@@ -33,7 +33,7 @@ type Lot = {
 type Ngan = { id: string; ten_ngan: string; ma_ngan: string }
 
 const LOAI_CSR = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","CSR5","Ngoại lệ"]
-const CA_OPTS  = ["A","B","C","D"]
+const CA_OPTS  = ["A","B"]
 const TRANG_THAI_OPTS = ["Hoàn thành","Dở dang","Xuất hàng"]
 const BOC_OPTS = [
   "Bọc nhãn 0,04 VRG CSR10","Bọc nhãn 0,04 VRG CSR20",
@@ -64,6 +64,7 @@ export default function ProductPage() {
   const [search, setSearch]       = useState("")
   const [filterLoai, setFilterLoai] = useState("")
   const [filterTT, setFilterTT]   = useState("")
+  const [filterCa, setFilterCa]   = useState("")
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
 
@@ -110,8 +111,9 @@ export default function ProductPage() {
 
   // ── Filtered + searched lots ───────────────────────────────────────────────
   const filtered = lots.filter(l =>
-    !search || l.ma_lo.toLowerCase().includes(search.toLowerCase()) ||
-    (l.ngans?.ten_ngan || "").toLowerCase().includes(search.toLowerCase())
+    (!search || l.ma_lo.toLowerCase().includes(search.toLowerCase()) ||
+    (l.ngans?.ten_ngan || "").toLowerCase().includes(search.toLowerCase())) &&
+    (!filterCa || l.ca === filterCa)
   )
   const paginated = filtered.slice((page-1)*PER_PAGE, page*PER_PAGE)
   const totalPages = Math.ceil(filtered.length / PER_PAGE)
@@ -240,13 +242,18 @@ export default function ProductPage() {
           <option value="">Tất cả trạng thái</option>
           {TRANG_THAI_OPTS.map(t=><option key={t}>{t}</option>)}
         </select>
+        <select value={filterCa} onChange={e=>{setFilterCa(e.target.value);setPage(1)}}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+          <option value="">Tất cả ca</option>
+          {CA_OPTS.map(c=><option key={c} value={c}>Ca {c}</option>)}
+        </select>
         <input type="date" value={filterFrom} onChange={e=>{setFilterFrom(e.target.value);setPage(1)}}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
         <span className="text-slate-400 text-sm">→</span>
         <input type="date" value={filterTo} onChange={e=>{setFilterTo(e.target.value);setPage(1)}}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        {(filterLoai||filterTT||filterFrom||filterTo||search) &&
-          <button onClick={()=>{setFilterLoai("");setFilterTT("");setFilterFrom("");setFilterTo("");setSearch("");setPage(1)}}
+        {(filterLoai||filterTT||filterCa||filterFrom||filterTo||search) &&
+          <button onClick={()=>{setFilterLoai("");setFilterTT("");setFilterCa("");setFilterFrom("");setFilterTo("");setSearch("");setPage(1)}}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}
@@ -412,6 +419,7 @@ export default function ProductPage() {
                 <div className="mt-2 flex gap-4 text-xs text-slate-500">
                   <span>Tổng bành: <strong className="text-slate-700">{form.tong_banh}</strong></span>
                   <span>Tổng kg: <strong className="text-slate-700">{form.tong_kg.toLocaleString()}</strong></span>
+                  <span>Ngăn: <strong className="text-slate-700">{form.ngan_id ? (ngans.find(n => n.id === form.ngan_id)?.ten_ngan || "—") : "Chưa chọn"}</strong></span>
                 </div>
               </div>
               {/* Bọc, Thảm */}

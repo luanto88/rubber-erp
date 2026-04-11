@@ -2,10 +2,12 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { Package, Warehouse, ClipboardCheck, FileOutput, Truck } from "lucide-react"
+import { useScrollReveal } from "@/lib/useScrollReveal"
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({ lots: 0, ngans: 0, qc: 0, orders: 0, dispatch: 0 })
   const [factoryName, setFactoryName] = useState("")
+  const revealRef = useScrollReveal()
 
   useEffect(() => {
     const load = async () => {
@@ -35,13 +37,13 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-extrabold text-slate-800">Dashboard</h1>
+      <div className="mb-8" ref={revealRef}>
+        <h1 className="text-2xl font-extrabold text-slate-800 scroll-reveal">Dashboard</h1>
         <p className="text-sm text-slate-500 mt-1">{factoryName || "Đang tải..."}</p>
       </div>
-      <div className="grid grid-cols-5 gap-4 mb-8">
+      <div ref={revealRef} className="grid grid-cols-5 gap-4 mb-8 scroll-reveal">
         {cards.map(c => (
-          <div key={c.label} className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 hover:shadow-lg transition-all">
+          <div key={c.label} className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 hover-glow cursor-default">
             <div className="flex items-center gap-3 mb-3">
               <c.icon size={20} className="text-emerald-600" />
               <span className="text-sm font-bold text-slate-600">{c.label}</span>
@@ -50,7 +52,7 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-6">
+      <div ref={revealRef} className="bg-white rounded-2xl border border-slate-200 shadow-md p-6 scroll-reveal">
         <h2 className="text-lg font-bold text-slate-700 mb-4">Hệ thống đã sẵn sàng</h2>
         <p className="text-sm text-slate-500">Chọn module từ menu bên trái để bắt đầu.</p>
       </div>

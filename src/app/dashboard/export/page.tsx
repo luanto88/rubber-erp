@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { FileOutput, Plus, X, Search, Eye, Truck, Package, ChevronDown, ChevronUp } from "lucide-react"
+import { FileOutput, Plus, X, Search, Truck, Package, ChevronDown, ChevronUp, Edit2, Trash2, Check } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Vehicle = {
@@ -33,6 +33,8 @@ type ExportOrder = {
   customer_id: string | null
   chung_loai: string
   loai_pallet: string
+  loai_banh: number
+  loai_boc: string
   vehicles: Vehicle[]
   assignments: Assignment[]
   tong_banh: number
@@ -45,6 +47,11 @@ type Customer = { id: string; ma_kh: string; ten_kh_en: string }
 const LOAI_XE_OPTS = ["Container 20ft","Container 40ft","Xe tải mui bạt","Khác"]
 const LOAI_PALLET  = ["Xuất rời","Pallet gỗ","Pallet sắt"]
 const LOAI_CSR     = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","CSR5","Ngoại lệ"]
+const BOC_OPTS = [
+  "Bọc nhãn 0,04 VRG CSR10","Bọc nhãn 0,04 VRG CSR20",
+  "Bọc nhãn 0,04 VRG CSRL","Bọc nhãn 0,04 VRG CSR3L",
+  "Bọc nhãn 0,04 VRG CSRCV50","Bọc nhãn 0,04 VRG CSRCV60",
+]
 
 const emptyVehicle = (): Vehicle => ({
   id: `v_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
@@ -55,6 +62,7 @@ const emptyForm = () => ({
   ma_don: "", ngay: new Date().toISOString().slice(0,10),
   so_thong_bao: "", so_hoa_don: "", so_hop_dong: "",
   customer_id: "", chung_loai: "CSR10", loai_pallet: "Xuất rời",
+  loai_banh: 35, loai_boc: "Bọc nhãn 0,04 VRG CSR10",
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
 })
@@ -75,12 +83,20 @@ export default function ExportPage() {
   // Views
   const [view, setView]           = useState<"list"|"add"|"detail">("list")
   const [form, setForm]           = useState(emptyForm())
+  const [editId, setEditId]       = useState<string|null>(null)
   const [saving, setSaving]       = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<ExportOrder|null>(null)
   const [expandedId, setExpandedId] = useState<string|null>(null)
 
+  // Delete
+  const [delConfirm, setDelConfirm] = useState<string|null>(null)
+
   // Lot selection for assignments
   const [lotSearch, setLotSearch] = useState("")
+
+  // Toast
+  const [toast, setToast] = useState<string|null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
@@ -126,6 +142,26 @@ export default function ExportPage() {
     tongXe: orders.reduce((s,o) => s+(o.vehicles?.length||0), 0),
   }
 
+  // ── Open Edit ─────────────────────────────────────────────────────────────
+  const openEdit = (order: ExportOrder) => {
+    setForm({
+      ma_don: order.ma_don || "",
+      ngay: order.ngay?.slice(0,10) || new Date().toISOString().slice(0,10),
+      so_thong_bao: order.so_thong_bao || "",
+      so_hoa_don: order.so_hoa_don || "",
+      so_hop_dong: order.so_hop_dong || "",
+      customer_id: order.customer_id || "",
+      chung_loai: order.chung_loai || "CSR10",
+      loai_pallet: order.loai_pallet || "Xuất rời",
+      loai_banh: order.loai_banh || 35,
+      loai_boc: order.loai_boc || "Bọc nhãn 0,04 VRG CSR10",
+      vehicles: order.vehicles?.length ? order.vehicles.map(v => ({...v})) : [emptyVehicle()],
+      assignments: order.assignments?.length ? order.assignments.map(a => ({...a})) : [],
+    })
+    setEditId(order.id)
+    setView("add")
+  }
+
   // ── Assignment helpers ────────────────────────────────────────────────────
   const toggleLot = (lot: Lot, vehicleIdx: number) => {
     setForm(prev => {
@@ -166,14 +202,31 @@ export default function ExportPage() {
       so_hop_dong: form.so_hop_dong,
       customer_id: form.customer_id || null,
       chung_loai: form.chung_loai, loai_pallet: form.loai_pallet,
+      loai_banh: form.loai_banh, loai_boc: form.loai_boc,
       vehicles: form.vehicles,
       assignments: form.assignments,
       tong_banh: totalBanh,
     }
-    await supabase.from("export_orders").insert(payload)
+    if (editId) {
+      await supabase.from("export_orders").update(payload).eq("id", editId)
+      showToast("Đã cập nhật đơn xuất hàng")
+    } else {
+      await supabase.from("export_orders").insert(payload)
+      showToast("Đã tạo đơn xuất hàng mới")
+    }
     setSaving(false)
     setView("list")
+    setEditId(null)
     setForm(emptyForm())
+    loadData(factoryId)
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDelete = async (id: string) => {
+    if (!factoryId) return
+    await supabase.from("export_orders").delete().eq("id", id)
+    setDelConfirm(null)
+    showToast("Đã xóa đơn xuất hàng")
     loadData(factoryId)
   }
 
@@ -183,15 +236,23 @@ export default function ExportPage() {
     (!lotSearch || l.ma_lo.toLowerCase().includes(lotSearch.toLowerCase()))
   )
 
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const ToastNotification = () => toast ? (
+    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-[fadeInUp_0.3s_ease-out]">
+      <Check size={16}/> {toast}
+    </div>
+  ) : null
+
   // ── RENDER: LIST ──────────────────────────────────────────────────────────
   if (view === "list") return (
     <div>
+      <ToastNotification/>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Xuất hàng</h1>
           <p className="text-sm text-slate-500 mt-0.5">Quản lý đơn xuất hàng</p>
         </div>
-        <button onClick={() => { setForm(emptyForm()); setView("add") }}
+        <button onClick={() => { setForm(emptyForm()); setEditId(null); setView("add") }}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16}/> Tạo đơn xuất
         </button>
@@ -272,8 +333,18 @@ export default function ExportPage() {
                     <td className="px-4 py-3 text-slate-600">{order.vehicles?.length || 0} xe</td>
                     <td className="px-4 py-3 font-semibold text-slate-700">{(order.tong_banh||0).toLocaleString()}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{order.so_hop_dong || "—"}</td>
-                    <td className="px-4 py-3 text-slate-400">
-                      {expandedId===order.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(order) }}
+                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
+                          <Edit2 size={14}/>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setDelConfirm(order.id) }}
+                          className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
+                          <Trash2 size={14}/>
+                        </button>
+                        {expandedId===order.id ? <ChevronUp size={16} className="text-slate-400"/> : <ChevronDown size={16} className="text-slate-400"/>}
+                      </div>
                     </td>
                   </tr>
                   {expandedId===order.id && (
@@ -325,23 +396,41 @@ export default function ExportPage() {
           </table>
         )}
       </div>
+
+      {/* Delete confirm */}
+      {delConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+            <h3 className="font-extrabold text-slate-800 mb-2">Xác nhận xóa?</h3>
+            <p className="text-sm text-slate-500 mb-5">Đơn xuất hàng này sẽ bị xóa vĩnh viễn.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDelConfirm(null)}
+                className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={() => handleDelete(delConfirm)}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 
-  // ── RENDER: ADD ────────────────────────────────────────────────────────────
+  // ── RENDER: ADD / EDIT ────────────────────────────────────────────────────
   return (
     <div>
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={()=>setView("list")} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
+      <ToastNotification/>
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={()=>{ setView("list"); setEditId(null) }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Tạo đơn xuất hàng</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800">
+            {editId ? "Sửa đơn xuất hàng" : "Tạo đơn xuất hàng"}
+          </h1>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
-        {/* LEFT: Form info + Vehicles */}
-        <div className="col-span-2 space-y-4">
-
+      <div className="flex gap-4" style={{ height: "calc(100vh - 200px)" }}>
+        {/* LEFT PANEL: Thông tin đơn + Xe */}
+        <div className="w-1/2 overflow-y-auto pr-2 space-y-4">
           {/* Thông tin đơn */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-700 mb-4">Thông tin đơn</h3>
@@ -394,6 +483,18 @@ export default function ExportPage() {
                   {LOAI_PALLET.map(l=><option key={l}>{l}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành (kg)</label>
+                <input type="number" value={form.loai_banh} onChange={e=>setForm(p=>({...p,loai_banh:+e.target.value}))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bọc</label>
+                <select value={form.loai_boc} onChange={e=>setForm(p=>({...p,loai_boc:e.target.value}))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  {BOC_OPTS.map(b=><option key={b}>{b}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -436,11 +537,67 @@ export default function ExportPage() {
                       className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                   </div>
                   <button onClick={()=>setForm(p=>({...p,vehicles:p.vehicles.filter((_,i)=>i!==idx),assignments:p.assignments.filter(a=>a.vehicleIdx!==idx)}))}
-                    className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg">
+                    className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg self-end">
                     <X size={14}/>
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT PANEL: Lot picker + Assignments */}
+        <div className="w-1/2 overflow-y-auto pl-2 space-y-4">
+          {/* Lot picker */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <h3 className="font-bold text-slate-700 mb-3">Chọn lô ({form.chung_loai})</h3>
+            <input value={lotSearch} onChange={e=>setLotSearch(e.target.value)}
+              placeholder="Tìm mã lô..."
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-400 mb-3"/>
+
+            {/* Vehicle selector */}
+            <div className="flex gap-1 mb-3 flex-wrap">
+              {form.vehicles.map((v,i) => (
+                <span key={v.id} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg">
+                  Xe {i+1}
+                </span>
+              ))}
+            </div>
+
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {availLots.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-4">Không có lô {form.chung_loai} nào</p>
+              ) : availLots.map(lot => {
+                const assignedVehicles = form.assignments
+                  .filter(a=>a.lot_id===lot.id)
+                  .map(a=>`Xe ${a.vehicleIdx+1}`)
+                const isAssigned = assignedVehicles.length > 0
+                return (
+                  <div key={lot.id} className={`rounded-xl border p-3 text-xs transition-all ${isAssigned?"border-emerald-300 bg-emerald-50":"border-slate-200 hover:border-emerald-300"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-slate-700">{lot.ma_lo}</span>
+                      <span className="text-slate-500">{lot.tong_banh} bành</span>
+                    </div>
+                    {isAssigned && (
+                      <div className="text-emerald-600 text-xs mb-2">✓ {assignedVehicles.join(", ")}</div>
+                    )}
+                    <div className="flex gap-1 flex-wrap">
+                      {form.vehicles.map((v,vIdx) => {
+                        const isInThisVehicle = form.assignments.some(a=>a.lot_id===lot.id&&a.vehicleIdx===vIdx)
+                        return (
+                          <button key={v.id} onClick={()=>toggleLot(lot,vIdx)}
+                            className={`px-2 py-1 rounded-lg font-bold transition-all ${
+                              isInThisVehicle
+                                ? "bg-emerald-600 text-white"
+                                : "bg-slate-100 text-slate-600 hover:bg-emerald-100"}`}>
+                            Xe {vIdx+1}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -486,70 +643,15 @@ export default function ExportPage() {
             </div>
           )}
         </div>
-
-        {/* RIGHT: Lot picker */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-4">
-            <h3 className="font-bold text-slate-700 mb-3">Chọn lô ({form.chung_loai})</h3>
-            <input value={lotSearch} onChange={e=>setLotSearch(e.target.value)}
-              placeholder="Tìm mã lô..."
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-400 mb-3"/>
-
-            {/* Vehicle selector */}
-            <div className="flex gap-1 mb-3 flex-wrap">
-              {form.vehicles.map((v,i) => (
-                <span key={v.id} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg">
-                  Xe {i+1}
-                </span>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 max-h-96 overflow-y-auto">
-              {availLots.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">Không có lô {form.chung_loai} nào</p>
-              ) : availLots.map(lot => {
-                const assignedVehicles = form.assignments
-                  .filter(a=>a.lot_id===lot.id)
-                  .map(a=>`Xe ${a.vehicleIdx+1}`)
-                const isAssigned = assignedVehicles.length > 0
-                return (
-                  <div key={lot.id} className={`rounded-xl border p-3 text-xs transition-all ${isAssigned?"border-emerald-300 bg-emerald-50":"border-slate-200 hover:border-emerald-300"}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-700">{lot.ma_lo}</span>
-                      <span className="text-slate-500">{lot.tong_banh} bành</span>
-                    </div>
-                    {isAssigned && (
-                      <div className="text-emerald-600 text-xs mb-2">✓ {assignedVehicles.join(", ")}</div>
-                    )}
-                    <div className="flex gap-1 flex-wrap">
-                      {form.vehicles.map((v,vIdx) => {
-                        const isInThisVehicle = form.assignments.some(a=>a.lot_id===lot.id&&a.vehicleIdx===vIdx)
-                        return (
-                          <button key={v.id} onClick={()=>toggleLot(lot,vIdx)}
-                            className={`px-2 py-1 rounded-lg font-bold transition-all ${
-                              isInThisVehicle
-                                ? "bg-emerald-600 text-white"
-                                : "bg-slate-100 text-slate-600 hover:bg-emerald-100"}`}>
-                            Xe {vIdx+1}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Save bar */}
-      <div className="flex justify-end gap-3 mt-6">
-        <button onClick={()=>setView("list")}
+      <div className="flex justify-end gap-3 mt-4">
+        <button onClick={()=>{ setView("list"); setEditId(null) }}
           className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
         <button onClick={handleSave} disabled={saving}
           className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
-          {saving ? "Đang lưu..." : `Lưu đơn xuất (${totalBanh.toLocaleString()} bành)`}
+          {saving ? "Đang lưu..." : editId ? "Lưu thay đổi" : `Lưu đơn xuất (${totalBanh.toLocaleString()} bành)`}
         </button>
       </div>
     </div>

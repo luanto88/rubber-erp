@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { ClipboardCheck, Plus, X, Search, Eye, ChevronDown, ChevronUp } from "lucide-react"
+import { ClipboardCheck, Plus, X, Search, ChevronDown, ChevronUp, Edit2, Trash2, Check } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Samples = {
@@ -140,11 +140,18 @@ export default function QualityPage() {
   const [filterTo, setFilterTo] = useState("")
 
   // Modal
-  const [modal, setModal]   = useState<"add"|"view"|null>(null)
+  const [modal, setModal]   = useState<"add"|"edit"|null>(null)
   const [form, setForm]     = useState(emptyForm(6))
+  const [editId, setEditId] = useState<string|null>(null)
   const [saving, setSaving] = useState(false)
-  const [viewItem, setViewItem] = useState<QcResult|null>(null)
   const [expandedId, setExpandedId] = useState<string|null>(null)
+
+  // Delete
+  const [delConfirm, setDelConfirm] = useState<string|null>(null)
+
+  // Toast
+  const [toast, setToast] = useState<string|null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
@@ -205,6 +212,33 @@ export default function QualityPage() {
     }))
   }
 
+  // ── Open Edit ─────────────────────────────────────────────────────────────
+  const openEdit = (r: QcResult) => {
+    const soMau = r.so_mau || 6
+    setForm({
+      ma_lo: r.ma_lo || "",
+      pkn: r.pkn || 0,
+      ngay_kn: r.ngay_kn?.slice(0,10) || new Date().toISOString().slice(0,10),
+      ngay_sx: r.ngay_sx?.slice(0,10) || "",
+      loai_csr: r.loai_csr || "CSR10",
+      loai_kn: r.loai_kn || "thuong",
+      tieu_chuan: r.tieu_chuan || "TCCS",
+      so_mau: soMau,
+      samples: {
+        tap_chat: (r.samples?.tap_chat || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.tap_chat?.length||0))).fill("")),
+        tro:      (r.samples?.tro || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.tro?.length||0))).fill("")),
+        bay_hoi:  (r.samples?.bay_hoi || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.bay_hoi?.length||0))).fill("")),
+        nito:     (r.samples?.nito || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.nito?.length||0))).fill("")),
+        po:       (r.samples?.po || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.po?.length||0))).fill("")),
+        pri:      (r.samples?.pri || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.pri?.length||0))).fill("")),
+        mooney:   (r.samples?.mooney || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.mooney?.length||0))).fill("")),
+        mau_sac:  (r.samples?.mau_sac || []).map(v => String(v)).concat(Array(Math.max(0, soMau - (r.samples?.mau_sac?.length||0))).fill("")),
+      } as Record<string, (number|string)[]>,
+    })
+    setEditId(r.id)
+    setModal("edit")
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!factoryId) return
@@ -222,23 +256,48 @@ export default function QualityPage() {
       ),
       grade, dat_hang, trang_thai,
     }
-    await supabase.from("qc_results").insert(payload)
+    if (editId) {
+      await supabase.from("qc_results").update(payload).eq("id", editId)
+      showToast("Đã cập nhật kết quả kiểm nghiệm")
+    } else {
+      await supabase.from("qc_results").insert(payload)
+      showToast("Đã thêm kết quả kiểm nghiệm mới")
+    }
     setSaving(false)
     setModal(null)
+    setEditId(null)
     setForm(emptyForm(6))
     loadData(factoryId)
   }
 
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDelete = async (id: string) => {
+    if (!factoryId) return
+    await supabase.from("qc_results").delete().eq("id", id)
+    setDelConfirm(null)
+    showToast("Đã xóa kết quả kiểm nghiệm")
+    loadData(factoryId)
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const ToastNotification = () => toast ? (
+    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-[fadeInUp_0.3s_ease-out]">
+      <Check size={16}/> {toast}
+    </div>
+  ) : null
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div>
+      <ToastNotification/>
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Kiểm nghiệm</h1>
           <p className="text-sm text-slate-500 mt-0.5">Kết quả kiểm tra chất lượng cao su</p>
         </div>
-        <button onClick={() => { setForm(emptyForm(6)); setModal("add") }}
+        <button onClick={() => { setForm(emptyForm(6)); setEditId(null); setModal("add") }}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16}/> Thêm kết quả
         </button>
@@ -359,8 +418,18 @@ export default function QualityPage() {
                         {r.trang_thai==="dat" ? `✓ ${r.dat_hang}` : "✗ Không đạt"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-400">
-                      {expandedId===r.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(r) }}
+                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
+                          <Edit2 size={14}/>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setDelConfirm(r.id) }}
+                          className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
+                          <Trash2 size={14}/>
+                        </button>
+                        {expandedId===r.id ? <ChevronUp size={16} className="text-slate-400"/> : <ChevronDown size={16} className="text-slate-400"/>}
+                      </div>
                     </td>
                   </tr>
                   {/* Expanded samples */}
@@ -401,13 +470,15 @@ export default function QualityPage() {
         )}
       </div>
 
-      {/* Add Modal */}
-      {modal === "add" && (
+      {/* Add/Edit Modal */}
+      {(modal === "add" || modal === "edit") && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">Nhập kết quả kiểm nghiệm</h2>
-              <button onClick={() => setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
+              <h2 className="text-lg font-extrabold text-slate-800">
+                {modal === "add" ? "Nhập kết quả kiểm nghiệm" : `Sửa kết quả — ${form.ma_lo}`}
+              </h2>
+              <button onClick={() => { setModal(null); setEditId(null) }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
             </div>
             <div className="p-6 space-y-5">
               {/* Info */}
@@ -496,12 +567,28 @@ export default function QualityPage() {
             </div>
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={()=>setModal(null)}
+              <button onClick={()=>{ setModal(null); setEditId(null) }}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={handleSave} disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
-                {saving ? "Đang lưu..." : "Lưu kết quả"}
+                {saving ? "Đang lưu..." : modal === "add" ? "Lưu kết quả" : "Lưu thay đổi"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm */}
+      {delConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+            <h3 className="font-extrabold text-slate-800 mb-2">Xác nhận xóa?</h3>
+            <p className="text-sm text-slate-500 mb-5">Kết quả kiểm nghiệm này sẽ bị xóa vĩnh viễn.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDelConfirm(null)}
+                className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={() => handleDelete(delConfirm)}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
             </div>
           </div>
         </div>

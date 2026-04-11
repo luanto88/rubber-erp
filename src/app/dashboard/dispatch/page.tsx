@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { Truck, Plus, Eye, ChevronRight, X, Search, Calendar } from "lucide-react"
+import { Truck, Plus, Eye, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
@@ -60,15 +60,23 @@ export default function DispatchPage() {
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
 
-  // Views: list | view | add
-  const [view, setView]           = useState<"list"|"detail"|"add">("list")
+  // Views: list | detail | add | edit
+  const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
   const [selected, setSelected]   = useState<DispatchEntry|null>(null)
 
-  // Add form
+  // Add/Edit form
   const [formNgay, setFormNgay]   = useState(new Date().toISOString().slice(0,10))
   const [formCN, setFormCN]       = useState("PEFC CS")
   const [formRows, setFormRows]   = useState<DxRow[]>([emptyRow()])
+  const [editId, setEditId]       = useState<string|null>(null)
   const [saving, setSaving]       = useState(false)
+
+  // Delete
+  const [delConfirm, setDelConfirm] = useState<string|null>(null)
+
+  // Toast
+  const [toast, setToast]         = useState<string|null>(null)
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
@@ -106,7 +114,16 @@ export default function DispatchPage() {
       s + (e.rows||[]).reduce((ss,r) => ss + (parseFloat(r.kl_dck)||0), 0), 0),
   }
 
-  // ── Save new entry ────────────────────────────────────────────────────────
+  // ── Open Edit ─────────────────────────────────────────────────────────────
+  const openEdit = (entry: DispatchEntry) => {
+    setEditId(entry.id)
+    setFormNgay(entry.ngay?.includes("/") ? entry.ngay.split("/").reverse().join("-") : entry.ngay || new Date().toISOString().slice(0,10))
+    setFormCN(entry.chung_nhan || "PEFC CS")
+    setFormRows(entry.rows?.length ? entry.rows.map(r => ({ ...r })) : [emptyRow()])
+    setView("edit")
+  }
+
+  // ── Save (add or edit) ────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
@@ -114,12 +131,28 @@ export default function DispatchPage() {
       factory_id: factoryId,
       ngay: formNgay,
       chung_nhan: formCN,
-      rows: formRows.map((r,i) => ({ ...r, uid: `r_${i}_${Date.now()}`, _date: formNgay })),
+      rows: formRows.map((r,i) => ({ ...r, uid: r.uid || `r_${i}_${Date.now()}`, _date: formNgay })),
     }
-    await supabase.from("dispatch_entries").insert(payload)
+    if (editId) {
+      await supabase.from("dispatch_entries").update(payload).eq("id", editId)
+      showToast("Đã cập nhật bảng phân xe")
+    } else {
+      await supabase.from("dispatch_entries").insert(payload)
+      showToast("Đã thêm bảng phân xe mới")
+    }
     setSaving(false)
     setView("list")
+    setEditId(null)
     setFormRows([emptyRow()])
+    loadData(factoryId)
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDelete = async (id: string) => {
+    if (!factoryId) return
+    await supabase.from("dispatch_entries").delete().eq("id", id)
+    setDelConfirm(null)
+    showToast("Đã xóa bảng phân xe")
     loadData(factoryId)
   }
 
@@ -128,15 +161,23 @@ export default function DispatchPage() {
     setFormRows(prev => prev.map((r,i) => i===idx ? {...r, [field]: val} : r))
   }
 
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const ToastNotification = () => toast ? (
+    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-[fadeInUp_0.3s_ease-out]">
+      <Check size={16}/> {toast}
+    </div>
+  ) : null
+
   // ── Render: LIST ──────────────────────────────────────────────────────────
   if (view === "list") return (
     <div>
+      <ToastNotification/>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>
           <p className="text-sm text-slate-500 mt-0.5">Bảng phân xe thu mủ hàng ngày</p>
         </div>
-        <button onClick={() => { setFormNgay(new Date().toISOString().slice(0,10)); setFormRows([emptyRow()]); setView("add") }}
+        <button onClick={() => { setFormNgay(new Date().toISOString().slice(0,10)); setFormCN("PEFC CS"); setFormRows([emptyRow()]); setEditId(null); setView("add") }}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16}/> Thêm bảng
         </button>
@@ -199,23 +240,45 @@ export default function DispatchPage() {
                 const totalKLT = (entry.rows||[]).reduce((s,r) => s+(parseFloat(r.kl_dct)||0),0)
                 const totalKLK = (entry.rows||[]).reduce((s,r) => s+(parseFloat(r.kl_dck)||0),0)
                 return (
-                  <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors"
-                    onClick={() => { setSelected(entry); setView("detail") }}>
-                    <td className="px-4 py-3 font-bold text-slate-700">
+                  <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
+                    <td className="px-4 py-3 font-bold text-slate-700"
+                      onClick={() => { setSelected(entry); setView("detail") }}>
                       {entry.ngay ? new Date(entry.ngay.includes("/")?
                         entry.ngay.split("/").reverse().join("-") : entry.ngay
                       ).toLocaleDateString("vi-VN") : "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
                         {entry.chung_nhan || "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-semibold text-slate-700">{entry.rows?.length || 0} xe</td>
-                    <td className="px-4 py-3 text-slate-600">{totalKLT.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-slate-600">{totalKLK.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-700"
+                      onClick={() => { setSelected(entry); setView("detail") }}>
+                      {entry.rows?.length || 0} xe
+                    </td>
+                    <td className="px-4 py-3 text-slate-600"
+                      onClick={() => { setSelected(entry); setView("detail") }}>
+                      {totalKLT.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600"
+                      onClick={() => { setSelected(entry); setView("detail") }}>
+                      {totalKLK.toLocaleString()}
+                    </td>
                     <td className="px-4 py-3">
-                      <ChevronRight size={16} className="text-slate-400"/>
+                      <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
+                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
+                          <Edit2 size={14}/>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setDelConfirm(entry.id) }}
+                          className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
+                          <Trash2 size={14}/>
+                        </button>
+                        <button onClick={() => { setSelected(entry); setView("detail") }}
+                          className="p-1.5 hover:bg-slate-100 text-slate-400 rounded-lg transition-colors" title="Xem">
+                          <ChevronRight size={16}/>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -224,23 +287,44 @@ export default function DispatchPage() {
           </table>
         )}
       </div>
+
+      {/* Delete confirm */}
+      {delConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+            <h3 className="font-extrabold text-slate-800 mb-2">Xác nhận xóa?</h3>
+            <p className="text-sm text-slate-500 mb-5">Bảng phân xe này sẽ bị xóa vĩnh viễn khỏi hệ thống.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDelConfirm(null)}
+                className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={() => handleDelete(delConfirm)}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 
   // ── Render: DETAIL ─────────────────────────────────────────────────────────
   if (view === "detail" && selected) return (
     <div>
+      <ToastNotification/>
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => setView("list")}
           className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
           <X size={18}/>
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-extrabold text-slate-800">
             Bảng phân xe — {selected.ngay}
           </h1>
           <p className="text-sm text-slate-500">{selected.rows?.length} xe · {selected.chung_nhan}</p>
         </div>
+        <button onClick={() => openEdit(selected)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-sm transition-colors">
+          <Edit2 size={14}/> Sửa
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
@@ -297,16 +381,19 @@ export default function DispatchPage() {
     </div>
   )
 
-  // ── Render: ADD ────────────────────────────────────────────────────────────
+  // ── Render: ADD / EDIT ────────────────────────────────────────────────────
   return (
     <div>
+      <ToastNotification/>
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => setView("list")}
+        <button onClick={() => { setView("list"); setEditId(null) }}
           className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
           <X size={18}/>
         </button>
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Thêm bảng phân xe</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800">
+            {editId ? "Sửa bảng phân xe" : "Thêm bảng phân xe"}
+          </h1>
         </div>
       </div>
 
@@ -383,11 +470,11 @@ export default function DispatchPage() {
 
       {/* Save */}
       <div className="flex justify-end gap-3">
-        <button onClick={() => setView("list")}
+        <button onClick={() => { setView("list"); setEditId(null) }}
           className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
         <button onClick={handleSave} disabled={saving}
           className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
-          {saving ? "Đang lưu..." : "Lưu bảng phân xe"}
+          {saving ? "Đang lưu..." : editId ? "Lưu thay đổi" : "Lưu bảng phân xe"}
         </button>
       </div>
     </div>
