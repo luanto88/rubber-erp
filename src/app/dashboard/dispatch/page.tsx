@@ -1,7 +1,8 @@
 "use client"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { Truck, Plus, Eye, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, MapPin, Weight } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, MapPin, Weight, Info, Download, Map, Lock, Unlock } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
@@ -26,6 +27,7 @@ type DxRow = {
   drc_d: string
   kl_dk: string
   ngan_ref: string[]
+  locked?: boolean
 }
 
 type DispatchEntry = {
@@ -104,6 +106,16 @@ const DIEM_GN: DiemGN[] = [
   { ma_lo:"L12", lat:12.587459, lng:105.526876, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
   { ma_lo:"L14", lat:12.586751, lng:105.537313, phien_a:["N13","N14","N15","N16","M13S","M13T","M14","M15","M16","L14","L15","L16","K15","K16"], phien_b:["N14","N15","N16"], phien_c:["N13","M13S","M13T","M14","L14","L15"], phien_d:["L15","M15","M16"] },
   { ma_lo:"C2",  lat:12.628201, lng:105.481744, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"Q7",  lat:12.596500, lng:105.504800, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P11", lat:12.597500, lng:105.521000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"U2",  lat:12.600000, lng:105.479000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P3",  lat:12.598000, lng:105.484000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"T7",  lat:12.594000, lng:105.505000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"U11", lat:12.601000, lng:105.523000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"S15", lat:12.592000, lng:105.537000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"S12", lat:12.592000, lng:105.526000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P14", lat:12.597000, lng:105.535000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"H13", lat:12.605000, lng:105.531000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
 ]
 
 const XU_LY_OPTS = ["Xé","Cán"]
@@ -148,7 +160,47 @@ const emptyRow = (): DxRow => ({
   kl_dkt: "", drc_dk: "", kl_dkk: "",
   kl_dt: "", drc_d: "65", kl_dk: "",
   ngan_ref: [],
+  locked: false,
 })
+
+// ─── MultiSelect inline dropdown ─────────────────────────────────────────────
+function MultiSelect({ options, selected, onChange, placeholder }: {
+  options: string[]
+  selected: string[]
+  onChange: (val: string[]) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener("mousedown", h)
+    return () => document.removeEventListener("mousedown", h)
+  }, [])
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full min-h-[30px] px-2 py-1 border border-slate-300 rounded-lg text-xs text-left bg-white flex flex-wrap gap-1 items-center hover:border-emerald-400 transition-colors">
+        {selected.length === 0
+          ? <span className="text-slate-400">{placeholder || "Chọn..."}</span>
+          : selected.map(s => <span key={s} className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-semibold">{s}</span>)
+        }
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg p-2 min-w-[140px] max-h-52 overflow-y-auto">
+          {options.map(opt => (
+            <label key={opt} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs">
+              <input type="checkbox" checked={selected.includes(opt)}
+                onChange={e => onChange(e.target.checked ? [...selected, opt] : selected.filter(x => x !== opt))}
+                className="accent-amber-500"/>
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function DispatchPage() {
@@ -172,6 +224,12 @@ export default function DispatchPage() {
 
   // Delete
   const [delConfirm, setDelConfirm] = useState<string|null>(null)
+
+  // KL modal & nhà máy
+  const [klModal, setKlModal]       = useState(false)
+  const [formNhaMay, setFormNhaMay] = useState("NMCB Phước Hòa Kampong Thom")
+
+  const router = useRouter()
 
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
@@ -538,22 +596,27 @@ export default function DispatchPage() {
   return (
     <div>
       <ToastNotification/>
-      <div className="flex items-center gap-3 mb-6">
+
+      {/* Page title */}
+      <div className="flex items-center gap-3 mb-4">
         <button onClick={() => { setView("list"); setEditId(null) }}
           className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18}/></button>
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">
-            {editId ? "Sửa bảng phân xe" : "Thêm bảng phân xe"}
-          </h1>
-        </div>
+        <h1 className="text-xl font-extrabold text-slate-800">
+          {editId ? "Sửa bảng phân xe" : "Bảng phân xe vận chuyển"}
+        </h1>
       </div>
 
-      {/* Header form */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4">
-        <div className="grid grid-cols-2 gap-4">
+      {/* Header form — 3 columns */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-3">
+        <div className="grid grid-cols-3 gap-4">
           <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày *</label>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày vận chuyển</label>
             <input type="date" value={formNgay} onChange={e => setFormNgay(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhà máy (điểm đến)</label>
+            <input value={formNhaMay} onChange={e => setFormNhaMay(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
           </div>
           <div>
@@ -566,154 +629,217 @@ export default function DispatchPage() {
         </div>
       </div>
 
-      {/* Rows */}
-      <div className="space-y-3 mb-4">
-        {formRows.map((row, idx) => (
-          <div key={row.uid} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500">Xe #{idx+1}</span>
-              <button onClick={() => setFormRows(prev => prev.filter((_,i) => i!==idx))}
-                className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors"><X size={14}/></button>
-            </div>
-            {/* Row 1: Xe, Tài xế, Chuyến, Xử lý */}
-            <div className="grid grid-cols-4 gap-3 mb-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Số xe</label>
-                <select value={row.so_xe} onChange={e => updateRow(idx,"so_xe",e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
-                  <option value="">-- Chọn --</option>
-                  {VEHICLES.map(v => <option key={v.key} value={v.ma_hieu}>{v.ma_hieu} — {v.loai}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Tài xế</label>
-                <input value={row.tai_xe} onChange={e => updateRow(idx,"tai_xe",e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Chuyến</label>
-                <select value={row.chuyen} onChange={e => updateRow(idx,"chuyen",+e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Xử lý</label>
-                <select value={row.xu_ly} onChange={e => updateRow(idx,"xu_ly",e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
-                  {XU_LY_OPTS.map(o => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-            </div>
-            {/* Row 2: Điểm GN + Phiên */}
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Điểm giao nhận</label>
-                <div className="flex flex-wrap gap-1 min-h-[28px] p-1.5 border border-slate-200 rounded-lg bg-slate-50">
-                  {DIEM_GN.map(d => (
-                    <button key={d.ma_lo} onClick={() => toggleDiemGN(idx, d.ma_lo)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                        (row.diem_gn||[]).includes(d.ma_lo)
-                          ? "bg-amber-500 text-white"
-                          : "bg-white text-slate-500 hover:bg-slate-100 border border-slate-200"
-                      }`}>{d.ma_lo}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Phiên</label>
-                <div className="flex gap-2 items-center">
-                  {["A","B","C","D"].map(p => (
-                    <button key={p} onClick={() => togglePhien(idx, p)}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                        (row.phien||[]).includes(p)
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                      }`}>Phiên {p}</button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {/* Row 3: Lô thu hoạch (auto-fill) */}
-            {(row.lo_thu_hoach||[]).length > 0 && (
-              <div className="mb-3">
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Lô thu hoạch (tự động)</label>
-                <div className="flex flex-wrap gap-1 p-1.5 border border-emerald-200 rounded-lg bg-emerald-50 max-h-16 overflow-y-auto">
-                  {(row.lo_thu_hoach||[]).map((l,li) => (
-                    <span key={li} className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-semibold">{l}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {/* Row 4: Lộ trình + KM */}
-            <div className="grid grid-cols-5 gap-3 mb-3">
-              <div className="col-span-4">
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Lộ trình (mã lô xe đi qua)</label>
-                <input value={(row.lo_trinh||[]).join(",")} onChange={e => {
-                  const val = e.target.value.split(",").map(s=>s.trim()).filter(Boolean)
-                  updateRow(idx,"lo_trinh",val)
-                }} placeholder="E1,G3" className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Km (auto)</label>
-                <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700">
-                  <MapPin size={12} className="text-emerald-500"/> {row.so_km} km
-                </div>
-              </div>
-            </div>
-            {/* Row 5: KL tươi, DRC, KL khô — auto-calc */}
-            <div className="grid grid-cols-6 gap-2">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">KL tươi</label>
-                <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
-                  placeholder="0" className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">DRC%</label>
-                <input value={row.drc_dc} onChange={e => updateRow(idx,"drc_dc",e.target.value)}
-                  placeholder="49.5" className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-emerald-600 block mb-1">KL khô ✓</label>
-                <input value={row.kl_dck} readOnly
-                  className="w-full px-2 py-1.5 border border-emerald-200 rounded-lg text-xs bg-emerald-50 text-emerald-700 font-bold"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">KL dập tươi</label>
-                <input value={row.kl_dkt} onChange={e => updateRow(idx,"kl_dkt",e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">DRC dập%</label>
-                <input value={row.drc_dk} onChange={e => updateRow(idx,"drc_dk",e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-emerald-600 block mb-1">KL dập khô ✓</label>
-                <input value={row.kl_dkk} readOnly
-                  className="w-full px-2 py-1.5 border border-emerald-200 rounded-lg text-xs bg-emerald-50 text-emerald-700 font-bold"/>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {/* Add row button */}
-        <button onClick={() => setFormRows(prev => [...prev, emptyRow()])}
-          className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-bold text-slate-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors">
-          + Thêm xe
-        </button>
+      {/* Toolbar — info bar + action buttons */}
+      <div className="flex items-center justify-between mb-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+        <p className="text-xs text-amber-700 flex items-center gap-1.5">
+          <Info size={14}/> Lộ trình: chọn từng điểm theo đội.
+        </p>
+        <div className="flex gap-2">
+          <button onClick={() => window.print()}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white border border-slate-300 rounded-lg transition-colors">
+            <Download size={12}/> Tải bảng
+          </button>
+          <button onClick={() => setKlModal(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-300 rounded-lg transition-colors">
+            <Weight size={12}/> Nhập KL
+          </button>
+          <button onClick={() => router.push("/dashboard/map")}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-50 border border-blue-300 rounded-lg transition-colors">
+            <Map size={12}/> GeoJSON
+          </button>
+          <button onClick={() => setFormRows(r => [...r, emptyRow()])}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors">
+            <Plus size={12}/> Thêm xe
+          </button>
+        </div>
       </div>
 
-      {/* Save */}
+      {/* Compact table */}
+      <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm mb-4">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","Lộ trình","Km",""].map(h => (
+                <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {formRows.map((row, idx) => (
+              <tr key={row.uid}
+                className={`${row.locked ? "bg-slate-50 opacity-70" : "hover:bg-amber-50"} transition-colors`}>
+
+                {/* Xe */}
+                <td className="px-2 py-1.5">
+                  <select value={row.so_xe} disabled={!!row.locked}
+                    onChange={e => updateRow(idx,"so_xe",e.target.value)}
+                    className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400">
+                    <option value="">--</option>
+                    {VEHICLES.map(v => <option key={v.key} value={v.ma_hieu}>{v.ma_hieu}</option>)}
+                  </select>
+                </td>
+
+                {/* Chuyến */}
+                <td className="px-2 py-1.5">
+                  {row.locked
+                    ? <span className="flex items-center gap-1 font-bold text-slate-600">
+                        {row.chuyen} <Lock size={11} className="text-amber-500"/>
+                      </span>
+                    : <select value={row.chuyen} onChange={e => updateRow(idx,"chuyen",Number(e.target.value))}
+                        className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
+                        <option value={1}>1</option><option value={2}>2</option>
+                      </select>
+                  }
+                </td>
+
+                {/* Tài xế */}
+                <td className="px-2 py-1.5">
+                  <input value={row.tai_xe} disabled={!!row.locked}
+                    onChange={e => updateRow(idx,"tai_xe",e.target.value)}
+                    className="w-28 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400"/>
+                </td>
+
+                {/* Điểm GN */}
+                <td className="px-2 py-1.5 min-w-[140px]">
+                  {row.locked
+                    ? <span className="text-slate-600">{row.diem_gn.join(", ") || "—"}</span>
+                    : <MultiSelect options={DIEM_GN.map(d => d.ma_lo)} selected={row.diem_gn}
+                        onChange={val => updateRow(idx,"diem_gn",val)} placeholder="Chọn điểm..."/>
+                  }
+                </td>
+
+                {/* Phiên */}
+                <td className="px-2 py-1.5 min-w-[130px]">
+                  {row.locked
+                    ? <span className="text-slate-600">{row.phien.join(", ") || "—"}</span>
+                    : <MultiSelect
+                        options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
+                        selected={row.phien}
+                        onChange={val => updateRow(idx,"phien",val)}
+                        placeholder="Chọn phiên..."/>
+                  }
+                </td>
+
+                {/* Lô thu hoạch — auto */}
+                <td className="px-2 py-1.5 text-center">
+                  {(row.lo_thu_hoach?.length ?? 0) > 0
+                    ? <span className="text-emerald-600 font-semibold">{row.lo_thu_hoach.length} lô</span>
+                    : <span className="text-slate-300">—</span>
+                  }
+                </td>
+
+                {/* Xử lý */}
+                <td className="px-2 py-1.5">
+                  <select value={row.xu_ly} disabled={!!row.locked}
+                    onChange={e => updateRow(idx,"xu_ly",e.target.value)}
+                    className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400">
+                    {XU_LY_OPTS.map(o => <option key={o}>{o}</option>)}
+                  </select>
+                </td>
+
+                {/* Lộ trình */}
+                <td className="px-2 py-1.5 min-w-[130px]">
+                  {row.locked
+                    ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "—"}</span>
+                    : <MultiSelect options={DIEM_GN.map(d => d.ma_lo)} selected={row.lo_trinh}
+                        onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
+                  }
+                </td>
+
+                {/* Km */}
+                <td className="px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
+                  {row.so_km ? `${row.so_km} km` : "—"}
+                </td>
+
+                {/* Lock / Delete */}
+                <td className="px-2 py-1.5">
+                  {row.locked
+                    ? <button onClick={() => updateRow(idx,"locked",false)}
+                        title="Mở khóa" className="p-1.5 text-amber-500 hover:bg-amber-50 rounded-lg transition-colors">
+                        <Lock size={14}/>
+                      </button>
+                    : <div className="flex gap-0.5">
+                        <button onClick={() => updateRow(idx,"locked",true)}
+                          title="Khóa hàng" className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
+                          <Unlock size={14}/>
+                        </button>
+                        <button onClick={() => setFormRows(r => r.filter((_,i) => i !== idx))}
+                          className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
+                          <X size={14}/>
+                        </button>
+                      </div>
+                  }
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Save footer */}
       <div className="flex justify-end gap-3">
         <button onClick={() => { setView("list"); setEditId(null) }}
           className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
         <button onClick={handleSave} disabled={saving}
-          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
+          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50 transition-all">
           {saving ? "Đang lưu..." : editId ? "Lưu thay đổi" : "Lưu bảng phân xe"}
         </button>
       </div>
+
+      {/* Modal Nhập KL */}
+      {klModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                <Weight size={18} className="text-orange-500"/> Nhập khối lượng
+              </h3>
+              <button onClick={() => setKlModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={18}/></button>
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {["Xe","Tài xế","KL tươi (kg)","DRC%","KL khô","KL dập tươi","DRC% dập","KL dập khô"].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {formRows.map((row, idx) => (
+                    <tr key={row.uid} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-bold text-emerald-700">{row.so_xe || "—"}</td>
+                      <td className="px-3 py-2 text-slate-500">{row.tai_xe}</td>
+                      <td className="px-3 py-2">
+                        <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
+                          placeholder="0" className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input value={row.drc_dc} onChange={e => updateRow(idx,"drc_dc",e.target.value)}
+                          placeholder="0" className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-3 py-2 font-semibold text-emerald-700">{row.kl_dck || "—"}</td>
+                      <td className="px-3 py-2">
+                        <input value={row.kl_dkt} onChange={e => updateRow(idx,"kl_dkt",e.target.value)}
+                          placeholder="0" className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input value={row.drc_dk} onChange={e => updateRow(idx,"drc_dk",e.target.value)}
+                          placeholder="0" className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-3 py-2 font-semibold text-emerald-700">{row.kl_dkk || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end">
+              <button onClick={() => setKlModal(false)}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all">Xong</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
