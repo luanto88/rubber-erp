@@ -1,8 +1,7 @@
 "use client"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, MapPin, Weight, Info, Download, Map, Lock, Unlock } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map, Lock, Unlock, Upload } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
@@ -28,6 +27,7 @@ type DxRow = {
   kl_dk: string
   ngan_ref: string[]
   locked?: boolean
+  _warn?: string
 }
 
 type DispatchEntry = {
@@ -36,6 +36,14 @@ type DispatchEntry = {
   ngay: string
   chung_nhan: string
   rows: DxRow[]
+  created_at?: string
+  ma_dx?: string
+}
+
+type GeoJsonFeature = {
+  type: string
+  properties: Record<string, string>
+  geometry: unknown
 }
 
 // ─── Master Data ──────────────────────────────────────────────────────────────
@@ -85,40 +93,45 @@ const VEHICLES: VehicleInfo[] = [
 ]
 
 // Điểm giao nhận with phiên data
-type DiemGN = { ma_lo: string; lat: number; lng: number; phien_a: string[]; phien_b: string[]; phien_c: string[]; phien_d: string[] }
+type DiemGN = { ma_lo: string; lat: number; lng: number; doi: number; phien_a: string[]; phien_b: string[]; phien_c: string[]; phien_d: string[] }
 const DIEM_GN: DiemGN[] = [
-  { ma_lo:"B5",  lat:12.632736, lng:105.495549, phien_a:["A3","A4","A5","A6","A7","B4","B5","B6","B7","C4","C5D","C5T","D4","D5D","D5T","E4","E5"], phien_b:["B4","C4","D4","E4"], phien_c:["E5","D5D","C5D","C5T"], phien_d:["A3","A4","A5"] },
-  { ma_lo:"C16", lat:12.628052, lng:105.546290, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
-  { ma_lo:"C17", lat:12.628048, lng:105.550884, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
-  { ma_lo:"D9",  lat:12.623630, lng:105.513983, phien_a:["A8","A9","A10","B8","B9","B10","C7","C8","C9","C10","D6","D7","D8","D10"], phien_b:["A8","A9","A10","B8"], phien_c:["B9","B10","C9","C10"], phien_d:["D6","D7","C6","C7"] },
-  { ma_lo:"D11", lat:12.623617, lng:105.523006, phien_a:["A11","A12","A13","B11","B12","B13","C11","C12","C13","D11","D12","E11","E12","F11","F12"], phien_b:["A11","A12","B11","B12"], phien_c:["A13","B13","C13","D12"], phien_d:["C11","C12","D11","F12"] },
-  { ma_lo:"E1",  lat:12.619189, lng:105.477754, phien_a:["A1","A2","B1","B2","B3","C1","C2","C3","D1","D2","D3","E1","E2D","E2T","E3","F1","F2","F3D","F3T"], phien_b:["A1","A2","B1","B2","B3"], phien_c:["C1","C2","C3","D1"], phien_d:["D2","E1","E2D","E2T","E3"] },
-  { ma_lo:"F16", lat:12.614454, lng:105.546214, phien_a:["D13","D14","D15S","D15T","D16","D17","D18","E13","E14","E15","E16","E17","E18","F13","F14","F15"], phien_b:["D13","D14","D15S","D15T","D16","D17"], phien_c:["D17","D18","E16","E17","E18"], phien_d:["E16","E14","E15","E13"] },
-  { ma_lo:"G3",  lat:12.610155, lng:105.486360, phien_a:["F4","F5","G1","G2","G3","G4","G5","H1","H2","H2D","H3","H3D","H4T","H4S","H5","H6T","H6S","I3","I4","I5","J4"], phien_b:["G1","G2","G3","H1","H2"], phien_c:["H3","H4T","G4","F4"], phien_d:["F5","G5","G6"] },
-  { ma_lo:"G5",  lat:12.610102, lng:105.495616, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"G8",  lat:12.609511, lng:105.509254, phien_a:["E6","E7","E8","E9","F6D","F6T","F7","F8","F9D","F9T","G7","G8","G9","H8","H9"], phien_b:["E6","E7","E8","F6D","F6T"], phien_c:["D9","E9","F9D","F9T","F8"], phien_d:["F7","G7","G8","G9"] },
-  { ma_lo:"G9",  lat:12.610070, lng:105.513951, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"H11", lat:12.605554, lng:105.524477, phien_a:["F10","G10","G11","G12","H10","H11","H12","I10","I11","I12","J13","J14"], phien_b:["F10","G10","H10"], phien_c:["G11","H11","I11"], phien_d:["G12","H12","J14"] },
-  { ma_lo:"I16", lat:12.600919, lng:105.546180, phien_a:["F16","F17","F18","G17","G18","H16","H17","H18","I16","I17","I18","J16","J17","J18"], phien_b:["F16","F17","F18","G17"], phien_c:["G17","G18","H18","H17"], phien_d:["H17","H16","I16","I17","I18"] },
-  { ma_lo:"J7",  lat:12.596465, lng:105.504800, phien_a:["H7","I6","I7","I8","I9","J5","J6T","J6S","J7","J8","J9","K5","K6","K7","K8","K9D","K9T","L6T","L7T","L7S","L8T","L8S"], phien_b:["H7","I7","I8","I9"], phien_c:["I6","J5","J6T","J6S","K5","K6","L6T"], phien_d:["J7","J8","J9","I9"] },
-  { ma_lo:"K10", lat:12.591972, lng:105.518578, phien_a:["M9D","M9T","M10","M12","L9","L10","L11","L12","K9D","K9T","K10","K11","K12B","K12N","J10","J11","J12"], phien_b:["M9D","M9T","M10","M11","L9","L10","L11","K9D","K9T"], phien_c:["K10","K11","L11","J10"], phien_d:["J11","J12","L12","K12B","K12N"] },
-  { ma_lo:"L2",  lat:12.587526, lng:105.481750, phien_a:["I1","I2","J1T","J1D","J2","K1","K2","K3","K4","K5D","K5T","L1","L2","L3","L4","L5D","M1","M2","M3","N1","N2"], phien_b:["I1","I2","J1T","J1D","J2","K1"], phien_c:["K2","K3","K4","K5D","K5T","L4","L5T","L3"], phien_d:["L1","L2","L3","M3"] },
-  { ma_lo:"L12", lat:12.587459, lng:105.526876, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"L14", lat:12.586751, lng:105.537313, phien_a:["N13","N14","N15","N16","M13S","M13T","M14","M15","M16","L14","L15","L16","K15","K16"], phien_b:["N14","N15","N16"], phien_c:["N13","M13S","M13T","M14","L14","L15"], phien_d:["L15","M15","M16"] },
-  { ma_lo:"C2",  lat:12.628201, lng:105.481744, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"Q7",  lat:12.596500, lng:105.504800, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"P11", lat:12.597500, lng:105.521000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"U2",  lat:12.600000, lng:105.479000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"P3",  lat:12.598000, lng:105.484000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"T7",  lat:12.594000, lng:105.505000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"U11", lat:12.601000, lng:105.523000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"S15", lat:12.592000, lng:105.537000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"S12", lat:12.592000, lng:105.526000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"P14", lat:12.597000, lng:105.535000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"H13", lat:12.605000, lng:105.531000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"B5",  doi:2,  lat:12.632736, lng:105.495549, phien_a:["A3","A4","A5","A6","A7","B4","B5","B6","B7","C4","C5D","C5T","D4","D5D","D5T","E4","E5"], phien_b:["B4","C4","D4","E4"], phien_c:["E5","D5D","C5D","C5T"], phien_d:["A3","A4","A5"] },
+  { ma_lo:"C16", doi:5,  lat:12.628052, lng:105.546290, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
+  { ma_lo:"C17", doi:5,  lat:12.628048, lng:105.550884, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
+  { ma_lo:"D9",  doi:3,  lat:12.623630, lng:105.513983, phien_a:["A8","A9","A10","B8","B9","B10","C7","C8","C9","C10","D6","D7","D8","D10"], phien_b:["A8","A9","A10","B8"], phien_c:["B9","B10","C9","C10"], phien_d:["D6","D7","C6","C7"] },
+  { ma_lo:"D11", doi:5,  lat:12.623617, lng:105.523006, phien_a:["A11","A12","A13","B11","B12","B13","C11","C12","C13","D11","D12","E11","E12","F11","F12"], phien_b:["A11","A12","B11","B12"], phien_c:["A13","B13","C13","D12"], phien_d:["C11","C12","D11","F12"] },
+  { ma_lo:"E1",  doi:1,  lat:12.619189, lng:105.477754, phien_a:["A1","A2","B1","B2","B3","C1","C2","C3","D1","D2","D3","E1","E2D","E2T","E3","F1","F2","F3D","F3T"], phien_b:["A1","A2","B1","B2","B3"], phien_c:["C1","C2","C3","D1"], phien_d:["D2","E1","E2D","E2T","E3"] },
+  { ma_lo:"F16", doi:8,  lat:12.614454, lng:105.546214, phien_a:["D13","D14","D15S","D15T","D16","D17","D18","E13","E14","E15","E16","E17","E18","F13","F14","F15"], phien_b:["D13","D14","D15S","D15T","D16","D17"], phien_c:["D17","D18","E16","E17","E18"], phien_d:["E16","E14","E15","E13"] },
+  { ma_lo:"G3",  doi:1,  lat:12.610155, lng:105.486360, phien_a:["F4","F5","G1","G2","G3","G4","G5","H1","H2","H2D","H3","H3D","H4T","H4S","H5","H6T","H6S","I3","I4","I5","J4"], phien_b:["G1","G2","G3","H1","H2"], phien_c:["H3","H4T","G4","F4"], phien_d:["F5","G5","G6"] },
+  { ma_lo:"G5",  doi:1,  lat:12.610102, lng:105.495616, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"G8",  doi:3,  lat:12.609511, lng:105.509254, phien_a:["E6","E7","E8","E9","F6D","F6T","F7","F8","F9D","F9T","G7","G8","G9","H8","H9"], phien_b:["E6","E7","E8","F6D","F6T"], phien_c:["D9","E9","F9D","F9T","F8"], phien_d:["F7","G7","G8","G9"] },
+  { ma_lo:"G9",  doi:3,  lat:12.610070, lng:105.513951, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"H11", doi:6,  lat:12.605554, lng:105.524477, phien_a:["F10","G10","G11","G12","H10","H11","H12","I10","I11","I12","J13","J14"], phien_b:["F10","G10","H10"], phien_c:["G11","H11","I11"], phien_d:["G12","H12","J14"] },
+  { ma_lo:"I16", doi:8,  lat:12.600919, lng:105.546180, phien_a:["F16","F17","F18","G17","G18","H16","H17","H18","I16","I17","I18","J16","J17","J18"], phien_b:["F16","F17","F18","G17"], phien_c:["G17","G18","H18","H17"], phien_d:["H17","H16","I16","I17","I18"] },
+  { ma_lo:"J7",  doi:3,  lat:12.596465, lng:105.504800, phien_a:["H7","I6","I7","I8","I9","J5","J6T","J6S","J7","J8","J9","K5","K6","K7","K8","K9D","K9T","L6T","L7T","L7S","L8T","L8S"], phien_b:["H7","I7","I8","I9"], phien_c:["I6","J5","J6T","J6S","K5","K6","L6T"], phien_d:["J7","J8","J9","I9"] },
+  { ma_lo:"K10", doi:6,  lat:12.591972, lng:105.518578, phien_a:["M9D","M9T","M10","M12","L9","L10","L11","L12","K9D","K9T","K10","K11","K12B","K12N","J10","J11","J12"], phien_b:["M9D","M9T","M10","M11","L9","L10","L11","K9D","K9T"], phien_c:["K10","K11","L11","J10"], phien_d:["J11","J12","L12","K12B","K12N"] },
+  { ma_lo:"L2",  doi:4,  lat:12.587526, lng:105.481750, phien_a:["I1","I2","J1T","J1D","J2","K1","K2","K3","K4","K5D","K5T","L1","L2","L3","L4","L5D","M1","M2","M3","N1","N2"], phien_b:["I1","I2","J1T","J1D","J2","K1"], phien_c:["K2","K3","K4","K5D","K5T","L4","L5T","L3"], phien_d:["L1","L2","L3","M3"] },
+  { ma_lo:"L12", doi:6,  lat:12.587459, lng:105.526876, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"L14", doi:7,  lat:12.586751, lng:105.537313, phien_a:["N13","N14","N15","N16","M13S","M13T","M14","M15","M16","L14","L15","L16","K15","K16"], phien_b:["N14","N15","N16"], phien_c:["N13","M13S","M13T","M14","L14","L15"], phien_d:["L15","M15","M16"] },
+  { ma_lo:"C2",  doi:1,  lat:12.628201, lng:105.481744, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"Q7",  doi:10, lat:12.596500, lng:105.504800, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P11", doi:10, lat:12.597500, lng:105.521000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"U2",  doi:9,  lat:12.600000, lng:105.479000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P3",  doi:9,  lat:12.598000, lng:105.484000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"T7",  doi:11, lat:12.594000, lng:105.505000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"U11", doi:11, lat:12.601000, lng:105.523000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"S15", doi:12, lat:12.592000, lng:105.537000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"S12", doi:12, lat:12.592000, lng:105.526000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"P14", doi:12, lat:12.597000, lng:105.535000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"H13", doi:6,  lat:12.605000, lng:105.531000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
 ]
 
 const XU_LY_OPTS = ["Xé","Cán"]
+const DRIVERS = [...new Set(VEHICLES.map(v => v.tai_xe))].sort()
+
+function getAllowedDoi(diemGn: string[]): number[] {
+  return [...new Set(diemGn.map(d => DIEM_GN.find(g => g.ma_lo === d)?.doi ?? 0).filter(x => x > 0))]
+}
 
 // ─── Manhattan distance calc ──────────────────────────────────────────────────
 function calcManhattanKm(stops: string[]) {
@@ -171,15 +184,24 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [openUp, setOpenUp] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
     document.addEventListener("mousedown", h)
     return () => document.removeEventListener("mousedown", h)
   }, [])
+  const handleToggle = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setOpenUp(window.innerHeight - rect.bottom < 220)
+    }
+    setOpen(o => !o)
+  }
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen(o => !o)}
+      <button ref={btnRef} type="button" onClick={handleToggle}
         className="w-full min-h-[30px] px-2 py-1 border border-slate-300 rounded-lg text-xs text-left bg-white flex flex-wrap gap-1 items-center hover:border-emerald-400 transition-colors">
         {selected.length === 0
           ? <span className="text-slate-400">{placeholder || "Chọn..."}</span>
@@ -187,7 +209,7 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
         }
       </button>
       {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg p-2 min-w-[140px] max-h-52 overflow-y-auto">
+        <div className={`absolute z-50 ${openUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 min-w-[140px] max-h-52 overflow-y-auto`}>
           {options.map(opt => (
             <label key={opt} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs">
               <input type="checkbox" checked={selected.includes(opt)}
@@ -225,11 +247,12 @@ export default function DispatchPage() {
   // Delete
   const [delConfirm, setDelConfirm] = useState<string|null>(null)
 
-  // KL modal & nhà máy
+  // KL modal, nhà máy, admin
   const [klModal, setKlModal]       = useState(false)
-  const [formNhaMay, setFormNhaMay] = useState("NMCB Phước Hòa Kampong Thom")
-
-  const router = useRouter()
+  const [factoryName, setFactoryName] = useState("NMCB Phước Hòa Kampong Thom")
+  const [isAdmin, setIsAdmin]       = useState(false)
+  const [importing, setImporting]   = useState(false)
+  const importRef                   = useRef<HTMLInputElement>(null)
 
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
@@ -245,7 +268,21 @@ export default function DispatchPage() {
     if (filterFrom) q = q.gte("ngay", filterFrom)
     if (filterTo)   q = q.lte("ngay", filterTo)
     const { data } = await q
-    setEntries(data || [])
+    const raw = (data || []) as DispatchEntry[]
+    // Compute ma_dx: DX-ddmmyy/seq per date group
+    const byDate: Record<string, DispatchEntry[]> = {}
+    for (const e of raw) { const k = e.ngay; if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
+    const withCode = raw.map(e => {
+      const group = [...(byDate[e.ngay] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+      const seq = group.findIndex(x => x.id === e.id) + 1
+      const ds = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
+      const d = new Date(ds)
+      const dd = String(d.getDate()).padStart(2,"0")
+      const mm = String(d.getMonth()+1).padStart(2,"0")
+      const yy = String(d.getFullYear()).slice(-2)
+      return { ...e, ma_dx: `DX-${dd}${mm}${yy}/${seq}` }
+    })
+    setEntries(withCode)
     setLoading(false)
   }, [filterFrom, filterTo])
 
@@ -254,6 +291,15 @@ export default function DispatchPage() {
     if (!fid) return
     setFactoryId(fid)
     loadData(fid)
+    // Factory name + isAdmin
+    supabase.from("factories").select("*").eq("id", fid).single().then(({ data: f }) => {
+      if (f) {
+        const fd = f as Record<string, unknown>
+        setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
+      }
+    })
+    const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
+    setIsAdmin(u.role === "admin")
   }, [loadData])
 
   // ── Filtered ──────────────────────────────────────────────────────────────
@@ -269,6 +315,39 @@ export default function DispatchPage() {
     totalXe: entries.reduce((s,e) => s + (e.rows?.length||0), 0),
     totalKg: entries.reduce((s,e) =>
       s + (e.rows||[]).reduce((ss,r) => ss + (parseFloat(r.kl_dck)||0), 0), 0),
+  }
+
+  // ── Open Add ─────────────────────────────────────────────────────────────
+  const openAdd = () => {
+    // Default ngày = max(entries) + 1
+    const today = new Date().toISOString().slice(0,10)
+    const maxDate = entries.reduce((mx, e) => {
+      const d = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
+      return d > mx ? d : mx
+    }, today)
+    const nextDay = new Date(maxDate)
+    nextDay.setDate(nextDay.getDate() + 1)
+    setFormNgay(nextDay.toISOString().slice(0,10))
+    // Pre-fill rows from latest entry (clear KL)
+    const latest = entries.find(e => {
+      const d = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
+      return d === maxDate
+    })
+    if (latest?.rows?.length) {
+      setFormRows(latest.rows.map(r => ({
+        ...r,
+        uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        kl_dct: "", drc_dc: "", kl_dck: "",
+        kl_dkt: "", drc_dk: "", kl_dkk: "",
+        kl_dt: "", kl_dk: "",
+        locked: false, _warn: undefined,
+      })))
+    } else {
+      setFormRows([emptyRow()])
+    }
+    setFormCN("PEFC CS")
+    setEditId(null)
+    setView("add")
   }
 
   // ── Open Edit ─────────────────────────────────────────────────────────────
@@ -315,14 +394,19 @@ export default function DispatchPage() {
 
   // ── Update row field with auto-calc ───────────────────────────────────────
   const updateRow = (idx: number, field: keyof DxRow, val: unknown) => {
-    setFormRows(prev => prev.map((r,i) => {
+    setFormRows(prev => prev.map((r, i) => {
       if (i !== idx) return r
       const next = { ...r, [field]: val }
 
-      // Auto-fill tài xế khi chọn xe
+      // Auto-fill tài xế + auto-assign chuyến khi chọn xe
       if (field === "so_xe") {
         const v = VEHICLES.find(x => x.ma_hieu === val)
         if (v) next.tai_xe = v.tai_xe
+        if (val) {
+          const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val)
+          next.chuyen = sameXe.length + 1
+          next._warn = sameXe.length >= 2 ? `Xe ${val} đã có ${sameXe.length} chuyến trong ngày này!` : undefined
+        }
       }
 
       // Auto-calc KL khô
@@ -336,13 +420,24 @@ export default function DispatchPage() {
         next.kl_dkk = autoCalcKLK(field === "kl_dkt" ? val as string : next.kl_dkt, field === "drc_dk" ? val as string : next.drc_dk)
       }
 
-      // Auto-calc khoảng cách Manhattan when lộ trình changes
+      // Khi Điểm GN thay đổi: lọc lộ trình theo đội
+      if (field === "diem_gn") {
+        const allowed = getAllowedDoi(val as string[])
+        if (allowed.length > 0) {
+          next.lo_trinh = next.lo_trinh.filter(lt => {
+            const d = DIEM_GN.find(g => g.ma_lo === lt)
+            return d && allowed.includes(d.doi)
+          })
+        }
+      }
+
+      // Auto-calc khoảng cách Manhattan khi lộ trình / điểm GN thay đổi
       if (field === "lo_trinh" || field === "diem_gn") {
         const stops = field === "lo_trinh" ? val as string[] : next.lo_trinh
         next.so_km = calcManhattanKm(stops.length > 0 ? stops : (next.diem_gn || []))
       }
 
-      // Auto-fill lô thu hoạch from phiên
+      // Auto-fill lô thu hoạch từ phiên + điểm GN (fix: extract letter from "Phiên A")
       if (field === "phien" || field === "diem_gn") {
         const phiens = field === "phien" ? val as string[] : next.phien
         const dgns = field === "diem_gn" ? val as string[] : next.diem_gn
@@ -351,7 +446,8 @@ export default function DispatchPage() {
           const d = DIEM_GN.find(g => g.ma_lo === dgn)
           if (!d) continue
           for (const p of phiens) {
-            const key = `phien_${p.toLowerCase()}` as keyof DiemGN
+            const letter = p.replace(/Phiên\s*/i, "").toLowerCase()
+            const key = `phien_${letter}` as keyof DiemGN
             const pLots = d[key]
             if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
           }
@@ -363,20 +459,87 @@ export default function DispatchPage() {
     }))
   }
 
-  // Toggle phien for a row
-  const togglePhien = (idx: number, p: string) => {
-    const row = formRows[idx]
-    const cur = row.phien || []
-    const next = cur.includes(p) ? cur.filter(x=>x!==p) : [...cur, p]
-    updateRow(idx, "phien", next)
+  // ── Download CSV template ─────────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const header = "ngay;so_xe;chuyen;tai_xe;diem_giao_nhan;phien_boc;xu_ly;lo_trinh;so_km;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d"
+    const rows = formRows.map(r => [
+      formNgay.split("-").reverse().join("/"),
+      r.so_xe, r.chuyen, r.tai_xe,
+      r.diem_gn.join(","), r.phien.join(","),
+      r.xu_ly, r.lo_trinh.join(","), r.so_km,
+      "", "", "", "", "", "65"
+    ].join(";"))
+    const csv = [header, ...rows].join("\n")
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = `dieu_xe_${formNgay}.csv`; a.click()
+    URL.revokeObjectURL(url)
   }
 
-  // Toggle diem_gn for a row
-  const toggleDiemGN = (idx: number, d: string) => {
-    const row = formRows[idx]
-    const cur = row.diem_gn || []
-    const next = cur.includes(d) ? cur.filter(x=>x!==d) : [...cur, d]
-    updateRow(idx, "diem_gn", next)
+  // ── Download GeoJSON ──────────────────────────────────────────────────────
+  const downloadGeoJSON = async () => {
+    const allLots = [...new Set(formRows.flatMap(r => r.lo_thu_hoach || []))]
+    if (allLots.length === 0) { showToast("Không có lô thu hoạch để xuất GeoJSON"); return }
+    try {
+      const res = await fetch("/geojson/Lo%20cao%20su%20-%202026_Full.geojson")
+      const gj = await res.json()
+      const features = (gj.features as GeoJsonFeature[]).filter(f =>
+        allLots.includes(f.properties?.Ten || f.properties?.ma_lo || "")
+      )
+      const output = { type: "FeatureCollection", features, metadata: { ngay: formNgay, factory: factoryName, totalLots: features.length } }
+      const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/geo+json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a"); a.href = url; a.download = `dieu_xe_${formNgay}.geojson`; a.click()
+      URL.revokeObjectURL(url)
+      showToast(`Đã xuất GeoJSON ${features.length} lô`)
+    } catch { showToast("Lỗi tải GeoJSON") }
+  }
+
+  // ── Import CSV ────────────────────────────────────────────────────────────
+  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file || !factoryId) return
+    setImporting(true)
+    const text = await file.text()
+    const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
+    const byDate: Record<string, DxRow[]> = {}
+    for (const line of lines) {
+      const cols = line.split(";")
+      // cols: ngay,so_xe,chuyen,tai_xe,diem_gn,phien,xu_ly,lo_trinh,so_km,kl_dct,drc_dc,kl_dkt,drc_dk,kl_dt,drc_d
+      const [ngayRaw, so_xe, chuyen, tai_xe, diem_gn_raw, phien_raw, xu_ly, lo_trinh_raw, so_km, kl_dct, drc_dc_raw, , drc_dk_raw, kl_dt, drc_d] = cols
+      if (!ngayRaw || !so_xe?.trim()) continue
+      const parts = ngayRaw.trim().split("/")
+      const ngay = parts.length === 3 ? `20${parts[2].slice(-2)}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}` : ngayRaw.trim()
+      const drc_dc = (drc_dc_raw || "").replace(",", ".")
+      const row: DxRow = {
+        uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        _date: ngay, so_xe: so_xe.trim(),
+        chuyen: parseInt(chuyen) || 1, tai_xe: tai_xe.trim(),
+        diem_gn: diem_gn_raw.split(",").map(s => s.trim()).filter(Boolean),
+        phien: phien_raw.split(",").map(s => s.trim()).filter(Boolean),
+        lo_thu_hoach: [], xu_ly: xu_ly.trim() || "Xé",
+        lo_trinh: lo_trinh_raw.split(",").map(s => s.trim()).filter(Boolean),
+        so_km: parseFloat(so_km) || 0,
+        kl_dct: kl_dct || "", drc_dc, kl_dck: autoCalcKLK(kl_dct || "", drc_dc),
+        kl_dkt: "", drc_dk: (drc_dk_raw || "").replace(",", "."), kl_dkk: "",
+        kl_dt: kl_dt || "", drc_d: drc_d?.trim() || "65", kl_dk: "",
+        ngan_ref: [], locked: false,
+      }
+      if (!byDate[ngay]) byDate[ngay] = []
+      byDate[ngay].push(row)
+    }
+    for (const [ngay, rows] of Object.entries(byDate)) {
+      const { data: existing } = await supabase.from("dispatch_entries")
+        .select("id").eq("factory_id", factoryId).eq("ngay", ngay).single()
+      if (existing) {
+        await supabase.from("dispatch_entries").update({ rows, chung_nhan: "PEFC CS" }).eq("id", existing.id)
+      } else {
+        await supabase.from("dispatch_entries").insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", rows })
+      }
+    }
+    setImporting(false)
+    showToast(`Import ${Object.keys(byDate).length} ngày thành công`)
+    loadData(factoryId)
+    e.target.value = ""
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────────
@@ -395,7 +558,7 @@ export default function DispatchPage() {
           <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>
           <p className="text-sm text-slate-500 mt-0.5">Bảng phân xe thu mủ hàng ngày</p>
         </div>
-        <button onClick={() => { setFormNgay(new Date().toISOString().slice(0,10)); setFormCN("PEFC CS"); setFormRows([emptyRow()]); setEditId(null); setView("add") }}
+        <button onClick={openAdd}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16}/> Thêm bảng
         </button>
@@ -449,7 +612,7 @@ export default function DispatchPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Ngày","Chứng nhận","Số xe","Tổng KL tươi","Tổng KL khô",""].map(h => (
+                {["Mã ĐX","Ngày","Chứng nhận","Số xe","Tổng KL tươi","Tổng KL khô",""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -460,6 +623,10 @@ export default function DispatchPage() {
                 const totalKLK = (entry.rows||[]).reduce((s,r) => s+(parseFloat(r.kl_dck)||0),0)
                 return (
                   <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500"
+                      onClick={() => { setSelected(entry); setView("detail") }}>
+                      {entry.ma_dx || "—"}
+                    </td>
                     <td className="px-4 py-3 font-bold text-slate-700"
                       onClick={() => { setSelected(entry); setView("detail") }}>
                       {entry.ngay ? new Date(entry.ngay.includes("/")?
@@ -532,7 +699,7 @@ export default function DispatchPage() {
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => setView("list")} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18}/></button>
         <div className="flex-1">
-          <h1 className="text-2xl font-extrabold text-slate-800">Bảng phân xe — {selected.ngay}</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800">{selected.ma_dx || "Bảng phân xe"} — {selected.ngay}</h1>
           <p className="text-sm text-slate-500">{selected.rows?.length} xe · {selected.chung_nhan}</p>
         </div>
         <button onClick={() => openEdit(selected)}
@@ -616,14 +783,14 @@ export default function DispatchPage() {
           </div>
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhà máy (điểm đến)</label>
-            <input value={formNhaMay} onChange={e => setFormNhaMay(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+            <input value={factoryName} disabled
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500 cursor-not-allowed"/>
           </div>
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Chứng nhận</label>
             <select value={formCN} onChange={e => setFormCN(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-              {["PEFC CS","PEFC FM","ISO","Không"].map(c => <option key={c}>{c}</option>)}
+              {["PEFC CS","PEFC FM","Không"].map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
         </div>
@@ -634,16 +801,27 @@ export default function DispatchPage() {
         <p className="text-xs text-amber-700 flex items-center gap-1.5">
           <Info size={14}/> Lộ trình: chọn từng điểm theo đội.
         </p>
-        <div className="flex gap-2">
-          <button onClick={() => window.print()}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white border border-slate-300 rounded-lg transition-colors">
-            <Download size={12}/> Tải bảng
-          </button>
+        <div className="flex gap-2 flex-wrap">
+          {isAdmin && (
+            <button onClick={downloadTemplate}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white border border-slate-300 rounded-lg transition-colors">
+              <Download size={12}/> Tải bảng
+            </button>
+          )}
+          {isAdmin && (
+            <>
+              <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV}/>
+              <button onClick={() => importRef.current?.click()} disabled={importing}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-violet-600 hover:bg-violet-50 border border-violet-300 rounded-lg transition-colors disabled:opacity-50">
+                <Upload size={12}/> {importing ? "Đang xử lý..." : "Nhập CSV"}
+              </button>
+            </>
+          )}
           <button onClick={() => setKlModal(true)}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-300 rounded-lg transition-colors">
             <Weight size={12}/> Nhập KL
           </button>
-          <button onClick={() => router.push("/dashboard/map")}
+          <button onClick={downloadGeoJSON}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-50 border border-blue-300 rounded-lg transition-colors">
             <Map size={12}/> GeoJSON
           </button>
@@ -679,24 +857,24 @@ export default function DispatchPage() {
                   </select>
                 </td>
 
-                {/* Chuyến */}
+                {/* Chuyến — read-only badge */}
                 <td className="px-2 py-1.5">
-                  {row.locked
-                    ? <span className="flex items-center gap-1 font-bold text-slate-600">
-                        {row.chuyen} <Lock size={11} className="text-amber-500"/>
-                      </span>
-                    : <select value={row.chuyen} onChange={e => updateRow(idx,"chuyen",Number(e.target.value))}
-                        className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
-                        <option value={1}>1</option><option value={2}>2</option>
-                      </select>
-                  }
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                    row.chuyen === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                  }`}>{row.chuyen}</span>
+                  {row._warn && <span className="ml-1 text-red-500 text-[10px]" title={row._warn}>⚠</span>}
                 </td>
 
-                {/* Tài xế */}
+                {/* Tài xế — dropdown */}
                 <td className="px-2 py-1.5">
-                  <input value={row.tai_xe} disabled={!!row.locked}
-                    onChange={e => updateRow(idx,"tai_xe",e.target.value)}
-                    className="w-28 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400"/>
+                  {row.locked
+                    ? <span className="text-slate-600 text-xs">{row.tai_xe}</span>
+                    : <select value={row.tai_xe} onChange={e => updateRow(idx,"tai_xe",e.target.value)}
+                        className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
+                        <option value="">-- Chọn --</option>
+                        {DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                  }
                 </td>
 
                 {/* Điểm GN */}
@@ -720,10 +898,15 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Lô thu hoạch — auto */}
-                <td className="px-2 py-1.5 text-center">
+                {/* Lô thu hoạch — chip list */}
+                <td className="px-2 py-1.5 max-w-[130px]">
                   {(row.lo_thu_hoach?.length ?? 0) > 0
-                    ? <span className="text-emerald-600 font-semibold">{row.lo_thu_hoach.length} lô</span>
+                    ? <div className="flex flex-wrap gap-0.5">
+                        {row.lo_thu_hoach.slice(0,4).map(l => (
+                          <span key={l} className="px-1 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[10px]">{l}</span>
+                        ))}
+                        {row.lo_thu_hoach.length > 4 && <span className="text-slate-400 text-[10px]">+{row.lo_thu_hoach.length - 4}</span>}
+                      </div>
                     : <span className="text-slate-300">—</span>
                   }
                 </td>
@@ -737,12 +920,18 @@ export default function DispatchPage() {
                   </select>
                 </td>
 
-                {/* Lộ trình */}
+                {/* Lộ trình — lọc theo đội của Điểm GN */}
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "—"}</span>
-                    : <MultiSelect options={DIEM_GN.map(d => d.ma_lo)} selected={row.lo_trinh}
-                        onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
+                    : (() => {
+                        const allowed = getAllowedDoi(row.diem_gn)
+                        const opts = allowed.length > 0
+                          ? DIEM_GN.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
+                          : DIEM_GN.map(d => d.ma_lo)
+                        return <MultiSelect options={opts} selected={row.lo_trinh}
+                          onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
+                      })()
                   }
                 </td>
 
@@ -800,34 +989,53 @@ export default function DispatchPage() {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50">
                   <tr>
-                    {["Xe","Tài xế","KL tươi (kg)","DRC%","KL khô","KL dập tươi","DRC% dập","KL dập khô"].map(h => (
-                      <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap">{h}</th>
+                    <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Xe</th>
+                    <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Tài xế</th>
+                    <th className="px-3 py-2 text-center font-bold text-amber-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Đông chén</th>
+                    <th className="px-3 py-2 text-center font-bold text-blue-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Đông khối</th>
+                    <th className="px-3 py-2 text-center font-bold text-emerald-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Mủ dây</th>
+                  </tr>
+                  <tr className="text-[10px]">
+                    {["Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô"].map((h,i) => (
+                      <th key={i} className={`px-2 py-1 font-bold text-slate-400 whitespace-nowrap ${i===0||i===3||i===6?"border-l border-slate-200":""}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {formRows.map((row, idx) => (
                     <tr key={row.uid} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-bold text-emerald-700">{row.so_xe || "—"}</td>
-                      <td className="px-3 py-2 text-slate-500">{row.tai_xe}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
+                      {/* Đông chén */}
+                      <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
-                          placeholder="0" className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                          placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2">
                         <input value={row.drc_dc} onChange={e => updateRow(idx,"drc_dc",e.target.value)}
-                          placeholder="0" className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                          placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-3 py-2 font-semibold text-emerald-700">{row.kl_dck || "—"}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2 font-semibold text-amber-700 whitespace-nowrap">{row.kl_dck || "—"}</td>
+                      {/* Đông khối */}
+                      <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dkt} onChange={e => updateRow(idx,"kl_dkt",e.target.value)}
-                          placeholder="0" className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                          placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2">
                         <input value={row.drc_dk} onChange={e => updateRow(idx,"drc_dk",e.target.value)}
-                          placeholder="0" className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                          placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-3 py-2 font-semibold text-emerald-700">{row.kl_dkk || "—"}</td>
+                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_dkk || "—"}</td>
+                      {/* Mủ dây */}
+                      <td className="px-2 py-2 border-l border-slate-100">
+                        <input value={row.kl_dt} onChange={e => updateRow(idx,"kl_dt",e.target.value)}
+                          placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2">
+                        <input value={row.drc_d} onChange={e => updateRow(idx,"drc_d",e.target.value)}
+                          placeholder="65" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2 font-semibold text-emerald-700 whitespace-nowrap">{row.kl_dk || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

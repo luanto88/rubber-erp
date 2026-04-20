@@ -8,50 +8,89 @@ description: Business logic các module sản xuất — Điều xe, Ngăn lưu,
 
 ### Cấu trúc dữ liệu
 ```typescript
-// Bảng dispatch_entries lưu toàn bộ 1 ngày
+// Bảng dispatch_entries
 {
   id: UUID, factory_id: UUID,
-  ngay: string,       // "DD/MM/YYYY" hoặc "YYYY-MM-DD"
-  chung_nhan: string, // "PEFC CS" | "PEFC FM" | "ISO" | "Không"
-  rows: DxRow[]       // JSONB — mỗi phần tử = 1 chuyến xe
+  ngay: string,       // "YYYY-MM-DD"
+  chung_nhan: string, // "PEFC CS" | "PEFC FM" | "Không"
+  rows: DxRow[],      // JSONB
+  created_at: string, // dùng tính ma_dx
+  ma_dx?: string      // computed "DX-ddmmyy/N", không lưu DB
 }
 
 // DxRow — 1 chuyến xe
 {
   uid: string, _date: string,
-  so_xe: string,      // "5B", "7A", "2A"... (danh sách xe cố định)
-  chuyen: number,     // 1 hoặc 2
-  tai_xe: string,     // Tên tài xế (danh sách cố định)
-  diem_gn: string[], // Điểm giao nhận: mã lô vườn ["Q7","P11"]
-  phien: string[],   // ["Phiên A","Phiên B","Phiên C","Phiên D"]
-  lo_thu_hoach: string,
-  xu_ly: string,      // "Xé" | "Cán"
-  lo_trinh: string[], // Lộ trình qua các điểm
+  so_xe: string,        // "5B", "7A", "2A"...
+  chuyen: number,       // AUTO-ASSIGN khi chọn xe, read-only
+  tai_xe: string,       // dropdown từ VEHICLES
+  diem_gn: string[],   // mã lô vườn ["Q7","P11"]
+  phien: string[],     // ["Phiên A","Phiên B","Phiên C","Phiên D"]
+  lo_thu_hoach: string[], // AUTO-FILL từ phien + diem_gn
+  xu_ly: string,        // "Xé" | "Cán"
+  lo_trinh: string[],  // chỉ điểm cùng doi với diem_gn
   so_km: number,
-  kl_dct: string,     // KL tươi (kg)
-  drc_dc: string,     // DRC% tươi
-  kl_dck: string,     // KL khô — AUTO-CALC
-  kl_dkt: string,     // KL dập tươi
-  drc_dk: string,     // DRC% dập
-  kl_dkk: string,     // KL dập khô — AUTO-CALC
-  kl_dt: string,      // KL dập tổng
-  drc_d: string,      // DRC dập, mặc định "65"
-  kl_dk: string,      // KL dập khô tổng
-  ngan_ref: string[]
+  kl_dct: string,       // Dong chen tuoi (kg)
+  drc_dc: string,       // DRC% dong chen
+  kl_dck: string,       // Dong chen kho — AUTO-CALC
+  kl_dkt: string,       // Dong khoi tuoi (kg)
+  drc_dk: string,       // DRC% dong khoi
+  kl_dkk: string,       // Dong khoi kho — AUTO-CALC
+  kl_dt: string,        // Mu day tuoi (kg)
+  drc_d: string,        // DRC% mu day (default "65")
+  kl_dk: string,        // Mu day kho — AUTO-CALC
+  ngan_ref: string[],
+  locked?: boolean,
+  _warn?: string        // canh bao xe trung chuyen (ephemeral)
 }
 ```
 
 ### Auto-calc bắt buộc
 ```typescript
-kl_dck = (parseFloat(kl_dct) * parseFloat(drc_dc) / 100).toFixed(1)
-kl_dkk = (parseFloat(kl_dkt) * parseFloat(drc_dk) / 100).toFixed(1)
-// Trigger khi: kl_dct, drc_dc, kl_dkt, hoặc drc_dk thay đổi
+kl_dck = autoCalcKLK(kl_dct, drc_dc)   // dong chen kho
+kl_dkk = autoCalcKLK(kl_dkt, drc_dk)   // dong khoi kho
+kl_dk  = autoCalcKLK(kl_dt,  drc_d)    // mu day kho
+// Trigger khi field tuong ung thay doi
 ```
 
+### Logic chuyến auto-assign
+```typescript
+// Trong updateRow khi field === "so_xe":
+const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val)
+next.chuyen = sameXe.length + 1  // 0 -> 1, 1 -> 2, >=2 -> warn
+next._warn = sameXe.length >= 2 ? `Xe ${val} da co ${sameXe.length} chuyen!` : undefined
+```
+
+### Logic lo_trinh filter theo doi
+```typescript
+// DIEM_GN co truong doi: number (lay tu lo_chi_tiet.csv)
+// Khi diem_gn thay doi, tinh allowedDoi, loc lo_trinh options
+const allowedDoi = getAllowedDoi(row.diem_gn)
+const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
+```
+
+### Doi phan bo cua DIEM_GN
+- Doi 1: E1, G3, G5, C2
+- Doi 2: B5
+- Doi 3: D9, G8, G9, J7
+- Doi 4: L2
+- Doi 5: C16, C17, D11
+- Doi 6: H11, K10, L12, H13
+- Doi 7: L14
+- Doi 8: F16, I16
+- Doi 9: U2, P3
+- Doi 10: Q7, P11
+- Doi 11: T7, U11
+- Doi 12: S15, S12, P14
+
 ### UI flow
-1. **List view** → bảng theo ngày, click hàng → detail
-2. **Detail view** → bảng đầy đủ tất cả cột + tổng KL dưới cùng
-3. **Add view** → form header (ngày + chứng nhận) + dynamic rows
+1. **List view** → col "Ma DX" dau tien (DX-ddmmyy/N), click hang → detail
+2. **Detail view** → bang day du, header hien ma_dx
+3. **Add view** → pre-fill rows tu ngay gan nhat (xoa KL), ngay default = maxDate+1
+4. **Nha may diem den** → disabled, lay tu factories table
+5. **Chung nhan** → "PEFC CS" | "PEFC FM" | "Khong" (khong co "ISO")
+6. **Toolbar** → Tai bang (CSV template, admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
+7. **KL modal** → 3 nhom: Dong chen / Dong khoi / Mu day
 
 ---
 

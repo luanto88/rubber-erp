@@ -86,9 +86,11 @@ src/
 {
   id: UUID,
   factory_id: UUID,
-  ngay: string,         // "DD/MM/YYYY" hoặc "YYYY-MM-DD"
-  chung_nhan: string,   // "PEFC CS" | "PEFC FM" | "ISO" | "Không"
-  rows: DxRow[]         // JSONB — mảng các chuyến xe
+  ngay: string,         // "YYYY-MM-DD"
+  chung_nhan: string,   // "PEFC CS" | "PEFC FM" | "Không"
+  rows: DxRow[],        // JSONB — mảng các chuyến xe
+  created_at: string,   // dùng để tính ma_dx
+  ma_dx?: string        // computed: "DX-ddmmyy/N" (không lưu DB)
 }
 ```
 
@@ -99,39 +101,60 @@ src/
   uid: string,
   _date: string,
   so_xe: string,        // "5B", "7A", "2A"... xe cố định
-  chuyen: number,       // Chuyến 1 hoặc 2
-  tai_xe: string,       // Tên tài xế — danh sách cố định
-  diem_gn: string[],   // Điểm giao nhận — mã lô vườn: ["Q7","P11"]
+  chuyen: number,       // AUTO-ASSIGN: 1 (lần đầu) | 2 (lần 2) — read-only
+  tai_xe: string,       // Tên tài xế — dropdown từ VEHICLES
+  diem_gn: string[],    // Điểm giao nhận — mã lô vườn: ["Q7","P11"]
   phien: string[],      // ["Phiên A","Phiên B","Phiên C","Phiên D"]
-  lo_thu_hoach: string,
+  lo_thu_hoach: string[], // AUTO-FILL từ phiên + điểm GN
   xu_ly: string,        // "Xé" | "Cán"
-  lo_trinh: string[],   // Lộ trình qua các điểm
+  lo_trinh: string[],   // Lộ trình — chỉ hiện điểm cùng đội với diem_gn
   so_km: number,
-  kl_dct: string,       // KL tươi (kg)
-  drc_dc: string,       // DRC% tươi
-  kl_dck: string,       // KL khô = kl_dct × drc_dc / 100 (AUTO-CALC)
-  kl_dkt: string,       // KL dập tươi
-  drc_dk: string,       // DRC% dập
-  kl_dkk: string,       // KL dập khô = kl_dkt × drc_dk / 100 (AUTO-CALC)
-  kl_dt: string,        // KL dập tổng
-  drc_d: string,        // DRC dập (mặc định "65")
-  kl_dk: string,        // KL dập khô tổng
-  ngan_ref: string[]
+  kl_dct: string,       // Đông chén tươi (kg)
+  drc_dc: string,       // DRC% đông chén
+  kl_dck: string,       // Đông chén khô — AUTO-CALC
+  kl_dkt: string,       // Đông khối tươi (kg)
+  drc_dk: string,       // DRC% đông khối
+  kl_dkk: string,       // Đông khối khô — AUTO-CALC
+  kl_dt: string,        // Mủ dây tươi (kg)
+  drc_d: string,        // DRC% mủ dây (mặc định "65")
+  kl_dk: string,        // Mủ dây khô — AUTO-CALC
+  ngan_ref: string[],
+  locked?: boolean,
+  _warn?: string        // cảnh báo xe trùng chuyến (ephemeral)
 }
 ```
 
+### Mã điều xe
+
+Format: `DX-ddmmyy/N` — computed từ `created_at` order trong cùng ngày.  
+Ví dụ: phiếu đầu tiên ngày 01/01/2026 → `DX-010126/1`.
+
 ### Logic tính tự động
 
-- `kl_dck = parseFloat(kl_dct) × parseFloat(drc_dc) / 100`
-- `kl_dkk = parseFloat(kl_dkt) × parseFloat(drc_dk) / 100`
-- Khi nhập `kl_dct` hoặc `drc_dc` → tự tính `kl_dck`
+- `kl_dck = kl_dct × drc_dc / 100` (đông chén khô)
+- `kl_dkk = kl_dkt × drc_dk / 100` (đông khối khô)
+- `kl_dk  = kl_dt  × drc_d  / 100` (mủ dây khô)
+- `chuyen` = auto-assign khi chọn xe (đếm xe đã chọn trong ngày)
+- `lo_trinh` chỉ hiện điểm GN cùng đội (`doi`) với `diem_gn` đã chọn
+- `lo_thu_hoach` auto-fill từ `phien_a/b/c/d` của các điểm GN
+
+### DiemGN Master Data
+
+Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.csv`.  
+Đội phân bổ: Đội 1 (E1,G3,G5,C2), Đội 2 (B5), Đội 3 (D9,G8,G9,J7),  
+Đội 4 (L2), Đội 5 (C16,C17,D11), Đội 6 (H11,K10,L12,H13),  
+Đội 7 (L14), Đội 8 (F16,I16), Đội 9 (U2,P3), Đội 10 (Q7,P11),  
+Đội 11 (T7,U11), Đội 12 (S15,S12,P14).
 
 ### UI Pattern
 
-- View **list**: Bảng danh sách ngày, click vào hàng → xem chi tiết
-- View **detail**: Bảng đầy đủ tất cả cột của rows
-- View **add**: Form header (ngày + chứng nhận) + dynamic rows (thêm/xóa xe)
-- Mỗi row có đủ: Số xe, tài xế, điểm GN (multi-select), phiên (multi-select), lộ trình, KL tươi, DRC%, KL khô (auto)
+- View **list**: Cột đầu "Mã ĐX" (`DX-ddmmyy/N`), click hàng → detail
+- View **detail**: Bảng đầy đủ, header hiện mã ĐX
+- View **add**: Pre-fill rows từ ngày gần nhất (xóa KL), ngày mặc định = maxDate+1
+- Nhà máy điểm đến: lấy từ `factories` table, disabled
+- Chứng nhận: "PEFC CS" | "PEFC FM" | "Không" (không có "ISO")
+- Toolbar: Tải bảng (CSV template, admin only) | Nhập CSV (import, admin only) | Nhập KL | GeoJSON | + Thêm xe
+- KL modal: 3 nhóm — Đông chén (kl_dct/drc_dc/kl_dck) | Đông khối (kl_dkt/drc_dk/kl_dkk) | Mủ dây (kl_dt/drc_d/kl_dk)
 
 ---
 
