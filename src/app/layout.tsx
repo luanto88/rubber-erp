@@ -1,9 +1,18 @@
 import type { Metadata } from "next"
 import "./globals.css"
 export const metadata: Metadata = {
-  title: "Rubber Factory ERP | PTCS Phước Hòa",
-  description: "Hệ thống quản lý sản xuất cao su",
+  title: "PTCS Phước Hòa Kampong Thom | Nhà máy chế biến cao su",
+  description: "Nhà máy chế biến cao su Phước Hòa Kampong Thom - Sản xuất CSR10, CSR20, CSR3L theo tiêu chuẩn PEFC CS. Thành lập 2019 tại Campuchia.",
 }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (<html lang="vi"><body className="bg-slate-100 min-h-screen">{children}</body></html>)
+  return (
+    <html lang="vi">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      </head>
+      <body className="bg-slate-50 min-h-screen" style={{ fontFamily: "'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif" }}>{children}</body>
+    </html>
+  )
 }

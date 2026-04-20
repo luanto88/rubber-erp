@@ -113,20 +113,23 @@ export default function ExportPage() {
     setLoading(false)
   }, [filterLoai, filterFrom, filterTo])
 
+  const loadLots = useCallback(async (fid: string) => {
+    const { data } = await supabase.from("lots")
+      .select("id,ma_lo,loai_csr,tong_banh,tong_kg,trang_thai")
+      .eq("factory_id", fid).eq("trang_thai","Hoàn thành")
+      .order("num", { ascending: false })
+    setLots(data || [])
+  }, [])
+
   useEffect(() => {
     const fid = localStorage.getItem("erp_factory")
     if (!fid) return
     setFactoryId(fid)
     loadData(fid)
-    // Load lots (hoàn thành, chưa xuất)
-    supabase.from("lots").select("id,ma_lo,loai_csr,tong_banh,tong_kg,trang_thai")
-      .eq("factory_id", fid).eq("trang_thai","Hoàn thành")
-      .order("num", { ascending: false })
-      .then(({ data }) => setLots(data || []))
-    // Load customers
+    loadLots(fid)
     supabase.from("customers").select("id,ma_kh,ten_kh_en").eq("factory_id", fid)
       .then(({ data }) => setCustomers(data || []))
-  }, [loadData])
+  }, [loadData, loadLots])
 
   const filtered = orders.filter(o =>
     !search ||
@@ -207,27 +210,46 @@ export default function ExportPage() {
       assignments: form.assignments,
       tong_banh: totalBanh,
     }
+    const newLotIds = [...new Set(form.assignments.map(a => a.lot_id))]
     if (editId) {
+      // Revert lots của đơn cũ về "Hoàn thành" trước khi cập nhật
+      const oldOrder = orders.find(o => o.id === editId)
+      if (oldOrder?.assignments?.length) {
+        const oldLotIds = [...new Set(oldOrder.assignments.map((a: Assignment) => a.lot_id))]
+        await supabase.from("lots").update({ trang_thai: "Hoàn thành" }).in("id", oldLotIds)
+      }
       await supabase.from("export_orders").update(payload).eq("id", editId)
       showToast("Đã cập nhật đơn xuất hàng")
     } else {
       await supabase.from("export_orders").insert(payload)
       showToast("Đã tạo đơn xuất hàng mới")
     }
+    // Cập nhật lots được gán vào đơn này → "Xuất hàng"
+    if (newLotIds.length > 0) {
+      await supabase.from("lots").update({ trang_thai: "Xuất hàng" }).in("id", newLotIds)
+    }
     setSaving(false)
     setView("list")
     setEditId(null)
     setForm(emptyForm())
     loadData(factoryId)
+    loadLots(factoryId)
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    // Revert lots của đơn bị xóa về "Hoàn thành"
+    const order = orders.find(o => o.id === id)
+    if (order?.assignments?.length) {
+      const lotIds = [...new Set(order.assignments.map((a: Assignment) => a.lot_id))]
+      await supabase.from("lots").update({ trang_thai: "Hoàn thành" }).in("id", lotIds)
+    }
     await supabase.from("export_orders").delete().eq("id", id)
     setDelConfirm(null)
     showToast("Đã xóa đơn xuất hàng")
     loadData(factoryId)
+    loadLots(factoryId)
   }
 
   // ── Filtered lots for assignment ──────────────────────────────────────────
@@ -536,7 +558,7 @@ export default function ExportPage() {
                       onChange={e=>setForm(p=>({...p,vehicles:p.vehicles.map((vv,i)=>i===idx?{...vv,ghi_chu:e.target.value}:vv)}))}
                       className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                   </div>
-                  <button onClick={()=>setForm(p=>({...p,vehicles:p.vehicles.filter((_,i)=>i!==idx),assignments:p.assignments.filter(a=>a.vehicleIdx!==idx)}))}
+                  <button onClick={()=>setForm(p=>({...p,vehicles:p.vehicles.filter((_,i)=>i!==idx),assignments:p.assignments.filter(a=>a.vehicleIdx!==idx).map(a=>a.vehicleIdx>idx?{...a,vehicleIdx:a.vehicleIdx-1}:a)}))}
                     className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg self-end">
                     <X size={14}/>
                   </button>

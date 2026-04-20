@@ -1,10 +1,11 @@
 "use client"
 import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { Home, Truck, Warehouse, Package, ClipboardCheck, FileOutput, Settings, LogOut, ChevronRight, Menu, Factory } from "lucide-react"
+import { Home, Truck, Warehouse, Package, ClipboardCheck, FileOutput, Settings, LogOut, ChevronRight, Menu, Factory, Map } from "lucide-react"
 
 const NAV = [
   { key: "/dashboard", label: "Dashboard", icon: Home },
+  { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
   { key: "production", label: "Quản lý Sản xuất", icon: Factory, children: [
     { key: "/dashboard/dispatch", label: "Điều xe", icon: Truck },
     { key: "/dashboard/storage", label: "Ngăn lưu", icon: Warehouse },
@@ -24,11 +25,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const u = localStorage.getItem("erp_user")
-    if (!u) { router.push("/"); return }
+    if (!u) { router.push("/login"); return }
     setUser(JSON.parse(u))
   }, [router])
 
-  const handleLogout = () => { localStorage.removeItem("erp_user"); localStorage.removeItem("erp_factory"); router.push("/") }
+  const handleLogout = () => { localStorage.removeItem("erp_user"); localStorage.removeItem("erp_factory"); router.push("/login") }
 
   if (!user) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full" /></div>
 

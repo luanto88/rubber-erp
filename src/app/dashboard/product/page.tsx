@@ -43,6 +43,25 @@ const BOC_OPTS = [
 const THAM_OPTS  = ["Củ","Mới"]
 const PALLET_OPTS = ["Sắt đế gỗ","Sắt mỏng","Gỗ","Nhựa"]
 
+// ─── Business Rules: bành/kiện by CSR type ─────────────────────────────────
+function getLoaiBanhConfig(loai_csr: string) {
+  if (loai_csr === "CSRCV50" || loai_csr === "CSRCV60") {
+    return { loai_banh: 20, max_per_kien: 60, lo_tron: 240 }
+  }
+  if (loai_csr === "CSRL" || loai_csr === "CSR3L") {
+    return { loai_banh: 33.33, max_per_kien: 36, lo_tron: 144 }
+  }
+  // CSR10, CSR20, CSR5, Ngoại lệ
+  return { loai_banh: 35, max_per_kien: 36, lo_tron: 144 }
+}
+
+function autoTrangThai(tong_banh: number, lo_tron: number, current: string) {
+  if (current === "Xuất hàng") return "Xuất hàng"
+  if (tong_banh >= lo_tron) return "Hoàn thành"
+  if (tong_banh > 0) return "Dở dang"
+  return "Dở dang"
+}
+
 // ─── Empty form ───────────────────────────────────────────────────────────────
 const emptyForm = () => ({
   ma_lo: "", num: 0, suffix: "cs", year: new Date().getFullYear().toString().slice(-2),
@@ -120,21 +139,46 @@ export default function ProductPage() {
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = {
-    total: lots.length,
-    hoanThanh: lots.filter(l => l.trang_thai === "Hoàn thành").length,
-    dorDang: lots.filter(l => l.trang_thai === "Dở dang").length,
-    tongBanh: lots.reduce((s,l) => s + (l.tong_banh||0), 0),
-    tongKg: lots.reduce((s,l) => s + (l.tong_kg||0), 0),
+    total: filtered.length,
+    hoanThanh: filtered.filter(l => l.trang_thai === "Hoàn thành").length,
+    dorDang: filtered.filter(l => l.trang_thai === "Dở dang").length,
+    tongBanh: filtered.reduce((s,l) => s + (l.tong_banh||0), 0),
+    tongKg: filtered.reduce((s,l) => s + (l.tong_kg||0), 0),
   }
 
-  // ── Auto-calc tong_banh & tong_kg ─────────────────────────────────────────
+  // ── Auto-calc tong_banh & tong_kg + auto loai_banh + auto trang_thai ────
   const updateForm = (patch: Partial<typeof form>) => {
     setForm(prev => {
       const next = { ...prev, ...patch }
+
+      // Auto-set loai_banh when loai_csr changes
+      if (patch.loai_csr !== undefined) {
+        const cfg = getLoaiBanhConfig(patch.loai_csr)
+        next.loai_banh = cfg.loai_banh
+        // Clamp existing kiện values to new max
+        const max = cfg.max_per_kien
+        next.kien_a = Math.min(next.kien_a, max)
+        next.kien_b = Math.min(next.kien_b, max)
+        next.kien_c = Math.min(next.kien_c, max)
+        next.kien_d = Math.min(next.kien_d, max)
+      }
+
+      // Clamp kiện values to max_per_kien
+      const cfg = getLoaiBanhConfig(next.loai_csr)
+      const max = cfg.max_per_kien
+      if (patch.kien_a !== undefined) next.kien_a = Math.min(Math.max(0, next.kien_a), max)
+      if (patch.kien_b !== undefined) next.kien_b = Math.min(Math.max(0, next.kien_b), max)
+      if (patch.kien_c !== undefined) next.kien_c = Math.min(Math.max(0, next.kien_c), max)
+      if (patch.kien_d !== undefined) next.kien_d = Math.min(Math.max(0, next.kien_d), max)
+
       const tb = (next.kien_a||0)+(next.kien_b||0)+(next.kien_c||0)+(next.kien_d||0)
       next.tong_banh = tb
-      next.tong_kg   = tb * (next.loai_banh||35)
-      // auto ma_lo
+      next.tong_kg   = Math.round(tb * (next.loai_banh||35) * 100) / 100
+
+      // Auto trang_thai
+      next.trang_thai = autoTrangThai(tb, cfg.lo_tron, next.trang_thai)
+
+      // Auto ma_lo
       if (patch.num !== undefined || patch.suffix !== undefined || patch.year !== undefined) {
         next.ma_lo = `${next.num}${next.suffix}/${next.year}`
       }
@@ -171,19 +215,32 @@ export default function ProductPage() {
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
-    const payload = {
-      ...form,
-      factory_id: factoryId,
-      ngan_id: form.ngan_id || null,
+    try {
+      const cfg = getLoaiBanhConfig(form.loai_csr)
+      const dd_snapshot = form.trang_thai === "Dở dang" ? {
+        kien_a: form.kien_a, kien_b: form.kien_b,
+        kien_c: form.kien_c, kien_d: form.kien_d,
+        max_per_kien: cfg.max_per_kien,
+        timestamp: new Date().toISOString(),
+      } : null
+      const payload = {
+        ...form,
+        factory_id: factoryId,
+        ngan_id: form.ngan_id || null,
+        dd_snapshot,
+      }
+      if (editId) {
+        await supabase.from("lots").update(payload).eq("id", editId)
+      } else {
+        await supabase.from("lots").insert(payload)
+      }
+      setModal(null)
+      loadData(factoryId)
+    } catch (err) {
+      console.error("handleSave error:", err)
+    } finally {
+      setSaving(false)
     }
-    if (editId) {
-      await supabase.from("lots").update(payload).eq("id", editId)
-    } else {
-      await supabase.from("lots").insert(payload)
-    }
-    setSaving(false)
-    setModal(null)
-    loadData(factoryId)
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
@@ -400,28 +457,70 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành (kg/bành)</label>
-                  <input type="number" value={form.loai_banh} onChange={e=>updateForm({loai_banh:+e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                  <input type="number" value={form.loai_banh} readOnly
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"/>
+                  <p className="text-[10px] text-slate-400 mt-1">Tự động theo loại CSR</p>
                 </div>
               </div>
-              {/* Kiện A B C D */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Số kiện (A / B / C / D)</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(["kien_a","kien_b","kien_c","kien_d"] as const).map((k,i)=>(
-                    <div key={k} className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{["A","B","C","D"][i]}</span>
-                      <input type="number" value={form[k]} onChange={e=>updateForm({[k]:+e.target.value} as any)}
-                        className="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+              {/* Kiện A B C D — with lock logic */}
+              {(() => {
+                const cfg = getLoaiBanhConfig(form.loai_csr)
+                const maxK = cfg.max_per_kien
+                const loTron = cfg.lo_tron
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-600">Số bành kiện (A / B / C / D)</label>
+                      <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
+                        Max {maxK} bành/kiện · Lô tròn = {loTron} bành
+                      </span>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-2 flex gap-4 text-xs text-slate-500">
-                  <span>Tổng bành: <strong className="text-slate-700">{form.tong_banh}</strong></span>
-                  <span>Tổng kg: <strong className="text-slate-700">{form.tong_kg.toLocaleString()}</strong></span>
-                  <span>Ngăn: <strong className="text-slate-700">{form.ngan_id ? (ngans.find(n => n.id === form.ngan_id)?.ten_ngan || "—") : "Chưa chọn"}</strong></span>
-                </div>
-              </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(["kien_a","kien_b","kien_c","kien_d"] as const).map((k,i)=>{
+                        const val = form[k]
+                        const isLocked = val >= maxK
+                        return (
+                          <div key={k} className="relative">
+                            <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold ${isLocked ? "text-emerald-500" : "text-slate-400"}`}>{["A","B","C","D"][i]}</span>
+                            <input type="number" value={val}
+                              min={0} max={maxK}
+                              disabled={isLocked}
+                              onChange={e=>updateForm({[k]:+e.target.value} as any)}
+                              className={`w-full pl-7 pr-3 py-2 border rounded-xl text-sm outline-none transition-colors ${
+                                isLocked
+                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-bold cursor-not-allowed"
+                                  : val > 0
+                                    ? "border-amber-300 bg-amber-50 text-amber-700 font-semibold focus:border-amber-500"
+                                    : "border-slate-300 focus:border-emerald-500"
+                              }`}/>
+                            {isLocked && (
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-[10px] font-bold">🔒</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {/* Warning for partially filled kiện */}
+                    {form.tong_banh > 0 && form.tong_banh < loTron && (
+                      <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
+                        <span>⚠️</span>
+                        <span>Lô dở dang: {form.tong_banh}/{loTron} bành. Còn thiếu {loTron - form.tong_banh} bành để thành lô tròn.</span>
+                      </div>
+                    )}
+                    {form.tong_banh >= loTron && (
+                      <div className="mt-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-center gap-2">
+                        <span>✅</span>
+                        <span>Lô tròn hoàn thành: {form.tong_banh} bành · {form.tong_kg.toLocaleString()} kg</span>
+                      </div>
+                    )}
+                    <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                      <span>Tổng bành: <strong className="text-slate-700">{form.tong_banh}</strong></span>
+                      <span>Tổng kg: <strong className="text-slate-700">{form.tong_kg.toLocaleString()}</strong></span>
+                      <span>Trạng thái: <strong className={form.trang_thai === "Hoàn thành" ? "text-emerald-600" : "text-amber-600"}>{form.trang_thai}</strong></span>
+                    </div>
+                  </div>
+                )
+              })()}
               {/* Bọc, Thảm */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -443,10 +542,13 @@ export default function ProductPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Trạng thái</label>
-                  <select value={form.trang_thai} onChange={e=>updateForm({trang_thai:e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {TRANG_THAI_OPTS.map(t=><option key={t}>{t}</option>)}
-                  </select>
+                  <input value={form.trang_thai} readOnly
+                    className={`w-full px-3 py-2 border rounded-xl text-sm font-bold cursor-not-allowed ${
+                      form.trang_thai === "Hoàn thành" ? "border-emerald-200 bg-emerald-50 text-emerald-700" :
+                      form.trang_thai === "Dở dang" ? "border-amber-200 bg-amber-50 text-amber-700" :
+                      "border-blue-200 bg-blue-50 text-blue-700"
+                    }`}/>
+                  <p className="text-[10px] text-slate-400 mt-1">Tự động: Hoàn thành khi đủ bành, Dở dang khi thiếu</p>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
