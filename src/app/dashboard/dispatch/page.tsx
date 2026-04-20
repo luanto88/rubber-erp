@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
-import { Truck, Plus, Eye, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, MapPin } from "lucide-react"
+import { Truck, Plus, Eye, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, MapPin, Weight } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
@@ -345,12 +345,13 @@ export default function DispatchPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { label: "Tổng bảng phân xe", value: stats.total },
-          { label: "Tổng chuyến xe", value: stats.totalXe },
-          { label: "Tổng KL khô (tấn)", value: (stats.totalKg/1000).toFixed(1)+"T" },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+        {([
+          { label: "Tổng bảng phân xe", value: stats.total,                         Icon: Calendar, ic: "text-slate-400"   },
+          { label: "Tổng chuyến xe",    value: stats.totalXe,                        Icon: Truck,    ic: "text-emerald-400" },
+          { label: "Tổng KL khô (tấn)", value: (stats.totalKg/1000).toFixed(1)+"T", Icon: Weight,   ic: "text-blue-400"    },
+        ] as const).map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
+            <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
             <div className="text-2xl font-extrabold text-emerald-700">{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
           </div>

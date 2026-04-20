@@ -282,12 +282,13 @@ export default function ExportPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { label:"Tổng đơn xuất",  value: stats.total,                    color:"text-slate-700"  },
-          { label:"Tổng bành xuất", value: stats.tongBanh.toLocaleString(), color:"text-emerald-600"},
-          { label:"Tổng xe",        value: stats.tongXe,                   color:"text-blue-600"   },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+        {([
+          { label:"Tổng đơn xuất",  value: stats.total,                     color:"text-slate-700",   Icon: FileOutput, ic: "text-slate-400"   },
+          { label:"Tổng bành xuất", value: stats.tongBanh.toLocaleString(),  color:"text-emerald-600", Icon: Package,    ic: "text-emerald-400" },
+          { label:"Tổng xe",        value: stats.tongXe,                    color:"text-blue-600",    Icon: Truck,      ic: "text-blue-400"    },
+        ] as const).map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
+            <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
             <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
           </div>

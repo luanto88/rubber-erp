@@ -1,7 +1,11 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { Warehouse, Plus, X, Search, Eye, Edit2 } from "lucide-react"
+import { useScrollReveal } from "@/lib/useScrollReveal"
+import {
+  Warehouse, Plus, X, Search, Eye, Edit2,
+  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets
+} from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Ngan = {
@@ -22,9 +26,9 @@ type Ngan = {
   lo_nguon_goc: string
 }
 
-const LOAI_NL_OPTS  = ["Mủ đông chén","Mủ nước","Mủ tạp","Mủ skim"]
-const NGUON_GOC_OPTS = ["NT","M","GCA"]
-const XU_LY_OPTS    = ["Xé","Cán","Hỗn hợp"]
+const LOAI_NL_OPTS    = ["Mủ đông chén","Mủ nước","Mủ tạp","Mủ skim"]
+const NGUON_GOC_OPTS  = ["NT","M","GCA"]
+const XU_LY_OPTS      = ["Xé","Cán","Hỗn hợp"]
 const CHUNG_NHAN_OPTS = ["PEFC CS","PEFC FM","ISO","Không"]
 const TRANG_THAI_OPTS = ["Đang sản xuất","Chờ sản xuất","Hoàn thành","Đóng"]
 
@@ -39,19 +43,36 @@ const emptyForm = () => ({
   lo_nguon_goc: "",
 })
 
+// header gradient + icon color theo trạng thái
+const headerStyle = (tt: string) => {
+  if (tt === "Đang sản xuất") return { grad: "from-emerald-50 to-teal-50", icon: "text-emerald-600" }
+  if (tt === "Hoàn thành")   return { grad: "from-blue-50 to-cyan-50",    icon: "text-blue-600" }
+  if (tt === "Chờ sản xuất") return { grad: "from-amber-50 to-yellow-50", icon: "text-amber-500" }
+  return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
+}
+
+const badgeClass = (tt: string) => {
+  if (tt === "Đang sản xuất") return "bg-emerald-100 text-emerald-700"
+  if (tt === "Hoàn thành")   return "bg-blue-100 text-blue-700"
+  if (tt === "Chờ sản xuất") return "bg-amber-100 text-amber-700"
+  return "bg-slate-100 text-slate-600"
+}
+
 export default function StoragePage() {
+  useScrollReveal()
+
   const [ngans, setNgans]         = useState<Ngan[]>([])
+  const [lotStats, setLotStats]   = useState<Record<string, number>>({})
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
   const [search, setSearch]       = useState("")
   const [filterTT, setFilterTT]   = useState("")
   const [filterNL, setFilterNL]   = useState("")
 
-  // Modal
-  const [modal, setModal]   = useState<"add"|"edit"|"view"|null>(null)
-  const [form, setForm]     = useState(emptyForm())
-  const [editId, setEditId] = useState<string|null>(null)
-  const [saving, setSaving] = useState(false)
+  const [modal, setModal]         = useState<"add"|"edit"|"view"|null>(null)
+  const [form, setForm]           = useState(emptyForm())
+  const [editId, setEditId]       = useState<string|null>(null)
+  const [saving, setSaving]       = useState(false)
   const [delConfirm, setDelConfirm] = useState<string|null>(null)
   const [viewNgan, setViewNgan]   = useState<Ngan|null>(null)
 
@@ -63,8 +84,17 @@ export default function StoragePage() {
       .order("ten_ngan", { ascending: true })
     if (filterTT) q = q.eq("trang_thai", filterTT)
     if (filterNL) q = q.eq("loai_nl", filterNL)
-    const { data } = await q
+    const [{ data }, { data: lotsData }] = await Promise.all([
+      q,
+      supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id","is",null)
+    ])
     setNgans(data || [])
+    // group tong_kg theo ngan_id
+    const ls: Record<string, number> = {}
+    for (const l of lotsData || []) {
+      if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
+    }
+    setLotStats(ls)
     setLoading(false)
   }, [filterTT, filterNL])
 
@@ -82,18 +112,16 @@ export default function StoragePage() {
   )
 
   // ── Stats ─────────────────────────────────────────────────────────────────
-  const stats = {
-    total: ngans.length,
-    dangSX: ngans.filter(n => n.trang_thai === "Đang sản xuất").length,
-    tongTuoi: ngans.reduce((s,n) => s+(n.tong_tuoi||0), 0),
-    tongKho: ngans.reduce((s,n) => s+(n.tong_kho||0), 0),
-  }
+  const statsCards = [
+    { label: "Tổng ngăn",        value: ngans.length.toString(),                        color: "text-slate-700",  icon: <Warehouse size={20} className="mx-auto mb-1 text-slate-500 opacity-70"/> },
+    { label: "Đang sản xuất",    value: ngans.filter(n=>n.trang_thai==="Đang sản xuất").length.toString(), color: "text-emerald-600", icon: <Activity size={20} className="mx-auto mb-1 text-emerald-500 opacity-70"/> },
+    { label: "Tổng KL tươi (kg)",value: ngans.reduce((s,n)=>s+(n.tong_tuoi||0),0).toLocaleString(), color: "text-blue-600",    icon: <Droplets size={20} className="mx-auto mb-1 text-blue-500 opacity-70"/> },
+    { label: "Tổng KL khô (kg)", value: ngans.reduce((s,n)=>s+(n.tong_kho||0),0).toLocaleString(),  color: "text-purple-600", icon: <Weight size={20} className="mx-auto mb-1 text-purple-500 opacity-70"/> },
+  ]
 
-  // ── Curing days ───────────────────────────────────────────────────────────
   const curingDays = (ngay_bd: string) => {
     if (!ngay_bd) return null
-    const diff = Math.floor((Date.now() - new Date(ngay_bd).getTime()) / 86400000)
-    return diff
+    return Math.floor((Date.now() - new Date(ngay_bd).getTime()) / 86400000)
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -111,7 +139,6 @@ export default function StoragePage() {
     loadData(factoryId)
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!factoryId) return
     await supabase.from("ngans").delete().eq("id", id)
@@ -144,20 +171,16 @@ export default function StoragePage() {
           <p className="text-sm text-slate-500 mt-0.5">Quản lý ngăn lưu trữ mủ cao su</p>
         </div>
         <button onClick={() => { setForm(emptyForm()); setEditId(null); setModal("add") }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
+          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
           <Plus size={16}/> Thêm ngăn
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
-        {[
-          { label: "Tổng ngăn", value: stats.total, color: "text-slate-700" },
-          { label: "Đang sản xuất", value: stats.dangSX, color: "text-emerald-600" },
-          { label: "Tổng KL tươi (kg)", value: stats.tongTuoi.toLocaleString(), color: "text-blue-600" },
-          { label: "Tổng KL khô (kg)", value: stats.tongKho.toLocaleString(), color: "text-purple-600" },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+      <div className="grid grid-cols-4 gap-3 mb-6 scroll-reveal">
+        {statsCards.map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
+            {s.icon}
             <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
           </div>
@@ -189,7 +212,7 @@ export default function StoragePage() {
           </button>}
       </div>
 
-      {/* Grid cards */}
+      {/* Card grid */}
       {loading ? (
         <div className="p-12 text-center text-slate-400">Đang tải...</div>
       ) : filtered.length === 0 ? (
@@ -198,73 +221,115 @@ export default function StoragePage() {
           <p>Không có ngăn lưu nào</p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-4 scroll-reveal">
           {filtered.map(n => {
-            const days = curingDays(n.ngay_bd)
+            const days   = curingDays(n.ngay_bd)
             const minDays = 21
-            const pct = days !== null ? Math.min((days/minDays)*100, 100) : 0
-            const ready = days !== null && days >= minDays
+            const pct    = days !== null ? Math.min((days / minDays) * 100, 100) : 0
+            const ready  = days !== null && days >= minDays
+            const hs     = headerStyle(n.trang_thai)
+            const tpKg   = lotStats[n.id] || 0
+            const tpPct  = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+
             return (
-              <div key={n.id} className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden">
-                {/* Card header */}
-                <div className={`px-4 py-3 flex items-center justify-between ${
-                  n.trang_thai === "Đang sản xuất" ? "bg-emerald-50 border-b border-emerald-100" :
-                  n.trang_thai === "Hoàn thành" ? "bg-blue-50 border-b border-blue-100" :
-                  "bg-slate-50 border-b border-slate-100"}`}>
-                  <div>
-                    <span className="font-extrabold text-slate-800 text-base">{n.ten_ngan}</span>
-                    <span className="ml-2 text-xs text-slate-500">{n.ma_ngan?.split("-")[0]}</span>
+              <div key={n.id} className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden hover-lift">
+
+                {/* Card header — gradient */}
+                <div className={`bg-gradient-to-r ${hs.grad} px-4 py-3 border-b border-slate-200 flex items-center justify-between`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Warehouse size={16} className={`${hs.icon} shrink-0`}/>
+                    <span className="font-extrabold text-slate-800 text-base truncate">{n.ten_ngan}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${badgeClass(n.trang_thai)}`}>
+                      {n.trang_thai}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
                     <button onClick={() => { setViewNgan(n); setModal("view") }}
-                      className="p-1.5 hover:bg-white rounded-lg text-slate-500 transition-colors">
+                      className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors">
                       <Eye size={14}/>
                     </button>
                     <button onClick={() => openEdit(n)}
-                      className="p-1.5 hover:bg-white rounded-lg text-blue-500 transition-colors">
+                      className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors">
                       <Edit2 size={14}/>
                     </button>
                     <button onClick={() => setDelConfirm(n.id)}
-                      className="p-1.5 hover:bg-white rounded-lg text-red-400 transition-colors">
+                      className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors">
                       <X size={14}/>
                     </button>
                   </div>
                 </div>
 
-                {/* Card body */}
-                <div className="p-4 space-y-3">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">Loại NL</span>
-                    <span className="font-semibold text-slate-700">{n.loai_nl}</span>
+                {/* Card body — icon + label + value + border-dashed */}
+                <div className="p-4 space-y-0">
+
+                  {/* Mã ngăn — đầy đủ */}
+                  <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
+                    <Tag size={14} className="text-slate-400 shrink-0 mt-0.5"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">Mã ngăn</span>
+                    <span className="text-xs font-semibold text-slate-700 break-all leading-relaxed">{n.ma_ngan || "—"}</span>
                   </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">Nguồn gốc</span>
-                    <span className="font-semibold text-slate-700">{n.nguon_goc} · {n.xu_ly}</span>
+
+                  {/* Loại NL */}
+                  <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
+                    <Layers size={14} className="text-slate-400 shrink-0"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">Loại NL</span>
+                    <span className="text-sm font-semibold text-slate-800">{n.loai_nl}</span>
                   </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">Chứng nhận</span>
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold">{n.chung_nhan}</span>
+
+                  {/* Nguồn gốc · Xử lý */}
+                  <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
+                    <MapPin size={14} className="text-slate-400 shrink-0"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">Nguồn · Xử lý</span>
+                    <span className="text-sm font-semibold text-slate-800">{n.nguon_goc} · {n.xu_ly}</span>
                   </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">KL tươi / khô</span>
-                    <span className="font-semibold text-slate-700">
-                      {(n.tong_tuoi||0).toLocaleString()} / {(n.tong_kho||0).toLocaleString()} kg
-                    </span>
+
+                  {/* Chứng nhận */}
+                  <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
+                    <ShieldCheck size={14} className="text-slate-400 shrink-0"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">Chứng nhận</span>
+                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">{n.chung_nhan}</span>
                   </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">Ngày bắt đầu</span>
-                    <span className="font-semibold text-slate-700">
-                      {n.ngay_bd ? new Date(n.ngay_bd).toLocaleDateString("vi-VN") : "—"}
+
+                  {/* KL tươi / khô */}
+                  <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
+                    <Weight size={14} className="text-slate-400 shrink-0"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">KL tươi / khô</span>
+                    <span className="text-sm font-semibold text-slate-800">
+                      {(n.tong_tuoi||0).toLocaleString()} / <span className="text-emerald-700">{(n.tong_kho||0).toLocaleString()}</span> kg
                     </span>
                   </div>
 
-                  {/* Curing progress */}
+                  {/* Tỷ lệ TP/QK — trường mới */}
+                  <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
+                    <BarChart2 size={14} className="text-slate-400 shrink-0 mt-1"/>
+                    <span className="text-xs text-slate-500 w-24 shrink-0">TP / QK ngăn</span>
+                    <div className="flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-sm font-semibold text-slate-800">
+                          {n.tong_kho > 0 ? `${tpPct.toFixed(1)}%` : "—"}
+                        </span>
+                        {n.tong_kho > 0 && (
+                          <span className="text-xs text-slate-400">
+                            ({tpKg.toLocaleString()} / {(n.tong_kho||0).toLocaleString()} kg)
+                          </span>
+                        )}
+                      </div>
+                      {n.tong_kho > 0 && (
+                        <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-1 bg-blue-400 rounded-full transition-all"
+                            style={{ width: `${Math.min(tpPct, 100)}%` }}/>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Thời gian ủ */}
                   {days !== null && (
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
+                    <div className="py-2">
+                      <div className="flex justify-between text-xs mb-1.5">
                         <span className="text-slate-500">Thời gian ủ</span>
                         <span className={`font-bold ${ready ? "text-emerald-600" : "text-amber-600"}`}>
-                          {days} ngày {ready ? "✓ Đủ 21 ngày" : `(còn ${minDays-days} ngày)`}
+                          {days} ngày {ready ? "✓ Đủ 21 ngày" : `(còn ${minDays - days} ngày)`}
                         </span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-1.5">
@@ -273,17 +338,6 @@ export default function StoragePage() {
                       </div>
                     </div>
                   )}
-
-                  {/* Status badge */}
-                  <div className="pt-1">
-                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                      n.trang_thai === "Đang sản xuất" ? "bg-emerald-100 text-emerald-700" :
-                      n.trang_thai === "Hoàn thành"    ? "bg-blue-100 text-blue-700" :
-                      n.trang_thai === "Chờ sản xuất"  ? "bg-amber-100 text-amber-700" :
-                      "bg-slate-100 text-slate-600"}`}>
-                      {n.trang_thai}
-                    </span>
-                  </div>
                 </div>
               </div>
             )
@@ -393,28 +447,32 @@ export default function StoragePage() {
       {/* View detail modal */}
       {modal === "view" && viewNgan && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-extrabold text-slate-800">{viewNgan.ten_ngan}</h2>
-              <button onClick={() => setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className={`bg-gradient-to-r ${headerStyle(viewNgan.trang_thai).grad} border-b border-slate-200 px-6 py-4 flex items-center justify-between`}>
+              <div className="flex items-center gap-2">
+                <Warehouse size={18} className={headerStyle(viewNgan.trang_thai).icon}/>
+                <h2 className="text-lg font-extrabold text-slate-800">{viewNgan.ten_ngan}</h2>
+              </div>
+              <button onClick={() => setModal(null)} className="p-2 hover:bg-white/60 rounded-xl"><X size={18}/></button>
             </div>
-            <div className="p-6 space-y-3 text-sm">
+            <div className="p-6 space-y-0 text-sm">
               {[
-                ["Mã ngăn", viewNgan.ma_ngan],
-                ["Loại NL", viewNgan.loai_nl],
+                ["Mã ngăn",   viewNgan.ma_ngan],
+                ["Loại NL",   viewNgan.loai_nl],
                 ["Nguồn gốc", viewNgan.nguon_goc],
-                ["Xử lý", viewNgan.xu_ly],
-                ["Chứng nhận", viewNgan.chung_nhan],
-                ["Ngày BD", viewNgan.ngay_bd ? new Date(viewNgan.ngay_bd).toLocaleDateString("vi-VN") : "—"],
-                ["Ngày KT", viewNgan.ngay_kt ? new Date(viewNgan.ngay_kt).toLocaleDateString("vi-VN") : "—"],
-                ["KL tươi", (viewNgan.tong_tuoi||0).toLocaleString()+" kg"],
-                ["KL khô",  (viewNgan.tong_kho||0).toLocaleString()+" kg"],
+                ["Xử lý",     viewNgan.xu_ly],
+                ["Chứng nhận",viewNgan.chung_nhan],
+                ["Ngày BD",   viewNgan.ngay_bd ? new Date(viewNgan.ngay_bd).toLocaleDateString("vi-VN") : "—"],
+                ["Ngày KT",   viewNgan.ngay_kt ? new Date(viewNgan.ngay_kt).toLocaleDateString("vi-VN") : "—"],
+                ["KL tươi",   (viewNgan.tong_tuoi||0).toLocaleString()+" kg"],
+                ["KL khô",    (viewNgan.tong_kho||0).toLocaleString()+" kg"],
+                ["TP / QK",   viewNgan.tong_kho > 0 ? `${((lotStats[viewNgan.id]||0)/viewNgan.tong_kho*100).toFixed(1)}% (${(lotStats[viewNgan.id]||0).toLocaleString()} kg)` : "—"],
                 ["Số chuyến", (viewNgan.trips||[]).length+" chuyến"],
-                ["Trạng thái", viewNgan.trang_thai],
+                ["Trạng thái",viewNgan.trang_thai],
               ].map(([k,v]) => (
-                <div key={k} className="flex justify-between border-b border-slate-50 pb-2">
+                <div key={k} className="flex justify-between py-2 border-b border-dashed border-slate-200 last:border-0">
                   <span className="text-slate-500">{k}</span>
-                  <span className="font-semibold text-slate-700">{v}</span>
+                  <span className="font-semibold text-slate-700 text-right max-w-[60%]">{v}</span>
                 </div>
               ))}
             </div>

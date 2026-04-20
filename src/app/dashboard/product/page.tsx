@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { Plus, Search, Filter, X, ChevronDown, Edit2, Trash2, Eye, Package } from "lucide-react"
+import { Plus, Search, Filter, X, ChevronDown, Edit2, Trash2, Eye, Package, CheckCircle, Clock, Layers, Weight } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lot = {
@@ -268,14 +268,15 @@ export default function ProductPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-5 gap-3 mb-6">
-        {[
-          { label: "Tổng lô", value: stats.total, color: "text-slate-700" },
-          { label: "Hoàn thành", value: stats.hoanThanh, color: "text-emerald-600" },
-          { label: "Dở dang", value: stats.dorDang, color: "text-amber-600" },
-          { label: "Tổng bành", value: stats.tongBanh.toLocaleString(), color: "text-blue-600" },
-          { label: "Tổng kg", value: (stats.tongKg/1000).toFixed(1)+"T", color: "text-purple-600" },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+        {([
+          { label: "Tổng lô",    value: stats.total,                        color: "text-slate-700",   Icon: Package,      ic: "text-slate-400"   },
+          { label: "Hoàn thành", value: stats.hoanThanh,                    color: "text-emerald-600", Icon: CheckCircle,  ic: "text-emerald-400" },
+          { label: "Dở dang",    value: stats.dorDang,                      color: "text-amber-600",   Icon: Clock,        ic: "text-amber-400"   },
+          { label: "Tổng bành",  value: stats.tongBanh.toLocaleString(),    color: "text-blue-600",    Icon: Layers,       ic: "text-blue-400"    },
+          { label: "Tổng tấn",   value: (stats.tongKg/1000).toFixed(1)+"T", color: "text-purple-600",  Icon: Weight,       ic: "text-purple-400"  },
+        ] as const).map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
+            <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
             <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
           </div>
