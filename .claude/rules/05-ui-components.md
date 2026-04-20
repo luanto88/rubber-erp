@@ -22,9 +22,52 @@ Card grid:        grid grid-cols-3 gap-4
 ```
 
 ### Cards
+
+**Chuẩn card:** `bg-white rounded-xl border border-slate-200 shadow-md p-4`
+
 ```
-Stats card:   bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center
-Content card: bg-white rounded-xl border border-slate-200 shadow-sm p-5
+Stats card:   bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center
+Content card: bg-white rounded-xl border border-slate-200 shadow-md p-4
+```
+
+**Quy tắc bắt buộc trong card:**
+1. **Header gradient nhẹ** — dùng `bg-gradient-to-r` để phân biệt header với body
+2. **Icon + label** — mỗi trường thông tin phải có icon lucide-react kèm label
+3. **Value đậm hơn label** — label: `text-xs text-slate-500`, value: `text-sm font-semibold text-slate-800`
+4. **Phân cách hàng bằng border-dashed** — dùng `border-b border-dashed border-slate-200` giữa các hàng
+
+**Pattern chuẩn cho content card:**
+```tsx
+<div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden hover-lift">
+  {/* Header gradient */}
+  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+    <IconName size={16} className="text-emerald-600" />
+    <span className="font-bold text-slate-700 text-sm">Tiêu đề card</span>
+  </div>
+  {/* Body */}
+  <div className="p-4 space-y-0">
+    <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
+      <IconField size={14} className="text-slate-400 shrink-0" />
+      <span className="text-xs text-slate-500 w-28 shrink-0">Label</span>
+      <span className="text-sm font-semibold text-slate-800">Value</span>
+    </div>
+    {/* last row: không có border-b */}
+    <div className="flex items-center gap-2 py-2">
+      <IconField size={14} className="text-slate-400 shrink-0" />
+      <span className="text-xs text-slate-500 w-28 shrink-0">Label</span>
+      <span className="text-sm font-semibold text-slate-800">Value</span>
+    </div>
+  </div>
+</div>
+```
+
+**Gradient header theo màu module:**
+```
+Mặc định / Thành phẩm:  from-emerald-50 to-teal-50    / icon text-emerald-600
+Ngăn lưu:               from-blue-50 to-cyan-50        / icon text-blue-600
+Kiểm nghiệm:            from-violet-50 to-purple-50    / icon text-violet-600
+Xuất hàng:              from-amber-50 to-orange-50     / icon text-amber-600
+Điều xe:                from-slate-50 to-gray-100      / icon text-slate-600
 ```
 
 ### Buttons
