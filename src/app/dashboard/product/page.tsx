@@ -1,120 +1,275 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
-import { Plus, Search, Filter, X, ChevronDown, Edit2, Trash2, Eye, Package, CheckCircle, Clock, Layers, Weight } from "lucide-react"
+import { useScrollReveal } from "@/lib/useScrollReveal"
+import {
+  Plus, Search, X, ChevronLeft, Edit2, Trash2, Package,
+  CheckCircle, Clock, Layers, Weight, AlertTriangle, Lock,
+  Warehouse,
+} from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lot = {
-  id: string
-  ma_lo: string
-  num: number
-  suffix: string
-  year: string
-  ngay_sx: string
-  ca: string
-  ngan_id: string | null
-  loai_csr: string
-  loai_banh: number
-  boc: string
-  tham: string
-  pallet: string[]
-  chi_thi: string
-  kien_a: number
-  kien_b: number
-  kien_c: number
-  kien_d: number
-  tong_banh: number
-  tong_kg: number
-  trang_thai: string
-  ghi_chu: string
+  id: string; ma_lo: string; num: number; suffix: string; year: string
+  ngay_sx: string; ca: string; ngan_id: string | null; day_chuyen: string
+  loai_csr: string; loai_banh: number; boc: string; tham: string
+  pallet: string[]; chi_thi: string
+  kien_a: number; kien_b: number; kien_c: number; kien_d: number
+  tong_banh: number; tong_kg: number; trang_thai: string; ghi_chu: string
   ngans?: { ten_ngan: string }
 }
 
-type Ngan = { id: string; ten_ngan: string; ma_ngan: string }
+type Ngan = {
+  id: string; ten_ngan: string; ma_ngan: string
+  tong_kho: number; trang_thai: string; ngay_bd: string
+  loai_nl: string; chung_nhan: string; ngay_kt: string
+}
 
-const LOAI_CSR = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","CSR5","Ngoại lệ"]
-const CA_OPTS  = ["A","B"]
-const TRANG_THAI_OPTS = ["Hoàn thành","Dở dang","Xuất hàng"]
-const BOC_OPTS = [
-  "Bọc nhãn 0,04 VRG CSR10","Bọc nhãn 0,04 VRG CSR20",
-  "Bọc nhãn 0,04 VRG CSRL","Bọc nhãn 0,04 VRG CSR3L",
-  "Bọc nhãn 0,04 VRG CSRCV50","Bọc nhãn 0,04 VRG CSRCV60",
-]
-const THAM_OPTS  = ["Củ","Mới"]
-const PALLET_OPTS = ["Sắt đế gỗ","Sắt mỏng","Gỗ","Nhựa"]
+type SessionHeader = {
+  day_chuyen: string; so_ca: 1 | 2 | 3; ngan_id: string
+  suffix: string; year: string; loai_csr: string; loai_banh: number
+  boc: string; tham: string; chi_thi: string; pallet: string[]
+}
 
-// ─── Business Rules: bành/kiện by CSR type ─────────────────────────────────
+type LotDraft = {
+  num: number
+  role: "dau" | "giua" | "cuoi" | "single"
+  kien_a: number; kien_b: number; kien_c: number; kien_d: number
+  prev_a: number; prev_b: number; prev_c: number; prev_d: number
+  locked_a: boolean; locked_b: boolean; locked_c: boolean; locked_d: boolean
+  is_continuation: boolean; existing_id?: string
+  tong_banh: number; tong_kg: number; trang_thai: string
+}
+
+type CaSection = {
+  ca: "A" | "B" | "C"
+  ngay_sx: string
+  from_num: number
+  to_num: number
+  lots: LotDraft[]
+}
+
+type EditForm = {
+  ma_lo: string; num: number; suffix: string; year: string
+  ngay_sx: string; ca: string; ngan_id: string; day_chuyen: string
+  loai_csr: string; loai_banh: number; boc: string; tham: string
+  pallet: string[]; chi_thi: string
+  kien_a: number; kien_b: number; kien_c: number; kien_d: number
+  tong_banh: number; tong_kg: number; trang_thai: string; ghi_chu: string
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const CA_OPTS = ["A", "B", "C"]
+const SUFFIX_OPTS = ["cs", "m", "gca"]
+const THAM_OPTS = ["Củ", "Mới"]
+const TRANG_THAI_OPTS = ["Hoàn thành", "Dở dang", "Xuất hàng"]
+const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"]
+
+// ─── Business Logic ───────────────────────────────────────────────────────────
 function getLoaiBanhConfig(loai_csr: string) {
-  if (loai_csr === "CSRCV50" || loai_csr === "CSRCV60") {
+  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr))
     return { loai_banh: 20, max_per_kien: 60, lo_tron: 240 }
-  }
-  if (loai_csr === "CSRL" || loai_csr === "CSR3L") {
+  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr))
     return { loai_banh: 33.33, max_per_kien: 36, lo_tron: 144 }
-  }
-  // CSR10, CSR20, CSR5, Ngoại lệ
   return { loai_banh: 35, max_per_kien: 36, lo_tron: 144 }
 }
 
-function autoTrangThai(tong_banh: number, lo_tron: number, current: string) {
+function getLoaiBanhOptions(loai_csr: string): number[] {
+  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) return [35, 20]
+  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr)) return [35, 33.33]
+  return [35]
+}
+
+function getLoaiCSRByDayChuyen(dc: string): string[] {
+  if (dc === "Mủ nước")
+    return ["CSRL", "CSR3L", "CSRCV50", "CSRCV60", "SVRL", "SVR3L", "SVRCV50", "SVRCV60"]
+  return ["CSR10", "CSR20", "SVR10", "SVR20", "CSR5", "Ngoại lệ"]
+}
+
+function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
+  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${loai_csr}`]
+  if (dc === "Mủ nước")
+    return [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${loai_csr}`]
+  return base
+}
+
+function autoTrangThai(tong_banh: number, lo_tron: number, current: string): string {
   if (current === "Xuất hàng") return "Xuất hàng"
   if (tong_banh >= lo_tron) return "Hoàn thành"
-  if (tong_banh > 0) return "Dở dang"
   return "Dở dang"
 }
 
-// ─── Empty form ───────────────────────────────────────────────────────────────
-const emptyForm = () => ({
-  ma_lo: "", num: 0, suffix: "cs", year: new Date().getFullYear().toString().slice(-2),
-  ngay_sx: new Date().toISOString().slice(0,10),
-  ca: "A", ngan_id: "", loai_csr: "CSR10", loai_banh: 35,
-  boc: "Bọc nhãn 0,04 VRG CSR10", tham: "Củ", pallet: ["Sắt đế gỗ","Sắt mỏng"],
-  chi_thi: "1", kien_a: 36, kien_b: 36, kien_c: 36, kien_d: 36,
-  tong_banh: 144, tong_kg: 5040, trang_thai: "Hoàn thành", ghi_chu: "",
-})
+function calcDraftTotals(draft: LotDraft, loai_banh: number, lo_tron: number): LotDraft {
+  const tb = (draft.kien_a || 0) + (draft.kien_b || 0) + (draft.kien_c || 0) + (draft.kien_d || 0)
+  return {
+    ...draft,
+    tong_banh: tb,
+    tong_kg: Math.round(tb * loai_banh * 100) / 100,
+    trang_thai: autoTrangThai(tb, lo_tron, draft.trang_thai),
+  }
+}
 
-// ─── Component ───────────────────────────────────────────────────────────────
+function generateLotDrafts(
+  fromNum: number, toNum: number,
+  suffix: string, loai_csr: string,
+  existingLots: Lot[],
+  prevCaLastDraft?: LotDraft
+): LotDraft[] {
+  if (fromNum > toNum || fromNum < 1) return []
+  const cfg = getLoaiBanhConfig(loai_csr)
+  const { max_per_kien, lo_tron, loai_banh } = cfg
+  const drafts: LotDraft[] = []
+
+  for (let n = fromNum; n <= toNum; n++) {
+    const dbLot = existingLots.find(l => l.num === n && l.suffix === suffix)
+    const role: LotDraft["role"] =
+      fromNum === toNum ? "single" :
+      n === fromNum ? "dau" :
+      n === toNum ? "cuoi" : "giua"
+
+    // Detect continuation source (previous ca draft OR existing dor_dang DB lot)
+    const fromPrevDraft = n === fromNum && prevCaLastDraft?.trang_thai === "Dở dang"
+      ? prevCaLastDraft : undefined
+    const fromDB = n === fromNum && dbLot?.trang_thai === "Dở dang" && !fromPrevDraft
+      ? dbLot : undefined
+    const contSource = fromPrevDraft || fromDB
+    const is_continuation = !!contSource
+
+    if (role === "giua") {
+      const tb = max_per_kien * 4
+      drafts.push({
+        num: n, role: "giua",
+        kien_a: max_per_kien, kien_b: max_per_kien,
+        kien_c: max_per_kien, kien_d: max_per_kien,
+        prev_a: 0, prev_b: 0, prev_c: 0, prev_d: 0,
+        locked_a: true, locked_b: true, locked_c: true, locked_d: true,
+        is_continuation: false,
+        tong_banh: tb,
+        tong_kg: Math.round(tb * loai_banh * 100) / 100,
+        trang_thai: "Hoàn thành",
+      })
+      continue
+    }
+
+    if (is_continuation && contSource) {
+      const pA = "kien_a" in contSource ? contSource.kien_a : (contSource as LotDraft).kien_a
+      const pB = "kien_b" in contSource ? contSource.kien_b : (contSource as LotDraft).kien_b
+      const pC = "kien_c" in contSource ? contSource.kien_c : (contSource as LotDraft).kien_c
+      const pD = "kien_d" in contSource ? contSource.kien_d : (contSource as LotDraft).kien_d
+      const tb = pA + pB + pC + pD
+      const draft: LotDraft = {
+        num: n, role,
+        kien_a: pA, kien_b: pB, kien_c: pC, kien_d: pD,
+        prev_a: pA, prev_b: pB, prev_c: pC, prev_d: pD,
+        locked_a: pA >= max_per_kien, locked_b: pB >= max_per_kien,
+        locked_c: pC >= max_per_kien, locked_d: pD >= max_per_kien,
+        is_continuation: true,
+        existing_id: (fromDB as Lot | undefined)?.id ?? (fromPrevDraft as LotDraft | undefined)?.existing_id,
+        tong_banh: tb,
+        tong_kg: Math.round(tb * loai_banh * 100) / 100,
+        trang_thai: autoTrangThai(tb, lo_tron, "Dở dang"),
+      }
+      drafts.push(draft)
+    } else {
+      // New lot – default all kiện to max so user can reduce
+      const tb = max_per_kien * 4
+      drafts.push({
+        num: n, role,
+        kien_a: max_per_kien, kien_b: max_per_kien,
+        kien_c: max_per_kien, kien_d: max_per_kien,
+        prev_a: 0, prev_b: 0, prev_c: 0, prev_d: 0,
+        locked_a: false, locked_b: false, locked_c: false, locked_d: false,
+        is_continuation: false,
+        tong_banh: tb,
+        tong_kg: Math.round(tb * loai_banh * 100) / 100,
+        trang_thai: "Hoàn thành",
+      })
+    }
+  }
+  return drafts
+}
+
+function todayStr(): string { return new Date().toISOString().slice(0, 10) }
+function thisYear(): string { return new Date().getFullYear().toString().slice(-2) }
+
+function defaultSession(): SessionHeader {
+  return {
+    day_chuyen: "Mủ tạp", so_ca: 1, ngan_id: "",
+    suffix: "cs", year: thisYear(), loai_csr: "CSR10", loai_banh: 35,
+    boc: "Bọc nhãn 0,04 VRG CSR10", tham: "Củ", chi_thi: "1",
+    pallet: ["Sắt đế gỗ"],
+  }
+}
+
+function defaultCaSection(ca: "A" | "B" | "C", fromNum = 1): CaSection {
+  return { ca, ngay_sx: todayStr(), from_num: fromNum, to_num: fromNum, lots: [] }
+}
+
+function emptyEditForm(): EditForm {
+  return {
+    ma_lo: "", num: 0, suffix: "cs", year: thisYear(), ngay_sx: todayStr(),
+    ca: "A", ngan_id: "", day_chuyen: "Mủ tạp", loai_csr: "CSR10", loai_banh: 35,
+    boc: "Bọc nhãn 0,04 VRG CSR10", tham: "Củ", pallet: ["Sắt đế gỗ"], chi_thi: "1",
+    kien_a: 36, kien_b: 36, kien_c: 36, kien_d: 36,
+    tong_banh: 144, tong_kg: 5040, trang_thai: "Hoàn thành", ghi_chu: "",
+  }
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function ProductPage() {
-  const [lots, setLots]       = useState<Lot[]>([])
-  const [ngans, setNgans]     = useState<Ngan[]>([])
-  const [loading, setLoading] = useState(true)
+  useScrollReveal()
+
+  const [lots, setLots]         = useState<Lot[]>([])
+  const [ngans, setNgans]       = useState<Ngan[]>([])
+  const [lotsStats, setLotsStats] = useState<{ ngan_id: string | null; tong_kg: number }[]>([])
+  const [loading, setLoading]   = useState(true)
   const [factoryId, setFactoryId] = useState<string | null>(null)
 
-  // Filters
-  const [search, setSearch]       = useState("")
+  // List filters
+  const [search, setSearch]         = useState("")
   const [filterLoai, setFilterLoai] = useState("")
-  const [filterTT, setFilterTT]   = useState("")
-  const [filterCa, setFilterCa]   = useState("")
+  const [filterTT, setFilterTT]     = useState("")
+  const [filterCa, setFilterCa]     = useState("")
+  const [filterDC, setFilterDC]     = useState("")
   const [filterFrom, setFilterFrom] = useState("")
-  const [filterTo, setFilterTo]   = useState("")
-
-  // Modal
-  const [modal, setModal]   = useState<"add"|"edit"|"view"|null>(null)
-  const [form, setForm]     = useState(emptyForm())
-  const [editId, setEditId] = useState<string|null>(null)
-  const [saving, setSaving] = useState(false)
-  const [delConfirm, setDelConfirm] = useState<string|null>(null)
-
-  // Pagination
-  const [page, setPage]     = useState(1)
+  const [filterTo, setFilterTo]     = useState("")
+  const [page, setPage]             = useState(1)
   const PER_PAGE = 20
+
+  // View
+  const [view, setView] = useState<"list" | "create">("list")
+
+  // Edit modal
+  const [editModal, setEditModal] = useState(false)
+  const [editForm, setEditForm]   = useState<EditForm>(emptyEditForm())
+  const [editId, setEditId]       = useState<string | null>(null)
+  const [saving, setSaving]       = useState(false)
+  const [delConfirm, setDelConfirm] = useState<string | null>(null)
+
+  // Create session
+  const [session, setSession]         = useState<SessionHeader>(defaultSession())
+  const [caSections, setCaSections]   = useState<CaSection[]>([defaultCaSection("A")])
 
   // ── Load data ──────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
-    let q = supabase
-      .from("lots")
-      .select("*, ngans(ten_ngan)")
-      .eq("factory_id", fid)
-      .order("ngay_sx", { ascending: false })
-      .order("num", { ascending: false })
-
+    let q = supabase.from("lots").select("*, ngans(ten_ngan)").eq("factory_id", fid)
+      .order("ngay_sx", { ascending: false }).order("num", { ascending: false })
     if (filterLoai) q = q.eq("loai_csr", filterLoai)
     if (filterTT)   q = q.eq("trang_thai", filterTT)
     if (filterFrom) q = q.gte("ngay_sx", filterFrom)
     if (filterTo)   q = q.lte("ngay_sx", filterTo)
 
-    const { data } = await q
-    setLots(data || [])
+    const [{ data: lotsData }, { data: ngansData }, { data: statsData }] = await Promise.all([
+      q,
+      supabase.from("ngans")
+        .select("id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt")
+        .eq("factory_id", fid),
+      supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid),
+    ])
+    setLots(lotsData || [])
+    setNgans(ngansData || [])
+    setLotsStats(statsData || [])
     setLoading(false)
   }, [filterLoai, filterTT, filterFrom, filterTo])
 
@@ -122,122 +277,314 @@ export default function ProductPage() {
     const fid = localStorage.getItem("erp_factory")
     if (!fid) return
     setFactoryId(fid)
-    // Load ngans
-    supabase.from("ngans").select("id,ten_ngan,ma_ngan").eq("factory_id", fid)
-      .then(({ data }) => setNgans(data || []))
     loadData(fid)
   }, [loadData])
 
-  // ── Filtered + searched lots ───────────────────────────────────────────────
+  // ── Filtered lots (list view) ──────────────────────────────────────────────
   const filtered = lots.filter(l =>
     (!search || l.ma_lo.toLowerCase().includes(search.toLowerCase()) ||
-    (l.ngans?.ten_ngan || "").toLowerCase().includes(search.toLowerCase())) &&
-    (!filterCa || l.ca === filterCa)
+      (l.ngans?.ten_ngan || "").toLowerCase().includes(search.toLowerCase())) &&
+    (!filterCa || l.ca === filterCa) &&
+    (!filterDC || l.day_chuyen === filterDC)
   )
-  const paginated = filtered.slice((page-1)*PER_PAGE, page*PER_PAGE)
-  const totalPages = Math.ceil(filtered.length / PER_PAGE)
+  const paginated   = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  const totalPages  = Math.ceil(filtered.length / PER_PAGE)
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = {
-    total: filtered.length,
-    hoanThanh: filtered.filter(l => l.trang_thai === "Hoàn thành").length,
-    dorDang: filtered.filter(l => l.trang_thai === "Dở dang").length,
-    tongBanh: filtered.reduce((s,l) => s + (l.tong_banh||0), 0),
-    tongKg: filtered.reduce((s,l) => s + (l.tong_kg||0), 0),
+    total:      filtered.length,
+    hoanThanh:  filtered.filter(l => l.trang_thai === "Hoàn thành").length,
+    dorDang:    filtered.filter(l => l.trang_thai === "Dở dang").length,
+    tongBanh:   filtered.reduce((s, l) => s + (l.tong_banh || 0), 0),
+    tongKg:     filtered.reduce((s, l) => s + (l.tong_kg || 0), 0),
   }
 
-  // ── Auto-calc tong_banh & tong_kg + auto loai_banh + auto trang_thai ────
-  const updateForm = (patch: Partial<typeof form>) => {
-    setForm(prev => {
-      const next = { ...prev, ...patch }
+  // ── Create view computed ───────────────────────────────────────────────────
+  const nganKgMap = useMemo(() => {
+    const map: Record<string, number> = {}
+    lotsStats.forEach(ls => {
+      if (ls.ngan_id) map[ls.ngan_id] = (map[ls.ngan_id] || 0) + (ls.tong_kg || 0)
+    })
+    return map
+  }, [lotsStats])
 
-      // Auto-set loai_banh when loai_csr changes
+  const eligibleNgans = useMemo(() => {
+    const now = new Date()
+    return ngans
+      .filter(n => {
+        if (!["Chờ sản xuất", "Đang sản xuất"].includes(n.trang_thai)) return false
+        if (!n.ngay_bd) return false
+        const days = Math.floor((now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000)
+        return days >= 21
+      })
+      .sort((a, b) => {
+        const da = Math.floor((now.getTime() - new Date(a.ngay_bd).getTime()) / 86400000)
+        const db = Math.floor((now.getTime() - new Date(b.ngay_bd).getTime()) / 86400000)
+        return db - da
+      })
+  }, [ngans])
+
+  const selectedNgan = ngans.find(n => n.id === session.ngan_id)
+  const dorDangLots  = lots.filter(l => l.ngan_id === session.ngan_id && l.trang_thai === "Dở dang")
+
+  const kgDaCoTrongNgan = nganKgMap[session.ngan_id] || 0
+
+  const kgLanNay = useMemo(() => {
+    let total = 0
+    caSections.forEach(cs => {
+      cs.lots.forEach(lot => {
+        if (lot.is_continuation) {
+          const added = Math.max(0, lot.kien_a - lot.prev_a)
+            + Math.max(0, lot.kien_b - lot.prev_b)
+            + Math.max(0, lot.kien_c - lot.prev_c)
+            + Math.max(0, lot.kien_d - lot.prev_d)
+          total += added * session.loai_banh
+        } else {
+          total += lot.tong_kg
+        }
+      })
+    })
+    return Math.round(total * 100) / 100
+  }, [caSections, session.loai_banh])
+
+  const kgTotal    = kgDaCoTrongNgan + kgLanNay
+  const nganPct    = selectedNgan && selectedNgan.tong_kho > 0
+    ? (kgTotal / selectedNgan.tong_kho) * 100 : 0
+  const nganBlocked = nganPct > 110
+
+  // Total lots/bành in this session
+  const sessionTotals = useMemo(() => {
+    let lots_count = 0, banh = 0
+    caSections.forEach(cs => {
+      cs.lots.forEach(lot => {
+        if (!lot.is_continuation) lots_count++
+        banh += lot.tong_banh
+      })
+    })
+    return { lots_count, banh }
+  }, [caSections])
+
+  // ── Session handlers ───────────────────────────────────────────────────────
+  const updateSession = (patch: Partial<SessionHeader>) => {
+    setSession(prev => {
+      const next = { ...prev, ...patch }
+      if (patch.day_chuyen !== undefined) {
+        const csrOpts = getLoaiCSRByDayChuyen(patch.day_chuyen)
+        next.loai_csr = csrOpts[0] || ""
+        const cfg = getLoaiBanhConfig(next.loai_csr)
+        next.loai_banh = cfg.loai_banh
+        next.boc = getBocsForLoaiCSR(patch.day_chuyen, next.loai_csr)[1] || ""
+      }
       if (patch.loai_csr !== undefined) {
         const cfg = getLoaiBanhConfig(patch.loai_csr)
         next.loai_banh = cfg.loai_banh
-        // Clamp existing kiện values to new max
-        const max = cfg.max_per_kien
-        next.kien_a = Math.min(next.kien_a, max)
-        next.kien_b = Math.min(next.kien_b, max)
-        next.kien_c = Math.min(next.kien_c, max)
-        next.kien_d = Math.min(next.kien_d, max)
+        next.boc = getBocsForLoaiCSR(next.day_chuyen, patch.loai_csr)[1] || ""
       }
+      return next
+    })
+    if (patch.loai_csr !== undefined || patch.suffix !== undefined) {
+      const newCsr    = patch.loai_csr ?? session.loai_csr
+      const newSuffix = patch.suffix ?? session.suffix
+      setCaSections(prev =>
+        prev.map((cs, ci) => {
+          const prevLast = ci > 0 ? prev[ci - 1].lots.at(-1) : undefined
+          return {
+            ...cs,
+            lots: generateLotDrafts(cs.from_num, cs.to_num, newSuffix, newCsr, lots, prevLast),
+          }
+        })
+      )
+    }
+  }
 
-      // Clamp kiện values to max_per_kien
-      const cfg = getLoaiBanhConfig(next.loai_csr)
-      const max = cfg.max_per_kien
-      if (patch.kien_a !== undefined) next.kien_a = Math.min(Math.max(0, next.kien_a), max)
-      if (patch.kien_b !== undefined) next.kien_b = Math.min(Math.max(0, next.kien_b), max)
-      if (patch.kien_c !== undefined) next.kien_c = Math.min(Math.max(0, next.kien_c), max)
-      if (patch.kien_d !== undefined) next.kien_d = Math.min(Math.max(0, next.kien_d), max)
-
-      const tb = (next.kien_a||0)+(next.kien_b||0)+(next.kien_c||0)+(next.kien_d||0)
-      next.tong_banh = tb
-      next.tong_kg   = Math.round(tb * (next.loai_banh||35) * 100) / 100
-
-      // Auto trang_thai
-      next.trang_thai = autoTrangThai(tb, cfg.lo_tron, next.trang_thai)
-
-      // Auto ma_lo
-      if (patch.num !== undefined || patch.suffix !== undefined || patch.year !== undefined) {
-        next.ma_lo = `${next.num}${next.suffix}/${next.year}`
+  const updateSoCa = (so_ca: 1 | 2 | 3) => {
+    setSession(prev => ({ ...prev, so_ca }))
+    const caLabels: ("A" | "B" | "C")[] = ["A", "B", "C"]
+    setCaSections(prev => {
+      const next: CaSection[] = []
+      for (let i = 0; i < so_ca; i++) {
+        if (prev[i]) { next.push(prev[i]); continue }
+        const fromNum = (prev[i - 1]?.to_num || 0) + 1
+        next.push(defaultCaSection(caLabels[i], fromNum))
       }
       return next
     })
   }
 
-  // ── Open add modal ─────────────────────────────────────────────────────────
-  const openAdd = () => {
-    const maxNum = lots.length > 0 ? Math.max(...lots.map(l => l.num||0)) : 0
-    const f = emptyForm()
-    f.num = maxNum + 1
-    f.ma_lo = `${f.num}${f.suffix}/${f.year}`
-    setForm(f); setEditId(null); setModal("add")
-  }
-
-  // ── Open edit modal ────────────────────────────────────────────────────────
-  const openEdit = (lot: Lot) => {
-    setForm({
-      ma_lo: lot.ma_lo, num: lot.num, suffix: lot.suffix, year: lot.year,
-      ngay_sx: lot.ngay_sx?.slice(0,10) || "",
-      ca: lot.ca, ngan_id: lot.ngan_id || "",
-      loai_csr: lot.loai_csr, loai_banh: lot.loai_banh||35,
-      boc: lot.boc, tham: lot.tham, pallet: lot.pallet||[],
-      chi_thi: lot.chi_thi, kien_a: lot.kien_a, kien_b: lot.kien_b,
-      kien_c: lot.kien_c, kien_d: lot.kien_d,
-      tong_banh: lot.tong_banh, tong_kg: lot.tong_kg,
-      trang_thai: lot.trang_thai, ghi_chu: lot.ghi_chu||"",
+  // ── Ca section handler ─────────────────────────────────────────────────────
+  const updateCaSection = (idx: number, patch: Partial<CaSection>) => {
+    setCaSections(prev => {
+      const updated = prev.map((cs, i) => (i === idx ? { ...cs, ...patch } : cs))
+      const cs       = updated[idx]
+      const prevLast = idx > 0 ? updated[idx - 1].lots.at(-1) : undefined
+      updated[idx]   = {
+        ...cs,
+        lots: generateLotDrafts(cs.from_num, cs.to_num, session.suffix, session.loai_csr, lots, prevLast),
+      }
+      // Auto-update next section's from_num suggestion
+      if (idx + 1 < updated.length) {
+        const next     = updated[idx + 1]
+        const prevToNum = prev[idx].to_num
+        if (next.from_num === prevToNum || next.from_num === 0) {
+          const lastDraft  = updated[idx].lots.at(-1)
+          const suggestFrom = lastDraft?.trang_thai === "Dở dang"
+            ? cs.to_num : cs.to_num + 1
+          const nextLast = updated[idx].lots.at(-1)
+          updated[idx + 1] = {
+            ...next,
+            from_num: suggestFrom,
+            lots: generateLotDrafts(
+              suggestFrom, Math.max(suggestFrom, next.to_num),
+              session.suffix, session.loai_csr, lots,
+              lastDraft?.trang_thai === "Dở dang" ? nextLast : undefined
+            ),
+          }
+        }
+      }
+      return updated
     })
-    setEditId(lot.id); setModal("edit")
   }
 
-  // ── Save ───────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!factoryId) return
+  // ── Lot draft handler ──────────────────────────────────────────────────────
+  const updateLotDraft = (caIdx: number, lotIdx: number, patch: Partial<LotDraft>) => {
+    if (nganBlocked) return
+    setCaSections(prev =>
+      prev.map((cs, ci) => {
+        if (ci !== caIdx) return cs
+        const newLots = cs.lots.map((lot, li) => {
+          if (li !== lotIdx) return lot
+          const cfg  = getLoaiBanhConfig(session.loai_csr)
+          const next = { ...lot, ...patch }
+          if (next.is_continuation) {
+            next.kien_a = next.locked_a ? next.prev_a : Math.min(Math.max(next.kien_a, next.prev_a), cfg.max_per_kien)
+            next.kien_b = next.locked_b ? next.prev_b : Math.min(Math.max(next.kien_b, next.prev_b), cfg.max_per_kien)
+            next.kien_c = next.locked_c ? next.prev_c : Math.min(Math.max(next.kien_c, next.prev_c), cfg.max_per_kien)
+            next.kien_d = next.locked_d ? next.prev_d : Math.min(Math.max(next.kien_d, next.prev_d), cfg.max_per_kien)
+          } else {
+            next.kien_a = Math.min(Math.max(0, next.kien_a), cfg.max_per_kien)
+            next.kien_b = Math.min(Math.max(0, next.kien_b), cfg.max_per_kien)
+            next.kien_c = Math.min(Math.max(0, next.kien_c), cfg.max_per_kien)
+            next.kien_d = Math.min(Math.max(0, next.kien_d), cfg.max_per_kien)
+          }
+          return calcDraftTotals(next, session.loai_banh, cfg.lo_tron)
+        })
+        return { ...cs, lots: newLots }
+      })
+    )
+  }
+
+  // ── Open create ────────────────────────────────────────────────────────────
+  const openCreate = () => {
+    const maxNum = lots.length > 0 ? Math.max(...lots.map(l => l.num || 0)) : 0
+    const s = defaultSession()
+    setSession(s)
+    setCaSections([defaultCaSection("A", maxNum + 1)])
+    setView("create")
+  }
+
+  // ── Save create ────────────────────────────────────────────────────────────
+  const handleCreateSave = async (markNganDone: boolean) => {
+    if (!factoryId || !session.ngan_id) return
     setSaving(true)
     try {
-      const cfg = getLoaiBanhConfig(form.loai_csr)
-      const dd_snapshot = form.trang_thai === "Dở dang" ? {
-        kien_a: form.kien_a, kien_b: form.kien_b,
-        kien_c: form.kien_c, kien_d: form.kien_d,
-        max_per_kien: cfg.max_per_kien,
-        timestamp: new Date().toISOString(),
-      } : null
-      const payload = {
-        ...form,
-        factory_id: factoryId,
-        ngan_id: form.ngan_id || null,
-        dd_snapshot,
+      const cfg = getLoaiBanhConfig(session.loai_csr)
+      for (const cs of caSections) {
+        for (const draft of cs.lots) {
+          const tb        = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d
+          const tong_kg   = Math.round(tb * session.loai_banh * 100) / 100
+          const trang_thai = autoTrangThai(tb, cfg.lo_tron, "Dở dang")
+          const dd_snapshot = trang_thai === "Dở dang"
+            ? { kien_a: draft.kien_a, kien_b: draft.kien_b, kien_c: draft.kien_c, kien_d: draft.kien_d, timestamp: new Date().toISOString() }
+            : null
+
+          if (draft.is_continuation && draft.existing_id) {
+            await supabase.from("lots").update({
+              kien_a: draft.kien_a, kien_b: draft.kien_b,
+              kien_c: draft.kien_c, kien_d: draft.kien_d,
+              tong_banh: tb, tong_kg, trang_thai, dd_snapshot, ca: cs.ca,
+            }).eq("id", draft.existing_id)
+          } else {
+            const ma_lo = `${draft.num}${session.suffix}/${session.year}`
+            await supabase.from("lots").insert({
+              factory_id: factoryId, day_chuyen: session.day_chuyen,
+              ma_lo, num: draft.num, suffix: session.suffix, year: session.year,
+              ngay_sx: cs.ngay_sx, ca: cs.ca, ngan_id: session.ngan_id,
+              loai_csr: session.loai_csr, loai_banh: session.loai_banh,
+              boc: session.boc, tham: session.tham, chi_thi: session.chi_thi,
+              pallet: session.pallet, kien_a: draft.kien_a, kien_b: draft.kien_b,
+              kien_c: draft.kien_c, kien_d: draft.kien_d,
+              tong_banh: tb, tong_kg, trang_thai, dd_snapshot,
+            })
+          }
+        }
       }
-      if (editId) {
-        await supabase.from("lots").update(payload).eq("id", editId)
-      } else {
-        await supabase.from("lots").insert(payload)
-      }
-      setModal(null)
+      const nganStatus = markNganDone ? "Hoàn thành" : "Đang sản xuất"
+      await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
+      setView("list")
       loadData(factoryId)
     } catch (err) {
-      console.error("handleSave error:", err)
+      console.error("handleCreateSave error:", err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Edit individual lot ────────────────────────────────────────────────────
+  const openEdit = (lot: Lot) => {
+    setEditForm({
+      ma_lo: lot.ma_lo, num: lot.num, suffix: lot.suffix, year: lot.year,
+      ngay_sx: lot.ngay_sx?.slice(0, 10) || "", ca: lot.ca,
+      ngan_id: lot.ngan_id || "", day_chuyen: lot.day_chuyen || "Mủ tạp",
+      loai_csr: lot.loai_csr, loai_banh: lot.loai_banh || 35,
+      boc: lot.boc, tham: lot.tham, pallet: lot.pallet || [],
+      chi_thi: lot.chi_thi,
+      kien_a: lot.kien_a, kien_b: lot.kien_b, kien_c: lot.kien_c, kien_d: lot.kien_d,
+      tong_banh: lot.tong_banh, tong_kg: lot.tong_kg,
+      trang_thai: lot.trang_thai, ghi_chu: lot.ghi_chu || "",
+    })
+    setEditId(lot.id)
+    setEditModal(true)
+  }
+
+  const updateEditForm = (patch: Partial<EditForm>) => {
+    setEditForm(prev => {
+      const next = { ...prev, ...patch }
+      if (patch.loai_csr !== undefined) {
+        const cfg    = getLoaiBanhConfig(patch.loai_csr)
+        next.loai_banh = cfg.loai_banh
+      }
+      const cfg = getLoaiBanhConfig(next.loai_csr)
+      if (patch.kien_a !== undefined) next.kien_a = Math.min(Math.max(0, next.kien_a), cfg.max_per_kien)
+      if (patch.kien_b !== undefined) next.kien_b = Math.min(Math.max(0, next.kien_b), cfg.max_per_kien)
+      if (patch.kien_c !== undefined) next.kien_c = Math.min(Math.max(0, next.kien_c), cfg.max_per_kien)
+      if (patch.kien_d !== undefined) next.kien_d = Math.min(Math.max(0, next.kien_d), cfg.max_per_kien)
+      const tb = next.kien_a + next.kien_b + next.kien_c + next.kien_d
+      next.tong_banh = tb
+      next.tong_kg   = Math.round(tb * next.loai_banh * 100) / 100
+      next.trang_thai = autoTrangThai(tb, cfg.lo_tron, next.trang_thai)
+      if (patch.num !== undefined || patch.suffix !== undefined || patch.year !== undefined)
+        next.ma_lo = `${next.num}${next.suffix}/${next.year}`
+      return next
+    })
+  }
+
+  const handleEditSave = async () => {
+    if (!factoryId || !editId) return
+    setSaving(true)
+    try {
+      const cfg = getLoaiBanhConfig(editForm.loai_csr)
+      const dd_snapshot = editForm.trang_thai === "Dở dang"
+        ? { kien_a: editForm.kien_a, kien_b: editForm.kien_b, kien_c: editForm.kien_c, kien_d: editForm.kien_d, timestamp: new Date().toISOString() }
+        : null
+      await supabase.from("lots").update({ ...editForm, factory_id: factoryId, ngan_id: editForm.ngan_id || null, dd_snapshot }).eq("id", editId)
+      // Update ngan status if needed
+      if (editForm.ngan_id) {
+        const { data: rem } = await supabase.from("lots").select("id").eq("ngan_id", editForm.ngan_id)
+        if ((rem?.length ?? 0) > 0)
+          await supabase.from("ngans").update({ trang_thai: "Đang sản xuất" }).eq("id", editForm.ngan_id)
+      }
+      void cfg
+      setEditModal(false)
+      loadData(factoryId)
     } finally {
       setSaving(false)
     }
@@ -246,22 +593,496 @@ export default function ProductPage() {
   // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    const lot = lots.find(l => l.id === id)
     await supabase.from("lots").delete().eq("id", id)
+    if (lot?.ngan_id) {
+      const { data: rem } = await supabase.from("lots").select("id").eq("ngan_id", lot.ngan_id).neq("id", id)
+      const newStatus = (rem?.length ?? 0) === 0 ? "Chờ sản xuất" : "Đang sản xuất"
+      await supabase.from("ngans").update({ trang_thai: newStatus }).eq("id", lot.ngan_id)
+    }
     setDelConfirm(null)
     loadData(factoryId)
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════════
+  // CREATE VIEW
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (view === "create") {
+    const cfg          = getLoaiBanhConfig(session.loai_csr)
+    const csrOpts      = getLoaiCSRByDayChuyen(session.day_chuyen)
+    const bocOpts      = getBocsForLoaiCSR(session.day_chuyen, session.loai_csr)
+    const banhOpts     = getLoaiBanhOptions(session.loai_csr)
+    const hasNgan      = !!session.ngan_id
+
+    return (
+      <div className="pb-32">
+        {/* ── Back header ── */}
+        <div className="flex items-center gap-3 mb-6">
+          <button onClick={() => setView("list")}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-all">
+            <ChevronLeft size={16}/> Quay lại
+          </button>
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-800">Nhập thành phẩm</h1>
+            <p className="text-xs text-slate-500 mt-0.5">Tạo lô mới theo ca sản xuất</p>
+          </div>
+        </div>
+
+        {/* ── Section 1: Dây chuyền + Số ca ── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-2">
+                Dây chuyền <span className="text-red-500">*</span>
+              </label>
+              <div className="flex gap-3">
+                {["Mủ tạp", "Mủ nước"].map(dc => (
+                  <button key={dc} onClick={() => updateSession({ day_chuyen: dc })}
+                    className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${
+                      session.day_chuyen === dc
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}>
+                    {dc}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-2">
+                Số ca <span className="text-red-500">*</span>
+              </label>
+              <div className="flex gap-3">
+                {([1, 2, 3] as const).map(n => (
+                  <button key={n} onClick={() => updateSoCa(n)}
+                    className={`w-12 h-10 rounded-xl text-sm font-bold border-2 transition-all ${
+                      session.so_ca === n
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}>
+                    {n} ca
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Section 2: Thông tin sản phẩm chung ── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
+          <h3 className="text-sm font-extrabold text-slate-700 mb-4 flex items-center gap-2">
+            <Package size={15} className="text-emerald-600"/> Thông tin sản phẩm (dùng chung mọi ca)
+          </h3>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Hậu tố *</label>
+              <select value={session.suffix} onChange={e => updateSession({ suffix: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                {SUFFIX_OPTS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Năm *</label>
+              <input value={session.year} onChange={e => updateSession({ year: e.target.value })}
+                maxLength={2} placeholder="26"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR *</label>
+              <select value={session.loai_csr} onChange={e => updateSession({ loai_csr: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                {csrOpts.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành (kg/bành) *</label>
+              {banhOpts.length > 1 ? (
+                <select value={session.loai_banh} onChange={e => updateSession({ loai_banh: +e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  {banhOpts.map(b => <option key={b} value={b}>{b} kg</option>)}
+                </select>
+              ) : (
+                <input readOnly value={`${cfg.loai_banh} kg`}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"/>
+              )}
+              <p className="text-[10px] text-slate-400 mt-1">Lo tròn: {cfg.lo_tron} bành</p>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Bọc *</label>
+              <select value={session.boc} onChange={e => updateSession({ boc: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                {bocOpts.map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Thấm *</label>
+              <select value={session.tham} onChange={e => updateSession({ tham: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                {THAM_OPTS.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Chỉ thị SX</label>
+              <input value={session.chi_thi} onChange={e => updateSession({ chi_thi: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-2">Pallet</label>
+              <div className="flex flex-wrap gap-2">
+                {PALLET_OPTS.map(p => {
+                  const checked = session.pallet.includes(p)
+                  return (
+                    <button key={p} onClick={() =>
+                      updateSession({ pallet: checked ? session.pallet.filter(x => x !== p) : [...session.pallet, p] })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        checked ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500 hover:border-slate-300"}`}>
+                      {checked ? "✓ " : ""}{p}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Section 3: Chọn ngăn lưu ── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
+          <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
+            <Warehouse size={15} className="text-blue-600"/> Chọn ngăn lưu <span className="text-red-500">*</span>
+          </h3>
+          <p className="text-xs text-slate-400 mb-4">Hiển thị ngăn đủ 21 ngày ủ · sắp xếp từ lâu nhất</p>
+
+          {/* Dở dang warning for selected ngan */}
+          {hasNgan && dorDangLots.length > 0 && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={14} className="text-amber-600"/>
+                <span className="text-xs font-bold text-amber-700">
+                  Lô dở dang cần hoàn thành ({dorDangLots.length} lô)
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {dorDangLots.map(l => (
+                  <span key={l.id} className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg">
+                    {l.ma_lo} · {l.tong_banh} bành
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {eligibleNgans.length === 0 ? (
+            <div className="p-8 text-center text-slate-400">
+              <Warehouse size={32} className="mx-auto mb-2 opacity-30"/>
+              <p className="text-sm">Không có ngăn đủ điều kiện sản xuất</p>
+              <p className="text-xs mt-1">Cần ngăn ≥ 21 ngày ủ và trạng thái Chờ/Đang SX</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              {eligibleNgans.map(n => {
+                const kgUsed   = nganKgMap[n.id] || 0
+                const pct      = n.tong_kho > 0 ? Math.min((kgUsed / n.tong_kho) * 100, 100) : 0
+                const days     = Math.floor((Date.now() - new Date(n.ngay_bd).getTime()) / 86400000)
+                const selected = session.ngan_id === n.id
+                const hasDorDang = lots.some(l => l.ngan_id === n.id && l.trang_thai === "Dở dang")
+                return (
+                  <button key={n.id} onClick={() => setSession(s => ({ ...s, ngan_id: n.id }))}
+                    className={`p-3 rounded-xl border-2 text-left transition-all hover-lift ${
+                      selected ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300"}`}>
+                    <div className="flex items-start justify-between mb-1">
+                      <span className="font-extrabold text-slate-800 text-sm">{n.ten_ngan}</span>
+                      <div className="flex gap-1">
+                        {hasDorDang && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">Dở dang</span>}
+                        <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
+                          n.trang_thai === "Đang sản xuất" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                          {n.trang_thai === "Đang sản xuất" ? "Đang SX" : "Chờ SX"}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-2 truncate">{n.ma_ngan}</p>
+                    <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
+                      <span>SX: {(kgUsed / 1000).toFixed(3)} T</span>
+                      <span className="font-bold text-teal-700">Còn: {((n.tong_kho - kgUsed) / 1000).toFixed(3)} T</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 mb-1">
+                      <div className={`h-1.5 rounded-full transition-all ${pct >= 100 ? "bg-red-400" : pct > 80 ? "bg-amber-400" : "bg-emerald-400"}`}
+                        style={{ width: `${pct}%` }}/>
+                    </div>
+                    <p className="text-[10px] text-slate-400">{n.loai_nl} · {days} ngày ủ · DK SX: {n.ngay_kt ? new Date(n.ngay_kt).toLocaleDateString("vi-VN") : "—"}</p>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Section 4: Ca sections ── */}
+        {hasNgan && caSections.map((cs, caIdx) => {
+          const caLabel     = cs.ca
+          const loCount     = cs.to_num - cs.from_num + 1
+          const giuaCount   = Math.max(0, loCount - 2)
+          const caTongBanh  = cs.lots.reduce((s, l) => s + l.tong_banh, 0)
+          const caTongKg    = Math.round(cs.lots.reduce((s, l) => {
+            if (l.is_continuation) {
+              return s + (l.kien_a + l.kien_b + l.kien_c + l.kien_d - l.prev_a - l.prev_b - l.prev_c - l.prev_d) * session.loai_banh
+            }
+            return s + l.tong_kg
+          }, 0) * 100) / 100
+
+          return (
+            <div key={caIdx} className="bg-white rounded-2xl border border-slate-200 shadow-md mb-4 overflow-hidden">
+              {/* Ca header */}
+              <div className="bg-gradient-to-r from-blue-50 to-cyan-50 px-5 py-3 border-b border-slate-200 flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-extrabold text-blue-700">Ca</span>
+                <select value={cs.ca}
+                  onChange={e => updateCaSection(caIdx, { ca: e.target.value as "A" | "B" | "C" })}
+                  className="px-3 py-1.5 border border-blue-200 rounded-xl text-sm font-bold text-blue-700 bg-white outline-none focus:border-blue-400">
+                  {CA_OPTS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <span className="text-xs text-slate-500">Ngày SX:</span>
+                <input type="date" value={cs.ngay_sx}
+                  onChange={e => updateCaSection(caIdx, { ngay_sx: e.target.value })}
+                  className="px-3 py-1.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-400"/>
+                {caTongBanh > 0 && (
+                  <span className="ml-auto text-xs font-bold text-slate-600">
+                    Ca {caLabel}: {caTongBanh} bành · {(caTongKg / 1000).toFixed(3)} T
+                  </span>
+                )}
+              </div>
+
+              <div className="p-5">
+                {/* Khoảng lô */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
+                    <span className="text-xs font-bold text-slate-500">Khoảng lô:</span>
+                    <span className="text-xs text-slate-400">Từ lô</span>
+                    <input type="number" min={1} value={cs.from_num}
+                      onChange={e => updateCaSection(caIdx, { from_num: Math.max(1, +e.target.value), to_num: Math.max(cs.to_num, +e.target.value) })}
+                      className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
+                    <span className="text-xs text-slate-400">đến lô</span>
+                    <input type="number" min={cs.from_num} value={cs.to_num}
+                      onChange={e => updateCaSection(caIdx, { to_num: Math.max(cs.from_num, +e.target.value) })}
+                      className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
+                    <span className="text-xs text-slate-400 ml-1">
+                      {session.suffix}/{session.year}
+                    </span>
+                    {loCount > 0 && (
+                      <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
+                        {loCount} lô
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {cs.lots.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic text-center py-4">Nhập khoảng lô để hiển thị...</p>
+                ) : (
+                  <div className="space-y-4">
+                    {cs.lots.map((lot, lotIdx) => {
+                      if (lot.role === "giua") {
+                        // Compact summary for middle lots
+                        const midStart  = cs.from_num + 1
+                        const midEnd    = cs.to_num - 1
+                        const midCount  = midEnd - midStart + 1
+                        if (lotIdx !== cs.lots.findIndex(l => l.role === "giua")) return null
+                        return (
+                          <div key={`giua-${caIdx}`} className="border border-slate-100 bg-slate-50 rounded-xl p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-slate-500">
+                                Lô giữa: {midStart}{session.suffix} → {midEnd}{session.suffix}
+                                <span className="ml-2 text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">{midCount} lô tròn</span>
+                              </span>
+                              <span className="text-xs text-slate-500 font-bold">
+                                {midCount} × {cfg.lo_tron} bành = {(midCount * cfg.lo_tron * session.loai_banh / 1000).toFixed(3)} T
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2">
+                              {(["A", "B", "C", "D"] as const).map(k => (
+                                <div key={k} className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5 text-center">
+                                  <div className="text-[10px] font-bold text-emerald-600">Kiện {k}</div>
+                                  <div className="text-sm font-extrabold text-emerald-700">{cfg.max_per_kien} <Lock size={10} className="inline"/></div>
+                                  <div className="text-[10px] text-emerald-500">{(cfg.max_per_kien * session.loai_banh / 1000).toFixed(3)} T</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      // Lô đầu / cuối / single
+                      const roleLabel = lot.role === "single" ? "" : lot.role === "dau" ? " · Lô đầu" : " · Lô cuối"
+                      const contLabel = lot.is_continuation ? " · Kế thừa" : ""
+                      const kienKeys  = ["kien_a", "kien_b", "kien_c", "kien_d"] as const
+                      const lockedArr = [lot.locked_a, lot.locked_b, lot.locked_c, lot.locked_d]
+                      const prevArr   = [lot.prev_a, lot.prev_b, lot.prev_c, lot.prev_d]
+
+                      return (
+                        <div key={`${caIdx}-${lotIdx}`} className={`border rounded-xl p-4 ${lot.is_continuation ? "border-amber-200 bg-amber-50/30" : "border-slate-200"}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-extrabold text-slate-700">
+                              Lô {lot.num}{session.suffix}/{session.year}
+                              <span className="text-xs font-normal text-slate-400 ml-2">{roleLabel}{contLabel}</span>
+                            </span>
+                            <div className="flex items-center gap-3 text-xs text-slate-500">
+                              <span>Tổng: <strong className={lot.trang_thai === "Hoàn thành" ? "text-emerald-600" : "text-amber-600"}>{lot.tong_banh} bành</strong></span>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${lot.trang_thai === "Hoàn thành" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                                {lot.trang_thai}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Kiện inputs */}
+                          <div className="grid grid-cols-4 gap-2">
+                            {kienKeys.map((k, ki) => {
+                              const isLocked = lockedArr[ki]
+                              const val      = lot[k]
+                              const prev     = prevArr[ki]
+                              const maxK     = cfg.max_per_kien
+                              const remaining = maxK - prev
+                              const kLabel   = ["A", "B", "C", "D"][ki]
+
+                              return (
+                                <div key={k} className="relative">
+                                  {lot.is_continuation && !isLocked && remaining < maxK && (
+                                    <div className="text-[9px] text-amber-600 font-bold mb-1 text-center">
+                                      Ca trước: {prev} · thêm tối đa {remaining}
+                                    </div>
+                                  )}
+                                  <div className={`relative border rounded-xl overflow-hidden ${
+                                    isLocked ? "border-emerald-300 bg-emerald-50" :
+                                    val > 0 && val < maxK ? "border-amber-300 bg-amber-50" :
+                                    val >= maxK ? "border-emerald-300 bg-emerald-50" :
+                                    "border-slate-300"}`}>
+                                    <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-xs font-extrabold ${
+                                      isLocked ? "text-emerald-600" : val >= maxK ? "text-emerald-600" : val > 0 ? "text-amber-700" : "text-slate-400"}`}>
+                                      {kLabel}
+                                    </span>
+                                    <input type="number" value={val}
+                                      min={lot.is_continuation ? prev : 0} max={maxK}
+                                      disabled={isLocked || lot.role === "giua" || nganBlocked}
+                                      onChange={e => updateLotDraft(caIdx, lotIdx, { [k]: +e.target.value } as Partial<LotDraft>)}
+                                      className={`w-full pl-7 pr-2 py-2.5 text-sm font-bold text-center outline-none bg-transparent ${
+                                        isLocked ? "text-emerald-700 cursor-not-allowed" :
+                                        val >= maxK ? "text-emerald-700" :
+                                        val > 0 ? "text-amber-700" : "text-slate-700"}`}/>
+                                    {isLocked && (
+                                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                                        <Lock size={10} className="text-emerald-500"/>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-center text-slate-400 mt-1">
+                                    {(val * session.loai_banh / 1000).toFixed(3)} T
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+
+                          {/* Lot summary */}
+                          <div className="mt-2 text-xs text-slate-400 text-right">
+                            {(lot.tong_kg / 1000).toFixed(3)} T · {lot.tong_banh} bành
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+
+        {/* ── Sticky bottom bar: ngan progress + save ── */}
+        {hasNgan && selectedNgan && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg px-6 py-4 z-40">
+            <div className="max-w-7xl mx-auto flex items-center gap-6">
+              {/* Progress info */}
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1.5 text-xs">
+                  <span className="font-bold text-slate-600">Tiến độ ngăn {selectedNgan.ten_ngan}</span>
+                  <span className={`font-extrabold ${nganBlocked ? "text-red-600" : nganPct >= 100 ? "text-amber-600" : "text-emerald-600"}`}>
+                    {nganPct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2 mb-1">
+                  <div className={`h-2 rounded-full transition-all ${nganBlocked ? "bg-red-500" : nganPct >= 100 ? "bg-amber-400" : "bg-emerald-500"}`}
+                    style={{ width: `${Math.min(nganPct, 100)}%` }}/>
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Đã: {(kgDaCoTrongNgan / 1000).toFixed(3)} T
+                  {kgLanNay > 0 && ` + Lần này: ${(kgLanNay / 1000).toFixed(3)} T`}
+                  {" "}= {(kgTotal / 1000).toFixed(3)} T / {(selectedNgan.tong_kho / 1000).toFixed(3)} T
+                </div>
+                {nganBlocked && (
+                  <p className="text-[10px] text-red-600 font-bold mt-0.5">
+                    ⛔ Vượt quá 110% — Giảm bớt số bành hoặc chọn ngăn khác
+                  </p>
+                )}
+              </div>
+
+              {/* Session summary */}
+              <div className="text-xs text-slate-500 text-right shrink-0">
+                <span className="font-bold text-slate-700">{sessionTotals.banh}</span> bành ·{" "}
+                <span className="font-bold text-slate-700">{(kgLanNay / 1000).toFixed(3)} T</span>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => setView("list")}
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                  Hủy
+                </button>
+                {nganPct >= 100 && !nganBlocked ? (
+                  <button onClick={() => handleCreateSave(true)} disabled={saving || caSections.every(cs => cs.lots.length === 0)}
+                    className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
+                    {saving ? "Đang lưu..." : `✓ Lưu ${sessionTotals.banh} bành · Đánh dấu ngăn Hoàn thành`}
+                  </button>
+                ) : (
+                  <button onClick={() => handleCreateSave(false)} disabled={saving || nganBlocked || !session.ngan_id || caSections.every(cs => cs.lots.length === 0)}
+                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
+                    {saving ? "Đang lưu..." : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bành" : "lô"}`}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* If ngan not selected, show stub bottom bar */}
+        {!hasNgan && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-4 z-40">
+            <div className="max-w-7xl mx-auto flex justify-end gap-2">
+              <button onClick={() => setView("list")}
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                Hủy
+              </button>
+              <button disabled
+                className="px-5 py-2 bg-slate-300 text-white text-sm font-bold rounded-xl cursor-not-allowed">
+                Chọn ngăn lưu trước
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // LIST VIEW
+  // ══════════════════════════════════════════════════════════════════════════════
   return (
     <div>
-      {/* Header */}
+      {/* Page header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>
           <p className="text-sm text-slate-500 mt-0.5">Quản lý lô cao su thành phẩm</p>
         </div>
-        <button onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
+        <button onClick={openCreate}
+          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
           <Plus size={16}/> Thêm lô
         </button>
       </div>
@@ -269,13 +1090,13 @@ export default function ProductPage() {
       {/* Stats */}
       <div className="grid grid-cols-5 gap-3 mb-6">
         {([
-          { label: "Tổng lô",    value: stats.total,                        color: "text-slate-700",   Icon: Package,      ic: "text-slate-400"   },
-          { label: "Hoàn thành", value: stats.hoanThanh,                    color: "text-emerald-600", Icon: CheckCircle,  ic: "text-emerald-400" },
-          { label: "Dở dang",    value: stats.dorDang,                      color: "text-amber-600",   Icon: Clock,        ic: "text-amber-400"   },
-          { label: "Tổng bành",  value: stats.tongBanh.toLocaleString(),    color: "text-blue-600",    Icon: Layers,       ic: "text-blue-400"    },
-          { label: "Tổng tấn",   value: (stats.tongKg/1000).toFixed(1)+"T", color: "text-purple-600",  Icon: Weight,       ic: "text-purple-400"  },
+          { label: "Tổng lô",    value: stats.total,                           color: "text-slate-700",   Icon: Package,     ic: "text-slate-400"   },
+          { label: "Hoàn thành", value: stats.hoanThanh,                       color: "text-emerald-600", Icon: CheckCircle, ic: "text-emerald-400" },
+          { label: "Dở dang",    value: stats.dorDang,                         color: "text-amber-600",   Icon: Clock,       ic: "text-amber-400"   },
+          { label: "Tổng bành",  value: stats.tongBanh.toLocaleString(),       color: "text-blue-600",    Icon: Layers,      ic: "text-blue-400"    },
+          { label: "Tổng tấn",   value: (stats.tongKg / 1000).toFixed(1) + "T", color: "text-purple-600", Icon: Weight,      ic: "text-purple-400"  },
         ] as const).map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center scroll-reveal">
             <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
             <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
@@ -284,41 +1105,50 @@ export default function ProductPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center scroll-reveal">
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400"/>
-          <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}}
-            placeholder="Tìm mã lô, ngăn..." className="flex-1 text-sm outline-none"/>
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
+            placeholder="Tìm mã lô, ngăn..."
+            className="flex-1 text-sm outline-none"/>
         </div>
-        <select value={filterLoai} onChange={e=>{setFilterLoai(e.target.value);setPage(1)}}
+        <select value={filterDC} onChange={e => { setFilterDC(e.target.value); setPage(1) }}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+          <option value="">Tất cả dây chuyền</option>
+          <option value="Mủ tạp">Mủ tạp</option>
+          <option value="Mủ nước">Mủ nước</option>
+        </select>
+        <select value={filterLoai} onChange={e => { setFilterLoai(e.target.value); setPage(1) }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
           <option value="">Tất cả loại</option>
-          {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
+          {["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","SVR10","SVR20","SVR3L","SVRL","SVRCV50","SVRCV60","CSR5","Ngoại lệ"]
+            .map(l => <option key={l}>{l}</option>)}
         </select>
-        <select value={filterTT} onChange={e=>{setFilterTT(e.target.value);setPage(1)}}
+        <select value={filterTT} onChange={e => { setFilterTT(e.target.value); setPage(1) }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
           <option value="">Tất cả trạng thái</option>
-          {TRANG_THAI_OPTS.map(t=><option key={t}>{t}</option>)}
+          {TRANG_THAI_OPTS.map(t => <option key={t}>{t}</option>)}
         </select>
-        <select value={filterCa} onChange={e=>{setFilterCa(e.target.value);setPage(1)}}
+        <select value={filterCa} onChange={e => { setFilterCa(e.target.value); setPage(1) }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
           <option value="">Tất cả ca</option>
-          {CA_OPTS.map(c=><option key={c} value={c}>Ca {c}</option>)}
+          {CA_OPTS.map(c => <option key={c} value={c}>Ca {c}</option>)}
         </select>
-        <input type="date" value={filterFrom} onChange={e=>{setFilterFrom(e.target.value);setPage(1)}}
+        <input type="date" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setPage(1) }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
         <span className="text-slate-400 text-sm">→</span>
-        <input type="date" value={filterTo} onChange={e=>{setFilterTo(e.target.value);setPage(1)}}
+        <input type="date" value={filterTo} onChange={e => { setFilterTo(e.target.value); setPage(1) }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        {(filterLoai||filterTT||filterCa||filterFrom||filterTo||search) &&
-          <button onClick={()=>{setFilterLoai("");setFilterTT("");setFilterCa("");setFilterFrom("");setFilterTo("");setSearch("");setPage(1)}}
+        {(filterLoai || filterTT || filterCa || filterFrom || filterTo || search || filterDC) && (
+          <button onClick={() => { setFilterLoai(""); setFilterTT(""); setFilterCa(""); setFilterFrom(""); setFilterTo(""); setSearch(""); setFilterDC(""); setPage(1) }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
-          </button>}
+          </button>
+        )}
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-reveal">
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
@@ -330,14 +1160,14 @@ export default function ProductPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Mã lô","Ngày SX","Ca","Ngăn","Loại","Bành","Trọng lượng","Trạng thái",""].map(h=>(
+                {["Mã lô", "Ngày SX", "Ca", "Dây chuyền", "Ngăn", "Loại", "Bành", "Trọng lượng", "Trạng thái", ""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {paginated.map(lot => (
-                <tr key={lot.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={lot.id} className="row-hover">
                   <td className="px-4 py-3">
                     <span className="font-bold text-emerald-700">{lot.ma_lo}</span>
                   </td>
@@ -347,27 +1177,32 @@ export default function ProductPage() {
                   <td className="px-4 py-3">
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Ca {lot.ca}</span>
                   </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${lot.day_chuyen === "Mủ nước" ? "bg-cyan-100 text-cyan-700" : "bg-slate-100 text-slate-600"}`}>
+                      {lot.day_chuyen || "—"}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{lot.ngans?.ten_ngan || "—"}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">{lot.loai_csr}</span>
                   </td>
                   <td className="px-4 py-3 font-semibold text-slate-700">{lot.tong_banh}</td>
-                  <td className="px-4 py-3 text-slate-600">{((lot.tong_kg||0)/1000).toFixed(3)} T</td>
+                  <td className="px-4 py-3 text-slate-600">{((lot.tong_kg || 0) / 1000).toFixed(3)} T</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                       lot.trang_thai === "Hoàn thành" ? "bg-emerald-100 text-emerald-700" :
                       lot.trang_thai === "Dở dang"    ? "bg-amber-100 text-amber-700" :
-                      "bg-slate-100 text-slate-600"}`}>
+                      "bg-blue-100 text-blue-700"}`}>
                       {lot.trang_thai}
                     </span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button onClick={()=>{openEdit(lot)}}
+                      <button onClick={() => openEdit(lot)}
                         className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors">
                         <Edit2 size={14}/>
                       </button>
-                      <button onClick={()=>setDelConfirm(lot.id)}
+                      <button onClick={() => setDelConfirm(lot.id)}
                         className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors">
                         <Trash2 size={14}/>
                       </button>
@@ -378,15 +1213,13 @@ export default function ProductPage() {
             </tbody>
           </table>
         )}
-
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
             <span className="text-xs text-slate-500">{filtered.length} lô · Trang {page}/{totalPages}</span>
             <div className="flex gap-1">
-              {Array.from({length: Math.min(totalPages,7)}, (_,i) => i+1).map(p => (
-                <button key={p} onClick={()=>setPage(p)}
-                  className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${p===page?"bg-emerald-600 text-white":"hover:bg-slate-100 text-slate-600"}`}>
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(p => (
+                <button key={p} onClick={() => setPage(p)}
+                  className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${p === page ? "bg-emerald-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}>
                   {p}
                 </button>
               ))}
@@ -395,178 +1228,146 @@ export default function ProductPage() {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
-      {(modal === "add" || modal === "edit") && (
+      {/* Edit Modal */}
+      {editModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">
-                {modal === "add" ? "Thêm lô mới" : `Sửa lô ${form.ma_lo}`}
-              </h2>
-              <button onClick={()=>setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
+              <h2 className="text-lg font-extrabold text-slate-800">Sửa lô {editForm.ma_lo}</h2>
+              <button onClick={() => setEditModal(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
             </div>
             <div className="p-6 space-y-4">
-              {/* Row 1 */}
+              {/* Dây chuyền */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <label className="text-xs font-bold text-slate-600 block mb-2">Dây chuyền *</label>
+                <div className="flex gap-3">
+                  {["Mủ tạp", "Mủ nước"].map(dc => (
+                    <button key={dc} onClick={() => updateEditForm({ day_chuyen: dc })}
+                      className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                        editForm.day_chuyen === dc
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-white text-slate-500"}`}>
+                      {dc}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Số lô *</label>
-                  <input type="number" value={form.num} onChange={e=>updateForm({num:+e.target.value})}
+                  <input type="number" value={editForm.num} onChange={e => updateEditForm({ num: +e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã lô</label>
-                  <input value={form.ma_lo} readOnly
+                  <input readOnly value={editForm.ma_lo}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"/>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Hậu tố</label>
-                  <input value={form.suffix} onChange={e=>updateForm({suffix:e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                  <select value={editForm.suffix} onChange={e => updateEditForm({ suffix: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                    {SUFFIX_OPTS.map(s => <option key={s}>{s}</option>)}
+                  </select>
                 </div>
               </div>
-              {/* Row 2 */}
+
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày sản xuất *</label>
-                  <input type="date" value={form.ngay_sx} onChange={e=>updateForm({ngay_sx:e.target.value})}
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày SX *</label>
+                  <input type="date" value={editForm.ngay_sx} onChange={e => updateEditForm({ ngay_sx: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ca *</label>
-                  <select value={form.ca} onChange={e=>updateForm({ca:e.target.value})}
+                  <select value={editForm.ca} onChange={e => updateEditForm({ ca: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {CA_OPTS.map(c=><option key={c}>{c}</option>)}
+                    {CA_OPTS.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR *</label>
-                  <select value={form.loai_csr} onChange={e=>updateForm({loai_csr:e.target.value})}
+                  <select value={editForm.loai_csr} onChange={e => updateEditForm({ loai_csr: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
+                    {getLoaiCSRByDayChuyen(editForm.day_chuyen).map(l => <option key={l}>{l}</option>)}
                   </select>
                 </div>
               </div>
-              {/* Row 3 */}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngăn lưu</label>
-                  <select value={form.ngan_id} onChange={e=>updateForm({ngan_id:e.target.value})}
+                  <select value={editForm.ngan_id} onChange={e => updateEditForm({ ngan_id: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
                     <option value="">-- Chọn ngăn --</option>
-                    {ngans.map(n=><option key={n.id} value={n.id}>{n.ten_ngan} — {n.ma_ngan}</option>)}
+                    {ngans.map(n => <option key={n.id} value={n.id}>{n.ten_ngan} — {n.ma_ngan}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành (kg/bành)</label>
-                  <input type="number" value={form.loai_banh} readOnly
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành</label>
+                  <input readOnly value={`${editForm.loai_banh} kg/bành`}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"/>
-                  <p className="text-[10px] text-slate-400 mt-1">Tự động theo loại CSR</p>
                 </div>
               </div>
-              {/* Kiện A B C D — with lock logic */}
+
+              {/* Kiện A B C D */}
               {(() => {
-                const cfg = getLoaiBanhConfig(form.loai_csr)
-                const maxK = cfg.max_per_kien
-                const loTron = cfg.lo_tron
+                const cfg2 = getLoaiBanhConfig(editForm.loai_csr)
+                const maxK = cfg2.max_per_kien
                 return (
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-xs font-bold text-slate-600">Số bành kiện (A / B / C / D)</label>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
-                        Max {maxK} bành/kiện · Lô tròn = {loTron} bành
+                        Max {maxK} bành · Lô tròn = {cfg2.lo_tron} bành
                       </span>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
-                      {(["kien_a","kien_b","kien_c","kien_d"] as const).map((k,i)=>{
-                        const val = form[k]
+                      {(["kien_a", "kien_b", "kien_c", "kien_d"] as const).map((k, i) => {
+                        const val = editForm[k]
                         const isLocked = val >= maxK
                         return (
                           <div key={k} className="relative">
-                            <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold ${isLocked ? "text-emerald-500" : "text-slate-400"}`}>{["A","B","C","D"][i]}</span>
-                            <input type="number" value={val}
-                              min={0} max={maxK}
-                              disabled={isLocked}
-                              onChange={e=>updateForm({[k]:+e.target.value} as any)}
+                            <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold ${isLocked ? "text-emerald-500" : "text-slate-400"}`}>
+                              {["A", "B", "C", "D"][i]}
+                            </span>
+                            <input type="number" value={val} min={0} max={maxK}
+                              onChange={e => updateEditForm({ [k]: +e.target.value } as Partial<EditForm>)}
                               className={`w-full pl-7 pr-3 py-2 border rounded-xl text-sm outline-none transition-colors ${
-                                isLocked
-                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-bold cursor-not-allowed"
-                                  : val > 0
-                                    ? "border-amber-300 bg-amber-50 text-amber-700 font-semibold focus:border-amber-500"
-                                    : "border-slate-300 focus:border-emerald-500"
-                              }`}/>
-                            {isLocked && (
-                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-[10px] font-bold">🔒</span>
-                            )}
+                                isLocked ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-bold" :
+                                val > 0  ? "border-amber-300 bg-amber-50 text-amber-700 font-semibold focus:border-amber-500" :
+                                "border-slate-300 focus:border-emerald-500"}`}/>
+                            {isLocked && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-[10px] font-bold">🔒</span>}
                           </div>
                         )
                       })}
                     </div>
-                    {/* Warning for partially filled kiện */}
-                    {form.tong_banh > 0 && form.tong_banh < loTron && (
-                      <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
-                        <span>⚠️</span>
-                        <span>Lô dở dang: {form.tong_banh}/{loTron} bành. Còn thiếu {loTron - form.tong_banh} bành để thành lô tròn.</span>
-                      </div>
-                    )}
-                    {form.tong_banh >= loTron && (
-                      <div className="mt-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-center gap-2">
-                        <span>✅</span>
-                        <span>Lô tròn hoàn thành: {form.tong_banh} bành · {form.tong_kg.toLocaleString()} kg</span>
-                      </div>
-                    )}
                     <div className="mt-2 flex gap-4 text-xs text-slate-500">
-                      <span>Tổng bành: <strong className="text-slate-700">{form.tong_banh}</strong></span>
-                      <span>Tổng kg: <strong className="text-slate-700">{form.tong_kg.toLocaleString()}</strong></span>
-                      <span>Trạng thái: <strong className={form.trang_thai === "Hoàn thành" ? "text-emerald-600" : "text-amber-600"}>{form.trang_thai}</strong></span>
+                      <span>Tổng bành: <strong className="text-slate-700">{editForm.tong_banh}</strong></span>
+                      <span>Tổng kg: <strong className="text-slate-700">{editForm.tong_kg.toLocaleString()}</strong></span>
+                      <span>Trạng thái: <strong className={editForm.trang_thai === "Hoàn thành" ? "text-emerald-600" : "text-amber-600"}>{editForm.trang_thai}</strong></span>
                     </div>
                   </div>
                 )
               })()}
-              {/* Bọc, Thảm */}
+
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Bọc</label>
-                  <select value={form.boc} onChange={e=>updateForm({boc:e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {BOC_OPTS.map(b=><option key={b}>{b}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Thảm</label>
-                  <select value={form.tham} onChange={e=>updateForm({tham:e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {THAM_OPTS.map(t=><option key={t}>{t}</option>)}
-                  </select>
-                </div>
-              </div>
-              {/* Trạng thái + Ghi chú */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Trạng thái</label>
-                  <input value={form.trang_thai} readOnly
-                    className={`w-full px-3 py-2 border rounded-xl text-sm font-bold cursor-not-allowed ${
-                      form.trang_thai === "Hoàn thành" ? "border-emerald-200 bg-emerald-50 text-emerald-700" :
-                      form.trang_thai === "Dở dang" ? "border-amber-200 bg-amber-50 text-amber-700" :
-                      "border-blue-200 bg-blue-50 text-blue-700"
-                    }`}/>
-                  <p className="text-[10px] text-slate-400 mt-1">Tự động: Hoàn thành khi đủ bành, Dở dang khi thiếu</p>
-                </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-                  <input value={form.ghi_chu} onChange={e=>updateForm({ghi_chu:e.target.value})}
+                  <input value={editForm.ghi_chu} onChange={e => updateEditForm({ ghi_chu: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
                 </div>
               </div>
             </div>
-            {/* Footer */}
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={()=>setModal(null)}
+              <button onClick={() => setEditModal(false)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
                 Hủy
               </button>
-              <button onClick={handleSave} disabled={saving}
+              <button onClick={handleEditSave} disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
-                {saving ? "Đang lưu..." : modal === "add" ? "Thêm lô" : "Lưu thay đổi"}
+                {saving ? "Đang lưu..." : "Lưu thay đổi"}
               </button>
             </div>
           </div>
@@ -578,11 +1379,11 @@ export default function ProductPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="font-extrabold text-slate-800 mb-2">Xác nhận xóa?</h3>
-            <p className="text-sm text-slate-500 mb-5">Lô này sẽ bị xóa vĩnh viễn khỏi hệ thống.</p>
+            <p className="text-sm text-slate-500 mb-5">Lô này sẽ bị xóa vĩnh viễn. Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động.</p>
             <div className="flex gap-3">
-              <button onClick={()=>setDelConfirm(null)}
+              <button onClick={() => setDelConfirm(null)}
                 className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={()=>handleDelete(delConfirm)}
+              <button onClick={() => handleDelete(delConfirm)}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
             </div>
           </div>
