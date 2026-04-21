@@ -159,11 +159,28 @@ function calcManhattanKm(stops: string[]) {
   return Math.round(total * 111.32 * 10) / 10  // degrees to km
 }
 
-// ─── Auto-calc KL khô ────────────────────────────────────────────────────────
 function autoCalcKLK(kl_tuoi: string, drc: string): string {
   const t = parseFloat(kl_tuoi); const d = parseFloat(drc)
   if (isNaN(t) || isNaN(d)) return ""
   return (t * d / 100).toFixed(1)
+}
+
+// DD/MM/YYYY or YYYY-MM-DD → YYYY-MM-DD
+const toISO = (ngay: string) =>
+  ngay.includes("/") ? ngay.split("/").reverse().join("-") : ngay
+
+function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
+  const lots: string[] = []
+  for (const dgn of diem_gn) {
+    const d = DIEM_GN.find(g => g.ma_lo === dgn)
+    if (!d) continue
+    for (const p of phien) {
+      const key = `phien_${p.replace(/Phiên\s*/i, "").toLowerCase()}` as keyof DiemGN
+      const pLots = d[key]
+      if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
+    }
+  }
+  return [...new Set(lots)]
 }
 
 const emptyRow = (): DxRow => ({
@@ -271,51 +288,32 @@ export default function DispatchPage() {
       .select("*")
       .eq("factory_id", fid)
       .order("ngay", { ascending: false })
-      .order("created_at", { ascending: false })
     if (filterFrom) q = q.gte("ngay", filterFrom)
     if (filterTo)   q = q.lte("ngay", filterTo)
     const { data } = await q
     const raw = (data || []) as DispatchEntry[]
 
-    // Normalize ngay → YYYY-MM-DD for reliable sorting
-    const toISO = (ngay: string) =>
-      ngay.includes("/") ? ngay.split("/").reverse().join("-") : ngay
-
-    // Re-compute lo_thu_hoach for rows missing it
+    // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
     const rehydrated = raw.map(e => ({
       ...e,
       rows: (e.rows || []).map(r => ({
         ...r,
-        lo_thu_hoach: (r.lo_thu_hoach?.length ?? 0) > 0
+        lo_thu_hoach: r.lo_thu_hoach?.length
           ? r.lo_thu_hoach
-          : (() => {
-              const lots: string[] = []
-              for (const dgn of (r.diem_gn || [])) {
-                const d = DIEM_GN.find(g => g.ma_lo === dgn)
-                if (!d) continue
-                for (const p of (r.phien || [])) {
-                  const letter = p.replace(/Phiên\s*/i, "").toLowerCase()
-                  const key = `phien_${letter}` as keyof DiemGN
-                  const pLots = d[key]
-                  if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
-                }
-              }
-              return [...new Set(lots)]
-            })()
+          : buildLoThuHoach(r.diem_gn || [], r.phien || [])
       }))
     }))
 
-    // Sort client-side by ISO date desc, then created_at desc (handles mixed DD/MM/YYYY & YYYY-MM-DD)
-    const sorted = [...rehydrated].sort((a, b) => {
+    // Sort by ISO date desc, then created_at desc (handles mixed DD/MM/YYYY & YYYY-MM-DD)
+    rehydrated.sort((a, b) => {
       const da = toISO(a.ngay), db = toISO(b.ngay)
       if (da !== db) return da > db ? -1 : 1
       return (b.created_at || "") > (a.created_at || "") ? 1 : -1
     })
 
-    // Compute ma_dx: DX-ddmmyy/seq per date group
     const byDate: Record<string, DispatchEntry[]> = {}
-    for (const e of sorted) { const k = toISO(e.ngay); if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
-    const withCode = sorted.map(e => {
+    for (const e of rehydrated) { const k = toISO(e.ngay); if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
+    const withCode = rehydrated.map(e => {
       const key = toISO(e.ngay)
       const group = [...(byDate[key] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
       const seq = group.findIndex(x => x.id === e.id) + 1
@@ -365,18 +363,11 @@ export default function DispatchPage() {
   const openAdd = () => {
     // Default ngày = max(entries) + 1
     const today = new Date().toISOString().slice(0,10)
-    const maxDate = entries.reduce((mx, e) => {
-      const d = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
-      return d > mx ? d : mx
-    }, today)
+    const maxDate = entries.reduce((mx, e) => { const d = toISO(e.ngay); return d > mx ? d : mx }, today)
     const nextDay = new Date(maxDate)
     nextDay.setDate(nextDay.getDate() + 1)
     setFormNgay(nextDay.toISOString().slice(0,10))
-    // Pre-fill rows from latest entry (clear KL)
-    const latest = entries.find(e => {
-      const d = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
-      return d === maxDate
-    })
+    const latest = entries.find(e => toISO(e.ngay) === maxDate)
     if (latest?.rows?.length) {
       setFormRows(latest.rows.map(r => ({
         ...r,
@@ -398,7 +389,7 @@ export default function DispatchPage() {
   // ── Open Edit ─────────────────────────────────────────────────────────────
   const openEdit = (entry: DispatchEntry) => {
     setEditId(entry.id)
-    setFormNgay(entry.ngay?.includes("/") ? entry.ngay.split("/").reverse().join("-") : entry.ngay || new Date().toISOString().slice(0,10))
+    setFormNgay(entry.ngay ? toISO(entry.ngay) : new Date().toISOString().slice(0,10))
     setFormCN(entry.chung_nhan || "PEFC CS")
     setFormRows(entry.rows?.length ? entry.rows.map(r => ({ ...r })) : [emptyRow()])
     setView("edit")
@@ -454,18 +445,19 @@ export default function DispatchPage() {
         }
       }
 
-      // Auto-calc KL khô
-      if (field === "kl_ct" || field === "drc_c") {
-        next.kl_ck = autoCalcKLK(field === "kl_ct" ? val as string : next.kl_ct, field === "drc_c" ? val as string : next.drc_c)
-      }
-      if (field === "kl_dct" || field === "drc_dc") {
-        next.kl_dck = autoCalcKLK(field === "kl_dct" ? val as string : next.kl_dct, field === "drc_dc" ? val as string : next.drc_dc)
-      }
-      if (field === "kl_dt" || field === "drc_d") {
-        next.kl_dk = autoCalcKLK(field === "kl_dt" ? val as string : next.kl_dt, field === "drc_d" ? val as string : next.drc_d)
-      }
-      if (field === "kl_dkt" || field === "drc_dk") {
-        next.kl_dkk = autoCalcKLK(field === "kl_dkt" ? val as string : next.kl_dkt, field === "drc_dk" ? val as string : next.drc_dk)
+      // Auto-calc KL khô: [kl_field, drc_field, result_field]
+      for (const [kf, df, rf] of [
+        ["kl_ct",  "drc_c",  "kl_ck" ],
+        ["kl_dct", "drc_dc", "kl_dck"],
+        ["kl_dkt", "drc_dk", "kl_dkk"],
+        ["kl_dt",  "drc_d",  "kl_dk" ],
+      ] as [keyof DxRow, keyof DxRow, keyof DxRow][]) {
+        if (field === kf || field === df) {
+          ;(next as unknown as Record<string, string>)[rf] = autoCalcKLK(
+            (field === kf ? val : next[kf]) as string,
+            (field === df ? val : next[df]) as string,
+          )
+        }
       }
 
       // Khi Điểm GN thay đổi: lọc lộ trình theo đội
@@ -485,22 +477,11 @@ export default function DispatchPage() {
         next.so_km = calcManhattanKm(stops.length > 0 ? stops : (next.diem_gn || []))
       }
 
-      // Auto-fill lô thu hoạch từ phiên + điểm GN (fix: extract letter from "Phiên A")
       if (field === "phien" || field === "diem_gn") {
-        const phiens = field === "phien" ? val as string[] : next.phien
-        const dgns = field === "diem_gn" ? val as string[] : next.diem_gn
-        const lots: string[] = []
-        for (const dgn of dgns) {
-          const d = DIEM_GN.find(g => g.ma_lo === dgn)
-          if (!d) continue
-          for (const p of phiens) {
-            const letter = p.replace(/Phiên\s*/i, "").toLowerCase()
-            const key = `phien_${letter}` as keyof DiemGN
-            const pLots = d[key]
-            if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
-          }
-        }
-        next.lo_thu_hoach = [...new Set(lots)]
+        next.lo_thu_hoach = buildLoThuHoach(
+          field === "diem_gn" ? val as string[] : next.diem_gn,
+          field === "phien"   ? val as string[] : next.phien,
+        )
       }
 
       return next
@@ -546,9 +527,9 @@ export default function DispatchPage() {
   // ── Parse rows from CSV lines ─────────────────────────────────────────────
   const parseCSVLines = (lines: string[]): Record<string, DxRow[]> => {
     const byDate: Record<string, DxRow[]> = {}
+    let uidCounter = Date.now()
     for (const line of lines) {
       const cols = line.split(";")
-      // header: ngay;so_xe;chuyen;tai_xe;diem_gn;phien;xu_ly;lo_trinh;so_km;kl_ct;drc_c;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d
       const [ngayRaw, so_xe, chuyen, tai_xe, diem_gn_raw, phien_raw, xu_ly, lo_trinh_raw, so_km,
              kl_ct_raw, drc_c_raw, kl_dct_raw, drc_dc_raw, , drc_dk_raw, kl_dt_raw, drc_d_raw] = cols
       if (!ngayRaw || !so_xe?.trim()) continue
@@ -559,13 +540,15 @@ export default function DispatchPage() {
       const kl_dct = (kl_dct_raw || "").trim()
       const drc_dc = (drc_dc_raw || "").replace(",", ".").trim()
       const drc_dk = (drc_dk_raw || "").replace(",", ".").trim()
+      const dgns = diem_gn_raw.split(",").map(s => s.trim()).filter(Boolean)
+      const phiens = phien_raw.split(",").map(s => s.trim()).filter(Boolean)
       const row: DxRow = {
-        uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        uid: `r_${uidCounter++}_${Math.random().toString(36).slice(2,6)}`,
         _date: ngay, so_xe: so_xe.trim(),
         chuyen: parseInt(chuyen) || 1, tai_xe: tai_xe.trim(),
-        diem_gn: diem_gn_raw.split(",").map(s => s.trim()).filter(Boolean),
-        phien: phien_raw.split(",").map(s => s.trim()).filter(Boolean),
-        lo_thu_hoach: [], xu_ly: xu_ly.trim() || "Xé",
+        diem_gn: dgns,
+        phien: phiens,
+        lo_thu_hoach: buildLoThuHoach(dgns, phiens), xu_ly: xu_ly.trim() || "Xé",
         lo_trinh: lo_trinh_raw.split(",").map(s => s.trim()).filter(Boolean),
         so_km: parseFloat(so_km) || 0,
         kl_ct, drc_c, kl_ck: autoCalcKLK(kl_ct, drc_c),
@@ -586,19 +569,15 @@ export default function DispatchPage() {
     setImporting(true)
     let byDate: Record<string, DxRow[]> = {}
 
+    let csvText: string
     if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
       const XLSX = await import("xlsx")
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: "array" })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_csv(ws, { FS: ";" })
-      const lines = data.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
-      byDate = parseCSVLines(lines)
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" })
+      csvText = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]], { FS: ";" })
     } else {
-      const text = await file.text()
-      const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
-      byDate = parseCSVLines(lines)
+      csvText = await file.text()
     }
+    byDate = parseCSVLines(csvText.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay")))
 
     for (const [ngay, rows] of Object.entries(byDate)) {
       const { data: existing } = await supabase.from("dispatch_entries")
