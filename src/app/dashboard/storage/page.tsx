@@ -101,8 +101,17 @@ const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
     .filter(Boolean).join("-")
 }
 
-const fmtDate = (d: string) =>
-  d ? new Date(d).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—"
+// Normalize "dd/mm/yyyy" → "YYYY-MM-DD" (dispatch_entries.ngay can be either format)
+const toISO = (d: string) =>
+  d && d.includes("/") ? d.split("/").reverse().join("-") : d
+
+// Format any date string → "dd/mm/yyyy" without timezone issues
+const fmtDate = (d: string) => {
+  if (!d) return "—"
+  const iso = (d.includes("/") ? d.split("/").reverse().join("-") : d).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`
+  return "—"
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function StoragePage() {
@@ -147,9 +156,10 @@ export default function StoragePage() {
       .order("ngay", { ascending: true })
     const byDate: Record<string, number> = {}
     for (const entry of (data || [])) {
+      const dateKey = toISO(entry.ngay) // normalize to YYYY-MM-DD for consistent sorting & display
       for (const row of ((entry.rows || []) as { uid: string }[])) {
         if (!assignedUIDs.has(row.uid)) {
-          byDate[entry.ngay] = (byDate[entry.ngay] || 0) + 1
+          byDate[dateKey] = (byDate[dateKey] || 0) + 1
         }
       }
     }
@@ -196,20 +206,24 @@ export default function StoragePage() {
       .from("dispatch_entries")
       .select("rows,ngay")
       .eq("factory_id", factoryId)
-      .gte("ngay", ngay_bd)
-      .lte("ngay", ngay_kt)
-    const trips: TripItem[] = (data || []).flatMap(
-      (entry: { rows: Record<string, string>[]; ngay: string }) =>
-        (entry.rows || []).map((r: Record<string, string>) => ({
-          uid: r.uid,
-          _date: entry.ngay,
-          so_xe: r.so_xe,
-          chuyen: Number(r.chuyen) || 1,
-          tai_xe: r.tai_xe,
-          kl_tuoi: (+r.kl_ct || 0) + (+r.kl_dct || 0) + (+r.kl_dkt || 0) + (+r.kl_dt || 0) + (+r.kl_mn || 0),
-          kl_kho:  (+r.kl_ck || 0) + (+r.kl_dck || 0) + (+r.kl_dkk || 0) + (+r.kl_dk  || 0) + (+r.kl_mnk || 0),
-        }))
-    )
+    // Filter by date range in JS — handles both "YYYY-MM-DD" and "dd/mm/yyyy" stored formats
+    const trips: TripItem[] = (data || [])
+      .filter((entry: { ngay: string }) => {
+        const d = toISO(entry.ngay)
+        return d >= ngay_bd && d <= ngay_kt
+      })
+      .flatMap(
+        (entry: { rows: Record<string, string>[]; ngay: string }) =>
+          (entry.rows || []).map((r: Record<string, string>) => ({
+            uid: r.uid,
+            _date: toISO(entry.ngay),
+            so_xe: r.so_xe,
+            chuyen: Number(r.chuyen) || 1,
+            tai_xe: r.tai_xe,
+            kl_tuoi: (+r.kl_ct || 0) + (+r.kl_dct || 0) + (+r.kl_dkt || 0) + (+r.kl_dt || 0) + (+r.kl_mn || 0),
+            kl_kho:  (+r.kl_ck || 0) + (+r.kl_dck || 0) + (+r.kl_dkk || 0) + (+r.kl_dk  || 0) + (+r.kl_mnk || 0),
+          }))
+      )
     setDispatchTrips(trips)
     setLoadingTrips(false)
   }, [factoryId])
