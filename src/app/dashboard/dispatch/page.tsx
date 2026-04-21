@@ -16,6 +16,9 @@ type DxRow = {
   xu_ly: string
   lo_trinh: string[]
   so_km: number
+  kl_ct: string
+  drc_c: string
+  kl_ck: string
   kl_dct: string
   drc_dc: string
   kl_dck: string
@@ -169,7 +172,9 @@ const emptyRow = (): DxRow => ({
   so_xe: "", chuyen: 1, tai_xe: "",
   diem_gn: [], phien: [], lo_thu_hoach: [],
   xu_ly: "Xé", lo_trinh: [],
-  so_km: 0, kl_dct: "", drc_dc: "", kl_dck: "",
+  so_km: 0,
+  kl_ct: "", drc_c: "", kl_ck: "",
+  kl_dct: "", drc_dc: "", kl_dck: "",
   kl_dkt: "", drc_dk: "", kl_dkk: "",
   kl_dt: "", drc_d: "65", kl_dk: "",
   ngan_ref: [],
@@ -266,6 +271,7 @@ export default function DispatchPage() {
       .select("*")
       .eq("factory_id", fid)
       .order("ngay", { ascending: false })
+      .order("created_at", { ascending: false })
     if (filterFrom) q = q.gte("ngay", filterFrom)
     if (filterTo)   q = q.lte("ngay", filterTo)
     const { data } = await q
@@ -339,6 +345,7 @@ export default function DispatchPage() {
       setFormRows(latest.rows.map(r => ({
         ...r,
         uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        kl_ct: "", drc_c: "", kl_ck: "",
         kl_dct: "", drc_dc: "", kl_dck: "",
         kl_dkt: "", drc_dk: "", kl_dkk: "",
         kl_dt: "", kl_dk: "",
@@ -412,6 +419,9 @@ export default function DispatchPage() {
       }
 
       // Auto-calc KL khô
+      if (field === "kl_ct" || field === "drc_c") {
+        next.kl_ck = autoCalcKLK(field === "kl_ct" ? val as string : next.kl_ct, field === "drc_c" ? val as string : next.drc_c)
+      }
       if (field === "kl_dct" || field === "drc_dc") {
         next.kl_dck = autoCalcKLK(field === "kl_dct" ? val as string : next.kl_dct, field === "drc_dc" ? val as string : next.drc_dc)
       }
@@ -463,13 +473,13 @@ export default function DispatchPage() {
 
   // ── Download CSV template ─────────────────────────────────────────────────
   const downloadTemplate = () => {
-    const header = "ngay;so_xe;chuyen;tai_xe;diem_giao_nhan;phien_boc;xu_ly;lo_trinh;so_km;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d"
+    const header = "ngay;so_xe;chuyen;tai_xe;diem_giao_nhan;phien_boc;xu_ly;lo_trinh;so_km;kl_ct;drc_c;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d"
     const rows = formRows.map(r => [
       formNgay.split("-").reverse().join("/"),
       r.so_xe, r.chuyen, r.tai_xe,
       r.diem_gn.join(","), r.phien.join(","),
       r.xu_ly, r.lo_trinh.join(","), r.so_km,
-      "", "", "", "", "", "65"
+      "", "", "", "", "", "", "", "65"
     ].join(";"))
     const csv = [header, ...rows].join("\n")
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" })
@@ -497,21 +507,22 @@ export default function DispatchPage() {
     } catch { showToast("Lỗi tải GeoJSON") }
   }
 
-  // ── Import CSV ────────────────────────────────────────────────────────────
-  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file || !factoryId) return
-    setImporting(true)
-    const text = await file.text()
-    const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
+  // ── Parse rows from CSV lines ─────────────────────────────────────────────
+  const parseCSVLines = (lines: string[]): Record<string, DxRow[]> => {
     const byDate: Record<string, DxRow[]> = {}
     for (const line of lines) {
       const cols = line.split(";")
-      // cols: ngay,so_xe,chuyen,tai_xe,diem_gn,phien,xu_ly,lo_trinh,so_km,kl_dct,drc_dc,kl_dkt,drc_dk,kl_dt,drc_d
-      const [ngayRaw, so_xe, chuyen, tai_xe, diem_gn_raw, phien_raw, xu_ly, lo_trinh_raw, so_km, kl_dct, drc_dc_raw, , drc_dk_raw, kl_dt, drc_d] = cols
+      // header: ngay;so_xe;chuyen;tai_xe;diem_gn;phien;xu_ly;lo_trinh;so_km;kl_ct;drc_c;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d
+      const [ngayRaw, so_xe, chuyen, tai_xe, diem_gn_raw, phien_raw, xu_ly, lo_trinh_raw, so_km,
+             kl_ct_raw, drc_c_raw, kl_dct_raw, drc_dc_raw, , drc_dk_raw, kl_dt_raw, drc_d_raw] = cols
       if (!ngayRaw || !so_xe?.trim()) continue
       const parts = ngayRaw.trim().split("/")
       const ngay = parts.length === 3 ? `20${parts[2].slice(-2)}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}` : ngayRaw.trim()
-      const drc_dc = (drc_dc_raw || "").replace(",", ".")
+      const kl_ct = (kl_ct_raw || "").trim()
+      const drc_c = (drc_c_raw || "").replace(",", ".").trim()
+      const kl_dct = (kl_dct_raw || "").trim()
+      const drc_dc = (drc_dc_raw || "").replace(",", ".").trim()
+      const drc_dk = (drc_dk_raw || "").replace(",", ".").trim()
       const row: DxRow = {
         uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
         _date: ngay, so_xe: so_xe.trim(),
@@ -521,14 +532,38 @@ export default function DispatchPage() {
         lo_thu_hoach: [], xu_ly: xu_ly.trim() || "Xé",
         lo_trinh: lo_trinh_raw.split(",").map(s => s.trim()).filter(Boolean),
         so_km: parseFloat(so_km) || 0,
-        kl_dct: kl_dct || "", drc_dc, kl_dck: autoCalcKLK(kl_dct || "", drc_dc),
-        kl_dkt: "", drc_dk: (drc_dk_raw || "").replace(",", "."), kl_dkk: "",
-        kl_dt: kl_dt || "", drc_d: drc_d?.trim() || "65", kl_dk: "",
+        kl_ct, drc_c, kl_ck: autoCalcKLK(kl_ct, drc_c),
+        kl_dct, drc_dc, kl_dck: autoCalcKLK(kl_dct, drc_dc),
+        kl_dkt: "", drc_dk, kl_dkk: "",
+        kl_dt: (kl_dt_raw || "").trim(), drc_d: drc_d_raw?.trim() || "65", kl_dk: "",
         ngan_ref: [], locked: false,
       }
       if (!byDate[ngay]) byDate[ngay] = []
       byDate[ngay].push(row)
     }
+    return byDate
+  }
+
+  // ── Import CSV / XLSX ─────────────────────────────────────────────────────
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file || !factoryId) return
+    setImporting(true)
+    let byDate: Record<string, DxRow[]> = {}
+
+    if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
+      const XLSX = await import("xlsx")
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: "array" })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_csv(ws, { FS: ";" })
+      const lines = data.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
+      byDate = parseCSVLines(lines)
+    } else {
+      const text = await file.text()
+      const lines = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay"))
+      byDate = parseCSVLines(lines)
+    }
+
     for (const [ngay, rows] of Object.entries(byDate)) {
       const { data: existing } = await supabase.from("dispatch_entries")
         .select("id").eq("factory_id", factoryId).eq("ngay", ngay).single()
@@ -637,7 +672,7 @@ export default function DispatchPage() {
                     </td>
                     <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
-                        {entry.chung_nhan || "—"}
+                        {entry.chung_nhan || "PEFC CS"}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-700"
@@ -812,10 +847,10 @@ export default function DispatchPage() {
           )}
           {isAdmin && (
             <>
-              <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV}/>
+              <input ref={importRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImport}/>
               <button onClick={() => importRef.current?.click()} disabled={importing}
                 className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-violet-600 hover:bg-violet-50 border border-violet-300 rounded-lg transition-colors disabled:opacity-50">
-                <Upload size={12}/> {importing ? "Đang xử lý..." : "Nhập CSV"}
+                <Upload size={12}/> {importing ? "Đang xử lý..." : "Nhập CSV/XLSX"}
               </button>
             </>
           )}
@@ -993,13 +1028,14 @@ export default function DispatchPage() {
                   <tr>
                     <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Xe</th>
                     <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Tài xế</th>
+                    <th className="px-3 py-2 text-center font-bold text-lime-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Mủ chén</th>
                     <th className="px-3 py-2 text-center font-bold text-amber-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Đông chén</th>
                     <th className="px-3 py-2 text-center font-bold text-blue-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Đông khối</th>
                     <th className="px-3 py-2 text-center font-bold text-emerald-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Mủ dây</th>
                   </tr>
                   <tr className="text-[10px]">
-                    {["Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô"].map((h,i) => (
-                      <th key={i} className={`px-2 py-1 font-bold text-slate-400 whitespace-nowrap ${i===0||i===3||i===6?"border-l border-slate-200":""}`}>{h}</th>
+                    {["Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô","Tươi (kg)","DRC%","Khô"].map((h,i) => (
+                      <th key={i} className={`px-2 py-1 font-bold text-slate-400 whitespace-nowrap ${i===0||i===3||i===6||i===9?"border-l border-slate-200":""}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1008,6 +1044,16 @@ export default function DispatchPage() {
                     <tr key={row.uid} className="hover:bg-slate-50">
                       <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
                       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
+                      {/* Mủ chén */}
+                      <td className="px-2 py-2 border-l border-slate-100">
+                        <input value={row.kl_ct} onChange={e => updateRow(idx,"kl_ct",e.target.value)}
+                          placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2">
+                        <input value={row.drc_c} onChange={e => updateRow(idx,"drc_c",e.target.value)}
+                          placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2 font-semibold text-lime-700 whitespace-nowrap">{row.kl_ck || "—"}</td>
                       {/* Đông chén */}
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
