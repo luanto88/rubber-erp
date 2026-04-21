@@ -46,7 +46,7 @@ const ALL_POSITIONS = [
 const NGUON_GOC_OPTS  = ["NT","M","GCA"]
 const XU_LY_OPTS      = ["Xé","Không xé","Hỗn hợp"]
 const CHUNG_NHAN_BASE = ["PEFC CS","PEFC FM","Không"]
-const TRANG_THAI_OPTS = ["Đang sản xuất","Chờ sản xuất","Hoàn thành","Đóng"]
+const TRANG_THAI_OPTS = ["Đang nhận (Cần cập nhật)","Chờ sản xuất","Đang sản xuất","Đã sản xuất"]
 
 const NL_ABBR: Record<string, string> = {
   "Mủ chén": "MC", "Mủ đông chén": "ĐC", "Mủ đông khối": "ĐK",
@@ -65,23 +65,32 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
   xu_ly: "Xé", chung_nhan: "PEFC CS",
   ngay_bd: new Date().toISOString().slice(0, 10),
   ngay_kt: "",
-  trang_thai: "Đang sản xuất",
+  trang_thai: "Đang nhận (Cần cập nhật)",
   tong_tuoi: 0, tong_kho: 0,
   lo_nguon_goc: "",
 })
 
 const headerStyle = (tt: string) => {
-  if (tt === "Đang sản xuất") return { grad: "from-emerald-50 to-teal-50",   icon: "text-emerald-600" }
-  if (tt === "Hoàn thành")   return { grad: "from-blue-50 to-cyan-50",       icon: "text-blue-600" }
-  if (tt === "Chờ sản xuất") return { grad: "from-amber-50 to-yellow-50",    icon: "text-amber-500" }
+  if (tt === "Đang sản xuất")            return { grad: "from-emerald-50 to-teal-50",   icon: "text-emerald-600" }
+  if (tt === "Đã sản xuất")              return { grad: "from-blue-50 to-cyan-50",       icon: "text-blue-600" }
+  if (tt === "Chờ sản xuất")             return { grad: "from-amber-50 to-yellow-50",    icon: "text-amber-500" }
+  if (tt === "Đang nhận (Cần cập nhật)") return { grad: "from-slate-50 to-gray-100",    icon: "text-slate-400" }
   return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
 }
 
 const badgeClass = (tt: string) => {
-  if (tt === "Đang sản xuất") return "bg-emerald-100 text-emerald-700"
-  if (tt === "Hoàn thành")   return "bg-blue-100 text-blue-700"
-  if (tt === "Chờ sản xuất") return "bg-amber-100 text-amber-700"
+  if (tt === "Đang sản xuất")            return "bg-emerald-100 text-emerald-700"
+  if (tt === "Đã sản xuất")              return "bg-blue-100 text-blue-700"
+  if (tt === "Chờ sản xuất")             return "bg-amber-100 text-amber-700"
+  if (tt === "Đang nhận (Cần cập nhật)") return "bg-slate-100 text-slate-500"
   return "bg-slate-100 text-slate-600"
+}
+
+const deriveTrangThai = (ngay_bd: string, ngay_kt: string, current: string): string => {
+  if (current === "Đang sản xuất" || current === "Đã sản xuất") return current
+  if (ngay_bd && ngay_kt) return "Chờ sản xuất"
+  if (ngay_bd) return "Đang nhận (Cần cập nhật)"
+  return current
 }
 
 const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
@@ -119,6 +128,9 @@ export default function StoragePage() {
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
 
+  // unassigned summary
+  const [unassignedSummary, setUnassignedSummary] = useState<{ total: number; byDate: Record<string, number> }>({ total: 0, byDate: {} })
+
   // trips
   const [dispatchTrips, setDispatchTrips]   = useState<TripItem[]>([])
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
@@ -126,6 +138,25 @@ export default function StoragePage() {
   const [manualKL, setManualKL]             = useState(false)
 
   // ── Load ──────────────────────────────────────────────────────────────────
+  const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
+    const assignedUIDs = new Set(allNgans.flatMap(n => n.trips || []))
+    const { data } = await supabase
+      .from("dispatch_entries")
+      .select("rows,ngay")
+      .eq("factory_id", fid)
+      .order("ngay", { ascending: true })
+    const byDate: Record<string, number> = {}
+    for (const entry of (data || [])) {
+      for (const row of ((entry.rows || []) as { uid: string }[])) {
+        if (!assignedUIDs.has(row.uid)) {
+          byDate[entry.ngay] = (byDate[entry.ngay] || 0) + 1
+        }
+      }
+    }
+    const total = Object.values(byDate).reduce((s, v) => s + v, 0)
+    setUnassignedSummary({ total, byDate })
+  }, [])
+
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
     let q = supabase.from("ngans").select("*")
@@ -136,14 +167,16 @@ export default function StoragePage() {
       q,
       supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
     ])
-    setNgans(data || [])
+    const loaded = data || []
+    setNgans(loaded)
     const ls: Record<string, number> = {}
     for (const l of lotsData || []) {
       if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
     }
     setLotStats(ls)
     setLoading(false)
-  }, [filterTT])
+    loadUnassigned(fid, loaded)
+  }, [filterTT, loadUnassigned])
 
   useEffect(() => {
     const fid = localStorage.getItem("erp_factory")
@@ -204,7 +237,7 @@ export default function StoragePage() {
   const busyPositions = new Set(
     ngans
       .filter(n =>
-        (n.trang_thai === "Đang sản xuất" || n.trang_thai === "Chờ sản xuất") &&
+        (n.trang_thai === "Đang sản xuất" || n.trang_thai === "Chờ sản xuất" || n.trang_thai === "Đang nhận (Cần cập nhật)") &&
         (!editId || n.id !== editId)
       )
       .map(n => n.ten_ngan)
@@ -262,8 +295,10 @@ export default function StoragePage() {
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
+    const trangThai = deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)
     const payload = {
       ...form,
+      trang_thai: trangThai,
       factory_id: factoryId,
       ngay_kt: form.ngay_kt || null,
       trips: Array.from(selectedTrips),
@@ -303,7 +338,7 @@ export default function StoragePage() {
       xu_ly: n.xu_ly || "Xé", chung_nhan: n.chung_nhan || "PEFC CS",
       ngay_bd: n.ngay_bd?.slice(0, 10) || "",
       ngay_kt: n.ngay_kt?.slice(0, 10) || "",
-      trang_thai: n.trang_thai || "Đang sản xuất",
+      trang_thai: n.trang_thai || "Đang nhận (Cần cập nhật)",
       tong_tuoi: n.tong_tuoi || 0, tong_kho: n.tong_kho || 0,
       lo_nguon_goc: n.lo_nguon_goc || "",
     }
@@ -313,6 +348,7 @@ export default function StoragePage() {
     setDispatchTrips([])
     setManualKL(true)
     setModal("edit")
+    if (f.ngay_bd && f.ngay_kt) fetchTrips(f.ngay_bd, f.ngay_kt)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -339,6 +375,24 @@ export default function StoragePage() {
           {dayChuyen === "Mủ tạp" ? "→ Ngăn lưu" : "→ Hồ chứa"}
         </p>
       </div>
+
+      {/* Xe chưa vào ngăn */}
+      {unassignedSummary.total > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Truck size={15} className="text-amber-600 shrink-0" />
+            <span className="text-sm font-bold text-amber-800">
+              Xe chưa vào {subTerm.toLowerCase()}: {unassignedSummary.total} chuyến
+            </span>
+          </div>
+          <p className="text-xs text-amber-700 leading-relaxed">
+            {Object.entries(unassignedSummary.byDate)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([date, cnt]) => `${fmtDate(date)}: ${cnt}`)
+              .join(" • ")}
+          </p>
+        </div>
+      )}
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
@@ -401,10 +455,8 @@ export default function StoragePage() {
         ) : (
           <div className="grid grid-cols-3 gap-4">
             {filtered.map(n => {
-              const days    = curingDays(n.ngay_bd)
-              const minDays = 21
-              const pct     = days !== null ? Math.min((days / minDays) * 100, 100) : 0
-              const ready   = days !== null && days >= minDays
+              const days  = curingDays(n.ngay_bd)
+              const ready = days !== null && days >= 21
               const hs      = headerStyle(n.trang_thai)
               const tpKg    = lotStats[n.id] || 0
               const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
@@ -487,20 +539,18 @@ export default function StoragePage() {
                         )}
                       </div>
                     </div>
-                    {days !== null && (
-                      <div className="py-2">
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-slate-500">Thời gian ủ</span>
-                          <span className={`font-bold ${ready ? "text-emerald-600" : "text-amber-600"}`}>
-                            {days} ngày {ready ? "✓ Đủ 21 ngày" : `(còn ${minDays - days} ngày)`}
+                    <div className="flex items-center gap-2 py-2">
+                      <Activity size={14} className="text-slate-400 shrink-0" />
+                      <span className="text-xs text-slate-500 w-24 shrink-0">Ngày lưu ủ</span>
+                      <span className="text-sm font-semibold text-slate-800">
+                        {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
+                        {days !== null && (
+                          <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
+                            ({days} ngày{ready ? " ✓" : ""})
                           </span>
-                        </div>
-                        <div className="w-full bg-slate-100 rounded-full h-1.5">
-                          <div className={`h-1.5 rounded-full transition-all ${ready ? "bg-emerald-500" : "bg-amber-400"}`}
-                            style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    )}
+                        )}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )
@@ -719,13 +769,13 @@ export default function StoragePage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-slate-50" />
               </div>
 
-              {/* Trạng thái */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Trạng thái</label>
-                <select value={form.trang_thai} onChange={e => setForm(p => ({ ...p, trang_thai: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  {TRANG_THAI_OPTS.map(o => <option key={o}>{o}</option>)}
-                </select>
+              {/* Trạng thái (read-only, tự tính từ ngày) */}
+              <div className="bg-slate-50 rounded-xl px-4 py-3 flex items-center gap-2">
+                <span className="text-xs text-slate-500">Trạng thái:</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${badgeClass(deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai))}`}>
+                  {deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)}
+                </span>
+                <span className="text-xs text-slate-400">(tự động)</span>
               </div>
             </div>
 
