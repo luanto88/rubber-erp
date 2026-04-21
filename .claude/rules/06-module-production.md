@@ -7,6 +7,7 @@ description: Business logic các module sản xuất — Điều xe, Ngăn lưu,
 ## Module Điều xe (`dispatch_entries`)
 
 ### Cấu trúc dữ liệu
+
 ```typescript
 // Bảng dispatch_entries
 {
@@ -27,9 +28,12 @@ description: Business logic các module sản xuất — Điều xe, Ngăn lưu,
   diem_gn: string[],   // mã lô vườn ["Q7","P11"]
   phien: string[],     // ["Phiên A","Phiên B","Phiên C","Phiên D"]
   lo_thu_hoach: string[], // AUTO-FILL từ phien + diem_gn
-  xu_ly: string,        // "Xé" | "Cán"
+  xu_ly: string,        // "Xé" | "Không xé"
   lo_trinh: string[],  // chỉ điểm cùng doi với diem_gn
   so_km: number,
+  kl_ct: string,       // Chen tuoi (kg)
+  drc_c: string,       // DRC% chen
+  kl_ck: string,       // Chen kho — AUTO-CALC
   kl_dct: string,       // Dong chen tuoi (kg)
   drc_dc: string,       // DRC% dong chen
   kl_dck: string,       // Dong chen kho — AUTO-CALC
@@ -46,37 +50,45 @@ description: Business logic các module sản xuất — Điều xe, Ngăn lưu,
 ```
 
 ### Auto-calc bắt buộc
+
 ```typescript
-kl_dck = autoCalcKLK(kl_dct, drc_dc)   // dong chen kho
-kl_dkk = autoCalcKLK(kl_dkt, drc_dk)   // dong khoi kho
-kl_dk  = autoCalcKLK(kl_dt,  drc_d)    // mu day kho
+kl_ck = autoCalcKLK(kl_ct, drc_c); // chen kho
+kl_dck = autoCalcKLK(kl_dct, drc_dc); // dong chen kho
+kl_dkk = autoCalcKLK(kl_dkt, drc_dk); // dong khoi kho
+kl_dk = autoCalcKLK(kl_dt, drc_d); // mu day kho
 // Trigger khi field tuong ung thay doi
 ```
 
 ### Logic chuyến auto-assign
+
 ```typescript
 // Trong updateRow khi field === "so_xe":
-const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val)
-next.chuyen = sameXe.length + 1  // 0 -> 1, 1 -> 2, >=2 -> warn
-next._warn = sameXe.length >= 2 ? `Xe ${val} da co ${sameXe.length} chuyen!` : undefined
+const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val);
+next.chuyen = sameXe.length + 1; // 0 -> 1, 1 -> 2, >=2 -> warn
+next._warn =
+  sameXe.length >= 2 ? `Xe ${val} da co ${sameXe.length} chuyen!` : undefined;
 ```
 
 ### Logic lo_trinh filter theo doi
+
 ```typescript
 // DIEM_GN co truong doi: number (lay tu lo_chi_tiet.csv)
 // Khi diem_gn thay doi, tinh allowedDoi, loc lo_trinh options
-const allowedDoi = getAllowedDoi(row.diem_gn)
-const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
+const allowedDoi = getAllowedDoi(row.diem_gn);
+const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
+  (d) => d.ma_lo,
+);
 ```
 
 ### Doi phan bo cua DIEM_GN
-- Doi 1: E1, G3, G5, C2
-- Doi 2: B5
-- Doi 3: D9, G8, G9, J7
-- Doi 4: L2
+
+- Doi 1: E1, G3, G5
+- Doi 2: B5, D9  (D9 chuyen tu Doi 3 sang)
+- Doi 3: G8, G9, J7
+- Doi 4: L2, N7
 - Doi 5: C16, C17, D11
-- Doi 6: H11, K10, L12, H13
-- Doi 7: L14
+- Doi 6: H11, K10, L12
+- Doi 7: H13, L14  (H13 chuyen tu Doi 6 sang)
 - Doi 8: F16, I16
 - Doi 9: U2, P3
 - Doi 10: Q7, P11
@@ -84,28 +96,30 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 - Doi 12: S15, S12, P14
 
 ### UI flow
+
 1. **List view** → col "Ma DX" dau tien (DX-ddmmyy/N), click hang → detail
 2. **Detail view** → bang day du, header hien ma_dx
 3. **Add view** → pre-fill rows tu ngay gan nhat (xoa KL), ngay default = maxDate+1
 4. **Nha may diem den** → disabled, lay tu factories table
 5. **Chung nhan** → "PEFC CS" | "PEFC FM" | "Khong" (khong co "ISO")
-6. **Toolbar** → Tai bang (CSV template, admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
-7. **KL modal** → 3 nhom: Dong chen / Dong khoi / Mu day
+6. **Toolbar** → Tai bang (CSV template hoặc xlsx template , admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
+7. **KL modal** → 3 nhom: Chen / Dong chen / Dong khoi / Mu day
 
 ---
 
 ## Module Ngăn lưu (`ngans`)
 
 ### Cấu trúc dữ liệu
+
 ```typescript
 {
   id: UUID, factory_id: UUID,
   ma_ngan: string,    // "N11-NT-ĐC-X-29/12/25-31/12/25"
   ten_ngan: string,   // "N11"
-  loai_nl: string,    // "Mủ đông chén"|"Mủ nước"|"Mủ tạp"|"Mủ skim"
+  loai_nl: string,    // "Mủ chén"|"Mủ đông chén"|"Mủ đông khối"|"Mủ dây"|"Mủ dơ"|"Mủ tạp"|"Mủ nước"
   nguon_goc: string,  // "NT"|"M"|"GCA"
-  xu_ly: string,      // "Xé"|"Cán"|"Hỗn hợp"
-  chung_nhan: string, // "PEFC CS"|"PEFC FM"|"ISO"|"Không"
+  xu_ly: string,      // "Xé"|"Không xé"|"Hỗn hợp"  (không dùng "Cán")
+  chung_nhan: string, // "PEFC CS"|"PEFC FM"|"Không"
   ngay_bd: date, ngay_kt: date,
   trang_thai: string, // "Đang sản xuất"|"Chờ sản xuất"|"Hoàn thành"|"Đóng"
   tong_tuoi: number,  // KL tươi tổng (kg)
@@ -116,6 +130,7 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 ```
 
 ### Business rules
+
 - **Thời gian ủ tối thiểu: 21 ngày** tính từ `ngay_bd`
 - **Progress bar:** `Math.min(daysSinceBD / 21 * 100, 100)%`
   - Màu xanh `bg-emerald-500` khi ≥ 21 ngày
@@ -124,6 +139,7 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 - Một ngăn có thể cung cấp mủ cho nhiều lô thành phẩm
 
 ### UI: Card grid (không phải bảng)
+
 - Layout 3 cột responsive
 - Card header màu theo trạng thái
 - Mỗi card hiện: tên, loại NL, nguồn gốc, chứng nhận, KL, progress bar ủ
@@ -133,6 +149,7 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 ## Module Thành phẩm (`lots`)
 
 ### Cấu trúc dữ liệu
+
 ```typescript
 {
   id: UUID, factory_id: UUID,
@@ -157,6 +174,7 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 ```
 
 ### Business rules bắt buộc
+
 - **Lô tròn:** 4 kiện × 36 bành = **144 bành** → `trang_thai = "Hoàn thành"`
 - **Lô dở dang:** bất kỳ kiện nào < 36 → `trang_thai = "Dở dang"`
 - **Auto-calc:**
@@ -167,8 +185,9 @@ const opts = DIEM_GN.filter(d => allowedDoi.includes(d.doi)).map(d => d.ma_lo)
 - **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d} tại thời điểm lô bị đánh dấu dở dang
 
 ### Hậu tố lô
-| Code | Tên | Nguồn gốc | Chứng nhận |
-|---|---|---|---|
-| `cs` | Nội tuyển PEFC | NT | PEFC CS |
-| `m` | Mua ngoài | M | — |
-| `gca` | Gia công | GCA | — |
+
+| Code  | Tên            | Nguồn gốc | Chứng nhận |
+| ----- | -------------- | --------- | ---------- |
+| `cs`  | Nội tuyển PEFC | NT        | PEFC CS    |
+| `m`   | Mua ngoài      | M         | —          |
+| `gca` | Gia công       | GCA       | —          |

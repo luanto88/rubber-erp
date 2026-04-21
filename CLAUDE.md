@@ -64,7 +64,7 @@ src/
 | Code          | Tên                    | Sản phẩm                                          | Chứng nhận                      |
 | ------------- | ---------------------- | ------------------------------------------------- | ------------------------------- |
 | `phuochoa_kt` | Phước Hòa Kampong Thom | CSR (CSRL/CSR3L/CSR5/CSRCV50/CSRCV60/CSR10/CSR20) | PEFC/ISO 9001/14001/17025/14067 |
-| `cuaparis`    | Cuaparis HCM           | SVR (SVRL/SVR3L/SVR5/SVRCV50/SVRCV50/SVR10/SVR20) | ISO                             |
+| `cuaparis`    | Cuaparis               | SVR (SVRL/SVR3L/SVR5/SVRCV50/SVRCV50/SVR10/SVR20) | ISO                             |
 
 ---
 
@@ -106,9 +106,12 @@ src/
   diem_gn: string[],    // Điểm giao nhận — mã lô vườn: ["Q7","P11"]
   phien: string[],      // ["Phiên A","Phiên B","Phiên C","Phiên D"]
   lo_thu_hoach: string[], // AUTO-FILL từ phiên + điểm GN
-  xu_ly: string,        // "Xé" | "Cán"
+  xu_ly: string,        // "Xé" | "Không xé"
   lo_trinh: string[],   // Lộ trình — chỉ hiện điểm cùng đội với diem_gn
   so_km: number,
+  kl_ct: string,        // Chén tươi (kg)
+  drc_c: string,        // DRC% chén
+  kl_ck: string,        // Chén khô — AUTO-CAL
   kl_dct: string,       // Đông chén tươi (kg)
   drc_dc: string,       // DRC% đông chén
   kl_dck: string,       // Đông chén khô — AUTO-CALC
@@ -131,6 +134,7 @@ Ví dụ: phiếu đầu tiên ngày 01/01/2026 → `DX-010126/1`.
 
 ### Logic tính tự động
 
+- `kl_ck = kl_ct × drc_c / 100` (chén khô)
 - `kl_dck = kl_dct × drc_dc / 100` (đông chén khô)
 - `kl_dkk = kl_dkt × drc_dk / 100` (đông khối khô)
 - `kl_dk  = kl_dt  × drc_d  / 100` (mủ dây khô)
@@ -141,10 +145,11 @@ Ví dụ: phiếu đầu tiên ngày 01/01/2026 → `DX-010126/1`.
 ### DiemGN Master Data
 
 Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.csv`.  
-Đội phân bổ: Đội 1 (E1,G3,G5,C2), Đội 2 (B5), Đội 3 (D9,G8,G9,J7),  
-Đội 4 (L2), Đội 5 (C16,C17,D11), Đội 6 (H11,K10,L12,H13),  
-Đội 7 (L14), Đội 8 (F16,I16), Đội 9 (U2,P3), Đội 10 (Q7,P11),  
-Đội 11 (T7,U11), Đội 12 (S15,S12,P14).
+Đội phân bổ: Đội 1 (E1,G3,G5), Đội 2 (B5,D9), Đội 3 (G8,G9,J7),  
+Đội 4 (L2,N7), Đội 5 (C16,C17,D11), Đội 6 (H11,K10,L12),  
+Đội 7 (L14,H13), Đội 8 (F16,I16), Đội 9 (U2,P3), Đội 10 (Q7,P11),  
+Đội 11 (T7,U11), Đội 12 (S15,S12,P14).  
+*(D9 chuyển từ Đội 3 → Đội 2; H13 chuyển từ Đội 6 → Đội 7)*
 
 ### UI Pattern
 
@@ -154,7 +159,7 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
 - Nhà máy điểm đến: lấy từ `factories` table, disabled
 - Chứng nhận: "PEFC CS" | "PEFC FM" | "Không" (không có "ISO")
 - Toolbar: Tải bảng (CSV template, admin only) | Nhập CSV (import, admin only) | Nhập KL | GeoJSON | + Thêm xe
-- KL modal: 3 nhóm — Đông chén (kl_dct/drc_dc/kl_dck) | Đông khối (kl_dkt/drc_dk/kl_dkk) | Mủ dây (kl_dt/drc_d/kl_dk)
+- KL modal: 4 nhóm — Chén (kl_ct/drc_c/kl_ck) |Đông chén (kl_dct/drc_dc/kl_dck) | Đông khối (kl_dkt/drc_dk/kl_dkk) | Mủ dây (kl_dt/drc_d/kl_dk)
 
 ---
 
@@ -168,10 +173,10 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
   factory_id: UUID,
   ma_ngan: string,      // "N11-NT-ĐC-X-29/12/25-31/12/25"
   ten_ngan: string,     // "N11"
-  loai_nl: string,      // "Mủ đông chén" | "Mủ nước" | "Mủ tạp" | "Mủ skim"
+  loai_nl: string,      // "Mủ chén" | "Mủ đông chén" | "Mủ đông khối" | "Mủ dây" | "Mủ dơ" | "Mủ tạp" | "Mủ nước"
   nguon_goc: string,    // "NT" | "M" | "GCA"
-  xu_ly: string,        // "Xé" | "Cán" | "Hỗn hợp"
-  chung_nhan: string,   // "PEFC CS" | "PEFC FM" | "ISO" | "Không"
+  xu_ly: string,        // "Xé" | "Không xé" | "Hỗn hợp"
+  chung_nhan: string,   // "PEFC CS" | "PEFC FM" | "Không" — lọc theo nhà máy: phuochoa_kt=["PEFC CS","Không"], cuaparis=["PEFC CS","PEFC FM","Không"]
   ngay_bd: date,        // Ngày bắt đầu
   ngay_kt: date,        // Ngày kết thúc
   trang_thai: string,   // "Đang sản xuất" | "Chờ sản xuất" | "Hoàn thành" | "Đóng"

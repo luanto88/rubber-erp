@@ -98,7 +98,7 @@ const DIEM_GN: DiemGN[] = [
   { ma_lo:"B5",  doi:2,  lat:12.632736, lng:105.495549, phien_a:["A3","A4","A5","A6","A7","B4","B5","B6","B7","C4","C5D","C5T","D4","D5D","D5T","E4","E5"], phien_b:["B4","C4","D4","E4"], phien_c:["E5","D5D","C5D","C5T"], phien_d:["A3","A4","A5"] },
   { ma_lo:"C16", doi:5,  lat:12.628052, lng:105.546290, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
   { ma_lo:"C17", doi:5,  lat:12.628048, lng:105.550884, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
-  { ma_lo:"D9",  doi:3,  lat:12.623630, lng:105.513983, phien_a:["A8","A9","A10","B8","B9","B10","C7","C8","C9","C10","D6","D7","D8","D10"], phien_b:["A8","A9","A10","B8"], phien_c:["B9","B10","C9","C10"], phien_d:["D6","D7","C6","C7"] },
+  { ma_lo:"D9",  doi:2,  lat:12.623630, lng:105.513983, phien_a:["A8","A9","A10","B8","B9","B10","C7","C8","C9","C10","D6","D7","D8","D10"], phien_b:["A8","A9","A10","B8"], phien_c:["B9","B10","C9","C10"], phien_d:["D6","D7","C6","C7"] },
   { ma_lo:"D11", doi:5,  lat:12.623617, lng:105.523006, phien_a:["A11","A12","A13","B11","B12","B13","C11","C12","C13","D11","D12","E11","E12","F11","F12"], phien_b:["A11","A12","B11","B12"], phien_c:["A13","B13","C13","D12"], phien_d:["C11","C12","D11","F12"] },
   { ma_lo:"E1",  doi:1,  lat:12.619189, lng:105.477754, phien_a:["A1","A2","B1","B2","B3","C1","C2","C3","D1","D2","D3","E1","E2D","E2T","E3","F1","F2","F3D","F3T"], phien_b:["A1","A2","B1","B2","B3"], phien_c:["C1","C2","C3","D1"], phien_d:["D2","E1","E2D","E2T","E3"] },
   { ma_lo:"F16", doi:8,  lat:12.614454, lng:105.546214, phien_a:["D13","D14","D15S","D15T","D16","D17","D18","E13","E14","E15","E16","E17","E18","F13","F14","F15"], phien_b:["D13","D14","D15S","D15T","D16","D17"], phien_c:["D17","D18","E16","E17","E18"], phien_d:["E16","E14","E15","E13"] },
@@ -123,10 +123,10 @@ const DIEM_GN: DiemGN[] = [
   { ma_lo:"S15", doi:12, lat:12.592000, lng:105.537000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
   { ma_lo:"S12", doi:12, lat:12.592000, lng:105.526000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
   { ma_lo:"P14", doi:12, lat:12.597000, lng:105.535000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
-  { ma_lo:"H13", doi:6,  lat:12.605000, lng:105.531000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
+  { ma_lo:"H13", doi:7,  lat:12.605000, lng:105.531000, phien_a:[], phien_b:[], phien_c:[], phien_d:[] },
 ]
 
-const XU_LY_OPTS = ["Xé","Cán"]
+const XU_LY_OPTS = ["Xé","Không xé","Hỗn hợp"]
 const DRIVERS = [...new Set(VEHICLES.map(v => v.tai_xe))].sort()
 
 function getAllowedDoi(diemGn: string[]): number[] {
@@ -250,6 +250,7 @@ export default function DispatchPage() {
   // KL modal, nhà máy, admin
   const [klModal, setKlModal]       = useState(false)
   const [factoryName, setFactoryName] = useState("NMCB Phước Hòa Kampong Thom")
+  const [factoryCode, setFactoryCode] = useState("")
   const [isAdmin, setIsAdmin]       = useState(false)
   const [importing, setImporting]   = useState(false)
   const importRef                   = useRef<HTMLInputElement>(null)
@@ -291,11 +292,12 @@ export default function DispatchPage() {
     if (!fid) return
     setFactoryId(fid)
     loadData(fid)
-    // Factory name + isAdmin
+    // Factory name + code + isAdmin
     supabase.from("factories").select("*").eq("id", fid).single().then(({ data: f }) => {
       if (f) {
         const fd = f as Record<string, unknown>
         setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
+        setFactoryCode((fd.code as string) || "")
       }
     })
     const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
@@ -790,7 +792,7 @@ export default function DispatchPage() {
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Chứng nhận</label>
             <select value={formCN} onChange={e => setFormCN(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-              {["PEFC CS","PEFC FM","Không"].map(c => <option key={c}>{c}</option>)}
+              {(factoryCode === "cuaparis" ? ["PEFC CS","PEFC FM","Không"] : ["PEFC CS","Không"]).map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
         </div>

@@ -26,10 +26,10 @@ type Ngan = {
   lo_nguon_goc: string
 }
 
-const LOAI_NL_OPTS    = ["Mủ đông chén","Mủ nước","Mủ tạp","Mủ skim"]
+const LOAI_NL_OPTS    = ["Mủ chén","Mủ đông chén","Mủ đông khối","Mủ dây","Mủ dơ","Mủ tạp","Mủ nước"]
 const NGUON_GOC_OPTS  = ["NT","M","GCA"]
-const XU_LY_OPTS      = ["Xé","Cán","Hỗn hợp"]
-const CHUNG_NHAN_OPTS = ["PEFC CS","PEFC FM","ISO","Không"]
+const XU_LY_OPTS      = ["Xé","Không xé","Hỗn hợp"]
+const CHUNG_NHAN_BASE = ["PEFC CS","PEFC FM","Không"]
 const TRANG_THAI_OPTS = ["Đang sản xuất","Chờ sản xuất","Hoàn thành","Đóng"]
 
 const emptyForm = () => ({
@@ -65,6 +65,7 @@ export default function StoragePage() {
   const [lotStats, setLotStats]   = useState<Record<string, number>>({})
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
+  const [factoryCode, setFactoryCode] = useState("")
   const [search, setSearch]       = useState("")
   const [filterTT, setFilterTT]   = useState("")
   const [filterNL, setFilterNL]   = useState("")
@@ -103,6 +104,9 @@ export default function StoragePage() {
     if (!fid) return
     setFactoryId(fid)
     loadData(fid)
+    supabase.from("factories").select("code").eq("id", fid).single().then(({ data: f }) => {
+      if (f) setFactoryCode((f as Record<string, unknown>).code as string || "")
+    })
   }, [loadData])
 
   const filtered = ngans.filter(n =>
@@ -396,7 +400,7 @@ export default function StoragePage() {
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Chứng nhận</label>
                   <select value={form.chung_nhan} onChange={e => setForm(p=>({...p,chung_nhan:e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {CHUNG_NHAN_OPTS.map(o=><option key={o}>{o}</option>)}
+                    {(factoryCode === "cuaparis" ? CHUNG_NHAN_BASE : ["PEFC CS","Không"]).map(o=><option key={o}>{o}</option>)}
                   </select>
                 </div>
               </div>
