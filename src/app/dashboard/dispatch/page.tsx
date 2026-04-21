@@ -276,14 +276,50 @@ export default function DispatchPage() {
     if (filterTo)   q = q.lte("ngay", filterTo)
     const { data } = await q
     const raw = (data || []) as DispatchEntry[]
+
+    // Normalize ngay → YYYY-MM-DD for reliable sorting
+    const toISO = (ngay: string) =>
+      ngay.includes("/") ? ngay.split("/").reverse().join("-") : ngay
+
+    // Re-compute lo_thu_hoach for rows missing it
+    const rehydrated = raw.map(e => ({
+      ...e,
+      rows: (e.rows || []).map(r => ({
+        ...r,
+        lo_thu_hoach: (r.lo_thu_hoach?.length ?? 0) > 0
+          ? r.lo_thu_hoach
+          : (() => {
+              const lots: string[] = []
+              for (const dgn of (r.diem_gn || [])) {
+                const d = DIEM_GN.find(g => g.ma_lo === dgn)
+                if (!d) continue
+                for (const p of (r.phien || [])) {
+                  const letter = p.replace(/Phiên\s*/i, "").toLowerCase()
+                  const key = `phien_${letter}` as keyof DiemGN
+                  const pLots = d[key]
+                  if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
+                }
+              }
+              return [...new Set(lots)]
+            })()
+      }))
+    }))
+
+    // Sort client-side by ISO date desc, then created_at desc (handles mixed DD/MM/YYYY & YYYY-MM-DD)
+    const sorted = [...rehydrated].sort((a, b) => {
+      const da = toISO(a.ngay), db = toISO(b.ngay)
+      if (da !== db) return da > db ? -1 : 1
+      return (b.created_at || "") > (a.created_at || "") ? 1 : -1
+    })
+
     // Compute ma_dx: DX-ddmmyy/seq per date group
     const byDate: Record<string, DispatchEntry[]> = {}
-    for (const e of raw) { const k = e.ngay; if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
-    const withCode = raw.map(e => {
-      const group = [...(byDate[e.ngay] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+    for (const e of sorted) { const k = toISO(e.ngay); if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
+    const withCode = sorted.map(e => {
+      const key = toISO(e.ngay)
+      const group = [...(byDate[key] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
       const seq = group.findIndex(x => x.id === e.id) + 1
-      const ds = e.ngay.includes("/") ? e.ngay.split("/").reverse().join("-") : e.ngay
-      const d = new Date(ds)
+      const d = new Date(key)
       const dd = String(d.getDate()).padStart(2,"0")
       const mm = String(d.getMonth()+1).padStart(2,"0")
       const yy = String(d.getFullYear()).slice(-2)
