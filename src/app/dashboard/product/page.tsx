@@ -1,7 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
-import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
   Plus, Search, X, ChevronLeft, Edit2, Trash2, Package,
   CheckCircle, Clock, Layers, Weight, AlertTriangle, Lock,
@@ -229,9 +228,26 @@ function emptyEditForm(): EditForm {
   }
 }
 
+// ─── Stepper Component ────────────────────────────────────────────────────────
+function Stepper({ value, min, max, onChange, disabled, className }: {
+  value: number; min: number; max: number
+  onChange: (v: number) => void; disabled?: boolean; className?: string
+}) {
+  return (
+    <div className={`flex items-center border border-slate-300 rounded-xl overflow-hidden ${className || ""}`}>
+      <button type="button" onClick={() => onChange(Math.max(min, value - 1))}
+        disabled={disabled || value <= min}
+        className="px-2.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 disabled:opacity-30 font-bold text-sm transition-colors select-none">−</button>
+      <span className="px-3 py-2 text-sm font-bold text-center min-w-[3rem] select-none">{value}</span>
+      <button type="button" onClick={() => onChange(Math.min(max, value + 1))}
+        disabled={disabled || value >= max}
+        className="px-2.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 disabled:opacity-30 font-bold text-sm transition-colors select-none">+</button>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ProductPage() {
-  useScrollReveal()
 
   const [lots, setLots]           = useState<Lot[]>([])
   const [ngans, setNgans]         = useState<Ngan[]>([])
@@ -392,6 +408,12 @@ export default function ProductPage() {
 
   // Derive year từ session.ngay_sx
   const sessionYear = yearFromDate(session.ngay_sx)
+
+  // Số lô lớn nhất theo suffix hiện tại (gợi ý)
+  const latestNumBySuffix = useMemo(() =>
+    lots.filter(l => l.suffix === session.suffix)
+      .reduce((m, l) => Math.max(m, l.num || 0), 0)
+  , [lots, session.suffix])
 
   // ── Session handlers ───────────────────────────────────────────────────────
   const updateSession = (patch: Partial<SessionHeader>) => {
@@ -981,19 +1003,27 @@ export default function ProductPage() {
               <div className="p-5">
                 {/* Khoảng lô */}
                 <div className="flex items-center gap-3 mb-5">
-                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 flex-wrap">
                     <span className="text-xs font-bold text-slate-500">Khoảng lô:</span>
                     <span className="text-xs text-slate-400">Từ lô</span>
                     <input type="number" min={1} value={cs.from_num}
                       onChange={e => updateCaSection(caIdx, { from_num: Math.max(1, +e.target.value), to_num: Math.max(cs.to_num, +e.target.value) })}
                       className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
                     <span className="text-xs text-slate-400">đến lô</span>
-                    <input type="number" min={cs.from_num} value={cs.to_num}
-                      onChange={e => updateCaSection(caIdx, { to_num: Math.max(cs.from_num, +e.target.value) })}
-                      className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
+                    <Stepper
+                      value={cs.to_num}
+                      min={cs.from_num}
+                      max={cs.from_num + 30}
+                      onChange={v => updateCaSection(caIdx, { to_num: v })}
+                    />
                     <span className="text-xs text-slate-400 ml-1">
                       {session.suffix ? `${session.suffix}/` : "/"}{sessionYear}
                     </span>
+                    {caIdx === 0 && latestNumBySuffix > 0 && (
+                      <span className="text-[10px] text-slate-400 italic">
+                        (gần nhất: {latestNumBySuffix}{session.suffix}/{sessionYear})
+                      </span>
+                    )}
                     {loCount > 0 && (
                       <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
                         {loCount} lô
@@ -1066,47 +1096,73 @@ export default function ProductPage() {
                               const val       = lot[k]
                               const prev      = prevArr[ki]
                               const maxK      = cfg.max_per_kien
-                              const remaining = maxK - prev
                               const kLabel    = ["A", "B", "C", "D"][ki]
 
+                              // Lô kế thừa + khóa (ca trước đã đủ) → indigo
+                              if (lot.is_continuation && isLocked) {
+                                return (
+                                  <div key={k} className="flex flex-col items-center gap-1">
+                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full whitespace-nowrap">
+                                      Ca trước · đã đủ
+                                    </span>
+                                    <div className="w-full border border-indigo-300 bg-indigo-50 rounded-xl px-2 py-2 flex items-center justify-between">
+                                      <span className="text-xs font-extrabold text-indigo-500">{kLabel}</span>
+                                      <span className="text-sm font-extrabold text-indigo-700">{val}</span>
+                                      <Lock size={10} className="text-indigo-400"/>
+                                    </div>
+                                    <div className="text-[10px] text-center text-slate-400">
+                                      {(val * session.loai_banh / 1000).toFixed(3)} T
+                                    </div>
+                                  </div>
+                                )
+                              }
+
+                              // Lô kế thừa + chưa đủ → stepper min=prev max=maxK
+                              if (lot.is_continuation && !isLocked) {
+                                const remaining = maxK - prev
+                                return (
+                                  <div key={k} className="flex flex-col items-center gap-1">
+                                    <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap">
+                                      Ca trước: {prev} · thêm ≤{remaining}
+                                    </span>
+                                    <Stepper
+                                      value={val} min={prev} max={maxK}
+                                      disabled={nganBlocked}
+                                      onChange={v => updateLotDraft(caIdx, lotIdx, { [k]: v } as Partial<LotDraft>)}
+                                      className={val >= maxK ? "border-emerald-300 bg-emerald-50" : val > prev ? "border-amber-300 bg-amber-50" : ""}
+                                    />
+                                    <div className="text-[10px] text-center text-slate-400">
+                                      {(val * session.loai_banh / 1000).toFixed(3)} T
+                                    </div>
+                                  </div>
+                                )
+                              }
+
+                              // Lô bình thường → input number
                               return (
                                 <div key={k} className="relative">
-                                  {lot.is_continuation && !isLocked && remaining < maxK && (
-                                    <div className="text-[9px] text-amber-600 font-bold mb-1 text-center">
-                                      Ca trước: {prev} · thêm tối đa {remaining}
-                                    </div>
-                                  )}
                                   <div className={`relative border rounded-xl overflow-hidden ${
-                                    isLocked ? "border-emerald-300 bg-emerald-50" :
                                     val > 0 && val < maxK ? "border-amber-300 bg-amber-50" :
                                     val >= maxK ? "border-emerald-300 bg-emerald-50" :
                                     "border-slate-300"}`}>
                                     <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-xs font-extrabold ${
-                                      isLocked ? "text-emerald-600" : val >= maxK ? "text-emerald-600" : val > 0 ? "text-amber-700" : "text-slate-400"}`}>
+                                      val >= maxK ? "text-emerald-600" : val > 0 ? "text-amber-700" : "text-slate-400"}`}>
                                       {kLabel}
                                     </span>
                                     <input type="number" value={val}
-                                      min={lot.is_continuation ? prev : 0} max={maxK}
-                                      disabled={isLocked || lot.role === "giua" || nganBlocked}
+                                      min={0} max={maxK}
+                                      disabled={nganBlocked}
                                       onChange={e => updateLotDraft(caIdx, lotIdx, { [k]: +e.target.value } as Partial<LotDraft>)}
                                       className={`w-full pl-7 pr-6 py-2.5 text-sm font-bold text-center outline-none bg-transparent ${
-                                        isLocked ? "text-emerald-700 cursor-not-allowed" :
                                         val >= maxK ? "text-emerald-700" :
                                         val > 0 ? "text-amber-700" : "text-slate-700"}`}/>
-                                    {isLocked ? (
-                                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                                        <Lock size={10} className="text-emerald-500"/>
-                                      </span>
-                                    ) : (
-                                      /* Nút (x) reset về 0 hoặc prev */
-                                      !nganBlocked && val !== (lot.is_continuation ? prev : 0) && (
-                                        <button
-                                          onClick={() => resetKien(caIdx, lotIdx, resetKeys[ki])}
-                                          title={lot.is_continuation ? `Reset về ${prev} (ca trước)` : "Reset về 0"}
-                                          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors">
-                                          <X size={10}/>
-                                        </button>
-                                      )
+                                    {!nganBlocked && val > 0 && val < maxK && (
+                                      <button
+                                        onClick={() => resetKien(caIdx, lotIdx, resetKeys[ki])}
+                                        title="Reset về 0"
+                                        className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors">
+                                        <X size={10}/>
+                                      </button>
                                     )}
                                   </div>
                                   <div className="text-[10px] text-center text-slate-400 mt-1">
@@ -1126,6 +1182,17 @@ export default function ProductPage() {
                     })}
                   </div>
                 )}
+
+                {/* Tổng ca */}
+                {caTongBanh > 0 && (
+                  <div className="mt-3 flex items-center flex-wrap gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+                    <span className="text-xs font-extrabold text-blue-700">Tổng Ca {caLabel}:</span>
+                    <span className="text-sm font-extrabold text-blue-800">{caTongBanh} bành</span>
+                    <span className="text-xs text-blue-400">·</span>
+                    <span className="text-sm font-extrabold text-blue-800">{Math.round(caTongKg).toLocaleString("vi-VN")} kg</span>
+                    <span className="ml-auto text-xs text-blue-500">≈ {(caTongKg / 1000).toFixed(3)} tấn</span>
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -1133,50 +1200,90 @@ export default function ProductPage() {
 
         {/* ── Sticky bottom bar ── */}
         {hasNgan && selectedNgan && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg px-6 py-4 z-40">
-            <div className="max-w-7xl mx-auto flex items-center gap-6">
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-1.5 text-xs">
-                  <span className="font-bold text-slate-600">Tiến độ ngăn {selectedNgan.ten_ngan}</span>
-                  <span className={`font-extrabold ${nganBlocked ? "text-red-600" : nganPct >= 100 ? "text-amber-600" : "text-emerald-600"}`}>
-                    {nganPct.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 mb-1">
-                  <div className={`h-2 rounded-full transition-all ${nganBlocked ? "bg-red-500" : nganPct >= 100 ? "bg-amber-400" : "bg-emerald-500"}`}
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-40">
+            <div className="max-w-7xl mx-auto px-6 py-3">
+              {/* Tầng 1: Thanh tiến độ ngăn compact */}
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-xs font-bold text-slate-600 shrink-0">
+                  Ngăn {selectedNgan.ten_ngan}
+                </span>
+                <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                  <div className={`h-1.5 rounded-full transition-all ${nganBlocked ? "bg-red-500" : nganPct >= 100 ? "bg-amber-400" : "bg-emerald-500"}`}
                     style={{ width: `${Math.min(nganPct, 100)}%` }}/>
                 </div>
-                <div className="text-[10px] text-slate-400">
-                  Đã: {(kgDaCoTrongNgan / 1000).toFixed(3)} T
-                  {kgLanNay > 0 && ` + Lần này: ${(kgLanNay / 1000).toFixed(3)} T`}
-                  {" "}= {(kgTotal / 1000).toFixed(3)} T / {(selectedNgan.tong_kho / 1000).toFixed(3)} T
-                </div>
+                <span className={`text-xs font-extrabold shrink-0 ${nganBlocked ? "text-red-600" : nganPct >= 100 ? "text-amber-600" : "text-emerald-600"}`}>
+                  {nganPct.toFixed(1)}%
+                </span>
+                <span className="text-[10px] text-slate-400 shrink-0">
+                  {(kgDaCoTrongNgan / 1000).toFixed(3)}T
+                  {kgLanNay > 0 ? ` + ${(kgLanNay / 1000).toFixed(3)}T` : ""}
+                  {" "}/ {(selectedNgan.tong_kho / 1000).toFixed(3)}T
+                </span>
                 {nganBlocked && (
-                  <p className="text-[10px] text-red-600 font-bold mt-0.5">
-                    ⛔ Vượt quá 110% — Giảm bớt số bành hoặc chọn ngăn khác
-                  </p>
+                  <span className="text-[10px] text-red-600 font-bold shrink-0">⛔ Vượt 110%</span>
                 )}
               </div>
-              <div className="text-xs text-slate-500 text-right shrink-0">
-                <span className="font-bold text-slate-700">{sessionTotals.banh}</span> bành ·{" "}
-                <span className="font-bold text-slate-700">{(kgLanNay / 1000).toFixed(3)} T</span>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => setView("list")}
-                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
-                  Hủy
-                </button>
-                {nganPct >= 100 && !nganBlocked ? (
-                  <button onClick={() => handleCreateSave(true)} disabled={saving || caSections.every(cs => cs.lots.length === 0)}
-                    className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
-                    {saving ? "Đang lưu..." : `✓ Lưu ${sessionTotals.banh} bành · Đánh dấu ngăn Hoàn thành`}
-                  </button>
-                ) : (
-                  <button onClick={() => handleCreateSave(false)} disabled={saving || nganBlocked || !session.ngan_id || caSections.every(cs => cs.lots.length === 0)}
-                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
-                    {saving ? "Đang lưu..." : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bành" : "lô"}`}
-                  </button>
+
+              {/* Tầng 2: Thẻ thông tin phiên + nút lưu */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Session info pills */}
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
+                  {new Date(session.ngay_sx + "T00:00:00").toLocaleDateString("vi-VN")}
+                </span>
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
+                  {session.loai_csr} · {session.loai_banh}kg
+                </span>
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap max-w-[200px] truncate">
+                  {session.boc}
+                </span>
+                {session.pallet.length > 0 && (
+                  <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
+                    {session.pallet.join(" · ")}
+                  </span>
                 )}
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
+                  CT:{session.chi_thi}
+                </span>
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
+                  Thấm {session.tham}
+                </span>
+                <span className="text-slate-300 text-xs">│</span>
+                {/* Ca kg pills */}
+                {caSections.map((cs, ci) => {
+                  const caKg = Math.round(cs.lots.reduce((s, l) => {
+                    if (l.is_continuation) return s + (l.kien_a + l.kien_b + l.kien_c + l.kien_d - l.prev_a - l.prev_b - l.prev_c - l.prev_d) * session.loai_banh
+                    return s + l.tong_kg
+                  }, 0) * 100) / 100
+                  if (caKg <= 0) return null
+                  return (
+                    <span key={ci} className="px-2.5 py-1 bg-blue-100 text-blue-700 text-[11px] font-bold rounded-full whitespace-nowrap">
+                      Ca {cs.ca}: {Math.round(caKg).toLocaleString("vi-VN")} kg
+                    </span>
+                  )
+                })}
+                {kgLanNay > 0 && (
+                  <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[11px] font-extrabold rounded-full whitespace-nowrap">
+                    Tổng: {Math.round(kgLanNay).toLocaleString("vi-VN")} kg
+                  </span>
+                )}
+                {/* Nút lưu */}
+                <div className="ml-auto flex gap-2 shrink-0">
+                  <button onClick={() => setView("list")}
+                    className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
+                    Hủy
+                  </button>
+                  {nganPct >= 100 && !nganBlocked ? (
+                    <button onClick={() => handleCreateSave(true)} disabled={saving || caSections.every(cs => cs.lots.length === 0)}
+                      className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
+                      {saving ? "Đang lưu..." : `✓ Lưu · Đánh dấu ngăn Hoàn thành`}
+                    </button>
+                  ) : (
+                    <button onClick={() => handleCreateSave(false)} disabled={saving || nganBlocked || !session.ngan_id || caSections.every(cs => cs.lots.length === 0)}
+                      className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
+                      {saving ? "Đang lưu..." : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bành" : "lô"}`}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1225,7 +1332,7 @@ export default function ProductPage() {
           { label: "Tổng bành",  value: stats.tongBanh.toLocaleString(),        color: "text-blue-600",    Icon: Layers,      ic: "text-blue-400"    },
           { label: "Tổng tấn",   value: (stats.tongKg / 1000).toFixed(1) + "T", color: "text-purple-600", Icon: Weight,      ic: "text-purple-400"  },
         ] as const).map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center scroll-reveal">
+          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
             <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
             <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
             <div className="text-xs text-slate-500 mt-1">{s.label}</div>
@@ -1234,7 +1341,7 @@ export default function ProductPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center scroll-reveal">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400"/>
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
@@ -1277,7 +1384,7 @@ export default function ProductPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-reveal">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
