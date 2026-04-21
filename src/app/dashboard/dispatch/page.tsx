@@ -211,21 +211,42 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [openUp, setOpenUp] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0, openUp: false })
+  const [search, setSearch] = useState("")
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch("")
+      }
+    }
     document.addEventListener("mousedown", h)
     return () => document.removeEventListener("mousedown", h)
   }, [])
+
   const handleToggle = () => {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect()
-      setOpenUp(window.innerHeight - rect.bottom < 220)
+      const dropH = 280
+      const openUp = window.innerHeight - rect.bottom < dropH
+      setPos({
+        top: openUp ? rect.top + window.scrollY - dropH : rect.bottom + window.scrollY,
+        left: Math.min(rect.left + window.scrollX, window.innerWidth - 260),
+        openUp,
+      })
+      setTimeout(() => searchRef.current?.focus(), 50)
     }
     setOpen(o => !o)
+    if (open) setSearch("")
   }
+
+  const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()))
+  const allSelected = filtered.length > 0 && filtered.every(o => selected.includes(o))
+
   return (
     <div ref={ref} className="relative">
       <button ref={btnRef} type="button" onClick={handleToggle}
@@ -236,15 +257,41 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
         }
       </button>
       {open && (
-        <div className={`absolute z-50 ${openUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 min-w-[140px] max-h-52 overflow-y-auto`}>
-          {options.map(opt => (
-            <label key={opt} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs">
-              <input type="checkbox" checked={selected.includes(opt)}
-                onChange={e => onChange(e.target.checked ? [...selected, opt] : selected.filter(x => x !== opt))}
-                className="accent-amber-500"/>
-              {opt}
-            </label>
-          ))}
+        <div
+          style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, width: 248 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
+        >
+          {/* Search */}
+          <div className="p-2 border-b border-slate-100">
+            <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Tìm kiếm..." onClick={e => e.stopPropagation()}
+              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+          </div>
+          {/* Select all / Clear */}
+          <div className="flex gap-1 px-2 py-1.5 border-b border-slate-100">
+            <button type="button" onClick={() => onChange([...new Set([...selected, ...filtered])])}
+              className="flex-1 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 rounded px-1 py-0.5 transition-colors">
+              {allSelected ? "✓ Tất cả" : "+ Chọn tất cả"}
+            </button>
+            <button type="button" onClick={() => onChange(selected.filter(s => !filtered.includes(s)))}
+              className="flex-1 text-[10px] font-bold text-slate-400 hover:bg-slate-50 rounded px-1 py-0.5 transition-colors">
+              Bỏ chọn
+            </button>
+          </div>
+          {/* Options */}
+          <div className="max-h-52 overflow-y-auto p-1">
+            {filtered.length === 0
+              ? <p className="text-xs text-slate-400 text-center py-3">Không tìm thấy</p>
+              : filtered.map(opt => (
+                <label key={opt} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer text-xs">
+                  <input type="checkbox" checked={selected.includes(opt)}
+                    onChange={e => onChange(e.target.checked ? [...selected, opt] : selected.filter(x => x !== opt))}
+                    className="accent-amber-500 shrink-0"/>
+                  <span className={selected.includes(opt) ? "font-semibold text-amber-700" : "text-slate-700"}>{opt}</span>
+                </label>
+              ))
+            }
+          </div>
         </div>
       )}
     </div>
