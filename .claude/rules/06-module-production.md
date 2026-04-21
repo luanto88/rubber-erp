@@ -153,16 +153,17 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 ```typescript
 {
   id: UUID, factory_id: UUID,
+  day_chuyen: string,  // "Mủ tạp" | "Mủ nước" — quyết định loại SP/bành/bọc hợp lệ
   ma_lo: string,       // AUTO: "${num}${suffix}/${year}" → "144cs/26"
   num: number,         // Số thứ tự
   suffix: string,      // "cs"|"m"|"gca"
   year: string,        // "26" (2 chữ số cuối)
   ngay_sx: date, ca: string,  // "A"|"B"|"C"|"D"
-  ngan_id: UUID,       // FK → ngans
-  loai_csr: string,    // "CSR10"|"CSR20"|"CSRL"|"CSR3L"|"CSR5"|"CSRCV50"|"CSRCV60"
-  loai_banh: number,   // kg/bành, thường = 35
+  ngan_id: UUID,       // FK → ngans — loai_nl của ngăn phải khớp với loại NL đầu vào của day_chuyen
+  loai_csr: string,    // NMPHK: "CSR10"|"CSR20"|"CSRL"|"CSR3L"|"CSRCV50"|"CSRCV60" / NMCP: "SVR*"
+  loai_banh: number,   // Mủ tạp=35; L/3L=35|33,33; CV50/60=35|20
   boc: string, tham: string,  // "Củ"|"Mới"
-  pallet: string[],    // ["Sắt đế gỗ","Sắt mỏng"]
+  pallet: string[],    // NMPHK: sắt đế gỗ/sắt mỏng/MB5/gỗ; NMCP: +sắt đế nhựa
   chi_thi: string,
   kien_a: number, kien_b: number, kien_c: number, kien_d: number,
   tong_banh: number,   // AUTO: sum(kien_a..d)

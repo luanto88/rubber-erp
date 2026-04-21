@@ -28,6 +28,9 @@ type DxRow = {
   kl_dt: string
   drc_d: string
   kl_dk: string
+  kl_mn: string    // Mủ nước tươi (kg) — dây chuyền Mủ nước
+  drc_mn: string   // DRC% mủ nước
+  kl_mnk: string   // Mủ nước khô — AUTO-CALC
   ngan_ref: string[]
   locked?: boolean
   _warn?: string
@@ -38,6 +41,7 @@ type DispatchEntry = {
   factory_id: string
   ngay: string
   chung_nhan: string
+  day_chuyen?: string  // "Mủ tạp" | "Mủ nước"
   rows: DxRow[]
   created_at?: string
   ma_dx?: string
@@ -194,6 +198,7 @@ const emptyRow = (): DxRow => ({
   kl_dct: "", drc_dc: "", kl_dck: "",
   kl_dkt: "", drc_dk: "", kl_dkk: "",
   kl_dt: "", drc_d: "65", kl_dk: "",
+  kl_mn: "", drc_mn: "", kl_mnk: "",
   ngan_ref: [],
   locked: false,
 })
@@ -260,9 +265,10 @@ export default function DispatchPage() {
   const [selected, setSelected]   = useState<DispatchEntry|null>(null)
 
   // Add/Edit form
-  const [formNgay, setFormNgay]   = useState(new Date().toISOString().slice(0,10))
-  const [formCN, setFormCN]       = useState("PEFC CS")
-  const [formRows, setFormRows]   = useState<DxRow[]>([emptyRow()])
+  const [formNgay, setFormNgay]         = useState(new Date().toISOString().slice(0,10))
+  const [formCN, setFormCN]             = useState("PEFC CS")
+  const [formDayChuyen, setFormDayChuyen] = useState("Mủ tạp")
+  const [formRows, setFormRows]         = useState<DxRow[]>([emptyRow()])
   const [editId, setEditId]       = useState<string|null>(null)
   const [saving, setSaving]       = useState(false)
 
@@ -382,6 +388,7 @@ export default function DispatchPage() {
       setFormRows([emptyRow()])
     }
     setFormCN("PEFC CS")
+    setFormDayChuyen(latest?.day_chuyen || "Mủ tạp")
     setEditId(null)
     setView("add")
   }
@@ -391,6 +398,7 @@ export default function DispatchPage() {
     setEditId(entry.id)
     setFormNgay(entry.ngay ? toISO(entry.ngay) : new Date().toISOString().slice(0,10))
     setFormCN(entry.chung_nhan || "PEFC CS")
+    setFormDayChuyen(entry.day_chuyen || "Mủ tạp")
     setFormRows(entry.rows?.length ? entry.rows.map(r => ({ ...r })) : [emptyRow()])
     setView("edit")
   }
@@ -403,6 +411,7 @@ export default function DispatchPage() {
       factory_id: factoryId,
       ngay: formNgay,
       chung_nhan: formCN,
+      day_chuyen: formDayChuyen,
       rows: formRows.map((r,i) => ({ ...r, uid: r.uid || `r_${i}_${Date.now()}`, _date: formNgay })),
     }
     if (editId) {
@@ -451,6 +460,7 @@ export default function DispatchPage() {
         ["kl_dct", "drc_dc", "kl_dck"],
         ["kl_dkt", "drc_dk", "kl_dkk"],
         ["kl_dt",  "drc_d",  "kl_dk" ],
+        ["kl_mn",  "drc_mn", "kl_mnk"],
       ] as [keyof DxRow, keyof DxRow, keyof DxRow][]) {
         if (field === kf || field === df) {
           ;(next as unknown as Record<string, string>)[rf] = autoCalcKLK(
@@ -555,6 +565,7 @@ export default function DispatchPage() {
         kl_dct, drc_dc, kl_dck: autoCalcKLK(kl_dct, drc_dc),
         kl_dkt: "", drc_dk, kl_dkk: "",
         kl_dt: (kl_dt_raw || "").trim(), drc_d: drc_d_raw?.trim() || "65", kl_dk: "",
+        kl_mn: "", drc_mn: "", kl_mnk: "",
         ngan_ref: [], locked: false,
       }
       if (!byDate[ngay]) byDate[ngay] = []
@@ -664,15 +675,16 @@ export default function DispatchPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Mã ĐX","Ngày","Chứng nhận","Số xe","Tổng KL tươi","Tổng KL khô",""].map(h => (
+                {["Mã ĐX","Ngày","Dây chuyền","Chứng nhận","Số xe","Tổng KL tươi","Tổng KL khô",""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map(entry => {
-                const totalKLT = (entry.rows||[]).reduce((s,r) => s+(parseFloat(r.kl_dct)||0),0)
-                const totalKLK = (entry.rows||[]).reduce((s,r) => s+(parseFloat(r.kl_dck)||0),0)
+                const isMN = entry.day_chuyen === "Mủ nước"
+                const totalKLT = (entry.rows||[]).reduce((s,r) => s + (isMN ? (parseFloat(r.kl_mn)||0) : (parseFloat(r.kl_dct)||0)), 0)
+                const totalKLK = (entry.rows||[]).reduce((s,r) => s + (isMN ? (parseFloat(r.kl_mnk)||0) : (parseFloat(r.kl_dck)||0)), 0)
                 return (
                   <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
                     <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500"
@@ -684,6 +696,11 @@ export default function DispatchPage() {
                       {entry.ngay ? new Date(entry.ngay.includes("/")?
                         entry.ngay.split("/").reverse().join("-") : entry.ngay
                       ).toLocaleDateString("vi-VN") : "—"}
+                    </td>
+                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        isMN ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+                      }`}>{entry.day_chuyen || "Mủ tạp"}</span>
                     </td>
                     <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
@@ -752,7 +769,12 @@ export default function DispatchPage() {
         <button onClick={() => setView("list")} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18}/></button>
         <div className="flex-1">
           <h1 className="text-2xl font-extrabold text-slate-800">{selected.ma_dx || "Bảng phân xe"} — {selected.ngay}</h1>
-          <p className="text-sm text-slate-500">{selected.rows?.length} xe · {selected.chung_nhan}</p>
+          <p className="text-sm text-slate-500 flex items-center gap-2">
+            {selected.rows?.length} xe · {selected.chung_nhan}
+            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+              selected.day_chuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+            }`}>{selected.day_chuyen || "Mủ tạp"}</span>
+          </p>
         </div>
         <button onClick={() => openEdit(selected)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-sm transition-colors">
@@ -823,6 +845,24 @@ export default function DispatchPage() {
         <h1 className="text-xl font-extrabold text-slate-800">
           {editId ? "Sửa bảng phân xe" : "Bảng phân xe vận chuyển"}
         </h1>
+      </div>
+
+      {/* Dây chuyền — luôn đặt đầu tiên */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-3">
+        <label className="text-xs font-bold text-slate-600 block mb-2">Dây chuyền <span className="text-red-500">*</span></label>
+        <div className="flex gap-3 items-center">
+          {["Mủ tạp", "Mủ nước"].map(dc => (
+            <button key={dc} type="button" onClick={() => setFormDayChuyen(dc)}
+              className={`px-5 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                formDayChuyen === dc
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+              }`}>{dc}</button>
+          ))}
+          <span className="text-xs text-slate-400 ml-2">
+            {formDayChuyen === "Mủ tạp" ? "→ Ngăn lưu · NL: Mủ chén / Đông chén / Đông khối / Mủ dây" : "→ Hồ chứa · NL: Mủ nước"}
+          </span>
+        </div>
       </div>
 
       {/* Header form — 3 columns */}
@@ -1038,6 +1078,17 @@ export default function DispatchPage() {
               <button onClick={() => setKlModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={18}/></button>
             </div>
             <div className="p-4 overflow-x-auto">
+              {/* KL badge dây chuyền */}
+              <div className="mb-3 flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                  formDayChuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+                }`}>{formDayChuyen}</span>
+                <span className="text-xs text-slate-400">
+                  {formDayChuyen === "Mủ tạp" ? "4 nhóm: Mủ chén · Đông chén · Đông khối · Mủ dây" : "1 nhóm: Mủ nước"}
+                </span>
+              </div>
+
+              {formDayChuyen === "Mủ tạp" ? (
               <table className="w-full text-xs">
                 <thead className="bg-slate-50">
                   <tr>
@@ -1059,7 +1110,6 @@ export default function DispatchPage() {
                     <tr key={row.uid} className="hover:bg-slate-50">
                       <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
                       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
-                      {/* Mủ chén */}
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_ct} onChange={e => updateRow(idx,"kl_ct",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -1069,7 +1119,6 @@ export default function DispatchPage() {
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
                       <td className="px-2 py-2 font-semibold text-lime-700 whitespace-nowrap">{row.kl_ck || "—"}</td>
-                      {/* Đông chén */}
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -1079,7 +1128,6 @@ export default function DispatchPage() {
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
                       <td className="px-2 py-2 font-semibold text-amber-700 whitespace-nowrap">{row.kl_dck || "—"}</td>
-                      {/* Đông khối */}
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dkt} onChange={e => updateRow(idx,"kl_dkt",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -1089,7 +1137,6 @@ export default function DispatchPage() {
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
                       <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_dkk || "—"}</td>
-                      {/* Mủ dây */}
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dt} onChange={e => updateRow(idx,"kl_dt",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -1103,6 +1150,39 @@ export default function DispatchPage() {
                   ))}
                 </tbody>
               </table>
+              ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Xe</th>
+                    <th className="px-3 py-2 text-left font-bold text-slate-500 whitespace-nowrap" rowSpan={2}>Tài xế</th>
+                    <th className="px-3 py-2 text-center font-bold text-blue-600 whitespace-nowrap border-l border-slate-200" colSpan={3}>Mủ nước</th>
+                  </tr>
+                  <tr className="text-[10px]">
+                    {["Tươi (kg)","DRC%","Khô"].map((h,i) => (
+                      <th key={i} className={`px-2 py-1 font-bold text-slate-400 whitespace-nowrap ${i===0?"border-l border-slate-200":""}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {formRows.map((row, idx) => (
+                    <tr key={row.uid} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
+                      <td className="px-2 py-2 border-l border-slate-100">
+                        <input value={row.kl_mn} onChange={e => updateRow(idx,"kl_mn",e.target.value)}
+                          placeholder="0" className="w-24 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2">
+                        <input value={row.drc_mn} onChange={e => updateRow(idx,"drc_mn",e.target.value)}
+                          placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                      </td>
+                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_mnk || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              )}
             </div>
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end">
               <button onClick={() => setKlModal(false)}

@@ -21,7 +21,7 @@ src/
       layout.tsx              ← Sidebar + nav layout
       page.tsx                ← Dashboard (stats cards)
       dispatch/page.tsx       ← Điều xe
-      storage/page.tsx        ← Ngăn lưu
+      storage/page.tsx        ← Kho nguyên liệu (Ngăn lưu / Hồ chứa tùy dây chuyền)
       product/page.tsx        ← Thành phẩm
       quality/page.tsx        ← Kiểm nghiệm
       export/page.tsx         ← Xuất hàng
@@ -61,10 +61,155 @@ src/
 
 ## Nhà máy
 
-| Code          | Tên                    | Sản phẩm                                          | Chứng nhận                      |
-| ------------- | ---------------------- | ------------------------------------------------- | ------------------------------- |
-| `phuochoa_kt` | Phước Hòa Kampong Thom | CSR (CSRL/CSR3L/CSR5/CSRCV50/CSRCV60/CSR10/CSR20) | PEFC/ISO 9001/14001/17025/14067 |
-| `cuaparis`    | Cuaparis               | SVR (SVRL/SVR3L/SVR5/SVRCV50/SVRCV50/SVR10/SVR20) | ISO                             |
+| Field | NMPHK (`phuochoa_kt`) | NMCP (`cuaparis`) |
+|---|---|---|
+| Tên | Phước Hòa Kampong Thom | Cuaparis |
+| Quốc gia | Campuchia | Việt Nam |
+| Tọa độ | 12.581870, 105.497249 | 11.178232, 106.680421 |
+| Tiêu chuẩn | TCCS 112:2022; TCVN 3769:2016 | TCCS 112:2022; TCVN 3769:2016 |
+| Chứng nhận NL | PEFC CS; Không | PEFC FM; PEFC CS; Không |
+| Chứng nhận QT | PEFC EUDR DDS; ISO 9001:2015; ISO 14001:2015; ISO 14067:2018 | PEFC EUDR DDS; ISO 9001:2015; ISO 14001:2015; ISO 14067:2018 |
+| Sản phẩm | CSR series | SVR series |
+
+---
+
+## Dây chuyền sản xuất
+
+> **Hierarchy bắt buộc:** Nhà máy → Dây chuyền → Loại SP → Bành → Bọc → Pallet  
+> Mọi module CRUD phải lọc dropdown theo trục này — không hiện tùy chọn không hợp lệ cho nhà máy/dây chuyền đang đăng nhập.
+
+Mỗi nhà máy có **2 dây chuyền**: `"Mủ tạp"` và `"Mủ nước"`. Dây chuyền quyết định loại NL đầu vào, loại sản phẩm, loại bành, bọc và pallet hợp lệ.
+
+### Dây chuyền: Mủ tạp
+
+| NM | Loại NL đầu vào | Loại SP | Bành (kg) | Bọc | Pallet |
+|---|---|---|---|---|---|
+| NMPHK | Mủ chén; Đông chén; Đông khối; Mủ dây | CSR10, CSR20 | 35 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG CSR10/CSR20 | Sắt đế gỗ; Sắt mỏng; MB5; Gỗ |
+| NMCP | Mủ chén; Đông chén; Đông khối; Mủ dây; **Mủ dơ** | SVR10, SVR20 | 35 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG SVR10/SVR20 | Sắt đế gỗ; **Sắt đế nhựa**; Sắt mỏng; MB5; Gỗ |
+
+### Dây chuyền: Mủ nước
+
+| NM | Loại SP | Bành (kg) | Bọc | Pallet |
+|---|---|---|---|---|
+| NMPHK | CSRL, CSR3L | 35; 33,33 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG CSRL/CSR3L; Bọc trơn 0,13; Bọc nhãn 0,13 VRG CSRL/CSR3L | Sắt đế gỗ; Sắt mỏng; MB5; Gỗ |
+| NMPHK | CSRCV50, CSRCV60 | 35; 20 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG CSRCV50/CV60; Bọc trơn 0,13; Bọc nhãn 0,13 VRG CSRCV50/CV60 | Sắt đế gỗ; Sắt mỏng; MB5; Gỗ |
+| NMCP | SVRL, SVR3L | 35; 33,33 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG SVRL/SVR3L; Bọc trơn 0,13; Bọc nhãn 0,13 VRG SVRL/SVR3L | Sắt đế gỗ; Sắt đế nhựa; Sắt mỏng; MB5; Gỗ |
+| NMCP | SVRCV50, SVRCV60 | 35; 20 | Bọc trơn 0,04; Bọc nhãn 0,04 VRG SVRCV50/CV60; Bọc trơn 0,13; Bọc nhãn 0,13 VRG SVRCV50/CV60 | Sắt đế gỗ; Sắt đế nhựa; Sắt mỏng; MB5; Gỗ |
+
+> **Mủ nước NL đầu vào:** Mủ nước (cả 2 nhà máy — không dùng mủ chén/đông chén/đông khối/mủ dây cho dây chuyền này)
+
+### Quy tắc filter dropdown theo hierarchy
+
+```typescript
+// 1. Nhà máy (factory_id) — đã xác định từ session
+// 2. Dây chuyền → quyết định loại NL và loại SP
+const dayChuyenOptions = ["Mủ tạp", "Mủ nước"]
+
+// 3. Loại SP → filter theo NM + dây chuyền
+const loaiSPByNMDC = {
+  NMPHK: { "Mủ tạp": ["CSR10","CSR20"], "Mủ nước": ["CSRL","CSR3L","CSRCV50","CSRCV60"] },
+  NMCP:  { "Mủ tạp": ["SVR10","SVR20"], "Mủ nước": ["SVRL","SVR3L","SVRCV50","SVRCV60"] },
+}
+
+// 4. Bành → filter theo NM + dây chuyền + loại SP
+const loaiBanhByLoaiSP = {
+  "Mủ tạp": [35],
+  "CSRL": [35, 33.33], "CSR3L": [35, 33.33], "SVRL": [35, 33.33], "SVR3L": [35, 33.33],
+  "CSRCV50": [35, 20],  "CSRCV60": [35, 20],  "SVRCV50": [35, 20],  "SVRCV60": [35, 20],
+}
+
+// 5. Bọc → filter theo NM + dây chuyền
+const bocByDayChuyen = {
+  "Mủ tạp": ["Bọc trơn 0,04", "Bọc nhãn 0,04 VRG {loaiSP}"],
+  "Mủ nước": ["Bọc trơn 0,04","Bọc nhãn 0,04 VRG {loaiSP}","Bọc trơn 0,13","Bọc nhãn 0,13 VRG {loaiSP}"],
+}
+
+// 6. Pallet → filter theo NM
+const palletByNM = {
+  NMPHK: ["Sắt đế gỗ","Sắt mỏng","MB5","Gỗ"],
+  NMCP:  ["Sắt đế gỗ","Sắt đế nhựa","Sắt mỏng","MB5","Gỗ"],
+}
+```
+
+---
+
+## Tên module theo Dây chuyền
+
+Module **"Kho nguyên liệu"** (tên sidebar) thay thế tên cũ "Ngăn lưu". Sub-term hiển thị trong UI thay đổi theo dây chuyền đang chọn:
+
+| Dây chuyền | Sub-term | Đơn vị lưu trữ |
+|---|---|---|
+| Mủ tạp | **Ngăn lưu** | Ngăn (compartment) |
+| Mủ nước | **Hồ chứa** | Hồ/Bể (tank/basin) |
+
+> File: `src/app/dashboard/storage/page.tsx` (tên route giữ nguyên `/storage`)
+
+---
+
+## Quy tắc: Dây chuyền trong Form Header (Bắt buộc)
+
+**Tất cả module CRUD** phải có trường **Dây chuyền** hiển thị ở đầu form (header section), **trước tất cả các trường khác**. Các dropdown và giá trị phụ đều filter theo dây chuyền đang chọn.
+
+### Áp dụng cho từng module
+
+| Module | File | Ảnh hưởng khi đổi Dây chuyền |
+|---|---|---|
+| Điều xe | `dispatch/page.tsx` | loại NL (KL modal groups hiện/ẩn) |
+| Kho nguyên liệu | `storage/page.tsx` | tên sub-term (Ngăn/Hồ), loại NL options, chứng nhận |
+| Thành phẩm | `product/page.tsx` | loại SP options, bành options, bọc options |
+| Chất lượng | `quality/page.tsx` | loại SP options (CSR* vs SVR*) |
+| Xuất hàng | `export/page.tsx` | loại SP options, pallet options |
+
+### UI Pattern bắt buộc cho Form Header
+
+```tsx
+{/* LUÔN đặt ở đầu form, trước mọi field khác */}
+<div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+    Dây chuyền <span className="text-red-500">*</span>
+  </label>
+  <div className="flex gap-3">
+    {["Mủ tạp", "Mủ nước"].map(dc => (
+      <button
+        key={dc}
+        onClick={() => setForm(f => ({ ...f, day_chuyen: dc }))}
+        className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+          form.day_chuyen === dc
+            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+            : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+        }`}
+      >
+        {dc}
+      </button>
+    ))}
+  </div>
+  {/* Sub-label hiển thị tên đơn vị theo dây chuyền */}
+  {form.day_chuyen && (
+    <p className="text-xs text-slate-400 mt-1">
+      {form.day_chuyen === "Mủ tạp" ? "→ Ngăn lưu" : "→ Hồ chứa"}
+    </p>
+  )}
+</div>
+```
+
+### Cascade reset rule
+
+Khi user đổi `day_chuyen`, **bắt buộc reset** tất cả các field phụ thuộc về `""` để tránh giá trị không hợp lệ:
+
+```typescript
+const handleDayChuyenChange = (dc: string) => {
+  setForm(prev => ({
+    ...prev,
+    day_chuyen: dc,
+    // Reset các field phụ thuộc
+    loai_csr: "",
+    loai_sp: "",
+    loai_banh: 35,
+    boc: "",
+    // Giữ nguyên: ngay, ca, ngan_id, suffix, num, year, ...
+  }))
+}
+```
 
 ---
 
@@ -211,6 +356,7 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
 {
   id: UUID,
   factory_id: UUID,
+  day_chuyen: string,   // "Mủ tạp" | "Mủ nước" — quyết định loại SP, bành, bọc hợp lệ
   ma_lo: string,        // "144cs/26" = num + suffix + "/" + year
   num: number,          // Số thứ tự lô
   suffix: string,       // "cs"=nội tuyển PEFC, "m"=mua ngoài, "gca"=gia công
@@ -218,11 +364,11 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
   ngay_sx: date,
   ca: string,           // "A" | "B" | "C" | "D"
   ngan_id: UUID,        // FK → ngans
-  loai_csr: string,     // "CSR10" | "CSR20" | "CSRL" | "CSR3L" | "CSR5" | "CSRCV50" | "CSRCV60"
-  loai_banh: number,    // Trọng lượng 1 bành (kg), thường = 35
-  boc: string,          // Loại bọc nhãn
+  loai_csr: string,     // NMPHK: "CSR10"|"CSR20"|"CSRL"|"CSR3L"|"CSRCV50"|"CSRCV60" / NMCP: "SVR10"|"SVR20"|"SVRL"|"SVR3L"|"SVRCV50"|"SVRCV60"
+  loai_banh: number,    // Mủ tạp=35; Mủ nước L/3L=35 hoặc 33,33; CV50/CV60=35 hoặc 20
+  boc: string,          // Mủ tạp: bọc 0,04 / Mủ nước: bọc 0,04 hoặc 0,13
   tham: string,         // "Củ" | "Mới"
-  pallet: string[],     // ["Sắt đế gỗ","Sắt mỏng"]
+  pallet: string[],     // NMPHK: [sắt đế gỗ/sắt mỏng/MB5/gỗ] / NMCP: +sắt đế nhựa
   chi_thi: string,      // Số chỉ thị
   kien_a: number,       // Số bành kiện A (chuẩn = 36)
   kien_b: number,       // Số bành kiện B (chuẩn = 36)

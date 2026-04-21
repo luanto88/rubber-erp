@@ -2,13 +2,13 @@
 description: Tổng quan dự án Rubber ERP — đọc file này đầu tiên khi bắt đầu bất kỳ task nào
 ---
 
-# Rubber ERP — PTCS Phước Hòa
+# Rubber ERP — PTCS Phước Hòa Kampong Thom
 
 ## Thông tin dự án
 
 - **Tên:** Hệ thống Quản lý Sản xuất Cao su
 - **Công ty:** CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM
-- **Deploy:** https://rubber-erp.vercel.app
+- **Deploy:** https://qlsxkpt.vercel.app
 - **GitHub:** https://github.com/luanto88/rubber-erp
 - **Supabase:** https://kaoeenrewvltnrbxmjfe.supabase.co
 
@@ -46,9 +46,17 @@ rubber-erp/
 
 ## Nhà máy (multi-tenant)
 
-| Code | Tên | Sản phẩm |
+| Field | NMPHK (`phuochoa_kt`) | NMCP (`cuaparis`) |
 |---|---|---|
-| `phuochoa_kt` | Phước Hòa Kampong Thom | CSR series |
-| `cuaparis` | Cuaparis HCM | SVR series |
+| Tên | Phước Hòa Kampong Thom | Cuaparis |
+| Quốc gia | Campuchia | Việt Nam |
+| Tọa độ | 12.581870, 105.497249 | 11.178232, 106.680421 |
+| Sản phẩm | CSR series | SVR series |
+| Chứng nhận NL | PEFC CS; Không | PEFC FM; PEFC CS; Không |
+| Pallet riêng | Sắt đế gỗ; Sắt mỏng; MB5; Gỗ | + Sắt đế nhựa |
+| Loại NL thêm | — | + Mủ dơ (dây chuyền Mủ tạp) |
+
+**Hierarchy thiết kế module:** Nhà máy → Dây chuyền (`"Mủ tạp"` / `"Mủ nước"`) → Loại SP → Bành → Bọc → Pallet
 
 Mọi query Supabase **bắt buộc** filter theo `factory_id`.
+```
