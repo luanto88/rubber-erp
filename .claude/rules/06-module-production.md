@@ -83,12 +83,12 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 ### Doi phan bo cua DIEM_GN
 
 - Doi 1: E1, G3, G5
-- Doi 2: B5, D9  (D9 chuyen tu Doi 3 sang)
+- Doi 2: B5, D9 (D9 chuyen tu Doi 3 sang)
 - Doi 3: G8, G9, J7
 - Doi 4: L2, N7
 - Doi 5: C16, C17, D11
 - Doi 6: H11, K10, L12
-- Doi 7: H13, L14  (H13 chuyen tu Doi 6 sang)
+- Doi 7: H13, L14 (H13 chuyen tu Doi 6 sang)
 - Doi 8: F16, I16
 - Doi 9: U2, P3
 - Doi 10: Q7, P11
@@ -167,7 +167,7 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
   tong_banh: number,   // AUTO: sum(kien_a..d)
   tong_kg: number,     // AUTO: tong_banh × loai_banh
   trang_thai: string,  // "Hoàn thành"|"Dở dang"|"Xuất hàng"
-  dd_snapshot: JSONB,  // Snapshot khi dở dang
+  dd_snapshot: JSONB,  // Tracking History: { history: [{ca, kien_a, kien_b, kien_c, kien_d, added_banh, timestamp}] }
   is_manual_edit: boolean, edit_key: string
 }
 ```
@@ -179,9 +179,19 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 - **Auto-calc:**
   - `tong_banh = kien_a + kien_b + kien_c + kien_d`
   - `tong_kg = tong_banh × loai_banh`
-  - `ma_lo = "${num}${suffix}/${year}"` — `num` reset theo năm
+  - `ma_lo = "${num}${suffix}/${year}"` — `num` reset theo năm **và theo loai_csr**
+- **Dãy số lô — tách riêng theo `loai_csr + suffix + year`:**
+  - CSR10+cs: 01cs → xxxcs (counter riêng)
+  - CSRCV60+cs: 01cs → xxxcs (counter riêng, **độc lập với CSR10**)
+  - Filter: `l.loai_csr === loai_csr && l.suffix === suffix && l.year === year`
+  - Áp dụng ở: `useEffect maxNumFromDB`, `updateSession` khi đổi suffix, `openCreate`
+  - `generateLotDrafts` cũng filter theo `loai_csr` khi lookup DB lot
+- **Lô Hoàn thành — bất biến:**
+  - Không mở được modal sửa (blocked trong `openEdit`)
+  - Nút Edit ẩn trong list view
+  - `generateLotDrafts`: lô DB có `trang_thai = "Hoàn thành"/"Xuất hàng"` → `is_already_completed = true`, bỏ qua khi save
 - **Highlight kiện:** xanh `text-emerald-600` = max, vàng `text-amber-600` = 1–(max-1), xám = 0
-- **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp} khi lô dở dang
+- **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp, history[]} khi lô dở dang
 - → Logic ngăn ↔ Thành phẩm (chọn ngăn, nút lưu theo %, xóa lô): xem `.claude/rules/storage.md`
 
 ### Logic lô kế thừa (Dở dang → Ca tiếp theo)
@@ -189,11 +199,13 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 Khi lô cuối ca trước còn dở dang, ca tiếp theo sẽ **kế thừa** lô đó với `is_continuation = true`.
 
 **Kiện đã đủ từ ca trước (locked = true):**
+
 - Hiển thị read-only, badge "Ca trước · đã đủ" (indigo)
 - **Không tính** vào sản lượng ca hiện tại
 - Không cho chỉnh sửa
 
 **Kiện chưa đủ (locked = false):**
+
 - Input nhập tay trực tiếp (`<input type="number">`) — KHÔNG dùng Stepper
 - `min = prev` (giá trị ca trước), `max = maxK` (giới hạn tối đa kiện)
 - Có nút X reset về `prev` (không về 0)
@@ -201,29 +213,54 @@ Khi lô cuối ca trước còn dở dang, ca tiếp theo sẽ **kế thừa** l
 - Label dưới: "+N bành ca này"
 
 **Tính sản lượng lô kế thừa (delta only):**
+
 ```typescript
 // caTongBanh và sessionTotals chỉ tính phần THÊM VÀO, không tính bành ca trước
-const deltaBanh = Math.max(0, kien_a - prev_a)
-  + Math.max(0, kien_b - prev_b)
-  + Math.max(0, kien_c - prev_c)
-  + Math.max(0, kien_d - prev_d)
-// Ví dụ: Ca A nhập 36/36/36/25, Ca B thêm kien_d lên 36
-// → Ca B chỉ được tính 11 bành (36-25), không tính 133 bành của Ca A
+const deltaBanh =
+  Math.max(0, kien_a - prev_a) +
+  Math.max(0, kien_b - prev_b) +
+  Math.max(0, kien_c - prev_c) +
+  Math.max(0, kien_d - prev_d);
+// Ví dụ: Ca A làm lô 677cs: kien_A=36 → 36 bành (1260kg)
+// Ca B kế thừa: kien_A locked (36), thêm kien_B=36, kien_C=36 → delta=72 bành (2520kg)
 ```
+
+**List view — hiển thị lock icon cho kiện kế thừa:**
+- `LotContribution` có thêm `locked_a/b/c/d?: boolean`
+- Tính từ `dd_snapshot.history`: nếu `h.kien_x === history[i-1].kien_x && h.kien_x > 0` → locked
+- Render: `{c.locked_a && <Lock size={9} className="text-indigo-400" />}{c.kien_a}`
+- Mỗi lô kế thừa hiện **1 dòng riêng mỗi ca** với bành/tấn delta của ca đó
 
 ### Insert lô vào DB — field bắt buộc
 
 ```typescript
 await supabase.from("lots").insert({
-  factory_id, day_chuyen,            // day_chuyen KHÔNG được null/rỗng
-  ma_lo, num, suffix, year,
-  ngay_sx, ca, ngan_id,
-  loai_csr, loai_banh, boc, tham, chi_thi, pallet,
-  kien_a, kien_b, kien_c, kien_d,
-  tong_banh, tong_kg, trang_thai, dd_snapshot,
-  ghi_chu: "",           // phải có, không để undefined
+  factory_id,
+  day_chuyen, // day_chuyen KHÔNG được null/rỗng
+  ma_lo,
+  num,
+  suffix,
+  year,
+  ngay_sx,
+  ca,
+  ngan_id,
+  loai_csr,
+  loai_banh,
+  boc,
+  tham,
+  chi_thi,
+  pallet,
+  kien_a,
+  kien_b,
+  kien_c,
+  kien_d,
+  tong_banh,
+  tong_kg,
+  trang_thai,
+  dd_snapshot,
+  ghi_chu: "", // phải có, không để undefined
   is_manual_edit: false, // phải có, không để undefined
-})
+});
 // Luôn check error — Supabase v2 không throw, chỉ trả về { data, error }
 ```
 
