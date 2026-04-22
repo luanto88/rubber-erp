@@ -280,6 +280,7 @@ export default function ProductPage() {
   const [editForm, setEditForm]     = useState<EditForm>(emptyEditForm())
   const [editId, setEditId]         = useState<string | null>(null)
   const [saving, setSaving]         = useState(false)
+  const [saveError, setSaveError]   = useState<string | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [maxNumFromDB, setMaxNumFromDB] = useState(0)
 
@@ -323,6 +324,13 @@ export default function ProductPage() {
     supabase.from("suffixes").select("code,name,nguon,chung_nhan")
       .eq("factory_id", fid).order("code")
       .then(({ data }) => { if (data) setSuffixList(data) })
+
+    // One-time: cập nhật các dòng day_chuyen rỗng thành "Mủ tạp"
+    supabase.from("lots")
+      .update({ day_chuyen: "Mủ tạp" })
+      .eq("factory_id", fid)
+      .or("day_chuyen.is.null,day_chuyen.eq.")
+      .then(() => {})
   }, [loadData])
 
   // ── Filtered lots (list view) ──────────────────────────────────────────────
@@ -643,6 +651,8 @@ export default function ProductPage() {
   const handleCreateSave = async (markNganDone: boolean) => {
     if (!factoryId || !session.ngan_id) return
     setSaving(true)
+    setSaveError(null)
+    let hasError = false
     try {
       const cfg  = getLoaiBanhConfig(session.loai_csr)
       const year = yearFromDate(session.ngay_sx)
@@ -656,14 +666,15 @@ export default function ProductPage() {
             : null
 
           if (draft.is_continuation && draft.existing_id) {
-            await supabase.from("lots").update({
+            const { error } = await supabase.from("lots").update({
               kien_a: draft.kien_a, kien_b: draft.kien_b,
               kien_c: draft.kien_c, kien_d: draft.kien_d,
               tong_banh: tb, tong_kg, trang_thai, dd_snapshot, ca: cs.ca,
             }).eq("id", draft.existing_id)
+            if (error) { setSaveError(`Lỗi cập nhật lô ${draft.num}: ${error.message}`); hasError = true; break }
           } else {
             const ma_lo = buildMaLo(draft.num, session.suffix, year)
-            await supabase.from("lots").insert({
+            const { error } = await supabase.from("lots").insert({
               factory_id: factoryId, day_chuyen: session.day_chuyen,
               ma_lo, num: draft.num, suffix: session.suffix, year,
               ngay_sx: session.ngay_sx, ca: cs.ca, ngan_id: session.ngan_id,
@@ -672,19 +683,27 @@ export default function ProductPage() {
               pallet: session.pallet, kien_a: draft.kien_a, kien_b: draft.kien_b,
               kien_c: draft.kien_c, kien_d: draft.kien_d,
               tong_banh: tb, tong_kg, trang_thai, dd_snapshot,
+              ghi_chu: "", is_manual_edit: false,
             })
+            if (error) { setSaveError(`Lỗi tạo lô ${ma_lo}: ${error.message}`); hasError = true; break }
           }
+          if (hasError) break
         }
+        if (hasError) break
       }
     } catch (err) {
-      console.error("handleCreateSave error:", err)
+      setSaveError(`Lỗi không xác định: ${String(err)}`)
+      hasError = true
     }
-    // Cập nhật trạng thái ngăn luôn chạy, kể cả khi lot inserts có lỗi
-    const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất"
-    await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
-    setSaving(false)
-    setView("list")
-    loadData(factoryId)
+    if (!hasError) {
+      const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất"
+      await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
+      setSaving(false)
+      setView("list")
+      loadData(factoryId)
+    } else {
+      setSaving(false)
+    }
   }
 
   // ── Edit individual lot ────────────────────────────────────────────────────
@@ -1247,6 +1266,15 @@ export default function ProductPage() {
             </div>
           )
         })}
+
+        {/* ── Error toast ── */}
+        {saveError && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
+            <AlertTriangle size={16} className="shrink-0"/>
+            <span className="text-sm font-bold">{saveError}</span>
+            <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70"><X size={14}/></button>
+          </div>
+        )}
 
         {/* ── Sticky bottom bar ── */}
         {hasNgan && selectedNgan && (
