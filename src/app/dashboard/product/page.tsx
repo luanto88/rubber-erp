@@ -281,6 +281,7 @@ export default function ProductPage() {
   const [editId, setEditId]         = useState<string | null>(null)
   const [saving, setSaving]         = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
+  const [maxNumFromDB, setMaxNumFromDB] = useState(0)
 
   const [session, setSession]       = useState<SessionHeader>(defaultSession())
   const [caSections, setCaSections] = useState<CaSection[]>([defaultCaSection("A")])
@@ -289,7 +290,7 @@ export default function ProductPage() {
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
     let q = supabase.from("lots").select("*, ngans(ten_ngan)").eq("factory_id", fid)
-      .order("ngay_sx", { ascending: false }).order("num", { ascending: false })
+      .order("ngay_sx", { ascending: false }).order("created_at", { ascending: false })
     if (filterLoai) q = q.eq("loai_csr", filterLoai)
     if (filterTT)   q = q.eq("trang_thai", filterTT)
     if (filterFrom) q = q.gte("ngay_sx", filterFrom)
@@ -355,7 +356,7 @@ export default function ProductPage() {
     const now = new Date()
     return ngans
       .filter(n => {
-        if (!["Chờ sản xuất", "Đang sản xuất"].includes(n.trang_thai)) return false
+        if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false
         if (!n.ngay_bd) return false
         const days = Math.floor((now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000)
         return days >= 21
@@ -409,11 +410,18 @@ export default function ProductPage() {
   // Derive year từ session.ngay_sx
   const sessionYear = yearFromDate(session.ngay_sx)
 
-  // Số lô lớn nhất theo suffix hiện tại (gợi ý)
-  const latestNumBySuffix = useMemo(() =>
-    lots.filter(l => l.suffix === session.suffix)
-      .reduce((m, l) => Math.max(m, l.num || 0), 0)
-  , [lots, session.suffix])
+  // Query DB trực tiếp để lấy max num theo suffix (tránh lỗi khi lots bị filter)
+  useEffect(() => {
+    if (!factoryId) return
+    supabase.from("lots")
+      .select("num")
+      .eq("factory_id", factoryId)
+      .eq("suffix", session.suffix)
+      .order("num", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setMaxNumFromDB(data?.num || 0))
+  }, [factoryId, session.suffix])
 
   // ── Session handlers ───────────────────────────────────────────────────────
   const updateSession = (patch: Partial<SessionHeader>) => {
@@ -573,7 +581,8 @@ export default function ProductPage() {
   }
 
   // ── Open create ────────────────────────────────────────────────────────────
-  const openCreate = () => {
+  const openCreate = async () => {
+    if (!factoryId) return
     // maxDate + 1 làm ngày SX mặc định
     const maxDate = lots.length > 0
       ? lots.reduce((max, l) => (l.ngay_sx > max ? l.ngay_sx : max), "2000-01-01")
@@ -585,13 +594,15 @@ export default function ProductPage() {
     // Chi thị mặc định = mới nhất
     const lastChiThi = lots.length > 0 ? (lots[0]?.chi_thi || "1") : "1"
 
-    // Hậu tố mặc định = đầu tiên trong DB hoặc "cs"
-    const defaultSuffix = suffixList.length > 0 ? suffixList[0].code : "cs"
+    // Hậu tố mặc định = đầu tiên trong DB có code != "" hoặc "cs"
+    const defaultSuffix = suffixList.find(s => s.code !== "")?.code || suffixList[0]?.code || "cs"
 
-    // from_num theo dãy số riêng của suffix
-    const maxNumForSuffix = lots.filter(l => l.suffix === defaultSuffix)
-      .reduce((m, l) => Math.max(m, l.num || 0), 0)
-    const fromNum = maxNumForSuffix + 1
+    // from_num theo query DB trực tiếp (tránh lỗi khi lots bị filter hoặc có suffix rỗng legacy)
+    const { data: maxData } = await supabase.from("lots")
+      .select("num").eq("factory_id", factoryId)
+      .eq("suffix", defaultSuffix)
+      .order("num", { ascending: false }).limit(1).maybeSingle()
+    const fromNum = (maxData?.num || 0) + 1
 
     // Loại CSR theo nhà máy
     const defaultCsr = getLoaiCSRByDayChuyen("Mủ tạp", factoryPrefix)[0] || `${factoryPrefix}10`
@@ -655,7 +666,7 @@ export default function ProductPage() {
           }
         }
       }
-      const nganStatus = markNganDone ? "Hoàn thành" : "Đang sản xuất"
+      const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất"
       await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
       setView("list")
       loadData(factoryId)
@@ -949,8 +960,10 @@ export default function ProductPage() {
                       <div className="flex gap-1">
                         {hasDorDang && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">Dở dang</span>}
                         <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
-                          n.trang_thai === "Đang sản xuất" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                          {n.trang_thai === "Đang sản xuất" ? "Đang SX" : "Chờ SX"}
+                          n.trang_thai === "Đang sản xuất" ? "bg-emerald-100 text-emerald-700" :
+                          n.trang_thai === "Hoàn thành" ? "bg-blue-100 text-blue-700" :
+                          "bg-amber-100 text-amber-700"}`}>
+                          {n.trang_thai === "Đang sản xuất" ? "Đang SX" : n.trang_thai === "Hoàn thành" ? "HT" : "Chờ SX"}
                         </span>
                       </div>
                     </div>
@@ -1010,18 +1023,15 @@ export default function ProductPage() {
                       onChange={e => updateCaSection(caIdx, { from_num: Math.max(1, +e.target.value), to_num: Math.max(cs.to_num, +e.target.value) })}
                       className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
                     <span className="text-xs text-slate-400">đến lô</span>
-                    <Stepper
-                      value={cs.to_num}
-                      min={cs.from_num}
-                      max={cs.from_num + 30}
-                      onChange={v => updateCaSection(caIdx, { to_num: v })}
-                    />
+                    <input type="number" min={cs.from_num} value={cs.to_num}
+                      onChange={e => updateCaSection(caIdx, { to_num: Math.max(cs.from_num, +e.target.value || cs.from_num) })}
+                      className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"/>
                     <span className="text-xs text-slate-400 ml-1">
                       {session.suffix ? `${session.suffix}/` : "/"}{sessionYear}
                     </span>
-                    {caIdx === 0 && latestNumBySuffix > 0 && (
+                    {caIdx === 0 && maxNumFromDB > 0 && (
                       <span className="text-[10px] text-slate-400 italic">
-                        (gần nhất: {latestNumBySuffix}{session.suffix}/{sessionYear})
+                        (gần nhất: {maxNumFromDB}{session.suffix}/{sessionYear})
                       </span>
                     )}
                     {loCount > 0 && (
@@ -1275,7 +1285,7 @@ export default function ProductPage() {
                   {nganPct >= 100 && !nganBlocked ? (
                     <button onClick={() => handleCreateSave(true)} disabled={saving || caSections.every(cs => cs.lots.length === 0)}
                       className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
-                      {saving ? "Đang lưu..." : `✓ Lưu · Đánh dấu ngăn Hoàn thành`}
+                      {saving ? "Đang lưu..." : `✓ Lưu · Đánh dấu ngăn Đã sản xuất`}
                     </button>
                   ) : (
                     <button onClick={() => handleCreateSave(false)} disabled={saving || nganBlocked || !session.ngan_id || caSections.every(cs => cs.lots.length === 0)}

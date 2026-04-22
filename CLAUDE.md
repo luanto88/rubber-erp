@@ -324,7 +324,10 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
   chung_nhan: string,   // "PEFC CS" | "PEFC FM" | "Không" — lọc theo nhà máy: phuochoa_kt=["PEFC CS","Không"], cuaparis=["PEFC CS","PEFC FM","Không"]
   ngay_bd: date,        // Ngày bắt đầu
   ngay_kt: date,        // Ngày kết thúc
-  trang_thai: string,   // "Đang sản xuất" | "Chờ sản xuất" | "Hoàn thành" | "Đóng"
+  trang_thai: string,   // "Đang sản xuất" | "Chờ sản xuất" | "Hoàn thành" | "Đã sản xuất" | "Đóng"
+  // "Hoàn thành" = ủ xong, sẵn sàng sản xuất (set bởi module Kho nguyên liệu)
+  // "Đã sản xuất" = đã sản xuất hết KL khô ngăn (set bởi module Thành phẩm khi đánh dấu xong)
+  // "Đóng" = ngăn đã đóng vĩnh viễn
   tong_tuoi: number,    // KL tươi tổng (kg)
   tong_kho: number,     // KL khô quy đổi (kg)
   trips: string[],      // JSONB — mảng uid của các chuyến xe

@@ -121,7 +121,9 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
   xu_ly: string,      // "Xé"|"Không xé"|"Hỗn hợp"  (không dùng "Cán")
   chung_nhan: string, // "PEFC CS"|"PEFC FM"|"Không"
   ngay_bd: date, ngay_kt: date,
-  trang_thai: string, // "Đang sản xuất"|"Chờ sản xuất"|"Hoàn thành"|"Đóng"
+  trang_thai: string, // "Đang sản xuất"|"Chờ sản xuất"|"Hoàn thành"|"Đã sản xuất"|"Đóng"
+  // "Hoàn thành" = ủ xong sẵn sàng SX (storage module set)
+  // "Đã sản xuất" = đã SX hết KL (product module set khi đánh dấu xong)
   tong_tuoi: number,  // KL tươi tổng (kg)
   tong_kho: number,   // KL khô quy đổi (kg)
   trips: string[],    // uid các chuyến xe đã vào ngăn
