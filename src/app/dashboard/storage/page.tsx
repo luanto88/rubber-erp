@@ -328,9 +328,12 @@ export default function StoragePage() {
   }
 
   // ── Save / Delete ─────────────────────────────────────────────────────────
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
+    setSaveError(null)
     const trangThai = deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)
     const payload = {
       ...form,
@@ -340,9 +343,11 @@ export default function StoragePage() {
       trips: Array.from(selectedTrips),
     }
     if (editId) {
-      await supabase.from("ngans").update(payload).eq("id", editId)
+      const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
+      if (error) { setSaveError(error.message); setSaving(false); return }
     } else {
-      await supabase.from("ngans").insert(payload)
+      const { error } = await supabase.from("ngans").insert(payload)
+      if (error) { setSaveError(error.message); setSaving(false); return }
     }
     setSaving(false)
     setModal(null)
@@ -804,6 +809,14 @@ export default function StoragePage() {
               </div>
             </div>
 
+            {saveError && (
+              <div className="px-6 pt-2 pb-0">
+                <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">
+                  <X size={13} className="shrink-0" />
+                  {saveError}
+                </div>
+              </div>
+            )}
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setModal(null)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">

@@ -644,7 +644,7 @@ export default function ProductPage() {
   }, [filteredContribs]);
 
   const stats = {
-    total: lots.filter((l) => l.factory_id === factoryId).length,
+    total: lots.length,
     hoanThanh: lots.filter(
       (l) => l.trang_thai === "Hoàn thành" || l.trang_thai === "Xuất hàng",
     ).length,
@@ -781,7 +781,7 @@ export default function ProductPage() {
       if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
         next.loai_banh = cfg.loai_banh;
-        next.boc = getBocsForLoaiCSR(next.day_chuyen, patch.loai_csr)[1] || "";
+        next.boc = getBocsForLoaiCSR(next.day_chuyen, next.loai_csr)[1] || "";
       }
       return next;
     });
@@ -1269,7 +1269,6 @@ export default function ProductPage() {
       dd_snapshot.kien_d = editForm.kien_d;
       dd_snapshot.timestamp = new Date().toISOString();
       // Note: manual edit doesnt touch history array to keep it simple, but marks it edited
-      editForm.is_manual_edit = true;
 
       await supabase
         .from("lots")
@@ -1278,6 +1277,7 @@ export default function ProductPage() {
           factory_id: factoryId,
           ngan_id: editForm.ngan_id || null,
           dd_snapshot,
+          is_manual_edit: true,
         })
         .eq("id", editId);
       if (editForm.ngan_id) {
