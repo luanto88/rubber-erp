@@ -364,7 +364,7 @@ export default function ProductPage() {
       .sort((a, b) => {
         const da = Math.floor((now.getTime() - new Date(a.ngay_bd).getTime()) / 86400000)
         const db = Math.floor((now.getTime() - new Date(b.ngay_bd).getTime()) / 86400000)
-        return db - da
+        return da - db
       })
   }, [ngans])
 
@@ -410,18 +410,20 @@ export default function ProductPage() {
   // Derive year từ session.ngay_sx
   const sessionYear = yearFromDate(session.ngay_sx)
 
-  // Query DB trực tiếp để lấy max num theo suffix (tránh lỗi khi lots bị filter)
+  // Query DB trực tiếp để lấy max num theo suffix + year (num reset theo năm)
   useEffect(() => {
     if (!factoryId) return
+    const currYear = yearFromDate(session.ngay_sx)
     supabase.from("lots")
       .select("num")
       .eq("factory_id", factoryId)
       .eq("suffix", session.suffix)
+      .eq("year", currYear)
       .order("num", { ascending: false })
       .limit(1)
       .maybeSingle()
       .then(({ data }) => setMaxNumFromDB(data?.num || 0))
-  }, [factoryId, session.suffix])
+  }, [factoryId, session.suffix, session.ngay_sx])
 
   // ── Session handlers ───────────────────────────────────────────────────────
   const updateSession = (patch: Partial<SessionHeader>) => {
@@ -597,10 +599,11 @@ export default function ProductPage() {
     // Hậu tố mặc định = đầu tiên trong DB có code != "" hoặc "cs"
     const defaultSuffix = suffixList.find(s => s.code !== "")?.code || suffixList[0]?.code || "cs"
 
-    // from_num theo query DB trực tiếp (tránh lỗi khi lots bị filter hoặc có suffix rỗng legacy)
+    // from_num theo query DB trực tiếp, lọc theo năm (num reset theo năm)
     const { data: maxData } = await supabase.from("lots")
       .select("num").eq("factory_id", factoryId)
       .eq("suffix", defaultSuffix)
+      .eq("year", yearFromDate(ngaySX))
       .order("num", { ascending: false }).limit(1).maybeSingle()
     const fromNum = (maxData?.num || 0) + 1
 
@@ -666,15 +669,15 @@ export default function ProductPage() {
           }
         }
       }
-      const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất"
-      await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
-      setView("list")
-      loadData(factoryId)
     } catch (err) {
       console.error("handleCreateSave error:", err)
-    } finally {
-      setSaving(false)
     }
+    // Cập nhật trạng thái ngăn luôn chạy, kể cả khi lot inserts có lỗi
+    const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất"
+    await supabase.from("ngans").update({ trang_thai: nganStatus }).eq("id", session.ngan_id)
+    setSaving(false)
+    setView("list")
+    loadData(factoryId)
   }
 
   // ── Edit individual lot ────────────────────────────────────────────────────

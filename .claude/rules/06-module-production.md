@@ -121,9 +121,8 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
   xu_ly: string,      // "Xé"|"Không xé"|"Hỗn hợp"  (không dùng "Cán")
   chung_nhan: string, // "PEFC CS"|"PEFC FM"|"Không"
   ngay_bd: date, ngay_kt: date,
-  trang_thai: string, // "Đang sản xuất"|"Chờ sản xuất"|"Hoàn thành"|"Đã sản xuất"|"Đóng"
-  // "Hoàn thành" = ủ xong sẵn sàng SX (storage module set)
-  // "Đã sản xuất" = đã SX hết KL (product module set khi đánh dấu xong)
+  trang_thai: string, // "Đang nhận"|"Đóng"|"Chờ sản xuất"|"Đang sản xuất"|"Đã sản xuất"
+  // → Chi tiết logic trạng thái và chuyển đổi xem .claude/rules/storage.md
   tong_tuoi: number,  // KL tươi tổng (kg)
   tong_kho: number,   // KL khô quy đổi (kg)
   trips: string[],    // uid các chuyến xe đã vào ngăn
@@ -133,12 +132,9 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 
 ### Business rules
 
-- **Thời gian ủ tối thiểu: 21 ngày** tính từ `ngay_bd`
-- **Progress bar:** `Math.min(daysSinceBD / 21 * 100, 100)%`
-  - Màu xanh `bg-emerald-500` khi ≥ 21 ngày
-  - Màu vàng `bg-amber-400` khi < 21 ngày
 - **Mã ngăn pattern:** `[Vị trí]-[Nguồn gốc]-[Loại NL viết tắt]-[XL]-[dd/mm/yy]-[dd/mm/yy]`
 - Một ngăn có thể cung cấp mủ cho nhiều lô thành phẩm
+- → Logic trạng thái, auto-transition 21 ngày, quan hệ với Thành phẩm: xem `.claude/rules/storage.md`
 
 ### UI: Card grid (không phải bảng)
 
@@ -176,16 +172,17 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 }
 ```
 
-### Business rules bắt buộc
+### Business rules lô (lots)
 
-- **Lô tròn:** 4 kiện × 36 bành = **144 bành** → `trang_thai = "Hoàn thành"`
-- **Lô dở dang:** bất kỳ kiện nào < 36 → `trang_thai = "Dở dang"`
+- **Lô tròn:** tong_banh ≥ lo_tron → `trang_thai = "Hoàn thành"` (lo_tron=144 cho mủ tạp/L/3L, 240 cho CV50/CV60)
+- **Lô dở dang:** tong_banh < lo_tron → `trang_thai = "Dở dang"`
 - **Auto-calc:**
   - `tong_banh = kien_a + kien_b + kien_c + kien_d`
   - `tong_kg = tong_banh × loai_banh`
-  - `ma_lo = "${num}${suffix}/${year}"`
-- **Highlight kiện:** xanh `text-emerald-600` = 36, vàng `text-amber-600` = 1–35, xám = 0
-- **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d} tại thời điểm lô bị đánh dấu dở dang
+  - `ma_lo = "${num}${suffix}/${year}"` — `num` reset theo năm
+- **Highlight kiện:** xanh `text-emerald-600` = max, vàng `text-amber-600` = 1–(max-1), xám = 0
+- **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp} khi lô dở dang
+- → Logic ngăn ↔ Thành phẩm (chọn ngăn, nút lưu theo %, xóa lô): xem `.claude/rules/storage.md`
 
 ### Hậu tố lô
 
