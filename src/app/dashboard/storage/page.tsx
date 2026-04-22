@@ -162,6 +162,11 @@ export default function StoragePage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
     const assignedUIDs = new Set(allNgans.flatMap(n => n.trips || []))
+    const coveredRanges = allNgans
+      .filter(n => n.ngay_bd)
+      .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
+    const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
+
     const { data } = await supabase
       .from("dispatch_entries")
       .select("rows,ngay")
@@ -169,7 +174,8 @@ export default function StoragePage() {
       .order("ngay", { ascending: true })
     const byDate: Record<string, number> = {}
     for (const entry of (data || [])) {
-      const dateKey = toISO(entry.ngay) // normalize to YYYY-MM-DD for consistent sorting & display
+      const dateKey = toISO(entry.ngay)
+      if (isDateCovered(dateKey)) continue
       for (const row of ((entry.rows || []) as { uid: string }[])) {
         if (!assignedUIDs.has(row.uid)) {
           byDate[dateKey] = (byDate[dateKey] || 0) + 1
@@ -219,10 +225,13 @@ export default function StoragePage() {
       .from("dispatch_entries")
       .select("rows,ngay")
       .eq("factory_id", factoryId)
-    // UIDs already claimed by OTHER ngăns (not the one currently being edited)
-    const assignedUIDs = new Set(
-      ngans.filter(n => n.id !== editId).flatMap(n => n.trips || [])
-    )
+    // Trips/dates already claimed by OTHER ngăns (not the one currently being edited)
+    const otherNgans = ngans.filter(n => n.id !== editId)
+    const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
+    const coveredRanges = otherNgans
+      .filter(n => n.ngay_bd)
+      .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
+    const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
     // Filter by date range in JS — handles both "YYYY-MM-DD" and "dd/mm/yyyy" stored formats
     const trips: TripItem[] = (data || [])
       .filter((entry: { ngay: string }) => {
@@ -244,7 +253,7 @@ export default function StoragePage() {
             kl_mn:  +r.kl_mn  || 0, kl_mnk: +r.kl_mnk || 0,
           }))
       )
-      .filter(t => !assignedUIDs.has(t.uid))
+      .filter(t => !assignedUIDs.has(t.uid) && !isDateCovered(t._date))
     setDispatchTrips(trips)
     if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
     setLoadingTrips(false)
