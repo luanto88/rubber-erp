@@ -212,13 +212,17 @@ export default function StoragePage() {
   }, [loadData])
 
   // ── Fetch trips from dispatch ─────────────────────────────────────────────
-  const fetchTrips = useCallback(async (ngay_bd: string, ngay_kt: string) => {
+  const fetchTrips = useCallback(async (ngay_bd: string, ngay_kt: string, autoSelect = false) => {
     if (!ngay_bd || !ngay_kt || !factoryId) return
     setLoadingTrips(true)
     const { data } = await supabase
       .from("dispatch_entries")
       .select("rows,ngay")
       .eq("factory_id", factoryId)
+    // UIDs already claimed by OTHER ngăns (not the one currently being edited)
+    const assignedUIDs = new Set(
+      ngans.filter(n => n.id !== editId).flatMap(n => n.trips || [])
+    )
     // Filter by date range in JS — handles both "YYYY-MM-DD" and "dd/mm/yyyy" stored formats
     const trips: TripItem[] = (data || [])
       .filter((entry: { ngay: string }) => {
@@ -240,9 +244,11 @@ export default function StoragePage() {
             kl_mn:  +r.kl_mn  || 0, kl_mnk: +r.kl_mnk || 0,
           }))
       )
+      .filter(t => !assignedUIDs.has(t.uid))
     setDispatchTrips(trips)
+    if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
     setLoadingTrips(false)
-  }, [factoryId])
+  }, [factoryId, ngans, editId])
 
   // ── Auto-calc KL from selected trips (filtered by loai_nl) ───────────────
   const formLoaiNL = form.loai_nl
@@ -669,7 +675,7 @@ export default function StoragePage() {
                   <input type="date" value={form.ngay_bd}
                     onChange={e => {
                       updateForm({ ngay_bd: e.target.value })
-                      fetchTrips(e.target.value, form.ngay_kt)
+                      fetchTrips(e.target.value, form.ngay_kt, modal === "add")
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                 </div>
@@ -678,7 +684,7 @@ export default function StoragePage() {
                   <input type="date" value={form.ngay_kt}
                     onChange={e => {
                       updateForm({ ngay_kt: e.target.value })
-                      fetchTrips(form.ngay_bd, e.target.value)
+                      fetchTrips(form.ngay_bd, e.target.value, modal === "add")
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                 </div>
