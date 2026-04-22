@@ -758,12 +758,14 @@ export default function ProductPage() {
 
   const sessionYear = yearFromDate(session.ngay_sx);
 
+  const getMaxLotNum = (loai_csr: string, suffix: string, year: string) =>
+    lots.filter((l) => l.loai_csr === loai_csr && l.suffix === suffix && l.year === year)
+      .reduce((m, l) => Math.max(m, l.num || 0), 0);
+
   useEffect(() => {
     if (!factoryId) return;
-    const maxForSuffix = lots
-      .filter((l) => l.loai_csr === session.loai_csr && l.suffix === session.suffix && l.year === sessionYear)
-      .reduce((m, l) => Math.max(m, l.num || 0), 0);
-    setMaxNumFromDB(maxForSuffix);
+    setMaxNumFromDB(getMaxLotNum(session.loai_csr, session.suffix, sessionYear));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, session.suffix, sessionYear, lots]);
 
   // ── Session handlers ───────────────────────────────────────────────────────
@@ -799,10 +801,7 @@ export default function ProductPage() {
           let fromNum = cs.from_num;
           let toNum = cs.to_num;
           if (ci === 0 && patch.suffix !== undefined) {
-            const maxForSuffix = lots
-              .filter((l) => l.loai_csr === newCsr && l.suffix === newSuffix && l.year === sessionYear)
-              .reduce((m, l) => Math.max(m, l.num || 0), 0);
-            fromNum = maxForSuffix + 1;
+            fromNum = getMaxLotNum(newCsr, newSuffix, sessionYear) + 1;
             toNum = Math.max(fromNum, cs.to_num);
           }
           const prevLast = ci > 0 ? prev[ci - 1].lots.at(-1) : undefined;
@@ -1005,14 +1004,10 @@ export default function ProductPage() {
       suffixList[0]?.code ||
       "cs";
 
-    const maxNumFromLoaded = lots
-      .filter((l) => l.loai_csr === defaultCsr && l.suffix === defaultSuffix && l.year === yrStr)
-      .reduce((m, l) => Math.max(m, l.num || 0), 0);
-    const fromNum = maxNumFromLoaded + 1;
-
     const defaultCsr =
       getLoaiCSRByDayChuyen("Mủ tạp", factoryPrefix)[0] || `${factoryPrefix}10`;
     const cfg = getLoaiBanhConfig(defaultCsr);
+    const fromNum = getMaxLotNum(defaultCsr, defaultSuffix, yrStr) + 1;
 
     const validLoaiNl = [
       "Mủ chén",

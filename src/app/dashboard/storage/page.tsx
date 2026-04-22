@@ -245,19 +245,18 @@ export default function StoragePage() {
   }, [factoryId])
 
   // ── Auto-calc KL from selected trips (filtered by loai_nl) ───────────────
+  const formLoaiNL = form.loai_nl
   useEffect(() => {
     const sel = dispatchTrips.filter(t => selectedTrips.has(t.uid))
-    const loaiNL = form.loai_nl
     const { tuoi, kho } = sel.reduce(
       (acc, t) => {
-        const kl = getKLFromTrip(t, loaiNL)
+        const kl = getKLFromTrip(t, formLoaiNL)
         return { tuoi: acc.tuoi + kl.tuoi, kho: acc.kho + kl.kho }
       },
       { tuoi: 0, kho: 0 }
     )
     setForm(p => ({ ...p, tong_tuoi: tuoi, tong_kho: kho }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTrips, dispatchTrips, form.loai_nl])
+  }, [selectedTrips, dispatchTrips, formLoaiNL])
 
   // ── Form helpers ──────────────────────────────────────────────────────────
   const updateForm = (patch: Partial<ReturnType<typeof emptyForm>>) => {
