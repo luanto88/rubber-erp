@@ -401,7 +401,14 @@ export default function ProductPage() {
     caSections.forEach(cs => {
       cs.lots.forEach(lot => {
         if (!lot.is_continuation) lots_count++
-        banh += lot.tong_banh
+        if (lot.is_continuation) {
+          banh += Math.max(0, lot.kien_a - lot.prev_a)
+            + Math.max(0, lot.kien_b - lot.prev_b)
+            + Math.max(0, lot.kien_c - lot.prev_c)
+            + Math.max(0, lot.kien_d - lot.prev_d)
+        } else {
+          banh += lot.tong_banh
+        }
       })
     })
     return { lots_count, banh }
@@ -991,7 +998,15 @@ export default function ProductPage() {
         {hasNgan && caSections.map((cs, caIdx) => {
           const caLabel    = cs.ca
           const loCount    = cs.to_num - cs.from_num + 1
-          const caTongBanh = cs.lots.reduce((s, l) => s + l.tong_banh, 0)
+          const caTongBanh = cs.lots.reduce((s, l) => {
+            if (l.is_continuation) {
+              return s + Math.max(0, l.kien_a - l.prev_a)
+                + Math.max(0, l.kien_b - l.prev_b)
+                + Math.max(0, l.kien_c - l.prev_c)
+                + Math.max(0, l.kien_d - l.prev_d)
+            }
+            return s + l.tong_banh
+          }, 0)
           const caTongKg   = Math.round(cs.lots.reduce((s, l) => {
             if (l.is_continuation) {
               return s + (l.kien_a + l.kien_b + l.kien_c + l.kien_d - l.prev_a - l.prev_b - l.prev_c - l.prev_d) * session.loai_banh
@@ -1130,22 +1145,44 @@ export default function ProductPage() {
                                 )
                               }
 
-                              // Lô kế thừa + chưa đủ → stepper min=prev max=maxK
+                              // Lô kế thừa + chưa đủ → input nhập tay, min=prev, max=maxK
                               if (lot.is_continuation && !isLocked) {
                                 const remaining = maxK - prev
+                                const added = val - prev
                                 return (
                                   <div key={k} className="flex flex-col items-center gap-1">
                                     <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap">
                                       Ca trước: {prev} · thêm ≤{remaining}
                                     </span>
-                                    <Stepper
-                                      value={val} min={prev} max={maxK}
-                                      disabled={nganBlocked}
-                                      onChange={v => updateLotDraft(caIdx, lotIdx, { [k]: v } as Partial<LotDraft>)}
-                                      className={val >= maxK ? "border-emerald-300 bg-emerald-50" : val > prev ? "border-amber-300 bg-amber-50" : ""}
-                                    />
-                                    <div className="text-[10px] text-center text-slate-400">
-                                      {(val * session.loai_banh / 1000).toFixed(3)} T
+                                    <div className={`relative border rounded-xl overflow-hidden w-full ${
+                                      val >= maxK ? "border-emerald-300 bg-emerald-50" :
+                                      val > prev ? "border-amber-300 bg-amber-50" :
+                                      "border-amber-200 bg-amber-50/40"}`}>
+                                      <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-xs font-extrabold ${
+                                        val >= maxK ? "text-emerald-600" : "text-amber-700"}`}>
+                                        {kLabel}
+                                      </span>
+                                      <input
+                                        type="number" value={val}
+                                        min={prev} max={maxK}
+                                        disabled={nganBlocked}
+                                        onChange={e => {
+                                          const v = Math.min(maxK, Math.max(prev, Number(e.target.value) || prev))
+                                          updateLotDraft(caIdx, lotIdx, { [k]: v } as Partial<LotDraft>)
+                                        }}
+                                        className={`w-full pl-7 pr-6 py-2.5 text-sm font-bold text-center outline-none bg-transparent ${
+                                          val >= maxK ? "text-emerald-700" : "text-amber-700"}`}/>
+                                      {!nganBlocked && val > prev && (
+                                        <button
+                                          onClick={() => resetKien(caIdx, lotIdx, resetKeys[ki])}
+                                          title={`Reset về ca trước (${prev})`}
+                                          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors">
+                                          <X size={10}/>
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-center text-amber-600 font-bold">
+                                      +{added} bành ca này
                                     </div>
                                   </div>
                                 )
@@ -1169,7 +1206,7 @@ export default function ProductPage() {
                                       className={`w-full pl-7 pr-6 py-2.5 text-sm font-bold text-center outline-none bg-transparent ${
                                         val >= maxK ? "text-emerald-700" :
                                         val > 0 ? "text-amber-700" : "text-slate-700"}`}/>
-                                    {!nganBlocked && val > 0 && val < maxK && (
+                                    {!nganBlocked && val > 0 && (
                                       <button
                                         onClick={() => resetKien(caIdx, lotIdx, resetKeys[ki])}
                                         title="Reset về 0"
