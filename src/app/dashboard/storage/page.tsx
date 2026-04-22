@@ -32,8 +32,22 @@ type TripItem = {
   so_xe: string
   chuyen: number
   tai_xe: string
-  kl_tuoi: number
-  kl_kho: number
+  kl_ct: number; kl_ck: number    // Mủ chén
+  kl_dct: number; kl_dck: number  // Mủ đông chén
+  kl_dkt: number; kl_dkk: number  // Mủ đông khối
+  kl_dt: number;  kl_dk: number   // Mủ dây
+  kl_mn: number;  kl_mnk: number  // Mủ nước
+}
+
+function getKLFromTrip(t: TripItem, loai_nl: string): { tuoi: number; kho: number } {
+  switch (loai_nl) {
+    case "Mủ chén":      return { tuoi: t.kl_ct,  kho: t.kl_ck }
+    case "Mủ đông chén": return { tuoi: t.kl_dct, kho: t.kl_dck }
+    case "Mủ đông khối": return { tuoi: t.kl_dkt, kho: t.kl_dkk }
+    case "Mủ dây":       return { tuoi: t.kl_dt,  kho: t.kl_dk }
+    case "Mủ nước":      return { tuoi: t.kl_mn,  kho: t.kl_mnk }
+    default:             return { tuoi: 0, kho: 0 }
+  }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -144,7 +158,6 @@ export default function StoragePage() {
   const [dispatchTrips, setDispatchTrips]   = useState<TripItem[]>([])
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
   const [loadingTrips, setLoadingTrips]     = useState(false)
-  const [manualKL, setManualKL]             = useState(false)
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
@@ -220,22 +233,31 @@ export default function StoragePage() {
             so_xe: r.so_xe,
             chuyen: Number(r.chuyen) || 1,
             tai_xe: r.tai_xe,
-            kl_tuoi: (+r.kl_ct || 0) + (+r.kl_dct || 0) + (+r.kl_dkt || 0) + (+r.kl_dt || 0) + (+r.kl_mn || 0),
-            kl_kho:  (+r.kl_ck || 0) + (+r.kl_dck || 0) + (+r.kl_dkk || 0) + (+r.kl_dk  || 0) + (+r.kl_mnk || 0),
+            kl_ct:  +r.kl_ct  || 0, kl_ck:  +r.kl_ck  || 0,
+            kl_dct: +r.kl_dct || 0, kl_dck: +r.kl_dck || 0,
+            kl_dkt: +r.kl_dkt || 0, kl_dkk: +r.kl_dkk || 0,
+            kl_dt:  +r.kl_dt  || 0, kl_dk:  +r.kl_dk  || 0,
+            kl_mn:  +r.kl_mn  || 0, kl_mnk: +r.kl_mnk || 0,
           }))
       )
     setDispatchTrips(trips)
     setLoadingTrips(false)
   }, [factoryId])
 
-  // ── Auto-calc KL from selected trips ─────────────────────────────────────
+  // ── Auto-calc KL from selected trips (filtered by loai_nl) ───────────────
   useEffect(() => {
-    if (manualKL) return
     const sel = dispatchTrips.filter(t => selectedTrips.has(t.uid))
-    const tuoi = sel.reduce((s, t) => s + t.kl_tuoi, 0)
-    const kho  = sel.reduce((s, t) => s + t.kl_kho,  0)
+    const loaiNL = form.loai_nl
+    const { tuoi, kho } = sel.reduce(
+      (acc, t) => {
+        const kl = getKLFromTrip(t, loaiNL)
+        return { tuoi: acc.tuoi + kl.tuoi, kho: acc.kho + kl.kho }
+      },
+      { tuoi: 0, kho: 0 }
+    )
     setForm(p => ({ ...p, tong_tuoi: tuoi, tong_kho: kho }))
-  }, [selectedTrips, dispatchTrips, manualKL])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTrips, dispatchTrips, form.loai_nl])
 
   // ── Form helpers ──────────────────────────────────────────────────────────
   const updateForm = (patch: Partial<ReturnType<typeof emptyForm>>) => {
@@ -341,7 +363,6 @@ export default function StoragePage() {
     setEditId(null)
     setSelectedTrips(new Set())
     setDispatchTrips([])
-    setManualKL(false)
     setModal("add")
   }
 
@@ -360,7 +381,6 @@ export default function StoragePage() {
     setEditId(n.id)
     setSelectedTrips(new Set(n.trips || []))
     setDispatchTrips([])
-    setManualKL(true)
     setModal("edit")
     if (f.ngay_bd && f.ngay_kt) fetchTrips(f.ngay_bd, f.ngay_kt)
   }
@@ -672,15 +692,12 @@ export default function StoragePage() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => {
-                          setManualKL(false)
-                          setSelectedTrips(new Set(dispatchTrips.map(t => t.uid)))
-                        }}
+                        onClick={() => setSelectedTrips(new Set(dispatchTrips.map(t => t.uid)))}
                         className="text-xs px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors">
                         Chọn tất cả
                       </button>
                       <button
-                        onClick={() => { setManualKL(false); setSelectedTrips(new Set()) }}
+                        onClick={() => setSelectedTrips(new Set())}
                         className="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors">
                         Bỏ tất cả
                       </button>
@@ -710,10 +727,10 @@ export default function StoragePage() {
                         <tbody className="divide-y divide-slate-100">
                           {dispatchTrips.map(t => {
                             const checked = selectedTrips.has(t.uid)
+                            const kl = getKLFromTrip(t, form.loai_nl)
                             return (
                               <tr key={t.uid}
                                 onClick={() => {
-                                  setManualKL(false)
                                   setSelectedTrips(prev => {
                                     const next = new Set(prev)
                                     checked ? next.delete(t.uid) : next.add(t.uid)
@@ -732,10 +749,10 @@ export default function StoragePage() {
                                 <td className="px-3 py-2 text-slate-600">C{t.chuyen}</td>
                                 <td className="px-3 py-2 text-slate-600">{t.tai_xe}</td>
                                 <td className="px-3 py-2 text-right font-semibold text-amber-600">
-                                  {t.kl_tuoi.toLocaleString()}
+                                  {kl.tuoi.toLocaleString()}
                                 </td>
                                 <td className="px-3 py-2 text-right font-semibold text-amber-600">
-                                  {t.kl_kho.toLocaleString()}
+                                  {kl.kho.toLocaleString()}
                                 </td>
                               </tr>
                             )
@@ -747,40 +764,34 @@ export default function StoragePage() {
                 </div>
               )}
 
-              {/* KL tươi / khô */}
+              {/* KL tươi / khô — read-only, tự tính từ xe được chọn */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    KL tươi (kg)
-                    {!manualKL && selectedTrips.size > 0 && (
-                      <span className="ml-1 text-emerald-600 font-normal">(tự tính)</span>
-                    )}
+                    KL tươi (kg) <span className="text-emerald-600 font-normal">(tự tính)</span>
                   </label>
-                  <input type="number" value={form.tong_tuoi}
-                    onChange={e => { setManualKL(true); setForm(p => ({ ...p, tong_tuoi: +e.target.value })) }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-700 font-semibold">
+                    {form.tong_tuoi.toLocaleString("vi-VN")}
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    KL khô (kg)
-                    {!manualKL && selectedTrips.size > 0 && (
-                      <span className="ml-1 text-emerald-600 font-normal">(tự tính)</span>
-                    )}
+                    KL khô (kg) <span className="text-emerald-600 font-normal">(tự tính)</span>
                   </label>
-                  <input type="number" value={form.tong_kho}
-                    onChange={e => { setManualKL(true); setForm(p => ({ ...p, tong_kho: +e.target.value })) }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-700 font-semibold">
+                    {form.tong_kho.toLocaleString("vi-VN")}
+                  </div>
                 </div>
               </div>
 
-              {/* Mã ngăn (auto-generated, editable) */}
+              {/* Mã ngăn (auto-generated, read-only) */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Mã {subTerm.toLowerCase()} (tự sinh, có thể sửa)
+                  Mã {subTerm.toLowerCase()} (tự sinh)
                 </label>
-                <input value={form.ma_ngan}
-                  onChange={e => setForm(p => ({ ...p, ma_ngan: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-slate-50" />
+                <div className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-700 font-mono break-all">
+                  {form.ma_ngan || "—"}
+                </div>
               </div>
 
               {/* Trạng thái (read-only, tự tính từ ngày) */}
