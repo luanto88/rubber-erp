@@ -184,6 +184,49 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 - **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp} khi lô dở dang
 - → Logic ngăn ↔ Thành phẩm (chọn ngăn, nút lưu theo %, xóa lô): xem `.claude/rules/storage.md`
 
+### Logic lô kế thừa (Dở dang → Ca tiếp theo)
+
+Khi lô cuối ca trước còn dở dang, ca tiếp theo sẽ **kế thừa** lô đó với `is_continuation = true`.
+
+**Kiện đã đủ từ ca trước (locked = true):**
+- Hiển thị read-only, badge "Ca trước · đã đủ" (indigo)
+- **Không tính** vào sản lượng ca hiện tại
+- Không cho chỉnh sửa
+
+**Kiện chưa đủ (locked = false):**
+- Input nhập tay trực tiếp (`<input type="number">`) — KHÔNG dùng Stepper
+- `min = prev` (giá trị ca trước), `max = maxK` (giới hạn tối đa kiện)
+- Có nút X reset về `prev` (không về 0)
+- Hiển thị badge "Ca trước: {prev} · thêm ≤{remaining}"
+- Label dưới: "+N bành ca này"
+
+**Tính sản lượng lô kế thừa (delta only):**
+```typescript
+// caTongBanh và sessionTotals chỉ tính phần THÊM VÀO, không tính bành ca trước
+const deltaBanh = Math.max(0, kien_a - prev_a)
+  + Math.max(0, kien_b - prev_b)
+  + Math.max(0, kien_c - prev_c)
+  + Math.max(0, kien_d - prev_d)
+// Ví dụ: Ca A nhập 36/36/36/25, Ca B thêm kien_d lên 36
+// → Ca B chỉ được tính 11 bành (36-25), không tính 133 bành của Ca A
+```
+
+### Insert lô vào DB — field bắt buộc
+
+```typescript
+await supabase.from("lots").insert({
+  factory_id, day_chuyen,            // day_chuyen KHÔNG được null/rỗng
+  ma_lo, num, suffix, year,
+  ngay_sx, ca, ngan_id,
+  loai_csr, loai_banh, boc, tham, chi_thi, pallet,
+  kien_a, kien_b, kien_c, kien_d,
+  tong_banh, tong_kg, trang_thai, dd_snapshot,
+  ghi_chu: "",           // phải có, không để undefined
+  is_manual_edit: false, // phải có, không để undefined
+})
+// Luôn check error — Supabase v2 không throw, chỉ trả về { data, error }
+```
+
 ### Hậu tố lô
 
 | Code  | Tên            | Nguồn gốc | Chứng nhận |

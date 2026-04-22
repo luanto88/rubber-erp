@@ -399,6 +399,24 @@ Mỗi điểm giao nhận có trường `doi: number` lấy từ `lo_chi_tiet.cs
 - `ma_lo` tự tạo: `${num}${suffix}/${year}` (vd: "144cs/26")
 - `tong_banh` và `tong_kg` tự tính khi thay đổi kiện hoặc `loai_banh`
 - Màu highlight kiện: xanh = 36 (đủ), vàng = 1-35 (thiếu), xám = 0
+- `day_chuyen` bắt buộc không được null/rỗng — insert phải luôn có giá trị "Mủ tạp" hoặc "Mủ nước"
+- `ghi_chu: ""` và `is_manual_edit: false` phải có trong insert (không để undefined)
+
+### Lô kế thừa (dở dang → ca tiếp theo)
+
+Khi lô cuối ca trước còn dở dang (`is_continuation = true`):
+
+| Kiện | Điều kiện | Hiển thị | Tính sản lượng |
+|---|---|---|---|
+| `locked = true` | Ca trước đã đủ (≥ max) | Read-only indigo, badge "Ca trước · đã đủ" | Không tính vào ca này |
+| `locked = false` | Ca trước chưa đủ | Input nhập tay, min=prev, max=maxK, có nút X | Chỉ tính phần delta (thêm vào) |
+
+**Quy tắc tính caTongBanh / sessionTotals cho lô kế thừa:**
+```typescript
+// Chỉ tính phần THÊM VÀO, không tính bành đã có từ ca trước
+deltaBanh = Max(0, kien_a - prev_a) + Max(0, kien_b - prev_b)
+          + Max(0, kien_c - prev_c) + Max(0, kien_d - prev_d)
+```
 
 ### Hậu tố (suffixes)
 
@@ -548,19 +566,27 @@ useEffect(() => {
 
 ### Save pattern
 
+> ⚠️ **Supabase JS v2 KHÔNG throw exception** — phải kiểm tra `error` object thủ công.  
+> Nếu bỏ qua `error`, insert/update thất bại nhưng code vẫn chạy tiếp (lô lưu không hiện).
+
 ```typescript
+const [saveError, setSaveError] = useState<string | null>(null)
+
 const handleSave = async () => {
-  if (!factoryId) return;
-  setSaving(true);
+  if (!factoryId) return
+  setSaving(true)
+  setSaveError(null)
   if (editId) {
-    await supabase.from("table").update(payload).eq("id", editId);
+    const { error } = await supabase.from("table").update(payload).eq("id", editId)
+    if (error) { setSaveError(error.message); setSaving(false); return }
   } else {
-    await supabase.from("table").insert({ ...payload, factory_id: factoryId });
+    const { error } = await supabase.from("table").insert({ ...payload, factory_id: factoryId })
+    if (error) { setSaveError(error.message); setSaving(false); return }
   }
-  setSaving(false);
-  setModal(null);
-  loadData(factoryId);
-};
+  setSaving(false)
+  setModal(null)
+  loadData(factoryId)
+}
 ```
 
 ### UI Components tự viết (không dùng thư viện ngoài ngoài lucide-react)

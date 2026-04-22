@@ -28,22 +28,42 @@ useEffect(() => {
 
 ## Save/Update pattern
 
+> ⚠️ **Supabase JS v2 KHÔNG throw exception khi lỗi DB** — luôn kiểm tra `error` object.  
+> Nếu chỉ dùng `await supabase...` mà không check `error`, lỗi insert/update bị bỏ qua.
+
 ```typescript
+const [saveError, setSaveError] = useState<string | null>(null)
+
 const handleSave = async () => {
   if (!factoryId) return
   setSaving(true)
+  setSaveError(null)
   const payload = { ...form, factory_id: factoryId }
 
   if (editId) {
-    await supabase.from("table").update(payload).eq("id", editId)
+    const { error } = await supabase.from("table").update(payload).eq("id", editId)
+    if (error) { setSaveError(error.message); setSaving(false); return }
   } else {
-    await supabase.from("table").insert(payload)
+    const { error } = await supabase.from("table").insert(payload)
+    if (error) { setSaveError(error.message); setSaving(false); return }
   }
 
   setSaving(false)
   setModal(null)
   loadData(factoryId) // bắt buộc refresh sau save
 }
+```
+
+### Toast lỗi (hiển thị saveError)
+
+```tsx
+{saveError && (
+  <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
+    <AlertTriangle size={16} className="shrink-0"/>
+    <span className="text-sm font-bold">{saveError}</span>
+    <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70"><X size={14}/></button>
+  </div>
+)}
 ```
 
 ## Delete pattern
