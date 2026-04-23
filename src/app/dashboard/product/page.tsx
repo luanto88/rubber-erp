@@ -84,6 +84,7 @@ type SessionHeader = {
 
 type HistoryEntry = {
   ca: string;
+  ngay_sx: string;
   kien_a: number;
   kien_b: number;
   kien_c: number;
@@ -150,12 +151,17 @@ type EditForm = {
 
 type LotContribution = Lot & {
   uid: string;
+  hist_index: number;
   tong_banh_cua_ca: number;
   tong_kg_cua_ca: number;
   locked_a?: boolean;
   locked_b?: boolean;
   locked_c?: boolean;
   locked_d?: boolean;
+  disp_a: number;
+  disp_b: number;
+  disp_c: number;
+  disp_d: number;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -576,7 +582,9 @@ export default function ProductPage() {
           const prev = i > 0 ? history[i - 1] : null;
           arr.push({
             ...lot,
+            ngay_sx: h.ngay_sx || lot.ngay_sx,
             uid: `${lot.id}-${i}`,
+            hist_index: i,
             ca: h.ca,
             tong_banh_cua_ca: h.added_banh,
             tong_kg_cua_ca: h.added_banh * lot.loai_banh,
@@ -590,14 +598,23 @@ export default function ProductPage() {
             locked_b: prev !== null && h.kien_b === prev.kien_b && h.kien_b > 0,
             locked_c: prev !== null && h.kien_c === prev.kien_c && h.kien_c > 0,
             locked_d: prev !== null && h.kien_d === prev.kien_d && h.kien_d > 0,
+            disp_a: prev !== null ? h.kien_a - prev.kien_a : h.kien_a,
+            disp_b: prev !== null ? h.kien_b - prev.kien_b : h.kien_b,
+            disp_c: prev !== null ? h.kien_c - prev.kien_c : h.kien_c,
+            disp_d: prev !== null ? h.kien_d - prev.kien_d : h.kien_d,
           });
         });
       } else {
         arr.push({
           ...lot,
           uid: lot.id,
+          hist_index: 0,
           tong_banh_cua_ca: lot.tong_banh,
           tong_kg_cua_ca: lot.tong_kg,
+          disp_a: lot.kien_a,
+          disp_b: lot.kien_b,
+          disp_c: lot.kien_c,
+          disp_d: lot.kien_d,
         });
       }
     });
@@ -1072,9 +1089,11 @@ export default function ProductPage() {
           if (draft.is_continuation && draft.existing_snapshot?.history) {
             history = [...draft.existing_snapshot.history];
           } else if (draft.is_continuation && draft.existing_snapshot) {
+            const existingLot = lots.find((l) => l.id === draft.existing_id);
             history = [
               {
                 ca: draft.existing_snapshot.ca || "Unknown",
+                ngay_sx: existingLot?.ngay_sx || "",
                 kien_a: draft.prev_a,
                 kien_b: draft.prev_b,
                 kien_c: draft.prev_c,
@@ -1088,6 +1107,7 @@ export default function ProductPage() {
           }
           history.push({
             ca: cs.ca,
+            ngay_sx: session.ngay_sx,
             kien_a: draft.kien_a,
             kien_b: draft.kien_b,
             kien_c: draft.kien_c,
@@ -1294,22 +1314,72 @@ export default function ProductPage() {
   };
 
   // ── Delete ─────────────────────────────────────────────────────────────────
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (uid: string) => {
     if (!factoryId) return;
-    const lot = lots.find((l) => l.id === id);
-    await supabase.from("lots").delete().eq("id", id);
-    if (lot?.ngan_id) {
-      const { data: rem } = await supabase
-        .from("lots")
-        .select("id")
-        .eq("ngan_id", lot.ngan_id)
-        .neq("id", id);
-      const newStatus =
-        (rem?.length ?? 0) === 0 ? "Chờ sản xuất" : "Đang sản xuất";
+    // uid có dạng "lotId-histIdx" (lô có history) hoặc "lotId" (lô đơn)
+    const dashIdx = uid.lastIndexOf("-");
+    const isHistoryUid =
+      dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
+    const lotId = isHistoryUid ? uid.slice(0, dashIdx) : uid;
+    const histIdx = isHistoryUid ? Number(uid.slice(dashIdx + 1)) : 0;
+
+    const lot = lots.find((l) => l.id === lotId);
+    if (!lot) return;
+
+    const history: HistoryEntry[] = lot.dd_snapshot?.history || [];
+
+    if (!isHistoryUid || history.length <= 1) {
+      // Xóa hẳn lô
+      await supabase.from("lots").delete().eq("id", lotId);
+      if (lot.ngan_id) {
+        const { data: rem } = await supabase
+          .from("lots")
+          .select("id")
+          .eq("ngan_id", lot.ngan_id)
+          .neq("id", lotId);
+        const newStatus =
+          (rem?.length ?? 0) === 0 ? "Chờ sản xuất" : "Đang sản xuất";
+        await supabase
+          .from("ngans")
+          .update({ trang_thai: newStatus })
+          .eq("id", lot.ngan_id);
+      }
+    } else {
+      // Chỉ xóa entry cuối — revert về entry trước
+      if (histIdx !== history.length - 1) {
+        setSaveError("Chỉ có thể xóa ca sản xuất mới nhất của lô này.");
+        setDelConfirm(null);
+        return;
+      }
+      const prevEntry = history[history.length - 2];
+      const newHistory = history.slice(0, -1);
+      const newTongBanh =
+        prevEntry.kien_a + prevEntry.kien_b + prevEntry.kien_c + prevEntry.kien_d;
+      const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
+      const newTrangThai = autoTrangThai(newTongBanh, cfg.lo_tron, "Dở dang");
       await supabase
-        .from("ngans")
-        .update({ trang_thai: newStatus })
-        .eq("id", lot.ngan_id);
+        .from("lots")
+        .update({
+          kien_a: prevEntry.kien_a,
+          kien_b: prevEntry.kien_b,
+          kien_c: prevEntry.kien_c,
+          kien_d: prevEntry.kien_d,
+          tong_banh: newTongBanh,
+          tong_kg: Math.round(newTongBanh * lot.loai_banh * 100) / 100,
+          trang_thai: newTrangThai,
+          ca: prevEntry.ca,
+          ngay_sx: prevEntry.ngay_sx || lot.ngay_sx,
+          dd_snapshot: {
+            ...lot.dd_snapshot,
+            kien_a: prevEntry.kien_a,
+            kien_b: prevEntry.kien_b,
+            kien_c: prevEntry.kien_c,
+            kien_d: prevEntry.kien_d,
+            history: newHistory,
+            ca: prevEntry.ca,
+          },
+        })
+        .eq("id", lotId);
     }
     setDelConfirm(null);
     loadData(factoryId);
@@ -2011,20 +2081,20 @@ export default function ProductPage() {
 
                                 if (lot.is_continuation && !isLocked) {
                                   const remaining = maxK - prev;
-                                  const added = val - prev;
+                                  const delta = val - prev;
                                   return (
                                     <div
                                       key={k}
                                       className="flex flex-col items-center gap-1"
                                     >
                                       <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap">
-                                        Ca trước: {prev} · thêm ≤{remaining}
+                                        Thêm ≤{remaining}
                                       </span>
                                       <div
                                         className={`relative border rounded-xl overflow-hidden w-full ${
                                           val >= maxK
                                             ? "border-emerald-300 bg-emerald-50"
-                                            : val > prev
+                                            : delta > 0
                                               ? "border-amber-300 bg-amber-50"
                                               : "border-amber-200 bg-amber-50/40"
                                         }`}
@@ -2040,20 +2110,20 @@ export default function ProductPage() {
                                         </span>
                                         <input
                                           type="number"
-                                          value={val}
-                                          min={prev}
-                                          max={maxK}
+                                          value={delta}
+                                          min={0}
+                                          max={remaining}
                                           disabled={nganBlocked}
                                           onChange={(e) => {
-                                            const v = Math.min(
-                                              maxK,
+                                            const d = Math.min(
+                                              remaining,
                                               Math.max(
-                                                prev,
-                                                Number(e.target.value) || prev,
+                                                0,
+                                                Number(e.target.value) || 0,
                                               ),
                                             );
                                             updateLotDraft(caIdx, lotIdx, {
-                                              [k]: v,
+                                              [k]: prev + d,
                                             } as Partial<LotDraft>);
                                           }}
                                           className={`w-full pl-7 pr-6 py-2.5 text-sm font-bold text-center outline-none bg-transparent ${
@@ -2062,7 +2132,7 @@ export default function ProductPage() {
                                               : "text-amber-700"
                                           }`}
                                         />
-                                        {!nganBlocked && val > prev && (
+                                        {!nganBlocked && delta > 0 && (
                                           <button
                                             onClick={() =>
                                               resetKien(
@@ -2079,7 +2149,7 @@ export default function ProductPage() {
                                         )}
                                       </div>
                                       <div className="text-[10px] text-center text-amber-600 font-bold">
-                                        +{added} bành ca này
+                                        +{delta} bành ca này
                                       </div>
                                     </div>
                                   );
@@ -2669,16 +2739,16 @@ export default function ProductPage() {
                                       <td className="px-4 py-2.5 text-xs text-slate-500">
                                         <span className="flex items-center gap-0.5 flex-wrap">
                                           {c.locked_a && <Lock size={9} className="text-indigo-400 shrink-0" />}
-                                          <span>{c.kien_a}</span>
+                                          <span>{c.disp_a}</span>
                                           <span>/</span>
                                           {c.locked_b && <Lock size={9} className="text-indigo-400 shrink-0" />}
-                                          <span>{c.kien_b}</span>
+                                          <span>{c.disp_b}</span>
                                           <span>/</span>
                                           {c.locked_c && <Lock size={9} className="text-indigo-400 shrink-0" />}
-                                          <span>{c.kien_c}</span>
+                                          <span>{c.disp_c}</span>
                                           <span>/</span>
                                           {c.locked_d && <Lock size={9} className="text-indigo-400 shrink-0" />}
-                                          <span>{c.kien_d}</span>
+                                          <span>{c.disp_d}</span>
                                         </span>
                                       </td>
                                       <td className="px-4 py-2.5">
@@ -2712,8 +2782,8 @@ export default function ProductPage() {
                                             </button>
                                           )}
                                           <button
-                                            onClick={() => setDelConfirm(c.id)}
-                                            title="Xóa gốc lô này"
+                                            onClick={() => setDelConfirm(c.uid)}
+                                            title="Xóa ca này"
                                             className="p-1.5 hover:bg-red-100 text-red-500 rounded-lg transition-colors"
                                           >
                                             <Trash2 size={14} />
