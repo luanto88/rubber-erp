@@ -151,7 +151,6 @@ type EditForm = {
 
 type LotContribution = Lot & {
   uid: string;
-  hist_index: number;
   tong_banh_cua_ca: number;
   tong_kg_cua_ca: number;
   locked_a?: boolean;
@@ -584,7 +583,6 @@ export default function ProductPage() {
             ...lot,
             ngay_sx: h.ngay_sx || lot.ngay_sx,
             uid: `${lot.id}-${i}`,
-            hist_index: i,
             ca: h.ca,
             tong_banh_cua_ca: h.added_banh,
             tong_kg_cua_ca: h.added_banh * lot.loai_banh,
@@ -608,7 +606,6 @@ export default function ProductPage() {
         arr.push({
           ...lot,
           uid: lot.id,
-          hist_index: 0,
           tong_banh_cua_ca: lot.tong_banh,
           tong_kg_cua_ca: lot.tong_kg,
           disp_a: lot.kien_a,
@@ -1316,7 +1313,6 @@ export default function ProductPage() {
   // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (uid: string) => {
     if (!factoryId) return;
-    // uid có dạng "lotId-histIdx" (lô có history) hoặc "lotId" (lô đơn)
     const dashIdx = uid.lastIndexOf("-");
     const isHistoryUid =
       dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
@@ -1353,30 +1349,25 @@ export default function ProductPage() {
       }
       const prevEntry = history[history.length - 2];
       const newHistory = history.slice(0, -1);
-      const newTongBanh =
-        prevEntry.kien_a + prevEntry.kien_b + prevEntry.kien_c + prevEntry.kien_d;
+      const { kien_a, kien_b, kien_c, kien_d, ca: prevCa } = prevEntry;
+      const newTongBanh = kien_a + kien_b + kien_c + kien_d;
       const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
       const newTrangThai = autoTrangThai(newTongBanh, cfg.lo_tron, "Dở dang");
+      const revertedKiens = { kien_a, kien_b, kien_c, kien_d };
       await supabase
         .from("lots")
         .update({
-          kien_a: prevEntry.kien_a,
-          kien_b: prevEntry.kien_b,
-          kien_c: prevEntry.kien_c,
-          kien_d: prevEntry.kien_d,
+          ...revertedKiens,
           tong_banh: newTongBanh,
           tong_kg: Math.round(newTongBanh * lot.loai_banh * 100) / 100,
           trang_thai: newTrangThai,
-          ca: prevEntry.ca,
+          ca: prevCa,
           ngay_sx: prevEntry.ngay_sx || lot.ngay_sx,
           dd_snapshot: {
             ...lot.dd_snapshot,
-            kien_a: prevEntry.kien_a,
-            kien_b: prevEntry.kien_b,
-            kien_c: prevEntry.kien_c,
-            kien_d: prevEntry.kien_d,
+            ...revertedKiens,
             history: newHistory,
-            ca: prevEntry.ca,
+            ca: prevCa,
           },
         })
         .eq("id", lotId);
