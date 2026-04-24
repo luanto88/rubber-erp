@@ -165,7 +165,7 @@ type LotContribution = Lot & {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CA_OPTS = ["A", "B", "C"];
-const THAM_OPTS = ["Củ", "Mới"];
+const THAM_OPTS = ["cũ", "Mới"];
 const TRANG_THAI_OPTS = ["Hoàn thành", "Dở dang", "Xuất hàng"];
 const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
 
@@ -515,6 +515,9 @@ export default function ProductPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
+  const [editDateModal, setEditDateModal] = useState<string | null>(null);
+  const [deleteMode, setDeleteMode] = useState<string | null>(null);
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
   const [maxNumFromDB, setMaxNumFromDB] = useState(0);
 
   const [session, setSession] = useState<SessionHeader>(defaultSession());
@@ -809,13 +812,15 @@ export default function ProductPage() {
       if (!n.ngay_bd) return false;
       return Math.floor((now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000) >= 21;
     });
-    const dangSX = eligible.find((n) => n.trang_thai === "Đang sản xuất");
+    const dangSX = eligible
+      .filter((n) => n.trang_thai === "Đang sản xuất")
+      .sort((a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime())[0];
     if (dangSX) return dangSX.id;
-    // Fallback: ngăn Chờ sản xuất cũ nhất
-    const oldest = eligible
+    // Fallback: ngăn Chờ sản xuất MỚI NHẤT (ngay_bd lớn nhất)
+    const newest = eligible
       .filter((n) => n.trang_thai === "Chờ sản xuất")
-      .sort((a, b) => new Date(a.ngay_bd).getTime() - new Date(b.ngay_bd).getTime())[0];
-    return oldest?.id || "";
+      .sort((a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime())[0];
+    return newest?.id || "";
   };
 
   const updateSession = (patch: Partial<SessionHeader>) => {
@@ -1095,7 +1100,7 @@ export default function ProductPage() {
         getBocsForLoaiCSR("Mủ tạp", defaultCsr)[1] ||
         getBocsForLoaiCSR("Mủ tạp", defaultCsr)[0] ||
         "",
-      tham: "Củ",
+      tham: "cũ",
       chi_thi: lastChiThi,
       pallet: ["Sắt đế gỗ"],
     };
@@ -1442,6 +1447,15 @@ export default function ProductPage() {
     loadData(factoryId);
   };
 
+  const handleBulkDelete = async () => {
+    for (const id of Array.from(selectedDeleteIds)) {
+      await handleDelete(id);
+    }
+    setDeleteMode(null);
+    setSelectedDeleteIds(new Set());
+    setDelConfirm(null);
+  };
+
   const toggleDate = (date: string) => {
     setExpandedDates((prev) =>
       prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date],
@@ -1635,7 +1649,7 @@ export default function ProductPage() {
             </div>
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Thấm *
+                Thãm *
               </label>
               <select
                 value={session.tham}
@@ -2377,7 +2391,7 @@ export default function ProductPage() {
                   CT:{session.chi_thi}
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                  Thấm {session.tham}
+                  Thãm {session.tham === "Củ" ? "cũ" : session.tham}
                 </span>
                 <span className="text-slate-300 text-xs">│</span>
                 {caSections.map((cs, ci) => {
@@ -2712,13 +2726,50 @@ export default function ProductPage() {
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openCreate(date); }}
-                      className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                      title="Thêm ca sản xuất cho ngày này"
-                    >
-                      <Plus size={12} /> Thêm ca
-                    </button>
+                    {deleteMode === date ? (
+                      <>
+                        <span className="text-xs text-red-600 font-bold shrink-0">
+                          Chọn lô cần xóa...
+                        </span>
+                        <button
+                          disabled={selectedDeleteIds.size === 0}
+                          onClick={(e) => { e.stopPropagation(); setDelConfirm("bulk"); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
+                        >
+                          <Trash2 size={12} /> Xóa {selectedDeleteIds.size} lô
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteMode(null); setSelectedDeleteIds(new Set()); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
+                        >
+                          Hủy
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openCreate(date); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                          title="Thêm ca sản xuất cho ngày này"
+                        >
+                          <Plus size={12} /> Thêm
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditDateModal(date); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                          title="Sửa lô trong ngày này"
+                        >
+                          <Edit2 size={12} /> Sửa
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteMode(date); setSelectedDeleteIds(new Set()); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                          title="Xóa lô trong ngày này"
+                        >
+                          <Trash2 size={12} /> Xóa
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -2752,6 +2803,9 @@ export default function ProductPage() {
                               <table className="w-full text-sm">
                                 <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
                                   <tr>
+                                    {deleteMode === date && (
+                                      <th className="px-3 py-2.5 w-10" />
+                                    )}
                                     <th className="px-4 py-2.5 text-left">
                                       Mã lô
                                     </th>
@@ -2762,6 +2816,9 @@ export default function ProductPage() {
                                       Loại
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
+                                      Bọc
+                                    </th>
+                                    <th className="px-4 py-2.5 text-left">
                                       SL Thực tế ca này
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
@@ -2770,17 +2827,30 @@ export default function ProductPage() {
                                     <th className="px-4 py-2.5 text-left">
                                       Trạng thái
                                     </th>
-                                    <th className="px-4 py-2.5 text-center">
-                                      Thao tác
-                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                   {caContribs.map((c) => (
                                     <tr
                                       key={c.uid}
-                                      className="hover:bg-slate-50 transition-colors"
+                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && selectedDeleteIds.has(c.id) ? "bg-red-50" : ""}`}
                                     >
+                                      {deleteMode === date && (
+                                        <td className="px-3 py-2.5">
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedDeleteIds.has(c.id)}
+                                            onChange={() =>
+                                              setSelectedDeleteIds((prev) => {
+                                                const next = new Set(prev);
+                                                next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                                                return next;
+                                              })
+                                            }
+                                            className="w-4 h-4 rounded accent-red-500"
+                                          />
+                                        </td>
+                                      )}
                                       <td className="px-4 py-2.5 font-bold text-slate-700">
                                         {c.ma_lo}
                                       </td>
@@ -2791,6 +2861,9 @@ export default function ProductPage() {
                                         <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
                                           {c.loai_csr}
                                         </span>
+                                      </td>
+                                      <td className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate" title={c.boc || ""}>
+                                        {c.boc || "—"}
                                       </td>
                                       <td className="px-4 py-2.5 font-extrabold text-blue-700">
                                         +{c.tong_banh_cua_ca}{" "}
@@ -2825,32 +2898,6 @@ export default function ProductPage() {
                                         >
                                           {c.trang_thai}
                                         </span>
-                                      </td>
-                                      <td className="px-4 py-2.5 text-center">
-                                        <div className="flex justify-center gap-1">
-                                          {c.trang_thai !== "Hoàn thành" && c.trang_thai !== "Xuất hàng" && (
-                                            <button
-                                              onClick={() =>
-                                                openEdit(
-                                                  lots.find(
-                                                    (l) => l.id === c.id,
-                                                  )!,
-                                                )
-                                              }
-                                              title="Sửa lô này"
-                                              className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-blue-50 text-blue-600 rounded-lg transition-colors font-bold"
-                                            >
-                                              <Edit2 size={12} /> Sửa
-                                            </button>
-                                          )}
-                                          <button
-                                            onClick={() => setDelConfirm(c.uid)}
-                                            title="Xóa ca này"
-                                            className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-red-50 text-red-600 rounded-lg transition-colors font-bold"
-                                          >
-                                            <Trash2 size={12} /> Xóa
-                                          </button>
-                                        </div>
                                       </td>
                                     </tr>
                                   ))}
@@ -3164,6 +3211,93 @@ export default function ProductPage() {
         </div>
       )}
 
+      {editDateModal && (() => {
+        const dateLots = contributions.filter((c) => c.ngay_sx === editDateModal);
+        const grouped: Record<string, typeof dateLots> = {};
+        dateLots.forEach((c) => {
+          const k = c.ca || "?";
+          if (!grouped[k]) grouped[k] = [];
+          grouped[k].push(c);
+        });
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+              <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+                <div>
+                  <h3 className="font-extrabold text-slate-800">
+                    Sửa ngày {new Date(editDateModal).toLocaleDateString("vi-VN")}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Click vào lô để mở form sửa
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditDateModal(null)}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X size={18} className="text-slate-500" />
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                {Object.keys(grouped).sort().map((ca) => (
+                  <div key={ca}>
+                    <div className="px-6 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-extrabold rounded-lg">
+                        Ca {ca}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {grouped[ca].reduce((s, c) => s + c.tong_banh_cua_ca, 0)} bành
+                      </span>
+                    </div>
+                    {grouped[ca].map((c) => {
+                      const lot = lots.find((l) => l.id === c.id);
+                      const canEdit = c.trang_thai !== "Xuất hàng";
+                      return (
+                        <div
+                          key={c.uid}
+                          className="px-6 py-3 flex items-center justify-between border-b border-slate-100 hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="font-bold text-slate-800 shrink-0">{c.ma_lo}</span>
+                            <span className="text-xs text-slate-400 shrink-0">
+                              +{c.tong_banh_cua_ca} bành · {fmtKg(c.tong_kg_cua_ca)}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                                c.trang_thai === "Hoàn thành"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : c.trang_thai === "Xuất hàng"
+                                    ? "bg-purple-100 text-purple-700"
+                                    : "bg-amber-100 text-amber-700"
+                              }`}
+                            >
+                              {c.trang_thai}
+                            </span>
+                          </div>
+                          {canEdit && lot ? (
+                            <button
+                              onClick={() => { setEditDateModal(null); openEdit(lot); }}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                            >
+                              <Edit2 size={12} /> Sửa lô
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400 shrink-0">Đã xuất hàng</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {dateLots.length === 0 && (
+                  <div className="p-8 text-center text-slate-400 text-sm">Không có lô nào</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {delConfirm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
@@ -3171,8 +3305,10 @@ export default function ProductPage() {
               Xác nhận xóa?
             </h3>
             <p className="text-sm text-slate-500 mb-5">
-              Lô này sẽ bị xóa vĩnh viễn. Ngăn lưu liên quan sẽ được cập nhật
-              trạng thái tự động.
+              {delConfirm === "bulk"
+                ? `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
+                : "Lô này sẽ bị xóa vĩnh viễn."}{" "}
+              Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động.
             </p>
             <div className="flex gap-3">
               <button
@@ -3182,7 +3318,11 @@ export default function ProductPage() {
                 Hủy
               </button>
               <button
-                onClick={() => handleDelete(delConfirm)}
+                onClick={() =>
+                  delConfirm === "bulk"
+                    ? handleBulkDelete()
+                    : handleDelete(delConfirm)
+                }
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
               >
                 Xóa
