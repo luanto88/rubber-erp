@@ -102,8 +102,8 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
 3. **Add view** → pre-fill rows tu ngay gan nhat (xoa KL), ngay default = maxDate+1
 4. **Nha may diem den** → disabled, lay tu factories table
 5. **Chung nhan** → "PEFC CS" | "PEFC FM" | "Khong" (khong co "ISO")
-6. **Toolbar** → Tai bang (CSV template hoặc xlsx template , admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
-7. **KL modal** → 3 nhom: Chen / Dong chen / Dong khoi / Mu day
+6. **Toolbar** → Tai bang (CSV template hoặc xlsx template, admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
+7. **KL modal** → 4 nhom: Chen / Dong chen / Dong khoi / Mu day
 
 ---
 
@@ -160,7 +160,7 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
   ngan_id: UUID,       // FK → ngans — loai_nl của ngăn phải khớp với loại NL đầu vào của day_chuyen
   loai_csr: string,    // NMPHK: "CSR10"|"CSR20"|"CSRL"|"CSR3L"|"CSRCV50"|"CSRCV60" / NMCP: "SVR*"
   loai_banh: number,   // Mủ tạp=35; L/3L=35|33,33; CV50/60=35|20
-  boc: string, tham: string,  // "Củ"|"Mới"
+  boc: string, tham: string,  // "cũ"|"Mới" (label UI: "Thãm"; records cũ DB có thể là "Củ" → display guard)
   pallet: string[],    // NMPHK: sắt đế gỗ/sắt mỏng/MB5/gỗ; NMCP: +sắt đế nhựa
   chi_thi: string,
   kien_a: number, kien_b: number, kien_c: number, kien_d: number,
@@ -186,10 +186,10 @@ const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
   - Filter: `l.loai_csr === loai_csr && l.suffix === suffix && l.year === year`
   - Áp dụng ở: `useEffect maxNumFromDB`, `updateSession` khi đổi suffix, `openCreate`
   - `generateLotDrafts` cũng filter theo `loai_csr` khi lookup DB lot
-- **Lô Hoàn thành — bất biến:**
-  - Không mở được modal sửa (blocked trong `openEdit`)
-  - Nút Edit ẩn trong list view
-  - `generateLotDrafts`: lô DB có `trang_thai = "Hoàn thành"/"Xuất hàng"` → `is_already_completed = true`, bỏ qua khi save
+- **Lô Xuất hàng — bất biến (chỉ khóa khi đã xuất hàng):**
+  - `openEdit()` block: chỉ `trang_thai === "Xuất hàng"` → không mở được modal sửa
+  - `canEdit` trong editDateModal: `trang_thai !== "Xuất hàng"` — lô "Hoàn thành" vẫn sửa được
+  - `generateLotDrafts`: lô DB có `trang_thai = "Hoàn thành"/"Xuất hàng"` → `is_already_completed = true`, bỏ qua khi save (logic tách biệt với khóa sửa)
 - **Highlight kiện:** xanh `text-emerald-600` = max, vàng `text-amber-600` = 1–(max-1), xám = 0
 - **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp, history[]} khi lô dở dang
 - → Logic ngăn ↔ Thành phẩm (chọn ngăn, nút lưu theo %, xóa lô): xem `.claude/rules/storage.md`
@@ -230,6 +230,35 @@ const deltaBanh =
 - Tính từ `dd_snapshot.history`: nếu `h.kien_x === history[i-1].kien_x && h.kien_x > 0` → locked
 - Render: `{c.locked_a && <Lock size={9} className="text-indigo-400" />}{c.kien_a}`
 - Mỗi lô kế thừa hiện **1 dòng riêng mỗi ca** với bành/tấn delta của ca đó
+
+### autoSelectNganId — logic chọn ngăn tự động
+
+Hàm helper trong component (không export). Ưu tiên:
+1. **"Đang sản xuất"** khớp loại NL với day_chuyen → sort `ngay_bd DESC` → lấy mới nhất
+2. Fallback: **"Chờ sản xuất"** → sort `ngay_bd DESC` → lấy mới nhất (ngày lưu lớn nhất)
+
+```typescript
+// Điều kiện eligible:
+// - loai_nl khớp: Mủ tạp → ["Mủ chén","Mủ đông chén","Mủ đông khối","Mủ dây","Mủ dơ","Mủ tạp"]
+//                 Mủ nước → ["Mủ nước"]
+// - trang_thai NOT IN ["Đóng","Đã sản xuất"]
+// - ngay_bd đủ 21 ngày
+// Gọi tại: openCreate() và updateSession() khi đổi day_chuyen
+```
+
+### UI Pattern — List view (grouped by ngày sản xuất)
+
+**Header mỗi ngày** có 3 nút ở góc phải:
+- **Thêm**: `openCreate(date)` — tạo ca mới pre-fill ngày đó
+- **Sửa**: `setEditDateModal(date)` — mở modal danh sách lô trong ngày
+- **Xóa**: `setDeleteMode(date)` — vào chế độ checkbox chọn lô để xóa hàng loạt
+
+**editDateModal**: Modal liệt kê `contributions` filter theo `ngay_sx === editDateModal`, group by ca. Mỗi lô có nút "Sửa lô" nếu `trang_thai !== "Xuất hàng"` (lô "Hoàn thành" vẫn hiện nút sửa).
+
+**deleteMode**: Khi active cho 1 ngày — hàng trong ngày đó hiện checkbox, header ngày thay bằng nút "Xóa N lô" + "Hủy". `handleBulkDelete` gọi `handleDelete(id)` tuần tự cho từng `id` trong `selectedDeleteIds`.
+
+**Cột bảng trong mỗi ca:** Mã lô · Ngăn · Loại · Bọc · SL Thực tế ca này · Kiện (A/B/C/D) thời điểm · Trạng thái  
+*(Không có cột Thao tác — Sửa/Xóa đã chuyển lên header ngày)*
 
 ### Insert lô vào DB — field bắt buộc
 

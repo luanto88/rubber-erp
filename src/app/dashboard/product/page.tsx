@@ -1273,8 +1273,8 @@ export default function ProductPage() {
 
   // ── Edit individual lot ────────────────────────────────────────────────────
   const openEdit = (lot: Lot) => {
-    if (lot.trang_thai === "Hoàn thành") {
-      setSaveError("Lô đã hoàn thành, không thể sửa.")
+    if (lot.trang_thai === "Xuất hàng") {
+      setSaveError("Lô đã xuất hàng, không thể sửa.")
       return
     }
     setEditForm({
@@ -3251,7 +3251,7 @@ export default function ProductPage() {
                     </div>
                     {grouped[ca].map((c) => {
                       const lot = lots.find((l) => l.id === c.id);
-                      const canEdit = c.trang_thai !== "Xuất hàng" && c.trang_thai !== "Hoàn thành";
+                      const canEdit = c.trang_thai !== "Xuất hàng";
                       return (
                         <div
                           key={c.uid}
