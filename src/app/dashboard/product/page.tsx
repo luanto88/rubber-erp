@@ -3251,7 +3251,7 @@ export default function ProductPage() {
                     </div>
                     {grouped[ca].map((c) => {
                       const lot = lots.find((l) => l.id === c.id);
-                      const canEdit = c.trang_thai !== "Xuất hàng";
+                      const canEdit = c.trang_thai !== "Xuất hàng" && c.trang_thai !== "Hoàn thành";
                       return (
                         <div
                           key={c.uid}
