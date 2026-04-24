@@ -248,6 +248,12 @@ function yearFromDate(dateStr: string): string {
     : new Date().getFullYear().toString().slice(-2);
 }
 
+function fmtKg(kg: number): string {
+  return Math.round(kg).toLocaleString("vi-VN") + " kg";
+}
+
+const CA_ORDER_MAP: Record<string, number> = { A: 1, B: 2, C: 3, D: 4 };
+
 function generateLotDrafts(
   fromNum: number,
   toNum: number,
@@ -357,22 +363,30 @@ function generateLotDrafts(
         "kien_d" in contSource
           ? contSource.kien_d
           : (contSource as LotDraft).kien_d;
-      const tb = pA + pB + pC + pD;
+      const lA = pA >= max_per_kien;
+      const lB = pB >= max_per_kien;
+      const lC = pC >= max_per_kien;
+      const lD = pD >= max_per_kien;
+      const initA = lA ? pA : max_per_kien;
+      const initB = lB ? pB : max_per_kien;
+      const initC = lC ? pC : max_per_kien;
+      const initD = lD ? pD : max_per_kien;
+      const tb = initA + initB + initC + initD;
       drafts.push({
         num: n,
         role,
-        kien_a: pA,
-        kien_b: pB,
-        kien_c: pC,
-        kien_d: pD,
+        kien_a: initA,
+        kien_b: initB,
+        kien_c: initC,
+        kien_d: initD,
         prev_a: pA,
         prev_b: pB,
         prev_c: pC,
         prev_d: pD,
-        locked_a: pA >= max_per_kien,
-        locked_b: pB >= max_per_kien,
-        locked_c: pC >= max_per_kien,
-        locked_d: pD >= max_per_kien,
+        locked_a: lA,
+        locked_b: lB,
+        locked_c: lC,
+        locked_d: lD,
         is_continuation: true,
         existing_id:
           (fromDB as Lot | undefined)?.id ??
@@ -783,6 +797,27 @@ export default function ProductPage() {
   }, [factoryId, session.suffix, sessionYear, lots]);
 
   // ── Session handlers ───────────────────────────────────────────────────────
+  const autoSelectNganId = (dayChuyenVal: string): string => {
+    const validNl =
+      dayChuyenVal === "Mủ tạp"
+        ? ["Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây", "Mủ dơ", "Mủ tạp"]
+        : ["Mủ nước"];
+    const now = new Date();
+    const eligible = ngans.filter((n) => {
+      if (!validNl.includes(n.loai_nl)) return false;
+      if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
+      if (!n.ngay_bd) return false;
+      return Math.floor((now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000) >= 21;
+    });
+    const dangSX = eligible.find((n) => n.trang_thai === "Đang sản xuất");
+    if (dangSX) return dangSX.id;
+    // Fallback: ngăn Chờ sản xuất cũ nhất
+    const oldest = eligible
+      .filter((n) => n.trang_thai === "Chờ sản xuất")
+      .sort((a, b) => new Date(a.ngay_bd).getTime() - new Date(b.ngay_bd).getTime())[0];
+    return oldest?.id || "";
+  };
+
   const updateSession = (patch: Partial<SessionHeader>) => {
     setSession((prev) => {
       const next = { ...prev, ...patch };
@@ -792,7 +827,7 @@ export default function ProductPage() {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
         next.loai_banh = cfg.loai_banh;
         next.boc = getBocsForLoaiCSR(patch.day_chuyen, next.loai_csr)[1] || "";
-        next.ngan_id = ""; // Reset ngan_id khi đổi dây chuyền
+        next.ngan_id = autoSelectNganId(patch.day_chuyen);
       }
       if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
@@ -883,6 +918,17 @@ export default function ProductPage() {
 
   // ── Ca section handler ─────────────────────────────────────────────────────
   const updateCaSection = (idx: number, patch: Partial<CaSection>) => {
+    // Nếu chỉ đổi ca letter (không đổi from_num/to_num), giữ nguyên kien values
+    if ("ca" in patch && !("from_num" in patch) && !("to_num" in patch)) {
+      setCaSections((prev) =>
+        prev.map((cs, i) =>
+          i === idx
+            ? { ...cs, ca: patch.ca as "A" | "B" | "C", lots: cs.lots.map((d) => ({ ...d, ca: patch.ca as string })) }
+            : cs,
+        ),
+      );
+      return;
+    }
     setCaSections((prev) => {
       const updated = prev.map((cs, i) =>
         i === idx ? { ...cs, ...patch } : cs,
@@ -998,7 +1044,7 @@ export default function ProductPage() {
   };
 
   // ── Open create ────────────────────────────────────────────────────────────
-  const openCreate = async () => {
+  const openCreate = async (presetDate?: string) => {
     if (!factoryId) return;
     const maxDate =
       lots.length > 0
@@ -1009,7 +1055,7 @@ export default function ProductPage() {
         : todayStr();
     const nextDay = new Date(maxDate);
     nextDay.setDate(nextDay.getDate() + 1);
-    const ngaySX = nextDay.toISOString().slice(0, 10);
+    const ngaySX = presetDate || nextDay.toISOString().slice(0, 10);
     const yrStr = yearFromDate(ngaySX);
 
     const lastChiThi = lots.length > 0 ? lots[0]?.chi_thi || "1" : "1";
@@ -1021,26 +1067,27 @@ export default function ProductPage() {
     const defaultCsr =
       getLoaiCSRByDayChuyen("Mủ tạp", factoryPrefix)[0] || `${factoryPrefix}10`;
     const cfg = getLoaiBanhConfig(defaultCsr);
-    const fromNum = getMaxLotNum(defaultCsr, defaultSuffix, yrStr) + 1;
-
-    const validLoaiNl = [
-      "Mủ chén",
-      "Mủ đông chén",
-      "Mủ đông khối",
-      "Mủ dây",
-      "Mủ dơ",
-      "Mủ tạp",
-    ];
-    const dangSxNgan = ngans.find(
-      (n) =>
-        n.trang_thai === "Đang sản xuất" && validLoaiNl.includes(n.loai_nl),
-    );
+    const latestDang = lots
+      .filter(
+        (l) =>
+          l.loai_csr === defaultCsr &&
+          l.suffix === defaultSuffix &&
+          l.year === yrStr &&
+          l.trang_thai === "Dở dang",
+      )
+      .sort((a, b) => {
+        if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
+        return (CA_ORDER_MAP[b.ca] || 0) - (CA_ORDER_MAP[a.ca] || 0);
+      })[0];
+    const fromNum = latestDang
+      ? latestDang.num
+      : getMaxLotNum(defaultCsr, defaultSuffix, yrStr) + 1;
 
     const s: SessionHeader = {
       ngay_sx: ngaySX,
       day_chuyen: "Mủ tạp",
       so_ca: 1,
-      ngan_id: dangSxNgan?.id || "",
+      ngan_id: autoSelectNganId("Mủ tạp"),
       suffix: defaultSuffix,
       loai_csr: defaultCsr,
       loai_banh: cfg.loai_banh,
@@ -1083,13 +1130,13 @@ export default function ProductPage() {
 
           // History Tracking
           let history: HistoryEntry[] = [];
-          if (draft.is_continuation && draft.existing_snapshot?.history) {
+          if (draft.is_continuation && draft.existing_snapshot?.history?.length) {
             history = [...draft.existing_snapshot.history];
           } else if (draft.is_continuation && draft.existing_snapshot) {
             const existingLot = lots.find((l) => l.id === draft.existing_id);
             history = [
               {
-                ca: draft.existing_snapshot.ca || "Unknown",
+                ca: draft.existing_snapshot.ca || existingLot?.ca || "?",
                 ngay_sx: existingLot?.ngay_sx || "",
                 kien_a: draft.prev_a,
                 kien_b: draft.prev_b,
@@ -1101,6 +1148,25 @@ export default function ProductPage() {
                   draft.existing_snapshot.timestamp || new Date().toISOString(),
               },
             ];
+          } else if (draft.is_continuation && draft.existing_id) {
+            // Lô dở dang không có dd_snapshot — tạo entry gốc từ lot thực tế
+            const existingLot = lots.find((l) => l.id === draft.existing_id);
+            if (existingLot) {
+              history = [
+                {
+                  ca: existingLot.ca,
+                  ngay_sx: existingLot.ngay_sx,
+                  kien_a: draft.prev_a,
+                  kien_b: draft.prev_b,
+                  kien_c: draft.prev_c,
+                  kien_d: draft.prev_d,
+                  added_banh:
+                    draft.prev_a + draft.prev_b + draft.prev_c + draft.prev_d,
+                  timestamp:
+                    (existingLot as any).created_at || new Date().toISOString(),
+                },
+              ];
+            }
           }
           history.push({
             ca: cs.ca,
@@ -1719,9 +1785,9 @@ export default function ProductPage() {
                       {n.ma_ngan}
                     </p>
                     <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
-                      <span>SX: {(kgUsed / 1000).toFixed(3)} T</span>
+                      <span>SX: {fmtKg(kgUsed)}</span>
                       <span className="font-bold text-teal-700">
-                        Còn: {((n.tong_kho - kgUsed) / 1000).toFixed(3)} T
+                        Còn: {fmtKg(n.tong_kho - kgUsed)}
                       </span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-1.5 mb-1">
@@ -1809,7 +1875,7 @@ export default function ProductPage() {
                   {caTongBanh > 0 && (
                     <span className="ml-auto text-xs font-bold text-slate-600">
                       Ca {caLabel}: {caTongBanh} bành ·{" "}
-                      {(caTongKg / 1000).toFixed(3)} T
+                      {fmtKg(caTongKg)}
                     </span>
                   )}
                 </div>
@@ -2216,7 +2282,7 @@ export default function ProductPage() {
                             </div>
 
                             <div className="mt-2 text-xs text-slate-400 text-right">
-                              {(lot.tong_kg / 1000).toFixed(3)} T ·{" "}
+                              {fmtKg(lot.tong_kg)} ·{" "}
                               {lot.tong_banh} bành
                             </div>
                           </div>
@@ -2238,7 +2304,7 @@ export default function ProductPage() {
                         {Math.round(caTongKg).toLocaleString("vi-VN")} kg
                       </span>
                       <span className="ml-auto text-xs text-blue-500">
-                        ≈ {(caTongKg / 1000).toFixed(3)} tấn
+                        ≈ {fmtKg(caTongKg)}
                       </span>
                     </div>
                   )}
@@ -2279,9 +2345,9 @@ export default function ProductPage() {
                   {nganPct.toFixed(1)}%
                 </span>
                 <span className="text-[10px] text-slate-400 shrink-0">
-                  {(kgDaCoTrongNgan / 1000).toFixed(3)}T
-                  {kgLanNay > 0 ? ` + ${(kgLanNay / 1000).toFixed(3)}T` : ""} /{" "}
-                  {(selectedNgan.tong_kho / 1000).toFixed(3)}T
+                  {fmtKg(kgDaCoTrongNgan)}
+                  {kgLanNay > 0 ? ` + ${fmtKg(kgLanNay)}` : ""} /{" "}
+                  {fmtKg(selectedNgan.tong_kho)}
                 </span>
                 {nganBlocked && (
                   <span className="text-[10px] text-red-600 font-bold shrink-0">
@@ -2426,7 +2492,7 @@ export default function ProductPage() {
           </p>
         </div>
         <button
-          onClick={openCreate}
+          onClick={() => openCreate()}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
         >
           <Plus size={16} /> Thêm lô
@@ -2466,7 +2532,7 @@ export default function ProductPage() {
             },
             {
               label: "Tổng tấn (lọc)",
-              value: (stats.tongKg / 1000).toFixed(2) + " T",
+              value: fmtKg(stats.tongKg),
               color: "text-purple-600",
               Icon: Weight,
               ic: "text-purple-400",
@@ -2621,15 +2687,15 @@ export default function ProductPage() {
                 key={date}
                 className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200"
               >
-                <div
-                  onClick={() => toggleDate(date)}
-                  className="bg-slate-50 px-5 py-3.5 cursor-pointer flex items-center justify-between hover:bg-slate-100 transition-colors select-none"
-                >
-                  <div className="flex items-center gap-3">
+                <div className="bg-slate-50 px-5 py-3.5 flex items-center justify-between hover:bg-slate-100 transition-colors select-none">
+                  <div
+                    onClick={() => toggleDate(date)}
+                    className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
+                  >
                     {isExpanded ? (
-                      <ChevronDown size={18} className="text-slate-400" />
+                      <ChevronDown size={18} className="text-slate-400 shrink-0" />
                     ) : (
-                      <ChevronRight size={18} className="text-slate-400" />
+                      <ChevronRight size={18} className="text-slate-400 shrink-0" />
                     )}
                     <span className="font-extrabold text-slate-800 text-base">
                       {date !== "Chưa có ngày"
@@ -2640,12 +2706,19 @@ export default function ProductPage() {
                       {Object.values(dateGroups).flat().length} lần nhập
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
-                    <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-emerald-700">
-                      {(dayKg / 1000).toFixed(2)} T
-                    </span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
+                      <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-emerald-700">{fmtKg(dayKg)}</span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openCreate(date); }}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                      title="Thêm ca sản xuất cho ngày này"
+                    >
+                      <Plus size={12} /> Thêm ca
+                    </button>
                   </div>
                 </div>
 
@@ -2672,7 +2745,7 @@ export default function ProductPage() {
                               </span>
                               <span className="text-xs font-bold text-slate-500">
                                 {caBanh.toLocaleString("vi-VN")} bành ·{" "}
-                                {(caKg / 1000).toFixed(2)} Tấn
+                                {fmtKg(caKg)}
                               </span>
                             </div>
                             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
@@ -2722,9 +2795,7 @@ export default function ProductPage() {
                                       <td className="px-4 py-2.5 font-extrabold text-blue-700">
                                         +{c.tong_banh_cua_ca}{" "}
                                         <span className="text-xs font-normal text-slate-500">
-                                          (
-                                          {(c.tong_kg_cua_ca / 1000).toFixed(2)}
-                                          T)
+                                          ({fmtKg(c.tong_kg_cua_ca)})
                                         </span>
                                       </td>
                                       <td className="px-4 py-2.5 text-xs text-slate-500">
@@ -2757,7 +2828,7 @@ export default function ProductPage() {
                                       </td>
                                       <td className="px-4 py-2.5 text-center">
                                         <div className="flex justify-center gap-1">
-                                          {c.trang_thai !== "Hoàn thành" && (
+                                          {c.trang_thai !== "Hoàn thành" && c.trang_thai !== "Xuất hàng" && (
                                             <button
                                               onClick={() =>
                                                 openEdit(
@@ -2766,18 +2837,18 @@ export default function ProductPage() {
                                                   )!,
                                                 )
                                               }
-                                              title="Sửa gốc lô này"
-                                              className="p-1.5 hover:bg-blue-100 text-blue-500 rounded-lg transition-colors"
+                                              title="Sửa lô này"
+                                              className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-blue-50 text-blue-600 rounded-lg transition-colors font-bold"
                                             >
-                                              <Edit2 size={14} />
+                                              <Edit2 size={12} /> Sửa
                                             </button>
                                           )}
                                           <button
                                             onClick={() => setDelConfirm(c.uid)}
                                             title="Xóa ca này"
-                                            className="p-1.5 hover:bg-red-100 text-red-500 rounded-lg transition-colors"
+                                            className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-red-50 text-red-600 rounded-lg transition-colors font-bold"
                                           >
-                                            <Trash2 size={14} />
+                                            <Trash2 size={12} /> Xóa
                                           </button>
                                         </div>
                                       </td>
