@@ -1,7 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
@@ -267,8 +266,6 @@ function buildPrintHTML(
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function QualityPage() {
-  useScrollReveal()
-
   // ── Core state ──────────────────────────────────────────────────────────────
   const [factoryId,   setFactoryId]   = useState<string|null>(null)
   const [factoryCode, setFactoryCode] = useState("NM")
@@ -811,7 +808,7 @@ export default function QualityPage() {
 
           {/* Lot chip panel — hidden in edit mode */}
           {!editingResultId && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4 scroll-reveal">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-sm font-bold text-slate-700">
                   {createForm.loai_kn==="kl_6thang" ? "Lô tồn kho > 6 tháng" :
@@ -855,7 +852,7 @@ export default function QualityPage() {
 
           {/* Tab panel */}
           {selectedLotIds.size > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden scroll-reveal">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
               {/* Tab bar */}
               <div className="flex border-b border-slate-200 overflow-x-auto bg-slate-50">
                 {Array.from(selectedLotIds).map(lotId => {
@@ -982,7 +979,7 @@ export default function QualityPage() {
           {mainTab === "xep_hang" && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-4 gap-3 mb-5 scroll-reveal">
+              <div className="grid grid-cols-4 gap-3 mb-5">
                 {[
                   { label:"Tổng lô (mới nhất)", value:stats.total,     color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
                   { label:"Đạt",                 value:stats.dat,       color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
@@ -998,7 +995,7 @@ export default function QualityPage() {
               </div>
 
               {/* Filter bar */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center scroll-reveal">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
                 <div className="flex items-center gap-2 flex-1 min-w-40">
                   <Search size={14} className="text-slate-400"/>
                   <input value={search} onChange={e=>setSearch(e.target.value)}
@@ -1037,7 +1034,7 @@ export default function QualityPage() {
                   <p>Không có kết quả kiểm nghiệm nào</p>
                 </div>
               ) : (
-                <div className="space-y-3 scroll-reveal">
+                <div className="space-y-3">
                   {dateGroups.map(([date, dateResults]) => {
                     const expanded = expandedDates.has(date)
                     const inDeleteMode = deleteMode===date
@@ -1210,7 +1207,7 @@ export default function QualityPage() {
           {mainTab === "giam_sat" && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-3 mb-5 scroll-reveal">
+              <div className="grid grid-cols-3 gap-3 mb-5">
                 {[
                   { label:"KN lại rớt CT", value:gmsStats.rotCT, color:"text-amber-600", Icon:RefreshCw, ic:"text-amber-400" },
                   { label:"KN lại 6 tháng",value:gmsStats.thang6,color:"text-blue-600",  Icon:Clock,     ic:"text-blue-400"  },
@@ -1225,7 +1222,7 @@ export default function QualityPage() {
               </div>
 
               {/* Filter bar */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center scroll-reveal">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
                 <button onClick={()=>setGmsFilter("rot_ct")}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-xl border-2 transition-all ${gmsFilter==="rot_ct"?"border-amber-500 bg-amber-50 text-amber-700":"border-slate-200 text-slate-500"}`}>
                   <RefreshCw size={13}/> KN lại rớt CT ({gmsStats.rotCT})
@@ -1259,7 +1256,7 @@ export default function QualityPage() {
                   <p>Không có dữ liệu giám sát</p>
                 </div>
               ) : (
-                <div className="space-y-3 scroll-reveal">
+                <div className="space-y-3">
                   {gmsResults.map(r => {
                     const parent = results.find(p=>p.id===r.parent_id)
                     return (

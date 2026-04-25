@@ -642,6 +642,17 @@ export default function Page() {
 }
 ```
 
+> ⛔ **LỖI THƯỜNG GẶP — scroll-reveal làm dữ liệu biến mất:**
+>
+> `scroll-reveal` đặt `opacity: 0` làm giá trị mặc định. Khi React re-render do state thay đổi
+> (filter, expand, data load), DOM node mới được tạo ra và mất class `revealed` → element trở về
+> `opacity: 0` → dữ liệu mờ dần rồi biến mất.
+>
+> **Quy tắc bắt buộc:**
+> - ✅ Được dùng `scroll-reveal` trên **static container** — element không bị unmount/remount khi state thay đổi
+> - ❌ KHÔNG dùng `scroll-reveal` trên **element hiển thị data** — danh sách, bảng, stats card, filter bar, bất kỳ element nào re-render khi data/state thay đổi
+> - ❌ KHÔNG dùng trong page có nhiều state động (quality, product, storage) — bỏ hoàn toàn `scroll-reveal` khỏi những page này
+
 ### 2. Hover Animation
 
 **Tất cả thành phần tương tác** (hàng bảng, nút, card) **phải có hiệu ứng hover tinh tế**.
