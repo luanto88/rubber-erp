@@ -1565,7 +1565,7 @@ export default function QualityPage() {
                         {/* Card header */}
                         <div className="px-5 py-3 flex items-center gap-4 border-b border-slate-100 bg-slate-50">
                           <span className="font-extrabold text-slate-800">Lô {r.ma_lo}</span>
-                          <span className="text-xs text-slate-500">PKN {r.pkn}</span>
+                          <span className="text-xs text-slate-500">{formatPKN(r.pkn, r.ngay_kn, factoryCode)}</span>
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
                           <span className="text-xs text-slate-400">KN: {new Date(r.ngay_kn).toLocaleDateString("vi-VN")}</span>
                           <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${r.trang_thai==="dat"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
@@ -1641,7 +1641,7 @@ export default function QualityPage() {
               {(dateGroups.find(([d])=>d===editDateModal)?.[1]||[]).map(r=>(
                 <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
                   <span className="text-xs font-bold text-violet-600">{formatPKN(r.pkn,r.ngay_kn,factoryCode)}</span>
-                  <span className="text-xs text-slate-400">Lô KN {r.lo_kn}</span>
+                  <span className="text-xs text-slate-400">Lô PKN {r.lo_kn}</span>
                   <span className="font-semibold text-emerald-700">{r.ma_lo}</span>
                   <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${r.trang_thai==="dat"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
