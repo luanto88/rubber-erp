@@ -356,11 +356,11 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
   </table>
   <div style="margin-top:6px;font-size:9px"><b>TỔNG SỐ LÔ KIỂM NGHIỆM:</b> ${sorted.length}</div>
   <div style="text-align:right;margin-top:4px;font-size:9px">Kampong Thom, ${ngayInStr}</div>
-  <div style="display:flex;justify-content:space-around;margin-top:32px;font-size:9px">
+  <div style="display:flex;justify-content:space-between;margin-top:32px;font-size:9px;padding:0 40px">
     <div style="text-align:center"><p style="margin-bottom:36px"><b>LẬP BIỂU</b></p><p>________________________</p></div>
     <div style="text-align:center"><p style="margin-bottom:36px"><b>TRƯỞNG PHÒNG QLCL</b></p><p>________________________</p></div>
   </div>
-  <div style="margin-top:8px;font-size:8px;color:#94a3b8">QLCL-QT21-F08</div>`
+  <div style="margin-top:8px;font-size:8px;color:#94a3b8">QLCL-QT21-F08 (01-10/01/2025)</div>`
 }
 
 function buildPrintHTML(
@@ -509,7 +509,7 @@ export default function QualityPage() {
       // Fetch failed qc_results
       const { data: failed } = await supabase.from("qc_results")
         .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .eq("trang_thai","khong_dat")
+        .or("trang_thai.eq.khong_dat,dat_hang.ilike.%RH")
         .order("created_at", { ascending: false })
 
       // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
@@ -531,11 +531,13 @@ export default function QualityPage() {
         else if (r.ma_lo) { if (!latestAllByMaLo.has(r.ma_lo)) latestAllByMaLo.set(r.ma_lo, r) }
       })
 
-      // Chỉ giữ lô mà kết quả MỚI NHẤT vẫn là khong_dat
+      // Chỉ giữ lô mà kết quả MỚI NHẤT vẫn là khong_dat (fallback: dat_hang kết thúc bằng "RH")
+      const isStillFailed = (r: QcResult|undefined) =>
+        r?.trang_thai === "khong_dat" || (!r?.trang_thai && r?.dat_hang?.endsWith("RH"))
       const stillFailedIds   = Array.from(latestByLotId.keys())
-        .filter(lid => latestAllById.get(lid)?.trang_thai === "khong_dat")
+        .filter(lid => isStillFailed(latestAllById.get(lid)))
       const stillFailedMaLos = Array.from(latestByMaLo.keys())
-        .filter(mlo => latestAllByMaLo.get(mlo)?.trang_thai === "khong_dat")
+        .filter(mlo => isStillFailed(latestAllByMaLo.get(mlo)))
 
       if (!stillFailedIds.length && !stillFailedMaLos.length) {
         setEligibleLots([]); setLotsLoading(false); return
@@ -548,13 +550,18 @@ export default function QualityPage() {
           : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
         stillFailedMaLos.length
           ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-              .eq("factory_id", factoryId).in("ma_lo", stillFailedMaLos)
+              .eq("factory_id", factoryId)
+              .or(stillFailedMaLos.map(mlo => `ma_lo.eq.${mlo},ma_lo.ilike.${mlo}/%`).join(","))
           : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
       ])
 
       const combined = [
         ...(resById.data||[]).map(l => ({ ...l, prev_qc: latestByLotId.get(l.id) })),
-        ...(resByMaLo.data||[]).map(l => ({ ...l, prev_qc: latestByMaLo.get(l.ma_lo) })),
+        ...(resByMaLo.data||[]).map(l => ({
+          ...l,
+          prev_qc: latestByMaLo.get(l.ma_lo)
+            ?? latestByMaLo.get(l.ma_lo.replace(/\/\d{2,4}$/, "")),
+        })),
       ]
       const seen = new Set<string>()
       setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
@@ -1031,7 +1038,9 @@ export default function QualityPage() {
     })
     const deduped = Array.from(statsMap.values())
     const datCount = deduped.filter(r=>r.trang_thai==="dat").length
-    const khongDatCount = deduped.filter(r=>r.trang_thai==="khong_dat").length
+    const khongDatCount = deduped.filter(r=>
+      r.trang_thai==="khong_dat" || (!r.trang_thai && r.dat_hang?.endsWith("RH"))
+    ).length
     return {
       latestPerLot: map,
       stats: {
