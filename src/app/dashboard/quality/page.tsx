@@ -1,11 +1,11 @@
 "use client"
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
-  FileText, RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
+  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
   Upload, Download
 } from "lucide-react"
 
@@ -243,19 +243,22 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
     const m = avg(a)!, s3 = sd3(a)!
     return [fmt(m), fmt(s3), fmt(m+s3)]
   }
-  // For Bay hơi/Nitơ/Màu: X | Xmax | Xmax-Xmin
-  const statB = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—","—"]
-    const m=avg(a)!, ma=mx(a)!, mi=mn(a)!
-    return [fmt(m), fmt(ma), fmt(ma-mi)]
+  // For Bay hơi: X̄ | Xmax (2 cột, không DR)
+  const statBH = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—"]
+    return [fmt(avg(a)!), fmt(mx(a)!)]
   }
-  // For Po/PRI: X | Xmin | Xmax-Xmin
+  // For Nitơ/Màu: X̄ | Xmin | Xmax
+  const statNi = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—","—"]
+    return [fmt(avg(a)!), fmt(mn(a)!), fmt(mx(a)!)]
+  }
+  // For Po/PRI: X̄ | Xmin | Xmax (1 decimal)
   const statC = (vals: (string|number)[]|undefined) => {
     const a = nums(vals); if (!a.length) return ["—","—","—"]
-    const m=avg(a)!, ma=mx(a)!, mi=mn(a)!
-    return [fmt(m), fmt(mi,1), fmt(ma-mi,1)]
+    return [fmt(avg(a)!,1), fmt(mn(a)!,1), fmt(mx(a)!,1)]
   }
-  // For Mooney: X | Xmin | Xmax
+  // For Mooney: X̄ | Xmin | Xmax
   const statD = (vals: (string|number)[]|undefined) => {
     const a = nums(vals); if (!a.length) return ["—","—","—"]
     return [fmt(avg(a),1), fmt(mn(a),1), fmt(mx(a),1)]
@@ -268,11 +271,11 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
     const resCl = resOk ? "#065f46" : "#dc2626"
     const [tc1,tc2,tc3] = statA(s.tap_chat)
     const [tr1,tr2,tr3] = statA(s.tro)
-    const [bh1,bh2,bh3] = statB(s.bay_hoi)
-    const [ni1,ni2,ni3] = statB(s.nito)
+    const [bh1,bh2]     = statBH(s.bay_hoi)
+    const [ni1,ni2,ni3] = statNi(s.nito)
     const [po1,po2,po3] = statC(s.po)
     const [pr1,pr2,pr3] = statC(s.pri)
-    const [ma1,ma2,ma3] = statB(s.mau_sac)
+    const [ma1,ma2,ma3] = statNi(s.mau_sac)
     const [ml1,ml2,ml3] = statD(s.mooney)
     const nmLo = stripYear(r.ma_lo)
 
@@ -287,7 +290,7 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
       <td style="text-align:center">${r.loai_csr}</td>
       ${c(g.tap_chat?.dat,tc1)}${c(undefined,tc2)}${c(g.tap_chat?.dat,tc3)}
       ${c(g.tro?.dat,tr1)}${c(undefined,tr2)}${c(g.tro?.dat,tr3)}
-      ${c(g.bay_hoi?.dat,bh1)}${c(undefined,bh2)}${c(g.bay_hoi?.dat,bh3)}
+      ${c(g.bay_hoi?.dat,bh1)}${c(g.bay_hoi?.dat,bh2)}
       ${c(g.nito?.dat,ni1)}${c(undefined,ni2)}${c(g.nito?.dat,ni3)}
       ${c(g.po?.dat,po1)}${c(undefined,po2)}${c(g.po?.dat,po3)}
       ${c(g.pri?.dat,pr1)}${c(undefined,pr2)}${c(g.pri?.dat,pr3)}
@@ -315,7 +318,7 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
         <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">HẠNG<br>DK</th>
         <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TẠP CHẤT</th>
         <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TRO</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">BAY HƠI</th>
+        <th colspan="2" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">BAY HƠI</th>
         <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">NITƠ</th>
         <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">Po</th>
         <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">PRI</th>
@@ -332,19 +335,18 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄+3SD</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
         <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
@@ -387,13 +389,17 @@ function buildPrintHTML(
   </body></html>`
 }
 
+const padSamples = (arr: (string|number)[]|undefined, n: number): string[] =>
+  (arr||[]).map(String).concat(Array(Math.max(0, n-(arr?.length||0))).fill(""))
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function QualityPage() {
   // ── Core state ──────────────────────────────────────────────────────────────
   const [factoryId,   setFactoryId]   = useState<string|null>(null)
   const [factoryCode, setFactoryCode] = useState("NM")
   const [factoryName, setFactoryName] = useState("")
-  const [results,     setResults]     = useState<QcResult[]>([])
+  const [results,      setResults]      = useState<QcResult[]>([])
+  const [statsResults, setStatsResults] = useState<QcResult[]>([])
   const [customStds,  setCustomStds]  = useState<CustomStd[]>([])
   const [loading,     setLoading]     = useState(true)
   const [saving,      setSaving]      = useState(false)
@@ -449,9 +455,13 @@ export default function QualityPage() {
 
   // ── Toast ────────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{msg:string;ok:boolean}|null>(null)
-  const showToast = (msg: string, ok=true) => {
-    setToast({msg,ok}); setTimeout(()=>setToast(null),3500)
-  }
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null)
+  const showToast = useCallback((msg: string, ok=true) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({msg,ok})
+    toastTimerRef.current = setTimeout(()=>setToast(null),3500)
+  }, [])
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
 
   // ── Load results ─────────────────────────────────────────────────────────────
   const loadResults = useCallback(async (fid: string) => {
@@ -470,6 +480,18 @@ export default function QualityPage() {
     setLoading(false)
   }, [filterLoai, filterTT, filterFrom, filterTo])
 
+  // ── Load stats (không filter trang_thai để stats luôn phản ánh thực tế) ───────
+  const loadStats = useCallback(async (fid: string) => {
+    let q = supabase.from("qc_results")
+      .select("*")
+      .eq("factory_id", fid)
+    if (filterLoai) q = q.eq("loai_csr", filterLoai)
+    if (filterFrom) q = q.gte("ngay_kn", filterFrom)
+    if (filterTo)   q = q.lte("ngay_kn", filterTo)
+    const { data } = await q
+    setStatsResults(data || [])
+  }, [filterLoai, filterFrom, filterTo])
+
   // ── Load custom standards ────────────────────────────────────────────────────
   const loadCustomStds = useCallback(async (fid: string) => {
     const { data } = await supabase.from("qc_custom_std")
@@ -484,34 +506,58 @@ export default function QualityPage() {
     setLotsLoading(true)
 
     if (createForm.loai_kn === "kl_rot_hang") {
-      // Fetch failed qc_results (no parent = original failures)
+      // Fetch failed qc_results
       const { data: failed } = await supabase.from("qc_results")
         .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
         .eq("trang_thai","khong_dat")
         .order("created_at", { ascending: false })
 
-      // Dedup: keep latest per lot
-      const latest = new Map<string,QcResult>()
+      // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
+      const latestByLotId = new Map<string,QcResult>()
+      const latestByMaLo  = new Map<string,QcResult>()
       ;(failed||[]).forEach(r => {
-        if (!r.lot_id) return
-        if (!latest.has(r.lot_id)) latest.set(r.lot_id, r)
+        if (r.lot_id) { if (!latestByLotId.has(r.lot_id)) latestByLotId.set(r.lot_id, r) }
+        else if (r.ma_lo) { if (!latestByMaLo.has(r.ma_lo)) latestByMaLo.set(r.ma_lo, r) }
       })
-      // Check none of those lot_ids have a passing result after the failure
-      const latestAll = new Map<string,QcResult>()
+
+      // Fetch ALL results để cross-check "vẫn còn rớt hạng"
       const { data: allRes } = await supabase.from("qc_results")
         .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
         .order("created_at", { ascending: false })
-      ;(allRes||[]).forEach(r => { if(r.lot_id && !latestAll.has(r.lot_id)) latestAll.set(r.lot_id,r) })
-      // Only keep lots whose LATEST result is still failing
-      const stillFailed = Array.from(latest.entries()).filter(([lid]) => {
-        const l = latestAll.get(lid); return l && l.trang_thai === "khong_dat"
+      const latestAllById   = new Map<string,QcResult>()
+      const latestAllByMaLo = new Map<string,QcResult>()
+      ;(allRes||[]).forEach(r => {
+        if (r.lot_id) { if (!latestAllById.has(r.lot_id))  latestAllById.set(r.lot_id, r) }
+        else if (r.ma_lo) { if (!latestAllByMaLo.has(r.ma_lo)) latestAllByMaLo.set(r.ma_lo, r) }
       })
-      if (!stillFailed.length) { setEligibleLots([]); setLotsLoading(false); return }
-      const lotIds = stillFailed.map(([lid]) => lid)
-      const { data: lots } = await supabase.from("lots")
-        .select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-        .in("id", lotIds)
-      setEligibleLots((lots||[]).map(l => ({ ...l, prev_qc: latest.get(l.id) })))
+
+      // Chỉ giữ lô mà kết quả MỚI NHẤT vẫn là khong_dat
+      const stillFailedIds   = Array.from(latestByLotId.keys())
+        .filter(lid => latestAllById.get(lid)?.trang_thai === "khong_dat")
+      const stillFailedMaLos = Array.from(latestByMaLo.keys())
+        .filter(mlo => latestAllByMaLo.get(mlo)?.trang_thai === "khong_dat")
+
+      if (!stillFailedIds.length && !stillFailedMaLos.length) {
+        setEligibleLots([]); setLotsLoading(false); return
+      }
+
+      const [resById, resByMaLo] = await Promise.all([
+        stillFailedIds.length
+          ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
+              .in("id", stillFailedIds)
+          : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
+        stillFailedMaLos.length
+          ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
+              .eq("factory_id", factoryId).in("ma_lo", stillFailedMaLos)
+          : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
+      ])
+
+      const combined = [
+        ...(resById.data||[]).map(l => ({ ...l, prev_qc: latestByLotId.get(l.id) })),
+        ...(resByMaLo.data||[]).map(l => ({ ...l, prev_qc: latestByMaLo.get(l.ma_lo) })),
+      ]
+      const seen = new Set<string>()
+      setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
 
     } else if (createForm.loai_kn === "kl_6thang") {
       const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
@@ -551,6 +597,7 @@ export default function QualityPage() {
     if (!fid) return
     setFactoryId(fid)
     loadResults(fid)
+    loadStats(fid)
     loadCustomStds(fid)
     const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
     setUserRole(u.role || "")
@@ -564,7 +611,7 @@ export default function QualityPage() {
         setFactoryCode(code)
         setFactoryName(f.ten_nha_may || f.name || f.slug || "Nhà máy")
       })
-  }, [loadResults, loadCustomStds])
+  }, [loadResults, loadStats, loadCustomStds])
 
   useEffect(() => {
     if (view === "create") loadEligibleLots()
@@ -607,12 +654,10 @@ export default function QualityPage() {
       id: r.lot_id || r.id, factory_id: r.factory_id, ma_lo: r.ma_lo,
       loai_csr: r.loai_csr, ngay_sx: r.ngay_sx, trang_thai:"Hoàn thành", tong_banh:0
     }
-    const pad = (arr: any[]|undefined, n: number) =>
-      (arr||[]).map(String).concat(Array(Math.max(0,n-(arr?.length||0))).fill(""))
     setEligibleLots([fakeLot])
     setSelectedLotIds(new Set([fakeLot.id]))
     setTabData({ [fakeLot.id]: {
-      samples: Object.fromEntries(ALL_FIELDS.map(f=>[f.key,pad((r.samples as any)?.[f.key],r.so_mau)])),
+      samples: Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples((r.samples as any)?.[f.key],r.so_mau)])),
       preview: null
     }})
     setActiveTabLotId(fakeLot.id)
@@ -629,10 +674,8 @@ export default function QualityPage() {
       setActiveTabLotId(next.size > 0 ? Array.from(next)[next.size-1] : null)
     } else {
       next.add(lot.id)
-      const pad = (arr: any[]|undefined, n: number) =>
-        (arr||[]).map(String).concat(Array(Math.max(0,n-(arr?.length||0))).fill(""))
       const initSamples: Samples = lot.prev_qc
-        ? Object.fromEntries(ALL_FIELDS.map(f=>[f.key,pad((lot.prev_qc!.samples as any)?.[f.key],createForm.so_mau)]))
+        ? Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples((lot.prev_qc!.samples as any)?.[f.key],createForm.so_mau)]))
         : emptyTabSamples(createForm.so_mau)
       setTabData(prev => ({ ...prev, [lot.id]: { samples:initSamples, preview:null } }))
       setActiveTabLotId(lot.id)
@@ -712,8 +755,11 @@ export default function QualityPage() {
       showToast("Đã cập nhật phiếu kiểm nghiệm")
     } else {
       // Insert batch — ALL lots share same pkn + batch_id (one phiếu)
-      const batchPKN = await getNextPKN(factoryId, year)
-      let nextLoKN   = await getNextLoKN(factoryId)
+      const [batchPKN, startLoKN] = await Promise.all([
+        getNextPKN(factoryId, year),
+        getNextLoKN(factoryId),
+      ])
+      let nextLoKN = startLoKN
       const batchId  = crypto.randomUUID()
       const isRetest = createForm.loai_kn==="kl_rot_hang"||createForm.loai_kn==="kl_6thang"
 
@@ -757,6 +803,7 @@ export default function QualityPage() {
     setSaving(false)
     setView("list")
     loadResults(factoryId)
+    loadStats(factoryId)
     setEditDateModal(null)
   }
 
@@ -767,16 +814,19 @@ export default function QualityPage() {
     if (error) { showToast("Lỗi xóa: "+error.message, false); return }
     setDelConfirm(null); showToast("Đã xóa phiếu kiểm nghiệm")
     loadResults(factoryId)
+    loadStats(factoryId)
   }
 
   const handleBulkDelete = async () => {
     if (!factoryId || selectedDeleteIds.size===0) return
-    for (const id of selectedDeleteIds) {
-      await supabase.from("qc_results").delete().eq("id",id)
-    }
+    const count = selectedDeleteIds.size
+    const { error } = await supabase.from("qc_results")
+      .delete().in("id", Array.from(selectedDeleteIds))
+    if (error) { showToast("Lỗi xóa: "+error.message, false); return }
     setSelectedDeleteIds(new Set()); setDeleteMode(null)
-    showToast(`Đã xóa ${selectedDeleteIds.size} phiếu`)
+    showToast(`Đã xóa ${count} phiếu`)
     loadResults(factoryId)
+    loadStats(factoryId)
   }
 
   // ── TCKH save ────────────────────────────────────────────────────────────────
@@ -839,8 +889,11 @@ export default function QualityPage() {
       const customLimits = customStds.find(s => s.id === tieuChuan)?.limits
 
       const year = new Date(ngayKN).getFullYear()
-      const batchPKN = await getNextPKN(factoryId, year)
-      let nextLoKN   = await getNextLoKN(factoryId)
+      const [batchPKN, startLoKN] = await Promise.all([
+        getNextPKN(factoryId, year),
+        getNextLoKN(factoryId),
+      ])
+      let nextLoKN = startLoKN
       const batchId  = crypto.randomUUID()
 
       const fieldMap: [string, string][] = [
@@ -849,17 +902,38 @@ export default function QualityPage() {
         ["ML","mooney"],["MAU","mau_sac"],
       ]
 
-      let okCount = 0
-      const errors: string[] = []
-
+      // Collect all lot names from data rows first
+      const dataRows: { ri: number; loNM: string; row: string[] }[] = []
       for (let ri = 3; ri < rows.length; ri++) {
         const row = rows[ri]
         if (!row || row.every(v => !v)) continue
-
         const loNM = String(row[colIdx["LO_NM"]] || "").trim()
-        if (!loNM) continue
+        if (loNM) dataRows.push({ ri, loNM, row })
+      }
 
-        // Build samples object
+      // Batch lot lookup — exact match trước, fallback ILIKE cho tên không có năm ("02cs" → "02cs/26")
+      const allLoNM = [...new Set(dataRows.map(d => d.loNM))]
+      const { data: allMatchedLots } = await supabase.from("lots")
+        .select("id,ma_lo").eq("factory_id", factoryId)
+        .in("ma_lo", allLoNM)
+      const lotByName = new Map<string, { id: string; ma_lo: string }>()
+      ;(allMatchedLots||[]).forEach(l => lotByName.set(l.ma_lo, l))
+
+      // Fallback: với tên không match (vd: "02cs" khi DB có "02cs/26"), thử ILIKE prefix
+      const unmatchedLoNM = allLoNM.filter(n => !lotByName.has(n))
+      if (unmatchedLoNM.length) {
+        for (const loNM of unmatchedLoNM) {
+          const { data: fallback } = await supabase.from("lots")
+            .select("id,ma_lo").eq("factory_id", factoryId)
+            .ilike("ma_lo", `${loNM}/%`).limit(1)
+          if (fallback?.[0]) lotByName.set(loNM, fallback[0])
+        }
+      }
+
+      let okCount = 0
+      const errors: string[] = []
+
+      for (const { loNM, row } of dataRows) {
         const samples: Samples = {}
         for (const [prefix, fieldKey] of fieldMap) {
           const vals: (string|number)[] = []
@@ -870,14 +944,9 @@ export default function QualityPage() {
           samples[fieldKey] = vals
         }
 
-        // Match lot by ma_lo (try exact then prefix)
-        const { data: matchedLots } = await supabase.from("lots")
-          .select("id,ma_lo")
-          .eq("factory_id", factoryId)
-          .or(`ma_lo.eq.${loNM},ma_lo.ilike.${loNM}%`)
-          .limit(1)
-        const lotId = matchedLots?.[0]?.id || null
-        const maLo  = matchedLots?.[0]?.ma_lo || loNM
+        const matched = lotByName.get(loNM)
+        const lotId = matched?.id || null
+        const maLo  = matched?.ma_lo || loNM
 
         const { grade, dat_hang, trang_thai } = calcGrade(samples, loaiCsr, tieuChuan, customLimits)
 
@@ -899,6 +968,7 @@ export default function QualityPage() {
       if (okCount > 0) {
         showToast(`Đã nhập ${okCount} lô — ${formatPKN(batchPKN, ngayKN, factoryCode)}`)
         loadResults(factoryId)
+        loadStats(factoryId)
       } else {
         showToast("Không nhập được lô nào", false)
       }
@@ -929,34 +999,54 @@ export default function QualityPage() {
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────────
-  const filtered = results.filter(r => {
+  const filtered = useMemo(() => results.filter(r => {
     if (search && !r.ma_lo?.toLowerCase().includes(search.toLowerCase())
-        && !String(r.pkn).includes(search)) return false
+        && !String(r.lo_kn).includes(search)) return false
     return true
-  })
+  }), [results, search])
 
-  const dateGroups = Array.from(
+  const dateGroups = useMemo(() => Array.from(
     filtered.reduce((m,r)=>{ const d=r.ngay_kn?.slice(0,10)||"?"; if(!m.has(d)) m.set(d,[]); m.get(d)!.push(r); return m }, new Map<string,QcResult[]>())
-  ).sort((a,b)=>b[0].localeCompare(a[0]))
+  ).sort((a,b)=>b[0].localeCompare(a[0])), [filtered])
 
-  const latestPerLot = new Map<string,QcResult>()
-  results.forEach(r=>{
-    const k=r.lot_id||r.ma_lo
-    const ex=latestPerLot.get(k)
-    if(!ex||(r.lan||1)>(ex.lan||1)||new Date(r.created_at||0)>new Date(ex.created_at||0))
-      latestPerLot.set(k,r)
-  })
-  const deduped = Array.from(latestPerLot.values())
-  const stats = {
-    total:deduped.length,
-    dat:deduped.filter(r=>r.trang_thai==="dat").length,
-    khongDat:deduped.filter(r=>r.trang_thai==="khong_dat").length,
-    tyLe: deduped.length ? Math.round(deduped.filter(r=>r.trang_thai==="dat").length/deduped.length*100) : 0,
-  }
+  const { latestPerLot, stats } = useMemo(() => {
+    // latestPerLot: dùng results (có filter) để hiển thị đúng trong list view
+    const map = new Map<string,QcResult>()
+    results.forEach(r=>{
+      const k=r.lot_id||r.ma_lo
+      const ex=map.get(k)
+      const rLan=r.lan||1, exLan=ex?.lan||1
+      if(!ex || rLan > exLan || (rLan === exLan && new Date(r.created_at||0)>new Date(ex.created_at||0)))
+        map.set(k,r)
+    })
+
+    // stats: dùng statsResults (không filter trang_thai) để phản ánh thực tế
+    const statsMap = new Map<string,QcResult>()
+    statsResults.forEach(r=>{
+      const k=r.lot_id||r.ma_lo
+      const ex=statsMap.get(k)
+      const rLan=r.lan||1, exLan=ex?.lan||1
+      if(!ex || rLan > exLan || (rLan === exLan && new Date(r.created_at||0)>new Date(ex.created_at||0)))
+        statsMap.set(k,r)
+    })
+    const deduped = Array.from(statsMap.values())
+    const datCount = deduped.filter(r=>r.trang_thai==="dat").length
+    const khongDatCount = deduped.filter(r=>r.trang_thai==="khong_dat").length
+    return {
+      latestPerLot: map,
+      stats: {
+        total: deduped.length,
+        dat: datCount,
+        khongDat: khongDatCount,
+        tyLe:      deduped.length ? Math.round(datCount/deduped.length*100) : 0,
+        tyLeKhongDat: deduped.length ? Math.round(khongDatCount/deduped.length*100) : 0,
+      }
+    }
+  }, [results, statsResults])
 
   // Giám sát: results that are re-tests (have parent_id)
-  const gmsResults = results.filter(r=>r.parent_id).filter(r=>{
-    if (gmsFilter==="rot_ct") return r.trang_thai==="dat" // passed after failing
+  const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
+    if (gmsFilter==="rot_ct") return r.trang_thai==="dat"
     if (gmsFilter==="6thang") return r.loai_kn==="kl_6thang"
     return true
   }).filter(r=>{
@@ -964,13 +1054,13 @@ export default function QualityPage() {
     if (gmsFrom && r.ngay_kn<gmsFrom) return false
     if (gmsTo   && r.ngay_kn>gmsTo)   return false
     return true
-  })
+  }), [results, gmsFilter, gmsLoai, gmsFrom, gmsTo])
 
-  const gmsStats = {
+  const gmsStats = useMemo(() => ({
     rotCT: results.filter(r=>r.parent_id&&r.trang_thai==="dat").length,
     thang6: results.filter(r=>r.loai_kn==="kl_6thang"&&r.parent_id).length,
     total: results.filter(r=>r.parent_id).length,
-  }
+  }), [results])
 
   // Create view: loaiCsr derived from form
   const createLoaiCSR = getLoaiCSR(createForm.chung_loai, factoryCode)
@@ -1268,10 +1358,10 @@ export default function QualityPage() {
               {/* Stats */}
               <div className="grid grid-cols-4 gap-3 mb-5">
                 {[
-                  { label:"Tổng lô (mới nhất)", value:stats.total,     color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
-                  { label:"Đạt",                 value:stats.dat,       color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
-                  { label:"Không đạt",           value:stats.khongDat, color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
-                  { label:"Tỷ lệ đạt",           value:stats.tyLe+"%", color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
+                  { label:"Tổng lô (mới nhất)", value:stats.total,                                            color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
+                  { label:"Đạt hạng",            value:`${stats.dat} lô`,                                     color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
+                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDat}%)`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
+                  { label:"Tỷ lệ đạt",           value:stats.tyLe+"%",                                        color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
                 ].map(s=>(
                   <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
                     <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
