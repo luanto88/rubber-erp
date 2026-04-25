@@ -284,7 +284,7 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
     return `<tr>
       <td style="text-align:center">${r.lo_kn||"—"}</td>
       <td style="text-align:center;font-weight:600">${nmLo}</td>
-      <td style="text-align:center">${r.dat_hang||r.loai_csr}</td>
+      <td style="text-align:center">${r.loai_csr}</td>
       ${c(g.tap_chat?.dat,tc1)}${c(undefined,tc2)}${c(g.tap_chat?.dat,tc3)}
       ${c(g.tro?.dat,tr1)}${c(undefined,tr2)}${c(g.tro?.dat,tr3)}
       ${c(g.bay_hoi?.dat,bh1)}${c(undefined,bh2)}${c(g.bay_hoi?.dat,bh3)}
@@ -293,7 +293,7 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
       ${c(g.pri?.dat,pr1)}${c(undefined,pr2)}${c(g.pri?.dat,pr3)}
       <td style="text-align:center">${ma1}</td><td style="text-align:center">${ma2}</td><td style="text-align:center">${ma3}</td>
       <td style="text-align:center">${ml1}</td><td style="text-align:center">${ml2}</td><td style="text-align:center">${ml3}</td>
-      <td style="text-align:center;font-weight:700;color:${resCl}">${r.trang_thai==="dat"?r.dat_hang:"Không đạt"}</td>
+      <td style="text-align:center;font-weight:700;color:${resCl}">${r.dat_hang}</td>
     </tr>`
   }).join("")
 
