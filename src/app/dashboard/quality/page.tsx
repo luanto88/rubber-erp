@@ -1,10 +1,12 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
-  FileText, RefreshCw, Clock, Star, ArrowLeft, Printer, Eye
+  FileText, RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
+  Upload, Download
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -17,7 +19,7 @@ type NoteEntry = {
 
 type QcResult = {
   id: string; factory_id: string; lot_id: string | null
-  ma_lo: string; pkn: number; lo_kn: number
+  ma_lo: string; pkn: number; lo_kn: number; batch_id?: string
   ngay_kn: string; ngay_sx: string
   chung_loai: string; loai_csr: string; loai_kn: string; tieu_chuan: string
   so_mau: number; samples: Samples
@@ -109,14 +111,27 @@ const TCVN: Record<string, LimitRow> = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const limitKey = (loaiCsr: string) => loaiCsr.replace(/^SVR/, "CSR")
 
-function getVisibleFields(loaiCsr: string): string[] {
-  const base = ["tap_chat","tro","bay_hoi","nito","pri"]
-  const lim = TCCS[limitKey(loaiCsr)] || TCCS.CSR10
-  if (lim.po_min !== null) base.push("po")
-  if (lim.mooney_min !== null) base.push("mooney")
-  if (lim.mau_max !== null) base.push("mau_sac")
+// Explicit indicator profile by chung_loai (overrides TCCS-derived logic)
+const LOAI_PROFILE: Record<string, { mooney: boolean; mau: boolean }> = {
+  "10":   { mooney: true,  mau: false },
+  "20":   { mooney: true,  mau: false },
+  "L":    { mooney: false, mau: true  },
+  "3L":   { mooney: false, mau: true  },
+  "CV50": { mooney: true,  mau: false },
+  "CV60": { mooney: true,  mau: false },
+}
+
+// getVisibleFields now takes chung_loai (e.g. "10", "L", "CV60")
+function getVisibleFields(chungLoai: string): string[] {
+  const base = ["tap_chat","tro","bay_hoi","nito","po","pri"] // Po always included
+  const p = LOAI_PROFILE[chungLoai] || { mooney: false, mau: false }
+  if (p.mooney) base.push("mooney")
+  if (p.mau)    base.push("mau_sac")
   return base
 }
+
+// stripYear: "345cs/26" → "345cs"
+const stripYear = (maLo: string) => maLo.replace(/\/\d{2,4}$/, "")
 
 function getLimits(loaiCsr: string, tieuChuan: string, customLimits?: LimitRow): LimitRow {
   const lk = limitKey(loaiCsr)
@@ -129,6 +144,7 @@ function calcGrade(
   samples: Samples, loaiCsr: string, tieuChuan: string, customLimits?: LimitRow
 ) {
   const lim = getLimits(loaiCsr, tieuChuan, customLimits)
+  const chungLoai = loaiCsr.replace(/^(CSR|SVR)/,"")
   const nums = (arr: (number|string)[] | undefined) =>
     (arr || []).map(Number).filter(v => !isNaN(v) && v > 0)
   const avg = (a: number[]) => a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0
@@ -136,7 +152,7 @@ function calcGrade(
   const mx  = (a: number[]) => a.length ? Math.max(...a) : 0
   const mn  = (a: number[]) => a.length ? Math.min(...a) : Infinity
 
-  const visible = getVisibleFields(loaiCsr)
+  const visible = getVisibleFields(chungLoai)
   const grade: Record<string, { dat: boolean; tb: number; detail: string }> = {}
 
   const tc = nums(samples.tap_chat); if (tc.length && visible.includes("tap_chat")) {
@@ -157,10 +173,15 @@ function calcGrade(
     const dat=m<=lim.nito&&(lim.nito_dr===null||dr<=lim.nito_dr)
     grade.nito={dat,tb:avg(ni),detail:`Max=${m}≤${lim.nito}${lim.nito_dr!==null?`, DR=${dr}≤${lim.nito_dr}`:""}`}
   }
-  const po = nums(samples.po); if (po.length && visible.includes("po") && lim.po_min!==null) {
-    const mi=mn(po),dr=+(mx(po)-mi).toFixed(2)
-    const dat=mi>=lim.po_min!&&(lim.po_dr===null||dr<=lim.po_dr)
-    grade.po={dat,tb:avg(po),detail:`Min=${mi}≥${lim.po_min}${lim.po_dr!==null?`, DR=${dr}≤${lim.po_dr}`:""}`}
+  const po = nums(samples.po); if (po.length && visible.includes("po")) {
+    if (lim.po_min === null) {
+      // Po recorded but no limit (e.g. CV types) — always Đạt
+      grade.po={dat:true,tb:avg(po),detail:"Không có giới hạn"}
+    } else {
+      const mi=mn(po),dr=+(mx(po)-mi).toFixed(2)
+      const dat=mi>=lim.po_min&&(lim.po_dr===null||dr<=lim.po_dr)
+      grade.po={dat,tb:avg(po),detail:`Min=${mi}≥${lim.po_min}${lim.po_dr!==null?`, DR=${dr}≤${lim.po_dr}`:""}`}
+    }
   }
   const pr = nums(samples.pri); if (pr.length && visible.includes("pri")) {
     const tb=avg(pr),mi=mn(pr),dr=+(mx(pr)-mi).toFixed(2)
@@ -197,69 +218,171 @@ function emptyTabSamples(soMau: number): Samples {
   return Object.fromEntries(ALL_FIELDS.map(f => [f.key, Array(soMau).fill("")]))
 }
 
-function buildPrintHTML(
-  dateResults: QcResult[], factoryName: string, date: string, fCode: string
-): string {
-  const loaiGroups = Array.from(new Set(dateResults.map(r=>r.loai_csr)))
-  const sorted = [...dateResults].sort((a,b)=>{
-    if (a.loai_csr < b.loai_csr) return -1
-    if (a.loai_csr > b.loai_csr) return 1
-    return (a.lo_kn||0)-(b.lo_kn||0)
-  })
-  const dateStr = new Date(date).toLocaleDateString("vi-VN")
-  const tieuChuan = dateResults[0]?.tieu_chuan || "TCCS 112:2022"
+// Build one page of the print HTML for a single batch
+function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: string, isFirst: boolean): string {
+  const sorted = [...batchResults].sort((a,b)=>(a.lo_kn||0)-(b.lo_kn||0))
+  const r0 = sorted[0]
+  const pknCode = formatPKN(r0.pkn, r0.ngay_kn, fCode)
+  const ngaySXStr = new Date(r0.ngay_sx).toLocaleDateString("vi-VN")
+  const ngayInStr = (() => {
+    const d = new Date(r0.ngay_kn)
+    return `ngày ${d.getUTCDate()} tháng ${d.getUTCMonth()+1} năm ${d.getUTCFullYear()}`
+  })()
 
-  const rows = sorted.map((r,i) => {
-    const g = r.grade || {}
-    const cell = (k: string) => {
-      const gk = g[k]
-      if (!gk) return '<td style="text-align:center">—</td>'
-      const color = gk.dat ? "#065f46" : "#dc2626"
-      return `<td style="text-align:center;color:${color};font-weight:600">${gk.tb?.toFixed(3)??""} ${gk.dat?"✓":"✗"}</td>`
-    }
-    const resColor = r.trang_thai==="dat" ? "#065f46" : "#dc2626"
-    return `<tr style="border-bottom:1px solid #e2e8f0">
-      <td style="text-align:center;padding:4px 6px">${i+1}</td>
-      <td style="padding:4px 6px;font-weight:600">${r.ma_lo}</td>
+  // Stats helpers
+  const nums = (arr: (string|number)[]|undefined) => (arr||[]).map(Number).filter(v=>!isNaN(v)&&v>0)
+  const avg  = (a: number[]) => a.length ? a.reduce((s,v)=>s+v,0)/a.length : null
+  const sd3  = (a: number[]) => { if(!a.length) return null; const m=avg(a)!; return 3*Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length) }
+  const mx   = (a: number[]) => a.length ? Math.max(...a) : null
+  const mn   = (a: number[]) => a.length ? Math.min(...a) : null
+  const fmt  = (v: number|null, d=3) => v===null ? "—" : v.toFixed(d)
+
+  // For Tạp chất/Tro: X | 3SD | X+3SD
+  const statA = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—","—"]
+    const m = avg(a)!, s3 = sd3(a)!
+    return [fmt(m), fmt(s3), fmt(m+s3)]
+  }
+  // For Bay hơi/Nitơ/Màu: X | Xmax | Xmax-Xmin
+  const statB = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—","—"]
+    const m=avg(a)!, ma=mx(a)!, mi=mn(a)!
+    return [fmt(m), fmt(ma), fmt(ma-mi)]
+  }
+  // For Po/PRI: X | Xmin | Xmax-Xmin
+  const statC = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—","—"]
+    const m=avg(a)!, ma=mx(a)!, mi=mn(a)!
+    return [fmt(m), fmt(mi,1), fmt(ma-mi,1)]
+  }
+  // For Mooney: X | Xmin | Xmax
+  const statD = (vals: (string|number)[]|undefined) => {
+    const a = nums(vals); if (!a.length) return ["—","—","—"]
+    return [fmt(avg(a),1), fmt(mn(a),1), fmt(mx(a),1)]
+  }
+
+  const rows = sorted.map(r => {
+    const s = r.samples || {}
+    const g = r.grade   || {}
+    const resOk = r.trang_thai === "dat"
+    const resCl = resOk ? "#065f46" : "#dc2626"
+    const [tc1,tc2,tc3] = statA(s.tap_chat)
+    const [tr1,tr2,tr3] = statA(s.tro)
+    const [bh1,bh2,bh3] = statB(s.bay_hoi)
+    const [ni1,ni2,ni3] = statB(s.nito)
+    const [po1,po2,po3] = statC(s.po)
+    const [pr1,pr2,pr3] = statC(s.pri)
+    const [ma1,ma2,ma3] = statB(s.mau_sac)
+    const [ml1,ml2,ml3] = statD(s.mooney)
+    const nmLo = stripYear(r.ma_lo)
+
+    const c = (ok: boolean|undefined, v: string) =>
+      ok===undefined ? `<td style="text-align:center;color:#94a3b8">${v}</td>`
+      : ok ? `<td style="text-align:center;color:#065f46">${v}</td>`
+           : `<td style="text-align:center;color:#dc2626;font-weight:700">${v}</td>`
+
+    return `<tr>
       <td style="text-align:center">${r.lo_kn||"—"}</td>
-      <td style="text-align:center">${formatPKN(r.pkn, r.ngay_kn, fCode)}</td>
-      ${cell("tap_chat")}${cell("tro")}${cell("bay_hoi")}${cell("nito")}${cell("po")}${cell("pri")}${cell("mooney")}${cell("mau_sac")}
-      <td style="text-align:center;font-weight:700;color:${resColor}">${r.dat_hang}</td>
+      <td style="text-align:center;font-weight:600">${nmLo}</td>
+      <td style="text-align:center">${r.dat_hang||r.loai_csr}</td>
+      ${c(g.tap_chat?.dat,tc1)}${c(undefined,tc2)}${c(g.tap_chat?.dat,tc3)}
+      ${c(g.tro?.dat,tr1)}${c(undefined,tr2)}${c(g.tro?.dat,tr3)}
+      ${c(g.bay_hoi?.dat,bh1)}${c(undefined,bh2)}${c(g.bay_hoi?.dat,bh3)}
+      ${c(g.nito?.dat,ni1)}${c(undefined,ni2)}${c(g.nito?.dat,ni3)}
+      ${c(g.po?.dat,po1)}${c(undefined,po2)}${c(g.po?.dat,po3)}
+      ${c(g.pri?.dat,pr1)}${c(undefined,pr2)}${c(g.pri?.dat,pr3)}
+      <td style="text-align:center">${ma1}</td><td style="text-align:center">${ma2}</td><td style="text-align:center">${ma3}</td>
+      <td style="text-align:center">${ml1}</td><td style="text-align:center">${ml2}</td><td style="text-align:center">${ml3}</td>
+      <td style="text-align:center;font-weight:700;color:${resCl}">${r.trang_thai==="dat"?r.dat_hang:"Không đạt"}</td>
     </tr>`
   }).join("")
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-  <title>Phiếu KQKN - ${dateStr}</title>
-  <style>
-    body{font-family:Arial,sans-serif;font-size:11px;margin:20px}
-    h2{text-align:center;font-size:14px;margin:8px 0}
-    .info{display:flex;gap:24px;margin:8px 0;font-size:11px}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th{background:#f8fafc;padding:5px 6px;border:1px solid #cbd5e1;font-size:10px;text-align:center}
-    td{border:1px solid #e2e8f0;padding:4px 6px;font-size:10px}
-    .sign{display:flex;justify-content:space-around;margin-top:40px}
-    .sign div{text-align:center}
-    @media print{body{margin:10px}}
-  </style></head><body>
-  <div style="text-align:center;font-size:10px;color:#64748b">${factoryName.toUpperCase()}</div>
-  <h2>PHIẾU KẾT QUẢ KIỂM NGHIỆM</h2>
-  <div class="info">
-    <span><b>Ngày KN:</b> ${dateStr}</span>
-    <span><b>Tiêu chuẩn:</b> ${tieuChuan}</span>
-    <span><b>Chủng loại:</b> ${loaiGroups.join(", ")}</span>
-  </div>
-  <table>
-    <thead><tr>
-      <th>STT</th><th>Mã lô</th><th>Lô KN</th><th>PKN</th>
-      <th>Tạp chất</th><th>Tro</th><th>Bay hơi</th><th>Nitơ</th>
-      <th>Po</th><th>PRI</th><th>Mooney</th><th>Màu</th><th>Xếp hạng</th>
-    </tr></thead>
+  const pageBreak = isFirst ? "" : '<div style="page-break-before:always"></div>'
+  return `${pageBreak}
+  <div style="text-align:center;font-weight:bold;font-size:13px;margin-bottom:6px">BẢNG KẾT QUẢ KIỂM NGHIỆM CAO SU CSR</div>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:4px;font-size:9px">
+    <tr>
+      <td style="width:40%"><b>Mã phiếu:</b> <span style="color:#6d28d9;font-weight:bold">${pknCode}</span></td>
+      <td style="width:35%;text-align:center"><b>NGÀY SẢN XUẤT:</b> ${ngaySXStr}</td>
+      <td style="width:25%;text-align:right"><b>NHÀ MÁY:</b> ${fCode}</td>
+    </tr>
+  </table>
+  <table style="width:100%;border-collapse:collapse;font-size:8px">
+    <thead>
+      <tr style="background:#f1f5f9">
+        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center;font-size:8px">LÔ<br>PKN</th>
+        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">LÔ<br>NM</th>
+        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">HẠNG<br>DK</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TẠP CHẤT</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TRO</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">BAY HƠI</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">NITƠ</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">Po</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">PRI</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">MÀU</th>
+        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">ML(1'+4')100°C</th>
+        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">ĐẠT<br>HẠNG</th>
+      </tr>
+      <tr style="background:#f8fafc">
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">3SD</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄+3SD</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">3SD</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄+3SD</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">DR</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
+        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
+      </tr>
+    </thead>
     <tbody>${rows}</tbody>
   </table>
-  <div class="sign">
-    <div><p style="margin-bottom:40px"><b>Người thử nghiệm</b></p><p>________________________</p></div>
-    <div><p style="margin-bottom:40px"><b>Trưởng phòng KN</b></p><p>________________________</p></div>
+  <div style="margin-top:6px;font-size:9px"><b>TỔNG SỐ LÔ KIỂM NGHIỆM:</b> ${sorted.length}</div>
+  <div style="text-align:right;margin-top:4px;font-size:9px">Kampong Thom, ${ngayInStr}</div>
+  <div style="display:flex;justify-content:space-around;margin-top:32px;font-size:9px">
+    <div style="text-align:center"><p style="margin-bottom:36px"><b>LẬP BIỂU</b></p><p>________________________</p></div>
+    <div style="text-align:center"><p style="margin-bottom:36px"><b>TRƯỞNG PHÒNG QLCL</b></p><p>________________________</p></div>
   </div>
+  <div style="margin-top:8px;font-size:8px;color:#94a3b8">QLCL-QT21-F08</div>`
+}
+
+function buildPrintHTML(
+  dateResults: QcResult[], factoryName: string, date: string, fCode: string
+): string {
+  // Group by batch_id (or pkn as fallback), print each as a separate page
+  const batchMap = new Map<string, QcResult[]>()
+  dateResults.forEach(r => {
+    const key = r.batch_id || String(r.pkn)
+    if (!batchMap.has(key)) batchMap.set(key, [])
+    batchMap.get(key)!.push(r)
+  })
+  const batches = Array.from(batchMap.values()).sort((a,b)=>(a[0].pkn||0)-(b[0].pkn||0))
+
+  const pages = batches.map((b, i) => buildBatchPage(b, factoryName, fCode, i===0)).join("")
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Phiếu KQKN - ${new Date(date).toLocaleDateString("vi-VN")}</title>
+  <style>
+    body{font-family:"Times New Roman",serif;font-size:9px;margin:15px 20px}
+    table td,table th{border:1px solid #cbd5e1;padding:2px 3px}
+    @media print{@page{size:A4 landscape;margin:10mm} body{margin:0}}
+  </style></head><body>
+  ${pages}
   <script>window.onload=()=>{ window.print() }</script>
   </body></html>`
 }
@@ -317,6 +440,12 @@ export default function QualityPage() {
   const [gmsFrom,   setGmsFrom]   = useState("")
   const [gmsTo,     setGmsTo]     = useState("")
   const [gmsLoai,   setGmsLoai]   = useState("")
+
+  // ── Admin / Import ───────────────────────────────────────────────────────────
+  const [userRole,     setUserRole]     = useState("")
+  const [importing,    setImporting]    = useState(false)
+  const [importResult, setImportResult] = useState<{ok:number;errors:string[]}|null>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   // ── Toast ────────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{msg:string;ok:boolean}|null>(null)
@@ -423,6 +552,8 @@ export default function QualityPage() {
     setFactoryId(fid)
     loadResults(fid)
     loadCustomStds(fid)
+    const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
+    setUserRole(u.role || "")
     supabase.from("factories").select("*").eq("id",fid).limit(1)
       .then(({data}) => {
         const f = data?.[0]
@@ -447,9 +578,9 @@ export default function QualityPage() {
     return (data?.[0]?.pkn ?? 0) + 1
   }
 
-  const getNextLoKN = async (fid: string, ngayKN: string): Promise<number> => {
+  const getNextLoKN = async (fid: string): Promise<number> => {
     const { count } = await supabase.from("qc_results")
-      .select("id",{count:"exact",head:true}).eq("factory_id",fid).eq("ngay_kn",ngayKN)
+      .select("id",{count:"exact",head:true}).eq("factory_id",fid)
     return (count ?? 0) + 1
   }
 
@@ -543,8 +674,7 @@ export default function QualityPage() {
 
   const isTabFilled = (lotId: string): boolean => {
     const td = tabData[lotId]; if (!td) return false
-    const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
-    return getVisibleFields(loaiCsr).every(field => {
+    return getVisibleFields(createForm.chung_loai).every(field => {
       const vals = (td.samples[field]||[]).filter(v=>v!==""&&!isNaN(Number(v)))
       return vals.length >= createForm.so_mau
     })
@@ -581,9 +711,10 @@ export default function QualityPage() {
       if (error) { showToast("Lỗi: "+error.message, false); setSaving(false); return }
       showToast("Đã cập nhật phiếu kiểm nghiệm")
     } else {
-      // Insert batch
-      let nextPKN = await getNextPKN(factoryId, year)
-      let nextLoKN = await getNextLoKN(factoryId, createForm.ngay_kn)
+      // Insert batch — ALL lots share same pkn + batch_id (one phiếu)
+      const batchPKN = await getNextPKN(factoryId, year)
+      let nextLoKN   = await getNextLoKN(factoryId)
+      const batchId  = crypto.randomUUID()
       const isRetest = createForm.loai_kn==="kl_rot_hang"||createForm.loai_kn==="kl_6thang"
 
       for (const lotId of selectedLotIds) {
@@ -611,7 +742,7 @@ export default function QualityPage() {
 
         const { error } = await supabase.from("qc_results").insert({
           factory_id:factoryId, lot_id:lot.id, ma_lo:lot.ma_lo,
-          pkn:nextPKN, lo_kn:nextLoKN,
+          batch_id:batchId, pkn:batchPKN, lo_kn:nextLoKN,
           ngay_kn:createForm.ngay_kn, ngay_sx:lot.ngay_sx,
           chung_loai:createForm.chung_loai, loai_csr:loaiCsr,
           loai_kn:createForm.loai_kn, tieu_chuan:createForm.tieu_chuan,
@@ -619,9 +750,9 @@ export default function QualityPage() {
           parent_id:parentId||null, lan, notes,
         })
         if (error) { showToast(`Lỗi lô ${lot.ma_lo}: ${error.message}`, false); setSaving(false); return }
-        nextPKN++; nextLoKN++
+        nextLoKN++
       }
-      showToast(`Đã lưu ${selectedLotIds.size} phiếu kiểm nghiệm`)
+      showToast(`Đã lưu phiếu ${formatPKN(batchPKN, createForm.ngay_kn, factoryCode)} — ${selectedLotIds.size} lô`)
     }
     setSaving(false)
     setView("list")
@@ -658,6 +789,143 @@ export default function QualityPage() {
     if (error) { showToast("Lỗi lưu tiêu chuẩn: "+error.message, false) }
     else { showToast("Đã lưu tiêu chuẩn "+tkhName); loadCustomStds(factoryId) }
     setTkhSaving(false); setTkhModal(false); setTkhName("")
+  }
+
+  // ── Import Excel/CSV ─────────────────────────────────────────────────────────
+  const handleImport = async (file: File) => {
+    if (!factoryId) return
+    setImporting(true)
+    setImportResult(null)
+
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: "array", cellDates: true })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: "yyyy-mm-dd" }) as string[][]
+
+      if (rows.length < 4) { showToast("File không đúng định dạng (cần ≥4 hàng)", false); setImporting(false); return }
+
+      // Row 0 = metadata headers, Row 1 = metadata values
+      const metaH = rows[0].map(h => String(h||"").trim().toUpperCase())
+      const metaV = rows[1].map(v => String(v||"").trim())
+      const meta: Record<string, string> = {}
+      metaH.forEach((h, i) => { if (h) meta[h] = metaV[i] })
+
+      // Normalize date: handles "dd/mm/yyyy", "mm/dd/yyyy" Excel variants → "yyyy-mm-dd"
+      const normDate = (raw: string) => {
+        if (!raw) return new Date().toISOString().slice(0,10)
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+        const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
+        if (m) { const [,a,b,y]=m; return `${y}-${b.padStart(2,"0")}-${a.padStart(2,"0")}` }
+        return raw
+      }
+
+      const ngayKN    = normDate(meta["NGAY_KN"] || "")
+      const ngaySX    = normDate(meta["NGAY_SX"] || "")
+      const rawLoai   = meta["CHUNG_LOAI"] || "10"
+      const cl        = rawLoai.replace(/^(CSR|SVR)/i, "")
+      const tieuChuan = meta["TIEU_CHUAN"] || "TCCS 112:2022"
+
+      // Row 2 = column headers
+      const colH = rows[2].map(h => String(h||"").trim().toUpperCase())
+      const colIdx: Record<string, number> = {}
+      colH.forEach((h, i) => { if (h) colIdx[h] = i })
+
+      // Detect so_mau from TC_M column count
+      const soMau = colH.filter(h => /^TC_M\d+$/.test(h)).length || 6
+      const loaiKN = soMau >= 14 ? "ngat" : "thuong"
+
+      const loaiCsr  = getLoaiCSR(cl, factoryCode)
+      const customLimits = customStds.find(s => s.id === tieuChuan)?.limits
+
+      const year = new Date(ngayKN).getFullYear()
+      const batchPKN = await getNextPKN(factoryId, year)
+      let nextLoKN   = await getNextLoKN(factoryId)
+      const batchId  = crypto.randomUUID()
+
+      const fieldMap: [string, string][] = [
+        ["TC","tap_chat"],["TRO","tro"],["BH","bay_hoi"],
+        ["NI","nito"],["PO","po"],["PRI","pri"],
+        ["ML","mooney"],["MAU","mau_sac"],
+      ]
+
+      let okCount = 0
+      const errors: string[] = []
+
+      for (let ri = 3; ri < rows.length; ri++) {
+        const row = rows[ri]
+        if (!row || row.every(v => !v)) continue
+
+        const loNM = String(row[colIdx["LO_NM"]] || "").trim()
+        if (!loNM) continue
+
+        // Build samples object
+        const samples: Samples = {}
+        for (const [prefix, fieldKey] of fieldMap) {
+          const vals: (string|number)[] = []
+          for (let m = 1; m <= soMau; m++) {
+            const idx = colIdx[`${prefix}_M${m}`]
+            vals.push(idx !== undefined ? (row[idx] || "") : "")
+          }
+          samples[fieldKey] = vals
+        }
+
+        // Match lot by ma_lo (try exact then prefix)
+        const { data: matchedLots } = await supabase.from("lots")
+          .select("id,ma_lo")
+          .eq("factory_id", factoryId)
+          .or(`ma_lo.eq.${loNM},ma_lo.ilike.${loNM}%`)
+          .limit(1)
+        const lotId = matchedLots?.[0]?.id || null
+        const maLo  = matchedLots?.[0]?.ma_lo || loNM
+
+        const { grade, dat_hang, trang_thai } = calcGrade(samples, loaiCsr, tieuChuan, customLimits)
+
+        const { error } = await supabase.from("qc_results").insert({
+          factory_id: factoryId, lot_id: lotId, ma_lo: maLo,
+          batch_id: batchId, pkn: batchPKN, lo_kn: nextLoKN,
+          ngay_kn: ngayKN, ngay_sx: ngaySX,
+          chung_loai: cl, loai_csr: loaiCsr,
+          loai_kn: loaiKN, tieu_chuan: tieuChuan,
+          so_mau: soMau, samples, grade, dat_hang, trang_thai,
+          parent_id: null, lan: 1, notes: [],
+        })
+
+        if (error) { errors.push(`Lô ${loNM}: ${error.message}`) }
+        else { okCount++; nextLoKN++ }
+      }
+
+      setImportResult({ ok: okCount, errors })
+      if (okCount > 0) {
+        showToast(`Đã nhập ${okCount} lô — ${formatPKN(batchPKN, ngayKN, factoryCode)}`)
+        loadResults(factoryId)
+      } else {
+        showToast("Không nhập được lô nào", false)
+      }
+    } catch (e: unknown) {
+      showToast("Lỗi đọc file: " + (e instanceof Error ? e.message : String(e)), false)
+    }
+
+    setImporting(false)
+    if (importFileRef.current) importFileRef.current.value = ""
+  }
+
+  const handleDownloadTemplate = () => {
+    const m1 = "NGAY_KN,NGAY_SX,CHUNG_LOAI,LOAI_KN,TIEU_CHUAN,SO_MAU"
+    const today = new Date().toISOString().slice(0,10)
+    const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10)
+    const m2 = `${today},${yesterday},10,thuong,TCCS 112:2022,6`
+    const cols = ["LO_NM",
+      ...["TC","TRO","BH","NI","PO","PRI","ML","MAU"].flatMap(p =>
+        Array.from({length:6},(_,i)=>`${p}_M${i+1}`)
+      )
+    ].join(",")
+    const ex = "01cs/26,0.050,0.052,0.051,0.050,0.051,0.052,0.44,0.45,0.44,0.45,0.44,0.45,0.55,0.56,0.55,0.56,0.55,0.56,0.42,0.43,0.42,0.43,0.42,0.43,47,48,47,48,47,48,63,64,63,64,63,64,82,83,82,83,82,83,,,,,,"
+    const csv = [m1, m2, cols, ex].join("\n")
+    const blob = new Blob(["﻿"+csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href=url; a.download="Mau_KN_thuong.csv"; a.click()
+    URL.revokeObjectURL(url)
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────────
@@ -706,7 +974,7 @@ export default function QualityPage() {
 
   // Create view: loaiCsr derived from form
   const createLoaiCSR = getLoaiCSR(createForm.chung_loai, factoryCode)
-  const createVisibleFields = ALL_FIELDS.filter(f=>getVisibleFields(createLoaiCSR).includes(f.key))
+  const createVisibleFields = ALL_FIELDS.filter(f=>getVisibleFields(createForm.chung_loai).includes(f.key))
 
   // ── Tiêu chuẩn options for dropdown ──────────────────────────────────────────
   const tieuChuanOptions = [
@@ -949,16 +1217,35 @@ export default function QualityPage() {
       {/* ── LIST / GIÁM SÁT VIEW ─────────────────────────────────────────── */}
       {view === "list" && (
         <div>
+          {/* Hidden file input for import */}
+          <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            onChange={e => { const f=e.target.files?.[0]; if (f) handleImport(f) }}/>
+
           {/* Page header */}
           <div className="flex items-center justify-between mb-5">
             <div>
               <h1 className="text-2xl font-extrabold text-slate-800">Kiểm nghiệm</h1>
               <p className="text-sm text-slate-500 mt-0.5">Kết quả kiểm nghiệm — TCCS / TCVN / TCKH</p>
             </div>
-            <button onClick={()=>openCreate()}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
-              <Plus size={16}/> Tạo phiếu KN
-            </button>
+            <div className="flex items-center gap-2">
+              {userRole === "admin" && (
+                <>
+                  <button onClick={handleDownloadTemplate}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all border border-slate-200">
+                    <Download size={14}/> Tải mẫu
+                  </button>
+                  <button onClick={()=>importFileRef.current?.click()} disabled={importing}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 rounded-xl transition-all border border-blue-200 disabled:opacity-40">
+                    {importing ? <RefreshCw size={14} className="animate-spin"/> : <Upload size={14}/>}
+                    {importing ? "Đang nhập..." : "Nhập KN"}
+                  </button>
+                </>
+              )}
+              <button onClick={()=>openCreate()}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
+                <Plus size={16}/> Tạo phiếu KN
+              </button>
+            </div>
           </div>
 
           {/* Tab nav */}
@@ -1041,6 +1328,15 @@ export default function QualityPage() {
                     const dateDat = dateResults.filter(r=>r.trang_thai==="dat").length
                     const hasRetest = dateResults.some(r=>r.parent_id)
 
+                    // Distinct batches in this date group (dedup by batch_id or pkn)
+                    const batches = Array.from(
+                      dateResults.reduce((m,r)=>{
+                        const key=r.batch_id||String(r.pkn)
+                        if(!m.has(key)) m.set(key, {pkn:r.pkn, ngay_kn:r.ngay_kn, batch_id:r.batch_id})
+                        return m
+                      }, new Map<string,{pkn:number;ngay_kn:string;batch_id?:string}>())
+                    ).map(([,v])=>v)
+
                     return (
                       <div key={date} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         {/* Date header */}
@@ -1052,8 +1348,14 @@ export default function QualityPage() {
                               {new Date(date).toLocaleDateString("vi-VN")}
                             </span>
                             <span className="px-2 py-0.5 bg-white border border-slate-200 text-xs font-bold rounded-full text-slate-600">
-                              {dateResults.length} phiếu
+                              {dateResults.length} lô
                             </span>
+                            {/* Batch PKN badges */}
+                            {batches.map(b=>(
+                              <span key={b.pkn} className="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-[10px] font-bold rounded-full">
+                                {formatPKN(b.pkn, b.ngay_kn, factoryCode)}
+                              </span>
+                            ))}
                             <span className="text-xs text-emerald-600 font-bold">{dateDat} đạt</span>
                             {hasRetest && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">↺ KN lại</span>}
                           </div>
@@ -1099,7 +1401,7 @@ export default function QualityPage() {
                             <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
                                 {inDeleteMode && <th className="px-3 py-2 w-8"/>}
-                                {["PKN","Lô KN","Mã lô","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả",""].map(h=>(
+                                {["Lô PKN","Lô KN","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả",""].map(h=>(
                                   <th key={h} className="px-3 py-2 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                                 ))}
                               </tr>
@@ -1119,11 +1421,10 @@ export default function QualityPage() {
                                           }} className="rounded"/>
                                       </td>
                                     )}
-                                    <td className="px-3 py-2.5 font-bold text-violet-700 text-xs">
-                                      {formatPKN(r.pkn, r.ngay_kn, factoryCode)}
+                                    <td className="px-3 py-2.5 text-center font-bold text-violet-700 text-xs font-mono">
+                                      {r.lo_kn||"—"}
                                       {r.parent_id && <span className="ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded">KN lại</span>}
                                     </td>
-                                    <td className="px-3 py-2.5 text-center text-xs text-slate-500 font-mono">{r.lo_kn||"—"}</td>
                                     <td className="px-3 py-2.5 font-semibold text-emerald-700">{r.ma_lo}</td>
                                     <td className="px-3 py-2.5">
                                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{r.loai_csr}</span>
@@ -1163,7 +1464,7 @@ export default function QualityPage() {
                                   {/* Expanded detail */}
                                   {expandedId===r.id && (
                                     <tr key={r.id+"_exp"}>
-                                      <td colSpan={inDeleteMode?11:10} className="px-4 py-4 bg-slate-50">
+                                      <td colSpan={inDeleteMode?10:9} className="px-4 py-4 bg-slate-50">
                                         <div className="flex flex-wrap gap-3 text-xs">
                                           {ALL_FIELDS.filter(f=>r.grade?.[f.key]||(r.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
                                             const vals=((r.samples as any)?.[f.key]||[]) as number[]
@@ -1372,6 +1673,42 @@ export default function QualityPage() {
             <div className="flex gap-3">
               <button onClick={()=>setDelConfirm(null)} className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={()=>handleDelete(delConfirm)} className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── IMPORT RESULT MODAL ─────────────────────────────────────────────── */}
+      {importResult && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="font-extrabold text-slate-800">Kết quả nhập dữ liệu</h2>
+              <button onClick={()=>setImportResult(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16}/></button>
+            </div>
+            <div className="p-6 space-y-3">
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl ${importResult.ok>0?"bg-emerald-50 text-emerald-700":"bg-slate-50 text-slate-600"}`}>
+                <Check size={18} className={importResult.ok>0?"text-emerald-600":"text-slate-400"}/>
+                <span className="font-bold">Nhập thành công: {importResult.ok} lô</span>
+              </div>
+              {importResult.errors.length > 0 && (
+                <div className="bg-red-50 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-red-700 font-bold text-sm mb-2">
+                    <AlertTriangle size={14}/> {importResult.errors.length} lỗi
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {importResult.errors.map((e,i)=>(
+                      <div key={i} className="text-xs text-red-600 font-mono">{e}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end">
+              <button onClick={()=>setImportResult(null)}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md">
+                Đóng
+              </button>
             </div>
           </div>
         </div>
