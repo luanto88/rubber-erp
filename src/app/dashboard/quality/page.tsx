@@ -533,7 +533,7 @@ export default function QualityPage() {
 
       // Chỉ giữ lô mà kết quả MỚI NHẤT vẫn là khong_dat (fallback: dat_hang kết thúc bằng "RH")
       const isStillFailed = (r: QcResult|undefined) =>
-        r?.trang_thai === "khong_dat" || (!r?.trang_thai && r?.dat_hang?.endsWith("RH"))
+        r?.trang_thai === "khong_dat" || r?.dat_hang?.endsWith("RH")
       const stillFailedIds   = Array.from(latestByLotId.keys())
         .filter(lid => isStillFailed(latestAllById.get(lid)))
       const stillFailedMaLos = Array.from(latestByMaLo.keys())
@@ -1039,7 +1039,7 @@ export default function QualityPage() {
     const deduped = Array.from(statsMap.values())
     const datCount = deduped.filter(r=>r.trang_thai==="dat").length
     const khongDatCount = deduped.filter(r=>
-      r.trang_thai==="khong_dat" || (!r.trang_thai && r.dat_hang?.endsWith("RH"))
+      r.trang_thai==="khong_dat" || r.dat_hang?.endsWith("RH")
     ).length
     return {
       latestPerLot: map,
