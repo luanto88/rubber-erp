@@ -420,6 +420,7 @@ export default function QualityPage() {
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set())
   const [delConfirm,    setDelConfirm]   = useState<string|null>(null)
   const [expandedId,    setExpandedId]   = useState<string|null>(null)
+  const [parentMap,     setParentMap]    = useState<Map<string,QcResult>>(new Map())
 
   // ── Create-view state ────────────────────────────────────────────────────────
   const [createForm, setCreateForm] = useState<CreateForm>({
@@ -563,8 +564,11 @@ export default function QualityPage() {
             ?? latestByMaLo.get(l.ma_lo.replace(/\/\d{2,4}$/, "")),
         })),
       ]
+      const finalCombined = createForm.ngay_sx
+        ? combined.filter(l => l.ngay_sx === createForm.ngay_sx)
+        : combined
       const seen = new Set<string>()
-      setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
+      setEligibleLots(finalCombined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
 
     } else if (createForm.loai_kn === "kl_6thang") {
       const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
@@ -597,6 +601,19 @@ export default function QualityPage() {
     }
     setLotsLoading(false)
   }, [factoryId, factoryCode, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
+
+  // ── Fetch missing parent records for monitoring tab ──────────────────────────
+  useEffect(() => {
+    if (mainTab !== "giam_sat" || !factoryId) return
+    const missingIds = gmsResults
+      .map(r => r.parent_id)
+      .filter((pid): pid is string => !!pid && !results.some(r => r.id === pid))
+    if (!missingIds.length) { setParentMap(new Map()); return }
+    supabase.from("qc_results").select("*").in("id", missingIds)
+      .then(({ data }) => {
+        setParentMap(new Map((data||[]).map(r => [r.id, r])))
+      })
+  }, [gmsResults, mainTab, factoryId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Bootstrap ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1123,10 +1140,26 @@ export default function QualityPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày SX <span className="text-red-500">*</span></label>
-                <input type="date" value={createForm.ngay_sx}
-                  onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Ngày SX {createForm.loai_kn !== "kl_rot_hang" && <span className="text-red-500">*</span>}
+                </label>
+                {createForm.loai_kn === "kl_rot_hang" ? (
+                  <div className="flex gap-1.5">
+                    <button onClick={()=>handleCreateFormChange({ngay_sx:""})}
+                      className={`px-2.5 py-2 text-xs font-bold rounded-xl border-2 transition-all whitespace-nowrap ${
+                        !createForm.ngay_sx
+                          ? "border-violet-500 bg-violet-50 text-violet-700"
+                          : "border-slate-200 text-slate-500 hover:border-slate-300"
+                      }`}>Tất cả</button>
+                    <input type="date" value={createForm.ngay_sx}
+                      onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
+                      className="flex-1 px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                  </div>
+                ) : (
+                  <input type="date" value={createForm.ngay_sx}
+                    onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                )}
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chủng loại <span className="text-red-500">*</span></label>
@@ -1141,7 +1174,9 @@ export default function QualityPage() {
                 <select value={createForm.loai_kn}
                   onChange={e=>{
                     const opt = LOAI_KN_OPTIONS.find(o=>o.val===e.target.value)
-                    handleCreateFormChange({loai_kn:e.target.value, so_mau: opt?.defaultMau||6})
+                    const patch: Partial<CreateForm> = {loai_kn:e.target.value, so_mau: opt?.defaultMau||6}
+                    if (e.target.value==="kl_rot_hang") patch.ngay_sx = ""
+                    handleCreateFormChange(patch)
                     setSelectedLotIds(new Set()); setTabData({})
                   }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
@@ -1656,7 +1691,7 @@ export default function QualityPage() {
               ) : (
                 <div className="space-y-3">
                   {gmsResults.map(r => {
-                    const parent = results.find(p=>p.id===r.parent_id)
+                    const parent = results.find(p=>p.id===r.parent_id) ?? parentMap.get(r.parent_id!)
                     return (
                       <div key={r.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         {/* Card header */}
@@ -1665,9 +1700,18 @@ export default function QualityPage() {
                           <span className="text-xs text-slate-500">{formatPKN(r.pkn, r.ngay_kn, factoryCode)}</span>
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
                           <span className="text-xs text-slate-400">KN: {new Date(r.ngay_kn).toLocaleDateString("vi-VN")}</span>
-                          <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                             {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
                           </span>
+                          <button onClick={()=>{
+                            const batchLots = results.filter(r2=>
+                              r.batch_id ? r2.batch_id===r.batch_id : (r2.pkn===r.pkn&&r2.ngay_kn===r.ngay_kn&&!!r2.parent_id)
+                            )
+                            const w=window.open("","_blank","width=960,height=680")
+                            if(w){w.document.write(buildPrintHTML(batchLots.length?batchLots:[r],factoryName,r.ngay_kn,factoryCode));w.document.close()}
+                          }} className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg border border-slate-200 transition-colors">
+                            <Printer size={11}/> PDF
+                          </button>
                         </div>
 
                         {/* Comparison */}
