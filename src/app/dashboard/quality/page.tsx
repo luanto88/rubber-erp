@@ -1516,9 +1516,22 @@ export default function QualityPage() {
                                   className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors">
                                   <Trash2 size={11}/> Xóa
                                 </button>
-                                <button onClick={e=>{e.stopPropagation();
+                                <button onClick={async e=>{e.stopPropagation();
+                                  // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)
+                                  const parentIds = dateResults.map(r=>r.id)
+                                  const { data: retests } = await supabase.from("qc_results")
+                                    .select("*")
+                                    .in("parent_id", parentIds)
+                                    .order("created_at", { ascending: false })
+                                  const retestMap = new Map<string,QcResult>()
+                                  ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
+                                  // Substitute re-test record but keep lo_kn từ bản gốc để PDF đúng số thứ tự
+                                  const resolved = dateResults.map(r=> {
+                                    const rt = retestMap.get(r.id)
+                                    return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
+                                  })
                                   const w=window.open("","_blank","width=960,height=680")
-                                  if(w){w.document.write(buildPrintHTML(dateResults,factoryName,date,factoryCode));w.document.close()}}}
+                                  if(w){w.document.write(buildPrintHTML(resolved,factoryName,date,factoryCode));w.document.close()}}}
                                   className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-colors">
                                   <Printer size={11}/> PDF
                                 </button>
