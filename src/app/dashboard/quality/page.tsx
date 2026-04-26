@@ -448,6 +448,9 @@ export default function QualityPage() {
   const [gmsTo,     setGmsTo]     = useState("")
   const [gmsLoai,   setGmsLoai]   = useState("")
 
+  // ── KN lại date filter (ngay_sx dropdown cho kl_rot_hang & kl_6thang) ─────────
+  const [knDateFilter, setKnDateFilter] = useState<string>("")
+
   // ── Admin / Import ───────────────────────────────────────────────────────────
   const [userRole,     setUserRole]     = useState("")
   const [importing,    setImporting]    = useState(false)
@@ -564,11 +567,8 @@ export default function QualityPage() {
             ?? latestByMaLo.get(l.ma_lo.replace(/\/\d{2,4}$/, "")),
         })),
       ]
-      const finalCombined = createForm.ngay_sx
-        ? combined.filter(l => l.ngay_sx === createForm.ngay_sx)
-        : combined
       const seen = new Set<string>()
-      setEligibleLots(finalCombined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
+      setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
 
     } else if (createForm.loai_kn === "kl_6thang") {
       const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
@@ -601,6 +601,18 @@ export default function QualityPage() {
     }
     setLotsLoading(false)
   }, [factoryId, factoryCode, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
+
+  // ── Giám sát: results that are re-tests (have parent_id) ────────────────────
+  const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
+    if (gmsFilter==="rot_ct") return !r.dat_hang?.endsWith("RH")
+    if (gmsFilter==="6thang") return r.loai_kn==="kl_6thang"
+    return true
+  }).filter(r=>{
+    if (gmsLoai && r.loai_csr!==gmsLoai) return false
+    if (gmsFrom && r.ngay_kn<gmsFrom) return false
+    if (gmsTo   && r.ngay_kn>gmsTo)   return false
+    return true
+  }), [results, gmsFilter, gmsLoai, gmsFrom, gmsTo])
 
   // ── Fetch missing parent records for monitoring tab ──────────────────────────
   useEffect(() => {
@@ -663,7 +675,7 @@ export default function QualityPage() {
       so_mau:6, tuy_chon_mau:6, tieu_chuan:"TCCS 112:2022" })
     setEligibleLots([]); setSelectedLotIds(new Set())
     setActiveTabLotId(null); setTabData({}); setEditingResultId(null)
-    setEditDateModal(null)
+    setEditDateModal(null); setKnDateFilter("")
     setView("create")
   }
 
@@ -1029,9 +1041,43 @@ export default function QualityPage() {
     return true
   }), [results, search])
 
+  // Ẩn phiếu kl_rot_hang khỏi danh sách chính (chỉ hiện trong Giám sát KN)
+  const mainFiltered = useMemo(
+    () => filtered.filter(r => r.loai_kn !== "kl_rot_hang"),
+    [filtered]
+  )
+
   const dateGroups = useMemo(() => Array.from(
-    filtered.reduce((m,r)=>{ const d=r.ngay_kn?.slice(0,10)||"?"; if(!m.has(d)) m.set(d,[]); m.get(d)!.push(r); return m }, new Map<string,QcResult[]>())
-  ).sort((a,b)=>b[0].localeCompare(a[0])), [filtered])
+    mainFiltered.reduce((m,r)=>{ const d=r.ngay_kn?.slice(0,10)||"?"; if(!m.has(d)) m.set(d,[]); m.get(d)!.push(r); return m }, new Map<string,QcResult[]>())
+  ).sort((a,b)=>b[0].localeCompare(a[0])), [mainFiltered])
+
+  // Dropdown ngày SX cho kl_rot_hang và kl_6thang
+  const eligibleDates = useMemo(() => {
+    if (!["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn)) return []
+    const dates = new Set<string>()
+    eligibleLots.forEach(l => { if (l.ngay_sx) dates.add(l.ngay_sx) })
+    return [...dates].sort().reverse()
+  }, [createForm.loai_kn, eligibleLots])
+
+  // Lots hiển thị sau khi filter ngày SX
+  const displayLots = useMemo(() => {
+    if (!["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn) || !knDateFilter)
+      return eligibleLots
+    return eligibleLots.filter(l => l.ngay_sx === knDateFilter)
+  }, [createForm.loai_kn, eligibleLots, knDateFilter])
+
+  // Map: qc_result.id gốc → kết quả KN lại rớt hạng mới nhất (để hiện badge)
+  const retestByParentId = useMemo(() => {
+    const map = new Map<string, QcResult>()
+    results
+      .filter(r => r.loai_kn === "kl_rot_hang" && r.parent_id)
+      .forEach(r => {
+        const ex = map.get(r.parent_id!)
+        if (!ex || new Date(r.created_at||0) > new Date(ex.created_at||0))
+          map.set(r.parent_id!, r)
+      })
+    return map
+  }, [results])
 
   const { latestPerLot, stats } = useMemo(() => {
     // latestPerLot: dùng results (có filter) để hiển thị đúng trong list view
@@ -1067,18 +1113,6 @@ export default function QualityPage() {
       }
     }
   }, [results, statsResults])
-
-  // Giám sát: results that are re-tests (have parent_id)
-  const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
-    if (gmsFilter==="rot_ct") return !r.dat_hang?.endsWith("RH")
-    if (gmsFilter==="6thang") return r.loai_kn==="kl_6thang"
-    return true
-  }).filter(r=>{
-    if (gmsLoai && r.loai_csr!==gmsLoai) return false
-    if (gmsFrom && r.ngay_kn<gmsFrom) return false
-    if (gmsTo   && r.ngay_kn>gmsTo)   return false
-    return true
-  }), [results, gmsFilter, gmsLoai, gmsFrom, gmsTo])
 
   const gmsStats = useMemo(() => ({
     rotCT: results.filter(r=>r.parent_id&&!r.dat_hang?.endsWith("RH")).length,
@@ -1141,20 +1175,18 @@ export default function QualityPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ngày SX {createForm.loai_kn !== "kl_rot_hang" && <span className="text-red-500">*</span>}
+                  Ngày SX {!["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn) && <span className="text-red-500">*</span>}
                 </label>
-                {createForm.loai_kn === "kl_rot_hang" ? (
-                  <div className="flex gap-1.5">
-                    <button onClick={()=>handleCreateFormChange({ngay_sx:""})}
-                      className={`px-2.5 py-2 text-xs font-bold rounded-xl border-2 transition-all whitespace-nowrap ${
-                        !createForm.ngay_sx
-                          ? "border-violet-500 bg-violet-50 text-violet-700"
-                          : "border-slate-200 text-slate-500 hover:border-slate-300"
-                      }`}>Tất cả</button>
-                    <input type="date" value={createForm.ngay_sx}
-                      onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
-                      className="flex-1 px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
-                  </div>
+                {["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn) ? (
+                  <select value={knDateFilter} onChange={e=>setKnDateFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                    <option value="">Tất cả</option>
+                    {eligibleDates.map(d=>(
+                      <option key={d} value={d}>
+                        {new Date(d+"T00:00:00").toLocaleDateString("vi-VN")}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <input type="date" value={createForm.ngay_sx}
                     onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
@@ -1177,6 +1209,7 @@ export default function QualityPage() {
                     const patch: Partial<CreateForm> = {loai_kn:e.target.value, so_mau: opt?.defaultMau||6}
                     if (e.target.value==="kl_rot_hang") patch.ngay_sx = ""
                     handleCreateFormChange(patch)
+                    setKnDateFilter("")
                     setSelectedLotIds(new Set()); setTabData({})
                   }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
@@ -1216,7 +1249,7 @@ export default function QualityPage() {
                    "Lô chưa kiểm nghiệm"}
                 </span>
                 <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">
-                  {lotsLoading ? "..." : eligibleLots.length}
+                  {lotsLoading ? "..." : displayLots.length}
                 </span>
                 {selectedLotIds.size > 0 && (
                   <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">
@@ -1226,13 +1259,17 @@ export default function QualityPage() {
               </div>
               {lotsLoading ? (
                 <div className="text-sm text-slate-400 py-4 text-center">Đang tải lô...</div>
-              ) : eligibleLots.length === 0 ? (
+              ) : displayLots.length === 0 ? (
                 <div className="text-sm text-slate-400 py-4 text-center">
-                  {!createForm.ngay_sx && createForm.loai_kn==="thuong" ? "Vui lòng chọn Ngày SX" : "Không có lô phù hợp"}
+                  {!createForm.ngay_sx && createForm.loai_kn==="thuong"
+                    ? "Vui lòng chọn Ngày SX"
+                    : knDateFilter && eligibleLots.length > 0
+                    ? "Không có lô phù hợp trong ngày đã chọn"
+                    : "Không có lô phù hợp"}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {eligibleLots.map(lot => {
+                  {displayLots.map(lot => {
                     const sel = selectedLotIds.has(lot.id)
                     return (
                       <button key={lot.id} onClick={()=>toggleLot(lot)}
@@ -1458,7 +1495,7 @@ export default function QualityPage() {
                     const expanded = expandedDates.has(date)
                     const inDeleteMode = deleteMode===date
                     const dateDat = dateResults.filter(r=>!r.dat_hang?.endsWith("RH")).length
-                    const hasRetest = dateResults.some(r=>r.parent_id)
+                    const hasRetest = dateResults.some(r=>r.parent_id || retestByParentId.has(r.id))
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -1569,6 +1606,7 @@ export default function QualityPage() {
                                     <td className="px-3 py-2.5 text-center font-bold text-violet-700 text-xs font-mono">
                                       {r.lo_kn||"—"}
                                       {r.parent_id && <span className="ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded">KN lại</span>}
+                                      {retestByParentId.has(r.id) && <span className="ml-1 px-1 py-0.5 bg-violet-100 text-violet-700 text-[9px] font-bold rounded">↺ KN lại</span>}
                                     </td>
                                     <td className="px-3 py-2.5 font-semibold text-emerald-700">{r.ma_lo}</td>
                                     <td className="px-3 py-2.5">
