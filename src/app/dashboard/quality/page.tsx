@@ -267,7 +267,7 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
   const rows = sorted.map(r => {
     const s = r.samples || {}
     const g = r.grade   || {}
-    const resOk = r.trang_thai === "dat"
+    const resOk = !r.dat_hang?.endsWith("RH")
     const resCl = resOk ? "#065f46" : "#dc2626"
     const [tc1,tc2,tc3] = statA(s.tap_chat)
     const [tr1,tr2,tr3] = statA(s.tro)
@@ -472,7 +472,8 @@ export default function QualityPage() {
       .order("ngay_kn", { ascending: false })
       .order("pkn",     { ascending: false })
     if (filterLoai) q = q.eq("loai_csr",  filterLoai)
-    if (filterTT)   q = q.eq("trang_thai", filterTT)
+    if (filterTT === "dat_hang") q = q.not("dat_hang", "ilike", "%RH")
+    else if (filterTT === "rot_hang") q = q.ilike("dat_hang", "%RH")
     if (filterFrom) q = q.gte("ngay_kn",  filterFrom)
     if (filterTo)   q = q.lte("ngay_kn",  filterTo)
     const { data } = await q
@@ -509,7 +510,7 @@ export default function QualityPage() {
       // Fetch failed qc_results
       const { data: failed } = await supabase.from("qc_results")
         .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .or("trang_thai.eq.khong_dat,dat_hang.ilike.%RH")
+        .ilike("dat_hang", "%RH")
         .order("created_at", { ascending: false })
 
       // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
@@ -531,9 +532,8 @@ export default function QualityPage() {
         else if (r.ma_lo) { if (!latestAllByMaLo.has(r.ma_lo)) latestAllByMaLo.set(r.ma_lo, r) }
       })
 
-      // Chỉ giữ lô mà kết quả MỚI NHẤT vẫn là khong_dat (fallback: dat_hang kết thúc bằng "RH")
       const isStillFailed = (r: QcResult|undefined) =>
-        r?.trang_thai === "khong_dat" || r?.dat_hang?.endsWith("RH")
+        r?.dat_hang?.endsWith("RH") === true
       const stillFailedIds   = Array.from(latestByLotId.keys())
         .filter(lid => isStillFailed(latestAllById.get(lid)))
       const stillFailedMaLos = Array.from(latestByMaLo.keys())
@@ -1037,10 +1037,8 @@ export default function QualityPage() {
         statsMap.set(k,r)
     })
     const deduped = Array.from(statsMap.values())
-    const datCount = deduped.filter(r=>r.trang_thai==="dat").length
-    const khongDatCount = deduped.filter(r=>
-      r.trang_thai==="khong_dat" || r.dat_hang?.endsWith("RH")
-    ).length
+    const khongDatCount = deduped.filter(r=>r.dat_hang?.endsWith("RH")).length
+    const datCount = deduped.length - khongDatCount
     return {
       latestPerLot: map,
       stats: {
@@ -1055,7 +1053,7 @@ export default function QualityPage() {
 
   // Giám sát: results that are re-tests (have parent_id)
   const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
-    if (gmsFilter==="rot_ct") return r.trang_thai==="dat"
+    if (gmsFilter==="rot_ct") return !r.dat_hang?.endsWith("RH")
     if (gmsFilter==="6thang") return r.loai_kn==="kl_6thang"
     return true
   }).filter(r=>{
@@ -1066,7 +1064,7 @@ export default function QualityPage() {
   }), [results, gmsFilter, gmsLoai, gmsFrom, gmsTo])
 
   const gmsStats = useMemo(() => ({
-    rotCT: results.filter(r=>r.parent_id&&r.trang_thai==="dat").length,
+    rotCT: results.filter(r=>r.parent_id&&!r.dat_hang?.endsWith("RH")).length,
     thang6: results.filter(r=>r.loai_kn==="kl_6thang"&&r.parent_id).length,
     total: results.filter(r=>r.parent_id).length,
   }), [results])
@@ -1208,7 +1206,7 @@ export default function QualityPage() {
                               : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>
                         {sel && <span className="mr-1">✓</span>}
                         {lot.ma_lo}
-                        {lot.prev_qc && <span className="ml-1 opacity-60">{lot.prev_qc.trang_thai==="khong_dat"?"✗":"↺"}</span>}
+                        {lot.prev_qc && <span className="ml-1 opacity-60">{lot.prev_qc.dat_hang?.endsWith("RH")?"✗":"↺"}</span>}
                       </button>
                     )
                   })}
@@ -1227,8 +1225,8 @@ export default function QualityPage() {
                   const filled = isTabFilled(lotId)
                   const preview = tabData[lotId]?.preview
                   const active = activeTabLotId===lotId
-                  const icon = !filled ? "⏳" : preview?.trang_thai==="dat" ? "✓" : "✗"
-                  const iconColor = !filled ? "text-slate-400" : preview?.trang_thai==="dat" ? "text-emerald-600" : "text-red-500"
+                  const icon = !filled ? "⏳" : !preview?.dat_hang?.endsWith("RH") ? "✓" : "✗"
+                  const iconColor = !filled ? "text-slate-400" : !preview?.dat_hang?.endsWith("RH") ? "text-emerald-600" : "text-red-500"
                   return (
                     <button key={lotId} onClick={()=>setActiveTabLotId(lotId)}
                       className={`flex items-center gap-1.5 px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 transition-all ${
@@ -1257,8 +1255,8 @@ export default function QualityPage() {
                       </div>
                       {preview && (
                         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold ${
-                          preview.trang_thai==="dat" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
-                          {preview.trang_thai==="dat" ? <Check size={14}/> : <X size={14}/>}
+                          !preview.dat_hang?.endsWith("RH") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+                          {!preview.dat_hang?.endsWith("RH") ? <Check size={14}/> : <X size={14}/>}
                           {preview.dat_hang}
                         </div>
                       )}
@@ -1395,8 +1393,8 @@ export default function QualityPage() {
                 <select value={filterTT} onChange={e=>setFilterTT(e.target.value)}
                   className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none">
                   <option value="">Tất cả KQ</option>
-                  <option value="dat">Đạt</option>
-                  <option value="khong_dat">Không đạt</option>
+                  <option value="dat_hang">Đạt hạng</option>
+                  <option value="rot_hang">Rớt hạng</option>
                 </select>
                 <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}
                   className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none"/>
@@ -1424,7 +1422,7 @@ export default function QualityPage() {
                   {dateGroups.map(([date, dateResults]) => {
                     const expanded = expandedDates.has(date)
                     const inDeleteMode = deleteMode===date
-                    const dateDat = dateResults.filter(r=>r.trang_thai==="dat").length
+                    const dateDat = dateResults.filter(r=>!r.dat_hang?.endsWith("RH")).length
                     const hasRetest = dateResults.some(r=>r.parent_id)
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
@@ -1549,8 +1547,8 @@ export default function QualityPage() {
                                     </td>
                                     <td className="px-3 py-2.5">
                                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                        r.trang_thai==="dat"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
-                                        {r.trang_thai==="dat"?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang||"Rớt"}`}
+                                        !r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
+                                        {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang||"Rớt hạng"}`}
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5">
@@ -1667,8 +1665,8 @@ export default function QualityPage() {
                           <span className="text-xs text-slate-500">{formatPKN(r.pkn, r.ngay_kn, factoryCode)}</span>
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
                           <span className="text-xs text-slate-400">KN: {new Date(r.ngay_kn).toLocaleDateString("vi-VN")}</span>
-                          <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${r.trang_thai==="dat"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
-                            {r.trang_thai==="dat"?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
+                          <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
+                            {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
                           </span>
                         </div>
 
@@ -1743,7 +1741,7 @@ export default function QualityPage() {
                   <span className="text-xs text-slate-400">Lô PKN {r.lo_kn}</span>
                   <span className="font-semibold text-emerald-700">{r.ma_lo}</span>
                   <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${r.trang_thai==="dat"?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                     {r.dat_hang}
                   </span>
                   {r.trang_thai!=="dat" || true ? (
