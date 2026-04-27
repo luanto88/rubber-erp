@@ -44,16 +44,7 @@ type QcResult = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LOAI_XE_OPTS   = ["Container 20ft","Container 40ft","Xe tải mui bạt","Khác"]
-const LOAI_PALLET    = ["Xuất rời","Pallet gỗ","Pallet sắt"]
 const LOAI_CSR       = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","SVR10","SVR20","SVR3L","SVRL","SVRCV50","SVRCV60"]
-const BOC_OPTS       = [
-  "Bọc nhãn 0,04 VRG CSR10","Bọc nhãn 0,04 VRG CSR20",
-  "Bọc nhãn 0,04 VRG CSRL","Bọc nhãn 0,04 VRG CSR3L",
-  "Bọc nhãn 0,04 VRG CSRCV50","Bọc nhãn 0,04 VRG CSRCV60",
-  "Bọc nhãn 0,04 VRG SVR10","Bọc nhãn 0,04 VRG SVR20",
-  "Bọc nhãn 0,04 VRG SVRL","Bọc nhãn 0,04 VRG SVR3L",
-  "Bọc nhãn 0,04 VRG SVRCV50","Bọc nhãn 0,04 VRG SVRCV60",
-]
 const CHI_TIEU_LIST  = ["Tạp chất","Tro","Bay hơi","Nitơ","Po","PRI","Độ nhớt"]
 const CHI_TIEU_KEY: Record<string, string> = {
   "Tạp chất":"tap_chat","Tro":"tro","Bay hơi":"bay_hoi","Nitơ":"nito","Po":"po","PRI":"pri","Độ nhớt":"mooney"
@@ -69,7 +60,7 @@ const emptyCustomerForm = () => ({ ma_kh:"", ten_kh_en:"", quoc_gia:"", dia_chi:
 const emptyForm = () => ({
   ma_don: "", ngay: new Date().toISOString().slice(0,10),
   so_thong_bao: "", so_hoa_don: "", so_hop_dong: "",
-  customer_id: "", chung_loai: "CSR10", loai_pallet: "Xuất rời",
+  customer_id: "", chung_loai: "CSR10", loai_pallet: "Sắt đế gỗ",
   loai_banh: 35, loai_boc: "Bọc nhãn 0,04 VRG CSR10",
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
@@ -81,6 +72,17 @@ function getLoaiBanhOptions(chung_loai: string): number[] {
   if (["CSRCV50","CSRCV60","SVRCV50","SVRCV60"].includes(chung_loai)) return [35, 20]
   if (["CSRL","CSR3L","SVRL","SVR3L"].includes(chung_loai)) return [35, 33.33]
   return [35]
+}
+
+function getPalletOpts(nmcp: boolean): string[] {
+  if (nmcp) return ["Sắt đế gỗ","Sắt đế nhựa","Sắt mỏng","MB5","Gỗ"]
+  return ["Sắt đế gỗ","Sắt mỏng","MB5","Gỗ"]
+}
+
+function getBocOpts(chung_loai: string): string[] {
+  const isMuNuoc = ["CSRL","CSR3L","CSRCV50","CSRCV60","SVRL","SVR3L","SVRCV50","SVRCV60"].includes(chung_loai)
+  const base = [`Bọc trơn 0,04`,`Bọc nhãn 0,04 VRG ${chung_loai}`]
+  return isMuNuoc ? [...base,`Bọc trơn 0,13`,`Bọc nhãn 0,13 VRG ${chung_loai}`] : base
 }
 
 function ddmmyy(dateStr: string) {
@@ -99,6 +101,8 @@ export default function ExportPage() {
   const [customers, setCustomers]     = useState<Customer[]>([])
   const [loading, setLoading]         = useState(true)
   const [factoryId, setFactoryId]     = useState<string|null>(null)
+  const [factory, setFactory]         = useState<{ id: string; name: string }|null>(null)
+  const isNMCP = useMemo(() => factory?.name?.toLowerCase().includes("cuaparis") ?? false, [factory])
 
   // Filters (list view)
   const [search, setSearch]           = useState("")
@@ -181,6 +185,8 @@ export default function ExportPage() {
     loadLots(fid)
     loadQcResults(fid)
     loadCustomers(fid)
+    supabase.from("factories").select("id,name").eq("id", fid).single()
+      .then(({ data }) => { if (data) setFactory(data) })
   }, [loadData, loadLots, loadQcResults, loadCustomers])
 
   // ── Compute remaining per lot ─────────────────────────────────────────────
@@ -258,7 +264,7 @@ export default function ExportPage() {
       so_hop_dong: order.so_hop_dong || "",
       customer_id: order.customer_id || "",
       chung_loai: order.chung_loai || "CSR10",
-      loai_pallet: order.loai_pallet || "Xuất rời",
+      loai_pallet: order.loai_pallet || "Sắt đế gỗ",
       loai_banh: order.loai_banh || 35,
       loai_boc: order.loai_boc || "Bọc nhãn 0,04 VRG CSR10",
       vehicles: order.vehicles?.length ? order.vehicles.map(v => ({...v})) : [emptyVehicle()],
@@ -754,7 +760,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR</label>
-                <select value={form.chung_loai} onChange={e=>{const cl=e.target.value;setForm(p=>({...p,chung_loai:cl,loai_banh:getLoaiBanhOptions(cl)[0],assignments:[]}))}}
+                <select value={form.chung_loai} onChange={e=>{const cl=e.target.value;const bOpts=getBocOpts(cl);setForm(p=>({...p,chung_loai:cl,loai_banh:getLoaiBanhOptions(cl)[0],loai_boc:bOpts[1]||bOpts[0],assignments:[]}))}}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
                   {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
                 </select>
@@ -763,7 +769,7 @@ export default function ExportPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại pallet</label>
                 <select value={form.loai_pallet} onChange={e=>setForm(p=>({...p,loai_pallet:e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  {LOAI_PALLET.map(l=><option key={l}>{l}</option>)}
+                  {getPalletOpts(isNMCP).map(l=><option key={l}>{l}</option>)}
                 </select>
               </div>
               <div>
@@ -796,7 +802,7 @@ export default function ExportPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bọc</label>
                 <select value={form.loai_boc} onChange={e=>setForm(p=>({...p,loai_boc:e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  {BOC_OPTS.map(b=><option key={b}>{b}</option>)}
+                  {getBocOpts(form.chung_loai).map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
             </div>
