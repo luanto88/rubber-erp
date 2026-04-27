@@ -344,7 +344,6 @@ export default function ExportPage() {
       so_thong_bao: form.so_thong_bao, so_hoa_don: form.so_hoa_don, so_hop_dong: form.so_hop_dong,
       customer_id: form.customer_id || null,
       chung_loai: form.chung_loai, loai_pallet: form.loai_pallet,
-      loai_banh: form.loai_banh, loai_boc: form.loai_boc,
       vehicles: form.vehicles,
       assignments: form.assignments,
       yeu_cau_chi_tieu: form.yeu_cau_chi_tieu,
