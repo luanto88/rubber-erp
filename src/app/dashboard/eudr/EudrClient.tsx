@@ -151,38 +151,61 @@ export default function EudrClient() {
       // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
       const { data: dispatches } = await supabase.from("dispatch_entries")
         .select("ngay,rows").eq("factory_id", ord.factory_id)
+      // Build lookup maps từ dispatches
+      // dateToRows: ngay → tất cả rows trong ngày đó (gộp mọi entry cùng ngày)
+      // uidToRow: uid → row (để match chính xác khi uid là UUID)
+      const dateToRows: Record<string, any[]> = {}
+      const uidToRow:   Record<string, any>   = {}
+      ;(dispatches||[]).forEach((d:any) => {
+        const rows = d.rows || []
+        dateToRows[d.ngay] = [...(dateToRows[d.ngay]||[]), ...rows]
+        rows.forEach((r:any) => { if (r.uid) uidToRow[r.uid] = r })
+      })
+
+      const extractPlots = (row: any): string[] =>
+        (row.lo_thu_hoach||[]).length
+          ? row.lo_thu_hoach
+          : buildLoThuHoach(row.diem_gn || [], row.phien || [])
+
       const diemGn = new Set<string>()
       let matchedRows = 0
-      ;(dispatches||[]).forEach((d:any) => {
-        (d.rows||[]).forEach((row: any) => {
-          if (allTripUids.has(row.uid)) {
-            matchedRows++
-            // Ưu tiên lo_thu_hoach từ DB; fallback tính lại từ diem_gn+phien
-            // (DB cũ / CSV import có thể có lo_thu_hoach rỗng)
-            const plots: string[] = (row.lo_thu_hoach||[]).length
-              ? row.lo_thu_hoach
-              : buildLoThuHoach(row.diem_gn || [], row.phien || [])
-            plots.forEach((code: string) => diemGn.add(code))
+      const processedDates = new Set<string>()
+
+      for (const uid of allTripUids) {
+        if (uid in uidToRow) {
+          // Format hiện tại: UUID khớp chính xác
+          matchedRows++
+          extractPlots(uidToRow[uid]).forEach((c:string) => diemGn.add(c))
+        } else {
+          // Format cũ: "DX-ddmmyy_N" → giải mã ngày, lấy tất cả rows của ngày đó
+          const m = uid.match(/^DX-(\d{2})(\d{2})(\d{2})_\d+$/)
+          if (m) {
+            const isoDate = `20${m[3]}-${m[2]}-${m[1]}`
+            if (!processedDates.has(isoDate)) {
+              processedDates.add(isoDate)
+              ;(dateToRows[isoDate] || []).forEach((row:any) => {
+                matchedRows++
+                extractPlots(row).forEach((c:string) => diemGn.add(c))
+              })
+            }
           }
-        })
-      })
-      // Fallback: khi UID stale (reimport dispatch), dùng khoảng ngày ngăn
+        }
+      }
+
+      // Fallback cuối: khi không nhận ra format UID → dùng khoảng ngày ngăn
       let usedDateFallback = false
       if (matchedRows === 0 && allTripUids.size > 0) {
         usedDateFallback = true
         const today = new Date().toISOString().split("T")[0]
-        for (const ngan of (ngans || [])) {
+        for (const ngan of (ngans||[])) {
           if (!ngan.ngay_bd) continue
           const bd = ngan.ngay_bd as string
           const kt = (ngan.ngay_kt as string) || today
-          ;(dispatches || []).forEach((d: any) => {
+          ;(dispatches||[]).forEach((d:any) => {
             if (d.ngay >= bd && d.ngay <= kt) {
-              ;(d.rows || []).forEach((row: any) => {
+              ;(d.rows||[]).forEach((row:any) => {
                 matchedRows++
-                const plots: string[] = (row.lo_thu_hoach || []).length
-                  ? row.lo_thu_hoach
-                  : buildLoThuHoach(row.diem_gn || [], row.phien || [])
-                plots.forEach((code: string) => diemGn.add(code))
+                extractPlots(row).forEach((c:string) => diemGn.add(c))
               })
             }
           })
@@ -190,19 +213,24 @@ export default function EudrClient() {
       }
       setDiemGnSet(diemGn)
 
-      // Build extraction date map: lot_id → earliest dispatch ngay of its ngan
+      // Build extraction date map: lot_id → ngày điều xe sớm nhất của ngăn
       const edMap: Record<string,string> = {}
       for (const lot of (lotsFull||[])) {
         const ngan = (ngans||[]).find((n:any) => n.id === lot.ngan_id)
         if (!ngan) continue
+        // Thử exact UID match trước
         const tripSet = new Set(ngan.trips||[])
-        const dates = (dispatches||[])
+        const exactDates = (dispatches||[])
           .filter((d:any) => (d.rows||[]).some((r:any) => tripSet.has(r.uid)))
-          .map((d:any) => d.ngay as string)
-          .filter(Boolean)
-          .sort()
-        // Fallback khi UID stale: dùng ngay_bd ngăn làm extraction date
-        edMap[lot.id] = dates.length ? dates[0] : (ngan.ngay_bd as string) || ""
+          .map((d:any) => d.ngay as string).filter(Boolean).sort()
+        if (exactDates.length) { edMap[lot.id] = exactDates[0]; continue }
+        // Fallback: giải mã "DX-ddmmyy_N" → lấy ngày sớm nhất
+        const legacyDates: string[] = []
+        ;(ngan.trips||[]).forEach((uid:string) => {
+          const m = uid.match(/^DX-(\d{2})(\d{2})(\d{2})_\d+$/)
+          if (m) legacyDates.push(`20${m[3]}-${m[2]}-${m[1]}`)
+        })
+        edMap[lot.id] = legacyDates.length ? legacyDates.sort()[0] : (ngan.ngay_bd as string)||""
       }
       setExtractionDates(edMap)
 
