@@ -158,7 +158,7 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Thông tin công ty (EUDR Seller) ── */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mb-6 scroll-reveal">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mb-6">
         <div className="bg-gradient-to-r from-violet-50 to-purple-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Building2 size={16} className="text-violet-600"/>
@@ -206,7 +206,7 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Hậu tố mã lô ── */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden scroll-reveal">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
         <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Tag size={16} className="text-emerald-600"/>

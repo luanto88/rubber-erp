@@ -66,6 +66,11 @@ export default function EudrClient() {
   const [extractionDates, setExtractionDates] = useState<Record<string,string>>({})
   const [lotCertMap, setLotCertMap] = useState<Record<string,string>>({})
 
+  // Trạng thái trace từng bước chuỗi cung ứng (null = chưa trace)
+  const [traceInfo, setTraceInfo] = useState<{
+    lots: number; ngans: number; tripUids: number; diemGn: number; features: number
+  } | null>(null)
+
   const [uploading, setUploading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [toast, setToast]        = useState<{msg:string;ok:boolean}|null>(null)
@@ -90,7 +95,7 @@ export default function EudrClient() {
   const searchOrder = useCallback(async (ma: string, fid?: string) => {
     const f = fid ?? factoryId
     if (!ma.trim()) return
-    setSearching(true); setNotFound(false); setOrder(null); setGeoData(null)
+    setSearching(true); setNotFound(false); setOrder(null); setGeoData(null); setTraceInfo(null)
     const { data } = await supabase.from("export_orders")
       .select("*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)")
       .eq("ma_don", ma.trim())
@@ -107,7 +112,10 @@ export default function EudrClient() {
     setLoadingGeo(true)
     try {
       const lotIds = [...new Set(ord.assignments.map(a => a.lot_id))]
-      if (!lotIds.length) { setLoadingGeo(false); return }
+      if (!lotIds.length) {
+        setTraceInfo({ lots: 0, ngans: 0, tripUids: 0, diemGn: 0, features: 0 })
+        setLoadingGeo(false); return
+      }
 
       // 1. Get lots → full details + ngan_ids
       const { data: lotsFull } = await supabase.from("lots")
@@ -115,7 +123,10 @@ export default function EudrClient() {
         .in("id", lotIds)
       setLotDetails(lotsFull || [])
       const nganIds = [...new Set((lotsFull||[]).map((l:any)=>l.ngan_id).filter(Boolean))]
-      if (!nganIds.length) { setLoadingGeo(false); return }
+      if (!nganIds.length) {
+        setTraceInfo({ lots: lotsFull?.length||0, ngans: 0, tripUids: 0, diemGn: 0, features: 0 })
+        setLoadingGeo(false); return
+      }
 
       // 2. Get ngans → trips + chung_nhan
       const { data: ngans } = await supabase.from("ngans")
@@ -131,7 +142,10 @@ export default function EudrClient() {
 
       const allTripUids = new Set<string>()
       ;(ngans||[]).forEach((n:any) => (n.trips||[]).forEach((uid:string) => allTripUids.add(uid)))
-      if (!allTripUids.size) { setLoadingGeo(false); return }
+      if (!allTripUids.size) {
+        setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: 0, diemGn: 0, features: 0 })
+        setLoadingGeo(false); return
+      }
 
       // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
       const { data: dispatches } = await supabase.from("dispatch_entries")
@@ -170,6 +184,7 @@ export default function EudrClient() {
           diemGn.has(f.properties?.Ma_lo) || diemGn.has(f.properties?.Ma_lo_2026)
         )
       }
+      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, diemGn: diemGn.size, features: filtered.features.length })
       setGeoData(filtered)
     } catch (e) {
       console.error(e)
@@ -370,17 +385,39 @@ export default function EudrClient() {
               </div>
             )}
 
-            {/* GeoJSON info */}
-            {(loadingGeo || geoData) && (
+            {/* Trace info — luôn hiển thị khi đang load hoặc đã có kết quả */}
+            {(loadingGeo || traceInfo !== null) && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 text-xs">
                 {loadingGeo ? (
                   <div className="flex items-center gap-2 text-slate-500">
                     <Loader2 size={13} className="animate-spin"/> Đang truy xuất chuỗi cung ứng...
                   </div>
-                ) : (
+                ) : traceInfo && traceInfo.features > 0 ? (
                   <div className="flex items-center gap-2 text-emerald-600">
-                    <Check size={13}/> <span className="font-semibold">{geoData?.features.length || 0} lô vườn</span>
-                    <span className="text-slate-400">từ {diemGnSet.size} điểm GN</span>
+                    <Check size={13}/> <span className="font-semibold">{traceInfo.features} lô vườn</span>
+                    <span className="text-slate-400">từ {traceInfo.diemGn} điểm GN</span>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-1.5 text-amber-600 font-semibold mb-1.5">
+                      <AlertTriangle size={13}/> Không tìm thấy lô vườn
+                    </div>
+                    <div className="text-[10px] text-slate-400 leading-5">
+                      {traceInfo && traceInfo.lots === 0
+                        ? "Đơn hàng chưa có lô thành phẩm"
+                        : traceInfo && traceInfo.ngans === 0
+                        ? `${traceInfo.lots} lô TP → chưa có ngăn lưu`
+                        : traceInfo && traceInfo.tripUids === 0
+                        ? `${traceInfo.ngans} ngăn → chưa có chuyến điều xe`
+                        : traceInfo && traceInfo.diemGn === 0
+                        ? `${traceInfo.tripUids} chuyến → không có điểm GN`
+                        : `${traceInfo?.diemGn} điểm GN không khớp dữ liệu GeoJSON`}
+                    </div>
+                    {traceInfo && (
+                      <div className="text-[10px] text-slate-300 mt-1">
+                        {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}GN → {traceInfo.features}lô
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -456,11 +493,32 @@ export default function EudrClient() {
           <div className="flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-md relative">
             {!geoData && !loadingGeo && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-10">
-                <div className="text-center text-slate-400">
-                  <Map size={48} className="mx-auto mb-3 opacity-30"/>
-                  <p className="font-semibold">Đang truy xuất chuỗi cung ứng...</p>
-                  <p className="text-xs mt-1">Bản đồ sẽ hiển thị sau khi tìm thấy lô vườn</p>
-                </div>
+                {traceInfo !== null ? (
+                  <div className="text-center">
+                    <AlertTriangle size={44} className="mx-auto mb-3 text-amber-400"/>
+                    <p className="font-semibold text-amber-600">Không tìm thấy lô vườn</p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                      {traceInfo.lots === 0
+                        ? "Đơn hàng chưa có lô thành phẩm"
+                        : traceInfo.ngans === 0
+                        ? `${traceInfo.lots} lô chưa được liên kết ngăn lưu`
+                        : traceInfo.tripUids === 0
+                        ? `${traceInfo.ngans} ngăn chưa có chuyến điều xe`
+                        : traceInfo.diemGn === 0
+                        ? `${traceInfo.tripUids} chuyến xe không có điểm giao nhận`
+                        : `${traceInfo.diemGn} điểm GN không khớp dữ liệu GeoJSON 2026`}
+                    </p>
+                    <p className="text-[10px] text-slate-300 mt-2">
+                      {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}GN → {traceInfo.features}lô
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center text-slate-400">
+                    <Map size={48} className="mx-auto mb-3 opacity-30"/>
+                    <p className="font-semibold">Đang truy xuất chuỗi cung ứng...</p>
+                    <p className="text-xs mt-1">Bản đồ sẽ hiển thị sau khi tìm thấy lô vườn</p>
+                  </div>
+                )}
               </div>
             )}
             {loadingGeo && (
