@@ -69,7 +69,7 @@ export default function EudrClient() {
 
   // Trạng thái trace từng bước chuỗi cung ứng (null = chưa trace)
   const [traceInfo, setTraceInfo] = useState<{
-    lots: number; ngans: number; tripUids: number; matchedRows: number; diemGn: number; features: number
+    lots: number; ngans: number; tripUids: number; matchedRows: number; diemGn: number; features: number; fallback?: boolean
   } | null>(null)
 
   const [uploading, setUploading] = useState(false)
@@ -131,7 +131,7 @@ export default function EudrClient() {
 
       // 2. Get ngans → trips + chung_nhan
       const { data: ngans } = await supabase.from("ngans")
-        .select("id,trips,chung_nhan").in("id", nganIds)
+        .select("id,trips,chung_nhan,ngay_bd,ngay_kt").in("id", nganIds)
 
       // Build lot→certification map from ngan.chung_nhan
       const certMap: Record<string,string> = {}
@@ -166,6 +166,28 @@ export default function EudrClient() {
           }
         })
       })
+      // Fallback: khi UID stale (reimport dispatch), dùng khoảng ngày ngăn
+      let usedDateFallback = false
+      if (matchedRows === 0 && allTripUids.size > 0) {
+        usedDateFallback = true
+        const today = new Date().toISOString().split("T")[0]
+        for (const ngan of (ngans || [])) {
+          if (!ngan.ngay_bd) continue
+          const bd = ngan.ngay_bd as string
+          const kt = (ngan.ngay_kt as string) || today
+          ;(dispatches || []).forEach((d: any) => {
+            if (d.ngay >= bd && d.ngay <= kt) {
+              ;(d.rows || []).forEach((row: any) => {
+                matchedRows++
+                const plots: string[] = (row.lo_thu_hoach || []).length
+                  ? row.lo_thu_hoach
+                  : buildLoThuHoach(row.diem_gn || [], row.phien || [])
+                plots.forEach((code: string) => diemGn.add(code))
+              })
+            }
+          })
+        }
+      }
       setDiemGnSet(diemGn)
 
       // Build extraction date map: lot_id → earliest dispatch ngay of its ngan
@@ -179,7 +201,8 @@ export default function EudrClient() {
           .map((d:any) => d.ngay as string)
           .filter(Boolean)
           .sort()
-        if (dates.length) edMap[lot.id] = dates[0]
+        // Fallback khi UID stale: dùng ngay_bd ngăn làm extraction date
+        edMap[lot.id] = dates.length ? dates[0] : (ngan.ngay_bd as string) || ""
       }
       setExtractionDates(edMap)
 
@@ -192,7 +215,7 @@ export default function EudrClient() {
           diemGn.has(f.properties?.Ma_lo) || diemGn.has(f.properties?.Ma_lo_2026)
         )
       }
-      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length })
+      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
       setGeoData(filtered)
     } catch (e) {
       console.error(e)
@@ -401,9 +424,14 @@ export default function EudrClient() {
                     <Loader2 size={13} className="animate-spin"/> Đang truy xuất chuỗi cung ứng...
                   </div>
                 ) : traceInfo && traceInfo.features > 0 ? (
-                  <div className="flex items-center gap-2 text-emerald-600">
-                    <Check size={13}/> <span className="font-semibold">{traceInfo.features} lô vườn</span>
-                    <span className="text-slate-400">từ {traceInfo.diemGn} mã lô vườn</span>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-emerald-600">
+                      <Check size={13}/> <span className="font-semibold">{traceInfo.features} lô vườn</span>
+                      <span className="text-slate-400">từ {traceInfo.diemGn} mã lô vườn</span>
+                    </div>
+                    {traceInfo.fallback && (
+                      <div className="text-[10px] text-amber-500">khoảng ngày ngăn (UID điều xe đã thay đổi)</div>
+                    )}
                   </div>
                 ) : (
                   <div>
