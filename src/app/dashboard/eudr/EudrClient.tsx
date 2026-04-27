@@ -151,14 +151,16 @@ export default function EudrClient() {
       // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
       const { data: dispatches } = await supabase.from("dispatch_entries")
         .select("ngay,rows").eq("factory_id", ord.factory_id)
-      // Build lookup maps từ dispatches
-      // dateToRows: ngay → tất cả rows trong ngày đó (gộp mọi entry cùng ngày)
-      // uidToRow: uid → row (để match chính xác khi uid là UUID)
+      // Normalize DD/MM/YYYY → YYYY-MM-DD (dispatch_entries.ngay từ CSV import dùng format này)
+      const toISO = (d: string) => d?.includes("/") ? d.split("/").reverse().join("-") : (d || "")
+
+      // Build lookup maps từ dispatches (key luôn là ISO)
       const dateToRows: Record<string, any[]> = {}
       const uidToRow:   Record<string, any>   = {}
       ;(dispatches||[]).forEach((d:any) => {
+        const isoNgay = toISO(d.ngay)
         const rows = d.rows || []
-        dateToRows[d.ngay] = [...(dateToRows[d.ngay]||[]), ...rows]
+        dateToRows[isoNgay] = [...(dateToRows[isoNgay]||[]), ...rows]
         rows.forEach((r:any) => { if (r.uid) uidToRow[r.uid] = r })
       })
 
@@ -202,7 +204,8 @@ export default function EudrClient() {
           const bd = ngan.ngay_bd as string
           const kt = (ngan.ngay_kt as string) || today
           ;(dispatches||[]).forEach((d:any) => {
-            if (d.ngay >= bd && d.ngay <= kt) {
+            const dn = toISO(d.ngay)
+            if (dn >= bd && dn <= kt) {
               ;(d.rows||[]).forEach((row:any) => {
                 matchedRows++
                 extractPlots(row).forEach((c:string) => diemGn.add(c))
