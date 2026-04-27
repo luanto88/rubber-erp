@@ -243,7 +243,7 @@ export default function EudrClient() {
       const filtered: FeatureCollection = {
         type: "FeatureCollection",
         features: full.features.filter(f =>
-          diemGn.has(f.properties?.Ma_lo) || diemGn.has(f.properties?.Ma_lo_2026)
+          diemGn.has(f.properties?.Ten)
         )
       }
       setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
