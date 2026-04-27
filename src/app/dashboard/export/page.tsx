@@ -43,8 +43,10 @@ type QcResult = {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LOAI_XE_OPTS   = ["Container 20ft","Container 40ft","Xe tải mui bạt","Khác"]
-const LOAI_CSR       = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60","SVR10","SVR20","SVR3L","SVRL","SVRCV50","SVRCV60"]
+const LOAI_XE_OPTS       = ["Container 20ft","Container 40ft","Xe tải mui bạt","Khác"]
+const CSR_OPTS           = ["CSR10","CSR20","CSR3L","CSRL","CSRCV50","CSRCV60"]
+const SVR_OPTS           = ["SVR10","SVR20","SVR3L","SVRL","SVRCV50","SVRCV60"]
+const PALLET_XUAT_BASE   = ["Rời","PE đế gỗ","PE đế nhựa","Gỗ","MB4","MB5"]
 const CHI_TIEU_LIST  = ["Tạp chất","Tro","Bay hơi","Nitơ","Po","PRI","Độ nhớt"]
 const CHI_TIEU_KEY: Record<string, string> = {
   "Tạp chất":"tap_chat","Tro":"tro","Bay hơi":"bay_hoi","Nitơ":"nito","Po":"po","PRI":"pri","Độ nhớt":"mooney"
@@ -57,11 +59,11 @@ const emptyVehicle = (): Vehicle => ({
 
 const emptyCustomerForm = () => ({ ma_kh:"", ten_kh_en:"", quoc_gia:"", dia_chi:"", email:"", nguoi_lien_he:"" })
 
-const emptyForm = () => ({
+const emptyForm = (prefix: "CSR"|"SVR" = "CSR") => ({
   ma_don: "", ngay: new Date().toISOString().slice(0,10),
   so_thong_bao: "", so_hoa_don: "", so_hop_dong: "",
-  customer_id: "", chung_loai: "CSR10", loai_pallet: "Sắt đế gỗ",
-  loai_banh: 35, loai_boc: "Bọc nhãn 0,04 VRG CSR10",
+  customer_id: "", chung_loai: `${prefix}10`, loai_pallet: "Rời",
+  loai_banh: 35, loai_boc: `Bọc nhãn 0,04 VRG ${prefix}10`,
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
   yeu_cau_chi_tieu: [] as ChiTieuReq[],
@@ -72,11 +74,6 @@ function getLoaiBanhOptions(chung_loai: string): number[] {
   if (["CSRCV50","CSRCV60","SVRCV50","SVRCV60"].includes(chung_loai)) return [35, 20]
   if (["CSRL","CSR3L","SVRL","SVR3L"].includes(chung_loai)) return [35, 33.33]
   return [35]
-}
-
-function getPalletOpts(nmcp: boolean): string[] {
-  if (nmcp) return ["Sắt đế gỗ","Sắt đế nhựa","Sắt mỏng","MB5","Gỗ"]
-  return ["Sắt đế gỗ","Sắt mỏng","MB5","Gỗ"]
 }
 
 function getBocOpts(chung_loai: string): string[] {
@@ -102,7 +99,13 @@ export default function ExportPage() {
   const [loading, setLoading]         = useState(true)
   const [factoryId, setFactoryId]     = useState<string|null>(null)
   const [factory, setFactory]         = useState<{ id: string; name: string }|null>(null)
-  const isNMCP = useMemo(() => factory?.name?.toLowerCase().includes("cuaparis") ?? false, [factory])
+  const isNMCP   = useMemo(() => factory?.name?.toLowerCase().includes("cuaparis") ?? false, [factory])
+  const csrOpts  = useMemo(() => isNMCP ? SVR_OPTS : CSR_OPTS, [isNMCP])
+
+  // Pallet xuất: base list + custom options added at runtime
+  const [palletExtra, setPalletExtra] = useState<string[]>([])
+  const [newPalletInput, setNewPalletInput] = useState("")
+  const palletOpts = useMemo(() => [...PALLET_XUAT_BASE, ...palletExtra], [palletExtra])
 
   // Filters (list view)
   const [search, setSearch]           = useState("")
@@ -263,14 +266,18 @@ export default function ExportPage() {
       so_hoa_don: order.so_hoa_don || "",
       so_hop_dong: order.so_hop_dong || "",
       customer_id: order.customer_id || "",
-      chung_loai: order.chung_loai || "CSR10",
-      loai_pallet: order.loai_pallet || "Sắt đế gỗ",
+      chung_loai: order.chung_loai || (isNMCP ? "SVR10" : "CSR10"),
+      loai_pallet: order.loai_pallet || "Rời",
       loai_banh: order.loai_banh || 35,
-      loai_boc: order.loai_boc || "Bọc nhãn 0,04 VRG CSR10",
+      loai_boc: order.loai_boc || `Bọc nhãn 0,04 VRG ${order.chung_loai || (isNMCP ? "SVR10" : "CSR10")}`,
       vehicles: order.vehicles?.length ? order.vehicles.map(v => ({...v})) : [emptyVehicle()],
       assignments: order.assignments?.length ? order.assignments.map(a => ({...a})) : [],
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
     })
+    // nếu loai_pallet của đơn cũ không có trong base list thì thêm vào palletExtra
+    if (order.loai_pallet && !PALLET_XUAT_BASE.includes(order.loai_pallet)) {
+      setPalletExtra(prev => prev.includes(order.loai_pallet) ? prev : [...prev, order.loai_pallet])
+    }
     setEditId(order.id)
     setView("add")
   }
@@ -481,7 +488,7 @@ export default function ExportPage() {
         <select value={filterLoai} onChange={e=>setFilterLoai(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
           <option value="">Tất cả loại</option>
-          {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
+          {csrOpts.map(l=><option key={l}>{l}</option>)}
         </select>
         <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
@@ -762,15 +769,25 @@ export default function ExportPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR</label>
                 <select value={form.chung_loai} onChange={e=>{const cl=e.target.value;const bOpts=getBocOpts(cl);setForm(p=>({...p,chung_loai:cl,loai_banh:getLoaiBanhOptions(cl)[0],loai_boc:bOpts[1]||bOpts[0],assignments:[]}))}}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
+                  {csrOpts.map(l=><option key={l}>{l}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại pallet</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại pallet xuất</label>
                 <select value={form.loai_pallet} onChange={e=>setForm(p=>({...p,loai_pallet:e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  {getPalletOpts(isNMCP).map(l=><option key={l}>{l}</option>)}
+                  {palletOpts.map(l=><option key={l}>{l}</option>)}
                 </select>
+                <div className="flex gap-1.5 mt-1.5">
+                  <input value={newPalletInput} onChange={e=>setNewPalletInput(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter"&&newPalletInput.trim()){const v=newPalletInput.trim();if(!palletOpts.includes(v))setPalletExtra(p=>[...p,v]);setForm(p=>({...p,loai_pallet:v}));setNewPalletInput("")}}}
+                    placeholder="Thêm loại khác..."
+                    className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                  <button type="button" onClick={()=>{const v=newPalletInput.trim();if(!v)return;if(!palletOpts.includes(v))setPalletExtra(p=>[...p,v]);setForm(p=>({...p,loai_pallet:v}));setNewPalletInput("")}}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors">
+                    <Plus size={12}/>
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hóa đơn</label>
