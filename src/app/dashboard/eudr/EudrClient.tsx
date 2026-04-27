@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { buildLoThuHoach } from "@/lib/dispatch-master"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -154,9 +155,11 @@ export default function EudrClient() {
       ;(dispatches||[]).forEach((d:any) => {
         (d.rows||[]).forEach((row: any) => {
           if (allTripUids.has(row.uid)) {
-            // lo_thu_hoach = mã lô vườn (F4, G1...) khớp Ma_lo trong GeoJSON
-            // diem_gn = mã điểm thu mủ (G3, Q7...) không phải mã lô vườn
-            const plots = (row.lo_thu_hoach||[]).length ? row.lo_thu_hoach : []
+            // Ưu tiên lo_thu_hoach từ DB; fallback tính lại từ diem_gn+phien
+            // (DB cũ / CSV import có thể có lo_thu_hoach rỗng)
+            const plots: string[] = (row.lo_thu_hoach||[]).length
+              ? row.lo_thu_hoach
+              : buildLoThuHoach(row.diem_gn || [], row.phien || [])
             plots.forEach((code: string) => diemGn.add(code))
           }
         })
