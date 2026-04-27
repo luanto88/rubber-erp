@@ -154,7 +154,10 @@ export default function EudrClient() {
       ;(dispatches||[]).forEach((d:any) => {
         (d.rows||[]).forEach((row: any) => {
           if (allTripUids.has(row.uid)) {
-            (row.diem_gn||[]).forEach((code: string) => diemGn.add(code))
+            // lo_thu_hoach = mã lô vườn (F4, G1...) khớp Ma_lo trong GeoJSON
+            // diem_gn = mã điểm thu mủ (G3, Q7...) không phải mã lô vườn
+            const plots = (row.lo_thu_hoach||[]).length ? row.lo_thu_hoach : []
+            plots.forEach((code: string) => diemGn.add(code))
           }
         })
       })
@@ -395,7 +398,7 @@ export default function EudrClient() {
                 ) : traceInfo && traceInfo.features > 0 ? (
                   <div className="flex items-center gap-2 text-emerald-600">
                     <Check size={13}/> <span className="font-semibold">{traceInfo.features} lô vườn</span>
-                    <span className="text-slate-400">từ {traceInfo.diemGn} điểm GN</span>
+                    <span className="text-slate-400">từ {traceInfo.diemGn} mã lô vườn</span>
                   </div>
                 ) : (
                   <div>
@@ -410,12 +413,12 @@ export default function EudrClient() {
                         : traceInfo && traceInfo.tripUids === 0
                         ? `${traceInfo.ngans} ngăn → chưa có chuyến điều xe`
                         : traceInfo && traceInfo.diemGn === 0
-                        ? `${traceInfo.tripUids} chuyến → không có điểm GN`
-                        : `${traceInfo?.diemGn} điểm GN không khớp dữ liệu GeoJSON`}
+                        ? `${traceInfo.tripUids} chuyến → chưa có lô thu hoạch (kiểm tra dữ liệu điều xe)`
+                        : `${traceInfo?.diemGn} lô thu hoạch không khớp dữ liệu GeoJSON 2026`}
                     </div>
                     {traceInfo && (
                       <div className="text-[10px] text-slate-300 mt-1">
-                        {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}GN → {traceInfo.features}lô
+                        {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}LV → {traceInfo.features}lô
                       </div>
                     )}
                   </div>
@@ -505,11 +508,11 @@ export default function EudrClient() {
                         : traceInfo.tripUids === 0
                         ? `${traceInfo.ngans} ngăn chưa có chuyến điều xe`
                         : traceInfo.diemGn === 0
-                        ? `${traceInfo.tripUids} chuyến xe không có điểm giao nhận`
-                        : `${traceInfo.diemGn} điểm GN không khớp dữ liệu GeoJSON 2026`}
+                        ? `${traceInfo.tripUids} chuyến xe chưa có lô thu hoạch`
+                        : `${traceInfo.diemGn} lô thu hoạch không khớp GeoJSON 2026`}
                     </p>
                     <p className="text-[10px] text-slate-300 mt-2">
-                      {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}GN → {traceInfo.features}lô
+                      {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}LV → {traceInfo.features}lô
                     </p>
                   </div>
                 ) : (
