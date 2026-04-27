@@ -69,7 +69,7 @@ export default function EudrClient() {
 
   // Trạng thái trace từng bước chuỗi cung ứng (null = chưa trace)
   const [traceInfo, setTraceInfo] = useState<{
-    lots: number; ngans: number; tripUids: number; diemGn: number; features: number
+    lots: number; ngans: number; tripUids: number; matchedRows: number; diemGn: number; features: number
   } | null>(null)
 
   const [uploading, setUploading] = useState(false)
@@ -114,7 +114,7 @@ export default function EudrClient() {
     try {
       const lotIds = [...new Set(ord.assignments.map(a => a.lot_id))]
       if (!lotIds.length) {
-        setTraceInfo({ lots: 0, ngans: 0, tripUids: 0, diemGn: 0, features: 0 })
+        setTraceInfo({ lots: 0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
@@ -125,7 +125,7 @@ export default function EudrClient() {
       setLotDetails(lotsFull || [])
       const nganIds = [...new Set((lotsFull||[]).map((l:any)=>l.ngan_id).filter(Boolean))]
       if (!nganIds.length) {
-        setTraceInfo({ lots: lotsFull?.length||0, ngans: 0, tripUids: 0, diemGn: 0, features: 0 })
+        setTraceInfo({ lots: lotsFull?.length||0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
@@ -144,7 +144,7 @@ export default function EudrClient() {
       const allTripUids = new Set<string>()
       ;(ngans||[]).forEach((n:any) => (n.trips||[]).forEach((uid:string) => allTripUids.add(uid)))
       if (!allTripUids.size) {
-        setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: 0, diemGn: 0, features: 0 })
+        setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
@@ -152,9 +152,11 @@ export default function EudrClient() {
       const { data: dispatches } = await supabase.from("dispatch_entries")
         .select("ngay,rows").eq("factory_id", ord.factory_id)
       const diemGn = new Set<string>()
+      let matchedRows = 0
       ;(dispatches||[]).forEach((d:any) => {
         (d.rows||[]).forEach((row: any) => {
           if (allTripUids.has(row.uid)) {
+            matchedRows++
             // Ưu tiên lo_thu_hoach từ DB; fallback tính lại từ diem_gn+phien
             // (DB cũ / CSV import có thể có lo_thu_hoach rỗng)
             const plots: string[] = (row.lo_thu_hoach||[]).length
@@ -190,7 +192,7 @@ export default function EudrClient() {
           diemGn.has(f.properties?.Ma_lo) || diemGn.has(f.properties?.Ma_lo_2026)
         )
       }
-      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, diemGn: diemGn.size, features: filtered.features.length })
+      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length })
       setGeoData(filtered)
     } catch (e) {
       console.error(e)
@@ -415,13 +417,15 @@ export default function EudrClient() {
                         ? `${traceInfo.lots} lô TP → chưa có ngăn lưu`
                         : traceInfo && traceInfo.tripUids === 0
                         ? `${traceInfo.ngans} ngăn → chưa có chuyến điều xe`
+                        : traceInfo && traceInfo.diemGn === 0 && (traceInfo.matchedRows||0) === 0
+                        ? `${traceInfo.tripUids} UID ngăn không khớp bất kỳ chuyến nào (dữ liệu điều xe đã thay đổi?)`
                         : traceInfo && traceInfo.diemGn === 0
-                        ? `${traceInfo.tripUids} chuyến → chưa có lô thu hoạch (kiểm tra dữ liệu điều xe)`
+                        ? `${traceInfo.matchedRows} chuyến khớp nhưng diem_gn/phien rỗng`
                         : `${traceInfo?.diemGn} lô thu hoạch không khớp dữ liệu GeoJSON 2026`}
                     </div>
                     {traceInfo && (
                       <div className="text-[10px] text-slate-300 mt-1">
-                        {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}ĐX → {traceInfo.diemGn}LV → {traceInfo.features}lô
+                        {traceInfo.lots}TP → {traceInfo.ngans}NL → {traceInfo.tripUids}UID → {traceInfo.matchedRows||0}match → {traceInfo.diemGn}LV → {traceInfo.features}lô
                       </div>
                     )}
                   </div>
@@ -510,8 +514,10 @@ export default function EudrClient() {
                         ? `${traceInfo.lots} lô chưa được liên kết ngăn lưu`
                         : traceInfo.tripUids === 0
                         ? `${traceInfo.ngans} ngăn chưa có chuyến điều xe`
+                        : traceInfo.diemGn === 0 && (traceInfo.matchedRows||0) === 0
+                        ? `${traceInfo.tripUids} UID ngăn không khớp bất kỳ chuyến nào`
                         : traceInfo.diemGn === 0
-                        ? `${traceInfo.tripUids} chuyến xe chưa có lô thu hoạch`
+                        ? `${traceInfo.matchedRows} chuyến khớp UID nhưng diem_gn/phien rỗng`
                         : `${traceInfo.diemGn} lô thu hoạch không khớp GeoJSON 2026`}
                     </p>
                     <p className="text-[10px] text-slate-300 mt-2">
