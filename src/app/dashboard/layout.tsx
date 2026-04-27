@@ -1,11 +1,12 @@
 "use client"
 import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { Home, Truck, Warehouse, Package, ClipboardCheck, FileOutput, Settings, LogOut, ChevronRight, Menu, Factory, Map } from "lucide-react"
+import { Home, Truck, Warehouse, Package, ClipboardCheck, FileOutput, Settings, LogOut, ChevronRight, Menu, Factory, Map, Shield } from "lucide-react"
 
 const NAV = [
   { key: "/dashboard", label: "Dashboard", icon: Home },
   { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
+  { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
   { key: "production", label: "Quản lý Sản xuất", icon: Factory, children: [
     { key: "/dashboard/dispatch", label: "Điều xe", icon: Truck },
     { key: "/dashboard/storage", label: "Ngăn lưu", icon: Warehouse },
