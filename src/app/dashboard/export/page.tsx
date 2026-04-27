@@ -77,6 +77,12 @@ const emptyForm = () => ({
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function getLoaiBanhOptions(chung_loai: string): number[] {
+  if (["CSRCV50","CSRCV60","SVRCV50","SVRCV60"].includes(chung_loai)) return [35, 20]
+  if (["CSRL","CSR3L","SVRL","SVR3L"].includes(chung_loai)) return [35, 33.33]
+  return [35]
+}
+
 function ddmmyy(dateStr: string) {
   const d = new Date(dateStr)
   const dd = String(d.getDate()).padStart(2,"0")
@@ -748,7 +754,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR</label>
-                <select value={form.chung_loai} onChange={e=>setForm(p=>({...p,chung_loai:e.target.value,assignments:[]}))}
+                <select value={form.chung_loai} onChange={e=>{const cl=e.target.value;setForm(p=>({...p,chung_loai:cl,loai_banh:getLoaiBanhOptions(cl)[0],assignments:[]}))}}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
                   {LOAI_CSR.map(l=><option key={l}>{l}</option>)}
                 </select>
@@ -772,8 +778,19 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bành (kg)</label>
-                <input type="number" value={form.loai_banh} onChange={e=>setForm(p=>({...p,loai_banh:+e.target.value}))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
+                <div className="flex gap-2 flex-wrap">
+                  {getLoaiBanhOptions(form.chung_loai).map(opt => (
+                    <button key={opt} type="button"
+                      onClick={() => setForm(p => ({ ...p, loai_banh: opt }))}
+                      className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                        form.loai_banh === opt
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                      }`}>
+                      {opt} kg
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại bọc</label>
