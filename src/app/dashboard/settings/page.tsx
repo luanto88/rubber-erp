@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { useScrollReveal } from "@/lib/useScrollReveal"
-import { Plus, Edit2, Trash2, X, Tag, AlertTriangle } from "lucide-react"
+import { Plus, Edit2, Trash2, X, Tag, AlertTriangle, Building2, Save } from "lucide-react"
 
 type Suffix = {
   code: string
@@ -25,6 +25,19 @@ function emptyForm(): SuffixForm {
   return { code: "", name: "", nguon: "", chung_nhan: "" }
 }
 
+type FactoryInfo = {
+  full_name_en: string
+  address_en: string
+  contact_person: string
+  contact_email: string
+  website: string
+  country_en: string
+}
+
+function emptyFactoryInfo(): FactoryInfo {
+  return { full_name_en: "", address_en: "", contact_person: "", contact_email: "", website: "", country_en: "" }
+}
+
 export default function SettingsPage() {
   useScrollReveal()
 
@@ -32,6 +45,11 @@ export default function SettingsPage() {
   const [user, setUser]           = useState<{ role: string } | null>(null)
   const [suffixes, setSuffixes]   = useState<Suffix[]>([])
   const [loading, setLoading]     = useState(true)
+
+  // Factory info state
+  const [factoryInfo, setFactoryInfo] = useState<FactoryInfo>(emptyFactoryInfo())
+  const [savingFactory, setSavingFactory] = useState(false)
+  const [factoryMsg, setFactoryMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   // Modal state
   const [modal, setModal]         = useState<"add" | "edit" | null>(null)
@@ -56,9 +74,24 @@ export default function SettingsPage() {
     setFactoryId(fid)
     setUser(u)
     loadSuffixes(fid)
+    supabase.from("factories")
+      .select("full_name_en,address_en,contact_person,contact_email,website,country_en")
+      .eq("id", fid).single()
+      .then(({ data }) => { if (data) setFactoryInfo(data as FactoryInfo) })
   }, [loadSuffixes])
 
   const isAdmin = user?.role === "admin"
+
+  const handleSaveFactory = async () => {
+    if (!factoryId || !isAdmin) return
+    setSavingFactory(true)
+    setFactoryMsg(null)
+    const { error: err } = await supabase.from("factories")
+      .update(factoryInfo).eq("id", factoryId)
+    setSavingFactory(false)
+    setFactoryMsg(err ? { ok: false, text: err.message } : { ok: true, text: "Đã lưu thông tin công ty" })
+    setTimeout(() => setFactoryMsg(null), 3000)
+  }
 
   const openAdd = () => {
     setForm(emptyForm())
@@ -121,6 +154,54 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Cài đặt</h1>
           <p className="text-sm text-slate-500 mt-0.5">Quản lý cấu hình hệ thống</p>
+        </div>
+      </div>
+
+      {/* ── Thông tin công ty (EUDR Seller) ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mb-6 scroll-reveal">
+        <div className="bg-gradient-to-r from-violet-50 to-purple-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-violet-600"/>
+            <span className="font-extrabold text-slate-700">Thông tin công ty (EUDR Seller)</span>
+            <span className="text-xs text-slate-400 ml-1">— dùng để tạo file DDS</span>
+          </div>
+          {isAdmin && (
+            <button onClick={handleSaveFactory} disabled={savingFactory}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50">
+              <Save size={13}/> {savingFactory ? "Đang lưu..." : "Lưu thông tin"}
+            </button>
+          )}
+        </div>
+        <div className="p-5">
+          {factoryMsg && (
+            <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 ${factoryMsg.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
+              {factoryMsg.ok ? <Save size={14}/> : <AlertTriangle size={14}/>} {factoryMsg.text}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { label: "Tên công ty (tiếng Anh)", field: "full_name_en", placeholder: "PTCS PHUOC HOA KAMPONG THOM CO., LTD", colSpan: true },
+              { label: "Địa chỉ", field: "address_en", placeholder: "Kampong Thom Province, Kingdom of Cambodia", colSpan: true },
+              { label: "Người liên hệ", field: "contact_person", placeholder: "Production Management Department", colSpan: false },
+              { label: "Email", field: "contact_email", placeholder: "contact@example.com", colSpan: false },
+              { label: "Website", field: "website", placeholder: "qlsxkpt.vercel.app", colSpan: false },
+              { label: "Quốc gia", field: "country_en", placeholder: "Cambodia", colSpan: false },
+            ].map(({ label, field, placeholder, colSpan }) => (
+              <div key={field} className={colSpan ? "col-span-2" : ""}>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
+                <input
+                  value={factoryInfo[field as keyof FactoryInfo]}
+                  onChange={e => setFactoryInfo(f => ({ ...f, [field]: e.target.value }))}
+                  disabled={!isAdmin}
+                  placeholder={placeholder}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 disabled:text-slate-400"
+                />
+              </div>
+            ))}
+          </div>
+          {!isAdmin && (
+            <p className="text-xs text-slate-400 mt-3">Chỉ Admin mới có thể chỉnh sửa thông tin này.</p>
+          )}
         </div>
       </div>
 

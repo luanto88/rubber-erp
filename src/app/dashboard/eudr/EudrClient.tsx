@@ -14,9 +14,13 @@ import {
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+import type { FactoryProfile, LotDetail } from "./dds-generator"
+
 type ExportOrder = {
   id: string; ma_don: string; ngay: string; factory_id: string
   chung_loai: string; tong_banh: number
+  loai_banh: number; loai_pallet: string; loai_boc: string
+  so_thong_bao: string; so_hoa_don: string; so_hop_dong: string
   assignments: { lot_id: string; ma_lo: string; vehicleIdx: number; kien_a:number; kien_b:number; kien_c:number; kien_d:number }[]
   vehicles: { id:string; loai_xe:string; bien_truoc:string; bien_sau:string }[]
   files: { name: string; url: string; size?: number }[]
@@ -57,6 +61,11 @@ export default function EudrClient() {
   const [diemGnSet, setDiemGnSet] = useState<Set<string>>(new Set())
   const [loadingGeo, setLoadingGeo] = useState(false)
 
+  const [factory, setFactory]   = useState<FactoryProfile|null>(null)
+  const [lotDetails, setLotDetails] = useState<LotDetail[]>([])
+  const [extractionDates, setExtractionDates] = useState<Record<string,string>>({})
+  const [lotCertMap, setLotCertMap] = useState<Record<string,string>>({})
+
   const [uploading, setUploading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [toast, setToast]        = useState<{msg:string;ok:boolean}|null>(null)
@@ -66,7 +75,13 @@ export default function EudrClient() {
 
   useEffect(() => {
     const fid = localStorage.getItem("erp_factory")
-    if (fid) setFactoryId(fid)
+    if (fid) {
+      setFactoryId(fid)
+      supabase.from("factories")
+        .select("id,full_name_en,address_en,contact_person,contact_email,website,country_en")
+        .eq("id", fid).single()
+        .then(({ data }) => { if (data) setFactory(data as FactoryProfile) })
+    }
     if (initOrder) searchOrder(initOrder, fid ?? "")
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -94,22 +109,35 @@ export default function EudrClient() {
       const lotIds = [...new Set(ord.assignments.map(a => a.lot_id))]
       if (!lotIds.length) { setLoadingGeo(false); return }
 
-      // 1. Get lots → ngan_ids
-      const { data: lots } = await supabase.from("lots").select("id,ngan_id").in("id", lotIds)
-      const nganIds = [...new Set((lots||[]).map(l=>l.ngan_id).filter(Boolean))]
+      // 1. Get lots → full details + ngan_ids
+      const { data: lotsFull } = await supabase.from("lots")
+        .select("id,ma_lo,ngay_sx,loai_banh,kien_a,kien_b,kien_c,kien_d,ngan_id")
+        .in("id", lotIds)
+      setLotDetails(lotsFull || [])
+      const nganIds = [...new Set((lotsFull||[]).map((l:any)=>l.ngan_id).filter(Boolean))]
       if (!nganIds.length) { setLoadingGeo(false); return }
 
-      // 2. Get ngans → trips (row UIDs)
-      const { data: ngans } = await supabase.from("ngans").select("id,trips").in("id", nganIds)
+      // 2. Get ngans → trips + chung_nhan
+      const { data: ngans } = await supabase.from("ngans")
+        .select("id,trips,chung_nhan").in("id", nganIds)
+
+      // Build lot→certification map from ngan.chung_nhan
+      const certMap: Record<string,string> = {}
+      for (const lot of (lotsFull||[])) {
+        const ngan = (ngans||[]).find((n:any) => n.id === lot.ngan_id)
+        certMap[lot.id] = ngan?.chung_nhan ?? ""
+      }
+      setLotCertMap(certMap)
+
       const allTripUids = new Set<string>()
-      ;(ngans||[]).forEach(n => (n.trips||[]).forEach((uid:string) => allTripUids.add(uid)))
+      ;(ngans||[]).forEach((n:any) => (n.trips||[]).forEach((uid:string) => allTripUids.add(uid)))
       if (!allTripUids.size) { setLoadingGeo(false); return }
 
-      // 3. Get dispatch_entries for this factory
+      // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
       const { data: dispatches } = await supabase.from("dispatch_entries")
-        .select("rows").eq("factory_id", ord.factory_id)
+        .select("ngay,rows").eq("factory_id", ord.factory_id)
       const diemGn = new Set<string>()
-      ;(dispatches||[]).forEach(d => {
+      ;(dispatches||[]).forEach((d:any) => {
         (d.rows||[]).forEach((row: any) => {
           if (allTripUids.has(row.uid)) {
             (row.diem_gn||[]).forEach((code: string) => diemGn.add(code))
@@ -117,6 +145,21 @@ export default function EudrClient() {
         })
       })
       setDiemGnSet(diemGn)
+
+      // Build extraction date map: lot_id → earliest dispatch ngay of its ngan
+      const edMap: Record<string,string> = {}
+      for (const lot of (lotsFull||[])) {
+        const ngan = (ngans||[]).find((n:any) => n.id === lot.ngan_id)
+        if (!ngan) continue
+        const tripSet = new Set(ngan.trips||[])
+        const dates = (dispatches||[])
+          .filter((d:any) => (d.rows||[]).some((r:any) => tripSet.has(r.uid)))
+          .map((d:any) => d.ngay as string)
+          .filter(Boolean)
+          .sort()
+        if (dates.length) edMap[lot.id] = dates[0]
+      }
+      setExtractionDates(edMap)
 
       // 4. Load full GeoJSON and filter
       const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
@@ -166,6 +209,20 @@ export default function EudrClient() {
     showToast("Đã xóa file")
   }
 
+  // ── Download single DDS ───────────────────────────────────────────────────
+  const handleDownloadDDS = async (n: 1 | 2) => {
+    if (!order || !factory) { showToast("Chưa có thông tin công ty. Vào Settings → điền thông tin Seller.", false); return }
+    try {
+      const { generateDDS1, generateDDS2 } = await import("./dds-generator")
+      const blob = n === 1
+        ? await generateDDS1(order, geoData, factory, lotCertMap)
+        : await generateDDS2(order, lotDetails, extractionDates, factory)
+      saveAs(blob, `${order.ma_don}_DDS_${n === 1 ? "Plantation" : "Shipment"}.pdf`)
+    } catch (e: any) {
+      showToast("Lỗi tạo PDF: " + e.message, false)
+    }
+  }
+
   // ── Download all (zip) ────────────────────────────────────────────────────
   const handleDownloadAll = async () => {
     if (!order) return
@@ -174,15 +231,19 @@ export default function EudrClient() {
     const folder = zip.folder(order.ma_don) || zip
 
     try {
-      // DDS templates
-      for (const [name, path] of [
-        ["EUDR_DDS_Template_1.pdf", "/mau_eudr_1.pdf"],
-        ["EUDR_DDS_Template_2.pdf", "/mau_eudr2.pdf"],
-      ] as [string,string][]) {
-        try {
-          const res = await fetch(path)
-          if (res.ok) folder.file(name, await res.blob())
-        } catch {}
+      // Generated DDS PDFs (dynamic per order)
+      if (factory) {
+        const { generateDDS1, generateDDS2 } = await import("./dds-generator")
+        folder.file(`${order.ma_don}_DDS_Plantation.pdf`, await generateDDS1(order, geoData, factory, lotCertMap))
+        folder.file(`${order.ma_don}_DDS_Shipment.pdf`,   await generateDDS2(order, lotDetails, extractionDates, factory))
+      } else {
+        // Fallback: static templates if factory info not set up yet
+        for (const [name, path] of [
+          ["EUDR_DDS_Template_1.pdf", "/mau_eudr_1.pdf"],
+          ["EUDR_DDS_Template_2.pdf", "/mau_eudr2.pdf"],
+        ] as [string,string][]) {
+          try { const res = await fetch(path); if (res.ok) folder.file(name, await res.blob()) } catch {}
+        }
       }
 
       // GeoJSON
@@ -339,15 +400,21 @@ export default function EudrClient() {
                 </button>
               </div>
               <div className="p-3 space-y-1.5">
-                {/* DDS templates */}
-                {[
-                  { name: "EUDR_DDS_Template_1.pdf", href: "/mau_eudr_1.pdf" },
-                  { name: "EUDR_DDS_Template_2.pdf", href: "/mau_eudr2.pdf" },
-                ].map(f => (
-                  <div key={f.name} className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+                {/* DDS files — generated dynamically per order */}
+                {([
+                  { n: 1 as const, label: `${order.ma_don}_DDS_Plantation.pdf`, desc: "Lô vườn" },
+                  { n: 2 as const, label: `${order.ma_don}_DDS_Shipment.pdf`,   desc: "Lô thành phẩm" },
+                ] as const).map(f => (
+                  <div key={f.n} className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
                     <FileText size={13} className="text-blue-500 shrink-0"/>
-                    <span className="flex-1 text-xs text-slate-700 truncate">{f.name}</span>
-                    <a href={f.href} download className="p-1 hover:bg-blue-100 rounded text-blue-500" title="Tải về"><FileDown size={13}/></a>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-700 truncate">{f.label}</div>
+                      <div className="text-[10px] text-slate-400">DDS {f.desc}</div>
+                    </div>
+                    <button onClick={() => handleDownloadDDS(f.n)}
+                      className="p-1 hover:bg-blue-100 rounded text-blue-500" title="Tạo và tải PDF">
+                      <FileDown size={13}/>
+                    </button>
                   </div>
                 ))}
 
