@@ -1,21 +1,21 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
+  ChevronRight,
+  ClipboardCheck,
+  Factory,
+  FileOutput,
   Home,
+  LogOut,
+  Map,
+  Menu,
+  Package,
+  Settings,
+  Shield,
   Truck,
   Warehouse,
-  Package,
-  ClipboardCheck,
-  FileOutput,
-  Settings,
-  LogOut,
-  ChevronRight,
-  Menu,
-  Factory,
-  Map,
-  Shield,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
@@ -42,21 +42,21 @@ function isNavGroup(item: NavItem): item is NavGroup {
 
 const NAV: NavItem[] = [
   { key: "/dashboard", label: "Dashboard", icon: Home },
-  { key: "/dashboard/map", label: "Ban do lo", icon: Map },
-  { key: "/dashboard/eudr", label: "EUDR / Truy xuat", icon: Shield },
+  { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
+  { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
   {
     key: "production",
-    label: "Quan ly San xuat",
+    label: "Quản lý Sản xuất",
     icon: Factory,
     children: [
-      { key: "/dashboard/dispatch", label: "Dieu xe", icon: Truck, permission: "dispatch.view" },
-      { key: "/dashboard/storage", label: "Kho nguyen lieu", icon: Warehouse, permission: "storage.view" },
-      { key: "/dashboard/product", label: "Thanh pham", icon: Package, permission: "product.view" },
-      { key: "/dashboard/quality", label: "Chat luong", icon: ClipboardCheck, permission: "quality.view" },
-      { key: "/dashboard/export", label: "Xuat hang", icon: FileOutput, permission: "export.view" },
+      { key: "/dashboard/dispatch", label: "Điều xe", icon: Truck, permission: "dispatch.view" },
+      { key: "/dashboard/storage", label: "Kho nguyên liệu", icon: Warehouse, permission: "storage.view" },
+      { key: "/dashboard/product", label: "Thành phẩm", icon: Package, permission: "product.view" },
+      { key: "/dashboard/quality", label: "Chất lượng", icon: ClipboardCheck, permission: "quality.view" },
+      { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
     ],
   },
-  { key: "/dashboard/settings", label: "Cai dat", icon: Settings, permission: "settings.view" },
+  { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, permission: "settings.view" },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -149,10 +149,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 flex items-center gap-3 border-b border-slate-700">
           {!collapsed && (
             <>
-              <span className="text-2xl">🏭</span>
+              <span className="text-2xl" aria-hidden="true">🏭</span>
               <div className="flex-1 min-w-0">
-                <div className="font-extrabold text-sm truncate">PTCS Phuoc Hoa</div>
-                <div className="text-[10px] text-emerald-400 truncate">Quan ly San xuat v2.0</div>
+                <div className="font-extrabold text-sm truncate">PTCS Phước Hòa</div>
+                <div className="text-[10px] text-emerald-400 truncate">Quản lý Sản xuất v2.0</div>
               </div>
             </>
           )}
@@ -239,7 +239,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
               </div>
             )}
-            <button onClick={handleLogout} className="text-slate-400 hover:text-red-400" title="Dang xuat">
+            <button onClick={handleLogout} className="text-slate-400 hover:text-red-400" title="Đăng xuất">
               <LogOut size={16} />
             </button>
           </div>

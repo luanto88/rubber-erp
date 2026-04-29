@@ -473,19 +473,19 @@ export default function SettingsPage() {
   const disabledUsers = profiles.filter((item) => item.status === "disabled")
 
   const tabs = [
-    { key: "company" as const, label: "Cong ty", icon: Building2, show: true },
-    { key: "users" as const, label: "Nguoi dung", icon: Users, show: canViewUsers },
-    { key: "permissions" as const, label: "Phan quyen", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
-    { key: "factory-config" as const, label: "Cau hinh nha may", icon: SlidersHorizontal, show: canManageSettings },
-    { key: "master-data" as const, label: "Danh muc", icon: Database, show: true },
+    { key: "company" as const, label: "Công ty", icon: Building2, show: true },
+    { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
+    { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
+    { key: "factory-config" as const, label: "Cấu hình nhà máy", icon: SlidersHorizontal, show: canManageSettings },
+    { key: "master-data" as const, label: "Danh mục", icon: Database, show: true },
   ].filter((item) => item.show)
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Cai dat</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Quan tri cau hinh, user va phan quyen</p>
+          <h1 className="text-2xl font-extrabold text-slate-800">Cài đặt</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Quản trị cấu hình, người dùng và phân quyền</p>
         </div>
       </div>
 
@@ -514,7 +514,7 @@ export default function SettingsPage() {
         <div className="bg-gradient-to-r from-violet-50 to-purple-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Building2 size={16} className="text-violet-600" />
-            <span className="font-extrabold text-slate-700">Thong tin cong ty (EUDR Seller)</span>
+            <span className="font-extrabold text-slate-700">Thông tin công ty (EUDR Seller)</span>
           </div>
           {canManageSettings && (
             <button
@@ -568,7 +568,7 @@ export default function SettingsPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
           <div className="bg-gradient-to-r from-blue-50 to-cyan-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
             <Users size={16} className="text-blue-600" />
-            <span className="font-extrabold text-slate-700">Nguoi dung va phe duyet</span>
+            <span className="font-extrabold text-slate-700">Người dùng và phê duyệt</span>
           </div>
 
           <div className="p-5 space-y-6">
@@ -703,7 +703,7 @@ export default function SettingsPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
           <div className="bg-gradient-to-r from-indigo-50 to-sky-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
             <ShieldCheck size={16} className="text-indigo-600" />
-            <span className="font-extrabold text-slate-700">Phan quyen</span>
+            <span className="font-extrabold text-slate-700">Phân quyền</span>
           </div>
 
           <div className="p-5 space-y-5">
@@ -737,7 +737,7 @@ export default function SettingsPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
           <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
             <SlidersHorizontal size={16} className="text-amber-600" />
-            <span className="font-extrabold text-slate-700">Cau hinh nha may</span>
+            <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
           </div>
 
           <div className="p-5">

@@ -11,6 +11,7 @@ import {
   signInWithUsername,
   signOutEverywhere,
   signUpWithUsername,
+  type SessionUser,
 } from "@/lib/auth"
 
 type FactoryOption = {
@@ -21,9 +22,9 @@ type FactoryOption = {
 }
 
 const REASON_MESSAGES: Record<string, string> = {
-  pending: "Tai khoan da dang nhap nhung dang cho admin phe duyet.",
-  disabled: "Tai khoan da bi khoa. Vui long lien he admin.",
-  no_factory: "Tai khoan chua duoc gan nha may.",
+  pending: "Tài khoản đã đăng nhập nhưng đang chờ admin phê duyệt.",
+  disabled: "Tài khoản đã bị khóa. Vui lòng liên hệ admin.",
+  no_factory: "Tài khoản chưa được gán nhà máy.",
 }
 
 function LoginPageContent() {
@@ -41,6 +42,7 @@ function LoginPageContent() {
   const [dept, setDept] = useState("")
   const [booting, setBooting] = useState(true)
   const [notice, setNotice] = useState("")
+  const [activeSessionUser, setActiveSessionUser] = useState<SessionUser | null>(null)
 
   const reason = searchParams.get("reason") || ""
 
@@ -73,7 +75,7 @@ function LoginPageContent() {
         const blockReason = authBlockReason(user)
 
         if (user && !blockReason) {
-          router.replace("/dashboard")
+          if (alive) setActiveSessionUser(user)
           return
         }
 
@@ -102,9 +104,10 @@ function LoginPageContent() {
   const handleLogin = async () => {
     setError("")
     setNotice("")
+    setActiveSessionUser(null)
 
     if (!username.trim() || !password) {
-      setError("Vui long nhap ten dang nhap va mat khau")
+      setError("Vui lòng nhập tên đăng nhập và mật khẩu")
       return
     }
 
@@ -113,7 +116,7 @@ function LoginPageContent() {
     try {
       const { data, error: authError } = await signInWithUsername(username, password)
       if (authError || !data.user) {
-        setError("Sai ten dang nhap hoac mat khau")
+        setError("Sai tên đăng nhập hoặc mật khẩu")
         setLoading(false)
         return
       }
@@ -123,14 +126,14 @@ function LoginPageContent() {
 
       if (blockReason) {
         await signOutEverywhere()
-        setError(REASON_MESSAGES[blockReason] || "Tai khoan khong the truy cap he thong")
+        setError(REASON_MESSAGES[blockReason] || "Tài khoản không thể truy cập hệ thống")
         setLoading(false)
         return
       }
 
       router.replace("/dashboard")
     } catch {
-      setError("Khong the dang nhap. Vui long thu lai.")
+      setError("Không thể đăng nhập. Vui lòng thử lại.")
     }
 
     setLoading(false)
@@ -139,10 +142,11 @@ function LoginPageContent() {
   const handleRegister = async () => {
     setError("")
     setNotice("")
+    setActiveSessionUser(null)
 
     const normalizedUsername = normalizeUsername(username)
     if (!normalizedUsername || !password || !fullName.trim() || !factoryId) {
-      setError("Vui long nhap day du thong tin bat buoc")
+      setError("Vui lòng nhập đầy đủ thông tin bắt buộc")
       return
     }
 
@@ -162,7 +166,7 @@ function LoginPageContent() {
       }
 
       if (existingProfile.data) {
-        setError("Ten dang nhap da ton tai")
+        setError("Tên đăng nhập đã tồn tại")
         setLoading(false)
         return
       }
@@ -178,7 +182,7 @@ function LoginPageContent() {
       if (signupError) {
         setError(
           signupError.message.includes("already")
-            ? "Ten dang nhap da ton tai"
+            ? "Tên đăng nhập đã tồn tại"
             : signupError.message,
         )
         setLoading(false)
@@ -187,11 +191,11 @@ function LoginPageContent() {
 
       await supabase.auth.signOut()
       clearLegacySession()
-      setNotice("Dang ky thanh cong. Tai khoan dang o trang thai cho phe duyet.")
+      setNotice("Đăng ký thành công. Tài khoản đang ở trạng thái chờ phê duyệt.")
       setTab("login")
       setPassword("")
     } catch {
-      setError("Khong the dang ky. Vui long thu lai.")
+      setError("Không thể đăng ký. Vui lòng thử lại.")
     }
 
     setLoading(false)
@@ -209,12 +213,52 @@ function LoginPageContent() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">🏭</div>
-          <h1 className="text-2xl font-extrabold text-slate-800">PTCS Phuoc Hoa</h1>
-          <p className="text-sm text-slate-500 mt-1">He thong Quan ly San xuat</p>
+          <div className="text-5xl mb-3" aria-hidden="true">🏭</div>
+          <h1 className="text-2xl font-extrabold text-slate-800">PTCS Phước Hòa</h1>
+          <p className="text-sm text-slate-500 mt-1">Hệ thống Quản lý Sản xuất</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+          {activeSessionUser ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+                <p className="text-sm font-semibold text-emerald-800">Bạn đang đăng nhập</p>
+                <p className="mt-1 text-base font-bold text-slate-800">{activeSessionUser.full_name}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {activeSessionUser.role} · {activeSessionUser.username}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={() => router.replace("/dashboard")}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
+                >
+                  Vào dashboard
+                </button>
+                <button
+                  onClick={async () => {
+                    setLoading(true)
+                    setError("")
+                    try {
+                      await signOutEverywhere()
+                      setActiveSessionUser(null)
+                      setNotice("Đã đăng xuất. Bạn có thể đăng nhập bằng tài khoản khác.")
+                    } catch {
+                      setError("Không thể đăng xuất. Vui lòng thử lại.")
+                    } finally {
+                      setLoading(false)
+                    }
+                  }}
+                  disabled={loading}
+                  className="w-full py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl border border-slate-300 transition-all disabled:opacity-50"
+                >
+                  {loading ? "Đang xử lý..." : "Đăng xuất để đổi tài khoản"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="flex gap-2 mb-6">
             {(["login", "register"] as const).map((item) => (
               <button
@@ -231,7 +275,7 @@ function LoginPageContent() {
                     : "text-slate-500 hover:bg-emerald-50")
                 }
               >
-                {item === "login" ? "Dang nhap" : "Dang ky"}
+                {item === "login" ? "Đăng nhập" : "Đăng ký"}
               </button>
             ))}
           </div>
@@ -254,13 +298,13 @@ function LoginPageContent() {
                 <input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Ho ten *"
+                  placeholder="Họ tên *"
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
                 />
                 <input
                   value={dept}
                   onChange={(e) => setDept(e.target.value)}
-                  placeholder="Phong ban"
+                  placeholder="Phòng ban"
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
                 />
               </>
@@ -269,7 +313,7 @@ function LoginPageContent() {
             <input
               value={username}
               onChange={(e) => setUsername(normalizeUsername(e.target.value))}
-              placeholder="Ten dang nhap *"
+              placeholder="Tên đăng nhập *"
               className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
             />
 
@@ -277,7 +321,7 @@ function LoginPageContent() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mat khau *"
+              placeholder="Mật khẩu *"
               onKeyDown={(e) =>
                 e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
               }
@@ -301,12 +345,14 @@ function LoginPageContent() {
               disabled={loading}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
             >
-              {loading ? "Dang xu ly..." : tab === "login" ? "Dang nhap" : "Dang ky"}
+              {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
             </button>
           </div>
+            </>
+          )}
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6">v2.0 · PTCS Phuoc Hoa © 2019-2026</p>
+        <p className="text-center text-xs text-slate-400 mt-6">v2.0 · PTCS Phước Hòa © 2019-2026</p>
       </div>
     </div>
   )
