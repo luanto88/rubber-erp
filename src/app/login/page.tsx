@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
@@ -26,7 +26,7 @@ const REASON_MESSAGES: Record<string, string> = {
   no_factory: "Tai khoan chua duoc gan nha may.",
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -309,5 +309,19 @@ export default function LoginPage() {
         <p className="text-center text-xs text-slate-400 mt-6">v2.0 · PTCS Phuoc Hoa © 2019-2026</p>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+          <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full" />
+        </div>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   )
 }
