@@ -1,302 +1,169 @@
 ---
-description: Business logic các module sản xuất — Điều xe, Ngăn lưu, Thành phẩm. Đọc khi làm việc với các module này.
+description: Business logic cac module san xuat - Dieu xe, Kho nguyen lieu, Thanh pham
 ---
 
-# Business Logic: Sản xuất
+# Business Logic: San xuat
 
-## Module Điều xe (`dispatch_entries`)
+## 1. Rule chung
 
-### Cấu trúc dữ liệu
+- Moi query phai filter theo `factory_id`
+- Moi form CRUD phai co field `day_chuyen` dat o dau form
+- Cac dropdown phu thuoc phai reset khi doi `day_chuyen`
+- Cac option san pham phai lay tu matrix cau hinh nha may, khong hard-code rai rac
 
-```typescript
-// Bảng dispatch_entries
+## 2. Module Dieu xe (`dispatch_entries`)
+
+### Schema chinh
+
+```ts
 {
-  id: UUID, factory_id: UUID,
-  ngay: string,       // "YYYY-MM-DD"
-  chung_nhan: string, // "PEFC CS" | "PEFC FM" | "Không"
-  rows: DxRow[],      // JSONB
-  created_at: string, // dùng tính ma_dx
-  ma_dx?: string      // computed "DX-ddmmyy/N", không lưu DB
-}
-
-// DxRow — 1 chuyến xe
-{
-  uid: string, _date: string,
-  so_xe: string,        // "5B", "7A", "2A"...
-  chuyen: number,       // AUTO-ASSIGN khi chọn xe, read-only
-  tai_xe: string,       // dropdown từ VEHICLES
-  diem_gn: string[],   // mã lô vườn ["Q7","P11"]
-  phien: string[],     // ["Phiên A","Phiên B","Phiên C","Phiên D"]
-  lo_thu_hoach: string[], // AUTO-FILL từ phien + diem_gn
-  xu_ly: string,        // "Xé" | "Không xé"
-  lo_trinh: string[],  // chỉ điểm cùng doi với diem_gn
-  so_km: number,
-  kl_ct: string,       // Chen tuoi (kg)
-  drc_c: string,       // DRC% chen
-  kl_ck: string,       // Chen kho — AUTO-CALC
-  kl_dct: string,       // Dong chen tuoi (kg)
-  drc_dc: string,       // DRC% dong chen
-  kl_dck: string,       // Dong chen kho — AUTO-CALC
-  kl_dkt: string,       // Dong khoi tuoi (kg)
-  drc_dk: string,       // DRC% dong khoi
-  kl_dkk: string,       // Dong khoi kho — AUTO-CALC
-  kl_dt: string,        // Mu day tuoi (kg)
-  drc_d: string,        // DRC% mu day (default "65")
-  kl_dk: string,        // Mu day kho — AUTO-CALC
-  ngan_ref: string[],
-  locked?: boolean,
-  _warn?: string        // canh bao xe trung chuyen (ephemeral)
+  id: UUID,
+  factory_id: UUID,
+  ngay: string,
+  chung_nhan: string,
+  rows: DxRow[],
+  created_at: string,
+  ma_dx?: string,
 }
 ```
 
-### Auto-calc bắt buộc
+### Rule quan trong
 
-```typescript
-kl_ck = autoCalcKLK(kl_ct, drc_c); // chen kho
-kl_dck = autoCalcKLK(kl_dct, drc_dc); // dong chen kho
-kl_dkk = autoCalcKLK(kl_dkt, drc_dk); // dong khoi kho
-kl_dk = autoCalcKLK(kl_dt, drc_d); // mu day kho
-// Trigger khi field tuong ung thay doi
-```
+- `ma_dx` format: `DX-ddmmyy/N`
+- `chung_nhan`: chi duoc la `PEFC CS`, `PEFC FM`, `Khong`
+- KL kho phai auto-calc tu KL tuoi va DRC
+- `chuyen` duoc auto-assign theo xe trong ngay
+- `lo_trinh` chi hien thi diem cung doi voi `diem_gn`
 
-### Logic chuyến auto-assign
+## 3. Module Kho nguyen lieu (`ngans`)
 
-```typescript
-// Trong updateRow khi field === "so_xe":
-const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val);
-next.chuyen = sameXe.length + 1; // 0 -> 1, 1 -> 2, >=2 -> warn
-next._warn =
-  sameXe.length >= 2 ? `Xe ${val} da co ${sameXe.length} chuyen!` : undefined;
-```
+### Trang thai hop le
 
-### Logic lo_trinh filter theo doi
+- `Dang nhan`
+- `Dong`
+- `Cho san xuat`
+- `Dang san xuat`
+- `Da san xuat`
 
-```typescript
-// DIEM_GN co truong doi: number (lay tu lo_chi_tiet.csv)
-// Khi diem_gn thay doi, tinh allowedDoi, loc lo_trinh options
-const allowedDoi = getAllowedDoi(row.diem_gn);
-const opts = DIEM_GN.filter((d) => allowedDoi.includes(d.doi)).map(
-  (d) => d.ma_lo,
-);
-```
+Chi tiet state machine xem them trong `storage.md`.
 
-### Doi phan bo cua DIEM_GN
+### Rule quan trong
 
-- Doi 1: E1, G3, G5
-- Doi 2: B5, D9 (D9 chuyen tu Doi 3 sang)
-- Doi 3: G8, G9, J7
-- Doi 4: L2, N7
-- Doi 5: C16, C17, D11
-- Doi 6: H11, K10, L12
-- Doi 7: H13, L14 (H13 chuyen tu Doi 6 sang)
-- Doi 8: F16, I16
-- Doi 9: U2, P3
-- Doi 10: Q7, P11
-- Doi 11: T7, U11
-- Doi 12: S15, S12, P14
+- Khong co trang thai `Hoan thanh` cho ngan
+- Ngan du 21 ngay moi chuyen sang `Cho san xuat`
+- Chi ngan `Cho san xuat` moi duoc chon trong `Thanh pham`
+- Chon ngan trong `Thanh pham` -> cap nhat ngay sang `Dang san xuat`
+- Bam `Luu va danh dau da san xuat` -> cap nhat ngan sang `Da san xuat`
 
-### UI flow
+### Loai nguyen lieu
 
-1. **List view** → col "Ma DX" dau tien (DX-ddmmyy/N), click hang → detail
-2. **Detail view** → bang day du, header hien ma_dx
-3. **Add view** → pre-fill rows tu ngay gan nhat (xoa KL), ngay default = maxDate+1
-4. **Nha may diem den** → disabled, lay tu factories table
-5. **Chung nhan** → "PEFC CS" | "PEFC FM" | "Khong" (khong co "ISO")
-6. **Toolbar** → Tai bang (CSV template hoặc xlsx template, admin only) | Nhap CSV (admin only) | Nhap KL | GeoJSON download | + Them xe
-7. **KL modal** → 4 nhom: Chen / Dong chen / Dong khoi / Mu day
+Phai filter theo nha may va day chuyen:
 
----
+- `Mu tap`: su dung cac loai nguyen lieu hop le cua nha may
+- `Mu nuoc`: chi duoc `Mu nuoc`
 
-## Module Ngăn lưu (`ngans`)
+## 4. Module Thanh pham (`lots`)
 
-### Cấu trúc dữ liệu
+### Schema chinh
 
-```typescript
+```ts
 {
-  id: UUID, factory_id: UUID,
-  ma_ngan: string,    // "N11-NT-ĐC-X-29/12/25-31/12/25"
-  ten_ngan: string,   // "N11"
-  loai_nl: string,    // "Mủ chén"|"Mủ đông chén"|"Mủ đông khối"|"Mủ dây"|"Mủ dơ"|"Mủ tạp"|"Mủ nước"
-  nguon_goc: string,  // "NT"|"M"|"GCA"
-  xu_ly: string,      // "Xé"|"Không xé"|"Hỗn hợp"  (không dùng "Cán")
-  chung_nhan: string, // "PEFC CS"|"PEFC FM"|"Không"
-  ngay_bd: date, ngay_kt: date,
-  trang_thai: string, // "Đang nhận"|"Đóng"|"Chờ sản xuất"|"Đang sản xuất"|"Đã sản xuất"
-  // → Chi tiết logic trạng thái và chuyển đổi xem .claude/rules/storage.md
-  tong_tuoi: number,  // KL tươi tổng (kg)
-  tong_kho: number,   // KL khô quy đổi (kg)
-  trips: string[],    // uid các chuyến xe đã vào ngăn
-  lo_nguon_goc: string
+  id: UUID,
+  factory_id: UUID,
+  day_chuyen: string,
+  ma_lo: string,
+  num: number,
+  suffix: string,
+  year: string,
+  ngay_sx: date,
+  ca: string,
+  ngan_id: UUID,
+  loai_csr: string,
+  loai_banh: number,
+  boc: string,
+  tham: string,
+  pallet: string[],
+  kien_a: number,
+  kien_b: number,
+  kien_c: number,
+  kien_d: number,
+  tong_banh: number,
+  tong_kg: number,
+  trang_thai: string,
 }
 ```
 
-### Business rules
+### Source of truth cho option
 
-- **Mã ngăn pattern:** `[Vị trí]-[Nguồn gốc]-[Loại NL viết tắt]-[XL]-[dd/mm/yy]-[dd/mm/yy]`
-- Một ngăn có thể cung cấp mủ cho nhiều lô thành phẩm
-- → Logic trạng thái, auto-transition 21 ngày, quan hệ với Thành phẩm: xem `.claude/rules/storage.md`
+`du_lieu_nha_may.xlsx` la source cao nhat cho:
 
-### UI: Card grid (không phải bảng)
+- `loai_banh`
+- `loai_boc`
+- `loai_tham`
+- `loai_pallet_sx`
 
-- Layout 3 cột responsive
-- Card header màu theo trạng thái
-- Mỗi card hiện: tên, loại NL, nguồn gốc, chứng nhận, KL, progress bar ủ
+Quy tac loc:
 
----
+- `loai_banh`, `loai_boc`, `loai_tham`: theo `nha may + day_chuyen + chung loai SP`
+- `loai_pallet_sx`: theo cau hinh nha may, co the mo rong runtime va luu DB
 
-## Module Thành phẩm (`lots`)
+### Quy tac lo tron
 
-### Cấu trúc dữ liệu
+- Banh `35` va `33.33`: 4 kien, moi kien 36 banh -> lo tron `144`
+- Banh `20`: 4 kien, moi kien 60 banh -> lo tron `240`
 
-```typescript
-{
-  id: UUID, factory_id: UUID,
-  day_chuyen: string,  // "Mủ tạp" | "Mủ nước" — quyết định loại SP/bành/bọc hợp lệ
-  ma_lo: string,       // AUTO: "${num}${suffix}/${year}" → "144cs/26"
-  num: number,         // Số thứ tự
-  suffix: string,      // "cs"|"m"|"gca"
-  year: string,        // "26" (2 chữ số cuối)
-  ngay_sx: date, ca: string,  // "A"|"B"|"C"|"D"
-  ngan_id: UUID,       // FK → ngans — loai_nl của ngăn phải khớp với loại NL đầu vào của day_chuyen
-  loai_csr: string,    // NMPHK: "CSR10"|"CSR20"|"CSRL"|"CSR3L"|"CSRCV50"|"CSRCV60" / NMCP: "SVR*"
-  loai_banh: number,   // Mủ tạp=35; L/3L=35|33,33; CV50/60=35|20
-  boc: string, tham: string,  // "cũ"|"Mới" (label UI: "Thãm"; records cũ DB có thể là "Củ" → display guard)
-  pallet: string[],    // NMPHK: sắt đế gỗ/sắt mỏng/MB5/gỗ; NMCP: +sắt đế nhựa
-  chi_thi: string,
-  kien_a: number, kien_b: number, kien_c: number, kien_d: number,
-  tong_banh: number,   // AUTO: sum(kien_a..d)
-  tong_kg: number,     // AUTO: tong_banh × loai_banh
-  trang_thai: string,  // "Hoàn thành"|"Dở dang"|"Xuất hàng"
-  dd_snapshot: JSONB,  // Tracking History: { history: [{ca, kien_a, kien_b, kien_c, kien_d, added_banh, timestamp}] }
-  is_manual_edit: boolean, edit_key: string
+### Trang thai lo
+
+- `Hoan thanh`
+- `Do dang`
+- `Xuat hang`
+
+### Xac dinh trang thai
+
+```ts
+if (loai_banh === 20) {
+  lo_tron = 240
+} else {
+  lo_tron = 144
 }
+trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang"
 ```
 
-### Business rules lô (lots)
+### Auto-calc
 
-- **Lô tròn:** tong_banh ≥ lo_tron → `trang_thai = "Hoàn thành"` (lo_tron=144 cho mủ tạp/L/3L, 240 cho CV50/CV60)
-- **Lô dở dang:** tong_banh < lo_tron → `trang_thai = "Dở dang"`
-- **Auto-calc:**
-  - `tong_banh = kien_a + kien_b + kien_c + kien_d`
-  - `tong_kg = tong_banh × loai_banh`
-  - `ma_lo = "${num}${suffix}/${year}"` — `num` reset theo năm **và theo loai_csr**
-- **Dãy số lô — tách riêng theo `loai_csr + suffix + year`:**
-  - CSR10+cs: 01cs → xxxcs (counter riêng)
-  - CSRCV60+cs: 01cs → xxxcs (counter riêng, **độc lập với CSR10**)
-  - Filter: `l.loai_csr === loai_csr && l.suffix === suffix && l.year === year`
-  - Áp dụng ở: `useEffect maxNumFromDB`, `updateSession` khi đổi suffix, `openCreate`
-  - `generateLotDrafts` cũng filter theo `loai_csr` khi lookup DB lot
-- **Lô Xuất hàng — bất biến (chỉ khóa khi đã xuất hàng):**
-  - `openEdit()` block: chỉ `trang_thai === "Xuất hàng"` → không mở được modal sửa
-  - `canEdit` trong editDateModal: `trang_thai !== "Xuất hàng"` — lô "Hoàn thành" vẫn sửa được
-  - `generateLotDrafts`: lô DB có `trang_thai = "Hoàn thành"/"Xuất hàng"` → `is_already_completed = true`, bỏ qua khi save (logic tách biệt với khóa sửa)
-- **Highlight kiện:** xanh `text-emerald-600` = max, vàng `text-amber-600` = 1–(max-1), xám = 0
-- **dd_snapshot:** lưu {kien_a, kien_b, kien_c, kien_d, timestamp, history[]} khi lô dở dang
-- → Logic ngăn ↔ Thành phẩm (chọn ngăn, nút lưu theo %, xóa lô): xem `.claude/rules/storage.md`
+- `tong_banh = kien_a + kien_b + kien_c + kien_d`
+- `tong_kg = tong_banh * loai_banh`
+- `ma_lo = ${num}${suffix}/${year}`
 
-### Logic lô kế thừa (Dở dang → Ca tiếp theo)
+### Kien toi da theo loai banh
 
-Khi lô cuối ca trước còn dở dang, ca tiếp theo sẽ **kế thừa** lô đó với `is_continuation = true`.
-
-**Kiện đã đủ từ ca trước (locked = true):**
-
-- Hiển thị read-only, badge "Ca trước · đã đủ" (indigo)
-- **Không tính** vào sản lượng ca hiện tại
-- Không cho chỉnh sửa
-
-**Kiện chưa đủ (locked = false):**
-
-- Input nhập tay trực tiếp (`<input type="number">`) — KHÔNG dùng Stepper
-- `min = prev` (giá trị ca trước), `max = maxK` (giới hạn tối đa kiện)
-- Có nút X reset về `prev` (không về 0)
-- Hiển thị badge "Ca trước: {prev} · thêm ≤{remaining}"
-- Label dưới: "+N bành ca này"
-
-**Tính sản lượng lô kế thừa (delta only):**
-
-```typescript
-// caTongBanh và sessionTotals chỉ tính phần THÊM VÀO, không tính bành ca trước
-const deltaBanh =
-  Math.max(0, kien_a - prev_a) +
-  Math.max(0, kien_b - prev_b) +
-  Math.max(0, kien_c - prev_c) +
-  Math.max(0, kien_d - prev_d);
-// Ví dụ: Ca A làm lô 677cs: kien_A=36 → 36 bành (1260kg)
-// Ca B kế thừa: kien_A locked (36), thêm kien_B=36, kien_C=36 → delta=72 bành (2520kg)
+```ts
+const maxKienValue = loai_banh === 20 ? 60 : 36
 ```
 
-**List view — hiển thị lock icon cho kiện kế thừa:**
-- `LotContribution` có thêm `locked_a/b/c/d?: boolean`
-- Tính từ `dd_snapshot.history`: nếu `h.kien_x === history[i-1].kien_x && h.kien_x > 0` → locked
-- Render: `{c.locked_a && <Lock size={9} className="text-indigo-400" />}{c.kien_a}`
-- Mỗi lô kế thừa hiện **1 dòng riêng mỗi ca** với bành/tấn delta của ca đó
+### Rule `tham`
 
-### autoSelectNganId — logic chọn ngăn tự động
+- Field ky thuat: `tham`
+- Cau hinh nguon: `loai_tham`
+- UI hien thi: `Tham`
+- Du lieu cu phai duoc normalize ve 2 gia tri chuan: `Cu`, `Moi`
 
-Hàm helper trong component (không export). Ưu tiên:
-1. **"Đang sản xuất"** khớp loại NL với day_chuyen → sort `ngay_bd DESC` → lấy mới nhất
-2. Fallback: **"Chờ sản xuất"** → sort `ngay_bd DESC` → lấy mới nhất (ngày lưu lớn nhất)
+### Rule lo ke thua
 
-```typescript
-// Điều kiện eligible:
-// - loai_nl khớp: Mủ tạp → ["Mủ chén","Mủ đông chén","Mủ đông khối","Mủ dây","Mủ dơ","Mủ tạp"]
-//                 Mủ nước → ["Mủ nước"]
-// - trang_thai NOT IN ["Đóng","Đã sản xuất"]
-// - ngay_bd đủ 21 ngày
-// Gọi tại: openCreate() và updateSession() khi đổi day_chuyen
-```
+Khi lo cuoi ca truoc dang do:
 
-### UI Pattern — List view (grouped by ngày sản xuất)
+- Kien da du tu ca truoc -> read-only, khong tinh vao san luong ca nay
+- Kien chua du -> nhap tiep, chi tinh phan delta them vao
 
-**Header mỗi ngày** có 3 nút ở góc phải:
-- **Thêm**: `openCreate(date)` — tạo ca mới pre-fill ngày đó
-- **Sửa**: `setEditDateModal(date)` — mở modal danh sách lô trong ngày
-- **Xóa**: `setDeleteMode(date)` — vào chế độ checkbox chọn lô để xóa hàng loạt
+## 5. Quan he Ngan va Thanh pham
 
-**editDateModal**: Modal liệt kê `contributions` filter theo `ngay_sx === editDateModal`, group by ca. Mỗi lô có nút "Sửa lô" nếu `trang_thai !== "Xuất hàng"` (lô "Hoàn thành" vẫn hiện nút sửa).
+- `eligibleNgans`: chi lay `Cho san xuat`
+- Chon ngan -> cap nhat `Dang san xuat`
+- Xoa het lo cua ngan -> ngan quay ve `Cho san xuat`
 
-**deleteMode**: Khi active cho 1 ngày — hàng trong ngày đó hiện checkbox, header ngày thay bằng nút "Xóa N lô" + "Hủy". `handleBulkDelete` gọi `handleDelete(id)` tuần tự cho từng `id` trong `selectedDeleteIds`.
+## 6. Quan he Thanh pham va Xuat hang
 
-**Cột bảng trong mỗi ca:** Mã lô · Ngăn · Loại · Bọc · SL Thực tế ca này · Kiện (A/B/C/D) thời điểm · Trạng thái  
-*(Không có cột Thao tác — Sửa/Xóa đã chuyển lên header ngày)*
-
-### Insert lô vào DB — field bắt buộc
-
-```typescript
-await supabase.from("lots").insert({
-  factory_id,
-  day_chuyen, // day_chuyen KHÔNG được null/rỗng
-  ma_lo,
-  num,
-  suffix,
-  year,
-  ngay_sx,
-  ca,
-  ngan_id,
-  loai_csr,
-  loai_banh,
-  boc,
-  tham,
-  chi_thi,
-  pallet,
-  kien_a,
-  kien_b,
-  kien_c,
-  kien_d,
-  tong_banh,
-  tong_kg,
-  trang_thai,
-  dd_snapshot,
-  ghi_chu: "", // phải có, không để undefined
-  is_manual_edit: false, // phải có, không để undefined
-});
-// Luôn check error — Supabase v2 không throw, chỉ trả về { data, error }
-```
-
-### Hậu tố lô
-
-| Code  | Tên            | Nguồn gốc | Chứng nhận |
-| ----- | -------------- | --------- | ---------- |
-| `cs`  | Nội tuyển PEFC | NT        | PEFC CS    |
-| `m`   | Mua ngoài      | M         | —          |
-| `gca` | Gia công       | GCA       | —          |
+- Lo `Hoan thanh` duoc hien thi tai module `Xuat hang`
+- Xuat het remaining -> lo chuyen `Xuat hang`
+- Xoa don hang -> tinh lai remaining
+- Neu con hang kha dung tro lai -> lo quay ve `Hoan thanh`

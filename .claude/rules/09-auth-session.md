@@ -1,70 +1,144 @@
 ---
-description: Auth, session, multi-tenant — đọc khi làm việc với login, user roles, factory context
+description: Auth, session, multi-tenant, dang ky va duyet tai khoan
 ---
 
-# Auth & Session Management
+# Auth & Session
 
-## Session storage
+## Kien truc auth hien tai
 
-Login lưu vào `localStorage` (không phải Supabase Auth):
-```typescript
-localStorage.setItem("erp_user",    JSON.stringify(userObject)) // user đầy đủ
-localStorage.setItem("erp_factory", factoryId)                  // UUID nhà máy
+He thong dang nhap dung `Supabase Auth`.
+
+`localStorage` chi duoc dung nhu app session cache cho:
+
+```ts
+localStorage.setItem("erp_user", JSON.stringify(userObject))
+localStorage.setItem("erp_factory", factoryId)
 ```
 
-## Lấy context trong component
-
-```typescript
-// Factory ID — dùng cho MỌI query Supabase
-const fid = localStorage.getItem("erp_factory")
-
-// User hiện tại
-const user = JSON.parse(localStorage.getItem("erp_user") || "{}")
-const role = user.role // "admin" | "manager" | "user" | "customer"
-```
+Khong dung `localStorage` de luu data nghiep vu.
 
 ## Multi-tenant
 
-Mọi query bắt buộc filter theo factory:
-```typescript
-supabase.from("any_table").select("*").eq("factory_id", fid)
+Moi query phai filter theo:
+
+```ts
+supabase.from("table").select("*").eq("factory_id", fid)
 ```
 
-## Bảng `users`
+## Data model auth
 
-```sql
-id UUID PK, factory_id UUID, username TEXT UNIQUE,
-password_hash TEXT, full_name TEXT, role TEXT,
-department TEXT, status TEXT  -- "active"|"pending"
+```ts
+auth.users
 ```
 
-## User roles
+Bang app profile:
 
-| Role | Quyền |
-|---|---|
-| `admin` | Toàn quyền, duyệt tài khoản mới |
-| `manager` | Đọc/ghi tất cả module |
-| `user` | Đọc/ghi module được phân quyền |
-| `customer` | Chỉ xem module EUDR/truy xuất nguồn gốc |
-
-## Login flow
-
-1. Nhập username + password + chọn nhà máy
-2. Query `users` where `username = ? AND status = "active"`
-3. So khớp `password_hash`
-4. Lưu session → redirect `/dashboard`
-
-## Register flow
-
-1. Nhập thông tin + chọn nhà máy
-2. Insert user với `status = "pending"`
-3. Chờ admin duyệt → admin set `status = "active"`
-
-## Guard pattern
-
-```typescript
-useEffect(() => {
-  const user = localStorage.getItem("erp_user")
-  if (!user) router.push("/") // redirect về login
-}, [router])
+```ts
+{
+  id: UUID,
+  username: string,
+  auth_email: string,
+  full_name: string,
+  factory_id: UUID | null,
+  role: string,
+  department: string,
+  status: string,
+  approved_by: UUID | null,
+  approved_at: string | null,
+  disabled_by: UUID | null,
+  disabled_at: string | null,
+}
 ```
+
+Ten bang app: `profiles`
+
+Bang `users` cu chi de migration va doi chieu, khong con la nguon dang nhap chinh.
+
+## Dang ky tai khoan
+
+- User dang ky moi -> `status = "pending"`
+- Duoc tao tai khoan auth + profile app
+- Chua duoc vao ung dung ngay
+- Can admin hoac nguoi co quyen duyet kich hoat
+
+## Duyet tai khoan
+
+Thuc hien trong module `Cai dat`.
+
+Khi duyet, admin gan:
+
+- Nha may
+- Role
+- Bo permission chi tiet
+
+Khi duyet thanh cong:
+
+- `status -> active`
+- luu `approved_by`
+- luu `approved_at`
+
+## Roles tong quat
+
+- `admin`
+- `manager`
+- `user`
+- `customer`
+
+`customer` chi xem khu vuc duoc cap, chu yeu la truy xuat/EUDR.
+
+## Disabled
+
+- Tai khoan `disabled` khong duoc vao ung dung
+- Neu auth thanh cong nhung profile la `disabled`, app phai dang xuat ngay va day ve `/login`
+- Phai luu `disabled_by` va `disabled_at`
+
+## Permission chi tiet
+
+He thong dung mo hinh:
+
+`module + action chuan`, them mot so action dac biet
+
+Action chuan:
+
+- `view`
+- `create`
+- `edit`
+- `delete`
+
+Action dac biet tuy module:
+
+- `import`
+- `export_file`
+- `print`
+- `approve`
+- `manage_config`
+- `quick_add`
+- `mark_completed`
+- `delete_order`
+
+## Guard
+
+- Phai check quyen o UI
+- Dong thoi phai check quyen o logic thao tac save / delete / import / approve
+- Khong chi an nut ma bo qua check logic
+
+## Route auth
+
+- Route dang nhap chuan: `/login`
+- Dang xuat phai:
+  - xoa app session cache
+  - sign out Supabase Auth
+  - day ve `/login`
+
+## Migration
+
+He thong co script migration user cu:
+
+- `scripts/migrate-legacy-users.mjs`
+
+Migration se:
+
+- doc bang `users` cu
+- tao auth user
+- tao / upsert `profiles`
+- migrate permission cu sang `user_permissions`

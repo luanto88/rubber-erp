@@ -9,7 +9,8 @@ description: Schema Supabase — tham chiếu khi viết query, migration, hoặ
 | Bảng | Mô tả | Primary Key |
 |---|---|---|
 | `factories` | Nhà máy | `id` UUID |
-| `users` | Tài khoản người dùng | `id` UUID |
+| `users` | Tài khoản người dùng cũ, chỉ dùng cho migration | `id` UUID |
+| `profiles` | Hồ sơ ứng dụng gắn với `auth.users` | `id` UUID |
 | `ngans` | Ngăn lưu mủ cao su | `id` UUID |
 | `lots` | Lô thành phẩm | `id` UUID |
 | `qc_results` | Kết quả kiểm nghiệm | `id` UUID |
@@ -17,12 +18,27 @@ description: Schema Supabase — tham chiếu khi viết query, migration, hoặ
 | `export_orders` | Đơn xuất hàng | `id` UUID |
 | `customers` | Khách hàng | `id` UUID |
 | `suffixes` | Hậu tố mã lô | `code` TEXT |
+| `permissions` | Danh sách permission hệ thống | `code` TEXT |
+| `role_permissions` | Permission mặc định theo role | `(role, permission_code)` |
+| `user_permissions` | Permission gán thực tế cho user | `(user_id, permission_code)` |
 | `kv_store` | Key-value store (legacy) | `id` UUID |
+
+## Bang mo rong nen co / se can them
+
+De ho tro `Cai dat`, cau hinh nha may, duyet tai khoan va phan quyen, he thong nen co cac bang mo rong sau:
+
+| Bảng | Mục đích |
+|---|---|
+| `factory_product_configs` | Matrix cau hinh theo nha may: `loai_banh`, `loai_boc`, `loai_tham`, `loai_pallet_sx`, `loai_pallet_xuat` |
+| `vehicles` | Danh muc xe, kem thong tin tai xe hien hanh |
+| `maintenance_assets` | Danh muc thiet bi cho module bao tri tuong lai |
+| `maintenance_areas` | Khu vuc / vi tri thiet bi cho module bao tri tuong lai |
 
 ## Quan hệ
 
 ```
 factories
+  ├── profiles (factory_id)
   ├── ngans (factory_id)
   ├── lots (factory_id)
   │     └── ngan_id → ngans.id
@@ -31,7 +47,8 @@ factories
   ├── dispatch_entries (factory_id)
   ├── export_orders (factory_id)
   │     └── customer_id → customers.id
-  └── customers (factory_id)
+  ├── customers (factory_id)
+  └── factory_product_configs (factory_id)
 ```
 
 ## Schema chi tiết
@@ -91,4 +108,34 @@ created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 id UUID PK, factory_id UUID,
 ma_kh TEXT UNIQUE, ten_kh_en TEXT, email TEXT, dia_chi TEXT,
 created_at TIMESTAMPTZ
+```
+
+### `profiles`
+```sql
+id UUID PK -> auth.users(id),
+username TEXT UNIQUE, auth_email TEXT UNIQUE,
+full_name TEXT, factory_id UUID -> factories,
+department TEXT, role TEXT, status TEXT,
+approved_by UUID, approved_at TIMESTAMPTZ,
+disabled_by UUID, disabled_at TIMESTAMPTZ,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+### `permissions`
+```sql
+code TEXT PK, module_name TEXT, action_name TEXT, created_at TIMESTAMPTZ
+```
+
+### `role_permissions`
+```sql
+role TEXT, permission_code TEXT -> permissions(code), created_at TIMESTAMPTZ
+PRIMARY KEY (role, permission_code)
+```
+
+### `user_permissions`
+```sql
+user_id UUID -> profiles(id),
+permission_code TEXT -> permissions(code),
+granted BOOLEAN, granted_by UUID, granted_at TIMESTAMPTZ
+PRIMARY KEY (user_id, permission_code)
 ```

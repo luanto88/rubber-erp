@@ -1,79 +1,96 @@
 ---
-description: Module Xuất hàng — đọc khi làm việc với export_orders, vehicles, assignments
+description: Module xuat hang, assignments, EUDR
 ---
 
-# Module Xuất hàng (`export_orders`)
+# Module Xuat hang
 
-## Cấu trúc dữ liệu
+## Schema chinh (`export_orders`)
 
-```typescript
-// Đơn xuất hàng
+```ts
 {
-  id: UUID, factory_id: UUID,
-  ma_don: string,        // "XH_KUMHO_14_240226"
+  id: UUID,
+  factory_id: UUID,
+  ma_don: string,
   ngay: date,
   so_thong_bao: string,
   so_hoa_don: string,
   so_hop_dong: string,
-  customer_id: UUID,     // FK → customers
-  chung_loai: string,    // "CSR10"...
-  loai_pallet: string,   // "Xuất rời"|"Pallet gỗ"|"Pallet sắt"
-  vehicles: Vehicle[],   // JSONB
-  assignments: Assignment[], // JSONB
-  tong_banh: number      // AUTO: sum tất cả assignments
-}
-
-// Xe
-type Vehicle = {
-  id: string,            // random uid
-  loai_xe: string,       // "Container 20ft"|"Container 40ft"|"Xe tải mui bạt"|"Khác"
-  bien_truoc: string,    // Biển số đầu kéo
-  bien_sau: string,      // Biển số rơ-moóc (sơmi rơmoóc)
-  ghi_chu: string
-}
-
-// Gán lô vào xe
-type Assignment = {
-  lot_id: string,        // UUID của lot
-  ma_lo: string,
-  vehicleIdx: number,    // Index trong mảng vehicles (0-based)
-  kien_a: number, kien_b: number, kien_c: number, kien_d: number
+  customer_id: UUID,
+  chung_loai: string,
+  loai_pallet: string,
+  loai_banh: number,
+  loai_boc: string,
+  vehicles: Vehicle[],
+  assignments: Assignment[],
+  tong_banh: number,
+  yeu_cau_chi_tieu: object[],
+  files: object[],
 }
 ```
 
-## Business rules
+## Rule `loai_pallet_xuat`
 
-- **"Biển trước"** = biển số đầu kéo (không phải mặt trước xe)
-- **"Biển sau"** = biển số rơ-moóc
-- Panel chọn lô chỉ hiện: `loai_csr === form.chung_loai` VÀ `trang_thai === "Hoàn thành"`
-- `tong_banh` AUTO = `sum(kien_a + kien_b + kien_c + kien_d)` trên tất cả assignments
-- Một lô có thể gán vào nhiều xe khác nhau (split shipment)
+`du_lieu_nha_may.xlsx` la source cao nhat cho `loai_pallet_xuat`.
 
-## UI Pattern — Layout 2 cột khi tạo đơn
+Rule chinh thuc:
 
+- `loai_pallet_xuat` chi loc theo `nha may`
+- Gia tri mac dinh ban dau lay tu Excel
+- Gia tri mo rong runtime duoc luu vao database theo dung nha may
+- UI co nut `+` ben phai o chon de them moi
+- Gia tri them moi phai duoc dung lai cho lan sau cua cung nha may
+
+### NMPHK
+
+- `Roi`
+- `Pallet sat de go`
+
+### NMCP
+
+- `Roi`
+- `PE de go`
+- `PE de nhua`
+- `Pallet go`
+- `MB4`
+- `MB5`
+
+## Rule `loai_boc`
+
+- `loai_boc` phai filter theo `nha may + day_chuyen + chung_loai`
+- Khong dung danh sach chung hard-code cho tat ca nha may
+
+## Ma don
+
+```ts
+ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`
 ```
-┌─────────────────────────┬──────────────────┐
-│ CỘT TRÁI (col-span-2)   │ CỘT PHẢI         │
-│ ┌─────────────────────┐ │ ┌──────────────┐ │
-│ │ Form thông tin đơn  │ │ │ Panel chọn   │ │
-│ └─────────────────────┘ │ │ lô hàng      │ │
-│ ┌─────────────────────┐ │ │              │ │
-│ │ Danh sách xe        │ │ │ Filter theo  │ │
-│ └─────────────────────┘ │ │ loai_csr     │ │
-│ ┌─────────────────────┐ │ │              │ │
-│ │ Lô đã gán (preview) │ │ │ Sticky top   │ │
-│ └─────────────────────┘ │ └──────────────┘ │
-└─────────────────────────┴──────────────────┘
-```
 
-### Panel chọn lô
-- Mỗi lô có nút riêng cho từng xe: `[Xe 1] [Xe 2] [Xe 3]`
-- Nút **xanh** = lô đã được gán vào xe đó
-- Click lần nữa = bỏ gán (toggle)
-- Sau khi gán → hiện ở khu vực "Lô đã gán" bên trái
-- Ở khu vực "Lô đã gán": chỉnh được số kiện A/B/C/D
+- Read-only
+- Chi auto tao khi du thong tin
+- Edit mode giu nguyen ma da luu
 
-## List view
+## Chon lo va remaining
 
-- Bảng danh sách đơn
-- Click hàng → expand inline: thông tin xe + danh sách lô
+- Hien thi lo co `trang_thai IN ("Hoan thanh", "Xuat hang")`
+- Chi dua lo vao panel neu con `remaining > 0`
+- `remaining` = tong so kien cua lo - tong da gan trong cac don khac
+
+## Quan he voi Thanh pham
+
+- Xuat het remaining -> lo chuyen `Xuat hang`
+- Con remaining -> giu `Hoan thanh`
+- Xoa don hang -> phai tinh lai remaining cua tung lo
+- Neu lo co hang kha dung tro lai sau khi xoa don -> quay ve `Hoan thanh`
+
+## Khach hang
+
+- Co thao tac tao nhanh trong module `Xuat hang`
+- Dong thoi phai co trang quan tri day du trong `Cai dat`
+
+## EUDR
+
+EUDR da duoc trien khai, khong con la y tuong tuong lai.
+
+- Module: `/dashboard/eudr`
+- Truy xuat tu `export_orders -> lots -> ngans -> dispatch_entries -> GeoJSON`
+- Ho tro QR code, zip file, file dinh kem

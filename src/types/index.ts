@@ -9,12 +9,17 @@ export interface Factory {
 export interface User {
   id: string
   username: string
+  auth_email?: string
   full_name: string
-  role: 'admin' | 'manager' | 'user'
-  factory_id: string
+  role: 'admin' | 'manager' | 'user' | 'customer'
+  factory_id: string | null
   department?: string
   status: 'pending' | 'active' | 'disabled'
-  permissions: Record<string, boolean>
+  permissions: string[]
+  approved_by?: string | null
+  approved_at?: string | null
+  disabled_by?: string | null
+  disabled_at?: string | null
 }
 
 export interface Ngan {
@@ -59,7 +64,7 @@ export interface Lot {
   tong_banh: number
   tong_kg: number
   trang_thai: 'Dở dang' | 'Hoàn thành'
-  dd_snapshot: Record<string, any> | null
+  dd_snapshot: Record<string, unknown> | null
   ghi_chu: string
 }
 
@@ -78,7 +83,7 @@ export interface QCResult {
   tieu_chuan: string
   so_mau: number
   samples: Record<string, number[]>
-  grade: Record<string, any>
+  grade: Record<string, unknown>
   dat_hang: string
   trang_thai: 'dat' | 'rot'
   parent_id: string | null
@@ -86,7 +91,7 @@ export interface QCResult {
   ly_do: string | null
   nguoi_kn: string
   ghi_chu: string
-  audit_log: any[]
+  audit_log: unknown[]
 }
 
 export interface Customer {
@@ -109,8 +114,8 @@ export interface ExportOrder {
   customer_id: string
   chung_loai: string
   loai_pallet: string
-  vehicles: any[]
-  assignments: any[]
+  vehicles: unknown[]
+  assignments: unknown[]
   tong_banh: number
 }
 

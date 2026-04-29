@@ -1,44 +1,33 @@
 ---
-description: Roadmap phát triển — đọc khi lên kế hoạch tính năng mới hoặc cần biết thứ tự ưu tiên
+description: Roadmap phat trien
 ---
 
 # Roadmap
 
-## Phase A — Fix & Polish (Hiện tại)
+## Phase A - Chuan hoa nen tang
 
-- [ ] Redirect đúng route sau khi login
-- [ ] Copyright footer
-- [ ] Browser compatibility (Chrome, Edge, Safari)
-- [ ] Responsive mobile cơ bản
-- [ ] Kiểm tra lỗi TypeScript còn sót
+- Chuan hoa tai lieu `CLAUDE.md` va `rules`
+- Dua matrix cau hinh nha may vao spec rieng
+- Dua master data va phan quyen ve `Cai dat`
+- Chuan hoa dang ky, duyet tai khoan, permission guard
 
-## Phase B — Nâng cấp Dashboard
+## Phase B - Hoan thien nghiep vu
 
-- [ ] Biểu đồ sản lượng theo tháng (line chart)
-- [ ] Biểu đồ KL khô theo loại CSR (bar chart)
-- [ ] Biểu đồ tỷ lệ đạt kiểm nghiệm (donut chart)
-- [ ] Responsive mobile đầy đủ
-- [ ] Dark mode
+- Chuan hoa cau hinh runtime trong database thay vi hard-code
+- Hoan thien quan he `Thanh pham <-> Xuat hang`
+- Hoan thien quan ly remaining va rollback trang thai lo khi xoa don
+- Chuan hoa `Tham` ve 2 gia tri `Cu`, `Moi`
 
-## Phase C — Tính năng mới
+## Phase C - Dashboard va bao cao
 
-- [ ] **Excel import/export** — import lô thành phẩm, xuất báo cáo
-- [ ] **GeoJSON map** — hiển thị 416 lô vườn trên bản đồ (12 đội)
-  - Fix lô V6T đang ở Đội 0 → sửa thành Đội 11
-  - Kiểm 28 lô có tọa độ center nằm ngoài polygon
-- [ ] **Báo cáo tổng hợp** — PDF, in ấn
-- [ ] **EUDR module** — truy xuất nguồn gốc cho khách hàng
-- [ ] **Bảo trì** — module lịch bảo trì máy móc
-- [ ] **Quản lý kho** — nhập/xuất vật tư
+- Bieu do san luong theo thang
+- Bieu do KL kho theo chung loai
+- Bieu do ti le dat kiem nghiem
+- Bao cao tong hop / PDF / in an
 
-## Ghi chú kỹ thuật
+## Phase D - Tiep tuc mo rong
 
-### GeoJSON
-- Coordinate order trong code: `[lat, lon]` (dạng chuỗi trong field `pg`)
-- GeoJSON chuẩn dùng `[lon, lat]`
-- 416 lô vườn, 12 đội (Đội 1–12), ~7,664 hectares tổng
-
-### Excel schema
-- Header row 1: field key
-- Header row 2: mô tả tiếng Việt
-- Không dùng single-row với description trong ngoặc (breaks JSON key parsing)
+- EUDR da trien khai, tiep tuc hoan thien
+- Bao tri may moc
+- Quan ly kho vat tu
+- Nang cap responsive va browser compatibility
