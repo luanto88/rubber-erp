@@ -22,6 +22,7 @@ description: Schema Supabase — tham chiếu khi viết query, migration, hoặ
 | `role_permissions` | Permission mặc định theo role | `(role, permission_code)` |
 | `user_permissions` | Permission gán thực tế cho user | `(user_id, permission_code)` |
 | `kv_store` | Key-value store (legacy) | `id` UUID |
+| `inventory_*` | Cum bang module quan ly kho vat tu / hoa chat | UUID / theo tung bang |
 
 ## Bang mo rong nen co / se can them
 
@@ -33,6 +34,7 @@ De ho tro `Cai dat`, cau hinh nha may, duyet tai khoan va phan quyen, he thong n
 | `vehicles` | Danh muc xe, kem thong tin tai xe hien hanh |
 | `maintenance_assets` | Danh muc thiet bi cho module bao tri tuong lai |
 | `maintenance_areas` | Khu vuc / vi tri thiet bi cho module bao tri tuong lai |
+| `inventory_warehouses`, `inventory_items`, `inventory_documents`, ... | Module kho vat tu / hoa chat; tat ca bang deu phai co `factory_id` |
 
 ## Quan hệ
 
@@ -75,6 +77,12 @@ dd_snapshot JSONB, is_manual_edit BOOLEAN, edit_key TEXT,
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
+Ghi chu van hanh:
+
+- `ngay_sx`: ngay mo lo ban dau
+- `ngay_ht`: ngay tron lo / ngay hoan tat lo
+- `ma_lo` la dinh danh nghiep vu duy nhat theo `factory_id`; khong duoc phep ton tai 2 ban ghi `lots` cung `ma_lo`
+
 ### `qc_results`
 ```sql
 id UUID PK, factory_id UUID, lot_id UUID→lots,
@@ -85,6 +93,14 @@ so_mau INTEGER, samples JSONB, grade JSONB,
 dat_hang TEXT, trang_thai TEXT, parent_id UUID, lan INTEGER,
 created_at TIMESTAMPTZ
 ```
+
+Ghi chu van hanh:
+
+- `lot_id` la khoa lien ket uu tien
+- `ma_lo` duoc giu de in an, truy vet va backfill du lieu cu
+- `ngay_sx` trong `qc_results` phai la ngay thanh pham hoan tat cua lo:
+  - uu tien `lots.ngay_ht`
+  - fallback `lots.ngay_sx`
 
 ### `dispatch_entries`
 ```sql
@@ -120,6 +136,12 @@ approved_by UUID, approved_at TIMESTAMPTZ,
 disabled_by UUID, disabled_at TIMESTAMPTZ,
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
+
+Ghi chu van hanh:
+
+- `auth_email` la email noi bo de anh xa `username` vao `auth.users`
+- Dinh dang hien tai: `username@auth.rubber-erp.example.com`
+- Email `.local` chi giu de tuong thich nguoc, khong dung de tao moi
 
 ### `permissions`
 ```sql

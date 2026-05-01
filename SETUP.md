@@ -1,36 +1,40 @@
-# 🏭 Rubber Factory ERP - Setup Guide
+# Rubber Factory ERP - Setup Guide
 
-## Bước 1: Tạo Database
+## Buoc 1: Tao Database
 
-1. Mở Supabase → **SQL Editor** (menu trái)
-2. Bấm **+ New query**
-3. Copy toàn bộ nội dung file `supabase/schema.sql` → Paste vào editor
-4. Bấm **Run** (Ctrl+Enter)
-5. Kiểm tra: vào **Table Editor** → phải thấy 10 bảng:
-   - factories, users, suffixes, dispatch_entries, ngans
-   - lots, qc_results, customers, export_orders, sk_history
+1. Mo Supabase -> `SQL Editor`
+2. Bam `+ New query`
+3. Copy toan bo noi dung file `supabase/schema.sql` vao editor
+4. Bam `Run`
+5. Kiem tra cac bang chinh da duoc tao
 
-## Bước 2: Lấy API Key đúng
+## Buoc 2: Cau hinh bien moi truong
 
-1. Supabase → **Settings** → **API**
-2. Copy **Project URL**: `https://xxx.supabase.co`
-3. Copy **anon public** key (bắt đầu bằng `eyJ...`)
-4. Paste vào file `.env.local`
+1. Mo Supabase -> `Settings` -> `API`
+2. Copy `Project URL`
+3. Copy `anon public key`
+4. Paste vao file `.env.local`
 
-## Bước 3: Chạy project
+## Buoc 3: Chay project
 
 ```bash
 cd rubber-erp
 npm run dev
 ```
 
-Mở http://localhost:3000
+Mo `http://localhost:3000`
 
-## Bước 4: Deploy lên Vercel
+## Auth note
+
+- He thong dang nhap bang `username`, khong bat nguoi dung nhap email thuc.
+- Ung dung tu sinh email noi bo cho `Supabase Auth` theo dang `username@auth.rubber-erp.example.com`.
+- Khong dung domain `.local` cho tai khoan auth moi.
+
+## Buoc 4: Deploy len Vercel
 
 ```bash
 npm i -g vercel
 vercel
 ```
 
-Làm theo hướng dẫn, nhập Environment Variables khi được hỏi.
+Nhap cac environment variables khi duoc hoi.

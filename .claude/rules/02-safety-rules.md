@@ -21,11 +21,27 @@ description: Quy tắc an toàn bắt buộc — áp dụng cho MỌI task, khô
 ## Cách lấy factory_id
 
 ```typescript
-const fid = localStorage.getItem("erp_factory") // UUID của nhà máy
+import { getActiveFactoryId } from "@/lib/auth"
+
+const fid = await getActiveFactoryId()
 ```
+
+Ghi chu:
+
+- `erp_factory` trong `localStorage` chi la cache
+- Khong duoc coi cache nay la source of truth duy nhat
+- Neu khong lay duoc `fid`, page phai ha loading va de auth/session layer xu ly tiep
 
 ## Cách lấy user hiện tại
 
 ```typescript
 const user = JSON.parse(localStorage.getItem("erp_user") || "{}")
 ```
+
+Rule bo sung:
+
+- Neu mot page bat `loading = true`, phai co duong `finally` hoac duong tat `loading` ro rang trong moi nhanh
+- Khong de UI treo vo han o cac thong bao:
+  - `Dang tai...`
+  - `Dang tai du lieu...`
+  - `Dang tai lo...`

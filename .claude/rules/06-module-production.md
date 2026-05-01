@@ -76,6 +76,7 @@ Phai filter theo nha may va day chuyen:
   suffix: string,
   year: string,
   ngay_sx: date,
+  ngay_ht: date | null,
   ca: string,
   ngan_id: UUID,
   loai_csr: string,
@@ -118,6 +119,15 @@ Quy tac loc:
 - `Do dang`
 - `Xuat hang`
 
+### Quy tac ngay cua lo
+
+- `ngay_sx`: ngay mo lo ban dau
+- `ngay_ht`: ngay tron lo / ngay hoan tat lo
+- Neu lo duoc nhap qua nhieu ca hoac nhieu ngay:
+  - `ngay_sx` khong doi
+  - `ngay_ht` chi duoc set khi lo chuyen sang `Hoan thanh` hoac `Xuat hang`
+- Cac module downstream can uu tien `ngay_ht` khi can ngay thanh pham hoan tat
+
 ### Xac dinh trang thai
 
 ```ts
@@ -134,6 +144,15 @@ trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang"
 - `tong_banh = kien_a + kien_b + kien_c + kien_d`
 - `tong_kg = tong_banh * loai_banh`
 - `ma_lo = ${num}${suffix}/${year}`
+
+### Quy tac day so lo
+
+- Day so lo phai lien tuc trong tung nhom `loai thanh pham + loai banh`
+- Day so lo trong nam khong phu thuoc `suffix`, `boc`, `tham`, `pallet` hay cac thuoc tinh khac
+- Nguoi dung tu chu dong reset ve `01` khi sang nam moi, nen `year` la diem cat day so
+- Tai thoi diem giao thoa cuoi nam, `so lo max` giu `/nam cu` va `so lo 01` dung `/nam moi`, khong phu thuoc tuyet doi vao `ngay_sx` la `31/12` hay `01/01`
+- Khi nguoi dung nhap so lo nhay coc trong cung nhom tren, UI phai canh bao cac so lo con trong
+- Goi y `so lo gan nhat` va logic xac dinh lo tiep theo phai tinh theo cung nhom `loai thanh pham + loai banh`
 
 ### Kien toi da theo loai banh
 
@@ -154,12 +173,37 @@ Khi lo cuoi ca truoc dang do:
 
 - Kien da du tu ca truoc -> read-only, khong tinh vao san luong ca nay
 - Kien chua du -> nhap tiep, chi tinh phan delta them vao
+- Neu lo vua dat tron trong lan nhap tiep:
+  - update chinh ban ghi `Do dang` hien co
+  - khong tao ban ghi `lots` moi cung `ma_lo`
+  - set `ngay_ht = ngay_sx` cua lan nhap hoan tat
+
+### Quy tac duy nhat `ma_lo`
+
+- Trong cung `factory_id`, `ma_lo` la dinh danh nghiep vu duy nhat
+- Khong duoc ton tai dong thoi 2 ban ghi `lots` cung `ma_lo` voi cac trang thai khac nhau
+- Neu lo `Do dang` da ton tai, thao tac sau phai tiep tuc cap nhat ban ghi do, khong duoc tao lo moi
 
 ## 5. Quan he Ngan va Thanh pham
 
 - `eligibleNgans`: chi lay `Cho san xuat`
 - Chon ngan -> cap nhat `Dang san xuat`
 - Xoa het lo cua ngan -> ngan quay ve `Cho san xuat`
+- Sua lo va doi ngan:
+  - Chan neu ngan dich vuot `110%`
+  - Sau khi luu, tinh lai ca ngan cu va ngan moi
+  - `< 100%` -> `Dang san xuat`
+  - `100% - 110%` -> giu nguyen trang thai hien tai
+  - Ngan khong con lo -> `Cho san xuat`
+
+## 5.1. Chi tiet ngan luu tren UI
+
+- Modal chi tiet ngan phai hien `Thong tin ngan` truoc
+- Phan thanh pham phai gom nhom theo `loai thanh pham + loai banh + loai boc`
+- Mac dinh chi hien header tong hop cua tung nhom, khong do danh sach lo dai ngay tu dau
+- Click header nhom -> mo danh sach `ngay san xuat`
+- Click tung ngay -> mo danh sach `lo thanh pham` chi tiet
+- Moi tang hien thi phai co thong tin tong hop `kg` va so luong de nguoi dung doc nhanh
 
 ## 6. Quan he Thanh pham va Xuat hang
 

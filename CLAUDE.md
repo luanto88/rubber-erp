@@ -47,6 +47,7 @@ src/
   10-roadmap.md
   11-factory-config.md
   12-settings-permissions.md
+  13-inventory-module.md
   storage.md
 ```
 
@@ -99,6 +100,15 @@ Quy tac van hanh:
 - Khi xoa don hang, phai tinh lai remaining cua lo
 - Neu lo con hang kha dung sau khi xoa don, trang thai lo quay ve `Hoan thanh`
 
+### 6.1. Quy tac ngay thanh pham va KN
+
+- `lots.ngay_sx`: ngay mo lo
+- `lots.ngay_ht`: ngay tron lo / hoan tat lo
+- `qc_results.ngay_sx` phai phan anh ngay thanh pham hoan tat:
+  - uu tien `lots.ngay_ht`
+  - fallback `lots.ngay_sx`
+- Neu lo ke thua qua nhieu ngay, khong duoc dung ngay mo lo de dai dien cho ngay hoan tat KN
+
 ### 7. Cai dat la noi quan tri tap trung
 
 Module `Cai dat` la noi quan tri tap trung cho:
@@ -138,11 +148,29 @@ Vi du:
 ### 8. Dang ky, duyet tai khoan, phan quyen
 
 - He thong dang nhap dung `Supabase Auth`
+- Username duoc anh xa sang email noi bo hop le theo dang `username@auth.rubber-erp.example.com`
+- Khong tao tai khoan moi voi domain `.local`
 - Tai khoan dang ky moi mac dinh `pending`
 - Admin duyet tai khoan trong `Cai dat`
 - Phan quyen theo `module + action chuan`, them mot so action dac biet
 - Quyen phai duoc check o ca UI va logic thao tac
 - Tai khoan `disabled` khong duoc phep vao ung dung
+
+### 8.1. Quy tac session va loading
+
+- `Supabase Auth session` la source of truth cho dang nhap
+- `erp_user` va `erp_factory` trong `localStorage` chi la cache session cho UI
+- Khi can `factory_id`, uu tien helper `getActiveFactoryId()` thay vi doc thang `localStorage`
+- App phai chu dong refresh session neu token sap het han
+- Dashboard layout phai tu dong dong bo lai session khi:
+  - bootstrap
+  - focus lai cua so
+  - tab quay lai visible
+  - heartbeat dinh ky
+- Cac ham load du lieu co bat `loading` phai co `try/finally` hoac co che ha loading tuong duong
+- Khong duoc de page roi vao trang thai gia:
+  - session loi nhung hien `Khong co du lieu phu hop`
+  - request loi nhung spinner treo `Dang tai...`
 
 ## Rules can doc khi lam viec
 
@@ -166,3 +194,5 @@ Vi du:
 - Supabase JS v2 khong throw DB error -> luon check `error`
 - Khong dung `localStorage` de luu data nghiep vu
 - Tai lieu chi tiet uu tien nam trong `rules`, khong nhan ban day lai vao file nay
+- Mac dinh giao dien va noi dung trong app phai viet bang tieng Viet co dau
+- Chi thay doi ngon ngu hien thi khi nguoi dung yeu cau ro rang

@@ -31,11 +31,38 @@ description: Module kiem nghiem va grading logic
 }
 ```
 
+## Quy tac ngay cua phieu KN
+
+- `ngay_kn`: ngay lap / ngay kiem nghiem
+- `qc_results.ngay_sx`: ngay thanh pham hoan tat cua lo duoc kiem
+- Nguon ngay uu tien:
+  - `lots.ngay_ht` neu da co
+  - fallback `lots.ngay_sx` neu lo chua co `ngay_ht`
+- Dieu nay thay the logic cu chi dua vao ngay mo lo
+- Vi du:
+  - lo mo ngay `10/04/2026`
+  - tron lo ngay `11/04/2026`
+  - KN ngay `12/04/2026`
+  -> `qc_results.ngay_sx = 11/04/2026`
+
 ## Rule quan trong
 
 - `pkn`: dem theo nam va theo nha may
 - `lo_kn`: dem tich luy theo nha may, khong reset
 - Cac lo cung 1 phieu dung chung `batch_id`
+- Khi tao phieu KN thuong, danh sach lo phai loc theo ngay thanh pham hoan tat, tuc `ngay_ht` neu co
+
+## Canonical lot va doi chieu lo
+
+- `lot_id` la lien ket chinh giua `qc_results` va `lots`
+- Neu du lieu cu bi lech `lot_id`, he thong duoc phep doi chieu bo sung theo `ma_lo`
+- Khi ton tai nhieu ban ghi `lots` cung `ma_lo`, he thong phai chon `canonical lot` theo uu tien:
+  - `Xuat hang`
+  - `Hoan thanh`
+  - `Do dang`
+  - ban ghi co `ngay_ht` moi hon
+  - ban ghi co `tong_banh` lon hon
+- Sau khi doi chieu thanh cong, `qc_results` phai duoc cap nhat lai ve `lot_id`, `ma_lo`, `ngay_sx` cua `canonical lot`
 
 ## Quy tac `dat_hang`
 
@@ -76,3 +103,34 @@ Khong dung gia tri `Khong dat` cho `dat_hang`.
 
 - `HANG DK`: luon la `loai_csr`
 - `DAT HANG`: dung `dat_hang`, co the la `CSR10RH`
+
+## Quy tac import KN
+
+- Import Excel chi duoc insert `qc_results` khi match duoc sang `lots`
+- Khong duoc tao `qc_results` mo coi voi `lot_id = null` cho du lieu moi
+- Truoc khi insert, he thong phai chay preflight tren toan bo file import:
+  - doi chieu tung `LO_NM` voi `canonical lot`
+  - doi chieu `NGAY_SX` trong file voi ngay hieu luc cua lo:
+    - uu tien `lots.ngay_ht`
+    - fallback `lots.ngay_sx`
+  - kiem tra lo da ton tai trong `qc_results` chua
+- Neu 1 dong trong file da co KN hoac sai ngay so voi lo thanh pham:
+  - khong duoc insert dong do
+  - phai dua vao danh sach canh bao
+  - he thong chu dong giu lai va import chi cac lo chua KN, dung ngay
+- Neu trong cung 1 file co 2 dong trung cung 1 lo:
+  - chi duoc giu dong dau tien
+  - cac dong trung sau phai bi bo qua va canh bao
+- Neu khong match duoc lo thanh pham:
+  - dong import do phai bao loi
+  - khong duoc insert tam bang `ma_lo` roi xu ly sau
+
+## Quan he xoa phieu va trang thai lo
+
+Khi xoa phieu kiem nghiem:
+
+- He thong phai lay truoc danh sach `lot_id` lien quan tu `qc_results`
+- Sau khi xoa phieu, cac lo thanh pham lien quan phai duoc cap nhat lai `trang_thai = Hoan thanh`
+- Rule nay ap dung cho ca:
+  - xoa 1 phieu
+  - xoa hang loat nhieu phieu

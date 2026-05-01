@@ -1,133 +1,108 @@
-# Module Ngăn lưu & Thành phẩm — Logic đầy đủ
+# Module Ngan Luu va Thanh Pham
 
-## ⚠️ Lưu ý quan trọng về trạng thái ngăn
+## 1. Trang thai ngan hop le
 
-Chỉ có **5 trạng thái hợp lệ**, **KHÔNG có "Hoàn thành"**:
+Chi co 5 trang thai hop le:
 
-| Trạng thái | Điều kiện | Module set |
-|---|---|---|
-| `Đang nhận` | Chỉ có `ngay_bd`, chưa có `ngay_kt` | Ngăn lưu (tạo ngăn) |
-| `Đóng` | Có `ngay_kt` (có thể cùng ngày `ngay_bd`) | Ngăn lưu (nhập ngày kết thúc) |
-| `Chờ sản xuất` | Đủ 21 ngày kể từ `ngay_bd` — **tự động** | Hệ thống (auto-transition) |
-| `Đang sản xuất` | User chọn ngăn trong form Thành phẩm | **Thành phẩm** (khi chọn ngăn) |
-| `Đã sản xuất` | User bấm "Lưu và đánh dấu đã sản xuất" | **Thành phẩm** (button đặc biệt) |
+- `Dang nhan (Can cap nhat)`
+- `Cho san xuat`
+- `Dang san xuat`
+- `Da san xuat`
+- `Dong`
 
----
+Khong co trang thai `Hoan thanh` cho ngan.
 
-## Module Ngăn lưu (`ngans`)
+## 2. Rule tao ngan
 
-### Tạo ngăn
+- Vi tri ngan goi y theo danh sach `N1 -> N24`
+- Phai an cac ngan dang duoc su dung o cac trang thai:
+  - `Dang nhan (Can cap nhat)`
+  - `Cho san xuat`
+  - `Dang san xuat`
+  - `Dong`
+- Cho phep nhap tay ten ngan, toi da 10 ky tu
+- `ma_ngan` la field tu sinh, khong cho sua tay
+- `KL tuoi` va `KL kho` la field read-only, tu tinh tu danh sach xe da chon
 
-**Gợi ý tên ngăn:**
-- Gợi ý N1–N24, **ẩn các ngăn đang chứa nguyên liệu** (trang_thai ∈ ["Đang nhận", "Đóng", "Chờ sản xuất", "Đang sản xuất"])
-- Cho phép nhập tay tên ngăn tùy ý, **tối đa 10 ký tự**
+## 3. Tinh khoi luong theo loai nguyen lieu
 
-**Trạng thái khi tạo:**
-- Chỉ nhập `ngay_bd` → trạng thái: `Đang nhận`
-- Nhập cả `ngay_bd` + `ngay_kt` → trạng thái: `Đóng`
-- `ngay_bd` và `ngay_kt` có thể là cùng 1 ngày
+Khi tao / sua ngan, chi duoc cong dung cot KL cua dung loai nguyen lieu da chon:
 
-**Auto-transition:**
-- Khi `ngay_bd` đủ 21 ngày → trạng thái tự chuyển thành `Chờ sản xuất`
-- Ngăn `Chờ sản xuất` mới xuất hiện trong dropdown chọn ngăn tại module Thành phẩm
+- `Mu chen` -> `kl_ct`, `kl_ck`
+- `Mu dong chen` -> `kl_dct`, `kl_dck`
+- `Mu dong khoi` -> `kl_dkt`, `kl_dkk`
+- `Mu day` -> `kl_dt`, `kl_dk`
+- `Mu nuoc` -> `kl_mn`, `kl_mnk`
 
-### Chọn xe vào ngăn
+Helper tham chieu trong code: `getKLFromTrip(...)` tai `src/app/dashboard/storage/page.tsx`.
 
-- Khi xe được chọn vào ngăn, xe đó **biến mất khỏi danh sách cảnh báo**
-- Các xe chưa được chọn vào ngăn **tiếp tục hiển thị trong phần cảnh báo**
+## 4. Auto-transition ngan
 
-### Tính KL quy khô ngăn theo loại nguyên liệu
+- Chi co `ngay_bd`, chua co `ngay_kt` -> `Dang nhan (Can cap nhat)`
+- Co ca `ngay_bd` va `ngay_kt` -> `Cho san xuat` sau khi du dieu kien dong me theo UI hien tai
+- Ngan du 21 ngay moi duoc xem la san sang dua vao san xuat
+- Module thanh pham chi duoc chon cac ngan hop le theo rule nghiep vu hien hanh
 
-Khi tạo ngăn, người dùng chọn loại NL. **Chỉ cộng đúng cột KL của loại NL đó** — dùng helper `getKLFromTrip(t, loai_nl)` trong `storage/page.tsx`:
+## 5. Quan he ngan va thanh pham
 
-| Loại NL chọn | Cột tươi dùng | Cột khô dùng |
-|---|---|---|
-| Mủ chén | `kl_ct` | `kl_ck` |
-| Mủ đông chén | `kl_dct` | `kl_dck` |
-| Mủ đông khối | `kl_dkt` | `kl_dkk` |
-| Mủ dây | `kl_dt` | `kl_dk` |
-| Mủ nước | `kl_mn` | `kl_mnk` |
+### Khi tao lo thanh pham
 
-Ví dụ: ngăn chọn "Mủ đông chén" thì chỉ cộng `kl_dct` (tươi) và `kl_dck` (khô). Auto-recalc khi user đổi loại NL.
+- Chon ngan trong module thanh pham -> ngan chuyen sang `Dang san xuat`
+- Bam `Luu va danh dau da san xuat` -> ngan chuyen sang `Da san xuat`
 
-### KL tươi/khô và Mã ngăn — read-only
+### Khi xoa lo thanh pham
 
-- **KL tươi, KL khô:** hiển thị dạng `<div>` (không có `<input>`), tự tính từ trips được chọn × loại NL
-- **Mã ngăn:** auto-generate theo `[Vị trí]-[Nguồn gốc]-[Loại NL viết tắt]-[XL]-[dd/mm/yy]-[dd/mm/yy]`, không cho sửa tay
-- `TripItem` lưu toàn bộ raw KL fields (`kl_ct/kl_ck`, `kl_dct/kl_dck`, `kl_dkt/kl_dkk`, `kl_dt/kl_dk`, `kl_mn/kl_mnk`), không pre-compute tổng
+- Neu xoa het lo cua ngan -> ngan quay ve `Cho san xuat`
 
----
+### Khi sua lo thanh pham va doi sang ngan khac
 
-## Module Thành phẩm — Quan hệ với Ngăn lưu
+Truoc khi luu:
 
-### Ngăn hiển thị trong dropdown chọn ngăn
+- Neu ty le lap day du kien cua ngan dich > `110%` -> chan thao tac
 
-Chỉ hiện ngăn có `trang_thai = "Chờ sản xuất"` (đủ 21 ngày ủ).  
-Không hiện: "Đang nhận", "Đóng", "Đã sản xuất".
+Sau khi luu:
 
-### Khi user **chọn ngăn** để sản xuất
+- Tinh lai ca `ngan cu` va `ngan moi`
+- Neu ngan khong con lo nao -> `Cho san xuat`
+- Neu ty le lap day `< 100%` -> `Dang san xuat`
+- Neu ty le nam trong `100% - 110%` -> giu nguyen trang thai hien tai
 
-→ **Ngay lập tức** cập nhật trạng thái ngăn: `Chờ sản xuất` → `Đang sản xuất`  
-→ Cập nhật đồng bộ về module Ngăn lưu (gọi `loadData`)
+## 6. Rule ty le lap day
 
-### Nút lưu — 2 trường hợp theo % lấp đầy ngăn
+- Ty le lap day = `tong tong_kg cac lo trong ngan / tong_kho ngan * 100`
+- Muc `100% - 110%` la vung hop le de tiep tuc giu trang thai hien tai
+- Vuot `110%` thi khong cho chuyen lo sang ngan do trong form sua
 
-**Tỷ lệ lấp đầy** = tổng `tong_kg` các lô / `tong_kho` ngăn × 100%
+## 7. Chi tiet ngan luu tren UI
 
-| % lấp đầy | Nút hiển thị | Hành động |
-|---|---|---|
-| < 100% | "Lưu" | Lưu lô, ngăn giữ trạng thái "Đang sản xuất" |
-| ≥ 100% | "Lưu" + **"Lưu và đánh dấu đã sản xuất"** | User chọn nút nào tùy ý |
-| > 110% | **Bắt buộc** "Lưu và đánh dấu đã sản xuất" | Không cho thêm lô mới |
+Khi bam `Xem chi tiet` trong module ngan luu:
 
-**Khi bấm "Lưu và đánh dấu đã sản xuất":**
-→ Ngăn chuyển sang `Đã sản xuất`  
-→ Cập nhật đồng bộ về module Ngăn lưu ngay lập tức
+- Luon hien thi `Thong tin ngan` truoc
+- Phan thanh pham khong hien danh sach dai ngay tu dau
+- Phai gom nhom thanh pham theo:
+  - `loai thanh pham + loai banh + loai boc`
+- Moi nhom chi hien 1 header tong hop:
+  - ten nhom
+  - tong `kg`
+  - tong so `lo`
+  - tong so `ngay san xuat`
+- Khi click vao header nhom -> mo danh sach `ngay san xuat`
+- Moi ngay san xuat chi hien 1 dong tong hop:
+  - ngay
+  - ten nhom
+  - tong `kg`
+  - tong so `lo`
+- Khi click vao tung ngay -> moi hien danh sach `lo thanh pham` chi tiet
 
-**Quan trọng:** User vẫn có thể bấm "Lưu" (không đánh dấu xong) khi ở mức 100–110%, ngăn vẫn là "Đang sản xuất".
+Muc tieu UI:
 
-### Khi user **xóa lô** của ngăn
+- Khong de modal thanh mot danh sach dai va cung
+- Uu tien tong quan truoc, chi tiet sau
+- Nguoi dung di tu `ngan -> nhom thanh pham -> ngay san xuat -> lo chi tiet`
 
-```
-Sau khi xóa → tính lại % lấp đầy ngăn
-  % ≥ 100% → trạng thái ngăn: "Đang sản xuất" (giữ nguyên)
-  % < 100% → trạng thái ngăn: "Đang sản xuất" (giữ nguyên)
-  Xóa HẾT lô của ngăn → trạng thái ngăn: "Chờ sản xuất"
-```
+## 8. Code references
 
-→ Cập nhật ngay về module Ngăn lưu sau mỗi lần xóa
-
----
-
-## Tóm tắt luồng trạng thái ngăn
-
-```
-[Tạo ngăn, chỉ ngay_bd]
-        ↓
-   "Đang nhận"
-        ↓ (thêm ngay_kt)
-      "Đóng"    ←── hoặc ngay từ đầu nếu nhập cả ngay_bd + ngay_kt
-
-[Tạo ngăn chỉ ngay_bd, sau 21 ngày]
-        ↓
-  "Chờ sản xuất"  ←── xuất hiện trong Thành phẩm dropdown
-        ↓ (user chọn ngăn trong form Thành phẩm)
-  "Đang sản xuất" ←── cập nhật ngay
-        ↓ (user xóa hết lô)
-  "Chờ sản xuất"  ←── quay về
-        ↓ (user bấm "Lưu và đánh dấu đã sản xuất", % ≥ 100%)
-   "Đã sản xuất"  ←── cập nhật ngay
-```
-
----
-
-## Code references
-
-- Ngăn lưu UI: `src/app/dashboard/storage/page.tsx`
-- Thành phẩm: `src/app/dashboard/product/page.tsx`
-- `getKLFromTrip(t, loai_nl)` trong storage/page.tsx: helper tính KL đúng loại NL
-- `eligibleNgans` trong product/page.tsx: filter ngăn để chọn — chỉ lấy `trang_thai = "Chờ sản xuất"`
-- Ngăn update khi chọn ngăn: gọi ngay khi `session.ngan_id` thay đổi (không chờ lưu)
-- Ngăn update khi lưu lô: trong `handleCreateSave`, sau vòng lặp insert
-- Ngăn update khi xóa lô: trong `handleDelete`
-- `handleSave` trong storage: bắt buộc check `{ error }` từ Supabase trước khi đóng modal
+- UI ngan luu: `src/app/dashboard/storage/page.tsx`
+- UI thanh pham: `src/app/dashboard/product/page.tsx`
+- Rule sync trang thai ngan khi sua lo: `handleEditSave`
+- Rule chi tiet ngan theo nhom / ngay / lo: `openView`, `groupedViewLots`
