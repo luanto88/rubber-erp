@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import {
@@ -25,6 +26,11 @@ import {
   UserCheck,
   SlidersHorizontal,
   Database,
+  Warehouse,
+  Boxes,
+  Beaker,
+  Ruler,
+  ArrowUpRight,
 } from "lucide-react"
 
 type Suffix = {
@@ -271,7 +277,7 @@ export default function SettingsPage() {
       return
     }
     if (!form.name.trim()) {
-      setError("Ten khong duoc de trong")
+      setError("Tên không được để trống")
       return
     }
     if (!/^[a-z0-9]+$/.test(form.code.trim())) {
@@ -522,7 +528,7 @@ export default function SettingsPage() {
               disabled={savingFactory}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
             >
-              <Save size={13} /> {savingFactory ? "Dang luu..." : "Luu thong tin"}
+              <Save size={13} /> {savingFactory ? "Đang lưu..." : "Lưu thông tin"}
             </button>
           )}
         </div>
@@ -575,7 +581,7 @@ export default function SettingsPage() {
             <div className="grid grid-cols-3 gap-4">
               {[
                 { label: "Cho duyet", value: pendingUsers.length, tone: "amber" },
-                { label: "Dang hoat dong", value: activeUsers.length, tone: "emerald" },
+                { label: "Đang hoạt động", value: activeUsers.length, tone: "emerald" },
                 { label: "Da khoa", value: disabledUsers.length, tone: "red" },
               ].map((item) => (
                 <div key={item.label} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
@@ -605,7 +611,7 @@ export default function SettingsPage() {
                     {pendingUsers.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                          Khong co tai khoan cho duyet
+                          Không có tài khoản chờ duyệt
                         </td>
                       </tr>
                     ) : (
@@ -740,10 +746,57 @@ export default function SettingsPage() {
             <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
           </div>
 
-          <div className="p-5">
-            <div className="text-sm text-slate-500">
-              Khu nay se quan tri matrix cau hinh theo nha may:
-              <span className="font-semibold text-slate-700"> loai_banh, loai_boc, loai_tham, loai_pallet_sx, loai_pallet_xuat</span>.
+          <div className="p-5 space-y-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+              Tại đây quản trị các cấu hình riêng theo nhà máy. Với module kho, danh mục kho, nhóm vật tư, vật tư hóa chất và định mức tiêu hao phải được mở từ khu vực này để giữ đúng quy ước toàn hệ thống.
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {[
+                {
+                  title: "Kho vật tư / hóa chất",
+                  note: "Quản lý mã kho, tên kho, thủ kho và trạng thái hoạt động theo từng nhà máy.",
+                  href: "/dashboard/inventory/settings?tab=warehouses",
+                  icon: Warehouse,
+                },
+                {
+                  title: "Nhóm vật tư",
+                  note: "Phân loại vật tư để dùng cho nhập xuất tồn, thống kê và cảnh báo tồn kho.",
+                  href: "/dashboard/inventory/settings?tab=categories",
+                  icon: Boxes,
+                },
+                {
+                  title: "Vật tư / hóa chất",
+                  note: "Cấu hình kho chứa, quản lý số lô, hạn sử dụng và giới hạn tồn min-max.",
+                  href: "/dashboard/inventory/settings?tab=items",
+                  icon: Beaker,
+                },
+                {
+                  title: "Định mức tiêu hao",
+                  note: "Quản lý định mức theo thành phẩm để phục vụ báo cáo tháng và đối chiếu thực tế.",
+                  href: "/dashboard/inventory/settings?tab=norms",
+                  icon: Ruler,
+                },
+              ].map((entry) => (
+                <Link
+                  key={entry.title}
+                  href={entry.href}
+                  className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-700">
+                      <entry.icon size={18} />
+                    </div>
+                    <ArrowUpRight size={16} className="text-slate-300 transition-colors group-hover:text-emerald-600" />
+                  </div>
+                  <div className="mt-4 text-base font-extrabold text-slate-800">{entry.title}</div>
+                  <div className="mt-2 text-sm leading-6 text-slate-500">{entry.note}</div>
+                </Link>
+              ))}
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+              Ghi nhớ: người dùng vận hành kho sẽ thao tác trong module <span className="font-bold">Quản lý kho</span>, còn thay đổi danh mục và định mức phải đi qua <span className="font-bold">Cài đặt / Cấu hình nhà máy</span>.
             </div>
           </div>
         </div>
@@ -755,26 +808,26 @@ export default function SettingsPage() {
         <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Tag size={16} className="text-emerald-600" />
-            <span className="font-extrabold text-slate-700">Hau to ma lo</span>
-            <span className="text-xs text-slate-500 ml-1">({suffixes.length} hau to)</span>
+            <span className="font-extrabold text-slate-700">Hậu tố mã lô</span>
+            <span className="text-xs text-slate-500 ml-1">({suffixes.length} hậu tố)</span>
           </div>
           {canManageSettings && (
             <button
               onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
             >
-              <Plus size={13} /> Them hau to
+              <Plus size={13} /> Thêm hậu tố
             </button>
           )}
         </div>
 
         <div className="p-4">
           {loading ? (
-            <div className="p-8 text-center text-slate-400 text-sm">Dang tai...</div>
+            <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
           ) : suffixes.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Tag size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Chua co hau to nao</p>
+              <p className="text-sm">Chưa có hậu tố nào</p>
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -835,7 +888,7 @@ export default function SettingsPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-lg font-extrabold text-slate-800">
-                {modal === "add" ? "Them hau to moi" : `Sua hau to "${editCode}"`}
+                {modal === "add" ? "Thêm hậu tố mới" : `Sửa hậu tố "${editCode}"`}
               </h2>
               <button onClick={() => setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl">
                 <X size={18} />
@@ -897,7 +950,7 @@ export default function SettingsPage() {
                 disabled={saving}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
               >
-                {saving ? "Dang luu..." : "Luu"}
+                {saving ? "Đang lưu..." : "Lưu"}
               </button>
             </div>
           </div>
@@ -912,7 +965,7 @@ export default function SettingsPage() {
                 <AlertTriangle size={18} />
               </div>
               <div>
-                <h3 className="font-extrabold text-slate-800">Xoa hau to &quot;{delConfirm}&quot;?</h3>
+                <h3 className="font-extrabold text-slate-800">Xóa hậu tố &quot;{delConfirm}&quot;?</h3>
                 <p className="text-sm text-slate-500 mt-1">Hanh dong nay khong the hoan tac.</p>
               </div>
             </div>
@@ -921,7 +974,7 @@ export default function SettingsPage() {
                 Huy
               </button>
               <button onClick={() => handleDelete(delConfirm)} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">
-                Xoa
+                Xóa
               </button>
             </div>
           </div>
@@ -934,7 +987,7 @@ export default function SettingsPage() {
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-800">
-                  {userEditor.mode === "approve" ? "Duyet tai khoan" : "Sua quyen nguoi dung"}
+                  {userEditor.mode === "approve" ? "Duyệt tài khoản" : "Sửa quyền người dùng"}
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {userEditor.fullName} ({userEditor.username})
@@ -954,7 +1007,7 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nha may *</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhà máy *</label>
                   <select
                     value={userEditor.factoryId}
                     onChange={(e) => setUserEditor({ ...userEditor, factoryId: e.target.value })}
@@ -1018,7 +1071,7 @@ export default function SettingsPage() {
                 disabled={savingUser}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
               >
-                {savingUser ? "Dang luu..." : userEditor.mode === "approve" ? "Duyet va kich hoat" : "Luu quyen"}
+                {savingUser ? "Đang lưu..." : userEditor.mode === "approve" ? "Duyệt và kích hoạt" : "Lưu quyền"}
               </button>
             </div>
           </div>

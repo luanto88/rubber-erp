@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { getActiveFactoryId } from "@/lib/auth";
 import {
   Plus,
   Search,
@@ -28,6 +29,7 @@ type Lot = {
   suffix: string;
   year: string;
   ngay_sx: string;
+  ngay_ht?: string | null;
   ca: string;
   ngan_id: string | null;
   day_chuyen: string;
@@ -69,6 +71,7 @@ type SuffixItem = {
 };
 
 type SessionHeader = {
+  year: string;
   ngay_sx: string; // dùng chung mọi ca, mặc định maxDate+1
   day_chuyen: string;
   so_ca: 1 | 2 | 3;
@@ -163,6 +166,12 @@ type LotContribution = Lot & {
   disp_d: number;
 };
 
+type LotSeries = {
+  loai_csr: string;
+  loai_banh: number;
+  year: string;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CA_OPTS = ["A", "B", "C"];
 const THAM_OPTS = ["cũ", "Mới"];
@@ -220,6 +229,17 @@ function autoTrangThai(
   return "Dở dang";
 }
 
+function getLotCompletionDate(
+  trang_thai: string,
+  currentNgaySX: string,
+  previousNgayHT?: string | null,
+): string | null {
+  if (trang_thai === "Hoàn thành" || trang_thai === "Xuất hàng") {
+    return currentNgaySX || previousNgayHT || null;
+  }
+  return null;
+}
+
 function calcDraftTotals(
   draft: LotDraft,
   loai_banh: number,
@@ -248,11 +268,44 @@ function yearFromDate(dateStr: string): string {
     : new Date().getFullYear().toString().slice(-2);
 }
 
+function normalizeLotYear(year: string, fallback?: string): string {
+  const sanitized = year.replace(/\D/g, "").slice(-2);
+  if (sanitized.length === 2) return sanitized;
+  return fallback ? normalizeLotYear(fallback) : yearFromDate(todayStr());
+}
+
 function fmtKg(kg: number): string {
   return Math.round(kg).toLocaleString("vi-VN") + " kg";
 }
 
 const CA_ORDER_MAP: Record<string, number> = { A: 1, B: 2, C: 3, D: 4 };
+
+function isSameLotSeries(
+  lot: Pick<Lot, "loai_csr" | "loai_banh" | "year">,
+  series: LotSeries,
+) {
+  return (
+    lot.loai_csr === series.loai_csr &&
+    Number(lot.loai_banh) === Number(series.loai_banh) &&
+    lot.year === series.year
+  );
+}
+
+function getJumpedLotNums(existingNums: number[], plannedNums: number[]): number[] {
+  const anchor = existingNums.length > 0 ? Math.max(...existingNums) : 0;
+  const futureNums = Array.from(
+    new Set(plannedNums.filter((num) => num > anchor)),
+  ).sort((a, b) => a - b);
+  const missing: number[] = [];
+  let cursor = anchor;
+
+  futureNums.forEach((num) => {
+    for (let next = cursor + 1; next < num; next++) missing.push(next);
+    cursor = Math.max(cursor, num);
+  });
+
+  return missing;
+}
 
 function generateLotDrafts(
   fromNum: number,
@@ -268,11 +321,10 @@ function generateLotDrafts(
   const cfg = getLoaiBanhConfig(loai_csr, sessionBanh);
   const { max_per_kien, lo_tron, loai_banh } = cfg;
   const drafts: LotDraft[] = [];
+  const series: LotSeries = { loai_csr, loai_banh, year: yearStr };
 
   for (let n = fromNum; n <= toNum; n++) {
-    const dbLot = existingLots.find(
-      (l) => l.num === n && l.loai_csr === loai_csr && l.suffix === suffix && l.year === yearStr,
-    );
+    const dbLot = existingLots.find((l) => l.num === n && isSameLotSeries(l, series));
     const role: LotDraft["role"] =
       fromNum === toNum
         ? "single"
@@ -432,6 +484,7 @@ function todayStr(): string {
 function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
   const defaultCsr = `${prefix}10`;
   return {
+    year: normalizeLotYear(yearFromDate(todayStr())),
     ngay_sx: todayStr(),
     day_chuyen: "Mủ tạp",
     so_ca: 1,
@@ -455,7 +508,7 @@ function emptyEditForm(): EditForm {
     ma_lo: "",
     num: 0,
     suffix: "cs",
-    year: new Date().getFullYear().toString().slice(-2),
+    year: normalizeLotYear(yearFromDate(todayStr())),
     ngay_sx: todayStr(),
     ca: "A",
     ngan_id: "",
@@ -528,35 +581,42 @@ export default function ProductPage() {
   // ── Load data ──────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
     setLoading(true);
-    let q = supabase
-      .from("lots")
-      .select("*, ngans(ten_ngan, ma_ngan, loai_nl)")
-      .eq("factory_id", fid)
-      .order("ngay_sx", { ascending: false })
-      .order("created_at", { ascending: false });
+    try {
+      const q = supabase
+        .from("lots")
+        .select("*, ngans(ten_ngan, ma_ngan, loai_nl)")
+        .eq("factory_id", fid)
+        .order("ngay_sx", { ascending: false })
+        .order("created_at", { ascending: false });
 
-    const [{ data: lotsData }, { data: ngansData }, { data: statsData }] =
-      await Promise.all([
-        q,
-        supabase
-          .from("ngans")
-          .select(
-            "id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt",
-          )
-          .eq("factory_id", fid),
-        supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid),
-      ]);
-    setLots(lotsData || []);
-    setNgans(ngansData || []);
-    setLotsStats(statsData || []);
-    setLoading(false);
+      const [{ data: lotsData }, { data: ngansData }, { data: statsData }] =
+        await Promise.all([
+          q,
+          supabase
+            .from("ngans")
+            .select(
+              "id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt",
+            )
+            .eq("factory_id", fid),
+          supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid),
+        ]);
+      setLots(lotsData || []);
+      setNgans(ngansData || []);
+      setLotsStats(statsData || []);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory");
-    if (!fid) return;
-    setFactoryId(fid);
-    loadData(fid);
+    const bootstrap = async () => {
+      const fid = await getActiveFactoryId();
+      if (!fid) {
+        setLoading(false);
+        return;
+      }
+      setFactoryId(fid);
+      loadData(fid);
 
     supabase
       .from("factories")
@@ -582,6 +642,8 @@ export default function ProductPage() {
       .eq("factory_id", fid)
       .or("day_chuyen.is.null,day_chuyen.eq.")
       .then(() => {});
+    };
+    void bootstrap();
   }, [loadData]);
 
   // ── Computed Bóc tách sản lượng (Contributions) ────────────────────────────
@@ -679,7 +741,7 @@ export default function ProductPage() {
     hoanThanh: lots.filter(
       (l) => l.trang_thai === "Hoàn thành" || l.trang_thai === "Xuất hàng",
     ).length,
-    dorDang: lots.filter((l) => l.trang_thai === "Dở dang").length,
+    dorDang: lots.filter((l) => l.trang_thai === "D? dang").length,
     tongBanh: filteredContribs.reduce(
       (s, c) => s + (c.tong_banh_cua_ca || 0),
       0,
@@ -787,17 +849,62 @@ export default function ProductPage() {
     return { lots_count, banh };
   }, [caSections]);
 
-  const sessionYear = yearFromDate(session.ngay_sx);
+  const sessionYear = session.year;
+  const currentSeries = useMemo<LotSeries>(() => ({
+    loai_csr: session.loai_csr,
+    loai_banh: session.loai_banh,
+    year: sessionYear,
+  }), [session.loai_csr, session.loai_banh, sessionYear]);
+  const jumpLotNums = useMemo(() => {
+    const existingNums = lots
+      .filter((l) => isSameLotSeries(l, currentSeries))
+      .map((l) => l.num)
+      .filter((num) => num > 0);
+    const plannedNums = caSections
+      .flatMap((cs) => cs.lots.map((lot) => lot.num))
+      .filter((num) => num > 0);
+    return getJumpedLotNums(existingNums, plannedNums);
+  }, [caSections, currentSeries, lots]);
 
-  const getMaxLotNum = (loai_csr: string, suffix: string, year: string) =>
-    lots.filter((l) => l.loai_csr === loai_csr && l.suffix === suffix && l.year === year)
+  const getMaxLotNum = (
+    loai_csr: string,
+    loai_banh: number,
+    year: string,
+  ) =>
+    lots
+      .filter((l) => isSameLotSeries(l, { loai_csr, loai_banh, year }))
       .reduce((m, l) => Math.max(m, l.num || 0), 0);
+
+  const getSuggestedStartNum = (
+    loai_csr: string,
+    loai_banh: number,
+    year: string,
+  ) => {
+    const latestDang = lots
+      .filter(
+        (l) =>
+          isSameLotSeries(l, { loai_csr, loai_banh, year }) &&
+          l.trang_thai === "Dở dang",
+      )
+      .sort((a, b) => {
+        if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
+        return (CA_ORDER_MAP[b.ca] || 0) - (CA_ORDER_MAP[a.ca] || 0);
+      })[0];
+
+    return latestDang?.num ?? getMaxLotNum(loai_csr, loai_banh, year) + 1;
+  };
 
   useEffect(() => {
     if (!factoryId) return;
-    setMaxNumFromDB(getMaxLotNum(session.loai_csr, session.suffix, sessionYear));
+    setMaxNumFromDB(
+      getMaxLotNum(
+        session.loai_csr,
+        session.loai_banh,
+        sessionYear,
+      ),
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [factoryId, session.suffix, sessionYear, lots]);
+  }, [factoryId, session.loai_csr, session.loai_banh, sessionYear, lots]);
 
   // ── Session handlers ───────────────────────────────────────────────────────
   const autoSelectNganId = (dayChuyenVal: string): string => {
@@ -844,18 +951,28 @@ export default function ProductPage() {
     if (
       patch.loai_csr !== undefined ||
       patch.suffix !== undefined ||
-      patch.loai_banh !== undefined
+      patch.loai_banh !== undefined ||
+      patch.year !== undefined
     ) {
       const newCsr = patch.loai_csr ?? session.loai_csr;
       const newSuffix =
         patch.suffix !== undefined ? patch.suffix : session.suffix;
       const newBanh = patch.loai_banh ?? session.loai_banh;
+      const newYear = normalizeLotYear(patch.year ?? session.year, session.year);
       setCaSections((prev) => {
         return prev.map((cs, ci) => {
           let fromNum = cs.from_num;
           let toNum = cs.to_num;
-          if (ci === 0 && patch.suffix !== undefined) {
-            fromNum = getMaxLotNum(newCsr, newSuffix, sessionYear) + 1;
+          if (
+            ci === 0 &&
+            (
+              patch.suffix !== undefined ||
+              patch.loai_csr !== undefined ||
+              patch.loai_banh !== undefined ||
+              patch.year !== undefined
+            )
+          ) {
+            fromNum = getSuggestedStartNum(newCsr, newBanh, newYear);
             toNum = Math.max(fromNum, cs.to_num);
           }
           const prevLast = ci > 0 ? prev[ci - 1].lots.at(-1) : undefined;
@@ -870,7 +987,7 @@ export default function ProductPage() {
               newCsr,
               newBanh,
               lots,
-              sessionYear,
+              newYear,
               prevLast?.trang_thai === "Dở dang" ? prevLast : undefined,
             ),
           };
@@ -1061,7 +1178,7 @@ export default function ProductPage() {
     const nextDay = new Date(maxDate);
     nextDay.setDate(nextDay.getDate() + 1);
     const ngaySX = presetDate || nextDay.toISOString().slice(0, 10);
-    const yrStr = yearFromDate(ngaySX);
+    const yrStr = normalizeLotYear(yearFromDate(ngaySX));
 
     const lastChiThi = lots.length > 0 ? lots[0]?.chi_thi || "1" : "1";
     const defaultSuffix =
@@ -1076,7 +1193,7 @@ export default function ProductPage() {
       .filter(
         (l) =>
           l.loai_csr === defaultCsr &&
-          l.suffix === defaultSuffix &&
+          Number(l.loai_banh) === Number(cfg.loai_banh) &&
           l.year === yrStr &&
           l.trang_thai === "Dở dang",
       )
@@ -1086,9 +1203,10 @@ export default function ProductPage() {
       })[0];
     const fromNum = latestDang
       ? latestDang.num
-      : getMaxLotNum(defaultCsr, defaultSuffix, yrStr) + 1;
+      : getMaxLotNum(defaultCsr, cfg.loai_banh, yrStr) + 1;
 
     const s: SessionHeader = {
+      year: yrStr,
       ngay_sx: ngaySX,
       day_chuyen: "Mủ tạp",
       so_ca: 1,
@@ -1112,12 +1230,17 @@ export default function ProductPage() {
   // ── Save create ────────────────────────────────────────────────────────────
   const handleCreateSave = async (markNganDone: boolean) => {
     if (!factoryId || !session.ngan_id) return;
+    const lotYear = normalizeLotYear(session.year, session.ngay_sx);
+    if (lotYear.length !== 2) {
+      setSaveError("Năm lô phải có đúng 2 chữ số.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     let hasError = false;
     try {
       const cfg = getLoaiBanhConfig(session.loai_csr, session.loai_banh);
-      const year = yearFromDate(session.ngay_sx);
+      const year = lotYear;
       for (const cs of caSections) {
         for (const draft of cs.lots) {
           if (draft.is_already_completed) continue; // Bỏ qua lô đã khóa
@@ -1195,6 +1318,11 @@ export default function ProductPage() {
           };
 
           if (draft.is_continuation && draft.existing_id) {
+            const ngay_ht = getLotCompletionDate(
+              trang_thai,
+              session.ngay_sx,
+              lots.find((l) => l.id === draft.existing_id)?.ngay_ht,
+            );
             const { error } = await supabase
               .from("lots")
               .update({
@@ -1205,6 +1333,7 @@ export default function ProductPage() {
                 tong_banh: tb,
                 tong_kg,
                 trang_thai,
+                ngay_ht,
                 dd_snapshot,
                 ca: cs.ca,
               })
@@ -1216,6 +1345,17 @@ export default function ProductPage() {
             }
           } else {
             const ma_lo = buildMaLo(draft.num, session.suffix, year);
+            const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
+            if (duplicateLot) {
+              setSaveError(
+                duplicateLot.trang_thai === "Dở dang"
+                  ? `Lô ${ma_lo} đang tồn tại ở trạng thái Dở dang. Hãy tiếp tục lô hiện có thay vì tạo mới.`
+                  : `Lô ${ma_lo} đã tồn tại trong thành phẩm, không thể tạo trùng.`,
+              );
+              hasError = true;
+              break;
+            }
+            const ngay_ht = getLotCompletionDate(trang_thai, session.ngay_sx);
             const { error } = await supabase.from("lots").insert({
               factory_id: factoryId,
               day_chuyen: session.day_chuyen,
@@ -1224,6 +1364,7 @@ export default function ProductPage() {
               suffix: session.suffix,
               year,
               ngay_sx: session.ngay_sx,
+              ngay_ht,
               ca: cs.ca,
               ngan_id: session.ngan_id,
               loai_csr: session.loai_csr,
@@ -1329,9 +1470,9 @@ export default function ProductPage() {
       if (
         patch.num !== undefined ||
         patch.suffix !== undefined ||
-        patch.ngay_sx !== undefined
+        patch.year !== undefined
       ) {
-        const yr = yearFromDate(patch.ngay_sx ?? next.ngay_sx);
+        const yr = normalizeLotYear(patch.year ?? next.year, prev.year);
         next.year = yr;
         next.ma_lo = buildMaLo(next.num, next.suffix, yr);
       }
@@ -1339,12 +1480,78 @@ export default function ProductPage() {
     });
   };
 
+  const getProjectedNganPct = (nganId: string, excludeLotId?: string) => {
+    const ngan = ngans.find((item) => item.id === nganId);
+    if (!ngan || !ngan.tong_kho) return 0;
+
+    const totalKg = lots
+      .filter((lot) => lot.ngan_id === nganId && lot.id !== excludeLotId)
+      .reduce((sum, lot) => sum + (lot.tong_kg || 0), 0);
+
+    return ((totalKg + (editForm.tong_kg || 0)) / ngan.tong_kho) * 100;
+  };
+
+  const syncNganStatusAfterLotEdit = async (nganId: string) => {
+    const ngan = ngans.find((item) => item.id === nganId);
+    if (!ngan) return;
+
+    const { data: nganLots, error: lotsError } = await supabase
+      .from("lots")
+      .select("id,tong_kg")
+      .eq("factory_id", factoryId!)
+      .eq("ngan_id", nganId);
+    if (lotsError) throw new Error(lotsError.message);
+
+    if (!nganLots || nganLots.length === 0) {
+      const { error: emptyStatusError } = await supabase
+        .from("ngans")
+        .update({ trang_thai: "Chờ sản xuất" })
+        .eq("id", nganId);
+      if (emptyStatusError) throw new Error(emptyStatusError.message);
+      return;
+    }
+
+    const totalKg = nganLots.reduce((sum, lot) => sum + (lot.tong_kg || 0), 0);
+    const pct = ngan.tong_kho > 0 ? (totalKg / ngan.tong_kho) * 100 : 0;
+
+    if (pct < 100) {
+      const { error: underStatusError } = await supabase
+        .from("ngans")
+        .update({ trang_thai: "Đang sản xuất" })
+        .eq("id", nganId);
+      if (underStatusError) throw new Error(underStatusError.message);
+    }
+  };
+
   const handleEditSave = async () => {
     if (!factoryId || !editId) return;
+    const lotYear = normalizeLotYear(editForm.year, editForm.ngay_sx);
+    if (lotYear.length !== 2) {
+      setSaveError("Năm lô phải có đúng 2 chữ số.");
+      return;
+    }
     setSaving(true);
     try {
       // Lấy dbLot cũ để xem có history không
       const dbLot = lots.find((l) => l.id === editId);
+      if (!dbLot) {
+        setSaveError("Không tìm thấy lô cần sửa.");
+        return;
+      }
+
+      const targetNganId = editForm.ngan_id || "";
+      if (targetNganId) {
+        const projectedPct =
+          targetNganId === dbLot.ngan_id
+            ? getProjectedNganPct(targetNganId, editId)
+            : getProjectedNganPct(targetNganId);
+        if (projectedPct > 110) {
+          setSaveError(
+            `Không thể chuyển sang ngăn này vì tỷ lệ lấp đầy sẽ là ${projectedPct.toFixed(1)}%, vượt 110%.`,
+          );
+          return;
+        }
+      }
       const dd_snapshot = dbLot?.dd_snapshot || {};
       dd_snapshot.kien_a = editForm.kien_a;
       dd_snapshot.kien_b = editForm.kien_b;
@@ -1353,29 +1560,40 @@ export default function ProductPage() {
       dd_snapshot.timestamp = new Date().toISOString();
       // Note: manual edit doesnt touch history array to keep it simple, but marks it edited
 
-      await supabase
+      const { error: updateError } = await supabase
         .from("lots")
         .update({
           ...editForm,
+          year: lotYear,
+          ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
           factory_id: factoryId,
           ngan_id: editForm.ngan_id || null,
+          ngay_ht: getLotCompletionDate(
+            editForm.trang_thai,
+            editForm.ngay_sx,
+            dbLot.ngay_ht,
+          ),
           dd_snapshot,
           is_manual_edit: true,
         })
         .eq("id", editId);
-      if (editForm.ngan_id) {
-        const { data: rem } = await supabase
-          .from("lots")
-          .select("id")
-          .eq("ngan_id", editForm.ngan_id);
-        if ((rem?.length ?? 0) > 0)
-          await supabase
-            .from("ngans")
-            .update({ trang_thai: "Đang sản xuất" })
-            .eq("id", editForm.ngan_id);
+      if (updateError) {
+        setSaveError(`Lỗi cập nhật lô: ${updateError.message}`);
+        return;
+      }
+      const affectedNganIds = Array.from(
+        new Set([dbLot.ngan_id, editForm.ngan_id].filter(Boolean) as string[]),
+      );
+      for (const nganId of affectedNganIds) {
+        await syncNganStatusAfterLotEdit(nganId);
       }
       setEditModal(false);
       loadData(factoryId);
+      setSaveError(null);
+    } catch (err) {
+      setSaveError(
+        `Lỗi cập nhật ngăn lưu: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -1434,6 +1652,11 @@ export default function ProductPage() {
           trang_thai: newTrangThai,
           ca: prevCa,
           ngay_sx: prevEntry.ngay_sx || lot.ngay_sx,
+          ngay_ht: getLotCompletionDate(
+            newTrangThai,
+            prevEntry.ngay_sx || lot.ngay_sx,
+            lot.ngay_ht,
+          ),
           dd_snapshot: {
             ...lot.dd_snapshot,
             ...revertedKiens,
@@ -1567,6 +1790,25 @@ export default function ProductPage() {
             />
             <span className="text-[10px] text-slate-400 ml-3">
               Năm lô: {sessionYear}
+            </span>
+          </div>
+
+          <div className="mb-3">
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              Năm lô
+            </label>
+            <input
+              value={session.year}
+              onChange={(e) =>
+                updateSession({
+                  year: e.target.value.replace(/\D/g, "").slice(0, 2),
+                })
+              }
+              placeholder="25"
+              className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            />
+            <span className="text-[10px] text-slate-400 ml-3">
+              Có thể điều chỉnh tay khi giao thoa cuối năm
             </span>
           </div>
 
@@ -1729,6 +1971,30 @@ export default function ProductPage() {
                     className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg"
                   >
                     {l.ma_lo} · {l.tong_banh} bành
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasNgan && jumpLotNums.length > 0 && (
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={14} className="text-rose-600" />
+                <span className="text-xs font-bold text-rose-700">
+                  Cảnh báo nhảy lô {session.loai_csr} · {session.loai_banh}kg ({jumpLotNums.length} số còn trống)
+                </span>
+              </div>
+              <div className="text-[11px] text-rose-600 mb-2">
+                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên tục.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {jumpLotNums.map((num) => (
+                  <span
+                    key={num}
+                    className="px-2 py-1 bg-rose-100 text-rose-700 text-xs font-bold rounded-lg"
+                  >
+                    {buildMaLo(num, session.suffix, sessionYear)}
                   </span>
                 ))}
               </div>
@@ -2967,7 +3233,7 @@ export default function ProductPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
                     Số lô *
@@ -3025,6 +3291,21 @@ export default function ProductPage() {
                     onChange={(e) =>
                       updateEditForm({ ngay_sx: e.target.value })
                     }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Năm lô
+                  </label>
+                  <input
+                    value={editForm.year}
+                    onChange={(e) =>
+                      updateEditForm({
+                        year: e.target.value.replace(/\D/g, "").slice(0, 2),
+                      })
+                    }
+                    placeholder="25"
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -3092,6 +3373,40 @@ export default function ProductPage() {
                     value={`${editForm.loai_banh} kg/bành`}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Loại bọc
+                  </label>
+                  <select
+                    value={editForm.boc}
+                    onChange={(e) => updateEditForm({ boc: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
+                    {getBocsForLoaiCSR(
+                      editForm.day_chuyen,
+                      editForm.loai_csr,
+                    ).map((b) => (
+                      <option key={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Thảm
+                  </label>
+                  <select
+                    value={editForm.tham}
+                    onChange={(e) => updateEditForm({ tham: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
+                    {THAM_OPTS.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

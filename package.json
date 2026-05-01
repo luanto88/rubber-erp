@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate:legacy-users": "node ./scripts/migrate-legacy-users.mjs"
+    "normalize:warehouse-maintenance-data": "node ./scripts/normalize-warehouse-maintenance-data.mjs",
+    "migrate:legacy-users": "node ./scripts/migrate-legacy-users.mjs",
+    "backfill:quality-lot-dates": "node ./scripts/backfill-quality-lot-dates.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.102.1",

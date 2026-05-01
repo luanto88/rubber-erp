@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
+import { getActiveFactoryId } from "@/lib/auth"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map, Lock, Unlock, Upload } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -337,14 +338,15 @@ export default function DispatchPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
-    let q = supabase.from("dispatch_entries")
-      .select("*")
-      .eq("factory_id", fid)
-      .order("ngay", { ascending: false })
-    if (filterFrom) q = q.gte("ngay", filterFrom)
-    if (filterTo)   q = q.lte("ngay", filterTo)
-    const { data } = await q
-    const raw = (data || []) as DispatchEntry[]
+    try {
+      let q = supabase.from("dispatch_entries")
+        .select("*")
+        .eq("factory_id", fid)
+        .order("ngay", { ascending: false })
+      if (filterFrom) q = q.gte("ngay", filterFrom)
+      if (filterTo)   q = q.lte("ngay", filterTo)
+      const { data } = await q
+      const raw = (data || []) as DispatchEntry[]
 
     // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
     const rehydrated = raw.map(e => ({
@@ -376,13 +378,19 @@ export default function DispatchPage() {
       const yy = String(d.getFullYear()).slice(-2)
       return { ...e, ma_dx: `DX-${dd}${mm}${yy}/${seq}` }
     })
-    setEntries(withCode)
-    setLoading(false)
+      setEntries(withCode)
+    } finally {
+      setLoading(false)
+    }
   }, [filterFrom, filterTo])
 
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory")
-    if (!fid) return
+    const bootstrap = async () => {
+      const fid = await getActiveFactoryId()
+      if (!fid) {
+        setLoading(false)
+        return
+      }
     setFactoryId(fid)
     loadData(fid)
     // Factory name + code + isAdmin
@@ -393,8 +401,10 @@ export default function DispatchPage() {
         setFactoryCode((fd.code as string) || "")
       }
     })
-    const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
-    setIsAdmin(u.role === "admin")
+      const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
+      setIsAdmin(u.role === "admin")
+    }
+    void bootstrap()
   }, [loadData])
 
   // ── Filtered ──────────────────────────────────────────────────────────────

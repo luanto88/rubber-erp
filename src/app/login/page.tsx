@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -203,22 +204,38 @@ function LoginPageContent() {
 
   if (booting) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-        <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full" />
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="text-5xl mb-3" aria-hidden="true">🏭</div>
-          <h1 className="text-2xl font-extrabold text-slate-800">PTCS Phước Hòa</h1>
-          <p className="text-sm text-slate-500 mt-1">Hệ thống Quản lý Sản xuất</p>
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex justify-center">
+            <Image
+              src="/logo-phk-moi.png"
+              alt="Logo PHK"
+              width={120}
+              height={120}
+              className="h-28 w-28 object-contain"
+              priority
+            />
+          </div>
+          <h1 className="text-2xl font-extrabold uppercase tracking-tight text-slate-800">
+            CTY TNHH PTCS PHƯỚC HÒA KAMPONG THOM
+          </h1>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
+            NHÀ MÁY CHẾ BIẾN
+          </p>
+          <p className="mt-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
+            HỆ THỐNG QUẢN LÝ SẢN XUẤT
+          </p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
           {activeSessionUser ? (
             <div className="space-y-5">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
@@ -232,7 +249,7 @@ function LoginPageContent() {
               <div className="grid grid-cols-1 gap-3">
                 <button
                   onClick={() => router.replace("/dashboard")}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
+                  className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700"
                 >
                   Vào dashboard
                 </button>
@@ -251,7 +268,7 @@ function LoginPageContent() {
                     }
                   }}
                   disabled={loading}
-                  className="w-full py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl border border-slate-300 transition-all disabled:opacity-50"
+                  className="w-full rounded-xl border border-slate-300 bg-white py-3 font-bold text-slate-700 transition-all hover:bg-slate-50 disabled:opacity-50"
                 >
                   {loading ? "Đang xử lý..." : "Đăng xuất để đổi tài khoản"}
                 </button>
@@ -259,100 +276,100 @@ function LoginPageContent() {
             </div>
           ) : (
             <>
-          <div className="flex gap-2 mb-6">
-            {(["login", "register"] as const).map((item) => (
-              <button
-                key={item}
-                onClick={() => {
-                  setTab(item)
-                  setError("")
-                  setNotice("")
-                }}
-                className={
-                  "flex-1 py-2.5 rounded-full text-sm font-bold transition-all " +
-                  (tab === item
-                    ? "bg-emerald-600 text-white shadow-md"
-                    : "text-slate-500 hover:bg-emerald-50")
-                }
-              >
-                {item === "login" ? "Đăng nhập" : "Đăng ký"}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <select
-              value={factoryId}
-              onChange={(e) => setFactoryId(e.target.value)}
-              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
-            >
-              {factoryOptions.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-
-            {tab === "register" && (
-              <>
-                <input
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Họ tên *"
-                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
-                />
-                <input
-                  value={dept}
-                  onChange={(e) => setDept(e.target.value)}
-                  placeholder="Phòng ban"
-                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
-                />
-              </>
-            )}
-
-            <input
-              value={username}
-              onChange={(e) => setUsername(normalizeUsername(e.target.value))}
-              placeholder="Tên đăng nhập *"
-              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
-            />
-
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mật khẩu *"
-              onKeyDown={(e) =>
-                e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
-              }
-              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-slate-50 outline-none focus:border-emerald-500"
-            />
-
-            {notice && (
-              <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
-                {notice}
+              <div className="mb-6 flex gap-2">
+                {(["login", "register"] as const).map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => {
+                      setTab(item)
+                      setError("")
+                      setNotice("")
+                    }}
+                    className={
+                      "flex-1 rounded-full py-2.5 text-sm font-bold transition-all " +
+                      (tab === item
+                        ? "bg-emerald-600 text-white shadow-md"
+                        : "text-slate-500 hover:bg-emerald-50")
+                    }
+                  >
+                    {item === "login" ? "Đăng nhập" : "Đăng ký"}
+                  </button>
+                ))}
               </div>
-            )}
 
-            {error && (
-              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
-                {error}
+              <div className="space-y-4">
+                <select
+                  value={factoryId}
+                  onChange={(e) => setFactoryId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                >
+                  {factoryOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+
+                {tab === "register" && (
+                  <>
+                    <input
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Họ tên *"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                    />
+                    <input
+                      value={dept}
+                      onChange={(e) => setDept(e.target.value)}
+                      placeholder="Phòng ban"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </>
+                )}
+
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                  placeholder="Tên đăng nhập *"
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                />
+
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Mật khẩu *"
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
+                  }
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                />
+
+                {notice && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+                    {notice}
+                  </div>
+                )}
+
+                {error && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  onClick={tab === "login" ? handleLogin : handleRegister}
+                  disabled={loading}
+                  className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
+                </button>
               </div>
-            )}
-
-            <button
-              onClick={tab === "login" ? handleLogin : handleRegister}
-              disabled={loading}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-            >
-              {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
-            </button>
-          </div>
             </>
           )}
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6">v2.0 · PTCS Phước Hòa © 2019-2026</p>
+        <p className="mt-6 text-center text-xs text-slate-400">v2.0 · NMCB Phước Hòa KPT © 2026</p>
       </div>
     </div>
   )
@@ -362,8 +379,8 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-          <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full" />
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
         </div>
       }
     >

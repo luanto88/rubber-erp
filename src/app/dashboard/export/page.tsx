@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { supabase } from "@/lib/supabase"
+import { getActiveFactoryId } from "@/lib/auth"
 import {
   FileOutput, Plus, X, Search, Truck, Package, ChevronDown, ChevronUp,
   Edit2, Trash2, Check, QrCode, UserPlus, AlertTriangle, GripVertical
@@ -143,16 +144,19 @@ export default function ExportPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
-    let q = supabase.from("export_orders")
-      .select("*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)")
-      .eq("factory_id", fid)
-      .order("ngay", { ascending: false })
-    if (filterLoai) q = q.eq("chung_loai", filterLoai)
-    if (filterFrom) q = q.gte("ngay", filterFrom)
-    if (filterTo)   q = q.lte("ngay", filterTo)
-    const { data } = await q
-    setOrders(data || [])
-    setLoading(false)
+    try {
+      let q = supabase.from("export_orders")
+        .select("*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)")
+        .eq("factory_id", fid)
+        .order("ngay", { ascending: false })
+      if (filterLoai) q = q.eq("chung_loai", filterLoai)
+      if (filterFrom) q = q.gte("ngay", filterFrom)
+      if (filterTo)   q = q.lte("ngay", filterTo)
+      const { data } = await q
+      setOrders(data || [])
+    } finally {
+      setLoading(false)
+    }
   }, [filterLoai, filterFrom, filterTo])
 
   const loadLots = useCallback(async (fid: string) => {
@@ -181,15 +185,21 @@ export default function ExportPage() {
   }, [])
 
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory")
-    if (!fid) return
-    setFactoryId(fid)
-    loadData(fid)
-    loadLots(fid)
-    loadQcResults(fid)
-    loadCustomers(fid)
-    supabase.from("factories").select("id,name").eq("id", fid).single()
-      .then(({ data }) => { if (data) setFactory(data) })
+    const bootstrap = async () => {
+      const fid = await getActiveFactoryId()
+      if (!fid) {
+        setLoading(false)
+        return
+      }
+      setFactoryId(fid)
+      loadData(fid)
+      loadLots(fid)
+      loadQcResults(fid)
+      loadCustomers(fid)
+      supabase.from("factories").select("id,name").eq("id", fid).single()
+        .then(({ data }) => { if (data) setFactory(data) })
+    }
+    void bootstrap()
   }, [loadData, loadLots, loadQcResults, loadCustomers])
 
   // ── Compute remaining per lot ─────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -83,16 +83,16 @@ const ORG: ONode = {
                 { id: "cn-tn2", title: "CN tiếp nhận", children: [] },
                 { id: "cn-drc2", title: "CN nướng DRC", children: [] },
                 { id: "cn-pc2", title: "CN pha chế", children: [] },
-                { id: "cn-dd2", title: "CN đàm đông", children: [] },
+                { id: "cn-dd2", title: "CN đánh đông", children: [] },
               ],
             },
             {
               id: "catruong", title: "Ca trưởng Mủ tạp - Mủ nước", children: [
                 { id: "cn-ckeo",   title: "CN cán kéo",  children: [] },
-                { id: "cn-cham",   title: "CN cán hàm",  children: [] },
+                { id: "cn-cham",   title: "CN cán băm",  children: [] },
                 { id: "cn-phamu",  title: "CN phả mủ",   children: [] },
                 { id: "cn-ralo",   title: "CN ra lò",    children: [] },
-                { id: "cn-canep",  title: "CN cán ép",   children: [] },
+                { id: "cn-canep",  title: "CN cân ép",   children: [] },
                 { id: "cn-baogoi", title: "CN bao gói",  children: [] },
                 { id: "cn-vokien", title: "CN vô kiện",  children: [] },
                 { id: "cn-nhatrac",title: "CN nhặt rác", children: [] },
@@ -353,8 +353,19 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-lg border-b border-slate-200/60" style={{ transition: "all 0.3s" }}>
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">🏭</span>
-            <span className="font-bold text-slate-800 text-lg tracking-tight">PTCS Phước Hòa</span>
+            <div className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-200 bg-white p-1 shadow-sm">
+              <Image
+                src="/logo-phk-moi.png"
+                alt="Logo PHK"
+                width={36}
+                height={36}
+                className="h-8 w-8 object-contain"
+                priority
+              />
+            </div>
+            <span className="font-bold text-slate-800 text-sm md:text-base tracking-tight">
+              CTY TNHH PTCS PHƯỚC HÒA KAMPONG THOM-NHÀ MÁY CHẾ BIẾN
+            </span>
           </div>
           <div className="hidden md:flex items-center gap-8">
             {[["#gioi-thieu","Giới thiệu"],["#to-chuc","Tổ chức"],["#tieu-chuan","Tiêu chuẩn"],["#san-pham","Sản phẩm"],["#quy-trinh","Quy trình"]].map(([h,l]) => (
@@ -594,8 +605,16 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
             <div>
               <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">🏭</span>
-                <span className="font-bold text-white text-lg">PTCS Phước Hòa</span>
+                <div className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-700/60 bg-white p-1">
+                  <Image
+                    src="/logo-phk-moi.png"
+                    alt="Logo PHK"
+                    width={36}
+                    height={36}
+                    className="h-8 w-8 object-contain"
+                  />
+                </div>
+                <span className="font-bold text-white text-lg">CTY TNHH PTCS PHƯỚC HÒA KAMPONG THOM-NHÀ MÁY CHẾ BIẾN</span>
               </div>
               <p className="text-sm leading-relaxed">Nhà máy chế biến cao su Phước Hòa Kampong Thom — Sản xuất cao su thiên nhiên tiêu chuẩn kỹ thuật (CSR) đạt chứng nhận quốc tế.</p>
             </div>

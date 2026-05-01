@@ -12,7 +12,8 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 
-const AUTH_EMAIL_DOMAIN = "auth.rubber-erp.local"
+const AUTH_EMAIL_DOMAIN = "auth.rubber-erp.example.com"
+const LEGACY_AUTH_EMAIL_DOMAIN = "auth.rubber-erp.local"
 
 function normalizeUsername(value) {
   return value.trim().toLowerCase()
@@ -20,6 +21,16 @@ function normalizeUsername(value) {
 
 function usernameToAuthEmail(username) {
   return `${normalizeUsername(username)}@${AUTH_EMAIL_DOMAIN}`
+}
+
+function legacyUsernameToAuthEmail(username) {
+  return `${normalizeUsername(username)}@${LEGACY_AUTH_EMAIL_DOMAIN}`
+}
+
+function authEmailsForUsername(username) {
+  const primaryEmail = usernameToAuthEmail(username)
+  const legacyEmail = legacyUsernameToAuthEmail(username)
+  return primaryEmail === legacyEmail ? [primaryEmail] : [primaryEmail, legacyEmail]
 }
 
 const roleDefaults = {
@@ -111,7 +122,9 @@ async function main() {
   for (const legacy of legacyUsers || []) {
     const username = normalizeUsername(legacy.username)
     const authEmail = usernameToAuthEmail(username)
-    let authUser = authByEmail.get(authEmail)
+    let authUser = authEmailsForUsername(username)
+      .map((email) => authByEmail.get(email))
+      .find(Boolean)
 
     if (!authUser) {
       const { data, error } = await supabase.auth.admin.createUser({

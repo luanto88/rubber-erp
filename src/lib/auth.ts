@@ -25,7 +25,9 @@ export type SessionUser = Profile & {
   permissions: PermissionCode[]
 }
 
-const AUTH_EMAIL_DOMAIN = "auth.rubber-erp.local"
+const AUTH_EMAIL_DOMAIN = "auth.rubber-erp.example.com"
+const LEGACY_AUTH_EMAIL_DOMAIN = "auth.rubber-erp.local"
+const SESSION_REFRESH_LEEWAY_SECONDS = 120
 
 export function normalizeUsername(value: string) {
   return value.trim().toLowerCase()
@@ -33,6 +35,16 @@ export function normalizeUsername(value: string) {
 
 export function usernameToAuthEmail(username: string) {
   return `${normalizeUsername(username)}@${AUTH_EMAIL_DOMAIN}`
+}
+
+export function legacyUsernameToAuthEmail(username: string) {
+  return `${normalizeUsername(username)}@${LEGACY_AUTH_EMAIL_DOMAIN}`
+}
+
+export function authEmailsForUsername(username: string) {
+  const primaryEmail = usernameToAuthEmail(username)
+  const legacyEmail = legacyUsernameToAuthEmail(username)
+  return primaryEmail === legacyEmail ? [primaryEmail] : [primaryEmail, legacyEmail]
 }
 
 export function clearLegacySession() {
@@ -68,6 +80,34 @@ export function persistLegacySession(user: SessionUser) {
 
 export async function getAuthSession() {
   const { data, error } = await supabase.auth.getSession()
+  if (error) throw error
+  return data.session
+}
+
+function isSessionExpiringSoon(session: Session | null) {
+  if (!session?.expires_at) return !session
+  return session.expires_at - Math.floor(Date.now() / 1000) <= SESSION_REFRESH_LEEWAY_SECONDS
+}
+
+export function isAuthSessionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes("jwt") ||
+    normalized.includes("token") ||
+    normalized.includes("session") ||
+    normalized.includes("refresh") ||
+    normalized.includes("auth") ||
+    normalized.includes("401") ||
+    normalized.includes("403")
+  )
+}
+
+export async function getFreshAuthSession() {
+  const session = await getAuthSession()
+  if (session && !isSessionExpiringSoon(session)) return session
+
+  const { data, error } = await supabase.auth.refreshSession()
   if (error) throw error
   return data.session
 }
@@ -147,7 +187,7 @@ export async function buildSessionUser(authUser: AuthUser) {
 }
 
 export async function hydrateActiveSession() {
-  const session = await getAuthSession()
+  const session = await getFreshAuthSession()
   if (!session?.user) {
     clearLegacySession()
     return { session: null, user: null as SessionUser | null }
@@ -164,9 +204,49 @@ export async function hydrateActiveSession() {
   return { session, user }
 }
 
+export async function getActiveFactoryId() {
+  const session = await getFreshAuthSession()
+  if (!session?.user) {
+    clearLegacySession()
+    return null
+  }
+
+  const cachedFactoryId = localStorage.getItem("erp_factory")
+  if (cachedFactoryId) return cachedFactoryId
+
+  const user = await buildSessionUser(session.user)
+  if (user.status === "active" && user.factory_id) {
+    persistLegacySession(user)
+    return user.factory_id
+  }
+
+  clearLegacySession()
+  return null
+}
+
 export async function signInWithUsername(username: string, password: string) {
-  const authEmail = usernameToAuthEmail(username)
-  return supabase.auth.signInWithPassword({ email: authEmail, password })
+  let lastError: Error | null = null
+
+  for (const authEmail of authEmailsForUsername(username)) {
+    const result = await supabase.auth.signInWithPassword({ email: authEmail, password })
+    if (!result.error) return result
+
+    lastError = result.error
+    const message = result.error.message.toLowerCase()
+    const isInvalidCredentialError =
+      message.includes("invalid login credentials") ||
+      message.includes("email not confirmed") ||
+      message.includes("invalid email or password")
+
+    if (!isInvalidCredentialError) {
+      return result
+    }
+  }
+
+  return {
+    data: { session: null, user: null },
+    error: lastError,
+  }
 }
 
 export async function signUpWithUsername(input: {
@@ -176,44 +256,30 @@ export async function signUpWithUsername(input: {
   department: string
   factoryId: string
 }) {
-  const authEmail = usernameToAuthEmail(input.username)
-
-  const { data, error } = await supabase.auth.signUp({
-    email: authEmail,
-    password: input.password,
-    options: {
-      data: {
-        username: normalizeUsername(input.username),
-        full_name: input.fullName.trim(),
-      },
+  const response = await fetch("/api/register", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      username: normalizeUsername(input.username),
+      password: input.password,
+      fullName: input.fullName.trim(),
+      department: input.department.trim(),
+      factoryId: input.factoryId,
+    }),
   })
 
-  if (error) return { data, error }
-  if (!data.user) {
+  const result = await response.json().catch(() => null)
+
+  if (!response.ok) {
     return {
-      data,
-      error: new Error("Khong tao duoc tai khoan auth"),
+      data: null,
+      error: new Error(result?.error || "Khong the dang ky tai khoan"),
     }
   }
 
-  const { error: profileError } = await supabase.from("profiles").insert({
-    id: data.user.id,
-    username: normalizeUsername(input.username),
-    auth_email: authEmail,
-    full_name: input.fullName.trim(),
-    factory_id: input.factoryId,
-    department: input.department.trim() || null,
-    role: "user",
-    status: "pending",
-  })
-
-  if (profileError) {
-    await supabase.auth.signOut()
-    return { data, error: profileError }
-  }
-
-  return { data, error: null }
+  return { data: result, error: null }
 }
 
 export function authBlockReason(user: SessionUser | Profile | null) {
@@ -243,6 +309,13 @@ export const DEFAULT_PERMISSION_CODES = [
   "storage.create",
   "storage.edit",
   "storage.delete",
+  "inventory.view",
+  "inventory.create",
+  "inventory.edit",
+  "inventory.delete",
+  "inventory.post",
+  "inventory.analytics",
+  "inventory.settings",
   "product.view",
   "product.create",
   "product.edit",
@@ -277,6 +350,12 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "storage.view",
     "storage.create",
     "storage.edit",
+    "inventory.view",
+    "inventory.create",
+    "inventory.edit",
+    "inventory.post",
+    "inventory.analytics",
+    "inventory.settings",
     "product.view",
     "product.create",
     "product.edit",
@@ -294,6 +373,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
   user: [
     "dispatch.view",
     "storage.view",
+    "inventory.view",
+    "inventory.analytics",
     "product.view",
     "quality.view",
     "export.view",

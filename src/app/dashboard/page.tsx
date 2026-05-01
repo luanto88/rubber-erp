@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase"
 import { Package, Warehouse, ClipboardCheck, FileOutput, Truck, Plus, Map, TrendingUp, ArrowRight } from "lucide-react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { useRouter } from "next/navigation"
+import { getActiveFactoryId } from "@/lib/auth"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -54,25 +55,29 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const load = async () => {
-      const fid = localStorage.getItem("erp_factory")
-      if (!fid) return
+      const fid = await getActiveFactoryId()
+      if (!fid) {
+        setLoading(false)
+        return
+      }
 
-      // Factory name
-      const { data: f } = await supabase.from("factories").select("name, prefix").eq("id", fid).single()
-      if (f) setFactoryName(f.name)
+      try {
+        // Factory name
+        const { data: f } = await supabase.from("factories").select("name, prefix").eq("id", fid).single()
+        if (f) setFactoryName(f.name)
 
-      // Counts
-      const [lots, ngans, qc, orders, dispatch] = await Promise.all([
-        supabase.from("lots").select("id", { count: "exact", head: true }).eq("factory_id", fid),
-        supabase.from("ngans").select("id", { count: "exact", head: true }).eq("factory_id", fid),
-        supabase.from("qc_results").select("id", { count: "exact", head: true }).eq("factory_id", fid),
-        supabase.from("export_orders").select("id", { count: "exact", head: true }).eq("factory_id", fid),
-        supabase.from("dispatch_entries").select("id", { count: "exact", head: true }).eq("factory_id", fid),
-      ])
-      setStats({
-        lots: lots.count || 0, ngans: ngans.count || 0, qc: qc.count || 0,
-        orders: orders.count || 0, dispatch: dispatch.count || 0
-      })
+        // Counts
+        const [lots, ngans, qc, orders, dispatch] = await Promise.all([
+          supabase.from("lots").select("id", { count: "exact", head: true }).eq("factory_id", fid),
+          supabase.from("ngans").select("id", { count: "exact", head: true }).eq("factory_id", fid),
+          supabase.from("qc_results").select("id", { count: "exact", head: true }).eq("factory_id", fid),
+          supabase.from("export_orders").select("id", { count: "exact", head: true }).eq("factory_id", fid),
+          supabase.from("dispatch_entries").select("id", { count: "exact", head: true }).eq("factory_id", fid),
+        ])
+        setStats({
+          lots: lots.count || 0, ngans: ngans.count || 0, qc: qc.count || 0,
+          orders: orders.count || 0, dispatch: dispatch.count || 0
+        })
 
       // ── Charts data ────────────────────────────────────────────────────
       // 1. Lots by CSR type (bar chart)
@@ -152,7 +157,9 @@ export default function DashboardPage() {
         )
       }
 
-      setLoading(false)
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
