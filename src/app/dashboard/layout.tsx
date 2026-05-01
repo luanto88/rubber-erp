@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
@@ -18,7 +19,14 @@ import {
   Warehouse,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
+import {
+  authBlockReason,
+  hasPermission,
+  hydrateActiveSession,
+  isAuthSessionError,
+  signOutEverywhere,
+  type SessionUser,
+} from "@/lib/auth"
 
 type NavLeaf = {
   key: string
@@ -46,13 +54,29 @@ const NAV: NavItem[] = [
   { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
   {
     key: "production",
-    label: "Quản lý Sản xuất",
+    label: "Quản lý sản xuất",
     icon: Factory,
     children: [
       { key: "/dashboard/dispatch", label: "Điều xe", icon: Truck, permission: "dispatch.view" },
-      { key: "/dashboard/storage", label: "Kho nguyên liệu", icon: Warehouse, permission: "storage.view" },
+      {
+        key: "/dashboard/storage",
+        label: "Kho nguyên liệu",
+        icon: Warehouse,
+        permission: "storage.view",
+      },
+      {
+        key: "/dashboard/inventory",
+        label: "Quản lý kho",
+        icon: Warehouse,
+        permission: "inventory.view",
+      },
       { key: "/dashboard/product", label: "Thành phẩm", icon: Package, permission: "product.view" },
-      { key: "/dashboard/quality", label: "Chất lượng", icon: ClipboardCheck, permission: "quality.view" },
+      {
+        key: "/dashboard/quality",
+        label: "Chất lượng",
+        icon: ClipboardCheck,
+        permission: "quality.view",
+      },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
     ],
   },
@@ -69,12 +93,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     let alive = true
+    let syncing = false
+    let lastSyncTime = 0
 
-    const bootstrap = async () => {
+    const syncSession = async (redirectBase = "/login") => {
+      if (syncing) return
+      syncing = true
       try {
-        const { user: sessionUser } = await hydrateActiveSession()
-        const blocked = authBlockReason(sessionUser)
+        const { session, user: sessionUser } = await hydrateActiveSession()
+        if (!session?.user) {
+          if (alive) {
+            setUser(null)
+            router.replace(redirectBase)
+          }
+          return
+        }
 
+        const blocked = authBlockReason(sessionUser)
         if (!sessionUser || blocked) {
           await signOutEverywhere()
           if (alive) router.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
@@ -82,38 +117,65 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
 
         if (alive) setUser(sessionUser)
+      } catch (error) {
+        console.error("dashboard session sync failed", error)
+        // Chỉ xóa session khi lỗi xác thực thực sự, không phải lỗi mạng tạm thời
+        if (alive && isAuthSessionError(error)) {
+          setUser(null)
+          router.replace("/login")
+        }
+      } finally {
+        syncing = false
+      }
+    }
+
+    const bootstrap = async () => {
+      try {
+        await syncSession()
       } finally {
         if (alive) setLoading(false)
       }
     }
 
-    bootstrap()
+    void bootstrap()
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session?.user) {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Chỉ xử lý SIGNED_IN / SIGNED_OUT — bỏ qua TOKEN_REFRESHED để tránh vòng lặp
+      if (event === "SIGNED_OUT" || !session?.user) {
         setUser(null)
         router.replace("/login")
         return
       }
-
-      const { user: sessionUser } = await hydrateActiveSession()
-      const blocked = authBlockReason(sessionUser)
-      if (!sessionUser || blocked) {
-        await signOutEverywhere()
-        router.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
-        return
+      if (event === "SIGNED_IN") {
+        await syncSession()
       }
-
-      setUser(sessionUser)
     })
+
+    const intervalId = window.setInterval(() => {
+      void syncSession()
+    }, 60_000)
+
+    const handleVisibilityOrFocus = () => {
+      const now = Date.now()
+      if (document.visibilityState === "visible" && now - lastSyncTime > 30_000) {
+        lastSyncTime = now
+        void syncSession()
+      }
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus)
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus)
 
     return () => {
       alive = false
       subscription.unsubscribe()
+      window.clearInterval(intervalId)
+      window.removeEventListener("focus", handleVisibilityOrFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
     }
-  }, [router])
+  }, [])
 
   const visibleNav: NavItem[] = NAV.flatMap((item) => {
     if (isNavGroup(item)) {
@@ -135,8 +197,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full" />
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
       </div>
     )
   }
@@ -144,28 +206,53 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <aside
-        className={(collapsed ? "w-16" : "w-64") + " bg-slate-900 text-white transition-all duration-300 flex flex-col flex-shrink-0"}
+        className={
+          (collapsed ? "w-16" : "w-64") +
+          " flex flex-shrink-0 flex-col bg-slate-900 text-white transition-all duration-300"
+        }
       >
-        <div className="p-4 flex items-center gap-3 border-b border-slate-700">
-          {!collapsed && (
+        <div className="flex items-center gap-3 border-b border-slate-700 p-4">
+          {!collapsed ? (
             <>
-              <span className="text-2xl" aria-hidden="true">🏭</span>
-              <div className="flex-1 min-w-0">
-                <div className="font-extrabold text-sm truncate">PTCS Phước Hòa</div>
-                <div className="text-[10px] text-emerald-400 truncate">Quản lý Sản xuất v2.0</div>
+              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-emerald-500/40 bg-white">
+                <Image
+                  src="/logo-nha-may-5.jpg"
+                  alt="Logo nhà máy"
+                  width={48}
+                  height={48}
+                  className="h-8 w-8 object-contain"
+                  priority
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-extrabold">Nhà máy chế biến Phước Hòa KPT</div>
+                <div className="truncate text-[10px] text-emerald-400">Hệ thống quản lý sản xuất</div>
               </div>
             </>
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-emerald-500/40 bg-white">
+              <Image
+                src="/logo-nha-may-5.jpg"
+                alt="Logo nhà máy"
+                width={40}
+                height={40}
+                className="h-7 w-7 object-contain"
+                priority
+              />
+            </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)} className="text-slate-400 hover:text-white">
             <Menu size={18} />
           </button>
         </div>
 
-        <nav className="flex-1 py-3 overflow-y-auto">
+        <nav className="flex-1 overflow-y-auto py-3">
           {visibleNav.map((item) => {
             if (isNavGroup(item)) {
               const isOpen = expanded[item.key]
-              const isChildActive = item.children.some((child) => pathname === child.key)
+              const isChildActive = item.children.some(
+                (child) => pathname === child.key || pathname.startsWith(`${child.key}/`),
+              )
 
               return (
                 <div key={item.key}>
@@ -175,38 +262,46 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors " +
                       (isChildActive
                         ? "text-emerald-400"
-                        : "text-slate-300 hover:text-white hover:bg-slate-800")
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white")
                     }
                   >
                     <item.icon size={18} />
                     {!collapsed && (
                       <>
                         <span className="flex-1 text-left">{item.label}</span>
-                        <ChevronRight size={14} className={"transition-transform " + (isOpen ? "rotate-90" : "")} />
+                        <ChevronRight
+                          size={14}
+                          className={"transition-transform " + (isOpen ? "rotate-90" : "")}
+                        />
                       </>
                     )}
                   </button>
 
                   {isOpen &&
                     !collapsed &&
-                    item.children.map((child) => (
-                      <button
-                        key={child.key}
-                        onClick={() => router.push(child.key)}
-                        className={
-                          "w-full flex items-center gap-3 pl-10 pr-4 py-2 text-sm transition-colors " +
-                          (pathname === child.key
-                            ? "text-emerald-400 bg-slate-800 font-bold"
-                            : "text-slate-400 hover:text-white hover:bg-slate-800")
-                        }
-                      >
-                        <child.icon size={15} />
-                        <span>{child.label}</span>
-                      </button>
-                    ))}
+                    item.children.map((child) => {
+                      const childActive = pathname === child.key || pathname.startsWith(`${child.key}/`)
+                      return (
+                        <button
+                          key={child.key}
+                          onClick={() => router.push(child.key)}
+                          className={
+                            "w-full flex items-center gap-3 py-2 pl-10 pr-4 text-sm transition-colors " +
+                            (childActive
+                              ? "bg-slate-800 font-bold text-emerald-400"
+                              : "text-slate-400 hover:bg-slate-800 hover:text-white")
+                          }
+                        >
+                          <child.icon size={15} />
+                          <span>{child.label}</span>
+                        </button>
+                      )
+                    })}
                 </div>
               )
             }
+
+            const itemActive = pathname === item.key || pathname.startsWith(`${item.key}/`)
 
             return (
               <button
@@ -214,9 +309,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 onClick={() => router.push(item.key)}
                 className={
                   "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors " +
-                  (pathname === item.key
-                    ? "text-emerald-400 bg-slate-800"
-                    : "text-slate-300 hover:text-white hover:bg-slate-800")
+                  (itemActive
+                    ? "bg-slate-800 text-emerald-400"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white")
                 }
               >
                 <item.icon size={18} />
@@ -226,16 +321,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-700">
+        <div className="border-t border-slate-700 p-4">
           <div className={"flex items-center gap-3 " + (collapsed ? "justify-center" : "")}>
-            <div className="w-8 h-8 bg-emerald-600 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold">
               {user.full_name?.[0] || "U"}
             </div>
             {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold truncate">{user.full_name}</div>
-                <div className="text-[10px] text-slate-400 truncate">
-                  {user.role} · {user.username}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold">{user.full_name}</div>
+                <div className="truncate text-[10px] text-slate-400">
+                  {user.role} - {user.username}
                 </div>
               </div>
             )}

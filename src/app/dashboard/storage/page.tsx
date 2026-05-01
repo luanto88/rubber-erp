@@ -1,10 +1,12 @@
-"use client"
-import { useState, useEffect, useCallback } from "react"
+﻿"use client"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
+import { getActiveFactoryId } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
-  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck
+  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck,
+  ChevronDown, ChevronRight
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -37,6 +39,19 @@ type TripItem = {
   kl_dkt: number; kl_dkk: number  // Mủ đông khối
   kl_dt: number;  kl_dk: number   // Mủ dây
   kl_mn: number;  kl_mnk: number  // Mủ nước
+}
+
+type ProducedLot = {
+  id: string
+  ma_lo: string
+  ngay_sx: string
+  ca: string
+  loai_csr: string
+  loai_banh: number
+  boc: string
+  tong_banh: number
+  tong_kg: number
+  trang_thai: string
 }
 
 function getKLFromTrip(t: TripItem, loai_nl: string): { tuoi: number; kho: number } {
@@ -127,6 +142,8 @@ const fmtDate = (d: string) => {
   return "—"
 }
 
+const fmtKg = (kg: number) => `${Math.round(kg || 0).toLocaleString("vi-VN")} kg`
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function StoragePage() {
   const revealRef = useScrollReveal()
@@ -150,6 +167,11 @@ export default function StoragePage() {
   const [saving, setSaving]       = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
+  const [viewLots, setViewLots]   = useState<ProducedLot[]>([])
+  const [viewLotsLoading, setViewLotsLoading] = useState(false)
+  const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
+  const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
+  const [todayMs] = useState(() => Date.now())
 
   // unassigned summary
   const [unassignedSummary, setUnassignedSummary] = useState<{ total: number; byDate: Record<string, number> }>({ total: 0, byDate: {} })
@@ -158,6 +180,52 @@ export default function StoragePage() {
   const [dispatchTrips, setDispatchTrips]   = useState<TripItem[]>([])
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
   const [loadingTrips, setLoadingTrips]     = useState(false)
+  const groupedViewLots = useMemo(() => {
+    const grouped = viewLots.reduce<Record<string, {
+      key: string
+      loai_csr: string
+      loai_banh: number
+      boc: string
+      totalKg: number
+      totalLots: number
+      dates: Record<string, { totalKg: number; lots: ProducedLot[] }>
+    }>>((acc, lot) => {
+      const key = [lot.loai_csr, lot.loai_banh, lot.boc || ""].join("|")
+      const dateKey = lot.ngay_sx?.slice(0, 10) || ""
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          loai_csr: lot.loai_csr,
+          loai_banh: lot.loai_banh,
+          boc: lot.boc || "—",
+          totalKg: 0,
+          totalLots: 0,
+          dates: {},
+        }
+      }
+      if (!acc[key].dates[dateKey]) {
+        acc[key].dates[dateKey] = { totalKg: 0, lots: [] }
+      }
+      acc[key].totalKg += lot.tong_kg || 0
+      acc[key].totalLots += 1
+      acc[key].dates[dateKey].totalKg += lot.tong_kg || 0
+      acc[key].dates[dateKey].lots.push(lot)
+      return acc
+    }, {})
+
+    return Object.values(grouped)
+      .map(group => ({
+        ...group,
+        dates: Object.entries(group.dates)
+          .sort((a, b) => b[0].localeCompare(a[0]))
+          .map(([date, value]) => ({
+            date,
+            totalKg: value.totalKg,
+            lots: value.lots.sort((a, b) => a.ma_lo.localeCompare(b.ma_lo)),
+          })),
+      }))
+      .sort((a, b) => b.totalKg - a.totalKg)
+  }, [viewLots])
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
@@ -188,34 +256,50 @@ export default function StoragePage() {
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
-    let q = supabase.from("ngans").select("*")
-      .eq("factory_id", fid)
-      .order("ten_ngan", { ascending: true })
-    if (filterTT) q = q.eq("trang_thai", filterTT)
-    const [{ data }, { data: lotsData }] = await Promise.all([
-      q,
-      supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
-    ])
-    const loaded = data || []
-    setNgans(loaded)
-    const ls: Record<string, number> = {}
-    for (const l of lotsData || []) {
-      if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
+    try {
+      let q = supabase.from("ngans").select("*")
+        .eq("factory_id", fid)
+        .order("ten_ngan", { ascending: true })
+      if (filterTT) q = q.eq("trang_thai", filterTT)
+      const [{ data }, { data: lotsData }] = await Promise.all([
+        q,
+        supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
+      ])
+      const loaded = data || []
+      setNgans(loaded)
+      const ls: Record<string, number> = {}
+      for (const l of lotsData || []) {
+        if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
+      }
+      setLotStats(ls)
+      loadUnassigned(fid, loaded)
+    } finally {
+      setLoading(false)
     }
-    setLotStats(ls)
-    setLoading(false)
-    loadUnassigned(fid, loaded)
   }, [filterTT, loadUnassigned])
 
+  // Bootstrap chỉ chạy 1 lần khi mount để lấy factory ID
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory")
-    if (!fid) return
-    setFactoryId(fid)
-    loadData(fid)
-    supabase.from("factories").select("code").eq("id", fid).single().then(({ data: f }) => {
-      if (f) setFactoryCode((f as Record<string, unknown>).code as string || "")
-    })
-  }, [loadData])
+    const bootstrap = async () => {
+      const fid = await getActiveFactoryId()
+      if (!fid) {
+        setLoading(false)
+        return
+      }
+      setFactoryId(fid)
+      loadData(fid)
+      supabase.from("factories").select("code").eq("id", fid).single().then(({ data: f }) => {
+        if (f) setFactoryCode((f as Record<string, unknown>).code as string || "")
+      })
+    }
+    void bootstrap()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Reload khi filter thay đổi (sau khi đã có factoryId)
+  useEffect(() => {
+    if (factoryId) loadData(factoryId)
+  }, [factoryId, loadData])
 
   // ── Fetch trips from dispatch ─────────────────────────────────────────────
   const fetchTrips = useCallback(async (ngay_bd: string, ngay_kt: string, autoSelect = false) => {
@@ -338,7 +422,7 @@ export default function StoragePage() {
 
   const curingDays = (ngay_bd: string) => {
     if (!ngay_bd) return null
-    return Math.floor((Date.now() - new Date(ngay_bd).getTime()) / 86400000)
+    return Math.floor((todayMs - new Date(ngay_bd).getTime()) / 86400000)
   }
 
   // ── Save / Delete ─────────────────────────────────────────────────────────
@@ -402,6 +486,53 @@ export default function StoragePage() {
     setDispatchTrips([])
     setModal("edit")
     if (f.ngay_bd && f.ngay_kt) fetchTrips(f.ngay_bd, f.ngay_kt)
+  }
+
+  const openView = async (n: Ngan) => {
+    if (!factoryId) return
+    setViewNgan(n)
+    setViewLots([])
+    setViewLotsLoading(true)
+    setExpandedProductKeys(new Set())
+    setExpandedDateKeys(new Set())
+    setModal("view")
+    const { data, error } = await supabase
+      .from("lots")
+      .select("id,ma_lo,ngay_sx,ca,loai_csr,loai_banh,boc,tong_banh,tong_kg,trang_thai")
+      .eq("factory_id", factoryId)
+      .eq("ngan_id", n.id)
+      .order("ngay_sx", { ascending: false })
+      .order("created_at", { ascending: false })
+    if (error) {
+      setViewLots([])
+    } else {
+      setViewLots((data || []) as ProducedLot[])
+    }
+    setViewLotsLoading(false)
+  }
+
+  const toggleProductKey = (key: string) => {
+    setExpandedProductKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
+  const toggleDateKey = (key: string) => {
+    setExpandedDateKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -526,7 +657,7 @@ export default function StoragePage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                      <button onClick={() => { setViewNgan(n); setModal("view") }}
+                      <button onClick={() => openView(n)}
                         className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors">
                         <Eye size={14} />
                       </button>
@@ -848,13 +979,18 @@ export default function StoragePage() {
       {/* ── View detail modal ──────────────────────────────────────────────── */}
       {modal === "view" && viewNgan && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
             <div className={`bg-gradient-to-r ${headerStyle(viewNgan.trang_thai).grad} border-b border-slate-200 px-6 py-4 flex items-center justify-between`}>
               <div className="flex items-center gap-2">
                 <Warehouse size={18} className={headerStyle(viewNgan.trang_thai).icon} />
                 <h2 className="text-lg font-extrabold text-slate-800">{viewNgan.ten_ngan}</h2>
               </div>
-              <button onClick={() => setModal(null)} className="p-2 hover:bg-white/60 rounded-xl">
+              <button onClick={() => {
+                setModal(null)
+                setViewLots([])
+                setExpandedProductKeys(new Set())
+                setExpandedDateKeys(new Set())
+              }} className="p-2 hover:bg-white/60 rounded-xl">
                 <X size={18} />
               </button>
             </div>
@@ -880,6 +1016,120 @@ export default function StoragePage() {
                   <span className="font-semibold text-slate-700 text-right max-w-[60%]">{v}</span>
                 </div>
               ))}
+
+              <div className="pt-5 mt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-800">Thành phẩm đã dùng nguyên liệu</h3>
+                    <p className="text-xs text-slate-400">Bấm từng nhóm để mở ngày sản xuất, rồi mở tiếp để xem chi tiết từng lô</p>
+                  </div>
+                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-full">
+                    {viewLots.length} lô
+                  </span>
+                </div>
+
+                {viewLotsLoading ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">Đang tải danh sách thành phẩm...</div>
+                ) : groupedViewLots.length === 0 ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">
+                    Chưa có lô thành phẩm nào sử dụng nguyên liệu từ {viewNgan.ten_ngan}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {groupedViewLots.map(group => {
+                      const productExpanded = expandedProductKeys.has(group.key)
+                      return (
+                        <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleProductKey(group.key)}
+                            className="w-full px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-left hover:bg-slate-100 transition-colors"
+                          >
+                            <div className="flex items-start gap-2 min-w-0">
+                              {productExpanded ? (
+                                <ChevronDown size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <ChevronRight size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-800 break-words">
+                                  {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
+                                </div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                  {group.dates.length} ngày sản xuất · {group.totalLots} lô
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-extrabold text-blue-700">{fmtKg(group.totalKg)}</div>
+                            </div>
+                          </button>
+
+                          {productExpanded && (
+                            <div className="bg-white divide-y divide-slate-100">
+                              {group.dates.map(dateGroup => {
+                                const dateKey = `${group.key}|${dateGroup.date}`
+                                const dateExpanded = expandedDateKeys.has(dateKey)
+                                return (
+                                  <div key={dateKey}>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDateKey(dateKey)}
+                                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition-colors"
+                                    >
+                                      <div className="flex items-start gap-2 min-w-0">
+                                        {dateExpanded ? (
+                                          <ChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />
+                                        ) : (
+                                          <ChevronRight size={15} className="text-slate-400 shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-semibold text-slate-700">
+                                            {fmtDate(dateGroup.date)}
+                                          </div>
+                                          <div className="text-xs text-slate-500 mt-1 break-words">
+                                            {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="text-right shrink-0">
+                                        <div className="text-sm font-bold text-slate-700">{fmtKg(dateGroup.totalKg)}</div>
+                                        <div className="text-xs text-slate-500">{dateGroup.lots.length} lô</div>
+                                      </div>
+                                    </button>
+
+                                    {dateExpanded && (
+                                      <div className="px-4 pb-3">
+                                        <div className="rounded-xl border border-slate-200 overflow-hidden">
+                                          <div className="divide-y divide-slate-100 bg-white">
+                                            {dateGroup.lots.map(lot => (
+                                              <div key={lot.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                                                <div className="min-w-0">
+                                                  <div className="font-bold text-slate-800">{lot.ma_lo}</div>
+                                                  <div className="text-xs text-slate-500">
+                                                    Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành · {lot.trang_thai}
+                                                  </div>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                  <div className="text-sm font-semibold text-slate-700">{fmtKg(lot.tong_kg || 0)}</div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

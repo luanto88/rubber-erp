@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
+import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
+import { getActiveFactoryId } from "@/lib/auth"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
@@ -27,7 +29,7 @@ type QcResult = {
   dat_hang: string; trang_thai: string
   parent_id?: string | null; lan?: number; notes?: NoteEntry[]
   created_at?: string
-  lots?: { ma_lo: string; ngay_sx: string }
+  lots?: { ma_lo: string; ngay_sx: string; ngay_ht?: string | null }
 }
 
 type LimitRow = {
@@ -46,7 +48,7 @@ type CustomStd = {
 
 type LotItem = {
   id: string; factory_id: string; ma_lo: string; loai_csr: string
-  ngay_sx: string; trang_thai: string; tong_banh: number
+  ngay_sx: string; ngay_ht?: string | null; trang_thai: string; tong_banh: number
 }
 
 type LotChip = LotItem & { prev_qc?: QcResult }
@@ -130,8 +132,40 @@ function getVisibleFields(chungLoai: string): string[] {
   return base
 }
 
+function normalizeLotCode(maLo: string): string {
+  return String(maLo || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/\\/g, "/")
+}
+
 // stripYear: "345cs/26" → "345cs"
-const stripYear = (maLo: string) => maLo.replace(/\/\d{2,4}$/, "")
+function stripYear(maLo: string): string {
+  return normalizeLotCode(maLo).replace(/\/\d{2,4}$/, "")
+}
+
+function getLotLookupKeys(maLo: string): string[] {
+  const normalized = normalizeLotCode(maLo)
+  if (!normalized) return []
+  const base = stripYear(normalized)
+  return normalized === base ? [base] : [normalized, base]
+}
+
+function summarizeImportWarnings(warnings: string[]) {
+  return warnings.reduce((acc, warning) => {
+    if (warning.includes("đã có phiếu kiểm nghiệm")) acc.duplicateQc++
+    else if (warning.includes("không khớp ngày hoàn thành lô")) acc.wrongDate++
+    else if (warning.includes("trùng lặp trong file import")) acc.duplicateInFile++
+    else acc.other++
+    return acc
+  }, {
+    duplicateQc: 0,
+    wrongDate: 0,
+    duplicateInFile: 0,
+    other: 0,
+  })
+}
 
 function getLimits(loaiCsr: string, tieuChuan: string, customLimits?: LimitRow): LimitRow {
   const lk = limitKey(loaiCsr)
@@ -212,6 +246,37 @@ function formatPKN(pkn: number, ngayKN: string, fCode: string): string {
 function getLoaiCSR(chungLoai: string, fCode: string): string {
   const prefix = fCode === "CP" ? "SVR" : "CSR"
   return prefix + chungLoai
+}
+
+function matchesLotCode(candidateMaLo: string, qcMaLo?: string | null): boolean {
+  if (!qcMaLo) return false
+  const candidateKeys = new Set(getLotLookupKeys(candidateMaLo))
+  return getLotLookupKeys(qcMaLo).some(key => candidateKeys.has(key))
+}
+
+function getLotQcDate(lot: { ngay_sx: string; ngay_ht?: string | null }): string {
+  return lot.ngay_ht || lot.ngay_sx
+}
+
+function getLotRank(lot: { trang_thai?: string; tong_banh?: number; ngay_ht?: string | null }): number {
+  if (lot.trang_thai === "Xuất hàng") return 4
+  if (lot.trang_thai === "Hoàn thành") return 3
+  if (lot.trang_thai === "Dở dang") return 2
+  return lot.tong_banh ? 1 : 0
+}
+
+function pickCanonicalLot<T extends { trang_thai?: string; tong_banh?: number; ngay_ht?: string | null }>(
+  current: T | null | undefined,
+  candidate: T,
+): T {
+  if (!current) return candidate
+  const currentRank = getLotRank(current)
+  const candidateRank = getLotRank(candidate)
+  if (candidateRank !== currentRank) return candidateRank > currentRank ? candidate : current
+  const currentDate = current.ngay_ht || ""
+  const candidateDate = candidate.ngay_ht || ""
+  if (candidateDate !== currentDate) return candidateDate > currentDate ? candidate : current
+  return (candidate.tong_banh || 0) >= (current.tong_banh || 0) ? candidate : current
 }
 
 function emptyTabSamples(soMau: number): Samples {
@@ -405,7 +470,7 @@ export default function QualityPage() {
   const [saving,      setSaving]      = useState(false)
 
   // ── Navigation ───────────────────────────────────────────────────────────────
-  const [mainTab,  setMainTab]  = useState<"xep_hang"|"giam_sat">("xep_hang")
+  const [mainTab,  setMainTab]  = useState<"xep_hang"|"giam_sat"|"thong_ke">("xep_hang")
   const [view,     setView]     = useState<"list"|"create">("list")
 
   // ── List-view state ──────────────────────────────────────────────────────────
@@ -435,6 +500,7 @@ export default function QualityPage() {
   const [tabData,        setTabData]        = useState<Record<string, TabState>>({})
   const [editingResultId,setEditingResultId]= useState<string|null>(null)
   const [lotsLoading,    setLotsLoading]    = useState(false)
+  const eligibleLotsReqRef = useRef(0)
 
   // ── TCKH modal ───────────────────────────────────────────────────────────────
   const [tkhModal,    setTkhModal]    = useState(false)
@@ -454,7 +520,12 @@ export default function QualityPage() {
   // ── Admin / Import ───────────────────────────────────────────────────────────
   const [userRole,     setUserRole]     = useState("")
   const [importing,    setImporting]    = useState(false)
-  const [importResult, setImportResult] = useState<{ok:number;errors:string[]}|null>(null)
+  const [importResult, setImportResult] = useState<{
+    ok: number
+    skipped: number
+    warnings: string[]
+    errors: string[]
+  } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
   // ── Toast ────────────────────────────────────────────────────────────────────
@@ -504,103 +575,213 @@ export default function QualityPage() {
     setCustomStds(data || [])
   }, [])
 
+  const backfillQcLotLinks = useCallback(async (fid: string, loaiCsr: string) => {
+    const { data: orphanQc, error: orphanError } = await supabase.from("qc_results")
+      .select("id,ma_lo")
+      .eq("factory_id", fid)
+      .eq("loai_csr", loaiCsr)
+      .is("lot_id", null)
+    if (orphanError) throw orphanError
+    if (!orphanQc?.length) return
+
+    const { data: lots, error: lotsError } = await supabase.from("lots")
+      .select("id,ma_lo,ngay_sx,ngay_ht")
+      .eq("factory_id", fid)
+      .eq("loai_csr", loaiCsr)
+    if (lotsError) throw lotsError
+
+    const lotByExact = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }>()
+    const lotByBase = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number } | null>()
+    ;(lots || []).forEach(lot => {
+      const exactKey = normalizeLotCode(lot.ma_lo)
+      const baseKey = stripYear(lot.ma_lo)
+      lotByExact.set(exactKey, pickCanonicalLot(lotByExact.get(exactKey), lot))
+      lotByBase.set(baseKey, pickCanonicalLot(lotByBase.get(baseKey), lot))
+    })
+
+    const updates = orphanQc
+      .map(row => {
+        const exactKey = normalizeLotCode(row.ma_lo || "")
+        const baseKey = stripYear(row.ma_lo || "")
+        const matched = lotByExact.get(exactKey) || lotByBase.get(baseKey) || null
+        return matched
+          ? { id: row.id, lot_id: matched.id, ma_lo: matched.ma_lo, ngay_sx: getLotQcDate(matched) }
+          : null
+      })
+      .filter(Boolean) as { id: string; lot_id: string; ma_lo: string; ngay_sx: string }[]
+
+    if (!updates.length) return
+
+    const results = await Promise.all(
+      updates.map(u =>
+        supabase.from("qc_results")
+          .update({ lot_id: u.lot_id, ma_lo: u.ma_lo, ngay_sx: u.ngay_sx })
+          .eq("id", u.id)
+      )
+    )
+    const failed = results.find(r => r.error)
+    if (failed?.error) throw failed.error
+  }, [])
+
   // ── Load eligible lots ───────────────────────────────────────────────────────
   const loadEligibleLots = useCallback(async () => {
     if (!factoryId || !createForm.chung_loai) { setEligibleLots([]); return }
     const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
+    const reqId = ++eligibleLotsReqRef.current
     setLotsLoading(true)
+    try {
+      await backfillQcLotLinks(factoryId, loaiCsr)
 
-    if (createForm.loai_kn === "kl_rot_hang") {
-      // Fetch failed qc_results
-      const { data: failed } = await supabase.from("qc_results")
-        .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .ilike("dat_hang", "%RH")
-        .order("created_at", { ascending: false })
+      if (createForm.loai_kn === "kl_rot_hang") {
+        // Fetch failed qc_results
+        const { data: failed, error: failedError } = await supabase.from("qc_results")
+          .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+          .ilike("dat_hang", "%RH")
+          .order("created_at", { ascending: false })
+        if (failedError) throw failedError
 
-      // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
-      const latestByLotId = new Map<string,QcResult>()
-      const latestByMaLo  = new Map<string,QcResult>()
-      ;(failed||[]).forEach(r => {
-        if (r.lot_id) { if (!latestByLotId.has(r.lot_id)) latestByLotId.set(r.lot_id, r) }
-        else if (r.ma_lo) { if (!latestByMaLo.has(r.ma_lo)) latestByMaLo.set(r.ma_lo, r) }
-      })
+        // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
+        const latestByLotId = new Map<string,QcResult>()
+        const latestByMaLo  = new Map<string,QcResult>()
+        ;(failed||[]).forEach(r => {
+          if (r.lot_id) {
+            if (!latestByLotId.has(r.lot_id)) latestByLotId.set(r.lot_id, r)
+          } else if (r.ma_lo) {
+            getLotLookupKeys(r.ma_lo).forEach(key => {
+              if (!latestByMaLo.has(key)) latestByMaLo.set(key, r)
+            })
+          }
+        })
 
-      // Fetch ALL results để cross-check "vẫn còn rớt hạng"
-      const { data: allRes } = await supabase.from("qc_results")
-        .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .order("created_at", { ascending: false })
-      const latestAllById   = new Map<string,QcResult>()
-      const latestAllByMaLo = new Map<string,QcResult>()
-      ;(allRes||[]).forEach(r => {
-        if (r.lot_id) { if (!latestAllById.has(r.lot_id))  latestAllById.set(r.lot_id, r) }
-        else if (r.ma_lo) { if (!latestAllByMaLo.has(r.ma_lo)) latestAllByMaLo.set(r.ma_lo, r) }
-      })
+        // Fetch ALL results để cross-check "vẫn còn rớt hạng"
+        const { data: allRes, error: allResError } = await supabase.from("qc_results")
+          .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+          .order("created_at", { ascending: false })
+        if (allResError) throw allResError
 
-      const isStillFailed = (r: QcResult|undefined) =>
-        r?.dat_hang?.endsWith("RH") === true
-      const stillFailedIds   = Array.from(latestByLotId.keys())
-        .filter(lid => isStillFailed(latestAllById.get(lid)))
-      const stillFailedMaLos = Array.from(latestByMaLo.keys())
-        .filter(mlo => isStillFailed(latestAllByMaLo.get(mlo)))
+        const latestAllById   = new Map<string,QcResult>()
+        const latestAllByMaLo = new Map<string,QcResult>()
+        ;(allRes||[]).forEach(r => {
+          if (r.lot_id) {
+            if (!latestAllById.has(r.lot_id)) latestAllById.set(r.lot_id, r)
+          } else if (r.ma_lo) {
+            getLotLookupKeys(r.ma_lo).forEach(key => {
+              if (!latestAllByMaLo.has(key)) latestAllByMaLo.set(key, r)
+            })
+          }
+        })
 
-      if (!stillFailedIds.length && !stillFailedMaLos.length) {
-        setEligibleLots([]); setLotsLoading(false); return
+        const isStillFailed = (r: QcResult|undefined) =>
+          r?.dat_hang?.endsWith("RH") === true
+        const stillFailedIds   = Array.from(latestByLotId.keys())
+          .filter(lid => isStillFailed(latestAllById.get(lid)))
+        const stillFailedMaLos = Array.from(latestByMaLo.keys())
+          .filter(mlo => isStillFailed(latestAllByMaLo.get(mlo)))
+
+        if (!stillFailedIds.length && !stillFailedMaLos.length) {
+          if (reqId === eligibleLotsReqRef.current) setEligibleLots([])
+          return
+        }
+
+        const [resById, resByMaLo] = await Promise.all([
+          stillFailedIds.length
+            ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+                .in("id", stillFailedIds)
+            : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;ngay_ht?:string|null;trang_thai:string;tong_banh:number}[], error: null }),
+          stillFailedMaLos.length
+            ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+                .eq("factory_id", factoryId)
+                .or(stillFailedMaLos.map(mlo => `ma_lo.eq.${mlo},ma_lo.ilike.${mlo}/%`).join(","))
+            : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;ngay_ht?:string|null;trang_thai:string;tong_banh:number}[], error: null }),
+        ])
+        if (resById.error) throw resById.error
+        if (resByMaLo.error) throw resByMaLo.error
+
+        const combined = [
+          ...(resById.data||[]).map(l => ({ ...l, prev_qc: latestByLotId.get(l.id) })),
+          ...(resByMaLo.data||[]).map(l => ({
+            ...l,
+            prev_qc: latestByMaLo.get(normalizeLotCode(l.ma_lo))
+              ?? latestByMaLo.get(stripYear(l.ma_lo)),
+          })),
+        ]
+        const seen = new Set<string>()
+        if (reqId === eligibleLotsReqRef.current) {
+          setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
+        }
+
+      } else if (createForm.loai_kn === "kl_6thang") {
+        const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
+        const { data: lots, error: lotsError } = await supabase.from("lots")
+          .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+          .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+          .neq("trang_thai","Xuất hàng")
+          .order("ngay_sx", { ascending: true })
+        if (lotsError) throw lotsError
+
+        // Attach latest qc_result if exists
+        const { data: qcAll, error: qcAllError } = await supabase.from("qc_results")
+          .select("*").eq("factory_id",factoryId).eq("loai_csr",loaiCsr)
+          .order("created_at",{ascending:false})
+        if (qcAllError) throw qcAllError
+
+        const latestQCById = new Map<string,QcResult>()
+        const latestQCByMaLo = new Map<string,QcResult>()
+        ;(qcAll||[]).forEach(r => {
+          if (r.lot_id) {
+            if (!latestQCById.has(r.lot_id)) latestQCById.set(r.lot_id, r)
+          } else if (r.ma_lo) {
+            getLotLookupKeys(r.ma_lo).forEach(key => {
+              if (!latestQCByMaLo.has(key)) latestQCByMaLo.set(key, r)
+            })
+          }
+        })
+        if (reqId === eligibleLotsReqRef.current) {
+          setEligibleLots((lots||[])
+            .filter(l => getLotQcDate(l) <= cutoff.toISOString().slice(0,10))
+            .map(l => ({
+            ...l,
+            prev_qc: latestQCById.get(l.id)
+              ?? latestQCByMaLo.get(normalizeLotCode(l.ma_lo))
+              ?? latestQCByMaLo.get(stripYear(l.ma_lo)),
+          })))
+        }
+
+      } else {
+        // Normal: Hoàn thành + not yet in qc_results
+        if (!createForm.ngay_sx) {
+          if (reqId === eligibleLotsReqRef.current) setEligibleLots([])
+          return
+        }
+        const { data: existingQC, error: existingQcError } = await supabase.from("qc_results")
+          .select("lot_id,ma_lo").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+        if (existingQcError) throw existingQcError
+
+        const excludeIds = new Set((existingQC||[]).map(r=>r.lot_id).filter(Boolean))
+        const excludeRows = (existingQC || []).filter(r => r.ma_lo)
+
+        const { data: lots, error: lotsError } = await supabase.from("lots")
+          .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+          .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+          .eq("trang_thai","Hoàn thành")
+          .order("num", {ascending:true})
+        if (lotsError) throw lotsError
+
+        if (reqId === eligibleLotsReqRef.current) {
+          setEligibleLots((lots||[]).filter(l =>
+            getLotQcDate(l) === createForm.ngay_sx &&
+            !excludeIds.has(l.id) &&
+            !excludeRows.some(r => matchesLotCode(l.ma_lo, r.ma_lo))
+          ))
+        }
       }
-
-      const [resById, resByMaLo] = await Promise.all([
-        stillFailedIds.length
-          ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-              .in("id", stillFailedIds)
-          : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
-        stillFailedMaLos.length
-          ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-              .eq("factory_id", factoryId)
-              .or(stillFailedMaLos.map(mlo => `ma_lo.eq.${mlo},ma_lo.ilike.${mlo}/%`).join(","))
-          : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;trang_thai:string;tong_banh:number}[] }),
-      ])
-
-      const combined = [
-        ...(resById.data||[]).map(l => ({ ...l, prev_qc: latestByLotId.get(l.id) })),
-        ...(resByMaLo.data||[]).map(l => ({
-          ...l,
-          prev_qc: latestByMaLo.get(l.ma_lo)
-            ?? latestByMaLo.get(l.ma_lo.replace(/\/\d{2,4}$/, "")),
-        })),
-      ]
-      const seen = new Set<string>()
-      setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
-
-    } else if (createForm.loai_kn === "kl_6thang") {
-      const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
-      const { data: lots } = await supabase.from("lots")
-        .select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-        .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .neq("trang_thai","Xuất hàng")
-        .lte("ngay_sx", cutoff.toISOString().slice(0,10))
-        .order("ngay_sx", { ascending: true })
-      // Attach latest qc_result if exists
-      const { data: qcAll } = await supabase.from("qc_results")
-        .select("*").eq("factory_id",factoryId).eq("loai_csr",loaiCsr)
-        .order("created_at",{ascending:false})
-      const latestQC = new Map<string,QcResult>()
-      ;(qcAll||[]).forEach(r=>{ if(r.lot_id&&!latestQC.has(r.lot_id)) latestQC.set(r.lot_id,r) })
-      setEligibleLots((lots||[]).map(l=>({...l,prev_qc:latestQC.get(l.id)})))
-
-    } else {
-      // Normal: Hoàn thành + not yet in qc_results
-      if (!createForm.ngay_sx) { setEligibleLots([]); setLotsLoading(false); return }
-      const { data: existingQC } = await supabase.from("qc_results")
-        .select("lot_id").eq("factory_id", factoryId).not("lot_id","is",null)
-      const excludeIds = new Set((existingQC||[]).map(r=>r.lot_id))
-      const { data: lots } = await supabase.from("lots")
-        .select("id,factory_id,ma_lo,loai_csr,ngay_sx,trang_thai,tong_banh")
-        .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        .eq("ngay_sx", createForm.ngay_sx).eq("trang_thai","Hoàn thành")
-        .order("num", {ascending:true})
-      setEligibleLots((lots||[]).filter(l=>!excludeIds.has(l.id)))
+    } catch (error) {
+      console.error("load eligible lots failed", error)
+      if (reqId === eligibleLotsReqRef.current) setEligibleLots([])
+    } finally {
+      if (reqId === eligibleLotsReqRef.current) setLotsLoading(false)
     }
-    setLotsLoading(false)
-  }, [factoryId, factoryCode, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
+  }, [backfillQcLotLinks, factoryId, factoryCode, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
 
   // ── Giám sát: results that are re-tests (have parent_id) ────────────────────
   const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
@@ -627,10 +808,15 @@ export default function QualityPage() {
       })
   }, [gmsResults, mainTab, factoryId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Bootstrap ────────────────────────────────────────────────────────────────
+  // ── Bootstrap — chỉ chạy 1 lần khi mount để lấy factory ID ─────────────────
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory")
-    if (!fid) return
+    const bootstrap = async () => {
+      const fid = await getActiveFactoryId()
+      if (!fid) {
+        setLoading(false)
+        setLotsLoading(false)
+        return
+      }
     setFactoryId(fid)
     loadResults(fid)
     loadStats(fid)
@@ -647,7 +833,18 @@ export default function QualityPage() {
         setFactoryCode(code)
         setFactoryName(f.ten_nha_may || f.name || f.slug || "Nhà máy")
       })
-  }, [loadResults, loadStats, loadCustomStds])
+    }
+    void bootstrap()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Reload khi filter thay đổi (sau khi đã có factoryId)
+  useEffect(() => {
+    if (factoryId) {
+      loadResults(factoryId)
+      loadStats(factoryId)
+    }
+  }, [factoryId, loadResults, loadStats])
 
   useEffect(() => {
     if (view === "create") loadEligibleLots()
@@ -688,7 +885,7 @@ export default function QualityPage() {
     })
     const fakeLot: LotChip = {
       id: r.lot_id || r.id, factory_id: r.factory_id, ma_lo: r.ma_lo,
-      loai_csr: r.loai_csr, ngay_sx: r.ngay_sx, trang_thai:"Hoàn thành", tong_banh:0
+      loai_csr: r.loai_csr, ngay_sx: r.ngay_sx, ngay_ht: r.ngay_sx, trang_thai:"Hoàn thành", tong_banh:0
     }
     setEligibleLots([fakeLot])
     setSelectedLotIds(new Set([fakeLot.id]))
@@ -825,7 +1022,7 @@ export default function QualityPage() {
         const { error } = await supabase.from("qc_results").insert({
           factory_id:factoryId, lot_id:lot.id, ma_lo:lot.ma_lo,
           batch_id:batchId, pkn:batchPKN, lo_kn:nextLoKN,
-          ngay_kn:createForm.ngay_kn, ngay_sx:lot.ngay_sx,
+          ngay_kn:createForm.ngay_kn, ngay_sx:getLotQcDate(lot),
           chung_loai:createForm.chung_loai, loai_csr:loaiCsr,
           loai_kn:createForm.loai_kn, tieu_chuan:createForm.tieu_chuan,
           so_mau:createForm.so_mau, samples, grade, dat_hang, trang_thai,
@@ -846,8 +1043,28 @@ export default function QualityPage() {
   // ── Delete ───────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    const { data: affectedResults, error: fetchError } = await supabase
+      .from("qc_results")
+      .select("lot_id")
+      .eq("factory_id", factoryId)
+      .eq("id", id)
+    if (fetchError) { showToast("Lỗi tải phiếu cần xóa: " + fetchError.message, false); return }
+
     const { error } = await supabase.from("qc_results").delete().eq("id",id)
     if (error) { showToast("Lỗi xóa: "+error.message, false); return }
+
+    const affectedLotIds = Array.from(
+      new Set((affectedResults || []).map(r => r.lot_id).filter(Boolean) as string[])
+    )
+    if (affectedLotIds.length) {
+      const { error: lotError } = await supabase
+        .from("lots")
+        .update({ trang_thai: "Hoàn thành" })
+        .eq("factory_id", factoryId)
+        .in("id", affectedLotIds)
+      if (lotError) { showToast("Đã xóa phiếu nhưng lỗi cập nhật lô: " + lotError.message, false); return }
+    }
+
     setDelConfirm(null); showToast("Đã xóa phiếu kiểm nghiệm")
     loadResults(factoryId)
     loadStats(factoryId)
@@ -856,9 +1073,30 @@ export default function QualityPage() {
   const handleBulkDelete = async () => {
     if (!factoryId || selectedDeleteIds.size===0) return
     const count = selectedDeleteIds.size
+    const ids = Array.from(selectedDeleteIds)
+    const { data: affectedResults, error: fetchError } = await supabase
+      .from("qc_results")
+      .select("lot_id")
+      .eq("factory_id", factoryId)
+      .in("id", ids)
+    if (fetchError) { showToast("Lỗi tải phiếu cần xóa: " + fetchError.message, false); return }
+
     const { error } = await supabase.from("qc_results")
-      .delete().in("id", Array.from(selectedDeleteIds))
+      .delete().in("id", ids)
     if (error) { showToast("Lỗi xóa: "+error.message, false); return }
+
+    const affectedLotIds = Array.from(
+      new Set((affectedResults || []).map(r => r.lot_id).filter(Boolean) as string[])
+    )
+    if (affectedLotIds.length) {
+      const { error: lotError } = await supabase
+        .from("lots")
+        .update({ trang_thai: "Hoàn thành" })
+        .eq("factory_id", factoryId)
+        .in("id", affectedLotIds)
+      if (lotError) { showToast("Đã xóa phiếu nhưng lỗi cập nhật lô: " + lotError.message, false); return }
+    }
+
     setSelectedDeleteIds(new Set()); setDeleteMode(null)
     showToast(`Đã xóa ${count} phiếu`)
     loadResults(factoryId)
@@ -891,88 +1129,83 @@ export default function QualityPage() {
 
       if (rows.length < 4) { showToast("File không đúng định dạng (cần ≥4 hàng)", false); setImporting(false); return }
 
-      // Row 0 = metadata headers, Row 1 = metadata values
-      const metaH = rows[0].map(h => String(h||"").trim().toUpperCase())
-      const metaV = rows[1].map(v => String(v||"").trim())
+      const metaH = rows[0].map(h => String(h || "").trim().toUpperCase())
+      const metaV = rows[1].map(v => String(v || "").trim())
       const meta: Record<string, string> = {}
       metaH.forEach((h, i) => { if (h) meta[h] = metaV[i] })
 
-      // Normalize date: handles "dd/mm/yyyy", "mm/dd/yyyy" Excel variants → "yyyy-mm-dd"
       const normDate = (raw: string) => {
         if (!raw) return new Date().toISOString().slice(0,10)
         if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
         const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
-        if (m) { const [,a,b,y]=m; return `${y}-${b.padStart(2,"0")}-${a.padStart(2,"0")}` }
+        if (m) { const [,a,b,y] = m; return `${y}-${b.padStart(2, "0")}-${a.padStart(2, "0")}` }
         return raw
       }
 
-      const ngayKN    = normDate(meta["NGAY_KN"] || "")
-      const ngaySX    = normDate(meta["NGAY_SX"] || "")
-      const rawLoai   = meta["CHUNG_LOAI"] || "10"
-      const cl        = rawLoai.replace(/^(CSR|SVR)/i, "")
+      const ngayKN = normDate(meta["NGAY_KN"] || "")
+      const ngaySX = normDate(meta["NGAY_SX"] || "")
+      const rawLoai = meta["CHUNG_LOAI"] || "10"
+      const cl = rawLoai.replace(/^(CSR|SVR)/i, "")
       const tieuChuan = meta["TIEU_CHUAN"] || "TCCS 112:2022"
 
-      // Row 2 = column headers
-      const colH = rows[2].map(h => String(h||"").trim().toUpperCase())
+      const colH = rows[2].map(h => String(h || "").trim().toUpperCase())
       const colIdx: Record<string, number> = {}
       colH.forEach((h, i) => { if (h) colIdx[h] = i })
 
-      // Detect so_mau from TC_M column count
       const soMau = colH.filter(h => /^TC_M\d+$/.test(h)).length || 6
       const loaiKN = soMau >= 14 ? "ngat" : "thuong"
 
-      const loaiCsr  = getLoaiCSR(cl, factoryCode)
+      const loaiCsr = getLoaiCSR(cl, factoryCode)
       const customLimits = customStds.find(s => s.id === tieuChuan)?.limits
-
-      const year = new Date(ngayKN).getFullYear()
-      const [batchPKN, startLoKN] = await Promise.all([
-        getNextPKN(factoryId, year),
-        getNextLoKN(factoryId),
-      ])
-      let nextLoKN = startLoKN
-      const batchId  = crypto.randomUUID()
-
       const fieldMap: [string, string][] = [
         ["TC","tap_chat"],["TRO","tro"],["BH","bay_hoi"],
         ["NI","nito"],["PO","po"],["PRI","pri"],
         ["ML","mooney"],["MAU","mau_sac"],
       ]
 
-      // Collect all lot names from data rows first
-      const dataRows: { ri: number; loNM: string; row: string[] }[] = []
+      const dataRows: { loNM: string; row: string[] }[] = []
       for (let ri = 3; ri < rows.length; ri++) {
         const row = rows[ri]
         if (!row || row.every(v => !v)) continue
         const loNM = String(row[colIdx["LO_NM"]] || "").trim()
-        if (loNM) dataRows.push({ ri, loNM, row })
+        if (loNM) dataRows.push({ loNM, row })
       }
 
-      // Batch lot lookup — exact match trước, fallback ILIKE cho tên không có năm ("02cs" → "02cs/26")
-      const allLoNM = [...new Set(dataRows.map(d => d.loNM))]
-      const { data: allMatchedLots } = await supabase.from("lots")
-        .select("id,ma_lo").eq("factory_id", factoryId)
-        .in("ma_lo", allLoNM)
-      const lotByName = new Map<string, { id: string; ma_lo: string }>()
-      ;(allMatchedLots||[]).forEach(l => lotByName.set(l.ma_lo, l))
+      const { data: factoryLots, error: factoryLotsError } = await supabase.from("lots")
+        .select("id,ma_lo,ngay_sx,ngay_ht,trang_thai,tong_banh")
+        .eq("factory_id", factoryId)
+        .eq("loai_csr", loaiCsr)
+      if (factoryLotsError) throw factoryLotsError
 
-      // Fallback: với tên không match (vd: "02cs" khi DB có "02cs/26"), thử ILIKE prefix
-      const unmatchedLoNM = allLoNM.filter(n => !lotByName.has(n))
-      if (unmatchedLoNM.length) {
-        for (const loNM of unmatchedLoNM) {
-          const { data: fallback } = await supabase.from("lots")
-            .select("id,ma_lo").eq("factory_id", factoryId)
-            .ilike("ma_lo", `${loNM}/%`).limit(1)
-          if (fallback?.[0]) lotByName.set(loNM, fallback[0])
-        }
-      }
+      const lotByExact = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }>()
+      const lotByBase = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number } | null>()
+      ;(factoryLots || []).forEach(lot => {
+        const exactKey = normalizeLotCode(lot.ma_lo)
+        const baseKey = stripYear(lot.ma_lo)
+        lotByExact.set(exactKey, pickCanonicalLot(lotByExact.get(exactKey), lot))
+        lotByBase.set(baseKey, pickCanonicalLot(lotByBase.get(baseKey), lot))
+      })
 
-      let okCount = 0
+      const { data: existingQcRows, error: existingQcRowsError } = await supabase
+        .from("qc_results")
+        .select("id,lot_id,ma_lo,ngay_kn")
+        .eq("factory_id", factoryId)
+        .eq("loai_csr", loaiCsr)
+      if (existingQcRowsError) throw existingQcRowsError
+
+      const warnings: string[] = []
       const errors: string[] = []
+      const seenImportLots = new Set<string>()
+      const preparedRows: {
+        sourceLot: string
+        matchedLot: { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }
+        samples: Samples
+      }[] = []
 
       for (const { loNM, row } of dataRows) {
         const samples: Samples = {}
         for (const [prefix, fieldKey] of fieldMap) {
-          const vals: (string|number)[] = []
+          const vals: (string | number)[] = []
           for (let m = 1; m <= soMau; m++) {
             const idx = colIdx[`${prefix}_M${m}`]
             vals.push(idx !== undefined ? (row[idx] || "") : "")
@@ -980,29 +1213,79 @@ export default function QualityPage() {
           samples[fieldKey] = vals
         }
 
-        const matched = lotByName.get(loNM)
-        const lotId = matched?.id || null
-        const maLo  = matched?.ma_lo || loNM
+        const exactKey = normalizeLotCode(loNM)
+        const baseKey = stripYear(loNM)
+        const matched = lotByExact.get(exactKey) || lotByBase.get(baseKey) || null
+        if (!matched) {
+          errors.push(`Lô ${loNM}: không tìm thấy lô thành phẩm tương ứng để gắn lot_id`)
+          continue
+        }
 
+        const canonicalKey = normalizeLotCode(matched.ma_lo)
+        if (seenImportLots.has(canonicalKey)) {
+          warnings.push(`Lô ${loNM}: trùng lặp trong file import, chỉ giữ lại dòng đầu tiên`)
+          continue
+        }
+
+        const lotNgaySX = getLotQcDate(matched)
+        if (lotNgaySX !== ngaySX) {
+          warnings.push(`Lô ${loNM}: bỏ qua vì ngày SX file ${ngaySX} không khớp ngày hoàn thành lô ${lotNgaySX}`)
+          continue
+        }
+
+        const existingQc = (existingQcRows || []).find(qc =>
+          qc.lot_id === matched.id || matchesLotCode(matched.ma_lo, qc.ma_lo)
+        )
+        if (existingQc) {
+          warnings.push(`Lô ${loNM}: đã có phiếu kiểm nghiệm${existingQc.ngay_kn ? ` ngày ${existingQc.ngay_kn}` : ""}, tự động bỏ qua`)
+          continue
+        }
+
+        seenImportLots.add(canonicalKey)
+        preparedRows.push({ sourceLot: loNM, matchedLot: matched, samples })
+      }
+
+      if (!preparedRows.length) {
+        setImportResult({ ok: 0, skipped: warnings.length, warnings, errors })
+        showToast("Không có lô hợp lệ để nhập", false)
+        return
+      }
+
+      const year = new Date(ngayKN).getFullYear()
+      const [batchPKN, startLoKN] = await Promise.all([
+        getNextPKN(factoryId, year),
+        getNextLoKN(factoryId),
+      ])
+      let nextLoKN = startLoKN
+      const batchId = crypto.randomUUID()
+      let okCount = 0
+
+      for (const { sourceLot, matchedLot, samples } of preparedRows) {
         const { grade, dat_hang, trang_thai } = calcGrade(samples, loaiCsr, tieuChuan, customLimits)
 
         const { error } = await supabase.from("qc_results").insert({
-          factory_id: factoryId, lot_id: lotId, ma_lo: maLo,
+          factory_id: factoryId, lot_id: matchedLot.id, ma_lo: matchedLot.ma_lo,
           batch_id: batchId, pkn: batchPKN, lo_kn: nextLoKN,
-          ngay_kn: ngayKN, ngay_sx: ngaySX,
+          ngay_kn: ngayKN, ngay_sx: getLotQcDate(matchedLot) || ngaySX,
           chung_loai: cl, loai_csr: loaiCsr,
           loai_kn: loaiKN, tieu_chuan: tieuChuan,
           so_mau: soMau, samples, grade, dat_hang, trang_thai,
           parent_id: null, lan: 1, notes: [],
         })
 
-        if (error) { errors.push(`Lô ${loNM}: ${error.message}`) }
+        if (error) errors.push(`Lô ${sourceLot}: ${error.message}`)
         else { okCount++; nextLoKN++ }
       }
 
-      setImportResult({ ok: okCount, errors })
+      setImportResult({
+        ok: okCount,
+        skipped: warnings.length,
+        warnings,
+        errors,
+      })
       if (okCount > 0) {
-        showToast(`Đã nhập ${okCount} lô — ${formatPKN(batchPKN, ngayKN, factoryCode)}`)
+        const skippedText = warnings.length ? `, bỏ qua ${warnings.length} lô` : ""
+        showToast(`Đã nhập ${okCount} lô${skippedText} — ${formatPKN(batchPKN, ngayKN, factoryCode)}`)
         loadResults(factoryId)
         loadStats(factoryId)
       } else {
@@ -1010,10 +1293,10 @@ export default function QualityPage() {
       }
     } catch (e: unknown) {
       showToast("Lỗi đọc file: " + (e instanceof Error ? e.message : String(e)), false)
+    } finally {
+      setImporting(false)
+      if (importFileRef.current) importFileRef.current.value = ""
     }
-
-    setImporting(false)
-    if (importFileRef.current) importFileRef.current.value = ""
   }
 
   const handleDownloadTemplate = () => {
@@ -1055,7 +1338,7 @@ export default function QualityPage() {
   const eligibleDates = useMemo(() => {
     if (!["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn)) return []
     const dates = new Set<string>()
-    eligibleLots.forEach(l => { if (l.ngay_sx) dates.add(l.ngay_sx) })
+    eligibleLots.forEach(l => { const lotDate = getLotQcDate(l); if (lotDate) dates.add(lotDate) })
     return [...dates].sort().reverse()
   }, [createForm.loai_kn, eligibleLots])
 
@@ -1063,7 +1346,7 @@ export default function QualityPage() {
   const displayLots = useMemo(() => {
     if (!["kl_rot_hang","kl_6thang"].includes(createForm.loai_kn) || !knDateFilter)
       return eligibleLots
-    return eligibleLots.filter(l => l.ngay_sx === knDateFilter)
+    return eligibleLots.filter(l => getLotQcDate(l) === knDateFilter)
   }, [createForm.loai_kn, eligibleLots, knDateFilter])
 
   // Map: qc_result.id gốc → kết quả KN lại rớt hạng mới nhất (để hiện badge)
@@ -1189,7 +1472,11 @@ export default function QualityPage() {
                   </select>
                 ) : (
                   <input type="date" value={createForm.ngay_sx}
-                    onChange={e=>handleCreateFormChange({ngay_sx:e.target.value})}
+                    onChange={e=>{
+                      handleCreateFormChange({ngay_sx:e.target.value})
+                      setSelectedLotIds(new Set())
+                      setTabData({})
+                    }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
                 )}
               </div>
@@ -1396,25 +1683,27 @@ export default function QualityPage() {
               <h1 className="text-2xl font-extrabold text-slate-800">Kiểm nghiệm</h1>
               <p className="text-sm text-slate-500 mt-0.5">Kết quả kiểm nghiệm — TCCS / TCVN / TCKH</p>
             </div>
-            <div className="flex items-center gap-2">
-              {userRole === "admin" && (
-                <>
-                  <button onClick={handleDownloadTemplate}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all border border-slate-200">
-                    <Download size={14}/> Tải mẫu
-                  </button>
-                  <button onClick={()=>importFileRef.current?.click()} disabled={importing}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 rounded-xl transition-all border border-blue-200 disabled:opacity-40">
-                    {importing ? <RefreshCw size={14} className="animate-spin"/> : <Upload size={14}/>}
-                    {importing ? "Đang nhập..." : "Nhập KN"}
-                  </button>
-                </>
-              )}
-              <button onClick={()=>openCreate()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
-                <Plus size={16}/> Tạo phiếu KN
-              </button>
-            </div>
+            {mainTab !== "thong_ke" && (
+              <div className="flex items-center gap-2">
+                {userRole === "admin" && (
+                  <>
+                    <button onClick={handleDownloadTemplate}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all border border-slate-200">
+                      <Download size={14}/> Tải mẫu
+                    </button>
+                    <button onClick={()=>importFileRef.current?.click()} disabled={importing}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 rounded-xl transition-all border border-blue-200 disabled:opacity-40">
+                      {importing ? <RefreshCw size={14} className="animate-spin"/> : <Upload size={14}/>}
+                      {importing ? "Đang nhập..." : "Nhập KN"}
+                    </button>
+                  </>
+                )}
+                <button onClick={()=>openCreate()}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
+                  <Plus size={16}/> Tạo phiếu KN
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Tab nav */}
@@ -1422,6 +1711,7 @@ export default function QualityPage() {
             {([
               { val:"xep_hang", label:"Xếp hạng", icon:Star },
               { val:"giam_sat", label:"Giám sát KN", icon:Eye },
+              { val:"thong_ke", label:"Thống kê", icon:BarChart2 },
             ] as const).map(t => (
               <button key={t.val} onClick={()=>setMainTab(t.val)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -1816,6 +2106,8 @@ export default function QualityPage() {
               )}
             </>
           )}
+
+          {mainTab === "thong_ke" && <QualityAnalyticsPage embedded factoryId={factoryId} />}
         </div>
       )}
 
@@ -1883,6 +2175,41 @@ export default function QualityPage() {
                 <Check size={18} className={importResult.ok>0?"text-emerald-600":"text-slate-400"}/>
                 <span className="font-bold">Nhập thành công: {importResult.ok} lô</span>
               </div>
+              {importResult.warnings.length > 0 && (
+                <div className="bg-amber-50 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-sm mb-2">
+                    <AlertTriangle size={14}/> {importResult.warnings.length} cảnh báo, đã bỏ qua {importResult.skipped} lô
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {(() => {
+                      const warningSummary = summarizeImportWarnings(importResult.warnings)
+                      return (
+                        <>
+                          <span className="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
+                            Trùng KN: {warningSummary.duplicateQc}
+                          </span>
+                          <span className="inline-flex items-center rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-700">
+                            Sai ngày hoàn thành: {warningSummary.wrongDate}
+                          </span>
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-700">
+                            Trùng trong file: {warningSummary.duplicateInFile}
+                          </span>
+                          {warningSummary.other > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
+                              Lý do khác: {warningSummary.other}
+                            </span>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {importResult.warnings.map((e,i)=>(
+                      <div key={i} className="text-xs text-amber-700 font-mono">{e}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {importResult.errors.length > 0 && (
                 <div className="bg-red-50 rounded-xl p-4">
                   <div className="flex items-center gap-2 text-red-700 font-bold text-sm mb-2">
