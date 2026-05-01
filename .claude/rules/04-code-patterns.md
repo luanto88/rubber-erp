@@ -54,6 +54,25 @@ Quy tac bat buoc:
 - Khong duoc phu thuoc cung nhac vao `localStorage.getItem("erp_factory")` trong page/module
 - Uu tien helper `getActiveFactoryId()` de tu phuc hoi `factory_id` neu cache session bi mat
 
+### Bootstrap khi can ca factoryId lan user (vi du settings page)
+
+```typescript
+const bootstrap = useCallback(async () => {
+  const fid = await getActiveFactoryId()
+  if (!fid) { setLoading(false); return }
+
+  const { user: sessionUser } = await hydrateActiveSession()
+  if (!sessionUser) { setLoading(false); return }
+
+  setFactoryId(fid)
+  setUser(sessionUser)
+  await loadData(fid)
+  setLoading(false)
+}, [loadData])
+```
+
+Khong duoc dung `localStorage.getItem("erp_factory")` hay `localStorage.getItem("erp_user")` truc tiep trong bootstrap — cache co the chua duoc set tai thoi diem bootstrap chay.
+
 ## Save/Update pattern
 
 > ⚠️ **Supabase JS v2 KHÔNG throw exception khi lỗi DB** — luôn kiểm tra `error` object.  

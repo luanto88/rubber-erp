@@ -170,14 +170,65 @@ Action dac biet tuy module:
 
 ```typescript
 let syncing = false
-const syncSession = async () => {
+const syncSession = async (redirectBase = "/login", fullHydration = true) => {
   if (syncing) return
   syncing = true
   try { ... } finally { syncing = false }
 }
 ```
 
-**2. `onAuthStateChange` chi xu ly `SIGNED_IN` / `SIGNED_OUT`**
+**2. Tach hai che do sync: fullHydration vs lightweight**
+
+`hydrateActiveSession()` thuc hien 4-5 DB query noi tiep (profile + permissions + role_permissions).
+Neu goi moi 60 giay, loi DB co the match `isAuthSessionError` → xoa user sai → redirect nham.
+
+Quy tac:
+
+- `fullHydration = true` (default): dung cho **bootstrap** va **SIGNED_IN** event
+  - Goi `hydrateActiveSession()` → fetch profile + permissions
+- `fullHydration = false` (lightweight): dung cho **interval** va **focus/visibility**
+  - Chi goi `getFreshAuthSession()` — doc localStorage, khong co DB query
+  - Chi lam network request neu token sap het han (refresh token)
+
+```typescript
+const syncSession = async (redirectBase = "/login", fullHydration = true) => {
+  if (syncing) return
+  syncing = true
+  try {
+    if (!fullHydration) {
+      // Lightweight: chi verify token con song, khong DB
+      const session = await getFreshAuthSession()
+      if (!session?.user && alive) {
+        setUser(null)
+        router.replace(redirectBase)
+      }
+      return
+    }
+    // Full hydration: fetch profile + permissions
+    const { session, user: sessionUser } = await hydrateActiveSession()
+    if (!session?.user) {
+      if (alive) { setUser(null); router.replace(redirectBase) }
+      return
+    }
+    const blocked = authBlockReason(sessionUser)
+    if (!sessionUser || blocked) {
+      await signOutEverywhere()
+      if (alive) router.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+      return
+    }
+    if (alive) setUser(sessionUser)
+  } catch (error) {
+    if (alive && isAuthSessionError(error)) {
+      setUser(null)
+      router.replace("/login")
+    }
+  } finally {
+    syncing = false
+  }
+}
+```
+
+**3. `onAuthStateChange` chi xu ly `SIGNED_IN` / `SIGNED_OUT`**
 
 ```typescript
 supabase.auth.onAuthStateChange(async (event, session) => {
@@ -187,44 +238,65 @@ supabase.auth.onAuthStateChange(async (event, session) => {
     return
   }
   if (event === "SIGNED_IN") {
-    await syncSession()
+    await syncSession("/login", true) // full hydration
   }
   // TOKEN_REFRESHED → bo qua, interval 60s xu ly
 })
 ```
 
-Li do: neu xu ly `TOKEN_REFRESHED`, moi lan `refreshSession()` se kich hoat them 1 `syncSession()` → vong lap tu cung co → 5-10 DB query dong thoi → UI dong bang.
+Li do: neu xu ly `TOKEN_REFRESHED`, moi lan `refreshSession()` se kich hoat them 1 `syncSession()` → vong lap tu cung co → UI dong bang.
 
-**3. Chi clear user khi loi xac thuc that su**
+**4. Bootstrap phai co timeout de tranh spinner treo**
+
+Neu `hydrateActiveSession()` bi treo do mang cham (fetch khong bao gio resolve),
+`setLoading(false)` khong chay → spinner treo mai mai.
 
 ```typescript
-} catch (error) {
-  if (alive && isAuthSessionError(error)) {
-    setUser(null)
-    router.replace("/login")
+const bootstrap = async () => {
+  try {
+    // Promise.race: neu sync treo > 10 giay, van ha loading
+    await Promise.race([
+      syncSession("/login", true),
+      new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+    ])
+  } finally {
+    if (alive) setLoading(false)
   }
-  // loi mang tam thoi → chi log, khong xoa user
 }
 ```
 
-`isAuthSessionError()` co san tai `src/lib/auth.ts` — check JWT/token/session/auth/401/403.
-
-Neu clear user tren moi loi mang, layout se hien spinner va tat ca module unmount.
-
-**4. Debounce focus/visibility handler — toi thieu 30 giay**
+**5. Fallback redirect khi loading xong nhung khong co user**
 
 ```typescript
+// Neu bootstrap xong ma user = null (loi mang, session het han, timeout)
+// → redirect ve login thay vi de spinner treo vo han
+useEffect(() => {
+  if (!loading && !user) {
+    router.replace("/login")
+  }
+}, [loading, user, router])
+```
+
+**6. Interval va focus dung lightweight**
+
+```typescript
+// Interval: lightweight — chi verify token, khong fetch DB
+const intervalId = window.setInterval(() => {
+  void syncSession("/login", false)
+}, 60_000)
+
+// Focus/visibility: lightweight, debounce 30 giay
 let lastSyncTime = 0
 const handleVisibilityOrFocus = () => {
   const now = Date.now()
   if (document.visibilityState === "visible" && now - lastSyncTime > 30_000) {
     lastSyncTime = now
-    void syncSession()
+    void syncSession("/login", false)
   }
 }
 ```
 
-**5. useEffect deps phai la `[]`**
+**7. useEffect deps phai la `[]`**
 
 ```typescript
 }, []) // router stable trong Next.js App Router, khong can trong deps
