@@ -177,6 +177,11 @@ export async function fetchPermissionCodesForUser(userId: string) {
     if (row.permission_code) codes.add(row.permission_code)
   }
 
+  // Fallback: nếu DB chưa có permissions cho role này (chưa seed), dùng ROLE_DEFAULTS
+  if (codes.size === 0 && role in ROLE_DEFAULTS) {
+    for (const code of ROLE_DEFAULTS[role]) codes.add(code)
+  }
+
   return [...codes].sort()
 }
 

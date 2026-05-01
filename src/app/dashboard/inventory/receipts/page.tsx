@@ -719,39 +719,39 @@ export default function InventoryReceiptsPage() {
               Chọn kho trước, sau đó chọn nhiều vật tư. Các dòng nhập sẽ tự sinh ngay bên dưới.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {draft.documentId ? (
-              <Link
-                href={`/dashboard/inventory/print?type=import&documentId=${encodeURIComponent(draft.documentId)}`}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-2 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+          <div className="flex flex-col items-end gap-3">
+            <div className="flex flex-wrap justify-end gap-2">
+              {draft.documentId ? (
+                <Link
+                  href={`/dashboard/inventory/print?type=import&documentId=${encodeURIComponent(draft.documentId)}`}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-2 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+                >
+                  <Printer size={16} />
+                  In phiếu
+                </Link>
+              ) : null}
+              <button
+                onClick={resetDraft}
+                className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
               >
-                <Printer size={16} />
-                In phiếu
-              </Link>
-            ) : null}
-            <button
-              onClick={resetDraft}
-              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
-            >
-              Làm mới
-            </button>
-            <button
-              onClick={() => void postReceiptDraft()}
-              disabled={saving || posting || loading}
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-            >
-              {posting ? "Đang ghi sổ..." : "Ghi sổ nhập kho"}
-            </button>
+                Làm mới
+              </button>
+              <button
+                onClick={() => void postReceiptDraft()}
+                disabled={saving || posting || loading}
+                className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {posting ? "Đang ghi sổ..." : "Ghi sổ nhập kho"}
+              </button>
+            </div>
+            <InventoryQrCard
+              title="QR phiếu nhập"
+              caption="Quét để mở nhanh phiếu nhập theo mã."
+              hrefPath={documentQrPath}
+              valueText={documentCode}
+              compact
+            />
           </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap justify-end gap-4">
-          <InventoryQrCard
-            title="QR phiếu nhập"
-            caption="Quét để mở nhanh phiếu nhập theo mã."
-            hrefPath={documentQrPath}
-            valueText={documentCode}
-          />
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-2">

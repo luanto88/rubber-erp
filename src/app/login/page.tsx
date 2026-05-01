@@ -217,11 +217,11 @@ function LoginPageContent() {
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex justify-center">
             <Image
-              src="/logo-phk-moi.png"
-              alt="Logo PHK"
+              src="/logo-nha-may-5.jpg"
+              alt="Logo nhà máy Phước Hòa KPT"
               width={120}
               height={120}
-              className="h-28 w-28 object-contain"
+              className="h-28 w-28 rounded-full object-cover shadow-md"
               priority
             />
           </div>

@@ -2,18 +2,21 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { ArrowRightLeft, BarChart3, Boxes, Layers, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 
 type PrimaryTab = {
   href: string
   label: string
+  icon: LucideIcon
   matchPrefixes: string[]
 }
 
 type SecondaryTab = {
   href: string
   label: string
+  icon: LucideIcon
 }
 
 type InventoryPageShellProps = {
@@ -28,6 +31,7 @@ const primaryTabs: PrimaryTab[] = [
   {
     href: "/dashboard/inventory/receipts",
     label: "Nhập xuất tồn",
+    icon: Layers,
     matchPrefixes: [
       "/dashboard/inventory",
       "/dashboard/inventory/receipts",
@@ -40,16 +44,17 @@ const primaryTabs: PrimaryTab[] = [
   {
     href: "/dashboard/inventory/analytics",
     label: "Thống kê",
+    icon: BarChart3,
     matchPrefixes: ["/dashboard/inventory/analytics"],
   },
 ]
 
 const operationalTabs: SecondaryTab[] = [
-  { href: "/dashboard/inventory/receipts", label: "Nhập kho" },
-  { href: "/dashboard/inventory/issues", label: "Xuất kho" },
-  { href: "/dashboard/inventory/transfers", label: "Chuyển kho" },
-  { href: "/dashboard/inventory/on-hand", label: "Tồn kho" },
-  { href: "/dashboard/inventory/cards", label: "Thẻ kho" },
+  { href: "/dashboard/inventory/receipts", label: "Nhập kho", icon: PackagePlus },
+  { href: "/dashboard/inventory/issues", label: "Xuất kho", icon: PackageMinus },
+  { href: "/dashboard/inventory/transfers", label: "Chuyển kho", icon: ArrowRightLeft },
+  { href: "/dashboard/inventory/on-hand", label: "Tồn kho", icon: Boxes },
+  { href: "/dashboard/inventory/cards", label: "Thẻ kho", icon: ScrollText },
 ]
 
 function isActivePath(pathname: string, href: string) {
@@ -75,7 +80,7 @@ export function InventoryPageShell({
     <div className="space-y-4">
       <section
         ref={revealRef}
-        className="scroll-reveal rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -88,20 +93,22 @@ export function InventoryPageShell({
           {action ? <div className="flex items-center gap-2">{action}</div> : null}
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1">
+        <div className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5">
           {primaryTabs.map((tab) => {
             const active = matchesAnyPrefix(pathname, tab.matchPrefixes)
+            const Icon = tab.icon
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
                 className={
-                  "rounded-xl px-4 py-2 text-sm font-bold transition-all " +
+                  "flex items-center gap-2 rounded-2xl px-6 py-2 text-sm font-bold transition-all " +
                   (active
                     ? "bg-white text-slate-800 shadow-sm"
                     : "text-slate-500 hover:text-slate-800")
                 }
               >
+                <Icon size={16} />
                 {tab.label}
               </Link>
             )
@@ -117,12 +124,13 @@ export function InventoryPageShell({
                   key={tab.href}
                   href={tab.href}
                   className={
-                    "rounded-lg px-3 py-2 text-sm font-semibold transition-colors " +
+                    "flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold transition-all " +
                     (active
-                      ? "bg-slate-900 text-white"
+                      ? "bg-slate-900 text-white shadow-sm"
                       : "text-slate-600 hover:bg-slate-100 hover:text-slate-800")
                   }
                 >
+                  <tab.icon size={15} />
                   {tab.label}
                 </Link>
               )
@@ -133,6 +141,24 @@ export function InventoryPageShell({
 
       {children}
     </div>
+  )
+}
+
+export function ScrollReveal({ children, className }: { children: ReactNode; className?: string }) {
+  const ref = useScrollReveal()
+  return (
+    <div ref={ref} className={`scroll-reveal${className ? ` ${className}` : ""}`}>
+      {children}
+    </div>
+  )
+}
+
+export function ScrollRevealSection({ children, className }: { children: ReactNode; className?: string }) {
+  const ref = useScrollReveal()
+  return (
+    <section ref={ref} className={`scroll-reveal section-hover${className ? ` ${className}` : ""}`}>
+      {children}
+    </section>
   )
 }
 
@@ -152,7 +178,7 @@ export function InventoryPlaceholderSection({
   return (
     <section
       ref={revealRef}
-      className="scroll-reveal rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div className="flex items-start gap-3">
         {icon ? <div className="rounded-xl bg-slate-100 p-3 text-slate-700">{icon}</div> : null}
@@ -163,7 +189,7 @@ export function InventoryPlaceholderSection({
       </div>
       <div className="mt-4 space-y-2">
         {bullets.map((bullet) => (
-          <div key={bullet} className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <div key={bullet} className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
             {bullet}
           </div>
         ))}

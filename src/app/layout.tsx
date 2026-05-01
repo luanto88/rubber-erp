@@ -3,6 +3,11 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "PTCS Phước Hòa Kampong Thom | Nhà máy chế biến cao su",
   description: "Nhà máy chế biến cao su Phước Hòa Kampong Thom - Sản xuất CSR10, CSR20, CSR3L theo tiêu chuẩn PEFC CS. Thành lập 2019 tại Campuchia.",
+  icons: {
+    icon: "/logo-nha-may-5.jpg",
+    shortcut: "/logo-nha-may-5.jpg",
+    apple: "/logo-nha-may-5.jpg",
+  },
 }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

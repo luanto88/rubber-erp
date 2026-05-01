@@ -11,7 +11,7 @@ import {
   PackageSearch,
   ShieldAlert,
 } from "lucide-react"
-import { InventoryPageShell, InventoryPlaceholderSection } from "../_components/inventory-shell"
+import { InventoryPageShell, InventoryPlaceholderSection, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
 import {
   loadInventoryMovementData,
   type InventoryItemOption,
@@ -21,7 +21,6 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
-import { useScrollReveal } from "@/lib/useScrollReveal"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
@@ -39,16 +38,28 @@ function SummaryCard({
   note: string
   tone?: string
 }) {
+  const [iconBg, borderAccent] = tone.includes("amber")
+    ? ["bg-amber-50 text-amber-600", "border-l-amber-400"]
+    : tone.includes("rose")
+      ? ["bg-rose-50 text-rose-600", "border-l-rose-400"]
+      : tone.includes("blue")
+        ? ["bg-blue-50 text-blue-600", "border-l-blue-400"]
+        : tone.includes("violet")
+          ? ["bg-violet-50 text-violet-600", "border-l-violet-400"]
+          : ["bg-emerald-50 text-emerald-600", "border-l-emerald-400"]
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover-lift">
+    <div
+      className={`rounded-2xl border border-slate-200 border-l-4 ${borderAccent} bg-white p-5 shadow-sm hover-lift`}
+    >
       <div className="flex items-start justify-between gap-3">
-        <div className="rounded-xl bg-slate-100 p-3 text-slate-700">{icon}</div>
+        <div className={`rounded-xl p-3 ${iconBg}`}>{icon}</div>
         <div className="text-right">
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
           <div className={`mt-2 text-2xl font-extrabold ${tone}`}>{value}</div>
         </div>
       </div>
-      <div className="mt-3 text-sm leading-6 text-slate-500">{note}</div>
+      <div className="mt-3 text-sm leading-relaxed text-slate-500">{note}</div>
     </div>
   )
 }
@@ -119,8 +130,6 @@ export default function InventoryAnalyticsPage() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState("all")
   const [selectedFocus, setSelectedFocus] = useState("all")
   const [downloading, setDownloading] = useState(false)
-  const revealRef = useScrollReveal()
-
   useEffect(() => {
     const bootstrap = async () => {
       setLoading(true)
@@ -415,7 +424,7 @@ export default function InventoryAnalyticsPage() {
         </div>
       ) : null}
 
-      <div ref={revealRef} className="scroll-reveal grid gap-4 xl:grid-cols-4">
+      <ScrollReveal className="stagger-cards grid gap-4 xl:grid-cols-4">
         <SummaryCard
           icon={<Boxes size={18} />}
           label="Vật tư theo dõi"
@@ -443,12 +452,9 @@ export default function InventoryAnalyticsPage() {
           note="Các lô còn tồn cần theo dõi hạn sử dụng."
           tone="text-blue-700"
         />
-      </div>
+      </ScrollReveal>
 
-      <section
-        ref={revealRef}
-        className="scroll-reveal mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-      >
+      <ScrollRevealSection className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="min-w-[220px] flex-1">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
           <select
@@ -477,13 +483,10 @@ export default function InventoryAnalyticsPage() {
             <option value="lot-expiry">Chỉ lô và hạn sử dụng</option>
           </select>
         </div>
-      </section>
+      </ScrollRevealSection>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <section
-          ref={revealRef}
-          className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-        >
+        <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="text-base font-bold text-slate-800">Cảnh báo ưu tiên</h2>
             <p className="mt-0.5 text-xs text-slate-500">
@@ -537,12 +540,9 @@ export default function InventoryAnalyticsPage() {
               ))}
             </div>
           )}
-        </section>
+        </ScrollRevealSection>
 
-        <section
-          ref={revealRef}
-          className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-        >
+        <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="text-base font-bold text-slate-800">Biểu đồ quản lý</h2>
             <p className="mt-0.5 text-xs text-slate-500">
@@ -563,14 +563,11 @@ export default function InventoryAnalyticsPage() {
               </div>
             ))}
           </div>
-        </section>
+        </ScrollRevealSection>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <section
-          ref={revealRef}
-          className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
-        >
+        <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="text-base font-bold text-slate-800">Vật tư biến động nhiều</h2>
             <p className="mt-0.5 text-xs text-slate-500">
@@ -604,7 +601,7 @@ export default function InventoryAnalyticsPage() {
               ))}
             </div>
           )}
-        </section>
+        </ScrollRevealSection>
 
         <InventoryPlaceholderSection
           title="Xuất file kiểm tra"
