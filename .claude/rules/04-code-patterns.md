@@ -7,24 +7,52 @@ description: Patterns code chuẩn — dùng khi viết mới hoặc sửa bất
 ## Fetch data pattern
 
 ```typescript
+import { getActiveFactoryId } from "@/lib/auth"
+
 const loadData = useCallback(async (fid: string) => {
   setLoading(true)
-  const { data } = await supabase
-    .from("table_name")
-    .select("*, related_table(field1, field2)")
-    .eq("factory_id", fid)
-    .order("created_at", { ascending: false })
-  setData(data || [])
-  setLoading(false)
+  try {
+    const { data } = await supabase
+      .from("table_name")
+      .select("*, related_table(field1, field2)")
+      .eq("factory_id", fid)
+      .order("created_at", { ascending: false })
+    setData(data || [])
+  } finally {
+    setLoading(false)
+  }
 }, [filterDep1, filterDep2]) // chỉ dependencies là filters
 
+// Bootstrap - chỉ chạy 1 lần khi mount để lấy factory ID
 useEffect(() => {
-  const fid = localStorage.getItem("erp_factory")
-  if (!fid) return
-  setFactoryId(fid)
-  loadData(fid)
-}, [loadData])
+  const bootstrap = async () => {
+    const fid = await getActiveFactoryId()
+    if (!fid) {
+      setLoading(false)
+      return
+    }
+    setFactoryId(fid)
+    loadData(fid)
+  }
+  void bootstrap()
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, []) // KHÔNG đặt loadData vào đây
+
+// Reload khi filter thay đổi (sau khi đã có factoryId)
+useEffect(() => {
+  if (factoryId) loadData(factoryId)
+}, [factoryId, loadData])
 ```
+
+Quy tac bat buoc:
+
+- **Bootstrap effect PHẢI có deps `[]`** — không phụ thuộc vào `loadData`
+- Nếu `loadData` có filter dependencies, dùng effect riêng `[factoryId, loadData]` để reload khi filter đổi
+- Đặt `loadData` vào deps của bootstrap sẽ gây re-run `getActiveFactoryId()` mỗi khi filter thay đổi — lãng phí DB call
+- Ham `loadData()` phai co `try/finally` neu co bat/tat `loading`
+- Khong duoc `return` som sau `setLoading(true)` ma bo quen ha `loading`
+- Khong duoc phu thuoc cung nhac vao `localStorage.getItem("erp_factory")` trong page/module
+- Uu tien helper `getActiveFactoryId()` de tu phuc hoi `factory_id` neu cache session bi mat
 
 ## Save/Update pattern
 
@@ -133,3 +161,11 @@ const updateForm = (patch: Partial<typeof form>) => {
   // render content
 )}
 ```
+
+## Phan biet loading / error / empty
+
+- `Dang tai...` chi dung khi request dang chay that
+- `Khong co du lieu` chi dung khi request thanh cong va ket qua rong
+- Neu request auth/session bi loi hoac session het han:
+  - khong duoc gia lam empty state
+  - phai cho co che auth/layout xu ly lai session hoac day ve login
