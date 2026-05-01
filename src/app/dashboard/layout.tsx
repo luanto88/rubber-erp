@@ -21,6 +21,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import {
   authBlockReason,
+  getFreshAuthSession,
   hasPermission,
   hydrateActiveSession,
   isAuthSessionError,
@@ -96,10 +97,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     let syncing = false
     let lastSyncTime = 0
 
-    const syncSession = async (redirectBase = "/login") => {
+    /**
+     * fullHydration=true  → fetch profile + permissions (bootstrap / SIGNED_IN)
+     * fullHydration=false → chỉ kiểm tra session token còn hợp lệ (interval / focus)
+     *
+     * Interval/focus dùng lightweight để tránh 4-5 DB query mỗi 60s.
+     * Lỗi DB trong DB query có thể match isAuthSessionError và xóa user nhầm.
+     */
+    const syncSession = async (redirectBase = "/login", fullHydration = true) => {
       if (syncing) return
       syncing = true
       try {
+        if (!fullHydration) {
+          // Lightweight: chỉ verify token còn sống, không gọi DB
+          const session = await getFreshAuthSession()
+          if (!session?.user && alive) {
+            setUser(null)
+            router.replace(redirectBase)
+          }
+          return
+        }
+
+        // Full hydration: fetch profile + permissions
         const { session, user: sessionUser } = await hydrateActiveSession()
         if (!session?.user) {
           if (alive) {
@@ -131,7 +150,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const bootstrap = async () => {
       try {
-        await syncSession()
+        // Timeout 10s: nếu hydrateActiveSession treo do mạng chậm,
+        // vẫn hạ loading để tránh spinner treo vô hạn
+        await Promise.race([
+          syncSession("/login", true),
+          new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+        ])
       } finally {
         if (alive) setLoading(false)
       }
@@ -149,19 +173,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return
       }
       if (event === "SIGNED_IN") {
-        await syncSession()
+        await syncSession("/login", true)
       }
     })
 
+    // Interval: lightweight — chỉ verify token, không fetch DB
     const intervalId = window.setInterval(() => {
-      void syncSession()
+      void syncSession("/login", false)
     }, 60_000)
 
     const handleVisibilityOrFocus = () => {
       const now = Date.now()
       if (document.visibilityState === "visible" && now - lastSyncTime > 30_000) {
         lastSyncTime = now
-        void syncSession()
+        void syncSession("/login", false)
       }
     }
 
