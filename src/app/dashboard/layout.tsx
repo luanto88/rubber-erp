@@ -195,6 +195,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }
 
+  // Khi bootstrap xong nhưng không có user (lỗi mạng tạm thời / session hết hạn không phải auth error)
+  // → redirect về login thay vì để spinner treo vô hạn
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
   if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">

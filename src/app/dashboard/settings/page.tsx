@@ -6,7 +6,9 @@ import { supabase } from "@/lib/supabase"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
+  getActiveFactoryId,
   hasPermission,
+  hydrateActiveSession,
   type AppRole,
   type SessionUser,
 } from "@/lib/auth"
@@ -193,16 +195,20 @@ export default function SettingsPage() {
   }, [])
 
   const bootstrap = useCallback(async () => {
-    const fid = localStorage.getItem("erp_factory")
-    const rawUser = localStorage.getItem("erp_user")
-    if (!fid || !rawUser) {
+    const fid = await getActiveFactoryId()
+    if (!fid) {
       setLoading(false)
       return
     }
 
-    const currentUser = JSON.parse(rawUser) as SessionUser
+    const { user: sessionUser } = await hydrateActiveSession()
+    if (!sessionUser) {
+      setLoading(false)
+      return
+    }
+
     setFactoryId(fid)
-    setUser(currentUser)
+    setUser(sessionUser)
 
     await Promise.all([
       loadSuffixes(fid),

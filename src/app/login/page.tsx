@@ -96,7 +96,8 @@ function LoginPageContent() {
     return () => {
       alive = false
     }
-  }, [factoryId, router])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (reason) setNotice(REASON_MESSAGES[reason] || "")
