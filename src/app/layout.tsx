@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import "./globals.css"
 export const metadata: Metadata = {
-  title: "PTCS Phước Hòa Kampong Thom | Nhà máy chế biến cao su",
+  title: "Công ty TNHH PTCS Phước Hòa Kampong - NMCB",
   description: "Nhà máy chế biến cao su Phước Hòa Kampong Thom - Sản xuất CSR10, CSR20, CSR3L theo tiêu chuẩn PEFC CS. Thành lập 2019 tại Campuchia.",
   icons: {
     icon: "/logo-nha-may-5.jpg",
