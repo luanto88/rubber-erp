@@ -162,7 +162,7 @@ Vi du:
 - `erp_user` va `erp_factory` trong `localStorage` chi la cache session cho UI
 - Khi can `factory_id`, uu tien helper `getActiveFactoryId()` thay vi doc thang `localStorage`
 - Khi can ca `factory_id` lan `user` (nhu settings page), dung `getActiveFactoryId()` + `hydrateActiveSession()`
-- App phai chu dong refresh session neu token sap het han
+- App phai chu dong refresh session neu token sap het han; `SESSION_REFRESH_LEEWAY_SECONDS = 300` (5 phut truoc khi het han)
 - Dashboard layout phai tu dong dong bo lai session khi:
   - bootstrap (full hydration — fetch profile + permissions)
   - SIGNED_IN event (full hydration)
@@ -171,8 +171,10 @@ Vi du:
   - heartbeat dinh ky 60 giay (lightweight)
 - Bootstrap layout phai boc trong `Promise.race` voi timeout 10s de tranh spinner treo do mang cham
 - Interval va focus sync phai dung lightweight (`getFreshAuthSession()` only) — goi `hydrateActiveSession()` moi 60s se lam 4-5 DB query, loi nao do co the xoa user sai
+- `onAuthStateChange` SIGNED_OUT handler phai thu `getFreshAuthSession()` truoc khi redirect — Supabase co the fire SIGNED_OUT khi network blip xay ra luc auto-refresh, gay false-positive kick user ra khoi app
 - Sau bootstrap, neu `!loading && !user`, phai redirect ve `/login` bang `useEffect`
 - Cac ham load du lieu co bat `loading` phai co `try/finally` hoac co che ha loading tuong duong
+- Ham save trong modal: `setSaving(false)` PHAI nam trong `finally`; sau save thanh cong dung `void loadData()` (fire-and-forget), KHONG `await loadData()` — neu `loadData` nam trong `try` va bi treo, `finally` khong chay, button "Dang luu..." bi treo mai mai
 - Khong duoc de page roi vao trang thai gia:
   - session loi nhung hien `Khong co du lieu phu hop`
   - request loi nhung spinner treo `Dang tai...`

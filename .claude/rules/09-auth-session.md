@@ -28,6 +28,7 @@ Khong dung `localStorage` de luu data nghiep vu.
 - `getFreshAuthSession()` co trach nhiem:
   - doc session hien tai
   - chu dong refresh token neu session sap het han
+  - `SESSION_REFRESH_LEEWAY_SECONDS = 300` — token duoc refresh truoc 5 phut khi het han, mo rong vung an toan de tranh SIGNED_OUT khi mang blip dung vao luc cuoi
 - `getActiveFactoryId()` co trach nhiem:
   - uu tien doc `erp_factory` tu cache neu hop le
   - neu cache mat / stale thi phai rebuild lai tu profile cua session dang dang nhap
@@ -233,8 +234,13 @@ const syncSession = async (redirectBase = "/login", fullHydration = true) => {
 ```typescript
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === "SIGNED_OUT" || !session?.user) {
-    setUser(null)
-    router.replace("/login")
+    // Supabase co the fire SIGNED_OUT khi network blip xay ra luc auto-refresh.
+    // Thu lay lai session truoc khi redirect de tranh false-positive.
+    try {
+      const recovered = await getFreshAuthSession()
+      if (recovered?.user && alive) return
+    } catch { /* khong recover duoc, tiep tuc redirect */ }
+    if (alive) { setUser(null); router.replace("/login") }
     return
   }
   if (event === "SIGNED_IN") {
@@ -244,7 +250,9 @@ supabase.auth.onAuthStateChange(async (event, session) => {
 })
 ```
 
-Li do: neu xu ly `TOKEN_REFRESHED`, moi lan `refreshSession()` se kich hoat them 1 `syncSession()` → vong lap tu cung co → UI dong bang.
+Li do xu ly TOKEN_REFRESHED: neu xu ly `TOKEN_REFRESHED`, moi lan `refreshSession()` se kich hoat them 1 `syncSession()` → vong lap tu cung co → UI dong bang.
+
+Li do recovery trong SIGNED_OUT: Supabase fire `SIGNED_OUT` khi token auto-refresh that bai do mang blip. Neu redirect ngay, user bi kick ra khoi app du session van con hop le (sau khi mang phuc hoi). `getFreshAuthSession()` chi doc session hien tai — neu van con user, bo qua event; neu that, moi redirect.
 
 **4. Bootstrap phai co timeout de tranh spinner treo**
 

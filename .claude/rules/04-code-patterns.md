@@ -86,20 +86,30 @@ const handleSave = async () => {
   setSaving(true)
   setSaveError(null)
   const payload = { ...form, factory_id: factoryId }
-
-  if (editId) {
-    const { error } = await supabase.from("table").update(payload).eq("id", editId)
-    if (error) { setSaveError(error.message); setSaving(false); return }
-  } else {
-    const { error } = await supabase.from("table").insert(payload)
-    if (error) { setSaveError(error.message); setSaving(false); return }
+  try {
+    if (editId) {
+      const { error } = await supabase.from("table").update(payload).eq("id", editId)
+      if (error) { setSaveError(error.message); return }
+    } else {
+      const { error } = await supabase.from("table").insert(payload)
+      if (error) { setSaveError(error.message); return }
+    }
+    setModal(null)
+    void loadData(factoryId) // fire-and-forget — tránh button "Đang lưu..." treo nếu loadData chậm
+  } catch (err) {
+    setSaveError(err instanceof Error ? err.message : "Lỗi không xác định")
+  } finally {
+    setSaving(false) // luôn hạ saving dù lỗi hay thành công
   }
-
-  setSaving(false)
-  setModal(null)
-  loadData(factoryId) // bắt buộc refresh sau save
 }
 ```
+
+Quy tac bat buoc ve save:
+
+- `setSaving(false)` PHAI nam trong `finally`, khong duoc dat tren moi nhanh `return`
+- Sau save thanh cong, dung `void loadData(factoryId)` (fire-and-forget), KHONG `await loadData()`
+- Li do: neu `loadData` nam trong `try` va bi treo (mang cham, query timeout), `finally` khong chay → button "Dang luu..." bi treo mai mai
+- `closeModal()` / `setModal(null)` phai goi TRUOC `void loadData()` de UI dong modal ngay
 
 ### Toast lỗi (hiển thị saveError)
 
