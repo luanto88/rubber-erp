@@ -416,3 +416,38 @@ export async function loadInventoryMovementData() {
     movements,
   }
 }
+
+// ── Alert threshold types ─────────────────────────────────────
+
+export type InventoryAlertThreshold = {
+  id: string
+  factory_id: string
+  code: string
+  label: string
+  value: number
+  unit: string
+  updated_at: string
+}
+
+export const DEFAULT_ALERT_THRESHOLDS: Omit<InventoryAlertThreshold, "id" | "factory_id" | "updated_at">[] = [
+  { code: "export_pct",   label: "Ngưỡng cảnh báo xuất lớn",    value: 50, unit: "%" },
+  { code: "transfer_pct", label: "Ngưỡng cảnh báo chuyển kho",   value: 70, unit: "%" },
+]
+
+// ── Line type label helper ────────────────────────────────────
+
+export function getLineTypeLabel(
+  item: InventoryItemOption | null,
+  index: number,
+  allItems: (InventoryItemOption | null)[]
+): string {
+  const getType = (it: InventoryItemOption | null) =>
+    it?.category_name?.toLowerCase().includes("hóa chất") ? "Hóa chất" : "Vật tư"
+
+  const currentType = getType(item)
+  let count = 0
+  for (let i = 0; i <= index; i++) {
+    if (getType(allItems[i]) === currentType) count++
+  }
+  return `${currentType} ${count}`
+}

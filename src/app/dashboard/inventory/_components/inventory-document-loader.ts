@@ -15,6 +15,12 @@ type InventoryDocumentHeader = {
   requester_name: string | null
   status: "draft" | "posted" | "cancelled"
   notes: string | null
+  posted_by: string | null
+  posted_at: string | null
+  posted_by_name: string | null
+  cancelled_by: string | null
+  cancelled_at: string | null
+  cancel_reason: string | null
 }
 
 type InventoryDocumentLine = {
@@ -46,7 +52,7 @@ export async function fetchInventoryDocumentByReference(
   let query = supabase
     .from("inventory_documents")
     .select(
-      "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes",
+      "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason",
     )
     .eq("factory_id", factoryId)
     .eq("document_type", documentType)
@@ -58,11 +64,24 @@ export async function fetchInventoryDocumentByReference(
     return null
   }
 
+  const docData = documentResult.data as InventoryDocumentHeader & { posted_by_name?: string | null }
+
+  if (docData.posted_by) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", docData.posted_by)
+      .maybeSingle()
+    docData.posted_by_name = profile?.full_name ?? null
+  } else {
+    docData.posted_by_name = null
+  }
+
   const lineResult = await supabase
     .from("inventory_document_lines")
     .select("id, item_id, item_code, item_name, unit, specification, quantity, lot_no, expiry_date, line_notes, image_urls")
     .eq("factory_id", factoryId)
-    .eq("document_id", documentResult.data.id)
+    .eq("document_id", docData.id)
     .order("created_at", { ascending: true })
 
   if (lineResult.error) {
@@ -70,7 +89,7 @@ export async function fetchInventoryDocumentByReference(
   }
 
   return {
-    document: documentResult.data as InventoryDocumentHeader,
+    document: docData,
     lines: (lineResult.data || []) as InventoryDocumentLine[],
   }
 }

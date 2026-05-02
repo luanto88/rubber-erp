@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { AlertTriangle, ArrowRightLeft, Check, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
-import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession } from "@/lib/auth"
+import { AlertTriangle, ArrowRightLeft, Ban, Check, CopyPlus, Printer, Save, Trash2, X } from "lucide-react"
+import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
 import {
+  getLineTypeLabel,
   loadInventoryAdminData,
   type InventoryItemOption,
   type InventoryWarehouseOption,
@@ -275,7 +276,12 @@ export default function InventoryTransfersPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
-  const [documentStatus, setDocumentStatus] = useState<"draft" | "posted" | null>(null)
+  const [documentStatus, setDocumentStatus] = useState<"draft" | "posted" | "cancelled" | null>(null)
+  const [postedInfo, setPostedInfo] = useState<{ at: string; byName: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [cancelModal, setCancelModal] = useState(false)
+  const [cancelReason, setCancelReason] = useState("")
+  const [cancelling, setCancelling] = useState(false)
   const [warehouses, setWarehouses] = useState<InventoryWarehouseOption[]>([])
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
@@ -289,6 +295,7 @@ export default function InventoryTransfersPage() {
       try {
         const inventoryData = await loadInventoryAdminData()
         const activeSession = await hydrateActiveSession().catch(() => ({ user: null }))
+        if (activeSession.user) setCurrentUser(activeSession.user)
         const resolvedFactoryId = inventoryData.factoryId ?? (await getActiveFactoryId())
         const actorName = activeSession.user?.full_name || activeSession.user?.username || ""
 
@@ -367,7 +374,11 @@ export default function InventoryTransfersPage() {
               image2Url: line.image_urls?.[1] || "",
             })),
           })
-          setDocumentStatus(loaded.document.status === "posted" ? "posted" : "draft")
+          setDocumentStatus(
+            loaded.document.status === "posted" ? "posted"
+            : loaded.document.status === "cancelled" ? "cancelled"
+            : "draft"
+          )
           return true
         }
 
@@ -431,7 +442,7 @@ export default function InventoryTransfersPage() {
     () => draft.documentCode || formatDocCode(sourceWarehouse?.code || "", draft.documentDate),
     [draft.documentCode, draft.documentDate, sourceWarehouse?.code],
   )
-  const documentQrPath = draft.documentId ? `/dashboard/inventory/transfers?code=${encodeURIComponent(documentCode)}` : null
+  const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=transfer&code=${encodeURIComponent(documentCode)}` : null
 
   const balanceMap = useMemo(
     () => new Map(balances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0])),
@@ -829,6 +840,10 @@ export default function InventoryTransfersPage() {
         postedRow && typeof postedRow.posted_lines === "number" ? postedRow.posted_lines : lineDetails.length
 
       setDocumentStatus("posted")
+      setPostedInfo({
+        at: new Date().toISOString(),
+        byName: currentUser?.full_name || currentUser?.username || session.user.email || "",
+      })
       setDraft((prev) => ({
         ...prev,
         documentId: targetDocumentId,
@@ -843,7 +858,32 @@ export default function InventoryTransfersPage() {
     }
   }
 
+  const cancelDocument = async () => {
+    if (!factoryId || !draft.documentId || !cancelReason.trim()) return
+    const session = await getFreshAuthSession()
+    if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn."); return }
+    setCancelling(true)
+    try {
+      const { error } = await supabase.rpc("inventory_cancel_document", {
+        p_factory_id: factoryId,
+        p_document_id: draft.documentId,
+        p_cancelled_by: session.user.id,
+        p_cancel_reason: cancelReason.trim(),
+      })
+      if (error) throw error
+      setDocumentStatus("cancelled")
+      setCancelModal(false)
+      setCancelReason("")
+      setSaveSuccess(`Phiếu chuyển ${draft.documentCode} đã được hủy. Tồn kho đã được hoàn nguyên.`)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Không thể hủy phiếu.")
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   return (
+    <>
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
       title="Phiếu chuyển kho"
@@ -886,7 +926,8 @@ export default function InventoryTransfersPage() {
         <SummaryBox label="Cảnh báo" value={String(summary.warningCount)} tone="text-amber-600" />
         <SummaryBox
           label="Trạng thái phiếu"
-          value={documentStatus === "posted" ? "Đã ghi sổ" : draft.documentId ? "Nháp" : "Chưa lưu"}
+          value={documentStatus === "posted" ? "Đã ghi sổ" : documentStatus === "cancelled" ? "Đã hủy" : draft.documentId ? "Nháp" : "Chưa lưu"}
+          tone={documentStatus === "posted" ? "text-emerald-700" : documentStatus === "cancelled" ? "text-red-600" : "text-slate-800"}
         />
       </div>
 
@@ -916,14 +957,35 @@ export default function InventoryTransfersPage() {
               >
                 Làm mới
               </button>
-              <button
-                onClick={() => void postTransferDraft()}
-                disabled={saving || posting || loading}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-              >
-                {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
-              </button>
+              {documentStatus !== "posted" && documentStatus !== "cancelled" ? (
+                <button
+                  onClick={() => void postTransferDraft()}
+                  disabled={saving || posting || loading}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
+                </button>
+              ) : null}
+              {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
+                <button
+                  onClick={() => setCancelModal(true)}
+                  className="rounded-xl border border-red-200 bg-red-50 px-5 py-2 text-sm font-bold text-red-600 transition-colors hover:bg-red-100"
+                >
+                  <Ban size={14} className="mr-1.5 inline" />
+                  Hủy phiếu
+                </button>
+              ) : null}
             </div>
+            {postedInfo ? (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                <Check size={13} className="shrink-0" />
+                <span>
+                  Đã ghi sổ lúc {new Date(postedInfo.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                  {" "}ngày {new Date(postedInfo.at).toLocaleDateString("vi-VN")}
+                  {postedInfo.byName ? ` bởi ${postedInfo.byName}` : ""}
+                </span>
+              </div>
+            ) : null}
             <InventoryQrCard
               title="QR phiếu chuyển"
               caption="Quét để mở nhanh phiếu chuyển theo mã."
@@ -1088,7 +1150,9 @@ export default function InventoryTransfersPage() {
                 <div key={detail.line.id} className="rounded-xl border border-slate-200 p-4">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-bold text-slate-800">Dòng {index + 1}</div>
+                      <div className="font-bold text-slate-800">
+                        {getLineTypeLabel(detail.item, index, lineDetails.map((d) => d.item))}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {detail.item ? (
@@ -1250,5 +1314,47 @@ export default function InventoryTransfersPage() {
         )}
       </section>
     </InventoryPageShell>
+
+    {cancelModal ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-red-600">
+              <Ban size={18} />
+              <h3 className="text-base font-bold">Hủy phiếu chuyển kho</h3>
+            </div>
+            <button onClick={() => { setCancelModal(false); setCancelReason("") }} className="text-slate-400 hover:text-slate-700">
+              <X size={18} />
+            </button>
+          </div>
+          <p className="mb-3 text-sm text-slate-600">
+            Hủy phiếu sẽ <strong>đảo ngược chuyển kho</strong> đã ghi sổ. Thao tác này không thể hoàn tác.
+          </p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Lý do hủy phiếu (bắt buộc)..."
+            rows={3}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-red-400"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => { setCancelModal(false); setCancelReason("") }}
+              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            >
+              Đóng
+            </button>
+            <button
+              onClick={() => void cancelDocument()}
+              disabled={cancelling || !cancelReason.trim()}
+              className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-red-700 disabled:opacity-50"
+            >
+              {cancelling ? "Đang hủy..." : "Xác nhận hủy phiếu"}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   )
 }

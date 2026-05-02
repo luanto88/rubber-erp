@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Printer } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Ban, Printer } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { getActiveFactoryId } from "@/lib/auth"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
@@ -83,7 +83,7 @@ export default function InventoryPrintPage() {
       return ""
     }
 
-    return `${getDocumentPath(documentType)}?code=${encodeURIComponent(payload.document.document_code)}`
+    return `/dashboard/inventory/print?type=${documentType}&code=${encodeURIComponent(payload.document.document_code)}`
   }, [documentType, payload?.document.document_code])
 
   const origin = typeof window !== "undefined" ? window.location.origin : ""
@@ -158,6 +158,27 @@ export default function InventoryPrintPage() {
               </div>
             </div>
 
+            {payload.document.status === "draft" && (
+              <div className="mt-4 flex items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3">
+                <AlertTriangle size={18} className="shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">Phiếu chưa ghi sổ</p>
+                  <p className="text-xs text-amber-700">Giao dịch này chưa ảnh hưởng đến tồn kho.</p>
+                </div>
+              </div>
+            )}
+            {payload.document.status === "cancelled" && (
+              <div className="mt-4 flex items-center gap-3 rounded-2xl border border-red-300 bg-red-50 px-5 py-3">
+                <Ban size={18} className="shrink-0 text-red-600" />
+                <div>
+                  <p className="text-sm font-bold text-red-800">Phiếu đã bị hủy</p>
+                  {payload.document.cancel_reason && (
+                    <p className="text-xs text-red-700">Lý do: {payload.document.cancel_reason}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-xl bg-slate-50 p-4">
                 <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Ngày phiếu</div>
@@ -168,8 +189,24 @@ export default function InventoryPrintPage() {
               <div className="rounded-xl bg-slate-50 p-4">
                 <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Trạng thái</div>
                 <div className="mt-2 text-sm font-semibold text-slate-800">
-                  {payload.document.status === "posted" ? "Đã ghi sổ" : "Nháp"}
+                  {payload.document.status === "posted"
+                    ? "Đã ghi sổ"
+                    : payload.document.status === "cancelled"
+                      ? "Đã hủy"
+                      : "Nháp"}
                 </div>
+                {payload.document.status === "posted" && payload.document.posted_at && (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {new Date(payload.document.posted_at).toLocaleString("vi-VN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                    })}
+                    {payload.document.posted_by_name ? ` · ${payload.document.posted_by_name}` : ""}
+                  </div>
+                )}
               </div>
               <div className="rounded-xl bg-slate-50 p-4">
                 <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Kho nguồn</div>

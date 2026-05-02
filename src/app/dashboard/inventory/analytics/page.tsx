@@ -8,7 +8,11 @@ import {
   Clock3,
   Download,
   FileSpreadsheet,
+  PackageMinus,
+  PackagePlus,
   PackageSearch,
+  Save,
+  Settings2,
   ShieldAlert,
 } from "lucide-react"
 import { InventoryPageShell, InventoryPlaceholderSection, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
@@ -21,6 +25,8 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { supabase } from "@/lib/supabase"
+import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
@@ -103,6 +109,20 @@ type ChartRow = {
   colorClass: string
 }
 
+type RecentTxRow = {
+  id: string
+  movementType: "import" | "export" | "transfer_in" | "transfer_out"
+  documentCode: string | null
+  documentId: string | null
+  itemId: string
+  warehouseId: string
+  quantity: number
+  actorName: string | null
+  movementDate: string
+  isAnomaly: boolean
+  anomalyPct?: number
+}
+
 function getDaysToExpiry(expiryDate: string | null) {
   if (!expiryDate) {
     return null
@@ -130,6 +150,14 @@ export default function InventoryAnalyticsPage() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState("all")
   const [selectedFocus, setSelectedFocus] = useState("all")
   const [downloading, setDownloading] = useState(false)
+  const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [transactionDays, setTransactionDays] = useState<7 | 30>(7)
+  const [recentTx, setRecentTx] = useState<RecentTxRow[]>([])
+  const [loadingTx, setLoadingTx] = useState(false)
+  const [thresholds, setThresholds] = useState({ export_pct: 50, transfer_pct: 70 })
+  const [savingThresholds, setSavingThresholds] = useState(false)
+  const [thresholdError, setThresholdError] = useState<string | null>(null)
   useEffect(() => {
     const bootstrap = async () => {
       setLoading(true)
@@ -142,6 +170,28 @@ export default function InventoryAnalyticsPage() {
         setStockBalances(inventoryData.stockBalances)
         setLotBalances(inventoryData.lotBalances)
         setMovements(inventoryData.movements)
+
+        if (inventoryData.factoryId) {
+          setFactoryId(inventoryData.factoryId)
+        }
+
+        const activeSession = await hydrateActiveSession().catch(() => ({ user: null }))
+        if (activeSession.user) setCurrentUser(activeSession.user)
+
+        if (inventoryData.factoryId) {
+          const { data: threshData } = await supabase
+            .from("inventory_alert_thresholds")
+            .select("code, value")
+            .eq("factory_id", inventoryData.factoryId)
+          if (threshData && threshData.length > 0) {
+            const exportRow = threshData.find((r) => r.code === "export_pct")
+            const transferRow = threshData.find((r) => r.code === "transfer_pct")
+            setThresholds({
+              export_pct: exportRow ? Number(exportRow.value) : 50,
+              transfer_pct: transferRow ? Number(transferRow.value) : 70,
+            })
+          }
+        }
       } finally {
         setLoading(false)
       }
@@ -149,6 +199,70 @@ export default function InventoryAnalyticsPage() {
 
     void bootstrap()
   }, [])
+
+  useEffect(() => {
+    if (!factoryId) return
+    const loadRecentTransactions = async () => {
+      setLoadingTx(true)
+      try {
+        const cutoff = new Date()
+        cutoff.setDate(cutoff.getDate() - transactionDays)
+        const { data: movData, error: movErr } = await supabase
+          .from("inventory_stock_movements")
+          .select("id, movement_type, warehouse_id, item_id, quantity_in, quantity_out, balance_after, movement_date, document_id")
+          .eq("factory_id", factoryId)
+          .gte("movement_date", cutoff.toISOString().slice(0, 10))
+          .order("movement_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(100)
+
+        if (movErr || !movData) { setRecentTx([]); return }
+
+        const docIds = [...new Set(movData.map((m) => m.document_id).filter(Boolean))]
+        const docMap = new Map<string, { document_code: string; requester_name: string | null }>()
+        if (docIds.length > 0) {
+          const { data: docData } = await supabase
+            .from("inventory_documents")
+            .select("id, document_code, requester_name")
+            .in("id", docIds)
+          if (docData) {
+            for (const d of docData) docMap.set(d.id, d)
+          }
+        }
+
+        const rows: RecentTxRow[] = movData.map((mov) => {
+          const qOut = Number(mov.quantity_out || 0)
+          const qIn = Number(mov.quantity_in || 0)
+          const balAfter = mov.balance_after !== null ? Number(mov.balance_after) : null
+          let isAnomaly = false
+          let anomalyPct: number | undefined
+          if ((mov.movement_type === "export" || mov.movement_type === "transfer_out") && qOut > 0 && balAfter !== null) {
+            const stockBefore = balAfter + qOut
+            const pct = stockBefore > 0 ? (qOut / stockBefore) * 100 : 0
+            const limit = mov.movement_type === "export" ? thresholds.export_pct : thresholds.transfer_pct
+            if (pct > limit) { isAnomaly = true; anomalyPct = Math.round(pct) }
+          }
+          return {
+            id: mov.id,
+            movementType: mov.movement_type as RecentTxRow["movementType"],
+            documentCode: docMap.get(mov.document_id)?.document_code ?? null,
+            documentId: mov.document_id,
+            itemId: mov.item_id,
+            warehouseId: mov.warehouse_id,
+            quantity: qIn > 0 ? qIn : qOut,
+            actorName: docMap.get(mov.document_id)?.requester_name ?? null,
+            movementDate: mov.movement_date,
+            isAnomaly,
+            anomalyPct,
+          }
+        })
+        setRecentTx(rows)
+      } finally {
+        setLoadingTx(false)
+      }
+    }
+    void loadRecentTransactions()
+  }, [factoryId, transactionDays, thresholds.export_pct, thresholds.transfer_pct])
 
   const warehouseMap = useMemo(
     () => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse])),
@@ -400,6 +514,22 @@ export default function InventoryAnalyticsPage() {
     }
   }
 
+  const handleSaveThreshold = async (code: "export_pct" | "transfer_pct", value: number) => {
+    if (!factoryId) return
+    setSavingThresholds(true)
+    setThresholdError(null)
+    try {
+      const label = code === "export_pct" ? "Ngưỡng cảnh báo xuất lớn" : "Ngưỡng cảnh báo chuyển kho"
+      const { error } = await supabase.from("inventory_alert_thresholds").upsert(
+        { factory_id: factoryId, code, label, value, unit: "%", updated_at: new Date().toISOString() },
+        { onConflict: "factory_id,code" },
+      )
+      if (error) setThresholdError(error.message)
+    } finally {
+      setSavingThresholds(false)
+    }
+  }
+
   return (
     <InventoryPageShell
       eyebrow="Thống kê"
@@ -566,6 +696,91 @@ export default function InventoryAnalyticsPage() {
         </ScrollRevealSection>
       </div>
 
+      <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-800">Giao dịch gần đây</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Các phát sinh nhập / xuất / chuyển kho gần nhất; ⚠️ đánh dấu giao dịch bất thường theo ngưỡng cấu hình.
+            </p>
+          </div>
+          <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            {([7, 30] as const).map((days) => (
+              <button
+                key={days}
+                type="button"
+                onClick={() => setTransactionDays(days)}
+                className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${
+                  transactionDays === days
+                    ? "bg-white text-emerald-700 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {days} ngày
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loadingTx ? (
+          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+        ) : recentTx.length === 0 ? (
+          <div className="p-12 text-center text-slate-400">Không có giao dịch trong {transactionDays} ngày qua.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                <tr>
+                  {["Thời gian", "Loại", "Mã phiếu", "Vật tư", "Số lượng", "Kho", "Người thực hiện", ""].map((h) => (
+                    <th key={h} className="px-4 py-3 text-left">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recentTx.slice(0, 50).map((row) => {
+                  const item = itemMap.get(row.itemId)
+                  const warehouse = warehouseMap.get(row.warehouseId)
+                  const typeConfig =
+                    row.movementType === "import"
+                      ? { icon: <PackagePlus size={14} />, label: "Nhập", bg: "bg-emerald-100 text-emerald-700" }
+                      : row.movementType === "export"
+                        ? { icon: <PackageMinus size={14} />, label: "Xuất", bg: "bg-amber-100 text-amber-700" }
+                        : row.movementType === "transfer_in"
+                          ? { icon: <PackagePlus size={14} />, label: "Chuyển đến", bg: "bg-blue-100 text-blue-700" }
+                          : { icon: <PackageMinus size={14} />, label: "Chuyển đi", bg: "bg-sky-100 text-sky-700" }
+                  return (
+                    <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-3 text-slate-500">{formatDate(row.movementDate)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${typeConfig.bg}`}>
+                          {typeConfig.icon}{typeConfig.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.documentCode || "—"}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        <div className="font-semibold">{item?.code || row.itemId}</div>
+                        {item?.name ? <div className="text-xs text-slate-400">{item.name}</div> : null}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{row.quantity.toLocaleString("vi-VN")}</td>
+                      <td className="px-4 py-3 text-slate-500">{warehouse?.code || row.warehouseId}</td>
+                      <td className="px-4 py-3 text-slate-500">{row.actorName || "—"}</td>
+                      <td className="px-4 py-3">
+                        {row.isAnomaly ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700" title={`Xuất ${row.anomalyPct}% tồn kho`}>
+                            <AlertTriangle size={12} />
+                            {row.anomalyPct}%
+                          </span>
+                        ) : null}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ScrollRevealSection>
+
       <div className="grid gap-4 xl:grid-cols-2">
         <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
@@ -636,6 +851,54 @@ export default function InventoryAnalyticsPage() {
           ]}
         />
       </div>
+      {hasPermission(currentUser, "inventory.settings") && (
+        <ScrollRevealSection className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2 text-slate-700">
+            <Settings2 size={16} />
+            <h2 className="text-base font-bold">Cấu hình ngưỡng cảnh báo</h2>
+          </div>
+          {thresholdError && (
+            <div className="mb-3 rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700">{thresholdError}</div>
+          )}
+          <div className="grid gap-6 sm:grid-cols-2">
+            {(["export_pct", "transfer_pct"] as const).map((code) => {
+              const label = code === "export_pct" ? "Ngưỡng cảnh báo xuất lớn" : "Ngưỡng cảnh báo chuyển kho"
+              const desc =
+                code === "export_pct"
+                  ? "Cảnh báo khi 1 lần xuất vượt X% tồn hiện tại của vật tư đó"
+                  : "Cảnh báo khi 1 lần chuyển kho vượt X% tồn kho nguồn"
+              return (
+                <div key={code}>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">{label}</label>
+                  <p className="mb-2 text-xs text-slate-400">{desc}</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={thresholds[code]}
+                      onChange={(e) =>
+                        setThresholds((prev) => ({ ...prev, [code]: Number(e.target.value) }))
+                      }
+                      className="w-24 rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                    />
+                    <span className="text-sm text-slate-500">% tồn</span>
+                    <button
+                      type="button"
+                      disabled={savingThresholds}
+                      onClick={() => void handleSaveThreshold(code, thresholds[code])}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      <Save size={12} />
+                      Lưu
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </ScrollRevealSection>
+      )}
     </InventoryPageShell>
   )
 }
