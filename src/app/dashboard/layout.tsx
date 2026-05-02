@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   ChevronRight,
@@ -91,6 +91,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [collapsed, setCollapsed] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ production: true })
   const [loading, setLoading] = useState(true)
+  const isLoggingOutRef = useRef(false)
 
   useEffect(() => {
     let alive = true
@@ -113,7 +114,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           const session = await getFreshAuthSession()
           if (!session?.user && alive) {
             setUser(null)
-            router.replace(redirectBase)
+            window.location.replace(redirectBase)
           }
           return
         }
@@ -123,7 +124,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (!session?.user) {
           if (alive) {
             setUser(null)
-            router.replace(redirectBase)
+            window.location.replace(redirectBase)
           }
           return
         }
@@ -131,7 +132,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const blocked = authBlockReason(sessionUser)
         if (!sessionUser || blocked) {
           await signOutEverywhere()
-          if (alive) router.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+          if (alive) window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
           return
         }
 
@@ -141,7 +142,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         // Chỉ xóa session khi lỗi xác thực thực sự, không phải lỗi mạng tạm thời
         if (alive && isAuthSessionError(error)) {
           setUser(null)
-          router.replace("/login")
+          window.location.replace("/login")
         }
       } finally {
         syncing = false
@@ -168,6 +169,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       // Chỉ xử lý SIGNED_IN / SIGNED_OUT — bỏ qua TOKEN_REFRESHED để tránh vòng lặp
       if (event === "SIGNED_OUT" || !session?.user) {
+        // Bỏ qua nếu đang logout thủ công — handleLogout sẽ navigate
+        if (isLoggingOutRef.current) return
         // Supabase có thể fire SIGNED_OUT khi network blip xảy ra lúc auto-refresh.
         // Thử lấy lại session trước khi redirect để tránh false-positive.
         try {
@@ -178,7 +181,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
         if (alive) {
           setUser(null)
-          router.replace("/login")
+          window.location.replace("/login")
         }
         return
       }
@@ -223,6 +226,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   })
 
   const handleLogout = async () => {
+    isLoggingOutRef.current = true
     try {
       await signOutEverywhere()
     } finally {
@@ -234,9 +238,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // → redirect về login thay vì để spinner treo vô hạn
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/login")
+      window.location.replace("/login")
     }
-  }, [loading, user, router])
+  }, [loading, user])
 
   if (loading || !user) {
     return (

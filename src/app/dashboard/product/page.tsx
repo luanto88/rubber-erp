@@ -1615,7 +1615,16 @@ export default function ProductPage() {
 
     if (!isHistoryUid || history.length <= 1) {
       // Xóa hẳn lô
-      await supabase.from("lots").delete().eq("id", lotId);
+      const { error: delError } = await supabase.from("lots").delete().eq("id", lotId);
+      if (delError) {
+        setSaveError(
+          delError.code === "23503"
+            ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
+            : delError.message,
+        );
+        setDelConfirm(null);
+        return;
+      }
       if (lot.ngan_id) {
         const { data: rem } = await supabase
           .from("lots")

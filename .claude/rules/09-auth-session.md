@@ -191,6 +191,9 @@ Quy tac:
   - Chi goi `getFreshAuthSession()` — doc localStorage, khong co DB query
   - Chi lam network request neu token sap het han (refresh token)
 
+Dung `window.location.replace` thay vi `router.replace` cho tat ca redirect trong syncSession —
+dam bao hard navigation ngay lap tuc, khong phu thuoc Next.js router queue.
+
 ```typescript
 const syncSession = async (redirectBase = "/login", fullHydration = true) => {
   if (syncing) return
@@ -201,27 +204,27 @@ const syncSession = async (redirectBase = "/login", fullHydration = true) => {
       const session = await getFreshAuthSession()
       if (!session?.user && alive) {
         setUser(null)
-        router.replace(redirectBase)
+        window.location.replace(redirectBase)
       }
       return
     }
     // Full hydration: fetch profile + permissions
     const { session, user: sessionUser } = await hydrateActiveSession()
     if (!session?.user) {
-      if (alive) { setUser(null); router.replace(redirectBase) }
+      if (alive) { setUser(null); window.location.replace(redirectBase) }
       return
     }
     const blocked = authBlockReason(sessionUser)
     if (!sessionUser || blocked) {
       await signOutEverywhere()
-      if (alive) router.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+      if (alive) window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
       return
     }
     if (alive) setUser(sessionUser)
   } catch (error) {
     if (alive && isAuthSessionError(error)) {
       setUser(null)
-      router.replace("/login")
+      window.location.replace("/login")
     }
   } finally {
     syncing = false
@@ -231,16 +234,33 @@ const syncSession = async (redirectBase = "/login", fullHydration = true) => {
 
 **3. `onAuthStateChange` chi xu ly `SIGNED_IN` / `SIGNED_OUT`**
 
+`isLoggingOutRef` bat buoc de tranh double-navigation khi logout thu cong.
+
 ```typescript
+// Khai bao o component level (ngoai useEffect)
+const isLoggingOutRef = useRef(false)
+
+// Trong handleLogout
+const handleLogout = async () => {
+  isLoggingOutRef.current = true  // skip SIGNED_OUT handler
+  try {
+    await signOutEverywhere()
+  } finally {
+    window.location.replace("/login")
+  }
+}
+
 supabase.auth.onAuthStateChange(async (event, session) => {
   if (event === "SIGNED_OUT" || !session?.user) {
+    // Bo qua neu dang logout thu cong — handleLogout se navigate
+    if (isLoggingOutRef.current) return
     // Supabase co the fire SIGNED_OUT khi network blip xay ra luc auto-refresh.
     // Thu lay lai session truoc khi redirect de tranh false-positive.
     try {
       const recovered = await getFreshAuthSession()
       if (recovered?.user && alive) return
     } catch { /* khong recover duoc, tiep tuc redirect */ }
-    if (alive) { setUser(null); router.replace("/login") }
+    if (alive) { setUser(null); window.location.replace("/login") }
     return
   }
   if (event === "SIGNED_IN") {
@@ -280,9 +300,9 @@ const bootstrap = async () => {
 // → redirect ve login thay vi de spinner treo vo han
 useEffect(() => {
   if (!loading && !user) {
-    router.replace("/login")
+    window.location.replace("/login")
   }
-}, [loading, user, router])
+}, [loading, user]) // router khong can trong deps
 ```
 
 **6. Interval va focus dung lightweight**
