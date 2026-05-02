@@ -66,7 +66,15 @@ function LoginPageContent() {
       if (alive) {
         const nextFactories = (data || []) as FactoryOption[]
         setFactories(nextFactories)
-        if (nextFactories[0] && !factoryId) setFactoryId(nextFactories[0].id)
+        if (nextFactories.length && !factoryId) {
+          const preferred =
+            nextFactories.find(
+              (f) =>
+                f.prefix === "CSR" ||
+                f.name.toLowerCase().includes("kampong"),
+            ) ?? nextFactories[0]
+          setFactoryId(preferred.id)
+        }
       }
 
       try {
