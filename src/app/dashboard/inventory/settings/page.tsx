@@ -308,12 +308,12 @@ export default function InventorySettingsPage() {
   const [categoryForm, setCategoryForm] = useState<CategoryForm>(emptyCategoryForm())
   const [itemForm, setItemForm] = useState<ItemForm>(emptyItemForm())
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (fidOverride?: string) => {
     setLoading(true)
     setDataWarning(null)
 
     try {
-      const fid = await getActiveFactoryId()
+      const fid = fidOverride || (await getActiveFactoryId())
       if (!fid) {
         setDataWarning("Không xác định được nhà máy đang đăng nhập.")
         setWarehouses(fallbackWarehouses)
@@ -506,192 +506,140 @@ export default function InventorySettingsPage() {
       setFormError("Chưa xác định được nhà máy.")
       return
     }
-    if (!warehouseForm.code.trim()) {
-      setFormError("Ma kho khong duoc de trong.")
-      return
-    }
-    if (!warehouseForm.name.trim()) {
-      setFormError("Tên kho không được để trống.")
-      return
-    }
+    if (!warehouseForm.code.trim()) { setFormError("Ma kho khong duoc de trong."); return }
+    if (!warehouseForm.name.trim()) { setFormError("Tên kho không được để trống."); return }
 
     setSaving(true)
     setFormError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        code: warehouseForm.code.trim().toUpperCase(),
+        name: warehouseForm.name.trim(),
+        keeper_name: warehouseForm.keeper_name.trim() || null,
+        warehouse_type: warehouseForm.warehouse_type.trim() || null,
+        is_active: warehouseForm.is_active,
+      }
+      const result = editingId
+        ? await supabase.from("inventory_warehouses").update(payload).eq("id", editingId).eq("factory_id", factoryId)
+        : await supabase.from("inventory_warehouses").insert(payload)
 
-    const payload = {
-      factory_id: factoryId,
-      code: warehouseForm.code.trim().toUpperCase(),
-      name: warehouseForm.name.trim(),
-      keeper_name: warehouseForm.keeper_name.trim() || null,
-      warehouse_type: warehouseForm.warehouse_type.trim() || null,
-      is_active: warehouseForm.is_active,
-    }
-
-    const result = editingId
-      ? await supabase.from("inventory_warehouses").update(payload).eq("id", editingId).eq("factory_id", factoryId)
-      : await supabase.from("inventory_warehouses").insert(payload)
-
-    if (result.error) {
-      setFormError(result.error.message)
+      if (result.error) { setFormError(result.error.message); return }
+      closeModal()
+      void loadData(factoryId)
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
       setSaving(false)
-      return
     }
-
-    await loadData()
-    setSaving(false)
-    closeModal()
   }
 
   const saveCategory = async () => {
-    if (!factoryId) {
-      setFormError("Chưa xác định được nhà máy.")
-      return
-    }
-    if (!categoryForm.code.trim()) {
-      setFormError("Mã nhóm không được để trống.")
-      return
-    }
-    if (!categoryForm.name.trim()) {
-      setFormError("Tên nhóm không được để trống.")
-      return
-    }
+    if (!factoryId) { setFormError("Chưa xác định được nhà máy."); return }
+    if (!categoryForm.code.trim()) { setFormError("Mã nhóm không được để trống."); return }
+    if (!categoryForm.name.trim()) { setFormError("Tên nhóm không được để trống."); return }
 
     setSaving(true)
     setFormError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        code: categoryForm.code.trim().toUpperCase(),
+        name: categoryForm.name.trim(),
+        sort_order: Number(categoryForm.sort_order) || 0,
+        is_active: categoryForm.is_active,
+      }
+      const result = editingId
+        ? await supabase.from("inventory_item_categories").update(payload).eq("id", editingId).eq("factory_id", factoryId)
+        : await supabase.from("inventory_item_categories").insert(payload)
 
-    const payload = {
-      factory_id: factoryId,
-      code: categoryForm.code.trim().toUpperCase(),
-      name: categoryForm.name.trim(),
-      sort_order: Number(categoryForm.sort_order) || 0,
-      is_active: categoryForm.is_active,
-    }
-
-    const result = editingId
-      ? await supabase.from("inventory_item_categories").update(payload).eq("id", editingId).eq("factory_id", factoryId)
-      : await supabase.from("inventory_item_categories").insert(payload)
-
-    if (result.error) {
-      setFormError(result.error.message)
+      if (result.error) { setFormError(result.error.message); return }
+      closeModal()
+      void loadData(factoryId)
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
       setSaving(false)
-      return
     }
-
-    await loadData()
-    setSaving(false)
-    closeModal()
   }
 
   const saveItem = async () => {
-    if (!factoryId) {
-      setFormError("Chưa xác định được nhà máy.")
-      return
-    }
-    if (!itemForm.category_id) {
-      setFormError("Vui long chon nhom vat tu.")
-      return
-    }
-    if (!itemForm.code.trim()) {
-      setFormError("Mã vật tư không được để trống.")
-      return
-    }
-    if (!itemForm.name.trim()) {
-      setFormError("Tên vật tư không được để trống.")
-      return
-    }
-    if (!itemForm.unit.trim()) {
-      setFormError("Đơn vị tính không được để trống.")
-      return
-    }
-    if (itemForm.selected_warehouse_ids.length === 0) {
-      setFormError("Phai chon it nhat 1 kho chua.")
-      return
-    }
+    if (!factoryId) { setFormError("Chưa xác định được nhà máy."); return }
+    if (!itemForm.category_id) { setFormError("Vui long chon nhom vat tu."); return }
+    if (!itemForm.code.trim()) { setFormError("Mã vật tư không được để trống."); return }
+    if (!itemForm.name.trim()) { setFormError("Tên vật tư không được để trống."); return }
+    if (!itemForm.unit.trim()) { setFormError("Đơn vị tính không được để trống."); return }
+    if (itemForm.selected_warehouse_ids.length === 0) { setFormError("Phai chon it nhat 1 kho chua."); return }
 
     setSaving(true)
     setFormError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        category_id: itemForm.category_id,
+        code: itemForm.code.trim().toUpperCase(),
+        name: itemForm.name.trim(),
+        unit: itemForm.unit.trim(),
+        specification: itemForm.specification.trim() || null,
+        default_warehouse_ids: itemForm.selected_warehouse_ids,
+        manages_lot: itemForm.manages_lot,
+        manages_expiry: itemForm.manages_expiry,
+        min_stock: Number(itemForm.min_stock) || 0,
+        max_stock: Number(itemForm.max_stock) || 0,
+        opening_stock: Number(itemForm.opening_stock) || 0,
+        image_url: itemForm.image_url.trim() || null,
+        equipment_name: itemForm.equipment_name.trim() || null,
+        is_active: itemForm.is_active,
+      }
+      const result = editingId
+        ? await supabase.from("inventory_items").update(payload).eq("id", editingId).eq("factory_id", factoryId).select("id").single()
+        : await supabase.from("inventory_items").insert(payload).select("id").single()
 
-    const payload = {
-      factory_id: factoryId,
-      category_id: itemForm.category_id,
-      code: itemForm.code.trim().toUpperCase(),
-      name: itemForm.name.trim(),
-      unit: itemForm.unit.trim(),
-      specification: itemForm.specification.trim() || null,
-      default_warehouse_ids: itemForm.selected_warehouse_ids,
-      manages_lot: itemForm.manages_lot,
-      manages_expiry: itemForm.manages_expiry,
-      min_stock: Number(itemForm.min_stock) || 0,
-      max_stock: Number(itemForm.max_stock) || 0,
-      opening_stock: Number(itemForm.opening_stock) || 0,
-      image_url: itemForm.image_url.trim() || null,
-      equipment_name: itemForm.equipment_name.trim() || null,
-      is_active: itemForm.is_active,
-    }
+      if (result.error || !result.data?.id) { setFormError(result.error?.message || "Không lưu được vật tư."); return }
 
-    const result = editingId
-      ? await supabase.from("inventory_items").update(payload).eq("id", editingId).eq("factory_id", factoryId).select("id").single()
-      : await supabase.from("inventory_items").insert(payload).select("id").single()
+      const itemId = result.data.id as string
+      await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemId).eq("factory_id", factoryId)
 
-    if (result.error || !result.data?.id) {
-      setFormError(result.error?.message || "Không lưu được vật tư.")
+      const rulesPayload = itemForm.selected_warehouse_ids.map((warehouseId, index) => ({
+        factory_id: factoryId,
+        item_id: itemId,
+        warehouse_id: warehouseId,
+        min_stock: Number(itemForm.min_stock) || 0,
+        max_stock: Number(itemForm.max_stock) || 0,
+        reorder_point: Number(itemForm.min_stock) || 0,
+        safety_stock: Number(itemForm.min_stock) || 0,
+        is_primary: index === 0,
+      }))
+      const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
+      if (rulesResult.error) { setFormError(rulesResult.error.message); return }
+
+      closeModal()
+      void loadData(factoryId)
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
       setSaving(false)
-      return
     }
-
-    const itemId = result.data.id as string
-
-    const deleteRulesResult = await supabase
-      .from("inventory_item_warehouse_rules")
-      .delete()
-      .eq("item_id", itemId)
-      .eq("factory_id", factoryId)
-
-    if (deleteRulesResult.error) {
-      setFormError(deleteRulesResult.error.message)
-      setSaving(false)
-      return
-    }
-
-    const rulesPayload = itemForm.selected_warehouse_ids.map((warehouseId, index) => ({
-      factory_id: factoryId,
-      item_id: itemId,
-      warehouse_id: warehouseId,
-      min_stock: Number(itemForm.min_stock) || 0,
-      max_stock: Number(itemForm.max_stock) || 0,
-      reorder_point: Number(itemForm.min_stock) || 0,
-      safety_stock: Number(itemForm.min_stock) || 0,
-      is_primary: index === 0,
-    }))
-
-    const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
-    if (rulesResult.error) {
-      setFormError(rulesResult.error.message)
-      setSaving(false)
-      return
-    }
-
-    await loadData()
-    setSaving(false)
-    closeModal()
   }
 
   const confirmDelete = async () => {
     if (!deleteTarget || !factoryId) return
-
     setSaving(true)
-    const result =
-      deleteTarget.type === "warehouse"
-        ? await supabase.from("inventory_warehouses").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
-        : deleteTarget.type === "category"
-          ? await supabase.from("inventory_item_categories").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
-          : await supabase.from("inventory_items").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
+    try {
+      const result =
+        deleteTarget.type === "warehouse"
+          ? await supabase.from("inventory_warehouses").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
+          : deleteTarget.type === "category"
+            ? await supabase.from("inventory_item_categories").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
+            : await supabase.from("inventory_items").delete().eq("id", deleteTarget.id).eq("factory_id", factoryId)
 
-    if (!result.error) {
-      await loadData()
-      setDeleteTarget(null)
+      if (!result.error) {
+        setDeleteTarget(null)
+        void loadData(factoryId)
+      }
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   return (

@@ -12,7 +12,6 @@ import {
   signInWithUsername,
   signOutEverywhere,
   signUpWithUsername,
-  type SessionUser,
 } from "@/lib/auth"
 
 type FactoryOption = {
@@ -43,7 +42,6 @@ function LoginPageContent() {
   const [dept, setDept] = useState("")
   const [booting, setBooting] = useState(true)
   const [notice, setNotice] = useState("")
-  const [activeSessionUser, setActiveSessionUser] = useState<SessionUser | null>(null)
 
   const reason = searchParams.get("reason") || ""
 
@@ -76,7 +74,7 @@ function LoginPageContent() {
         const blockReason = authBlockReason(user)
 
         if (user && !blockReason) {
-          if (alive) setActiveSessionUser(user)
+          if (alive) router.replace("/dashboard")
           return
         }
 
@@ -106,7 +104,6 @@ function LoginPageContent() {
   const handleLogin = async () => {
     setError("")
     setNotice("")
-    setActiveSessionUser(null)
 
     if (!username.trim() || !password) {
       setError("Vui lòng nhập tên đăng nhập và mật khẩu")
@@ -144,7 +141,6 @@ function LoginPageContent() {
   const handleRegister = async () => {
     setError("")
     setNotice("")
-    setActiveSessionUser(null)
 
     const normalizedUsername = normalizeUsername(username)
     if (!normalizedUsername || !password || !fullName.trim() || !factoryId) {
@@ -237,137 +233,95 @@ function LoginPageContent() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
-          {activeSessionUser ? (
-            <div className="space-y-5">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                <p className="text-sm font-semibold text-emerald-800">Bạn đang đăng nhập</p>
-                <p className="mt-1 text-base font-bold text-slate-800">{activeSessionUser.full_name}</p>
-                <p className="mt-1 text-sm text-slate-600">
-                  {activeSessionUser.role} · {activeSessionUser.username}
-                </p>
-              </div>
+          <div className="mb-6 flex gap-2">
+            {(["login", "register"] as const).map((item) => (
+              <button
+                key={item}
+                onClick={() => {
+                  setTab(item)
+                  setError("")
+                  setNotice("")
+                }}
+                className={
+                  "flex-1 rounded-full py-2.5 text-sm font-bold transition-all " +
+                  (tab === item
+                    ? "bg-emerald-600 text-white shadow-md"
+                    : "text-slate-500 hover:bg-emerald-50")
+                }
+              >
+                {item === "login" ? "Đăng nhập" : "Đăng ký"}
+              </button>
+            ))}
+          </div>
 
-              <div className="grid grid-cols-1 gap-3">
-                <button
-                  onClick={() => router.replace("/dashboard")}
-                  className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700"
-                >
-                  Vào dashboard
-                </button>
-                <button
-                  onClick={async () => {
-                    setLoading(true)
-                    setError("")
-                    try {
-                      await signOutEverywhere()
-                      setActiveSessionUser(null)
-                      setNotice("Đã đăng xuất. Bạn có thể đăng nhập bằng tài khoản khác.")
-                    } catch {
-                      setError("Không thể đăng xuất. Vui lòng thử lại.")
-                    } finally {
-                      setLoading(false)
-                    }
-                  }}
-                  disabled={loading}
-                  className="w-full rounded-xl border border-slate-300 bg-white py-3 font-bold text-slate-700 transition-all hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {loading ? "Đang xử lý..." : "Đăng xuất để đổi tài khoản"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="mb-6 flex gap-2">
-                {(["login", "register"] as const).map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => {
-                      setTab(item)
-                      setError("")
-                      setNotice("")
-                    }}
-                    className={
-                      "flex-1 rounded-full py-2.5 text-sm font-bold transition-all " +
-                      (tab === item
-                        ? "bg-emerald-600 text-white shadow-md"
-                        : "text-slate-500 hover:bg-emerald-50")
-                    }
-                  >
-                    {item === "login" ? "Đăng nhập" : "Đăng ký"}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-4">
+            <select
+              value={factoryId}
+              onChange={(e) => setFactoryId(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+            >
+              {factoryOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
 
-              <div className="space-y-4">
-                <select
-                  value={factoryId}
-                  onChange={(e) => setFactoryId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
-                >
-                  {factoryOptions.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-
-                {tab === "register" && (
-                  <>
-                    <input
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="Họ tên *"
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
-                    />
-                    <input
-                      value={dept}
-                      onChange={(e) => setDept(e.target.value)}
-                      placeholder="Phòng ban"
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
-                    />
-                  </>
-                )}
-
+            {tab === "register" && (
+              <>
                 <input
-                  value={username}
-                  onChange={(e) => setUsername(normalizeUsername(e.target.value))}
-                  placeholder="Tên đăng nhập *"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Họ tên *"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
-
                 <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mật khẩu *"
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
-                  }
+                  value={dept}
+                  onChange={(e) => setDept(e.target.value)}
+                  placeholder="Phòng ban"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
+              </>
+            )}
 
-                {notice && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
-                    {notice}
-                  </div>
-                )}
+            <input
+              value={username}
+              onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+              placeholder="Tên đăng nhập *"
+              className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+            />
 
-                {error && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
-                    {error}
-                  </div>
-                )}
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mật khẩu *"
+              onKeyDown={(e) =>
+                e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
+              }
+              className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+            />
 
-                <button
-                  onClick={tab === "login" ? handleLogin : handleRegister}
-                  disabled={loading}
-                  className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
-                </button>
+            {notice && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+                {notice}
               </div>
-            </>
-          )}
+            )}
+
+            {error && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={tab === "login" ? handleLogin : handleRegister}
+              disabled={loading}
+              className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
+            </button>
+          </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">v2.0 · NMCB Phước Hòa KPT © 2026</p>

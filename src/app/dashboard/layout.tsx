@@ -168,8 +168,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       // Chỉ xử lý SIGNED_IN / SIGNED_OUT — bỏ qua TOKEN_REFRESHED để tránh vòng lặp
       if (event === "SIGNED_OUT" || !session?.user) {
-        setUser(null)
-        router.replace("/login")
+        // Supabase có thể fire SIGNED_OUT khi network blip xảy ra lúc auto-refresh.
+        // Thử lấy lại session trước khi redirect để tránh false-positive.
+        try {
+          const recovered = await getFreshAuthSession()
+          if (recovered?.user && alive) return
+        } catch {
+          // không recover được, tiếp tục redirect
+        }
+        if (alive) {
+          setUser(null)
+          router.replace("/login")
+        }
         return
       }
       if (event === "SIGNED_IN") {

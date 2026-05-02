@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import {
@@ -28,11 +27,6 @@ import {
   UserCheck,
   SlidersHorizontal,
   Database,
-  Warehouse,
-  Boxes,
-  Beaker,
-  Ruler,
-  ArrowUpRight,
 } from "lucide-react"
 
 type Suffix = {
@@ -97,6 +91,54 @@ type UserEditor = {
 
 type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data"
 
+type FactoryConfigTab = "warehouses" | "categories" | "items"
+
+type InvWarehouseRow = {
+  id: string
+  factory_id: string
+  code: string
+  name: string
+  keeper_name: string | null
+  warehouse_type: string | null
+  is_active: boolean
+}
+
+type InvCategoryRow = {
+  id: string
+  factory_id: string
+  code: string
+  name: string
+  sort_order: number
+  is_active: boolean
+  itemCount: number
+}
+
+type InvItemRow = {
+  id: string
+  factory_id: string
+  category_id: string | null
+  code: string
+  name: string
+  unit: string
+  specification: string | null
+  default_warehouse_ids: string[] | null
+  manages_lot: boolean
+  manages_expiry: boolean
+  min_stock: number
+  max_stock: number
+  is_active: boolean
+  categoryName: string
+  warehouseCodes: string[]
+}
+
+type InvWarehouseForm = { code: string; name: string; keeper_name: string; warehouse_type: string; is_active: boolean }
+type InvCategoryForm = { code: string; name: string; sort_order: string; is_active: boolean }
+type InvItemForm = {
+  category_id: string; code: string; name: string; unit: string; specification: string
+  selected_warehouse_ids: string[]; manages_lot: boolean; manages_expiry: boolean
+  min_stock: string; max_stock: string; is_active: boolean
+}
+
 const SYSTEM_CODES = ["cs", "m"]
 
 function emptyForm(): SuffixForm {
@@ -154,6 +196,22 @@ export default function SettingsPage() {
   const canApproveUsers = hasPermission(user, "users.approve")
   const canEditPermissions = hasPermission(user, "users.edit_permission")
 
+  const [configTab, setConfigTab] = useState<FactoryConfigTab>("warehouses")
+  const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
+  const [invCategories, setInvCategories] = useState<InvCategoryRow[]>([])
+  const [invItems, setInvItems] = useState<InvItemRow[]>([])
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configLoaded, setConfigLoaded] = useState(false)
+
+  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | null>(null)
+  const [configEditId, setConfigEditId] = useState<string | null>(null)
+  const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
+  const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
+  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState("")
+  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item"; id: string; label: string } | null>(null)
+
   const loadSuffixes = useCallback(async (fid: string) => {
     const { data } = await supabase.from("suffixes").select("*").eq("factory_id", fid).order("code")
     setSuffixes(data || [])
@@ -193,6 +251,124 @@ export default function SettingsPage() {
       })),
     )
   }, [])
+
+  const loadConfigData = useCallback(async (fid: string) => {
+    setConfigLoading(true)
+    try {
+      const [wRes, cRes, iItemsRes, iCatCountRes] = await Promise.all([
+        supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
+        supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
+        supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active").eq("factory_id", fid).order("code"),
+        supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
+      ])
+
+      const nextWarehouses = (wRes.data || []) as InvWarehouseRow[]
+      const rawCategories = (cRes.data || []) as Omit<InvCategoryRow, "itemCount">[]
+      const countMap = new Map<string, number>()
+      for (const row of (iCatCountRes.data || [])) {
+        if (row.category_id) countMap.set(row.category_id, (countMap.get(row.category_id) || 0) + 1)
+      }
+      const nextCategories = rawCategories.map((row) => ({ ...row, itemCount: countMap.get(row.id) || 0 }))
+      const warehouseCodeMap = new Map(nextWarehouses.map((w) => [w.id, w.code]))
+      const categoryNameMap = new Map(nextCategories.map((c) => [c.id, c.name]))
+      const nextItems = ((iItemsRes.data || []) as Omit<InvItemRow, "categoryName" | "warehouseCodes">[]).map((row) => ({
+        ...row,
+        categoryName: categoryNameMap.get(row.category_id || "") || "Chưa phân loại",
+        warehouseCodes: (row.default_warehouse_ids || []).map((id) => warehouseCodeMap.get(id) || id),
+      }))
+
+      setInvWarehouses(nextWarehouses)
+      setInvCategories(nextCategories)
+      setInvItems(nextItems)
+      setConfigLoaded(true)
+    } finally {
+      setConfigLoading(false)
+    }
+  }, [])
+
+  const saveConfigWarehouse = async () => {
+    if (!factoryId) return
+    if (!invWarehouseForm.code.trim()) { setConfigError("Mã kho không được để trống"); return }
+    if (!invWarehouseForm.name.trim()) { setConfigError("Tên kho không được để trống"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = { factory_id: factoryId, code: invWarehouseForm.code.trim().toUpperCase(), name: invWarehouseForm.name.trim(), keeper_name: invWarehouseForm.keeper_name.trim() || null, warehouse_type: invWarehouseForm.warehouse_type.trim() || null, is_active: invWarehouseForm.is_active }
+      const result = configEditId
+        ? await supabase.from("inventory_warehouses").update(payload).eq("id", configEditId).eq("factory_id", factoryId)
+        : await supabase.from("inventory_warehouses").insert(payload)
+      if (result.error) { setConfigError(result.error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const saveConfigCategory = async () => {
+    if (!factoryId) return
+    if (!invCategoryForm.code.trim()) { setConfigError("Mã nhóm không được để trống"); return }
+    if (!invCategoryForm.name.trim()) { setConfigError("Tên nhóm không được để trống"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = { factory_id: factoryId, code: invCategoryForm.code.trim().toUpperCase(), name: invCategoryForm.name.trim(), sort_order: Number(invCategoryForm.sort_order) || 0, is_active: invCategoryForm.is_active }
+      const result = configEditId
+        ? await supabase.from("inventory_item_categories").update(payload).eq("id", configEditId).eq("factory_id", factoryId)
+        : await supabase.from("inventory_item_categories").insert(payload)
+      if (result.error) { setConfigError(result.error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const saveConfigItem = async () => {
+    if (!factoryId) return
+    if (!invItemForm.category_id) { setConfigError("Vui lòng chọn nhóm vật tư"); return }
+    if (!invItemForm.code.trim()) { setConfigError("Mã vật tư không được để trống"); return }
+    if (!invItemForm.name.trim()) { setConfigError("Tên vật tư không được để trống"); return }
+    if (!invItemForm.unit.trim()) { setConfigError("Đơn vị tính không được để trống"); return }
+    if (invItemForm.selected_warehouse_ids.length === 0) { setConfigError("Phải chọn ít nhất 1 kho chứa"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = { factory_id: factoryId, category_id: invItemForm.category_id, code: invItemForm.code.trim().toUpperCase(), name: invItemForm.name.trim(), unit: invItemForm.unit.trim(), specification: invItemForm.specification.trim() || null, default_warehouse_ids: invItemForm.selected_warehouse_ids, manages_lot: invItemForm.manages_lot, manages_expiry: invItemForm.manages_expiry, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, is_active: invItemForm.is_active }
+      const result = configEditId
+        ? await supabase.from("inventory_items").update(payload).eq("id", configEditId).eq("factory_id", factoryId).select("id").single()
+        : await supabase.from("inventory_items").insert(payload).select("id").single()
+      if (result.error || !result.data?.id) { setConfigError(result.error?.message || "Không lưu được vật tư"); return }
+      const itemId = result.data.id as string
+      await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemId).eq("factory_id", factoryId)
+      const rulesPayload = invItemForm.selected_warehouse_ids.map((wId, idx) => ({ factory_id: factoryId, item_id: itemId, warehouse_id: wId, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, reorder_point: Number(invItemForm.min_stock) || 0, safety_stock: Number(invItemForm.min_stock) || 0, is_primary: idx === 0 }))
+      const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
+      if (rulesResult.error) { setConfigError(rulesResult.error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const deleteConfigItem = async () => {
+    if (!configDelConfirm || !factoryId) return
+    setConfigSaving(true)
+    try {
+      const table = configDelConfirm.type === "warehouse" ? "inventory_warehouses" : configDelConfirm.type === "category" ? "inventory_item_categories" : "inventory_items"
+      await supabase.from(table).delete().eq("id", configDelConfirm.id).eq("factory_id", factoryId)
+      setConfigDelConfirm(null)
+      void loadConfigData(factoryId)
+    } finally {
+      setConfigSaving(false)
+    }
+  }
 
   const bootstrap = useCallback(async () => {
     const fid = await getActiveFactoryId()
@@ -241,6 +417,12 @@ export default function SettingsPage() {
   useEffect(() => {
     bootstrap()
   }, [bootstrap])
+
+  useEffect(() => {
+    if (tab === "factory-config" && factoryId && !configLoaded && !configLoading) {
+      void loadConfigData(factoryId)
+    }
+  }, [tab, factoryId, configLoaded, configLoading, loadConfigData])
 
   const groupedPermissions = useMemo(() => {
     return permissionOptions.reduce<Record<string, PermissionOption[]>>((acc, item) => {
@@ -746,64 +928,174 @@ export default function SettingsPage() {
       )}
 
       {tab === "factory-config" && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
-            <SlidersHorizontal size={16} className="text-amber-600" />
-            <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal size={16} className="text-amber-600" />
+                <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => {
+                    setConfigError("")
+                    if (configTab === "warehouses") {
+                      setConfigEditId(null)
+                      setInvWarehouseForm({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
+                      setConfigModal("warehouse")
+                    } else if (configTab === "categories") {
+                      setConfigEditId(null)
+                      setInvCategoryForm({ code: "", name: "", sort_order: String(invCategories.length + 1), is_active: true })
+                      setConfigModal("category")
+                    } else {
+                      setConfigEditId(null)
+                      setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+                      setConfigModal("item")
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm mới
+                </button>
+              )}
+            </div>
+
+            <div className="p-4">
+              <div className="flex gap-2 mb-4">
+                {(["warehouses", "categories", "items"] as const).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setConfigTab(key)}
+                    className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === key ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
+                  >
+                    {key === "warehouses" ? "Kho" : key === "categories" ? "Nhóm vật tư" : "Vật tư / Hóa chất"}
+                  </button>
+                ))}
+              </div>
+
+              {configLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : configTab === "warehouses" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã kho", "Tên kho", "Thủ kho", "Loại kho", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {invWarehouses.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Chưa có kho nào</td></tr>
+                    ) : invWarehouses.map((row) => (
+                      <tr key={row.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
+                        <td className="px-4 py-3 text-slate-500">{row.keeper_name || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{row.warehouse_type || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                            {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvWarehouseForm({ code: row.code, name: row.name, keeper_name: row.keeper_name || "", warehouse_type: row.warehouse_type || "", is_active: row.is_active }); setConfigModal("warehouse") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setConfigDelConfirm({ type: "warehouse", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : configTab === "categories" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã", "Tên nhóm", "Thứ tự", "Số vật tư", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {invCategories.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Chưa có nhóm nào</td></tr>
+                    ) : invCategories.map((row) => (
+                      <tr key={row.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-amber-700">{row.code}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
+                        <td className="px-4 py-3 text-slate-500">{row.sort_order}</td>
+                        <td className="px-4 py-3 text-slate-700 font-bold">{row.itemCount}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                            {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvCategoryForm({ code: row.code, name: row.name, sort_order: String(row.sort_order), is_active: row.is_active }); setConfigModal("category") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setConfigDelConfirm({ type: "category", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã", "Tên vật tư", "Nhóm", "Kho chứa", "Lô/Hạn", "Min-Max", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {invItems.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
+                    ) : invItems.map((row) => (
+                      <tr key={row.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-800">{row.name}</div>
+                          <div className="text-xs text-slate-400">{row.unit}{row.specification ? ` · ${row.specification}` : ""}</div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{row.categoryName}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {row.warehouseCodes.map((w) => <span key={w} className="px-1.5 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-600">{w}</span>)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1">
+                            {row.manages_lot && <span className="px-1.5 py-0.5 bg-blue-100 rounded-full text-xs font-bold text-blue-700">Lô</span>}
+                            {row.manages_expiry && <span className="px-1.5 py-0.5 bg-violet-100 rounded-full text-xs font-bold text-violet-700">Hạn</span>}
+                            {!row.manages_lot && !row.manages_expiry && <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-500">Thường</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{row.min_stock.toLocaleString("vi-VN")} – {row.max_stock.toLocaleString("vi-VN")}</td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active }); setConfigModal("item") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setConfigDelConfirm({ type: "item", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
 
-          <div className="p-5 space-y-5">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-              Tại đây quản trị các cấu hình riêng theo nhà máy. Với module kho, danh mục kho, nhóm vật tư, vật tư hóa chất và định mức tiêu hao phải được mở từ khu vực này để giữ đúng quy ước toàn hệ thống.
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              {[
-                {
-                  title: "Kho vật tư / hóa chất",
-                  note: "Quản lý mã kho, tên kho, thủ kho và trạng thái hoạt động theo từng nhà máy.",
-                  href: "/dashboard/inventory/settings?tab=warehouses",
-                  icon: Warehouse,
-                },
-                {
-                  title: "Nhóm vật tư",
-                  note: "Phân loại vật tư để dùng cho nhập xuất tồn, thống kê và cảnh báo tồn kho.",
-                  href: "/dashboard/inventory/settings?tab=categories",
-                  icon: Boxes,
-                },
-                {
-                  title: "Vật tư / hóa chất",
-                  note: "Cấu hình kho chứa, quản lý số lô, hạn sử dụng và giới hạn tồn min-max.",
-                  href: "/dashboard/inventory/settings?tab=items",
-                  icon: Beaker,
-                },
-                {
-                  title: "Định mức tiêu hao",
-                  note: "Quản lý định mức theo thành phẩm để phục vụ báo cáo tháng và đối chiếu thực tế.",
-                  href: "/dashboard/inventory/settings?tab=norms",
-                  icon: Ruler,
-                },
-              ].map((entry) => (
-                <Link
-                  key={entry.title}
-                  href={entry.href}
-                  className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-700">
-                      <entry.icon size={18} />
-                    </div>
-                    <ArrowUpRight size={16} className="text-slate-300 transition-colors group-hover:text-emerald-600" />
-                  </div>
-                  <div className="mt-4 text-base font-extrabold text-slate-800">{entry.title}</div>
-                  <div className="mt-2 text-sm leading-6 text-slate-500">{entry.note}</div>
-                </Link>
-              ))}
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
-              Ghi nhớ: người dùng vận hành kho sẽ thao tác trong module <span className="font-bold">Quản lý kho</span>, còn thay đổi danh mục và định mức phải đi qua <span className="font-bold">Cài đặt / Cấu hình nhà máy</span>.
-            </div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+            Ghi nhớ: người dùng vận hành kho sẽ thao tác trong module <span className="font-bold">Quản lý kho</span>, còn thay đổi danh mục và định mức phải đi qua <span className="font-bold">Cài đặt / Cấu hình nhà máy</span>.
           </div>
         </div>
       )}
@@ -1078,6 +1370,160 @@ export default function SettingsPage() {
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
               >
                 {savingUser ? "Đang lưu..." : userEditor.mode === "approve" ? "Duyệt và kích hoạt" : "Lưu quyền"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {configModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-base font-extrabold text-slate-800">
+                {configModal === "warehouse" ? (configEditId ? "Sửa kho" : "Thêm kho mới") : configModal === "category" ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư") : (configEditId ? "Sửa vật tư" : "Thêm vật tư")}
+              </h2>
+              <button onClick={() => setConfigModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {configError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{configError}</div>}
+
+              {configModal === "warehouse" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã kho *</label>
+                      <input value={invWarehouseForm.code} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại kho</label>
+                      <input value={invWarehouseForm.warehouse_type} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, warehouse_type: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên kho *</label>
+                    <input value={invWarehouseForm.name} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Thủ kho</label>
+                    <input value={invWarehouseForm.keeper_name} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, keeper_name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={invWarehouseForm.is_active} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang hoạt động
+                  </label>
+                </>
+              )}
+
+              {configModal === "category" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã nhóm *</label>
+                      <input value={invCategoryForm.code} onChange={(e) => setInvCategoryForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                      <input value={invCategoryForm.sort_order} onChange={(e) => setInvCategoryForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên nhóm *</label>
+                    <input value={invCategoryForm.name} onChange={(e) => setInvCategoryForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={invCategoryForm.is_active} onChange={(e) => setInvCategoryForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang hoạt động
+                  </label>
+                </>
+              )}
+
+              {configModal === "item" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư *</label>
+                      <input value={invItemForm.code} onChange={(e) => setInvItemForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư *</label>
+                      <select value={invItemForm.category_id} onChange={(e) => setInvItemForm((p) => ({ ...p, category_id: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                        <option value="">Chọn nhóm</option>
+                        {invCategories.map((c) => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
+                      <input value={invItemForm.name} onChange={(e) => setInvItemForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị *</label>
+                      <input value={invItemForm.unit} onChange={(e) => setInvItemForm((p) => ({ ...p, unit: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách</label>
+                    <input value={invItemForm.specification} onChange={(e) => setInvItemForm((p) => ({ ...p, specification: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Kho chứa *</label>
+                    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      {invWarehouses.map((w) => (
+                        <label key={w.id} className="flex items-center gap-2 text-sm text-slate-700">
+                          <input type="checkbox" checked={invItemForm.selected_warehouse_ids.includes(w.id)} onChange={(e) => setInvItemForm((p) => ({ ...p, selected_warehouse_ids: e.target.checked ? [...p.selected_warehouse_ids, w.id] : p.selected_warehouse_ids.filter((id) => id !== w.id) }))} />
+                          {w.code} - {w.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tồn tối thiểu</label>
+                      <input value={invItemForm.min_stock} onChange={(e) => setInvItemForm((p) => ({ ...p, min_stock: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tồn tối đa</label>
+                      <input value={invItemForm.max_stock} onChange={(e) => setInvItemForm((p) => ({ ...p, max_stock: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={invItemForm.manages_lot} onChange={(e) => setInvItemForm((p) => ({ ...p, manages_lot: e.target.checked }))} /> Quản lý lô</label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={invItemForm.manages_expiry} onChange={(e) => setInvItemForm((p) => ({ ...p, manages_expiry: e.target.checked }))} /> Quản lý hạn</label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={invItemForm.is_active} onChange={(e) => setInvItemForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang dùng</label>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+              <button onClick={() => setConfigModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button
+                onClick={configModal === "warehouse" ? saveConfigWarehouse : configModal === "category" ? saveConfigCategory : saveConfigItem}
+                disabled={configSaving}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+              >
+                {configSaving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {configDelConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-red-100 text-red-600 rounded-xl"><AlertTriangle size={18} /></div>
+              <div>
+                <h3 className="font-extrabold text-slate-800">Xóa &quot;{configDelConfirm.label}&quot;?</h3>
+                <p className="text-sm text-slate-500 mt-1">Hành động này không thể hoàn tác.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setConfigDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={() => void deleteConfigItem()} disabled={configSaving} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl disabled:opacity-50">
+                {configSaving ? "Đang xóa..." : "Xóa"}
               </button>
             </div>
           </div>

@@ -27,7 +27,7 @@ export type SessionUser = Profile & {
 
 const AUTH_EMAIL_DOMAIN = "auth.rubber-erp.example.com"
 const LEGACY_AUTH_EMAIL_DOMAIN = "auth.rubber-erp.local"
-const SESSION_REFRESH_LEEWAY_SECONDS = 120
+const SESSION_REFRESH_LEEWAY_SECONDS = 300
 
 export function normalizeUsername(value: string) {
   return value.trim().toLowerCase()

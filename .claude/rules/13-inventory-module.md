@@ -29,7 +29,9 @@ src/app/dashboard/inventory/
 ├── _components/
 │   ├── inventory-shell.tsx           ← InventoryPageShell, ScrollReveal, ScrollRevealSection
 │   ├── inventory-data.ts             ← loadInventoryAdminData / SnapshotData / MovementData
-│   ├── inventory-document-loader.ts  ← fetch document by ID / code
+│   │                                    + getLineTypeLabel, InventoryAlertThreshold, DEFAULT_ALERT_THRESHOLDS
+│   ├── inventory-document-loader.ts  ← fetchInventoryDocumentByReference
+│   │                                    (trả về audit fields + posted_by_name từ profiles)
 │   ├── inventory-image-upload.tsx    ← upload ảnh lên Supabase Storage bucket
 │   └── inventory-qr-card.tsx        ← QR code card; prop compact=true cho header phiếu
 ├── receipts/page.tsx                 ← Nhập kho: CRUD + ghi sổ (stored procedure)
