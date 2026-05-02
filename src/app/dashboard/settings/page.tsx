@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import {
   DEFAULT_PERMISSION_CODES,
@@ -27,6 +27,8 @@ import {
   UserCheck,
   SlidersHorizontal,
   Database,
+  Download,
+  Upload,
 } from "lucide-react"
 
 type Suffix = {
@@ -166,6 +168,58 @@ function labelPermission(code: string) {
   }
 }
 
+function parseCSVLine(line: string): string[] {
+  const result: string[] = []
+  let current = ""
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '"') { inQuotes = !inQuotes }
+    else if (char === "," && !inQuotes) { result.push(current.trim()); current = "" }
+    else { current += char }
+  }
+  result.push(current.trim())
+  return result
+}
+
+function downloadConfigTemplate(tab: FactoryConfigTab) {
+  const cfgs: Record<FactoryConfigTab, { filename: string; rows: string[] }> = {
+    warehouses: {
+      filename: "mau_nhap_kho.csv",
+      rows: [
+        "ma_kho,ten_kho,thu_kho,loai_kho,trang_thai",
+        "KA,Kho vật tư,Nguyễn Văn A,Vật tư,true",
+        "KB,Kho hóa chất,,Hóa chất,true",
+      ],
+    },
+    categories: {
+      filename: "mau_nhap_nhom_vat_tu.csv",
+      rows: [
+        "ma_nhom,ten_nhom,thu_tu,trang_thai",
+        "VT,Vật tư cơ khí,1,true",
+        "HC,Hóa chất,2,true",
+      ],
+    },
+    items: {
+      filename: "mau_nhap_vat_tu.csv",
+      rows: [
+        "ma_nhom,ma_vat_tu,ten_vat_tu,don_vi,quy_cach,ma_kho,quan_ly_lo,quan_ly_han,ton_min,ton_max",
+        "VT,VT001,Dầu nhớt máy,Lít,SAE 40,KA,false,false,50,500",
+        "HC,HC001,Acid sulfuric,Kg,H2SO4 98%,KB,true,true,20,200",
+        "# Ghi chú: ma_kho hỗ trợ nhiều kho ngăn cách dấu chấm phẩy vd: KA;KB",
+      ],
+    },
+  }
+  const cfg = cfgs[tab]
+  const blob = new Blob(["﻿" + cfg.rows.join("\r\n")], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = cfg.filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("company")
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -211,6 +265,9 @@ export default function SettingsPage() {
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState("")
   const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item"; id: string; label: string } | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   const loadSuffixes = useCallback(async (fid: string) => {
     const { data } = await supabase.from("suffixes").select("*").eq("factory_id", fid).order("code")
@@ -367,6 +424,78 @@ export default function SettingsPage() {
       void loadConfigData(factoryId)
     } finally {
       setConfigSaving(false)
+    }
+  }
+
+  const handleImportFile = async (file: File) => {
+    if (!factoryId) return
+    setImporting(true)
+    setImportResult(null)
+    const errors: string[] = []
+    let success = 0
+    try {
+      const text = await file.text()
+      const lines = text
+        .replace(/^﻿/, "")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("#"))
+      if (lines.length < 2) {
+        setImportResult({ success: 0, errors: ["File không có dữ liệu (cần ít nhất 1 dòng header + 1 dòng dữ liệu)"] })
+        return
+      }
+      const dataLines = lines.slice(1)
+      for (let i = 0; i < dataLines.length; i++) {
+        const row = parseCSVLine(dataLines[i])
+        const rowNum = i + 2
+        if (configTab === "warehouses") {
+          const [code, name, keeper_name, warehouse_type, is_active_str] = row
+          if (!code || !name) { errors.push(`Dòng ${rowNum}: mã kho và tên kho là bắt buộc`); continue }
+          const { error } = await supabase.from("inventory_warehouses").upsert(
+            { factory_id: factoryId, code: code.toUpperCase(), name, keeper_name: keeper_name || null, warehouse_type: warehouse_type || null, is_active: is_active_str?.toLowerCase() !== "false" },
+            { onConflict: "factory_id,code" },
+          )
+          if (error) { errors.push(`Dòng ${rowNum} (${code}): ${error.message}`); continue }
+          success++
+        } else if (configTab === "categories") {
+          const [code, name, sort_order_str, is_active_str] = row
+          if (!code || !name) { errors.push(`Dòng ${rowNum}: mã nhóm và tên nhóm là bắt buộc`); continue }
+          const { error } = await supabase.from("inventory_item_categories").upsert(
+            { factory_id: factoryId, code: code.toUpperCase(), name, sort_order: Number(sort_order_str) || 0, is_active: is_active_str?.toLowerCase() !== "false" },
+            { onConflict: "factory_id,code" },
+          )
+          if (error) { errors.push(`Dòng ${rowNum} (${code}): ${error.message}`); continue }
+          success++
+        } else if (configTab === "items") {
+          const [cat_code, code, name, unit, specification, wh_codes_str, manages_lot_str, manages_expiry_str, min_stock_str, max_stock_str] = row
+          if (!cat_code || !code || !name || !unit || !wh_codes_str) { errors.push(`Dòng ${rowNum}: thiếu trường bắt buộc (mã nhóm, mã vật tư, tên, đơn vị, mã kho)`); continue }
+          const cat = invCategories.find((c) => c.code === cat_code.trim().toUpperCase())
+          if (!cat) { errors.push(`Dòng ${rowNum} (${code}): không tìm thấy nhóm "${cat_code}" — hãy nhập Nhóm vật tư trước`); continue }
+          const whCodes = wh_codes_str.split(";").map((w) => w.trim().toUpperCase())
+          const whs = whCodes.map((wc) => invWarehouses.find((w) => w.code === wc)).filter(Boolean) as InvWarehouseRow[]
+          if (whs.length === 0) { errors.push(`Dòng ${rowNum} (${code}): không tìm thấy kho "${wh_codes_str}" — hãy nhập Kho trước`); continue }
+          const { data: itemData, error: itemErr } = await supabase
+            .from("inventory_items")
+            .upsert(
+              { factory_id: factoryId, category_id: cat.id, code: code.toUpperCase(), name, unit, specification: specification || null, default_warehouse_ids: whs.map((w) => w.id), manages_lot: manages_lot_str?.toLowerCase() === "true", manages_expiry: manages_expiry_str?.toLowerCase() === "true", min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, is_active: true },
+              { onConflict: "factory_id,code" },
+            )
+            .select("id")
+            .single()
+          if (itemErr || !itemData?.id) { errors.push(`Dòng ${rowNum} (${code}): ${itemErr?.message || "lỗi lưu vật tư"}`); continue }
+          await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemData.id).eq("factory_id", factoryId)
+          const rulesPayload = whs.map((w, idx) => ({ factory_id: factoryId, item_id: itemData.id, warehouse_id: w.id, min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, reorder_point: Number(min_stock_str) || 0, safety_stock: Number(min_stock_str) || 0, is_primary: idx === 0 }))
+          const { error: rErr } = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
+          if (rErr) { errors.push(`Dòng ${rowNum} (${code}): lỗi kho — ${rErr.message}`); continue }
+          success++
+        }
+      }
+      setImportResult({ success, errors })
+      if (success > 0) void loadConfigData(factoryId)
+    } catch (err) {
+      setImportResult({ success: 0, errors: [err instanceof Error ? err.message : "Lỗi không xác định"] })
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -936,27 +1065,43 @@ export default function SettingsPage() {
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
               {canManageSettings && (
-                <button
-                  onClick={() => {
-                    setConfigError("")
-                    if (configTab === "warehouses") {
-                      setConfigEditId(null)
-                      setInvWarehouseForm({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
-                      setConfigModal("warehouse")
-                    } else if (configTab === "categories") {
-                      setConfigEditId(null)
-                      setInvCategoryForm({ code: "", name: "", sort_order: String(invCategories.length + 1), is_active: true })
-                      setConfigModal("category")
-                    } else {
-                      setConfigEditId(null)
-                      setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
-                      setConfigModal("item")
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
-                >
-                  <Plus size={13} /> Thêm mới
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => downloadConfigTemplate(configTab)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
+                    title="Tải file mẫu CSV để điền dữ liệu và import"
+                  >
+                    <Download size={13} /> Tải mẫu
+                  </button>
+                  <button
+                    onClick={() => { setImportResult(null); importFileRef.current?.click() }}
+                    disabled={importing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
+                  >
+                    <Upload size={13} /> {importing ? "Đang nhập..." : "Nhập CSV"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setConfigError("")
+                      if (configTab === "warehouses") {
+                        setConfigEditId(null)
+                        setInvWarehouseForm({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
+                        setConfigModal("warehouse")
+                      } else if (configTab === "categories") {
+                        setConfigEditId(null)
+                        setInvCategoryForm({ code: "", name: "", sort_order: String(invCategories.length + 1), is_active: true })
+                        setConfigModal("category")
+                      } else {
+                        setConfigEditId(null)
+                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+                        setConfigModal("item")
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                  >
+                    <Plus size={13} /> Thêm mới
+                  </button>
+                </div>
               )}
             </div>
 
@@ -965,13 +1110,44 @@ export default function SettingsPage() {
                 {(["warehouses", "categories", "items"] as const).map((key) => (
                   <button
                     key={key}
-                    onClick={() => setConfigTab(key)}
+                    onClick={() => { setConfigTab(key); setImportResult(null) }}
                     className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === key ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
                   >
                     {key === "warehouses" ? "Kho" : key === "categories" ? "Nhóm vật tư" : "Vật tư / Hóa chất"}
                   </button>
                 ))}
               </div>
+
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handleImportFile(file)
+                  e.target.value = ""
+                }}
+              />
+
+              {importResult && (
+                <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${importResult.errors.length === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-700">
+                      {importResult.success > 0 ? `✅ Đã nhập ${importResult.success} dòng thành công` : "⚠️ Không có dòng nào được nhập"}
+                      {importResult.errors.length > 0 && `, ${importResult.errors.length} lỗi`}
+                    </span>
+                    <button onClick={() => setImportResult(null)} className="p-1 hover:bg-slate-100 rounded-lg">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {importResult.errors.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-xs text-red-600 max-h-40 overflow-y-auto">
+                      {importResult.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
 
               {configLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
