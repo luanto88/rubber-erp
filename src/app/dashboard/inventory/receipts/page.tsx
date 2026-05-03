@@ -13,6 +13,7 @@ import { InventoryQrCard } from "../_components/inventory-qr-card"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
+  type InventoryCategoryOption,
   type InventoryItemOption,
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
@@ -231,6 +232,9 @@ export default function InventoryReceiptsPage() {
   const [warehouses, setWarehouses] = useState<InventoryWarehouseOption[]>([])
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
+  const [balances, setBalances] = useState<{ warehouse_id: string; item_id: string; on_hand: number }[]>([])
+  const [categories, setCategories] = useState<InventoryCategoryOption[]>([])
+  const [selectedCategoryId, setSelectedCategoryId] = useState("")
   const [draft, setDraft] = useState<DraftState>(defaultDraft())
 
   useEffect(() => {
@@ -248,6 +252,15 @@ export default function InventoryReceiptsPage() {
         setWarehouses(inventoryData.warehouses)
         setItems(inventoryData.items)
         setWarehouseRules(inventoryData.warehouseRules)
+        setCategories(inventoryData.categories)
+
+        if (inventoryData.factoryId) {
+          const balanceResult = await supabase
+            .from("inventory_stock_balances")
+            .select("warehouse_id, item_id, on_hand")
+            .eq("factory_id", inventoryData.factoryId)
+          if (!balanceResult.error) setBalances((balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[])
+        }
 
         const loadDocumentFromQuery = async () => {
           if (!inventoryData.factoryId || (!requestedDocumentId && !requestedCode)) {
@@ -355,10 +368,17 @@ export default function InventoryReceiptsPage() {
   )
   const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=import&code=${encodeURIComponent(documentCode)}` : null
 
+  const balanceMap = useMemo(
+    () => new Map(balances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0])),
+    [balances],
+  )
+
   const warehouseScopedItems = useMemo(() => {
-    const scoped = items.filter((item) => !draft.warehouseId || item.default_warehouse_ids.includes(draft.warehouseId))
-    return scoped.length > 0 ? scoped : items
-  }, [draft.warehouseId, items])
+    let scoped = items.filter((item) => !draft.warehouseId || item.default_warehouse_ids.includes(draft.warehouseId))
+    if (scoped.length === 0) scoped = items
+    if (selectedCategoryId) scoped = scoped.filter((item) => item.category_id === selectedCategoryId)
+    return scoped
+  }, [draft.warehouseId, items, selectedCategoryId])
 
   useEffect(() => {
     if (loading) return
@@ -870,7 +890,19 @@ export default function InventoryReceiptsPage() {
           </div>
 
           <div className="xl:col-span-2">
-            <label className="mb-1.5 block text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <label className="text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                className="w-48 rounded-xl border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-emerald-500"
+              >
+                <option value="">Tất cả phân loại</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             {!draft.warehouseId ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
                 Vui lòng chọn kho trước khi chọn vật tư.
@@ -879,6 +911,12 @@ export default function InventoryReceiptsPage() {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {warehouseScopedItems.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
+                  const totalStock = warehouses.reduce(
+                    (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
+                  )
+                  const warehouseStocks = warehouses
+                    .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
+                    .filter((w) => w.stock > 0)
                   return (
                     <button
                       key={item.id}
@@ -891,15 +929,21 @@ export default function InventoryReceiptsPage() {
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-bold text-slate-800">{item.code}</div>
                           <div className="mt-1 text-sm text-slate-600">{item.name}</div>
                           <div className="mt-2 text-xs text-slate-500">
-                            Tồn hiện tại: {item.opening_stock.toLocaleString("vi-VN")} {item.unit}
+                            Tổng tồn: {totalStock.toLocaleString("vi-VN")} {item.unit}
                           </div>
+                          {warehouseStocks.length > 1 &&
+                            warehouseStocks.map((w) => (
+                              <div key={w.code} className="text-xs text-slate-400">
+                                {w.code}: {w.stock.toLocaleString("vi-VN")} {item.unit}
+                              </div>
+                            ))}
                         </div>
                         <div
-                          className={`rounded-full p-1.5 ${
+                          className={`shrink-0 rounded-full p-1.5 ${
                             selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
                           }`}
                         >
@@ -1009,15 +1053,14 @@ export default function InventoryReceiptsPage() {
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-bold text-slate-600">Hình ảnh 1</label>
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        documentType="import"
-                        label="Hình ảnh 1"
-                        value={detail.line.image1Url}
-                        onChange={(url) => updateLine(detail.line.id, { image1Url: url })}
-                      />
-                    </div>
+                    <InventoryImageUpload
+                      factoryId={factoryId}
+                      documentType="import"
+                      label="Hình ảnh 1"
+                      value={detail.line.image1Url}
+                      onChange={(url) => updateLine(detail.line.id, { image1Url: url })}
+                    />
+                  </div>
 
                     <div>
                       <InventoryImageUpload

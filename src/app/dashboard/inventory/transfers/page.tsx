@@ -13,6 +13,7 @@ import { InventoryQrCard } from "../_components/inventory-qr-card"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
+  type InventoryCategoryOption,
   type InventoryItemOption,
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
@@ -287,6 +288,8 @@ export default function InventoryTransfersPage() {
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
   const [balances, setBalances] = useState<BalanceRow[]>([])
   const [lotBalances, setLotBalances] = useState<LotBalanceRow[]>(fallbackLotBalances)
+  const [categories, setCategories] = useState<InventoryCategoryOption[]>([])
+  const [selectedCategoryId, setSelectedCategoryId] = useState("")
   const [draft, setDraft] = useState<TransferDraftState>(defaultDraft())
 
   useEffect(() => {
@@ -304,6 +307,7 @@ export default function InventoryTransfersPage() {
         setWarehouses(inventoryData.warehouses)
         setItems(inventoryData.items)
         setWarehouseRules(inventoryData.warehouseRules)
+        setCategories(inventoryData.categories)
 
         if (resolvedFactoryId) {
           const [balanceResult, lotBalanceResult] = await Promise.all([
@@ -450,11 +454,13 @@ export default function InventoryTransfersPage() {
   )
 
   const sourceScopedItems = useMemo(() => {
-    const scoped = items.filter(
+    let scoped = items.filter(
       (item) => !draft.sourceWarehouseId || item.default_warehouse_ids.includes(draft.sourceWarehouseId),
     )
-    return scoped.length > 0 ? scoped : items
-  }, [draft.sourceWarehouseId, items])
+    if (scoped.length === 0) scoped = items
+    if (selectedCategoryId) scoped = scoped.filter((item) => item.category_id === selectedCategoryId)
+    return scoped
+  }, [draft.sourceWarehouseId, items, selectedCategoryId])
 
   useEffect(() => {
     if (loading) return
@@ -1071,7 +1077,19 @@ export default function InventoryTransfersPage() {
           </div>
 
           <div className="xl:col-span-2">
-            <label className="mb-1.5 block text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <label className="text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                className="w-48 rounded-xl border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-emerald-500"
+              >
+                <option value="">Tất cả phân loại</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             {!draft.sourceWarehouseId ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
                 Vui lòng chọn kho nguồn trước khi chọn vật tư.
@@ -1080,7 +1098,12 @@ export default function InventoryTransfersPage() {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {sourceScopedItems.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
-                  const stockValue = balanceMap.get(`${draft.sourceWarehouseId}:${item.id}`) ?? item.opening_stock ?? 0
+                  const totalStock = warehouses.reduce(
+                    (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
+                  )
+                  const warehouseStocks = warehouses
+                    .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
+                    .filter((w) => w.stock > 0)
 
                   return (
                     <button
@@ -1094,15 +1117,21 @@ export default function InventoryTransfersPage() {
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-bold text-slate-800">{item.code}</div>
                           <div className="mt-1 text-sm text-slate-600">{item.name}</div>
                           <div className="mt-2 text-xs text-slate-500">
-                            Tồn hiện tại: {stockValue.toLocaleString("vi-VN")} {item.unit}
+                            Tổng tồn: {totalStock.toLocaleString("vi-VN")} {item.unit}
                           </div>
+                          {warehouseStocks.length > 1 &&
+                            warehouseStocks.map((w) => (
+                              <div key={w.code} className="text-xs text-slate-400">
+                                {w.code}: {w.stock.toLocaleString("vi-VN")} {item.unit}
+                              </div>
+                            ))}
                         </div>
                         <div
-                          className={`rounded-full p-1.5 ${
+                          className={`shrink-0 rounded-full p-1.5 ${
                             selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
                           }`}
                         >
@@ -1252,7 +1281,6 @@ export default function InventoryTransfersPage() {
                     </div>
 
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Hình ảnh 1</label>
                       <InventoryImageUpload
                         factoryId={factoryId}
                         documentType="transfer"
