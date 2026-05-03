@@ -462,6 +462,17 @@ export default function InventoryTransfersPage() {
     return scoped
   }, [draft.sourceWarehouseId, items, selectedCategoryId])
 
+  const warehouseScopedCategories = useMemo(() => {
+    const base = (() => {
+      const scoped = items.filter(
+        (item) => !draft.sourceWarehouseId || item.default_warehouse_ids.includes(draft.sourceWarehouseId),
+      )
+      return scoped.length > 0 ? scoped : items
+    })()
+    const presentIds = new Set(base.map((item) => item.category_id).filter(Boolean))
+    return categories.filter((c) => presentIds.has(c.id))
+  }, [categories, draft.sourceWarehouseId, items])
+
   useEffect(() => {
     if (loading) return
 
@@ -1007,7 +1018,7 @@ export default function InventoryTransfersPage() {
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho nguồn *</label>
             <select
               value={draft.sourceWarehouseId}
-              onChange={(e) =>
+              onChange={(e) => {
                 setDraft((prev) => ({
                   ...prev,
                   sourceWarehouseId: e.target.value,
@@ -1016,7 +1027,8 @@ export default function InventoryTransfersPage() {
                   selectedItemIds: [],
                   lines: [],
                 }))
-              }
+                setSelectedCategoryId("")
+              }}
               className={INPUT_CLASS}
             >
               <option value="">Chọn kho nguồn</option>
@@ -1076,20 +1088,24 @@ export default function InventoryTransfersPage() {
             />
           </div>
 
-          <div className="xl:col-span-2">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <label className="text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
+          {draft.sourceWarehouseId && warehouseScopedCategories.length >= 2 ? (
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại vật tư</label>
               <select
                 value={selectedCategoryId}
                 onChange={(e) => setSelectedCategoryId(e.target.value)}
-                className="w-48 rounded-xl border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-emerald-500"
+                className={INPUT_CLASS}
               >
                 <option value="">Tất cả phân loại</option>
-                {categories.map((c) => (
+                {warehouseScopedCategories.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             </div>
+          ) : null}
+
+          <div className="xl:col-span-2">
+            <label className="mb-2 block text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
             {!draft.sourceWarehouseId ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
                 Vui lòng chọn kho nguồn trước khi chọn vật tư.
