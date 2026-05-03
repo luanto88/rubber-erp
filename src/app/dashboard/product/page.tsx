@@ -568,6 +568,8 @@ export default function ProductPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
+  const [lotsBlockedByKn, setLotsBlockedByKn] = useState<string[]>([])
+  const [preCheckLoading, setPreCheckLoading] = useState(false)
   const [editDateModal, setEditDateModal] = useState<string | null>(null);
   const [deleteMode, setDeleteMode] = useState<string | null>(null);
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
@@ -1680,12 +1682,39 @@ export default function ProductPage() {
   };
 
   const handleBulkDelete = async () => {
-    for (const id of Array.from(selectedDeleteIds)) {
+    const deletable = Array.from(selectedDeleteIds).filter(
+      (id) => !lotsBlockedByKn.includes(id),
+    );
+    for (const id of deletable) {
       await handleDelete(id);
     }
+    setLotsBlockedByKn([]);
     setDeleteMode(null);
     setSelectedDeleteIds(new Set());
     setDelConfirm(null);
+  };
+
+  const handleDeletePreCheck = async () => {
+    if (!factoryId || selectedDeleteIds.size === 0) return;
+    setPreCheckLoading(true);
+    const ids = Array.from(selectedDeleteIds);
+    const { data } = await supabase
+      .from("qc_results")
+      .select("lot_id")
+      .in("lot_id", ids)
+      .eq("factory_id", factoryId);
+    const blocked = [...new Set((data || []).map((r) => r.lot_id as string))];
+    setLotsBlockedByKn(blocked);
+    setPreCheckLoading(false);
+    if (blocked.length === ids.length) {
+      setSaveError(
+        ids.length === 1
+          ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
+          : `Tất cả ${ids.length} lô đã chọn đều có phiếu kiểm nghiệm, không thể xóa. Xóa phiếu KN trước.`,
+      );
+      return;
+    }
+    setDelConfirm("bulk");
   };
 
   const toggleDate = (date: string) => {
@@ -3007,14 +3036,15 @@ export default function ProductPage() {
                           Chọn lô cần xóa...
                         </span>
                         <button
-                          disabled={selectedDeleteIds.size === 0}
-                          onClick={(e) => { e.stopPropagation(); setDelConfirm("bulk"); }}
+                          disabled={selectedDeleteIds.size === 0 || preCheckLoading}
+                          onClick={(e) => { e.stopPropagation(); void handleDeletePreCheck(); }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
-                          <Trash2 size={12} /> Xóa {selectedDeleteIds.size} lô
+                          <Trash2 size={12} />
+                          {preCheckLoading ? "Đang kiểm tra..." : `Xóa ${selectedDeleteIds.size} lô`}
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteMode(null); setSelectedDeleteIds(new Set()); }}
+                          onClick={(e) => { e.stopPropagation(); setDeleteMode(null); setSelectedDeleteIds(new Set()); setLotsBlockedByKn([]); }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
                           Hủy
@@ -3628,9 +3658,24 @@ export default function ProductPage() {
             <h3 className="font-extrabold text-slate-800 mb-2">
               Xác nhận xóa?
             </h3>
+            {lotsBlockedByKn.length > 0 && (
+              <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                <p className="text-xs font-bold text-amber-700">
+                  ⚠️ {lotsBlockedByKn.length} lô đã có phiếu KN — sẽ không được xóa:
+                </p>
+                <p className="text-xs text-amber-600 mt-1 break-all">
+                  {lotsBlockedByKn
+                    .map((id) => lots.find((l) => l.id === id)?.ma_lo)
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+              </div>
+            )}
             <p className="text-sm text-slate-500 mb-5">
               {delConfirm === "bulk"
-                ? `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
+                ? lotsBlockedByKn.length > 0
+                  ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lô chưa có KN sẽ bị xóa vĩnh viễn.`
+                  : `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
                 : "Lô này sẽ bị xóa vĩnh viễn."}{" "}
               Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động.
             </p>
