@@ -1706,14 +1706,6 @@ export default function ProductPage() {
     const blocked = [...new Set((data || []).map((r) => r.lot_id as string))];
     setLotsBlockedByKn(blocked);
     setPreCheckLoading(false);
-    if (blocked.length === ids.length) {
-      setSaveError(
-        ids.length === 1
-          ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
-          : `Tất cả ${ids.length} lô đã chọn đều có phiếu kiểm nghiệm, không thể xóa. Xóa phiếu KN trước.`,
-      );
-      return;
-    }
     setDelConfirm("bulk");
   };
 
@@ -3673,29 +3665,43 @@ export default function ProductPage() {
             )}
             <p className="text-sm text-slate-500 mb-5">
               {delConfirm === "bulk"
-                ? lotsBlockedByKn.length > 0
-                  ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lô chưa có KN sẽ bị xóa vĩnh viễn.`
-                  : `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
+                ? lotsBlockedByKn.length === selectedDeleteIds.size
+                  ? "Tất cả lô đã chọn đều có phiếu KN, không thể xóa."
+                  : lotsBlockedByKn.length > 0
+                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lô chưa có KN sẽ bị xóa vĩnh viễn.`
+                    : `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
                 : "Lô này sẽ bị xóa vĩnh viễn."}{" "}
-              Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động.
+              {(delConfirm !== "bulk" || lotsBlockedByKn.length < selectedDeleteIds.size) &&
+                "Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động."}
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setDelConfirm(null)}
-                className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={() =>
-                  delConfirm === "bulk"
-                    ? handleBulkDelete()
-                    : handleDelete(delConfirm)
-                }
-                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
-              >
-                Xóa
-              </button>
+              {delConfirm === "bulk" && lotsBlockedByKn.length === selectedDeleteIds.size ? (
+                <button
+                  onClick={() => { setDelConfirm(null); setLotsBlockedByKn([]); }}
+                  className="w-full py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Đóng
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setDelConfirm(null)}
+                    className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    onClick={() =>
+                      delConfirm === "bulk"
+                        ? handleBulkDelete()
+                        : handleDelete(delConfirm)
+                    }
+                    className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
+                  >
+                    Xóa
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
