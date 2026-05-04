@@ -493,8 +493,8 @@ export default function InventoryIssuesPage() {
       const quantity = Number(line.quantity) || 0
       const currentStock =
         item && draft.warehouseId
-          ? balanceMap.get(`${draft.warehouseId}:${item.id}`) ?? item.opening_stock ?? 0
-          : item?.opening_stock ?? 0
+          ? (balanceMap.get(`${draft.warehouseId}:${item.id}`) ?? 0)
+          : 0
 
       const availableLots = item
         ? dedupeLotOptions(
@@ -1055,7 +1055,7 @@ export default function InventoryIssuesPage() {
                   const totalStock = warehouses.reduce(
                     (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
                   )
-                  const displayStock = balances.length > 0 ? totalStock : (item.opening_stock ?? 0)
+                  const displayStock = totalStock
                   const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)

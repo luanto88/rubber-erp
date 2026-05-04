@@ -508,8 +508,8 @@ export default function InventoryTransfersPage() {
       const quantity = Number(line.quantity) || 0
       const currentStock =
         item && draft.sourceWarehouseId
-          ? balanceMap.get(`${draft.sourceWarehouseId}:${item.id}`) ?? item.opening_stock ?? 0
-          : item?.opening_stock ?? 0
+          ? (balanceMap.get(`${draft.sourceWarehouseId}:${item.id}`) ?? 0)
+          : 0
 
       const sourceRule =
         item && draft.sourceWarehouseId ? findRule(item.id, draft.sourceWarehouseId, warehouseRules) : null
