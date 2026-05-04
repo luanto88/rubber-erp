@@ -14,6 +14,7 @@ import {
 import { InventoryPageShell, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
 import {
   loadInventorySnapshotData,
+  type InventoryCategoryOption,
   type InventoryItemOption,
   type InventoryLotBalanceRow,
   type InventoryStockBalanceRow,
@@ -85,10 +86,13 @@ export default function InventoryOnHandPage() {
   const [warning, setWarning] = useState<string | null>(null)
   const [warehouses, setWarehouses] = useState<InventoryWarehouseOption[]>([])
   const [items, setItems] = useState<InventoryItemOption[]>([])
+  const [categories, setCategories] = useState<InventoryCategoryOption[]>([])
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
   const [stockBalances, setStockBalances] = useState<InventoryStockBalanceRow[]>([])
   const [lotBalances, setLotBalances] = useState<InventoryLotBalanceRow[]>([])
   const [selectedWarehouseId, setSelectedWarehouseId] = useState("all")
+  const [selectedCategoryId, setSelectedCategoryId] = useState("")
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   useEffect(() => {
     const bootstrap = async () => {
@@ -98,6 +102,7 @@ export default function InventoryOnHandPage() {
         setWarning(inventoryData.warning)
         setWarehouses(inventoryData.warehouses)
         setItems(inventoryData.items)
+        setCategories(inventoryData.categories || [])
         setWarehouseRules(inventoryData.warehouseRules)
         setStockBalances(inventoryData.stockBalances)
         setLotBalances(inventoryData.lotBalances)
@@ -123,9 +128,8 @@ export default function InventoryOnHandPage() {
       .filter((balance) => selectedWarehouseId === "all" || balance.warehouse_id === selectedWarehouseId)
       .map((balance) => {
         const item = itemMap.get(balance.item_id)
-        if (!item) {
-          return null
-        }
+        if (!item) return null
+        if (selectedCategoryId && item.category_id !== selectedCategoryId) return null
 
         const warehouse = warehouseMap.get(balance.warehouse_id)
         const rule = getRule(item.id, balance.warehouse_id, warehouseRules)
@@ -167,20 +171,20 @@ export default function InventoryOnHandPage() {
       })
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
       .sort((a, b) => a.item.code.localeCompare(b.item.code, "vi"))
-  }, [itemMap, lotBalances, search, selectedWarehouseId, stockBalances, warehouseMap, warehouseRules])
+  }, [itemMap, lotBalances, search, selectedCategoryId, selectedWarehouseId, stockBalances, warehouseMap, warehouseRules])
 
   const lotRows = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase()
     return lotBalances
       .filter((lot) => lot.on_hand > 0)
       .filter((lot) => selectedWarehouseId === "all" || lot.warehouse_id === selectedWarehouseId)
+      .filter((lot) => !selectedItemId || lot.item_id === selectedItemId)
       .map((lot) => {
         const item = itemMap.get(lot.item_id)
         const warehouse = warehouseMap.get(lot.warehouse_id)
-        if (!item || !warehouse) {
-          return null
-        }
+        if (!item || !warehouse) return null
+        if (selectedCategoryId && item.category_id !== selectedCategoryId) return null
 
-        const normalizedSearch = search.trim().toLowerCase()
         if (
           normalizedSearch &&
           !item.code.toLowerCase().includes(normalizedSearch) &&
@@ -205,7 +209,7 @@ export default function InventoryOnHandPage() {
         const expiryB = b.expiryDate || "9999-12-31"
         return expiryA.localeCompare(expiryB, "vi")
       })
-  }, [itemMap, lotBalances, search, selectedWarehouseId, warehouseMap])
+  }, [itemMap, lotBalances, search, selectedCategoryId, selectedItemId, selectedWarehouseId, warehouseMap])
 
   const stats = useMemo(() => {
     const lowCount = onHandRows.filter((row) => row.status === "low").length
@@ -281,11 +285,11 @@ export default function InventoryOnHandPage() {
       </ScrollReveal>
 
       <ScrollRevealSection className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="min-w-[220px] flex-1">
+        <div className="min-w-[180px] flex-1">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
           <select
             value={selectedWarehouseId}
-            onChange={(event) => setSelectedWarehouseId(event.target.value)}
+            onChange={(event) => { setSelectedWarehouseId(event.target.value); setSelectedItemId(null) }}
             className={INPUT_CLASS}
           >
             <option value="all">Tất cả kho</option>
@@ -297,12 +301,30 @@ export default function InventoryOnHandPage() {
           </select>
         </div>
 
-        <div className="min-w-[260px] flex-1">
+        {categories.length >= 2 ? (
+          <div className="min-w-[180px] flex-1">
+            <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại</label>
+            <select
+              value={selectedCategoryId}
+              onChange={(event) => { setSelectedCategoryId(event.target.value); setSelectedItemId(null) }}
+              className={INPUT_CLASS}
+            >
+              <option value="">Tất cả phân loại</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        <div className="min-w-[220px] flex-1">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Tìm vật tư hoặc số lô</label>
           <input
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Mã vật tư, tên vật tư hoặc số lô"
+            onChange={(event) => { setSearch(event.target.value); setSelectedItemId(null) }}
+            placeholder="Mã, tên vật tư hoặc số lô"
             className={INPUT_CLASS}
           />
         </div>
@@ -341,7 +363,16 @@ export default function InventoryOnHandPage() {
               </thead>
               <tbody>
                 {onHandRows.map((row) => (
-                  <tr key={row.id} className="row-hover border-t border-slate-100">
+                  <tr
+                    key={row.id}
+                    className={`border-t border-slate-100 cursor-pointer transition-colors duration-150 ${
+                      selectedItemId === row.item.id
+                        ? "bg-emerald-50 hover:bg-emerald-100"
+                        : "hover:bg-slate-50"
+                    }`}
+                    onClick={() => setSelectedItemId(selectedItemId === row.item.id ? null : row.item.id)}
+                    title={selectedItemId === row.item.id ? "Bấm để bỏ lọc lô" : "Bấm để xem lô của vật tư này"}
+                  >
                     <td className="px-4 py-3 text-slate-600">
                       <div className="font-semibold text-slate-700">{row.warehouse?.code || "N/A"}</div>
                       <div className="text-xs text-slate-500">{row.warehouse?.name || "Chưa xác định"}</div>
@@ -387,11 +418,36 @@ export default function InventoryOnHandPage() {
       <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
-            <h2 className="text-base font-bold text-slate-800">Tồn theo số lô và hạn sử dụng</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Theo dõi số lô còn tồn để phục vụ chọn lô khi xuất kho và chuyển kho.
-            </p>
+            {selectedItemId ? (
+              <>
+                <h2 className="text-base font-bold text-slate-800">
+                  Lô của{" "}
+                  <span className="text-emerald-700">
+                    {items.find((i) => i.id === selectedItemId)?.name || selectedItemId}
+                  </span>
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Đang lọc theo vật tư đã chọn ở bảng trên.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-base font-bold text-slate-800">Tồn theo số lô và hạn sử dụng</h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Theo dõi số lô còn tồn để phục vụ chọn lô khi xuất kho và chuyển kho.
+                </p>
+              </>
+            )}
           </div>
+          {selectedItemId ? (
+            <button
+              type="button"
+              onClick={() => setSelectedItemId(null)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+            >
+              Xem tất cả ×
+            </button>
+          ) : null}
         </div>
 
         {loading ? (

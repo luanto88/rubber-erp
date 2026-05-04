@@ -260,7 +260,9 @@ export default function InventoryReceiptsPage() {
             .from("inventory_stock_balances")
             .select("warehouse_id, item_id, on_hand")
             .eq("factory_id", inventoryData.factoryId)
-          if (!balanceResult.error) setBalances((balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[])
+          if (!balanceResult.error) {
+            setBalances((balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[])
+          }
         }
 
         const loadDocumentFromQuery = async () => {
@@ -706,8 +708,12 @@ export default function InventoryReceiptsPage() {
       }))
       setSaveSuccess(`Đã ghi sổ phiếu nhập ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
     } catch (error) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : (error as { message?: string })?.message || "Không ghi sổ được phiếu nhập."
       setSaveErrorTitle("Không ghi sổ được phiếu nhập")
-      setSaveError(error instanceof Error ? error.message : "Không ghi sổ được phiếu nhập.")
+      setSaveError(msg)
     } finally {
       setPosting(false)
     }
@@ -928,12 +934,13 @@ export default function InventoryReceiptsPage() {
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {warehouseScopedItems.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = warehouses.reduce(
                     (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
                   )
+                  const displayStock = balances.length > 0 ? totalStock : (item.opening_stock ?? 0)
                   const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)
@@ -942,32 +949,32 @@ export default function InventoryReceiptsPage() {
                       key={item.id}
                       type="button"
                       onClick={() => toggleSelectedItem(item.id)}
-                      className={`rounded-xl border p-4 text-left transition-all ${
+                      className={`rounded-lg border p-2.5 text-left transition-all ${
                         selected
                           ? "border-emerald-500 bg-emerald-50 shadow-sm"
                           : "border-slate-200 bg-white hover:border-slate-300"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-bold text-slate-800">{item.code}</div>
-                          <div className="mt-1 text-sm text-slate-600">{item.name}</div>
-                          <div className="mt-2 text-xs text-slate-500">
-                            Tổng tồn: {totalStock.toLocaleString("vi-VN")} {item.unit}
+                          <div className="text-xs font-bold text-slate-800">{item.code}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-slate-600">{item.name}</div>
+                          <div className="mt-1 text-[10px] text-slate-500">
+                            Tồn: {displayStock.toLocaleString("vi-VN")} {item.unit}
                           </div>
                           {warehouseStocks.length > 1 &&
                             warehouseStocks.map((w) => (
-                              <div key={w.code} className="text-xs text-slate-400">
-                                {w.code}: {w.stock.toLocaleString("vi-VN")} {item.unit}
+                              <div key={w.code} className="text-[10px] text-slate-400">
+                                {w.code}: {w.stock.toLocaleString("vi-VN")}
                               </div>
                             ))}
                         </div>
                         <div
-                          className={`shrink-0 rounded-full p-1.5 ${
+                          className={`shrink-0 rounded-full p-1 ${
                             selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
                           }`}
                         >
-                          <Check size={14} />
+                          <Check size={11} />
                         </div>
                       </div>
                     </button>

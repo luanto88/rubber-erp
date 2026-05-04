@@ -49,22 +49,43 @@ export async function fetchInventoryDocumentByReference(
     return null
   }
 
-  let query = supabase
-    .from("inventory_documents")
-    .select(
-      "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason",
-    )
-    .eq("factory_id", factoryId)
-    .eq("document_type", documentType)
-
-  query = documentId ? query.eq("id", documentId) : query.eq("document_code", code as string)
-
-  const documentResult = await query.maybeSingle()
-  if (documentResult.error || !documentResult.data) {
-    return null
+  const buildDocQuery = (fields: string) => {
+    let q = supabase
+      .from("inventory_documents")
+      .select(fields)
+      .eq("factory_id", factoryId)
+      .eq("document_type", documentType)
+    return documentId ? q.eq("id", documentId) : q.eq("document_code", code as string)
   }
 
-  const docData = documentResult.data as InventoryDocumentHeader & { posted_by_name?: string | null }
+  const FULL_FIELDS =
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason"
+  const BASIC_FIELDS =
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes"
+
+  const fullResult = await buildDocQuery(FULL_FIELDS).maybeSingle()
+
+  let rawDoc: Record<string, unknown> | null = null
+
+  if (!fullResult.error) {
+    rawDoc = fullResult.data as unknown as Record<string, unknown> | null
+  } else {
+    // Fallback: audit columns may not exist yet (pending migration) — retry without them
+    const basicResult = await buildDocQuery(BASIC_FIELDS).maybeSingle()
+    if (basicResult.error || !basicResult.data) return null
+    rawDoc = {
+      ...(basicResult.data as unknown as Record<string, unknown>),
+      posted_by: null,
+      posted_at: null,
+      cancelled_by: null,
+      cancelled_at: null,
+      cancel_reason: null,
+    }
+  }
+
+  if (!rawDoc) return null
+
+  const docData = rawDoc as unknown as InventoryDocumentHeader & { posted_by_name?: string | null }
 
   if (docData.posted_by) {
     const { data: profile } = await supabase
