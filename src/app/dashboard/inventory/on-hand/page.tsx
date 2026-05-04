@@ -121,6 +121,22 @@ export default function InventoryOnHandPage() {
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
 
+  // Chỉ hiển thị phân loại có tồn trong kho đang chọn (như Nhập/Xuất/Chuyển)
+  const availableCategories = useMemo(() => {
+    const relevantBalances =
+      selectedWarehouseId === "all"
+        ? stockBalances
+        : stockBalances.filter((b) => b.warehouse_id === selectedWarehouseId)
+    const presentItemIds = new Set(relevantBalances.map((b) => b.item_id))
+    const presentCategoryIds = new Set(
+      items
+        .filter((item) => presentItemIds.has(item.id))
+        .map((item) => item.category_id)
+        .filter(Boolean),
+    )
+    return categories.filter((c) => presentCategoryIds.has(c.id))
+  }, [categories, items, selectedWarehouseId, stockBalances])
+
   const onHandRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
 
@@ -289,7 +305,11 @@ export default function InventoryOnHandPage() {
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
           <select
             value={selectedWarehouseId}
-            onChange={(event) => { setSelectedWarehouseId(event.target.value); setSelectedItemId(null) }}
+            onChange={(event) => {
+              setSelectedWarehouseId(event.target.value)
+              setSelectedItemId(null)
+              setSelectedCategoryId("")
+            }}
             className={INPUT_CLASS}
           >
             <option value="all">Tất cả kho</option>
@@ -301,7 +321,7 @@ export default function InventoryOnHandPage() {
           </select>
         </div>
 
-        {categories.length >= 2 ? (
+        {availableCategories.length >= 2 ? (
           <div className="min-w-[180px] flex-1">
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại</label>
             <select
@@ -310,7 +330,7 @@ export default function InventoryOnHandPage() {
               className={INPUT_CLASS}
             >
               <option value="">Tất cả phân loại</option>
-              {categories.map((cat) => (
+              {availableCategories.map((cat) => (
                 <option key={cat.id} value={cat.id}>
                   {cat.name}
                 </option>
