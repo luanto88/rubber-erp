@@ -1139,7 +1139,7 @@ export default function InventoryIssuesPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {detail.item ? (
+                      {detail.item?.manages_lot && detail.availableLots.length >= 2 ? (
                         <button
                           type="button"
                           onClick={() => addAnotherLotLine(detail.item!.id)}
