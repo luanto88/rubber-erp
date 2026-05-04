@@ -476,11 +476,11 @@ export default function DispatchPage() {
       }
       if (editId) {
         const { error } = await supabase.from("dispatch_entries").update(payload).eq("id", editId)
-        if (error) { showToast(error.message, "error"); return }
+        if (error) { showToast(error.message); return }
         showToast("Đã cập nhật bảng phân xe")
       } else {
         const { error } = await supabase.from("dispatch_entries").insert(payload)
-        if (error) { showToast(error.message, "error"); return }
+        if (error) { showToast(error.message); return }
         showToast("Đã thêm bảng phân xe mới")
       }
       setView("list")
@@ -488,7 +488,7 @@ export default function DispatchPage() {
       setFormRows([emptyRow()])
       void loadData(factoryId)
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Lỗi không xác định", "error")
+      showToast(err instanceof Error ? err.message : "Lỗi không xác định")
     } finally {
       setSaving(false)
     }
