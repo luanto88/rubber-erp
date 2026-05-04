@@ -9,7 +9,9 @@
     "lint": "eslint",
     "normalize:warehouse-maintenance-data": "node ./scripts/normalize-warehouse-maintenance-data.mjs",
     "migrate:legacy-users": "node ./scripts/migrate-legacy-users.mjs",
-    "backfill:quality-lot-dates": "node ./scripts/backfill-quality-lot-dates.mjs"
+    "backfill:quality-lot-dates": "node ./scripts/backfill-quality-lot-dates.mjs",
+    "import:inventory-items": "node --env-file=.env.local scripts/import-inventory-items.mjs",
+    "fix:inventory-categories": "node --env-file=.env.local scripts/fix-null-categories.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.102.1",
