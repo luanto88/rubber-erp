@@ -165,11 +165,12 @@ Vi du:
 - App phai chu dong refresh session neu token sap het han; `SESSION_REFRESH_LEEWAY_SECONDS = 300` (5 phut truoc khi het han)
 - Dashboard layout phai tu dong dong bo lai session khi:
   - bootstrap (full hydration — fetch profile + permissions)
-  - SIGNED_IN event (full hydration)
+  - SIGNED_IN event (full hydration, chi khi `bootstrapDone = false`)
   - focus lai cua so (lightweight — chi verify token, khong DB query)
   - tab quay lai visible (lightweight)
   - heartbeat dinh ky 60 giay (lightweight)
 - Bootstrap layout phai boc trong `Promise.race` voi timeout 10s de tranh spinner treo do mang cham
+- Bootstrap phai set `bootstrapDone = true` trong `finally` — SIGNED_IN handler chi duoc goi full hydration khi `!bootstrapDone`, tranh double hydration (3-4 DB query thua) khi Supabase fire SIGNED_IN cho session dang co ngay luc layout mount
 - Interval va focus sync phai dung lightweight (`getFreshAuthSession()` only) — goi `hydrateActiveSession()` moi 60s se lam 4-5 DB query, loi nao do co the xoa user sai
 - `onAuthStateChange` SIGNED_OUT handler:
   - phai co `isLoggingOutRef.current` check — neu dang logout thu cong thi skip (handleLogout se navigate)

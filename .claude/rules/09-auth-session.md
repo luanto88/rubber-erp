@@ -264,7 +264,11 @@ supabase.auth.onAuthStateChange(async (event, session) => {
     return
   }
   if (event === "SIGNED_IN") {
-    await syncSession("/login", true) // full hydration
+    // Bo qua neu bootstrap da chay xong — Supabase fire SIGNED_IN cho session dang co
+    // ngay khi layout mount, bootstrap da xu ly roi, hydrate them lan 2 la thua
+    if (!bootstrapDone) {
+      await syncSession("/login", true) // full hydration
+    }
   }
   // TOKEN_REFRESHED → bo qua, interval 60s xu ly
 })
@@ -274,20 +278,27 @@ Li do xu ly TOKEN_REFRESHED: neu xu ly `TOKEN_REFRESHED`, moi lan `refreshSessio
 
 Li do recovery trong SIGNED_OUT: Supabase fire `SIGNED_OUT` khi token auto-refresh that bai do mang blip. Neu redirect ngay, user bi kick ra khoi app du session van con hop le (sau khi mang phuc hoi). `getFreshAuthSession()` chi doc session hien tai — neu van con user, bo qua event; neu that, moi redirect.
 
-**4. Bootstrap phai co timeout de tranh spinner treo**
+Li do `bootstrapDone` trong SIGNED_IN: khi user dang nhap va navigate sang dashboard, layout mount → bootstrap chay full hydration. Dong thoi Supabase fire SIGNED_IN cho session dang ton tai. Neu bootstrap xong truoc khi SIGNED_IN fire, `syncing` lock da reset → handler se goi them 1 full hydration nua (3-4 DB query thua). `bootstrapDone` chan truong hop nay.
+
+**4. Bootstrap phai co timeout va phai set `bootstrapDone`**
 
 Neu `hydrateActiveSession()` bi treo do mang cham (fetch khong bao gio resolve),
 `setLoading(false)` khong chay → spinner treo mai mai.
 
+`bootstrapDone` bat buoc de tranh double full hydration khi Supabase fire SIGNED_IN
+cho session dang co ngay khi dashboard mount (race condition voi bootstrap).
+
 ```typescript
+let bootstrapDone = false  // khai bao cung cap voi alive, syncing
+
 const bootstrap = async () => {
   try {
-    // Promise.race: neu sync treo > 10 giay, van ha loading
     await Promise.race([
       syncSession("/login", true),
       new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
     ])
   } finally {
+    bootstrapDone = true   // LUON set, du thanh cong hay timeout
     if (alive) setLoading(false)
   }
 }

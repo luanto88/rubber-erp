@@ -23,32 +23,29 @@ const loadData = useCallback(async (fid: string) => {
   }
 }, [filterDep1, filterDep2]) // chỉ dependencies là filters
 
-// Bootstrap - chỉ chạy 1 lần khi mount để lấy factory ID
+// Bootstrap - chỉ lấy factoryId, KHÔNG gọi loadData trực tiếp
 useEffect(() => {
   const bootstrap = async () => {
     const fid = await getActiveFactoryId()
-    if (!fid) {
-      setLoading(false)
-      return
-    }
+    if (!fid) { setLoading(false); return }
     setFactoryId(fid)
-    loadData(fid)
+    // Gọi thêm dữ liệu phụ (ví dụ: tên nhà máy) ở đây nếu cần
   }
   void bootstrap()
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, []) // KHÔNG đặt loadData vào đây
+}, []) // PHẢI là [] — không đặt loadData hay bất kỳ loadXxx nào vào đây
 
-// Reload khi filter thay đổi (sau khi đã có factoryId)
+// Reload khi factoryId có hoặc filter thay đổi — effect này xử lý CẢ lần load đầu lẫn reload
 useEffect(() => {
-  if (factoryId) loadData(factoryId)
+  if (factoryId) void loadData(factoryId)
 }, [factoryId, loadData])
 ```
 
 Quy tac bat buoc:
 
-- **Bootstrap effect PHẢI có deps `[]`** — không phụ thuộc vào `loadData`
-- Nếu `loadData` có filter dependencies, dùng effect riêng `[factoryId, loadData]` để reload khi filter đổi
-- Đặt `loadData` vào deps của bootstrap sẽ gây re-run `getActiveFactoryId()` mỗi khi filter thay đổi — lãng phí DB call
+- **Bootstrap effect PHẢI có deps `[]`** — không đặt `loadData` hay bất kỳ `loadXxx` nào vào deps
+- **Không gọi `loadData(fid)` bên trong bootstrap** — để second effect `[factoryId, loadData]` xử lý load đầu tiên và mọi reload sau đó
+- Lý do: nếu gọi loadData trong bootstrap VÀ có second effect, loadData bị gọi 2 lần lúc mount (bootstrap gọi 1 lần, second effect detect `factoryId` thay đổi gọi thêm 1 lần)
+- Nếu page có nhiều loader (loadData, loadLots, loadCustomers...), tất cả đều đặt vào second effect, không đặt vào bootstrap
 - Ham `loadData()` phai co `try/finally` neu co bat/tat `loading`
 - Khong duoc `return` som sau `setLoading(true)` ma bo quen ha `loading`
 - Khong duoc phu thuoc cung nhac vao `localStorage.getItem("erp_factory")` trong page/module
@@ -57,18 +54,25 @@ Quy tac bat buoc:
 ### Bootstrap khi can ca factoryId lan user (vi du settings page)
 
 ```typescript
-const bootstrap = useCallback(async () => {
-  const fid = await getActiveFactoryId()
-  if (!fid) { setLoading(false); return }
+// Bootstrap chỉ lấy factoryId + user, KHÔNG gọi loadData
+useEffect(() => {
+  const bootstrap = async () => {
+    const fid = await getActiveFactoryId()
+    if (!fid) { setLoading(false); return }
 
-  const { user: sessionUser } = await hydrateActiveSession()
-  if (!sessionUser) { setLoading(false); return }
+    const { user: sessionUser } = await hydrateActiveSession()
+    if (!sessionUser) { setLoading(false); return }
 
-  setFactoryId(fid)
-  setUser(sessionUser)
-  await loadData(fid)
-  setLoading(false)
-}, [loadData])
+    setFactoryId(fid)
+    setUser(sessionUser)
+  }
+  void bootstrap()
+}, [])
+
+// loadData chạy khi factoryId sẵn sàng
+useEffect(() => {
+  if (factoryId) void loadData(factoryId)
+}, [factoryId, loadData])
 ```
 
 Khong duoc dung `localStorage.getItem("erp_factory")` hay `localStorage.getItem("erp_user")` truc tiep trong bootstrap — cache co the chua duoc set tai thoi diem bootstrap chay.
