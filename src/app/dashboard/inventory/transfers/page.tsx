@@ -899,22 +899,14 @@ export default function InventoryTransfersPage() {
     }
   }
 
+  const canSave = !!draft.sourceWarehouseId && !!draft.targetWarehouseId && draft.lines.length > 0
+
   return (
     <>
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
       title="Phiếu chuyển kho"
       description="Chọn kho nguồn, kho đích và nhiều vật tư cùng lúc. Mỗi dòng được hoàn thiện theo số lô và hạn dùng còn tồn ở kho nguồn."
-      action={
-        <button
-          onClick={() => void saveTransferDraft()}
-          disabled={saving || posting || loading || documentStatus === "posted"}
-          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
-        >
-          <Save size={16} />
-          {saving ? "Đang lưu..." : draft.documentId ? "Cập nhật phiếu" : "Tạo phiếu chuyển"}
-        </button>
-      }
     >
       {warning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -975,13 +967,23 @@ export default function InventoryTransfersPage() {
                 Làm mới
               </button>
               {documentStatus !== "posted" && documentStatus !== "cancelled" ? (
-                <button
-                  onClick={() => void postTransferDraft()}
-                  disabled={saving || posting || loading}
-                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-                >
-                  {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
-                </button>
+                <>
+                  <button
+                    onClick={() => void saveTransferDraft()}
+                    disabled={!canSave || saving || posting || loading}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <Save size={14} />
+                    {saving ? "Đang lưu..." : draft.documentId ? "Sửa phiếu" : "Lưu nháp"}
+                  </button>
+                  <button
+                    onClick={() => void postTransferDraft()}
+                    disabled={saving || posting || loading}
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                  >
+                    {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
+                  </button>
+                </>
               ) : null}
               {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
                 <button

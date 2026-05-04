@@ -442,7 +442,7 @@ export function getLineTypeLabel(
   allItems: (InventoryItemOption | null)[]
 ): string {
   const getType = (it: InventoryItemOption | null) =>
-    it?.category_name?.toLowerCase().includes("hóa chất") ? "Hóa chất" : "Vật tư"
+    it?.category_name || "Vật tư"
 
   const currentType = getType(item)
   let count = 0
