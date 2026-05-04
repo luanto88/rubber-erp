@@ -965,6 +965,7 @@ export default function QualityPage() {
       showToast(`Chưa nhập đủ số liệu: ${names}`, false); return
     }
     setSaving(true)
+    try {
     const year = new Date(createForm.ngay_kn).getFullYear()
     const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
     const customLimits = customStds.find(s=>s.id===createForm.tieu_chuan)?.limits
@@ -974,7 +975,7 @@ export default function QualityPage() {
       // Update single existing result
       const lotId = Array.from(selectedLotIds)[0]
       const td = tabData[lotId]
-      if (!td) { setSaving(false); return }
+      if (!td) { return }
       const samples = Object.fromEntries(Object.entries(td.samples).map(([k,v])=>[k,v.map(Number)]))
       const { grade, dat_hang, trang_thai } = calcGrade(td.samples, loaiCsr, createForm.tieu_chuan, customLimits)
       const { error } = await supabase.from("qc_results").update({
@@ -984,7 +985,7 @@ export default function QualityPage() {
         loai_kn: createForm.loai_kn, tieu_chuan: createForm.tieu_chuan,
         so_mau: createForm.so_mau, samples, grade, dat_hang, trang_thai,
       }).eq("id", editingResultId)
-      if (error) { showToast("Lỗi: "+error.message, false); setSaving(false); return }
+      if (error) { showToast("Lỗi: "+error.message, false); return }
       showToast("Đã cập nhật phiếu kiểm nghiệm")
     } else {
       // Insert batch — ALL lots share same pkn + batch_id (one phiếu)
@@ -1028,16 +1029,20 @@ export default function QualityPage() {
           so_mau:createForm.so_mau, samples, grade, dat_hang, trang_thai,
           parent_id:parentId||null, lan, notes,
         })
-        if (error) { showToast(`Lỗi lô ${lot.ma_lo}: ${error.message}`, false); setSaving(false); return }
+        if (error) { showToast(`Lỗi lô ${lot.ma_lo}: ${error.message}`, false); return }
         nextLoKN++
       }
       showToast(`Đã lưu phiếu ${formatPKN(batchPKN, createForm.ngay_kn, factoryCode)} — ${selectedLotIds.size} lô`)
     }
-    setSaving(false)
     setView("list")
     loadResults(factoryId)
     loadStats(factoryId)
     setEditDateModal(null)
+    } catch (err) {
+      showToast(`Lỗi: ${err instanceof Error ? err.message : String(err)}`, false)
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────────

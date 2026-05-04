@@ -432,24 +432,29 @@ export default function StoragePage() {
     if (!factoryId) return
     setSaving(true)
     setSaveError(null)
-    const trangThai = deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)
-    const payload = {
-      ...form,
-      trang_thai: trangThai,
-      factory_id: factoryId,
-      ngay_kt: form.ngay_kt || null,
-      trips: Array.from(selectedTrips),
+    try {
+      const trangThai = deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)
+      const payload = {
+        ...form,
+        trang_thai: trangThai,
+        factory_id: factoryId,
+        ngay_kt: form.ngay_kt || null,
+        trips: Array.from(selectedTrips),
+      }
+      if (editId) {
+        const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
+        if (error) { setSaveError(error.message); return }
+      } else {
+        const { error } = await supabase.from("ngans").insert(payload)
+        if (error) { setSaveError(error.message); return }
+      }
+      setModal(null)
+      void loadData(factoryId)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setSaving(false)
     }
-    if (editId) {
-      const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
-      if (error) { setSaveError(error.message); setSaving(false); return }
-    } else {
-      const { error } = await supabase.from("ngans").insert(payload)
-      if (error) { setSaveError(error.message); setSaving(false); return }
-    }
-    setSaving(false)
-    setModal(null)
-    loadData(factoryId)
   }
 
   const handleDelete = async (id: string) => {

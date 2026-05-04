@@ -440,15 +440,21 @@ export default function ExportPage() {
     if (!factoryId) return
     if (!custForm.ma_kh || !custForm.ten_kh_en) { setCustError("Cần điền Mã KH và Tên KH"); return }
     setCustSaving(true); setCustError(null)
-    const { data, error } = await supabase.from("customers")
-      .insert({ ...custForm, factory_id: factoryId })
-      .select("id,ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he")
-      .single()
-    if (error) { setCustError(error.message); setCustSaving(false); return }
-    setCustomers(prev => [...prev, data])
-    setForm(p => ({ ...p, customer_id: data.id }))
-    setCustModal(false); setCustForm(emptyCustomerForm()); setCustSaving(false)
-    showToast(`Đã tạo khách hàng ${data.ten_kh_en}`)
+    try {
+      const { data, error } = await supabase.from("customers")
+        .insert({ ...custForm, factory_id: factoryId })
+        .select("id,ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he")
+        .single()
+      if (error) { setCustError(error.message); return }
+      setCustomers(prev => [...prev, data])
+      setForm(p => ({ ...p, customer_id: data.id }))
+      setCustModal(false); setCustForm(emptyCustomerForm())
+      showToast(`Đã tạo khách hàng ${data.ten_kh_en}`)
+    } catch (err) {
+      setCustError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setCustSaving(false)
+    }
   }
 
   // ── Filtered orders ───────────────────────────────────────────────────────
