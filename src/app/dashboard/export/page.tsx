@@ -184,23 +184,26 @@ export default function ExportPage() {
     setCustomers(data || [])
   }, [])
 
+  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadXxx trong deps
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
-      if (!fid) {
-        setLoading(false)
-        return
-      }
+      if (!fid) { setLoading(false); return }
       setFactoryId(fid)
-      loadData(fid)
-      loadLots(fid)
-      loadQcResults(fid)
-      loadCustomers(fid)
       supabase.from("factories").select("id,name").eq("id", fid).single()
         .then(({ data }) => { if (data) setFactory(data) })
     }
     void bootstrap()
-  }, [loadData, loadLots, loadQcResults, loadCustomers])
+  }, [])
+
+  // Reload khi factoryId hoặc filter thay đổi
+  useEffect(() => {
+    if (!factoryId) return
+    void loadData(factoryId)
+    void loadLots(factoryId)
+    void loadQcResults(factoryId)
+    void loadCustomers(factoryId)
+  }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers])
 
   // ── Compute remaining per lot ─────────────────────────────────────────────
   const lotsExt = useMemo<LotExt[]>(() => {
@@ -367,48 +370,53 @@ export default function ExportPage() {
     if (!factoryId) return
     if (!form.ma_don) { showToast("Chưa có mã đơn — cần chọn KH + số thông báo + ngày", "error"); return }
     setSaving(true)
-    const payload = {
-      factory_id: factoryId,
-      ma_don: form.ma_don, ngay: form.ngay,
-      so_thong_bao: form.so_thong_bao, so_hoa_don: form.so_hoa_don, so_hop_dong: form.so_hop_dong,
-      customer_id: form.customer_id || null,
-      chung_loai: form.chung_loai, loai_pallet: form.loai_pallet,
-      vehicles: form.vehicles,
-      assignments: form.assignments,
-      yeu_cau_chi_tieu: form.yeu_cau_chi_tieu,
-      tong_banh: totalBanh,
-    }
-    const newLotIds = [...new Set(form.assignments.map(a => a.lot_id))]
-    if (editId) {
-      const oldOrder = orders.find(o => o.id === editId)
-      if (oldOrder?.assignments?.length) {
-        const oldLotIds = [...new Set(oldOrder.assignments.map((a:Assignment) => a.lot_id))]
-        await supabase.from("lots").update({ trang_thai: "Hoàn thành" }).in("id", oldLotIds)
+    try {
+      const payload = {
+        factory_id: factoryId,
+        ma_don: form.ma_don, ngay: form.ngay,
+        so_thong_bao: form.so_thong_bao, so_hoa_don: form.so_hoa_don, so_hop_dong: form.so_hop_dong,
+        customer_id: form.customer_id || null,
+        chung_loai: form.chung_loai, loai_pallet: form.loai_pallet,
+        vehicles: form.vehicles,
+        assignments: form.assignments,
+        yeu_cau_chi_tieu: form.yeu_cau_chi_tieu,
+        tong_banh: totalBanh,
       }
-      const { error } = await supabase.from("export_orders").update(payload).eq("id", editId)
-      if (error) { showToast(error.message, "error"); setSaving(false); return }
-      showToast("Đã cập nhật đơn xuất hàng")
-    } else {
-      const { error } = await supabase.from("export_orders").insert(payload)
-      if (error) { showToast(error.message, "error"); setSaving(false); return }
-      showToast("Đã tạo đơn xuất hàng mới")
+      const newLotIds = [...new Set(form.assignments.map(a => a.lot_id))]
+      if (editId) {
+        const oldOrder = orders.find(o => o.id === editId)
+        if (oldOrder?.assignments?.length) {
+          const oldLotIds = [...new Set(oldOrder.assignments.map((a:Assignment) => a.lot_id))]
+          await supabase.from("lots").update({ trang_thai: "Hoàn thành" }).in("id", oldLotIds)
+        }
+        const { error } = await supabase.from("export_orders").update(payload).eq("id", editId)
+        if (error) { showToast(error.message, "error"); return }
+        showToast("Đã cập nhật đơn xuất hàng")
+      } else {
+        const { error } = await supabase.from("export_orders").insert(payload)
+        if (error) { showToast(error.message, "error"); return }
+        showToast("Đã tạo đơn xuất hàng mới")
+      }
+      // Update lot status based on remaining
+      for (const lotId of newLotIds) {
+        const lot = lotsExt.find(l => l.id === lotId)
+        if (!lot) continue
+        const assignedForThisLot = form.assignments.filter(a => a.lot_id === lotId)
+        const totalAssigned = assignedForThisLot.reduce((s,a) =>
+          s+(a.kien_a||0)+(a.kien_b||0)+(a.kien_c||0)+(a.kien_d||0), 0)
+        const remaining = (lot.rem_a+lot.rem_b+lot.rem_c+lot.rem_d) - totalAssigned
+        await supabase.from("lots").update({ trang_thai: remaining <= 0 ? "Xuất hàng" : "Hoàn thành" }).eq("id", lotId)
+      }
+      setView("list")
+      setEditId(null)
+      setForm(emptyForm())
+      void loadData(factoryId)
+      void loadLots(factoryId)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi không xác định", "error")
+    } finally {
+      setSaving(false)
     }
-    // Update lot status based on remaining
-    for (const lotId of newLotIds) {
-      const lot = lotsExt.find(l => l.id === lotId)
-      if (!lot) continue
-      const assignedForThisLot = form.assignments.filter(a => a.lot_id === lotId)
-      const totalAssigned = assignedForThisLot.reduce((s,a) =>
-        s+(a.kien_a||0)+(a.kien_b||0)+(a.kien_c||0)+(a.kien_d||0), 0)
-      const remaining = (lot.rem_a+lot.rem_b+lot.rem_c+lot.rem_d) - totalAssigned
-      await supabase.from("lots").update({ trang_thai: remaining <= 0 ? "Xuất hàng" : "Hoàn thành" }).eq("id", lotId)
-    }
-    setSaving(false)
-    setView("list")
-    setEditId(null)
-    setForm(emptyForm())
-    loadData(factoryId)
-    loadLots(factoryId)
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────

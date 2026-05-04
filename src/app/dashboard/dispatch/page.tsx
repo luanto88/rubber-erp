@@ -384,28 +384,30 @@ export default function DispatchPage() {
     }
   }, [filterFrom, filterTo])
 
+  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadData trong deps
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
-      if (!fid) {
-        setLoading(false)
-        return
-      }
-    setFactoryId(fid)
-    loadData(fid)
-    // Factory name + code + isAdmin
-    supabase.from("factories").select("*").eq("id", fid).single().then(({ data: f }) => {
-      if (f) {
-        const fd = f as Record<string, unknown>
-        setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
-        setFactoryCode((fd.code as string) || "")
-      }
-    })
+      if (!fid) { setLoading(false); return }
+      setFactoryId(fid)
+      // Factory name + code + isAdmin
+      supabase.from("factories").select("*").eq("id", fid).single().then(({ data: f }) => {
+        if (f) {
+          const fd = f as Record<string, unknown>
+          setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
+          setFactoryCode((fd.code as string) || "")
+        }
+      })
       const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
       setIsAdmin(u.role === "admin")
     }
     void bootstrap()
-  }, [loadData])
+  }, [])
+
+  // Reload khi factoryId hoặc filter thay đổi
+  useEffect(() => {
+    if (factoryId) void loadData(factoryId)
+  }, [factoryId, loadData])
 
   // ── Filtered ──────────────────────────────────────────────────────────────
   const filtered = entries.filter(e =>
@@ -464,25 +466,32 @@ export default function DispatchPage() {
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
-    const payload = {
-      factory_id: factoryId,
-      ngay: formNgay,
-      chung_nhan: formCN,
-      day_chuyen: formDayChuyen,
-      rows: formRows.map((r,i) => ({ ...r, uid: r.uid || `r_${i}_${Date.now()}`, _date: formNgay })),
+    try {
+      const payload = {
+        factory_id: factoryId,
+        ngay: formNgay,
+        chung_nhan: formCN,
+        day_chuyen: formDayChuyen,
+        rows: formRows.map((r,i) => ({ ...r, uid: r.uid || `r_${i}_${Date.now()}`, _date: formNgay })),
+      }
+      if (editId) {
+        const { error } = await supabase.from("dispatch_entries").update(payload).eq("id", editId)
+        if (error) { showToast(error.message, "error"); return }
+        showToast("Đã cập nhật bảng phân xe")
+      } else {
+        const { error } = await supabase.from("dispatch_entries").insert(payload)
+        if (error) { showToast(error.message, "error"); return }
+        showToast("Đã thêm bảng phân xe mới")
+      }
+      setView("list")
+      setEditId(null)
+      setFormRows([emptyRow()])
+      void loadData(factoryId)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi không xác định", "error")
+    } finally {
+      setSaving(false)
     }
-    if (editId) {
-      await supabase.from("dispatch_entries").update(payload).eq("id", editId)
-      showToast("Đã cập nhật bảng phân xe")
-    } else {
-      await supabase.from("dispatch_entries").insert(payload)
-      showToast("Đã thêm bảng phân xe mới")
-    }
-    setSaving(false)
-    setView("list")
-    setEditId(null)
-    setFormRows([emptyRow()])
-    loadData(factoryId)
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────

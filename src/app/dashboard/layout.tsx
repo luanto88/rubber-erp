@@ -97,6 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     let alive = true
     let syncing = false
     let lastSyncTime = 0
+    let bootstrapDone = false
 
     /**
      * fullHydration=true  → fetch profile + permissions (bootstrap / SIGNED_IN)
@@ -158,6 +159,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
         ])
       } finally {
+        bootstrapDone = true
         if (alive) setLoading(false)
       }
     }
@@ -186,7 +188,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return
       }
       if (event === "SIGNED_IN") {
-        await syncSession("/login", true)
+        // Bỏ qua nếu bootstrap đã hoàn thành — tránh double full hydration
+        if (!bootstrapDone) {
+          await syncSession("/login", true)
+        }
       }
     })
 
