@@ -41,7 +41,7 @@ src/app/dashboard/inventory/
 ├── cards/page.tsx                    ← Thẻ kho / lịch sử xuất nhập
 ├── analytics/page.tsx                ← Thống kê, cảnh báo, giao dịch gần đây, ngưỡng cảnh báo, xuất XLSX
 ├── item/page.tsx                     ← Chi tiết vật tư theo item code
-├── print/page.tsx                    ← In phiếu A4 + QR code; banner draft/cancelled; posted_by info
+├── print/page.tsx                    ← In phiếu A5 ngang + QR code; ẩn sidebar khi in; kho đúng theo loại phiếu
 ├── print-report/page.tsx             ← In báo cáo hàng loạt (on-hand)
 └── settings/page.tsx                 ← Cài đặt: kho, danh mục, vật tư, định mức
 ```
@@ -138,8 +138,17 @@ const [iconBg, borderAccent] = tone.includes("amber")
   - Tạo bảng `inventory_alert_thresholds` (ngưỡng cảnh báo per factory, UNIQUE `factory_id, code`)
   - Cập nhật 3 stored procedures ghi sổ để ghi `posted_by / posted_at`
   - Thêm `inventory_cancel_document` — đảo ngược stock movements + set `status = 'cancelled'`
-- **Migration fix ambiguous column (2026-05-04)**: `supabase/migrations/20260504_fix_ambiguous_document_id.sql`
+- **Migration thêm cột audit tách riêng (2026-05-04)**: `supabase/migrations/20260504_add_audit_columns.sql`
+  - Chạy file này **trước** `20260504_fix_ambiguous_document_id.sql`
+  - ALTER TABLE thêm `posted_by`, `posted_at`, `cancelled_by`, `cancelled_at`, `cancel_reason` (IF NOT EXISTS)
+  - CREATE TABLE IF NOT EXISTS `inventory_alert_thresholds` + RLS
+  - CREATE OR REPLACE FUNCTION `inventory_cancel_document`
+- **Migration fix ambiguous column (2026-05-04)**: `supabase/migrations/20260504_fix_ambiguous_document_id.sql` — chạy **sau** `20260504_add_audit_columns.sql`
   - Patch cả 3 hàm ghi sổ: thêm alias `idl` cho `inventory_document_lines` trong WHERE/FOR loop để tránh lỗi "column reference document_id is ambiguous" (xung đột giữa OUT parameter và cột bảng)
+- **Migration seed tồn kho ban đầu (2026-05-04)**: `supabase/migrations/20260504_init_stock_from_opening.sql`
+  - INSERT INTO `inventory_stock_balances` từ `inventory_items.opening_stock` cho kho mặc định đầu tiên
+  - Chỉ chạy 1 lần khi `inventory_stock_balances` còn rỗng; ON CONFLICT DO NOTHING nếu on_hand > 0
+  - **Thứ tự bắt buộc**: `20260504_add_audit_columns.sql` → `20260504_fix_ambiguous_document_id.sql` → `20260504_init_stock_from_opening.sql`
 - **Seed**: `scripts/seed-inventory.mjs` — chạy `node --env-file=.env.local scripts/seed-inventory.mjs`
 - **Factory seed**: Phước Hòa KPT (`0268ab41-a564-4538-acf1-6297ac372f57`); 2 kho, 3 nhóm, 10 vật tư, 4 phiếu nhập + 2 phiếu xuất đã ghi sổ
 - **Stored procedures**:
@@ -231,10 +240,16 @@ Vòng đời trạng thái: `draft` → `posted` → `cancelled` (không thể q
 
 ## Rule print page (`print/page.tsx`)
 
+- **Khổ in**: A5 landscape (`@page { size: A5 landscape; margin: 8mm; }`)
+- **Ẩn sidebar**: CSS `aside { display: none !important; }` + `main > div { padding: 0 !important; }` trong `@media print`
 - Phiếu `draft`: banner vàng "Phiếu chưa ghi sổ — Giao dịch này chưa ảnh hưởng đến tồn kho"
 - Phiếu `cancelled`: banner đỏ "Phiếu đã bị hủy" + lý do hủy
 - Phiếu `posted`: ô Trạng thái hiển thị `posted_at · posted_by_name`
 - `inventory-document-loader.ts` tự resolve `posted_by UUID → profiles.full_name` trước khi return
+- **Hiển thị kho theo loại phiếu** (không hiển thị cả Kho nguồn + Kho đích cho mọi loại):
+  - `import` → chỉ hiện **Kho nhập** (target warehouse), grid 3 cột
+  - `export` → chỉ hiện **Kho xuất** (source warehouse), grid 3 cột
+  - `transfer` → hiện cả **Kho nguồn** + **Kho đích**, grid 4 cột
 
 ## Rule nhãn dòng chi tiết
 
@@ -268,6 +283,7 @@ return (
 - Người dùng có thể chọn nhiều vật tư cùng lúc ở phần header
 - Sau khi chọn vật tư, hệ thống tự sinh các dòng chi tiết tương ứng bên dưới
 - Nếu cùng một vật tư cần xuất / chuyển từ nhiều lô, phải dùng thao tác `Tách lô`
+- **Nút "Tách lô"** chỉ hiển thị khi `item.manages_lot === true` **VÀ** vật tư đó có **≥ 2 lô** còn `on_hand > 0` trong kho đang chọn (`availableLots.length >= 2`). Không hiện khi vật tư không quản lý lô hoặc chỉ có 1 lô.
 - Chỉ hiển thị các `số lô` còn tồn trong kho; không hiển thị lô đã hết
 - Mỗi cặp `số lô - hạn sử dụng` phải đồng bộ đúng theo dữ liệu tồn lô
 - Với `Nhập kho`, `số lô` và `hạn sử dụng` là dữ liệu nhập mới; không lấy từ danh sách tồn lô hiện có
@@ -291,7 +307,9 @@ const warehouseStocks = warehouses
 // Hiển thị breakdown chỉ khi warehouseStocks.length > 1
 ````
 
-`balanceMap` phải được load từ `inventory_stock_balances` ở **tất cả 3 trang** Nhập / Xuất / Chuyển (không dùng `opening_stock` tĩnh của `inventory_items`).
+`balanceMap` phải được load từ `inventory_stock_balances` ở **tất cả 3 trang** Nhập / Xuất / Chuyển. **Không được dùng `opening_stock` tĩnh của `inventory_items` làm fallback** cho `currentStock` — gây hiển thị tồn ảo khi `inventory_stock_balances` rỗng trong khi stored procedure không có fallback tương tự → lỗi "tồn chỉ còn 0" khi ghi sổ.
+
+Khởi tạo tồn kho ban đầu phải thực hiện qua migration SQL `20260504_init_stock_from_opening.sql` (insert vào `inventory_stock_balances`), không phải qua `opening_stock` fallback ở UI.
 
 ### `default_warehouse_ids` trong `inventory_items`
 
@@ -327,6 +345,10 @@ const warehouseStocks = warehouses
   - Mỗi dòng chi tiết: hàng 1 (Tên vật tư + Số lượng), hàng 2 (Số lô + Hạn sử dụng), hàng 3-4 (ảnh, ghi chú)
   - Header khu vực chọn vật tư dùng flex row: label bên trái + dropdown Phân loại bên phải
   - `InventoryImageUpload` tự render label qua prop `label` — **không được** thêm `<label>` ngoài bọc component, sẽ render 2 lần
+- **Tab Tồn kho (`on-hand/page.tsx`) — quy tắc lọc**:
+  - Dropdown `Phân loại` chỉ hiển thị các nhóm có vật tư **đang tồn trong kho đang chọn** (derived từ `inventory_stock_balances` filtered by `selectedWarehouseId`)
+  - Khi đổi `Kho`, phải reset `selectedCategoryId` về rỗng (nhất quán với Nhập/Xuất/Chuyển)
+  - Nếu chọn "Tất cả kho": hiện tất cả nhóm có ít nhất 1 vật tư có tồn; nếu chọn kho cụ thể: chỉ hiện nhóm có tồn tại kho đó
 
 ## Rule thống kê (`analytics/page.tsx`)
 
