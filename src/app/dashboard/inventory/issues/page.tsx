@@ -266,6 +266,7 @@ export default function InventoryIssuesPage() {
   const [warning, setWarning] = useState<string | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveErrorTitle, setSaveErrorTitle] = useState("Có lỗi xảy ra")
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"draft" | "posted" | "cancelled" | null>(null)
   const [postedInfo, setPostedInfo] = useState<{ at: string; byName: string } | null>(null)
@@ -429,7 +430,7 @@ export default function InventoryIssuesPage() {
     () => draft.documentCode || formatDocCode(selectedWarehouse?.code || "", draft.documentDate),
     [draft.documentCode, draft.documentDate, selectedWarehouse?.code],
   )
-  const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=export&code=${encodeURIComponent(documentCode)}` : null
+  const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=export&documentId=${encodeURIComponent(draft.documentId)}` : null
 
   const balanceMap = useMemo(
     () => new Map(balances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0])),
@@ -684,7 +685,7 @@ export default function InventoryIssuesPage() {
         requester_name: draft.requesterName || null,
         created_by: session.user.id,
         status: "draft",
-        qr_value: `/dashboard/inventory/issues?code=${encodeURIComponent(nextDocumentCode)}`,
+        qr_value: `/dashboard/inventory/print?type=export&code=${encodeURIComponent(nextDocumentCode)}`,
         notes: draft.note.trim() || null,
       }
 
@@ -749,6 +750,7 @@ export default function InventoryIssuesPage() {
       setSaveSuccess(`Đã lưu phiếu xuất ${nextDocumentCode} ở trạng thái nháp.`)
       return { documentId, documentCode: nextDocumentCode }
     } catch (error) {
+      setSaveErrorTitle("Không lưu được phiếu xuất")
       setSaveError(error instanceof Error ? error.message : "Không lưu được phiếu xuất.")
       return null
     } finally {
@@ -789,6 +791,7 @@ export default function InventoryIssuesPage() {
       if (!saved?.documentId) return
       targetDocumentId = saved.documentId
       targetDocumentCode = saved.documentCode
+      setSaveSuccess(null)
     }
 
     const session = await getFreshAuthSession()
@@ -825,6 +828,7 @@ export default function InventoryIssuesPage() {
       setSaveSuccess(`Đã ghi sổ phiếu xuất ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
       await refreshBalances(factoryId)
     } catch (error) {
+      setSaveErrorTitle("Không ghi sổ được phiếu xuất")
       setSaveError(error instanceof Error ? error.message : "Không ghi sổ được phiếu xuất.")
     } finally {
       setPosting(false)
@@ -881,7 +885,7 @@ export default function InventoryIssuesPage() {
 
       {saveError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <div className="font-bold">Không lưu được phiếu xuất</div>
+          <div className="font-bold">{saveErrorTitle}</div>
           <div className="mt-1 leading-6">{saveError}</div>
         </div>
       ) : null}
