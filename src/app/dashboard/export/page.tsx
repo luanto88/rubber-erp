@@ -6,10 +6,11 @@ import {
   FileOutput, Plus, X, Search, Truck, Package, ChevronDown, ChevronUp,
   Edit2, Trash2, Check, QrCode, UserPlus, AlertTriangle, GripVertical
 } from "lucide-react"
+import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload"
 import { QRCodeSVG as QRCode } from "qrcode.react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Vehicle = { id: string; loai_xe: string; bien_truoc: string; bien_sau: string; ghi_chu: string }
+type Vehicle = { id: string; loai_xe: string; bien_truoc: string; bien_sau: string; ghi_chu: string; image_url_1?: string; image_url_2?: string; image_url_3?: string }
 type Assignment = { lot_id: string; ma_lo: string; vehicleIdx: number; kien_a: number; kien_b: number; kien_c: number; kien_d: number }
 type ChiTieuReq = { ten: string; min: string; max: string }
 
@@ -56,6 +57,7 @@ const CHI_TIEU_KEY: Record<string, string> = {
 const emptyVehicle = (): Vehicle => ({
   id: `v_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
   loai_xe: "Container 40ft", bien_truoc: "", bien_sau: "", ghi_chu: "",
+  image_url_1: "", image_url_2: "", image_url_3: "",
 })
 
 const emptyCustomerForm = () => ({ ma_kh:"", ten_kh_en:"", quoc_gia:"", dia_chi:"", email:"", nguoi_lien_he:"" })
@@ -945,6 +947,34 @@ export default function ExportPage() {
                         className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg self-end">
                         <X size={14}/>
                       </button>
+                    </div>
+
+                    {/* Ảnh xe */}
+                    <div className="grid grid-cols-3 gap-2 px-3 pb-3">
+                      <InventoryImageUpload
+                        factoryId={factoryId}
+                        bucket="order-files"
+                        documentType="vehicles"
+                        label="Hình ảnh 1"
+                        value={v.image_url_1 || ""}
+                        onChange={url=>setForm(p=>({...p,vehicles:p.vehicles.map((vv,i)=>i===idx?{...vv,image_url_1:url}:vv)}))}
+                      />
+                      <InventoryImageUpload
+                        factoryId={factoryId}
+                        bucket="order-files"
+                        documentType="vehicles"
+                        label="Hình ảnh 2"
+                        value={v.image_url_2 || ""}
+                        onChange={url=>setForm(p=>({...p,vehicles:p.vehicles.map((vv,i)=>i===idx?{...vv,image_url_2:url}:vv)}))}
+                      />
+                      <InventoryImageUpload
+                        factoryId={factoryId}
+                        bucket="order-files"
+                        documentType="vehicles"
+                        label="Hình ảnh 3"
+                        value={v.image_url_3 || ""}
+                        onChange={url=>setForm(p=>({...p,vehicles:p.vehicles.map((vv,i)=>i===idx?{...vv,image_url_3:url}:vv)}))}
+                      />
                     </div>
 
                     {/* Drop hint or assigned lots */}

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
+import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import {
   Plus,
   Search,
@@ -48,6 +49,8 @@ type Lot = {
   trang_thai: string;
   ghi_chu: string;
   dd_snapshot?: any;
+  image_url_1?: string;
+  image_url_2?: string;
   ngans?: { ten_ngan: string; ma_ngan: string; loai_nl: string };
 };
 
@@ -83,6 +86,8 @@ type SessionHeader = {
   tham: string;
   chi_thi: string;
   pallet: string[];
+  image_url_1: string;
+  image_url_2: string;
 };
 
 type HistoryEntry = {
@@ -487,7 +492,7 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
     year: normalizeLotYear(yearFromDate(todayStr())),
     ngay_sx: todayStr(),
     day_chuyen: "Mủ tạp",
-    so_ca: 1,
+    so_ca: 2,
     ngan_id: "",
     suffix: "cs",
     loai_csr: defaultCsr,
@@ -496,6 +501,8 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
     tham: "Củ",
     chi_thi: "1",
     pallet: ["Sắt đế gỗ"],
+    image_url_1: "",
+    image_url_2: "",
   };
 }
 
@@ -942,6 +949,7 @@ export default function ProductPage() {
         next.loai_banh = cfg.loai_banh;
         next.boc = getBocsForLoaiCSR(patch.day_chuyen, next.loai_csr)[1] || "";
         next.ngan_id = autoSelectNganId(patch.day_chuyen);
+        next.so_ca = 2;
       }
       if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
@@ -1211,7 +1219,7 @@ export default function ProductPage() {
       year: yrStr,
       ngay_sx: ngaySX,
       day_chuyen: "Mủ tạp",
-      so_ca: 1,
+      so_ca: 2,
       ngan_id: autoSelectNganId("Mủ tạp"),
       suffix: defaultSuffix,
       loai_csr: defaultCsr,
@@ -1223,6 +1231,8 @@ export default function ProductPage() {
       tham: "cũ",
       chi_thi: lastChiThi,
       pallet: ["Sắt đế gỗ"],
+      image_url_1: "",
+      image_url_2: "",
     };
     setSession(s);
     setCaSections([defaultCaSection("A", fromNum)]);
@@ -1240,6 +1250,8 @@ export default function ProductPage() {
     setSaving(true);
     setSaveError(null);
     let hasError = false;
+    // Theo dõi ID các lô vừa INSERT trong phiên này để các ca sau cùng phiên có thể UPDATE thay vì INSERT lại
+    const insertedLotIds = new Map<string, string>(); // ma_lo → id
     try {
       const cfg = getLoaiBanhConfig(session.loai_csr, session.loai_banh);
       const year = lotYear;
@@ -1319,11 +1331,16 @@ export default function ProductPage() {
             ca: cs.ca,
           };
 
-          if (draft.is_continuation && draft.existing_id) {
+          const ma_lo_cur = buildMaLo(draft.num, session.suffix, year);
+          // Lô kế thừa: ưu tiên existing_id từ DB, fallback sang ID vừa INSERT trong phiên này
+          const resolvedExistingId =
+            draft.existing_id || insertedLotIds.get(ma_lo_cur);
+
+          if (draft.is_continuation && resolvedExistingId) {
             const ngay_ht = getLotCompletionDate(
               trang_thai,
               session.ngay_sx,
-              lots.find((l) => l.id === draft.existing_id)?.ngay_ht,
+              lots.find((l) => l.id === resolvedExistingId)?.ngay_ht,
             );
             const { error } = await supabase
               .from("lots")
@@ -1339,14 +1356,14 @@ export default function ProductPage() {
                 dd_snapshot,
                 ca: cs.ca,
               })
-              .eq("id", draft.existing_id);
+              .eq("id", resolvedExistingId);
             if (error) {
               setSaveError(`Lỗi cập nhật lô ${draft.num}: ${error.message}`);
               hasError = true;
               break;
             }
           } else {
-            const ma_lo = buildMaLo(draft.num, session.suffix, year);
+            const ma_lo = ma_lo_cur;
             const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
             if (duplicateLot) {
               setSaveError(
@@ -1358,7 +1375,7 @@ export default function ProductPage() {
               break;
             }
             const ngay_ht = getLotCompletionDate(trang_thai, session.ngay_sx);
-            const { error } = await supabase.from("lots").insert({
+            const { data: insertData, error } = await supabase.from("lots").insert({
               factory_id: factoryId,
               day_chuyen: session.day_chuyen,
               ma_lo,
@@ -1385,11 +1402,17 @@ export default function ProductPage() {
               dd_snapshot,
               ghi_chu: "",
               is_manual_edit: false,
-            });
+              image_url_1: session.image_url_1 || null,
+              image_url_2: session.image_url_2 || null,
+            }).select("id").single();
             if (error) {
               setSaveError(`Lỗi tạo lô ${ma_lo}: ${error.message}`);
               hasError = true;
               break;
+            }
+            // Lưu ID để các ca sau trong cùng phiên có thể UPDATE thay vì INSERT lại
+            if (insertData?.id) {
+              insertedLotIds.set(ma_lo, insertData.id);
             }
           }
           if (hasError) break;
@@ -1758,7 +1781,7 @@ export default function ProductPage() {
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
-          <div className="grid grid-cols-2 gap-6">
+          <div className="flex flex-wrap items-end gap-6">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-2">
                 Dây chuyền <span className="text-red-500">*</span>
@@ -1767,7 +1790,10 @@ export default function ProductPage() {
                 {["Mủ tạp", "Mủ nước"].map((dc) => (
                   <button
                     key={dc}
-                    onClick={() => updateSession({ day_chuyen: dc })}
+                    onClick={() => {
+                      updateSession({ day_chuyen: dc });
+                      updateSoCa(2);
+                    }}
                     className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${
                       session.day_chuyen === dc
                         ? "border-emerald-500 bg-emerald-50 text-emerald-700"
@@ -1790,7 +1816,7 @@ export default function ProductPage() {
                     onClick={() => updateSoCa(n)}
                     className={`w-12 h-10 rounded-xl text-sm font-bold border-2 transition-all ${
                       session.so_ca === n
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                         : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
                     }`}
                   >
@@ -1808,170 +1834,191 @@ export default function ProductPage() {
             phẩm (dùng chung mọi ca)
           </h3>
 
-          <div className="mb-3">
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">
-              Ngày sản xuất <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={session.ngay_sx}
-              onChange={(e) => updateSession({ ngay_sx: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-            />
-            <span className="text-[10px] text-slate-400 ml-3">
-              Năm lô: {sessionYear}
-            </span>
-          </div>
-
-          <div className="mb-3">
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">
-              Năm lô
-            </label>
-            <input
-              value={session.year}
-              onChange={(e) =>
-                updateSession({
-                  year: e.target.value.replace(/\D/g, "").slice(0, 2),
-                })
-              }
-              placeholder="25"
-              className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-            />
-            <span className="text-[10px] text-slate-400 ml-3">
-              Có thể điều chỉnh tay khi giao thoa cuối năm
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Hậu tố *
-              </label>
-              <select
-                value={session.suffix}
-                onChange={(e) => updateSession({ suffix: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              >
-                <option value="">Trống (không hậu tố)</option>
-                {displaySuffixes.map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.code} — {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Loại CSR *
-              </label>
-              <select
-                value={session.loai_csr}
-                onChange={(e) => updateSession({ loai_csr: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              >
-                {csrOpts.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Loại bành (kg/bành) *
-              </label>
-              {banhOpts.length > 1 ? (
-                <select
-                  value={session.loai_banh}
+          <div className="space-y-3">
+            {/* Hàng 1: Ngày sản xuất — Năm lô — Hậu tố */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Ngày sản xuất <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={session.ngay_sx}
+                  onChange={(e) => updateSession({ ngay_sx: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Năm lô: {sessionYear}</p>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Năm lô
+                </label>
+                <input
+                  value={session.year}
                   onChange={(e) =>
-                    updateSession({ loai_banh: +e.target.value })
+                    updateSession({
+                      year: e.target.value.replace(/\D/g, "").slice(0, 2),
+                    })
                   }
+                  placeholder="25"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Chỉnh tay khi giao thoa cuối năm</p>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Hậu tố *
+                </label>
+                <select
+                  value={session.suffix}
+                  onChange={(e) => updateSession({ suffix: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 >
-                  {banhOpts.map((b) => (
-                    <option key={b} value={b}>
-                      {b} kg
+                  <option value="">Trống (không hậu tố)</option>
+                  {displaySuffixes.map((s) => (
+                    <option key={s.code} value={s.code}>
+                      {s.code} — {s.name}
                     </option>
                   ))}
                 </select>
-              ) : (
-                <input
-                  readOnly
-                  value={`${cfg.loai_banh} kg`}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
-                />
-              )}
-              <p className="text-[10px] text-slate-400 mt-1">
-                Lô tròn: {cfg.lo_tron} bành
-              </p>
+              </div>
             </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Bọc *
-              </label>
-              <select
-                value={session.boc}
-                onChange={(e) => updateSession({ boc: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              >
-                {bocOpts.map((b) => (
-                  <option key={b}>{b}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Thãm *
-              </label>
-              <select
-                value={session.tham}
-                onChange={(e) => updateSession({ tham: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              >
-                {THAM_OPTS.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                Chỉ thị SX
-              </label>
-              <input
-                value={session.chi_thi}
-                onChange={(e) => updateSession({ chi_thi: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-2">
-              Pallet
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {PALLET_OPTS.map((p) => {
-                const checked = session.pallet.includes(p);
-                return (
-                  <button
-                    key={p}
-                    onClick={() =>
-                      updateSession({
-                        pallet: checked
-                          ? session.pallet.filter((x) => x !== p)
-                          : [...session.pallet, p],
-                      })
+
+            {/* Hàng 2: Loại CSR — Bành — Bọc — Thảm */}
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Loại CSR *
+                </label>
+                <select
+                  value={session.loai_csr}
+                  onChange={(e) => updateSession({ loai_csr: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  {csrOpts.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Bành (kg/bành) *
+                </label>
+                {banhOpts.length > 1 ? (
+                  <select
+                    value={session.loai_banh}
+                    onChange={(e) =>
+                      updateSession({ loai_banh: +e.target.value })
                     }
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      checked
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                        : "border-slate-200 text-slate-500 hover:border-slate-300"
-                    }`}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    {checked ? "✓ " : ""}
-                    {p}
-                  </button>
-                );
-              })}
+                    {banhOpts.map((b) => (
+                      <option key={b} value={b}>
+                        {b} kg
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    readOnly
+                    value={`${cfg.loai_banh} kg`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
+                  />
+                )}
+                <p className="text-[10px] text-slate-400 mt-1">Lô tròn: {cfg.lo_tron} bành</p>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Bọc *
+                </label>
+                <select
+                  value={session.boc}
+                  onChange={(e) => updateSession({ boc: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  {bocOpts.map((b) => (
+                    <option key={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Thảm *
+                </label>
+                <select
+                  value={session.tham}
+                  onChange={(e) => updateSession({ tham: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  {THAM_OPTS.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Hàng 3: Chỉ thị sx (1/3) — Pallet (2/3) */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Chỉ thị SX
+                </label>
+                <input
+                  value={session.chi_thi}
+                  onChange={(e) => updateSession({ chi_thi: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Pallet
+                </label>
+                <div className="flex flex-wrap gap-2 pt-0.5">
+                  {PALLET_OPTS.map((p) => {
+                    const checked = session.pallet.includes(p);
+                    return (
+                      <button
+                        key={p}
+                        onClick={() =>
+                          updateSession({
+                            pallet: checked
+                              ? session.pallet.filter((x) => x !== p)
+                              : [...session.pallet, p],
+                          })
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                          checked
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 text-slate-500 hover:border-slate-300"
+                        }`}
+                      >
+                        {checked ? "✓ " : ""}
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Hàng 4: Hình ảnh 1 — Hình ảnh 2 */}
+            <div className="grid grid-cols-2 gap-3">
+              <InventoryImageUpload
+                factoryId={factoryId}
+                bucket="product-files"
+                documentType="lots"
+                label="Hình ảnh 1"
+                value={session.image_url_1}
+                onChange={(url) => updateSession({ image_url_1: url })}
+              />
+              <InventoryImageUpload
+                factoryId={factoryId}
+                bucket="product-files"
+                documentType="lots"
+                label="Hình ảnh 2"
+                value={session.image_url_2}
+                onChange={(url) => updateSession({ image_url_2: url })}
+              />
             </div>
           </div>
         </div>
@@ -2861,6 +2908,29 @@ export default function ProductPage() {
           </div>
         ))}
       </div>
+
+      {lots.filter((l) => l.trang_thai === "Dở dang").length > 0 && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
+          <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+          <div>
+            <span className="text-xs font-bold text-amber-700 block mb-1">
+              {lots.filter((l) => l.trang_thai === "Dở dang").length} lô dở dang cần hoàn thành:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {lots
+                .filter((l) => l.trang_thai === "Dở dang")
+                .map((l) => (
+                  <span
+                    key={l.id}
+                    className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold"
+                  >
+                    {l.ma_lo} · {l.tong_banh} bành
+                  </span>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2 flex-1 min-w-48">

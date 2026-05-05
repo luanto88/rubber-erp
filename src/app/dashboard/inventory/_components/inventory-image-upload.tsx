@@ -6,10 +6,11 @@ import { supabase } from "@/lib/supabase"
 
 type InventoryImageUploadProps = {
   factoryId: string | null
-  documentType: "import" | "export" | "transfer"
+  documentType: string
   label: string
   value: string
   onChange: (url: string) => void
+  bucket?: string
 }
 
 function sanitizeFilename(name: string) {
@@ -30,6 +31,7 @@ export function InventoryImageUpload({
   label,
   value,
   onChange,
+  bucket = "inventory-files",
 }: InventoryImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -54,11 +56,11 @@ export function InventoryImageUpload({
 
     try {
       const path = `${factoryId}/${documentType}/${Date.now()}_${sanitizeFilename(file.name)}`
-      const uploadResult = await supabase.storage.from("inventory-files").upload(path, file, { upsert: true })
+      const uploadResult = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
 
       if (uploadResult.error) throw uploadResult.error
 
-      const { data } = supabase.storage.from("inventory-files").getPublicUrl(uploadResult.data.path)
+      const { data } = supabase.storage.from(bucket).getPublicUrl(uploadResult.data.path)
       onChange(data.publicUrl)
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
