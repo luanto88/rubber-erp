@@ -750,7 +750,7 @@ export default function ProductPage() {
     hoanThanh: lots.filter(
       (l) => l.trang_thai === "Hoàn thành" || l.trang_thai === "Xuất hàng",
     ).length,
-    dorDang: lots.filter((l) => l.trang_thai === "D? dang").length,
+    dorDang: lots.filter((l) => l.trang_thai === "Dở dang").length,
     tongBanh: filteredContribs.reduce(
       (s, c) => s + (c.tong_banh_cua_ca || 0),
       0,
@@ -2909,17 +2909,24 @@ export default function ProductPage() {
         ))}
       </div>
 
-      {lots.filter((l) => l.trang_thai === "Dở dang").length > 0 && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
-          <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
-          <div>
-            <span className="text-xs font-bold text-amber-700 block mb-1">
-              {lots.filter((l) => l.trang_thai === "Dở dang").length} lô dở dang cần hoàn thành:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {lots
-                .filter((l) => l.trang_thai === "Dở dang")
-                .map((l) => (
+      {(() => {
+        const curYear = new Date().getFullYear().toString().slice(-2);
+        const allDorDang = lots.filter(
+          (l) =>
+            l.trang_thai === "Dở dang" &&
+            l.tong_banh > 0 &&
+            l.year === curYear &&
+            (!filterDC || l.day_chuyen === filterDC),
+        );
+        return allDorDang.length > 0 ? (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
+            <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <span className="text-xs font-bold text-amber-700 block mb-1">
+                {allDorDang.length} lô dở dang cần hoàn thành{filterDC ? ` (${filterDC})` : ""}:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {allDorDang.map((l) => (
                   <span
                     key={l.id}
                     className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold"
@@ -2927,10 +2934,11 @@ export default function ProductPage() {
                     {l.ma_lo} · {l.tong_banh} bành
                   </span>
                 ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : null;
+      })()}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2 flex-1 min-w-48">
