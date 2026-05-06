@@ -221,6 +221,17 @@ function normalizeLoaiNl(value?: string | null) {
   return value || "";
 }
 
+function getLotStatusBadgeClass(status?: string | null) {
+  switch (normalizeLotStatus(status)) {
+    case "Hoàn thành":
+      return "bg-emerald-100 text-emerald-700";
+    case "Xuất hàng":
+      return "bg-purple-100 text-purple-700";
+    default:
+      return "bg-amber-100 text-amber-700";
+  }
+}
+
 // â”€â”€â”€ Business Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) {
@@ -766,7 +777,9 @@ export default function ProductPage() {
         return false;
       }
       if (filterLoai && c.loai_csr !== filterLoai) return false;
-      if (filterTT && c.trang_thai !== filterTT) return false;
+      if (filterTT && normalizeLotStatus(c.trang_thai) !== normalizeLotStatus(filterTT)) {
+        return false;
+      }
       if (filterFrom && c.ngay_sx < filterFrom) return false;
       if (filterTo && c.ngay_sx > filterTo) return false;
       return true;
@@ -785,7 +798,7 @@ export default function ProductPage() {
   const groupedByDateAndCa = useMemo(() => {
     const groups: Record<string, Record<string, LotContribution[]>> = {};
     filteredContribs.forEach((c) => {
-      const date = c.ngay_sx || "ChÆ°a cĂ³ ngĂ y";
+      const date = c.ngay_sx || "Chưa có ngày";
       if (!groups[date]) groups[date] = {};
       if (!groups[date][c.ca]) groups[date][c.ca] = [];
       groups[date][c.ca].push(c);
@@ -1322,14 +1335,29 @@ export default function ProductPage() {
         getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[1] ||
         getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[0] ||
         "",
-      tham: "cÅ©",
+      tham: "cũ",
       chi_thi: lastChiThi,
       pallet: ["Sắt đế gỗ"],
       image_url_1: "",
       image_url_2: "",
     };
     setSession(s);
-    setCaSections([defaultCaSection("A", fromNum)]);
+    setCaSections([
+      {
+        ca: "A",
+        from_num: fromNum,
+        to_num: fromNum,
+        lots: generateLotDrafts(
+          fromNum,
+          fromNum,
+          s.suffix,
+          s.loai_csr,
+          s.loai_banh,
+          lots,
+          yrStr,
+        ),
+      },
+    ]);
     setView("create");
   };
 
@@ -1558,6 +1586,13 @@ export default function ProductPage() {
     if (pct <= 110 && ngan.trang_thai === "Đã sản xuất") {
       return;
     }
+
+    const nextStatus = pct <= 110 ? "Đã sản xuất" : "Đang sản xuất";
+    const { error: nextStatusError } = await supabase
+      .from("ngans")
+      .update({ trang_thai: nextStatus })
+      .eq("id", nganId);
+    if (nextStatusError) throw new Error(nextStatusError.message);
   };
 
   const handleEditSave = async () => {
@@ -1693,14 +1728,23 @@ export default function ProductPage() {
     if (!factoryId) return;
 
     const contribution = contributions.find((item) => item.uid === uid);
-    const lotId = contribution?.id || uid;
-    const lot = lots.find((l) => l.id === lotId);
-    if (!lot) return;
+    if (!contribution) {
+      setSaveError("Không tìm thấy dòng session cần xóa.");
+      setDelConfirm(null);
+      return;
+    }
+
+    const lot = lots.find((l) => l.id === contribution.id);
+    if (!lot) {
+      setSaveError("Không tìm thấy lô gốc của dòng session này.");
+      setDelConfirm(null);
+      return;
+    }
 
     const transactionId = contribution?.transaction_id;
     const transactionCount = lot.lot_transactions?.length || 0;
 
-    if (transactionId && transactionCount > 1) {
+    if (transactionId) {
       try {
         const result = await deleteLotTransaction({ transactionId });
         const affectedNganIds = Array.from(
@@ -1719,24 +1763,8 @@ export default function ProductPage() {
       return;
     }
 
-    if (transactionCount === 1 && lot.lot_transactions?.[0]?.id) {
-      try {
-        const result = await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
-        const affectedNganIds = Array.from(
-          new Set([result?.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
-        );
-        for (const nganId of affectedNganIds) {
-          await syncNganStatusAfterLotEdit(nganId);
-        }
-      } catch (err) {
-        setSaveError(err instanceof Error ? err.message : String(err));
-        setDelConfirm(null);
-        return;
-      }
-    }
-
-    if (!transactionId && transactionCount === 0) {
-      const { error: delError } = await supabase.from("lots").delete().eq("id", lotId);
+    if (transactionCount === 0) {
+      const { error: delError } = await supabase.from("lots").delete().eq("id", contribution.id);
       if (delError) {
         setSaveError(
           delError.code === "23503"
@@ -1749,6 +1777,10 @@ export default function ProductPage() {
       if (lot.ngan_id) {
         await syncNganStatusAfterLotEdit(lot.ngan_id);
       }
+    } else {
+      setSaveError("Dòng session này không có transaction_id hợp lệ để xóa riêng.");
+      setDelConfirm(null);
+      return;
     }
 
     setDelConfirm(null);
@@ -1791,6 +1823,11 @@ export default function ProductPage() {
     setPreCheckLoading(false);
     setDelConfirm("bulk");
   };
+
+  const blockedSelectedCount = Array.from(selectedDeleteIds).filter((id) => {
+    const contribution = contributions.find((item) => item.uid === id);
+    return contribution ? lotsBlockedByKn.includes(contribution.id) : false;
+  }).length;
 
   const toggleDate = (date: string) => {
     setExpandedDates((prev) =>
@@ -2225,7 +2262,7 @@ export default function ProductPage() {
                       {n.loai_nl} · {days} ngày ủ · DK SX:{" "}
                       {n.ngay_kt
                         ? new Date(n.ngay_kt).toLocaleDateString("vi-VN")
-                        : "—"}
+                        : "-"}
                     </p>
                   </button>
                 );
@@ -2909,16 +2946,16 @@ export default function ProductPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">ThĂ nh pháº©m</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Quáº£n lĂ½ lĂ´ vĂ  phĂ¢n tĂ¡ch sáº£n lÆ°á»£ng theo Ca
+            Quản lý lô và phân tách sản lượng theo ca
           </p>
         </div>
         <button
           onClick={() => openCreate()}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
         >
-          <Plus size={16} /> ThĂªm lĂ´
+          <Plus size={16} /> Thêm lô
         </button>
       </div>
 
@@ -2926,35 +2963,35 @@ export default function ProductPage() {
         {(
           [
             {
-              label: "Tá»•ng lĂ´",
+              label: "Tổng lô",
               value: stats.total,
               color: "text-slate-700",
               Icon: Package,
               ic: "text-slate-400",
             },
             {
-              label: "HoĂ n thĂ nh",
+              label: "Hoàn thành",
               value: stats.hoanThanh,
               color: "text-emerald-600",
               Icon: CheckCircle,
               ic: "text-emerald-400",
             },
             {
-              label: "Dá»Ÿ dang",
+              label: "Dở dang",
               value: stats.dorDang,
               color: "text-amber-600",
               Icon: Clock,
               ic: "text-amber-400",
             },
             {
-              label: "Tá»•ng bĂ nh (lá»c)",
+              label: "Tổng bánh (lọc)",
               value: stats.tongBanh.toLocaleString("vi-VN"),
               color: "text-blue-600",
               Icon: Layers,
               ic: "text-blue-400",
             },
             {
-              label: "Tá»•ng táº¥n (lá»c)",
+              label: "Tổng tấn (lọc)",
               value: fmtKg(stats.tongKg),
               color: "text-purple-600",
               Icon: Weight,
@@ -3011,7 +3048,7 @@ export default function ProductPage() {
             onChange={(e) => {
               setSearch(e.target.value);
             }}
-            placeholder="TĂ¬m mĂ£ lĂ´, ngÄƒn..."
+            placeholder="Tìm mã lô, ngăn..."
             className="flex-1 text-sm outline-none"
           />
         </div>
@@ -3022,7 +3059,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Táº¥t cáº£ dĂ¢y chuyá»n</option>
+          <option value="">Tất cả dây chuyền</option>
           <option value={DAY_CHUYEN_TAP}>{DAY_CHUYEN_TAP}</option>
           <option value={DAY_CHUYEN_NUOC}>{DAY_CHUYEN_NUOC}</option>
         </select>
@@ -3033,7 +3070,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Táº¥t cáº£ loáº¡i</option>
+          <option value="">Tất cả loại</option>
           {[
             "CSR10",
             "CSR20",
@@ -3048,7 +3085,7 @@ export default function ProductPage() {
             "SVRCV50",
             "SVRCV60",
             "CSR5",
-            "Ngoáº¡i lá»‡",
+            "Ngoại lệ",
           ].map((l) => (
             <option key={l}>{l}</option>
           ))}
@@ -3060,7 +3097,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Táº¥t cáº£ tráº¡ng thĂ¡i</option>
+          <option value="">Tất cả trạng thái</option>
           {TRANG_THAI_OPTS.map((t) => (
             <option key={t}>{t}</option>
           ))}
@@ -3072,7 +3109,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Táº¥t cáº£ ca</option>
+          <option value="">Tất cả ca</option>
           {CA_OPTS.map((c) => (
             <option key={c} value={c}>
               Ca {c}
@@ -3087,7 +3124,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         />
-        <span className="text-slate-400 text-sm">â†’</span>
+        <span className="text-slate-400 text-sm">→</span>
         <input
           type="date"
           value={filterTo}
@@ -3115,7 +3152,7 @@ export default function ProductPage() {
             }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500"
           >
-            <X size={14} /> XĂ³a lá»c
+            <X size={14} /> Xóa lọc
           </button>
         )}
       </div>
@@ -3155,24 +3192,24 @@ export default function ProductPage() {
                       />
                     )}
                     <span className="font-extrabold text-slate-800 text-base">
-                      {date !== "ChÆ°a cĂ³ ngĂ y"
+                      {date !== "Chưa có ngày"
                         ? new Date(date).toLocaleDateString("vi-VN")
                         : date}
                     </span>
                     <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full">
-                      {Object.values(dateGroups).flat().length} láº§n nháº­p
+                      {Object.values(dateGroups).flat().length} lần nhập
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
-                      <span>{dayBanh.toLocaleString("vi-VN")} bĂ nh</span>
+                      <span>{dayBanh.toLocaleString("vi-VN")} bánh</span>
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
                     {deleteMode === date ? (
                       <>
                         <span className="text-xs text-red-600 font-bold shrink-0">
-                          Chá»n lĂ´ cáº§n xĂ³a...
+                          Chọn dòng cần xóa...
                         </span>
                         <button
                           disabled={
@@ -3186,7 +3223,7 @@ export default function ProductPage() {
                         >
                           <Trash2 size={12} />
                           {preCheckLoading
-                            ? "Äang kiá»ƒm tra..."
+                            ? "Đang kiểm tra..."
                             : `Xóa ${selectedDeleteIds.size} dòng`}
                         </button>
                         <button
@@ -3198,7 +3235,7 @@ export default function ProductPage() {
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
-                          Há»§y
+                          Hủy
                         </button>
                       </>
                     ) : (
@@ -3209,9 +3246,9 @@ export default function ProductPage() {
                             openCreate(date);
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="ThĂªm ca sáº£n xuáº¥t cho ngĂ y nĂ y"
+                          title="Thêm ca sản xuất cho ngày này"
                         >
-                          <Plus size={12} /> ThĂªm
+                          <Plus size={12} /> Thêm
                         </button>
                         <button
                           onClick={(e) => {
@@ -3219,9 +3256,9 @@ export default function ProductPage() {
                             setEditDateModal(date);
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="Sá»­a lĂ´ trong ngĂ y nĂ y"
+                          title="Sửa lô trong ngày này"
                         >
-                          <Edit2 size={12} /> Sá»­a
+                          <Edit2 size={12} /> Sửa
                         </button>
                         <button
                           onClick={(e) => {
@@ -3230,9 +3267,9 @@ export default function ProductPage() {
                             setSelectedDeleteIds(new Set());
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="XĂ³a lĂ´ trong ngĂ y nĂ y"
+                          title="Xóa lô trong ngày này"
                         >
-                          <Trash2 size={12} /> XĂ³a
+                          <Trash2 size={12} /> Xóa
                         </button>
                       </>
                     )}
@@ -3261,7 +3298,7 @@ export default function ProductPage() {
                                 Ca {ca}
                               </span>
                               <span className="text-xs font-bold text-slate-500">
-                                {caBanh.toLocaleString("vi-VN")} b\u00e1nh \u00b7{" "}
+                                {caBanh.toLocaleString("vi-VN")} bánh ·{" "}
                                 {fmtKg(caKg)}
                               </span>
                             </div>
@@ -3273,25 +3310,25 @@ export default function ProductPage() {
                                       <th className="px-3 py-2.5 w-10" />
                                     )}
                                     <th className="px-4 py-2.5 text-left">
-                                      M\u00e3 l\u00f4
+                                      Mã lô
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Ng\u0103n
+                                      Ngăn
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Lo\u1ea1i
+                                      Loại
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      B\u1ecdc
+                                      Bọc
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      SL Th\u1ef1c t\u1ebf ca n\u00e0y
+                                      SL thực tế ca này
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Ki\u1ec7n (A/B/C/D) th\u1eddi \u0111i\u1ec3m
+                                      Kiện (A/B/C/D) thời điểm
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Tr\u1ea1ng th\u00e1i
+                                      Trạng thái
                                     </th>
                                   </tr>
                                 </thead>
@@ -3383,15 +3420,9 @@ export default function ProductPage() {
                                       </td>
                                       <td className="px-4 py-2.5">
                                         <span
-                                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            c.trang_thai === "HoĂ n thĂ nh"
-                                              ? "bg-emerald-100 text-emerald-700"
-                                              : c.trang_thai === "Xuáº¥t hĂ ng"
-                                                ? "bg-purple-100 text-purple-700"
-                                                : "bg-amber-100 text-amber-700"
-                                          }`}
+                                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getLotStatusBadgeClass(c.trang_thai)}`}
                                         >
-                                          {c.trang_thai}
+                                          {normalizeLotStatus(c.trang_thai)}
                                         </span>
                                       </td>
                                     </tr>
@@ -3410,7 +3441,7 @@ export default function ProductPage() {
         {Object.keys(groupedByDateAndCa).length === 0 && (
           <div className="p-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
             <Package size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u ph\u00f9 h\u1ee3p</p>
+            <p>Không có dữ liệu phù hợp</p>
           </div>
         )}
       </div>
@@ -3420,7 +3451,7 @@ export default function ProductPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-lg font-extrabold text-slate-800">
-                S\u1eeda l\u00f4 {editForm.ma_lo}
+                Sửa lô {editForm.ma_lo}
               </h2>
               <button
                 onClick={() => setEditModal(false)}
@@ -3436,14 +3467,14 @@ export default function ProductPage() {
                   className="text-amber-600 mt-0.5 shrink-0"
                 />
                 <p className="text-xs text-amber-700">
-                  <strong>L\u01b0u \u00fd:</strong> Vi\u1ec7c s\u1eeda g\u1ed1c s\u1ebd thay \u0111\u1ed5i s\u1ed1 li\u1ec7u to\u00e0n
-                  c\u1ee5c c\u1ee7a l\u00f4 n\u00e0y nh\u01b0ng kh\u00f4ng s\u1eeda \u0111\u1ed5i c\u00e1c nh\u00e1nh History ph\u00e2n ca
-                  c\u1ee7a n\u00f3. Ch\u1ec9 s\u1eeda tay khi ph\u00e1t hi\u1ec7n sai s\u00f3t s\u1ed1 l\u01b0\u1ee3ng t\u1ed5ng.
+                  <strong>Lưu ý:</strong> Việc sửa gốc sẽ thay đổi số liệu toàn
+                  cục của lô này nhưng không sửa đổi các nhánh history phân ca
+                  của nó. Chỉ sửa tay khi phát hiện sai sót số lượng tổng.
                 </p>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <label className="text-xs font-bold text-slate-600 block mb-2">
-                  D\u00e2y chuy\u1ec1n *
+                  Dây chuyền *
                 </label>
                 <div className="flex gap-3">
                   {["M\u1ee7 t\u1ea1p", "M\u1ee7 n\u01b0\u1edbc"].map((dc) => (
@@ -3465,7 +3496,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Sá»‘ lĂ´ *
+                    Số lô *
                   </label>
                   <input
                     type="number"
@@ -3476,7 +3507,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    MĂ£ lĂ´
+                    Mã lô
                   </label>
                   <input
                     readOnly
@@ -3486,23 +3517,23 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Háº­u tá»‘
+                    Hậu tố
                   </label>
                   <select
                     value={editForm.suffix}
                     onChange={(e) => updateEditForm({ suffix: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="">Trá»‘ng</option>
+                    <option value="">Trống</option>
                     {(suffixList.length > 0
                       ? suffixList
                       : [
-                          { code: "cs", name: "Ná»™i tuyá»ƒn PEFC" },
-                          { code: "m", name: "Mua ngoĂ i" },
+                          { code: "cs", name: "Nội tuyển PEFC" },
+                          { code: "m", name: "Mua ngoài" },
                         ]
                     ).map((s) => (
                       <option key={s.code} value={s.code}>
-                        {s.code} â€” {s.name}
+                        {s.code} - {s.name}
                       </option>
                     ))}
                   </select>
@@ -3512,7 +3543,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    NgĂ y SX *
+                    Ngày SX *
                   </label>
                   <input
                     type="date"
@@ -3525,7 +3556,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    NÄƒm lĂ´
+                    Năm lô
                   </label>
                   <input
                     value={editForm.year}
@@ -3554,7 +3585,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loáº¡i CSR *
+                    Loại CSR *
                   </label>
                   <select
                     value={editForm.loai_csr}
@@ -3576,7 +3607,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    NgÄƒn lÆ°u
+                    Ngăn lưu
                   </label>
                   <select
                     value={editForm.ngan_id}
@@ -3585,21 +3616,21 @@ export default function ProductPage() {
                     }
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="">-- Chá»n ngÄƒn --</option>
+                    <option value="">-- Chọn ngăn --</option>
                     {ngans.map((n) => (
                       <option key={n.id} value={n.id}>
-                        {n.ten_ngan} â€” {n.ma_ngan}
+                        {n.ten_ngan} - {n.ma_ngan}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loáº¡i bĂ nh
+                    Loại bánh
                   </label>
                   <input
                     readOnly
-                    value={`${editForm.loai_banh} kg/bĂ nh`}
+                    value={`${editForm.loai_banh} kg/bánh`}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />
                 </div>
@@ -3608,7 +3639,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loáº¡i bá»c
+                    Loại bọc
                   </label>
                   <select
                     value={editForm.boc}
@@ -3625,7 +3656,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Tháº£m
+                    Thảm
                   </label>
                   <select
                     value={editForm.tham}
@@ -3649,10 +3680,10 @@ export default function ProductPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-xs font-bold text-slate-600">
-                        Sá»‘ bĂ nh kiá»‡n (A / B / C / D)
+                        Số bánh kiện (A / B / C / D)
                       </label>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
-                        Max {maxK} bĂ nh Â· LĂ´ trĂ²n = {cfg2.lo_tron} bĂ nh
+                        Max {maxK} bánh · Lô tròn = {cfg2.lo_tron} bánh
                       </span>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
@@ -3687,7 +3718,7 @@ export default function ProductPage() {
                               />
                               {isLocked && (
                                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-[10px] font-bold">
-                                  đŸ”’
+                                  🔒
                                 </span>
                               )}
                             </div>
@@ -3697,27 +3728,25 @@ export default function ProductPage() {
                     </div>
                     <div className="mt-2 flex gap-4 text-xs text-slate-500">
                       <span>
-                        Tá»•ng bĂ nh:{" "}
+                        Tổng bánh:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_banh}
                         </strong>
                       </span>
                       <span>
-                        Tá»•ng kg:{" "}
+                        Tổng kg:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_kg.toLocaleString()}
                         </strong>
                       </span>
                       <span>
-                        Tráº¡ng thĂ¡i:{" "}
+                        Trạng thái:{" "}
                         <strong
-                          className={
-                            editForm.trang_thai === "HoĂ n thĂ nh"
-                              ? "text-emerald-600"
-                              : "text-amber-600"
-                          }
+                          className={normalizeLotStatus(editForm.trang_thai) === "Hoàn thành"
+                            ? "text-emerald-600"
+                            : "text-amber-600"}
                         >
-                          {editForm.trang_thai}
+                          {normalizeLotStatus(editForm.trang_thai)}
                         </strong>
                       </span>
                     </div>
@@ -3727,7 +3756,7 @@ export default function ProductPage() {
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ghi chĂº
+                  Ghi chú
                 </label>
                 <input
                   value={editForm.ghi_chu}
@@ -3741,14 +3770,14 @@ export default function ProductPage() {
                 onClick={() => setEditModal(false)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
-                Há»§y
+                Hủy
               </button>
               <button
                 onClick={handleEditSave}
                 disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
               >
-                {saving ? "Äang lÆ°u..." : "LÆ°u thay Ä‘á»•i"}
+                {saving ? "Đang lưu..." : "Lưu thay đổi"}
               </button>
             </div>
           </div>
@@ -3772,11 +3801,11 @@ export default function ProductPage() {
                 <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
                   <div>
                     <h3 className="font-extrabold text-slate-800">
-                      Sá»­a ngĂ y{" "}
+                      Sửa ngày{" "}
                       {new Date(editDateModal).toLocaleDateString("vi-VN")}
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Click vĂ o lĂ´ Ä‘á»ƒ má»Ÿ form sá»­a
+                      Click vào lô để mở form sửa
                     </p>
                   </div>
                   <button
@@ -3800,7 +3829,7 @@ export default function ProductPage() {
                               (s, c) => s + c.tong_banh_cua_ca,
                               0,
                             )}{" "}
-                            bĂ nh
+                            bánh
                           </span>
                         </div>
                         {grouped[ca].map((c) => {
@@ -3822,19 +3851,13 @@ export default function ProductPage() {
                                   {c.ma_lo}
                                 </span>
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  +{c.tong_banh_cua_ca} bĂ nh Â·{" "}
+                                  +{c.tong_banh_cua_ca} bánh ·{" "}
                                   {fmtKg(c.tong_kg_cua_ca)}
                                 </span>
                                 <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                                    c.trang_thai === "HoĂ n thĂ nh"
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : c.trang_thai === "Xuáº¥t hĂ ng"
-                                        ? "bg-purple-100 text-purple-700"
-                                        : "bg-amber-100 text-amber-700"
-                                  }`}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${getLotStatusBadgeClass(c.trang_thai)}`}
                                 >
-                                  {c.trang_thai}
+                                  {normalizeLotStatus(c.trang_thai)}
                                 </span>
                               </div>
                               {canEdit && lot ? (
@@ -3845,11 +3868,11 @@ export default function ProductPage() {
                                   }}
                                   className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                                 >
-                                  <Edit2 size={12} /> Sá»­a lĂ´
+                                  <Edit2 size={12} /> Sửa lô
                                 </button>
                               ) : (
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  ÄĂ£ xuáº¥t hĂ ng
+                                  Đã xuất hàng
                                 </span>
                               )}
                             </div>
@@ -3859,7 +3882,7 @@ export default function ProductPage() {
                     ))}
                   {dateLots.length === 0 && (
                     <div className="p-8 text-center text-slate-400 text-sm">
-                      KhĂ´ng cĂ³ lĂ´ nĂ o
+                      Không có lô nào
                     </div>
                   )}
                 </div>
@@ -3890,19 +3913,19 @@ export default function ProductPage() {
             )}
             <p className="text-sm text-slate-500 mb-5">
               {delConfirm === "bulk"
-                ? lotsBlockedByKn.length === selectedDeleteIds.size
+                ? blockedSelectedCount === selectedDeleteIds.size
                   ? "Tất cả dòng đã chọn đều có phiếu KN, không thể xóa."
-                  : lotsBlockedByKn.length > 0
-                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} dòng chưa có KN sẽ bị xóa vĩnh viễn.`
+                  : blockedSelectedCount > 0
+                    ? `${selectedDeleteIds.size - blockedSelectedCount} dòng chưa có KN sẽ bị xóa vĩnh viễn.`
                     : `${selectedDeleteIds.size} dòng đã chọn sẽ bị xóa vĩnh viễn.`
                 : "Dòng này sẽ bị xóa vĩnh viễn."}{" "}
               {(delConfirm !== "bulk" ||
-                lotsBlockedByKn.length < selectedDeleteIds.size) &&
+                blockedSelectedCount < selectedDeleteIds.size) &&
                 "Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động."}
             </p>
             <div className="flex gap-3">
               {delConfirm === "bulk" &&
-              lotsBlockedByKn.length === selectedDeleteIds.size ? (
+              blockedSelectedCount === selectedDeleteIds.size ? (
                 <button
                   onClick={() => {
                     setDelConfirm(null);

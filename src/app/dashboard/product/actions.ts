@@ -86,24 +86,10 @@ async function syncLotMasterSnapshot(lotId: string) {
   const kienD = txs.reduce((sum, tx) => sum + Number(tx.kien_d ?? 0), 0);
   const tongBanh = txs.reduce((sum, tx) => sum + Number(tx.so_banh ?? 0), 0);
   const tongKg = txs.reduce((sum, tx) => sum + Number(tx.so_kg ?? 0), 0);
-  const normalizedStatus = normalizeLotStatus(lot.trang_thai);
   const loTron = Number(lot.loai_banh) === 20 ? 240 : 144;
 
   const derivedStatus: NormalizedLotStatus =
-    tongBanh >= loTron
-      ? "Hoàn thành"
-      : normalizedStatus === "Xuất hàng"
-        ? "Xuất hàng"
-        : normalizedStatus === "Hoàn thành"
-          ? "Hoàn thành"
-          : "Dở dang";
-
-  const correctedStatus: NormalizedLotStatus =
-    tongBanh >= loTron
-      ? normalizedStatus === "Xuất hàng"
-        ? "Xuất hàng"
-        : "Hoàn thành"
-      : "Dở dang";
+    tongBanh >= loTron ? "Hoàn thành" : "Dở dang";
 
   const payload = {
     kien_a: kienA,
@@ -112,7 +98,7 @@ async function syncLotMasterSnapshot(lotId: string) {
     kien_d: kienD,
     tong_banh: tongBanh,
     tong_kg: tongKg,
-    trang_thai: correctedStatus,
+    trang_thai: derivedStatus,
     ca: latestTx?.ca ?? null,
     ngan_id: latestTx?.ngan_id ?? null,
     ngay_ht: derivedStatus === "Hoàn thành" ? (latestTx?.ngay_nhap ?? null) : null,
@@ -263,7 +249,10 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
     throw new Error(`Khong tim thay giao dich can xoa: ${findError?.message ?? transactionId}`);
   }
 
-  const { error: deleteError } = await supabase.from("lot_transactions").delete().eq("id", transactionId);
+  const { error: deleteError } = await supabase
+    .from("lot_transactions")
+    .delete()
+    .eq("id", transactionId);
   if (deleteError) throw new Error(`Khong xoa duoc giao dich: ${deleteError.message}`);
 
   const { count, error: countError } = await supabase
@@ -277,7 +266,8 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
   if ((count ?? 0) > 0) {
     snapshot = await syncLotMasterSnapshot(targetTx.lot_id);
   } else {
-    await supabase.from("lots").delete().eq("id", targetTx.lot_id);
+    const { error: deleteLotError } = await supabase.from("lots").delete().eq("id", targetTx.lot_id);
+    if (deleteLotError) throw new Error(`Khong xoa duoc lo tong: ${deleteLotError.message}`);
   }
 
   revalidateLotScreens();
