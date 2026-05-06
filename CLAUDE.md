@@ -208,3 +208,5 @@ Vi du:
 - Tai lieu chi tiet uu tien nam trong `rules`, khong nhan ban day lai vao file nay
 - Mac dinh giao dien va noi dung trong app phai viet bang tieng Viet co dau
 - Chi thay doi ngon ngu hien thi khi nguoi dung yeu cau ro rang
+- Trong `/dashboard/product`, canh bao `lo do dang` dang hien thi theo tat ca lo do dang cung day chuyen, khong phu thuoc nam thanh pham
+- Neu doi rule loc `lo do dang`, phai cap nhat dong bo ca canh bao ngoai list va canh bao trong form tao moi

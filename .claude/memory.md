@@ -1,102 +1,74 @@
-# Rubber Factory ERP — Project Memory (Updated)
+# Rubber ERP - Bộ nhớ dự án
 
-## Dự án
+## Tổng quan
 
-Hệ thống ERP quản lý sản xuất cao su cho **CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM**.
+Hệ thống ERP quản lý sản xuất cao su cho:
+
+- Công ty TNHH PTCS Phước Hòa Kampong Thom
+- Mô hình nhiều nhà máy, mọi dữ liệu nghiệp vụ phải gắn với `factory_id`
+- Stack chính: Next.js App Router, TypeScript, Tailwind CSS, Supabase
 
 ## Nhà máy
 
-- **Phước Hòa KPT** (Cambodia): CSR-series, prefix CSR, location "Kampong Thom"
-- **Cuaparis** (HCM): SVR-series, prefix SVR, location "Phước Hòa"
+- Phước Hòa KPT: dùng prefix `CSR`
+- Cuaparis: dùng prefix `SVR`
 
-## Tech Stack
+## Nguyên tắc cốt lõi
 
-- **Frontend**: Next.js 14, TypeScript, Tailwind CSS, App Router
-- **Database**: Supabase (PostgreSQL), > 24 bảng (đã bao gồm 14 bảng của module Kho)
-- **Auth**: Supabase Auth (Session là source of truth, localStorage chỉ dùng làm cache UI)
-- **Deploy**: Vercel — https://rubber-erp.vercel.app/
-- **Repo**: https://github.com/luanto88/rubber-erp
-- **Supabase**: https://kaoeenrewvltnrbxmjfe.supabase.co
-- **Anon Key**: sb_publishable_cYvSxJUCByOIPO4Psbj9Tw_s_zbZb5Y
+- Luôn filter dữ liệu theo `factory_id`
+- `day_chuyen` là trục lọc chính trong các module sản xuất
+- Cấu hình sản phẩm không được hard-code rải rác; ưu tiên lấy từ cấu hình nhà máy / database
+- Supabase Auth session là source of truth cho đăng nhập
+- Không xóa file hoặc dữ liệu khi chưa có xác nhận rõ ràng
 
-## Modules
+## Thành phẩm và ngăn liệu
 
-| Module      | Trạng thái     | Ghi chú                                        |
-| ----------- | -------------- | ---------------------------------------------- |
-| Dashboard   | ✅ Cơ bản      | Stats cards                                    |
-| Quản lý Kho | ✅ Hoàn thiện  | Nhập, Xuất, Chuyển, Tồn, Thẻ kho, QR, Cảnh báo |
-| Điều xe     | 🔄 Cập nhật    | Mã DX, Import CSV mẫu, Tải GeoJSON             |
-| Ngăn lưu    | 🔄 Cập nhật    | Đang nhận -> Đóng -> Chờ SX (21 ngày)          |
-| Thành phẩm  | 🔄 Cập nhật    | Liên thông Ngăn lưu, chặn max 110%             |
-| Chất lượng  | 📋 Cần migrate | 3 khung, import, PDF, retest                   |
-| Xuất hàng   | 📋 Cần migrate | Xe + lô drag-drop, QR                          |
-| Cài đặt     | ✅ Đang VH     | Quản trị tập trung, User, Matrix, Phân quyền   |
-| Login       | ✅ Done        | Supabase Auth, chọn nhà máy                    |
+- Bánh `35` và `33.33`: lô tròn `144`
+- Bánh `20`: lô tròn `240`
+- Trạng thái lô chuẩn: `Dở dang`, `Hoàn thành`, `Xuất hàng`
+- Trạng thái ngăn chuẩn: `Đang nhận`, `Đóng`, `Chờ sản xuất`, `Đang sản xuất`, `Đã sản xuất`
 
-## Logic quan trọng
+### Quy tắc xóa dòng sản xuất
 
-### 1. Quản lý Kho (Inventory)
+- Mỗi dòng session trong `/dashboard/product` phải đại diện cho đúng một `lot_transactions.id`
+- Xóa dòng là xóa từng transaction, không xóa cả master lot nếu vẫn còn transaction khác
+- Sau khi xóa transaction:
+  - nếu còn transaction khác thì đồng bộ lại snapshot master lot
+  - nếu không còn transaction nào thì mới xóa master lot
 
-- **Kho chuẩn:** `KA` (Vật tư), `KB` (Hóa chất - quản lý chặt Lô/Hạn sử dụng).
-- **Luồng chứng từ:** Nháp (`draft`) ➔ Đã ghi sổ (`posted`) ➔ Đã hủy (`cancelled`).
-- **Ghi sổ (Post):** Tác động DB trực tiếp qua Stored Procedures (`inventory_post_export_document`,...). Chặn xuất âm ở tầng DB (Trigger `inventory_prevent_negative_stock`).
-- **Action Bar UI:** Các nút Lưu Nháp, Ghi Sổ, Hủy Phiếu luôn hiển thị ở Header góc phải. Chỉ dùng `disabled` để làm mờ khi thiếu dữ liệu, tuyệt đối KHÔNG ẨN nút.
-- **Hủy phiếu:** Phải có quyền `inventory.cancel` và bắt buộc nhập lý do. Hệ thống sẽ đảo ngược tồn kho nguyên tử.
+### Quy tắc đồng bộ trạng thái ngăn
 
-### 2. Điều xe
+- Tính theo tổng `so_kg` từ `lot_transactions` của từng `ngan_id`
+- Tổng kg bằng `0` -> `Chờ sản xuất`
+- Dưới `100%` -> `Đang sản xuất`
+- Từ `100%` đến `110%`:
+  - nếu đã là `Đã sản xuất` thì giữ nguyên
+  - nếu chưa phải `Đã sản xuất` thì cho phép cập nhật theo workflow hiện tại
 
-- **Mã:** `DX-ddmmyy/{stt}`.
-- **Thông tin mặc định:** Ngày điều xe = ngày lớn nhất + 1. Trạng thái Chứng nhận = PEFC CS. Lộ trình tự động filter theo đội của Điểm giao nhận.
-- **Khối lượng:** Tự tính DRC mủ dây mặc định là 65.
-- **Tiện ích:** Hỗ trợ admin tải file mẫu CSV để import nhiều ngày cùng lúc. Sinh file GeoJSON lô thu hoạch.
+### Quy tắc cảnh báo lô dở dang
 
-### 3. Ngăn lưu & Thành phẩm (Liên thông)
+- Trong `/dashboard/product`, cảnh báo lô dở dang đang hiển thị theo **tất cả lô dở dang cùng dây chuyền**
+- Cảnh báo này **không lọc theo năm thành phẩm**
+- Cảnh báo ngoài list và trong form tạo mới phải dùng cùng một rule để không bị lệch số lượng
 
-- **Vòng đời Ngăn lưu:**
-  - Tạo mới: **Đang nhận**
-  - Có ngày kết thúc: **Đóng**
-  - Đủ 21 ngày: **Chờ sản xuất** (Xuất hiện bên module Thành phẩm).
-- **Sản xuất (Thành phẩm):**
-  - Bắt đầu nhập thành phẩm: Trạng thái chuyển thành **Đang sản xuất**.
-  - Tiến độ > 100% nhưng <= 110%: Cảnh báo và hiện nút _Lưu và đánh dấu đã sản xuất_.
-  - Tiến độ > 110%: Bị CHẶN, bắt buộc phải bấm hoàn tất.
-  - Hoàn tất: Trạng thái chốt là **Đã sản xuất**. Mọi thay đổi Xóa/Sửa bên Thành phẩm sẽ tự động sync ngược lại trạng thái Ngăn lưu.
+### Quy tắc gợi ý trong form tạo mới
 
-### Thành phẩm
+- Gợi ý số lô gần nhất vẫn tính theo series `loai_csr + loai_banh + year`
+- Nhưng danh sách cảnh báo lô dở dang là theo dây chuyền, không theo năm
 
-- **Dở dang**: dd_snapshot lưu giá trị gốc, hiện ở CẢ 2 ngày/Ca
-- **isManualEdit**: tách biệt tạo mới (auto-detect DD) vs sửa (giá trị thật)
-- **Batch edit**: editKey="batch_xxx", sửa tất cả lô 1 ngày
-- **KienCard**: 4 kiện A/B/C/D, max 36 bành, reset button
-- **Lot format**: `{num}{suffix}/{year}` VD: 01cs/26
-- **Hậu tố**: cs=Nội tuyển PEFC, m=Thu mua, gctpk=GC Tân Biên
+## Ngôn ngữ hiển thị
 
-### Chất lượng
+- Luôn luôn sử dụng tiếng Việt có dấu, đúng chính tả
+- Chỉ đổi sang ngôn ngữ khác hoặc bỏ dấu khi người dùng yêu cầu rõ ràng
+- Khi sửa UI hoặc tài liệu nội bộ, ưu tiên thay các chuỗi lỗi mã hóa bằng tiếng Việt chuẩn
 
-- 3 khung: chưa KN (blue) / rớt hạng (red) / 6 tháng (purple)
-- Mã phiếu: KQKN-{NM}-{ddmmyy}/{stt}
-- Loại KN: thường(6) / ngặt(14) / tùy chọn(≤14)
-- NGAY_SX mặc định = NGAY_KN - 1 ngày
-- PDF footer: CSR→"Kampong Thom", SVR→"Phước Hòa"
-- Decimal: Tạp chất/Tro=3, Bay hơi/Nitơ=2, P₀/PRI/ML/Màu=1
+## Ghi nhớ thao tác
 
-### Xuất hàng
-
-- Mã đơn: XH*{MaKH}*{SoTB}\_{ddmmyy}
-- Layout: Xe trái | Lô phải, drag-drop
-- Biển số: đầu kéo + rơ-moóc
-
-## Quy tắc
-
-- **KHÔNG** xóa/ghi đè dữ liệu khi chưa xác nhận
-- safeSave: KHÔNG BAO GIỜ lưu mảng rỗng
-- CSR_TYPES dynamic theo factory prefix (CSR/SVR)
-- Lot suffixes: CS(nội tuyển), M(thu mua), GCA(gia công)
-- **Multi-tenant:** Dữ liệu luôn query và filter theo `factory_id` từ auth session hiện tại.
-- **Nguồn sự thật Sản phẩm:** Ma trận sản phẩm load động từ database (bảng cài đặt nhà máy), TUYỆT ĐỐI KHÔNG hard-code danh sách sản phẩm trong code.
-
-## Deploy workflow
-
-```
-Sửa code → git add . → git commit -m "msg" → git push → Vercel auto deploy
-```
+- Khi sửa Next.js trong repo này, phải đọc tài liệu tương ứng trong `node_modules/next/dist/docs/`
+- Khi sửa module thành phẩm, ưu tiên kiểm tra đồng thời:
+  - `src/app/dashboard/product/page.tsx`
+  - `src/app/dashboard/product/actions.ts`
+  - `src/app/dashboard/product/shared.ts`
+- Sau các thay đổi quan trọng ở module thành phẩm, cần chạy:
+  - `npx eslint src/app/dashboard/product/page.tsx src/app/dashboard/product/actions.ts src/app/dashboard/product/shared.ts`
+  - `npm run build`

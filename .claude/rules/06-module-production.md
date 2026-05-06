@@ -254,8 +254,15 @@ Khi lo cuoi ca truoc dang do:
 
 - Danh sach canh bao do dang toan cuc va canh bao trong form nhap thanh pham phai dung cung 1 nguon du lieu va cung 1 rule loc
 - Khong de truong hop ngoai form bao `Do dang` nhung trong form khong con lo do dang (hoac nguoc lai)
+- Hien tai, canh bao lo do dang trong `/dashboard/product` duoc hien thi theo **toan bo lo do dang cung day chuyen**, khong loc theo `year` cua thanh pham
+- Neu can hien thi theo nam trong tuong lai, phai doi dong bo o ca canh bao toan cuc va canh bao trong form tao moi, khong sua le 1 ben
 
 ### Goi y tu dong trong form nhap
 
 - Goi y `so lo gan nhat` dua theo lo `Do dang` gan nhat trong cung series (`loai_csr + loai_banh + year`)
 - Goi y `ngan_id` uu tien theo giao dich gan nhat cung `day_chuyen` de tranh nham day chuyen
+
+### Quy tac ngon ngu hien thi
+
+- Mac dinh noi dung UI, thong bao, canh bao va tai lieu noi bo phai viet bang tieng Viet co dau, dung chinh ta
+- Chi duoc bo dau hoac doi ngon ngu khi nguoi dung yeu cau ro rang

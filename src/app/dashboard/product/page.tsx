@@ -877,7 +877,15 @@ export default function ProductPage() {
       (!filterDC ||
         normalizeDayChuyen(l.day_chuyen) === normalizeDayChuyen(filterDC)),
   );
-  const dorDangLots = allDorDangLots.filter((l) => l.ngan_id === session.ngan_id);
+  const createDorDangLots = lots.filter(
+    (l) =>
+      normalizeLotStatus(l.trang_thai) === "Dở dang" &&
+      l.tong_banh > 0 &&
+      normalizeDayChuyen(l.day_chuyen) === normalizeDayChuyen(session.day_chuyen),
+  );
+  const selectedNganDorDangLots = createDorDangLots.filter(
+    (l) => l.ngan_id === session.ngan_id,
+  );
 
   const kgDaCoTrongNgan = nganKgMap[session.ngan_id] || 0;
 
@@ -2136,16 +2144,21 @@ export default function ProductPage() {
             <strong>{normalizeDayChuyen(session.day_chuyen)}</strong>
           </p>
 
-          {hasNgan && dorDangLots.length > 0 && (
+          {hasNgan && createDorDangLots.length > 0 && (
             <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-amber-600" />
                 <span className="text-xs font-bold text-amber-700">
-                  Lô dở dang cần hoàn thành ({dorDangLots.length} lô)
+                  Lô dở dang cần hoàn thành ({createDorDangLots.length} lô)
                 </span>
               </div>
+              {session.ngan_id && selectedNganDorDangLots.length > 0 && (
+                <p className="text-[11px] text-amber-700 mb-2">
+                  Ngăn đang chọn còn {selectedNganDorDangLots.length} lô dở dang.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
-                {dorDangLots.map((l) => (
+                {createDorDangLots.map((l) => (
                   <span
                     key={l.id}
                     className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg"
