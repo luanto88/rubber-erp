@@ -28,6 +28,7 @@ type SaveLotTransactionInput = {
     ghi_chu?: string | null;
     image_url_1?: string | null;
     image_url_2?: string | null;
+    trang_thai?: string | null;
   };
   transaction: {
     id?: string;
