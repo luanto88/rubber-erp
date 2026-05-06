@@ -197,6 +197,29 @@ const CA_OPTS = ["A", "B", "C"];
 const THAM_OPTS = ["c\u0169", "M\u1edbi"];
 const TRANG_THAI_OPTS = ["Ho\u00e0n th\u00e0nh", "D\u1edf dang", "Xu\u1ea5t h\u00e0ng"];
 const PALLET_OPTS = ["S\u1eaft \u0111\u1ebf g\u1ed7", "S\u1eaft \u0111\u1ebf nh\u1ef1a", "S\u1eaft m\u1ecfng", "MB5", "G\u1ed7"];
+const DAY_CHUYEN_TAP = "Mủ tạp";
+const DAY_CHUYEN_NUOC = "Mủ nước";
+
+function foldText(value?: string | null) {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeDayChuyen(value?: string | null) {
+  const v = foldText(value);
+  if (v.includes("nuoc")) return DAY_CHUYEN_NUOC;
+  return DAY_CHUYEN_TAP;
+}
+
+function normalizeLoaiNl(value?: string | null) {
+  const v = foldText(value);
+  if (v.includes("nuoc")) return DAY_CHUYEN_NUOC;
+  if (v.includes("tap")) return DAY_CHUYEN_TAP;
+  return value || "";
+}
 
 // â”€â”€â”€ Business Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
@@ -675,7 +698,7 @@ export default function ProductPage() {
 
       supabase
         .from("lots")
-        .update({ day_chuyen: "Má»§ táº¡p" })
+        .update({ day_chuyen: DAY_CHUYEN_TAP })
         .eq("factory_id", fid)
         .or("day_chuyen.is.null,day_chuyen.eq.")
         .then(() => {});
@@ -736,7 +759,12 @@ export default function ProductPage() {
       )
         return false;
       if (filterCa && c.ca !== filterCa) return false;
-      if (filterDC && c.day_chuyen !== filterDC) return false;
+      if (
+        filterDC &&
+        normalizeDayChuyen(c.day_chuyen) !== normalizeDayChuyen(filterDC)
+      ) {
+        return false;
+      }
       if (filterLoai && c.loai_csr !== filterLoai) return false;
       if (filterTT && c.trang_thai !== filterTT) return false;
       if (filterFrom && c.ngay_sx < filterFrom) return false;
@@ -796,20 +824,20 @@ export default function ProductPage() {
   const eligibleNgans = useMemo(() => {
     const now = new Date();
     const validLoaiNl =
-      session.day_chuyen === "Má»§ táº¡p"
+      normalizeDayChuyen(session.day_chuyen) === DAY_CHUYEN_TAP
         ? [
-            "Má»§ chĂ©n",
-            "Má»§ Ä‘Ă´ng chĂ©n",
-            "Má»§ Ä‘Ă´ng khá»‘i",
-            "Má»§ dĂ¢y",
-            "Má»§ dÆ¡",
-            "Má»§ táº¡p",
+            "Mủ chén",
+            "Mủ đông chén",
+            "Mủ đông khối",
+            "Mủ dây",
+            "Mủ dơ",
+            "Mủ tạp",
           ]
-        : ["Má»§ nÆ°á»›c"];
+        : ["Mủ nước"];
 
     return ngans
       .filter((n) => {
-        if (!validLoaiNl.includes(n.loai_nl)) return false;
+        if (!validLoaiNl.includes(normalizeLoaiNl(n.loai_nl))) return false;
         if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
         if (!n.ngay_bd) return false;
         const days = Math.floor(
@@ -833,7 +861,8 @@ export default function ProductPage() {
     (l) =>
       normalizeLotStatus(l.trang_thai) === "Dở dang" &&
       l.tong_banh > 0 &&
-      (!filterDC || l.day_chuyen === filterDC),
+      (!filterDC ||
+        normalizeDayChuyen(l.day_chuyen) === normalizeDayChuyen(filterDC)),
   );
   const dorDangLots = allDorDangLots.filter((l) => l.ngan_id === session.ngan_id);
 
@@ -950,19 +979,19 @@ export default function ProductPage() {
   // â”€â”€ Session handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const autoSelectNganId = (dayChuyenVal: string): string => {
     const validNl =
-      dayChuyenVal === "Má»§ táº¡p"
+      normalizeDayChuyen(dayChuyenVal) === DAY_CHUYEN_TAP
         ? [
-            "Má»§ chĂ©n",
-            "Má»§ Ä‘Ă´ng chĂ©n",
-            "Má»§ Ä‘Ă´ng khá»‘i",
-            "Má»§ dĂ¢y",
-            "Má»§ dÆ¡",
-            "Má»§ táº¡p",
+            "Mủ chén",
+            "Mủ đông chén",
+            "Mủ đông khối",
+            "Mủ dây",
+            "Mủ dơ",
+            "Mủ tạp",
           ]
-        : ["Má»§ nÆ°á»›c"];
+        : ["Mủ nước"];
     const now = new Date();
     const eligible = ngans.filter((n) => {
-      if (!validNl.includes(n.loai_nl)) return false;
+      if (!validNl.includes(normalizeLoaiNl(n.loai_nl))) return false;
       if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
       if (!n.ngay_bd) return false;
       return (
@@ -979,7 +1008,7 @@ export default function ProductPage() {
     const recentFromSameDayChuyen = contributions
       .filter(
         (c) =>
-          c.day_chuyen === dayChuyenVal &&
+          normalizeDayChuyen(c.day_chuyen) === normalizeDayChuyen(dayChuyenVal) &&
           c.ngan_id &&
           c.tong_kg_cua_ca > 0 &&
           eligible.some((n) => n.id === c.ngan_id),
@@ -1262,7 +1291,7 @@ export default function ProductPage() {
       "cs";
 
     const defaultCsr =
-      getLoaiCSRByDayChuyen("Má»§ táº¡p", factoryPrefix)[0] || `${factoryPrefix}10`;
+      getLoaiCSRByDayChuyen(DAY_CHUYEN_TAP, factoryPrefix)[0] || `${factoryPrefix}10`;
     const cfg = getLoaiBanhConfig(defaultCsr);
     const latestDang = lots
       .filter(
@@ -1283,15 +1312,15 @@ export default function ProductPage() {
     const s: SessionHeader = {
       year: yrStr,
       ngay_sx: ngaySX,
-      day_chuyen: "Má»§ táº¡p",
+      day_chuyen: DAY_CHUYEN_TAP,
       so_ca: 2,
-      ngan_id: autoSelectNganId("Má»§ táº¡p"),
+      ngan_id: autoSelectNganId(DAY_CHUYEN_TAP),
       suffix: defaultSuffix,
       loai_csr: defaultCsr,
       loai_banh: cfg.loai_banh,
       boc:
-        getBocsForLoaiCSR("Má»§ táº¡p", defaultCsr)[1] ||
-        getBocsForLoaiCSR("Má»§ táº¡p", defaultCsr)[0] ||
+        getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[1] ||
+        getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[0] ||
         "",
       tham: "cÅ©",
       chi_thi: lastChiThi,
@@ -1420,7 +1449,7 @@ export default function ProductPage() {
       ngay_sx: lot.ngay_sx?.slice(0, 10) || "",
       ca: lot.ca,
       ngan_id: lot.ngan_id || "",
-      day_chuyen: lot.day_chuyen || "Má»§ táº¡p",
+      day_chuyen: normalizeDayChuyen(lot.day_chuyen) || DAY_CHUYEN_TAP,
       loai_csr: lot.loai_csr,
       loai_banh: lot.loai_banh || 35,
       boc: lot.boc,
@@ -1817,7 +1846,7 @@ export default function ProductPage() {
                 DĂ¢y chuyá»n <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-3">
-                {["Má»§ táº¡p", "Má»§ nÆ°á»›c"].map((dc) => (
+                {[DAY_CHUYEN_TAP, DAY_CHUYEN_NUOC].map((dc) => (
                   <button
                     key={dc}
                     onClick={() => {
@@ -2061,12 +2090,12 @@ export default function ProductPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
           <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
-            <Warehouse size={15} className="text-blue-600" /> Chá»n ngÄƒn lÆ°u{" "}
+            <Warehouse size={15} className="text-blue-600" /> Chọn ngăn liệu{" "}
             <span className="text-red-500">*</span>
           </h3>
           <p className="text-xs text-slate-400 mb-4">
-            Hiá»ƒn thá»‹ ngÄƒn Ä‘á»§ 21 ngĂ y á»§ cá»§a dĂ¢y chuyá»n{" "}
-            <strong>{session.day_chuyen}</strong>
+            Hiển thị ngăn đủ 21 ngày ủ của dây chuyền{" "}
+            <strong>{normalizeDayChuyen(session.day_chuyen)}</strong>
           </p>
 
           {hasNgan && dorDangLots.length > 0 && (
@@ -2119,9 +2148,9 @@ export default function ProductPage() {
           {eligibleNgans.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Warehouse size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">KhĂ´ng cĂ³ ngÄƒn Ä‘á»§ Ä‘iá»u kiá»‡n sáº£n xuáº¥t</p>
+              <p className="text-sm">Không có ngăn đủ điều kiện sản xuất</p>
               <p className="text-xs mt-1">
-                Cáº§n ngÄƒn â‰¥ 21 ngĂ y á»§ vĂ  tráº¡ng thĂ¡i Chá»/Äang SX
+                Cần ngăn ≥ 21 ngày ủ và trạng thái Chờ/Đang SX
               </p>
             </div>
           ) : (
@@ -2863,7 +2892,7 @@ export default function ProductPage() {
                 disabled
                 className="px-5 py-2 bg-slate-300 text-white text-sm font-bold rounded-xl cursor-not-allowed"
               >
-                Chá»n ngÄƒn lÆ°u trÆ°á»›c
+                Chọn ngăn lưu trước
               </button>
             </div>
           </div>
@@ -2993,8 +3022,8 @@ export default function ProductPage() {
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
           <option value="">Táº¥t cáº£ dĂ¢y chuyá»n</option>
-          <option value="Má»§ táº¡p">Má»§ táº¡p</option>
-          <option value="Má»§ nÆ°á»›c">Má»§ nÆ°á»›c</option>
+          <option value={DAY_CHUYEN_TAP}>{DAY_CHUYEN_TAP}</option>
+          <option value={DAY_CHUYEN_NUOC}>{DAY_CHUYEN_NUOC}</option>
         </select>
         <select
           value={filterLoai}
