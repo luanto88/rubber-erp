@@ -19,17 +19,11 @@ function foldText(value?: string | null) {
     .toLowerCase();
 }
 
-export function normalizeLotStatus(
-  status?: string | null,
-): NormalizedLotStatus {
-  switch (foldText(status)) {
-    case "hoan thanh":
-      return "Hoàn thành";
-    case "xuat hang":
-      return "Xuất hàng";
-    default:
-      return "Dở dang";
-  }
+export function normalizeLotStatus(status?: string | null): NormalizedLotStatus {
+  const folded = foldText(status);
+  if (folded.includes("xuat") && folded.includes("hang")) return "Xuất hàng";
+  if (folded.includes("hoan") && folded.includes("thanh")) return "Hoàn thành";
+  return "Dở dang";
 }
 
 export function pickCanonicalLot<T extends LotLike>(lots: T[]): T {

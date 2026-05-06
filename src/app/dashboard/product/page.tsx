@@ -768,9 +768,13 @@ export default function ProductPage() {
   const stats = {
     total: lots.length,
     hoanThanh: lots.filter(
-      (l) => l.trang_thai === "HoĂ n thĂ nh" || l.trang_thai === "Xuáº¥t hĂ ng",
+      (l) => {
+        const status = normalizeLotStatus(l.trang_thai);
+        return status === "Hoàn thành" || status === "Xuất hàng";
+      },
     ).length,
-    dorDang: lots.filter((l) => l.trang_thai === "Dá»Ÿ dang").length,
+    dorDang: lots.filter((l) => normalizeLotStatus(l.trang_thai) === "Dở dang")
+      .length,
     tongBanh: filteredContribs.reduce(
       (s, c) => s + (c.tong_banh_cua_ca || 0),
       0,
@@ -806,7 +810,7 @@ export default function ProductPage() {
     return ngans
       .filter((n) => {
         if (!validLoaiNl.includes(n.loai_nl)) return false;
-        if (["ÄĂ³ng", "ÄĂ£ sáº£n xuáº¥t"].includes(n.trang_thai)) return false;
+        if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
         if (!n.ngay_bd) return false;
         const days = Math.floor(
           (now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000,
@@ -827,7 +831,7 @@ export default function ProductPage() {
   const selectedNgan = ngans.find((n) => n.id === session.ngan_id);
   const allDorDangLots = lots.filter(
     (l) =>
-      l.trang_thai === "Dá»Ÿ dang" &&
+      normalizeLotStatus(l.trang_thai) === "Dở dang" &&
       l.tong_banh > 0 &&
       (!filterDC || l.day_chuyen === filterDC),
   );
@@ -921,7 +925,7 @@ export default function ProductPage() {
       .filter(
         (l) =>
           isSameLotSeries(l, { loai_csr, loai_banh, year }) &&
-          l.trang_thai === "Dá»Ÿ dang",
+          normalizeLotStatus(l.trang_thai) === "Dở dang",
       )
       .sort((a, b) => {
         if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
@@ -959,7 +963,7 @@ export default function ProductPage() {
     const now = new Date();
     const eligible = ngans.filter((n) => {
       if (!validNl.includes(n.loai_nl)) return false;
-      if (["ÄĂ³ng", "ÄĂ£ sáº£n xuáº¥t"].includes(n.trang_thai)) return false;
+      if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
       if (!n.ngay_bd) return false;
       return (
         Math.floor(
@@ -968,7 +972,7 @@ export default function ProductPage() {
       );
     });
     const dangSX = eligible
-      .filter((n) => n.trang_thai === "Äang sáº£n xuáº¥t")
+      .filter((n) => n.trang_thai === "Đang sản xuất")
       .sort(
         (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
       )[0];
@@ -988,7 +992,7 @@ export default function ProductPage() {
     if (dangSX) return dangSX.id;
     // Fallback: ngÄƒn Chá» sáº£n xuáº¥t Má»I NHáº¤T (ngay_bd lá»›n nháº¥t)
     const newest = eligible
-      .filter((n) => n.trang_thai === "Chá» sáº£n xuáº¥t")
+      .filter((n) => n.trang_thai === "Chờ sản xuất")
       .sort(
         (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
       )[0];
@@ -1055,7 +1059,7 @@ export default function ProductPage() {
               newBanh,
               lots,
               newYear,
-              prevLast?.trang_thai === "Dá»Ÿ dang" ? prevLast : undefined,
+              normalizeLotStatus(prevLast?.trang_thai) === "Dở dang" ? prevLast : undefined,
             ),
           };
         });
@@ -1079,11 +1083,11 @@ export default function ProductPage() {
         const prevSection = prev[i - 1];
         const prevLastDraft = prevSection?.lots.at(-1);
         const fromNum =
-          prevLastDraft?.trang_thai === "Dá»Ÿ dang"
+          normalizeLotStatus(prevLastDraft?.trang_thai) === "Dở dang"
             ? prevSection.to_num
             : (prevSection?.to_num || 0) + 1;
         const prevLast =
-          prevLastDraft?.trang_thai === "Dá»Ÿ dang" ? prevLastDraft : undefined;
+          normalizeLotStatus(prevLastDraft?.trang_thai) === "Dở dang" ? prevLastDraft : undefined;
         const newSection: CaSection = {
           ca: caLabels[i],
           from_num: fromNum,
@@ -1138,7 +1142,7 @@ export default function ProductPage() {
           session.loai_banh,
           lots,
           sessionYear,
-          prevLast?.trang_thai === "Dá»Ÿ dang" ? prevLast : undefined,
+          normalizeLotStatus(prevLast?.trang_thai) === "Dở dang" ? prevLast : undefined,
         ),
       };
       if (idx + 1 < updated.length) {
@@ -1147,7 +1151,7 @@ export default function ProductPage() {
         if (nextSec.from_num === prevToNum || nextSec.from_num === 0) {
           const lastDraft = updated[idx].lots.at(-1);
           const suggestFrom =
-            lastDraft?.trang_thai === "Dá»Ÿ dang" ? cs.to_num : cs.to_num + 1;
+            normalizeLotStatus(lastDraft?.trang_thai) === "Dở dang" ? cs.to_num : cs.to_num + 1;
           const nextLast = updated[idx].lots.at(-1);
           updated[idx + 1] = {
             ...nextSec,
@@ -1160,7 +1164,7 @@ export default function ProductPage() {
               session.loai_banh,
               lots,
               sessionYear,
-              lastDraft?.trang_thai === "Dá»Ÿ dang" ? nextLast : undefined,
+              normalizeLotStatus(lastDraft?.trang_thai) === "Dở dang" ? nextLast : undefined,
             ),
           };
         }
@@ -1266,7 +1270,7 @@ export default function ProductPage() {
           l.loai_csr === defaultCsr &&
           Number(l.loai_banh) === Number(cfg.loai_banh) &&
           l.year === yrStr &&
-          l.trang_thai === "Dá»Ÿ dang",
+          normalizeLotStatus(l.trang_thai) === "Dở dang",
       )
       .sort((a, b) => {
         if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
@@ -1404,7 +1408,7 @@ export default function ProductPage() {
     }
   };
   const openEdit = (lot: Lot) => {
-    if (lot.trang_thai === "Xuáº¥t hĂ ng") {
+    if (normalizeLotStatus(lot.trang_thai) === "Xuất hàng") {
       setSaveError("LĂ´ Ä‘Ă£ xuáº¥t hĂ ng, khĂ´ng thá»ƒ sá»­a.");
       return;
     }
@@ -1522,7 +1526,7 @@ export default function ProductPage() {
       return;
     }
 
-    if (pct <= 110 && ngan.trang_thai === "ÄĂ£ sáº£n xuáº¥t") {
+    if (pct <= 110 && ngan.trang_thai === "Đã sản xuất") {
       return;
     }
   };
@@ -2133,7 +2137,7 @@ export default function ProductPage() {
                 );
                 const selected = session.ngan_id === n.id;
                 const hasDorDang = lots.some(
-                  (l) => l.ngan_id === n.id && l.trang_thai === "Dá»Ÿ dang",
+                  (l) => l.ngan_id === n.id && normalizeLotStatus(l.trang_thai) === "Dở dang",
                 );
                 return (
                   <button
@@ -3776,7 +3780,8 @@ export default function ProductPage() {
                           const isLatestContribution =
                             !c.transaction_id || c.transaction_id === latestTransactionId;
                           const canEdit =
-                            isLatestContribution && c.trang_thai !== "Xuáº¥t hĂ ng";
+                            isLatestContribution &&
+                            normalizeLotStatus(c.trang_thai) !== "Xuất hàng";
                           return (
                             <div
                               key={c.uid}
