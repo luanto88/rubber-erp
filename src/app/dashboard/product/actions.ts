@@ -98,6 +98,13 @@ async function syncLotMasterSnapshot(lotId: string) {
           ? "Hoàn thành"
           : "Dở dang";
 
+  const correctedStatus: NormalizedLotStatus =
+    tongBanh >= loTron
+      ? normalizedStatus === "Xuất hàng"
+        ? "Xuất hàng"
+        : "Hoàn thành"
+      : "Dở dang";
+
   const payload = {
     kien_a: kienA,
     kien_b: kienB,
@@ -105,7 +112,7 @@ async function syncLotMasterSnapshot(lotId: string) {
     kien_d: kienD,
     tong_banh: tongBanh,
     tong_kg: tongKg,
-    trang_thai: derivedStatus,
+    trang_thai: correctedStatus,
     ca: latestTx?.ca ?? null,
     ngan_id: latestTx?.ngan_id ?? null,
     ngay_ht: derivedStatus === "Hoàn thành" ? (latestTx?.ngay_nhap ?? null) : null,
@@ -254,20 +261,6 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
 
   if (findError || !targetTx) {
     throw new Error(`Khong tim thay giao dich can xoa: ${findError?.message ?? transactionId}`);
-  }
-
-  const { data: latestTx, error: latestError } = await supabase
-    .from("lot_transactions")
-    .select("id")
-    .eq("lot_id", targetTx.lot_id)
-    .order("ngay_nhap", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestError) throw new Error(`Khong xac dinh duoc giao dich moi nhat: ${latestError.message}`);
-  if (latestTx && latestTx.id !== transactionId) {
-    throw new Error("Chi duoc xoa contribution moi nhat cua lo do dang.");
   }
 
   const { error: deleteError } = await supabase.from("lot_transactions").delete().eq("id", transactionId);

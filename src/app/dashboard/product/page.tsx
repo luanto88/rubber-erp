@@ -1324,7 +1324,7 @@ export default function ProductPage() {
         "",
       tham: "cÅ©",
       chi_thi: lastChiThi,
-      pallet: ["Sáº¯t Ä‘áº¿ gá»—"],
+      pallet: ["Sắt đế gỗ"],
       image_url_1: "",
       image_url_2: "",
     };
@@ -1338,7 +1338,7 @@ export default function ProductPage() {
     if (!factoryId || !session.ngan_id) return;
     const lotYear = normalizeLotYear(session.year, session.ngay_sx);
     if (lotYear.length !== 2) {
-      setSaveError("NÄƒm lĂ´ pháº£i cĂ³ Ä‘Ăºng 2 chá»¯ sá»‘.");
+      setSaveError("Năm lô phải có đúng 2 chữ số.");
       return;
     }
     setSaving(true);
@@ -1438,7 +1438,7 @@ export default function ProductPage() {
   };
   const openEdit = (lot: Lot) => {
     if (normalizeLotStatus(lot.trang_thai) === "Xuất hàng") {
-      setSaveError("LĂ´ Ä‘Ă£ xuáº¥t hĂ ng, khĂ´ng thá»ƒ sá»­a.");
+      setSaveError("Lô đã xuất hàng, không thể sửa.");
       return;
     }
     setEditForm({
@@ -1699,17 +1699,8 @@ export default function ProductPage() {
 
     const transactionId = contribution?.transaction_id;
     const transactionCount = lot.lot_transactions?.length || 0;
-    const latestTransactionId =
-      transactionCount > 0
-        ? lot.lot_transactions?.[transactionCount - 1]?.id
-        : null;
 
     if (transactionId && transactionCount > 1) {
-      if (transactionId !== latestTransactionId) {
-        setSaveError("Chá»‰ Ä‘Æ°á»£c xĂ³a contribution má»›i nháº¥t cá»§a lĂ´ dá»Ÿ.");
-        setDelConfirm(null);
-        return;
-      }
       try {
         const result = await deleteLotTransaction({ transactionId });
         const affectedNganIds = Array.from(
@@ -1765,7 +1756,10 @@ export default function ProductPage() {
   };
   const handleBulkDelete = async () => {
     const deletable = Array.from(selectedDeleteIds).filter(
-      (id) => !lotsBlockedByKn.includes(id),
+      (id) => {
+        const contribution = contributions.find((item) => item.uid === id);
+        return !lotsBlockedByKn.includes(contribution?.id || id);
+      },
     );
     for (const id of deletable) {
       await handleDelete(id);
@@ -1779,7 +1773,14 @@ export default function ProductPage() {
   const handleDeletePreCheck = async () => {
     if (!factoryId || selectedDeleteIds.size === 0) return;
     setPreCheckLoading(true);
-    const ids = Array.from(selectedDeleteIds);
+    const ids = Array.from(
+      new Set(
+        Array.from(selectedDeleteIds).map((id) => {
+          const contribution = contributions.find((item) => item.uid === id);
+          return contribution?.id || id;
+        }),
+      ),
+    );
     const { data } = await supabase
       .from("qc_results")
       .select("lot_id")
@@ -1813,11 +1814,11 @@ export default function ProductPage() {
         : [
             {
               code: "cs",
-              name: "Ná»™i tuyá»ƒn PEFC",
+              name: "Nội tuyển PEFC",
               nguon: "NT",
               chung_nhan: "PEFC CS",
             },
-            { code: "m", name: "Mua ngoĂ i", nguon: "M", chung_nhan: "" },
+            { code: "m", name: "Mua ngoài", nguon: "M", chung_nhan: "" },
           ];
 
     return (
@@ -1827,14 +1828,14 @@ export default function ProductPage() {
             onClick={() => setView("list")}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-all"
           >
-            <ChevronLeft size={16} /> Quay láº¡i
+            <ChevronLeft size={16} /> Quay lại
           </button>
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">
-              Nháº­p thĂ nh pháº©m
+              Nhập thành phẩm
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Táº¡o lĂ´ má»›i theo ca sáº£n xuáº¥t
+              Tạo lô mới theo ca sản xuất
             </p>
           </div>
         </div>
@@ -1843,7 +1844,7 @@ export default function ProductPage() {
           <div className="flex flex-wrap items-end gap-6">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-2">
-                DĂ¢y chuyá»n <span className="text-red-500">*</span>
+                Dây chuyền <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-3">
                 {[DAY_CHUYEN_TAP, DAY_CHUYEN_NUOC].map((dc) => (
@@ -1866,7 +1867,7 @@ export default function ProductPage() {
             </div>
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-2">
-                Sá»‘ ca <span className="text-red-500">*</span>
+                Số ca <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-3">
                 {([1, 2, 3] as const).map((n) => (
@@ -1889,16 +1890,16 @@ export default function ProductPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
           <h3 className="text-sm font-extrabold text-slate-700 mb-4 flex items-center gap-2">
-            <Package size={15} className="text-emerald-600" /> ThĂ´ng tin sáº£n
-            pháº©m (dĂ¹ng chung má»i ca)
+            <Package size={15} className="text-emerald-600" /> Thông tin sản
+            phẩm (dùng chung mỗi ca)
           </h3>
 
           <div className="space-y-3">
-            {/* HĂ ng 1: NgĂ y sáº£n xuáº¥t â€” NÄƒm lĂ´ â€” Háº­u tá»‘ */}
+            {/* Hàng 1: Ngày sản xuất - Năm lô - Hậu tố */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  NgĂ y sáº£n xuáº¥t <span className="text-red-500">*</span>
+                  Ngày sản xuất <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
@@ -1907,12 +1908,12 @@ export default function ProductPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  NÄƒm lĂ´: {sessionYear}
+                  Năm lô: {sessionYear}
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  NÄƒm lĂ´
+                  Năm lô
                 </label>
                 <input
                   value={session.year}
@@ -1925,33 +1926,33 @@ export default function ProductPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Chá»‰nh tay khi giao thoa cuá»‘i nÄƒm
+                  Chỉnh tay khi giao thoa cuối năm
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Háº­u tá»‘ *
+                  Hậu tố *
                 </label>
                 <select
                   value={session.suffix}
                   onChange={(e) => updateSession({ suffix: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 >
-                  <option value="">Trá»‘ng (khĂ´ng háº­u tá»‘)</option>
+                  <option value="">Trống (không hậu tố)</option>
                   {displaySuffixes.map((s) => (
                     <option key={s.code} value={s.code}>
-                      {s.code} â€” {s.name}
+                      {s.code} - {s.name}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
 
-            {/* HĂ ng 2: Loáº¡i CSR â€” BĂ nh â€” Bá»c â€” Tháº£m */}
+            {/* Hàng 2: Loại CSR - Bánh - Bọc - Thảm */}
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loáº¡i CSR *
+                  Loại CSR *
                 </label>
                 <select
                   value={session.loai_csr}
@@ -1965,7 +1966,7 @@ export default function ProductPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  BĂ nh (kg/bĂ nh) *
+                  Bánh (kg/bánh) *
                 </label>
                 {banhOpts.length > 1 ? (
                   <select
@@ -1989,12 +1990,12 @@ export default function ProductPage() {
                   />
                 )}
                 <p className="text-[10px] text-slate-400 mt-1">
-                  LĂ´ trĂ²n: {cfg.lo_tron} bĂ nh
+                  Lô tròn: {cfg.lo_tron} bánh
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Bá»c *
+                  Bọc *
                 </label>
                 <select
                   value={session.boc}
@@ -2008,7 +2009,7 @@ export default function ProductPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Tháº£m *
+                  Thảm *
                 </label>
                 <select
                   value={session.tham}
@@ -2022,11 +2023,11 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* HĂ ng 3: Chá»‰ thá»‹ sx (1/3) â€” Pallet (2/3) */}
+            {/* Hàng 3: Chỉ thị sx (1/3) - Pallet (2/3) */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Chá»‰ thá»‹ SX
+                  Chỉ thị SX
                 </label>
                 <input
                   value={session.chi_thi}
@@ -2057,7 +2058,7 @@ export default function ProductPage() {
                             : "border-slate-200 text-slate-500 hover:border-slate-300"
                         }`}
                       >
-                        {checked ? "âœ“ " : ""}
+                        {checked ? "✓ " : ""}
                         {p}
                       </button>
                     );
@@ -2066,13 +2067,13 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* HĂ ng 4: HĂ¬nh áº£nh 1 â€” HĂ¬nh áº£nh 2 */}
+            {/* Hàng 4: Hình ảnh 1 - Hình ảnh 2 */}
             <div className="grid grid-cols-2 gap-3">
               <InventoryImageUpload
                 factoryId={factoryId}
                 bucket="product-files"
                 documentType="lots"
-                label="HĂ¬nh áº£nh 1"
+                label="Hình ảnh 1"
                 value={session.image_url_1}
                 onChange={(url) => updateSession({ image_url_1: url })}
               />
@@ -2080,7 +2081,7 @@ export default function ProductPage() {
                 factoryId={factoryId}
                 bucket="product-files"
                 documentType="lots"
-                label="HĂ¬nh áº£nh 2"
+                label="Hình ảnh 2"
                 value={session.image_url_2}
                 onChange={(url) => updateSession({ image_url_2: url })}
               />
@@ -2103,7 +2104,7 @@ export default function ProductPage() {
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-amber-600" />
                 <span className="text-xs font-bold text-amber-700">
-                  LĂ´ dá»Ÿ dang cáº§n hoĂ n thĂ nh ({dorDangLots.length} lĂ´)
+                  Lô dở dang cần hoàn thành ({dorDangLots.length} lô)
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2112,7 +2113,7 @@ export default function ProductPage() {
                     key={l.id}
                     className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg"
                   >
-                    {l.ma_lo} Â· {l.tong_banh} bĂ nh
+                    {l.ma_lo} · {l.tong_banh} bánh
                   </span>
                 ))}
               </div>
@@ -2124,13 +2125,13 @@ export default function ProductPage() {
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-rose-600" />
                 <span className="text-xs font-bold text-rose-700">
-                  Cáº£nh bĂ¡o nháº£y lĂ´ {session.loai_csr} Â· {session.loai_banh}kg (
-                  {jumpLotNums.length} sá»‘ cĂ²n trá»‘ng)
+                  Cảnh báo nhảy lô {session.loai_csr} · {session.loai_banh}kg (
+                  {jumpLotNums.length} số còn trống)
                 </span>
               </div>
               <div className="text-[11px] text-rose-600 mb-2">
-                CĂ¹ng loáº¡i thĂ nh pháº©m vĂ  cĂ¹ng loáº¡i bĂ¡nh pháº£i dĂ¹ng dĂ£y sá»‘ lĂ´ liĂªn
-                tá»¥c.
+                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên
+                tục.
               </div>
               <div className="flex flex-wrap gap-2">
                 {jumpLotNums.map((num) => (
@@ -2185,23 +2186,23 @@ export default function ProductPage() {
                       <div className="flex gap-1">
                         {hasDorDang && (
                           <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">
-                            Dá»Ÿ dang
+                            Dở dang
                           </span>
                         )}
                         <span
                           className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
-                            n.trang_thai === "Äang sáº£n xuáº¥t"
+                            n.trang_thai === "Đang sản xuất"
                               ? "bg-emerald-100 text-emerald-700"
-                              : n.trang_thai === "HoĂ n thĂ nh"
+                              : n.trang_thai === "Hoàn thành"
                                 ? "bg-blue-100 text-blue-700"
                                 : "bg-amber-100 text-amber-700"
                           }`}
                         >
-                          {n.trang_thai === "Äang sáº£n xuáº¥t"
-                            ? "Äang SX"
-                            : n.trang_thai === "HoĂ n thĂ nh"
+                          {n.trang_thai === "Đang sản xuất"
+                            ? "Đang SX"
+                            : n.trang_thai === "Hoàn thành"
                               ? "HT"
-                              : "Chá» SX"}
+                              : "Chờ SX"}
                         </span>
                       </div>
                     </div>
@@ -2211,7 +2212,7 @@ export default function ProductPage() {
                     <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
                       <span>SX: {fmtKg(kgUsed)}</span>
                       <span className="font-bold text-teal-700">
-                        CĂ²n: {fmtKg(n.tong_kho - kgUsed)}
+                        Còn: {fmtKg(n.tong_kho - kgUsed)}
                       </span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-1.5 mb-1">
@@ -2221,10 +2222,10 @@ export default function ProductPage() {
                       />
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      {n.loai_nl} Â· {days} ngĂ y á»§ Â· DK SX:{" "}
+                      {n.loai_nl} · {days} ngày ủ · DK SX:{" "}
                       {n.ngay_kt
                         ? new Date(n.ngay_kt).toLocaleDateString("vi-VN")
-                        : "â€”"}
+                        : "—"}
                     </p>
                   </button>
                 );
@@ -2298,7 +2299,7 @@ export default function ProductPage() {
                   </select>
                   {caTongBanh > 0 && (
                     <span className="ml-auto text-xs font-bold text-slate-600">
-                      Ca {caLabel}: {caTongBanh} bĂ nh Â· {fmtKg(caTongKg)}
+                      Ca {caLabel}: {caTongBanh} bánh · {fmtKg(caTongKg)}
                     </span>
                   )}
                 </div>
@@ -2307,9 +2308,9 @@ export default function ProductPage() {
                   <div className="flex items-center gap-3 mb-5">
                     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 flex-wrap">
                       <span className="text-xs font-bold text-slate-500">
-                        Khoáº£ng lĂ´:
+                        Khoảng lô:
                       </span>
-                      <span className="text-xs text-slate-400">Tá»« lĂ´</span>
+                      <span className="text-xs text-slate-400">Từ lô</span>
                       <input
                         type="number"
                         min={1}
@@ -2322,7 +2323,7 @@ export default function ProductPage() {
                         }
                         className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"
                       />
-                      <span className="text-xs text-slate-400">Ä‘áº¿n lĂ´</span>
+                      <span className="text-xs text-slate-400">đến lô</span>
                       <input
                         type="number"
                         min={cs.from_num}
@@ -2343,13 +2344,13 @@ export default function ProductPage() {
                       </span>
                       {caIdx === 0 && maxNumFromDB > 0 && (
                         <span className="text-[10px] text-slate-400 italic">
-                          (gáº§n nháº¥t: {maxNumFromDB}
+                          (gần nhất: {maxNumFromDB}
                           {session.suffix}/{sessionYear})
                         </span>
                       )}
                       {loCount > 0 && (
                         <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
-                          {loCount} lĂ´
+                          {loCount} lô
                         </span>
                       )}
                     </div>
@@ -2357,7 +2358,7 @@ export default function ProductPage() {
 
                   {cs.lots.length === 0 ? (
                     <p className="text-xs text-slate-400 italic text-center py-4">
-                      Nháº­p khoáº£ng lĂ´ Ä‘á»ƒ hiá»ƒn thá»‹...
+                      Nhập khoảng lô để hiển thị...
                     </p>
                   ) : (
                     <div className="space-y-4">
@@ -2377,9 +2378,9 @@ export default function ProductPage() {
                               </span>
                               <div className="flex items-center gap-2 text-xs">
                                 <span className="bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-bold">
-                                  đŸ”’ ÄĂ£ {lot.trang_thai}
+                                  Đã {normalizeLotStatus(lot.trang_thai)}
                                 </span>
-                                <span>{lot.tong_banh} bĂ nh</span>
+                                <span>{lot.tong_banh} bánh</span>
                               </div>
                             </div>
                           );
@@ -2402,15 +2403,15 @@ export default function ProductPage() {
                             >
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-bold text-slate-500">
-                                  LĂ´ giá»¯a: {midStart}
-                                  {sfxPart} â†’ {midEnd}
+                                  Lô giữa: {midStart}
+                                  {sfxPart} → {midEnd}
                                   {sfxPart}
                                   <span className="ml-2 text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
-                                    {midCount} lĂ´ trĂ²n
+                                    {midCount} lô tròn
                                   </span>
                                 </span>
                                 <span className="text-xs text-slate-500 font-bold">
-                                  {midCount} Ă— {cfg.lo_tron} bĂ nh ={" "}
+                                  {midCount} × {cfg.lo_tron} bánh ={" "}
                                   {(
                                     (midCount *
                                       cfg.lo_tron *
@@ -2427,7 +2428,7 @@ export default function ProductPage() {
                                     className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5 text-center"
                                   >
                                     <div className="text-[10px] font-bold text-emerald-600">
-                                      Kiá»‡n {k}
+                                      Kiện {k}
                                     </div>
                                     <div className="text-sm font-extrabold text-emerald-700">
                                       {cfg.max_per_kien}{" "}
@@ -2451,10 +2452,10 @@ export default function ProductPage() {
                           lot.role === "single"
                             ? ""
                             : lot.role === "dau"
-                              ? " Â· LĂ´ Ä‘áº§u"
-                              : " Â· LĂ´ cuá»‘i";
+                              ? " · Lô đầu"
+                              : " · Lô cuối";
                         const contLabel = lot.is_continuation
-                          ? " Â· Káº¿ thá»«a"
+                          ? " · Kế thừa"
                           : "";
                         const kienKeys = [
                           "kien_a",
@@ -2500,21 +2501,21 @@ export default function ProductPage() {
                               </span>
                               <div className="flex items-center gap-3 text-xs text-slate-500">
                                 <span>
-                                  Tá»•ng:{" "}
+                                  Tổng:{" "}
                                   <strong
                                     className={
-                                      lot.trang_thai === "HoĂ n thĂ nh"
+                                      normalizeLotStatus(lot.trang_thai) === "Hoàn thành"
                                         ? "text-emerald-600"
                                         : "text-amber-600"
                                     }
                                   >
-                                    {lot.tong_banh} bĂ nh
+                                    {lot.tong_banh} bánh
                                   </strong>
                                 </span>
                                 <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${lot.trang_thai === "HoĂ n thĂ nh" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${normalizeLotStatus(lot.trang_thai) === "Hoàn thành" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
                                 >
-                                  {lot.trang_thai}
+                                  {normalizeLotStatus(lot.trang_thai)}
                                 </span>
                               </div>
                             </div>
@@ -2534,7 +2535,7 @@ export default function ProductPage() {
                                       className="flex flex-col items-center gap-1"
                                     >
                                       <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full whitespace-nowrap">
-                                        Ca trÆ°á»›c Â· Ä‘Ă£ Ä‘á»§
+                                        Ca trước · đã đủ
                                       </span>
                                       <div className="w-full border border-indigo-300 bg-indigo-50 rounded-xl px-2 py-2 flex items-center justify-between">
                                         <span className="text-xs font-extrabold text-indigo-500">
@@ -2568,7 +2569,7 @@ export default function ProductPage() {
                                       className="flex flex-col items-center gap-1"
                                     >
                                       <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap">
-                                        ThĂªm â‰¤{remaining}
+                                        Thêm ≤{remaining}
                                       </span>
                                       <div
                                         className={`relative border rounded-xl overflow-hidden w-full ${
@@ -2621,7 +2622,7 @@ export default function ProductPage() {
                                                 resetKeys[ki],
                                               )
                                             }
-                                            title={`Reset vá» ca trÆ°á»›c (${prev})`}
+                                            title={`Reset về ca trước (${prev})`}
                                             className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors"
                                           >
                                             <X size={10} />
@@ -2629,7 +2630,7 @@ export default function ProductPage() {
                                         )}
                                       </div>
                                       <div className="text-[10px] text-center text-amber-600 font-bold">
-                                        +{delta} bĂ nh ca nĂ y
+                                        +{delta} bánh ca này
                                       </div>
                                     </div>
                                   );
@@ -2685,7 +2686,7 @@ export default function ProductPage() {
                                               resetKeys[ki],
                                             )
                                           }
-                                          title="Reset vá» 0"
+                                          title="Reset về 0"
                                           className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors"
                                         >
                                           <X size={10} />
@@ -2705,7 +2706,7 @@ export default function ProductPage() {
                             </div>
 
                             <div className="mt-2 text-xs text-slate-400 text-right">
-                              {fmtKg(lot.tong_kg)} Â· {lot.tong_banh} bĂ nh
+                              {fmtKg(lot.tong_kg)} · {lot.tong_banh} bánh
                             </div>
                           </div>
                         );
@@ -2716,17 +2717,17 @@ export default function ProductPage() {
                   {caTongBanh > 0 && (
                     <div className="mt-3 flex items-center flex-wrap gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
                       <span className="text-xs font-extrabold text-blue-700">
-                        Tá»•ng Ca {caLabel}:
+                        Tổng Ca {caLabel}:
                       </span>
                       <span className="text-sm font-extrabold text-blue-800">
-                        {caTongBanh} bĂ nh
+                        {caTongBanh} bánh
                       </span>
-                      <span className="text-xs text-blue-400">Â·</span>
+                      <span className="text-xs text-blue-400">·</span>
                       <span className="text-sm font-extrabold text-blue-800">
                         {Math.round(caTongKg).toLocaleString("vi-VN")} kg
                       </span>
                       <span className="ml-auto text-xs text-blue-500">
-                        â‰ˆ {fmtKg(caTongKg)}
+                        ≈ {fmtKg(caTongKg)}
                       </span>
                     </div>
                   )}
@@ -2753,7 +2754,7 @@ export default function ProductPage() {
             <div className="max-w-7xl mx-auto px-6 py-3">
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-xs font-bold text-slate-600 shrink-0">
-                  NgÄƒn {selectedNgan.ten_ngan}
+                  Ngăn {selectedNgan.ten_ngan}
                 </span>
                 <div className="flex-1 bg-slate-100 rounded-full h-1.5">
                   <div
@@ -2773,7 +2774,7 @@ export default function ProductPage() {
                 </span>
                 {nganBlocked && (
                   <span className="text-[10px] text-red-600 font-bold shrink-0">
-                    â›” VÆ°á»£t 110%
+                    Vượt 110%
                   </span>
                 )}
               </div>
@@ -2785,23 +2786,23 @@ export default function ProductPage() {
                   )}
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                  {session.loai_csr} Â· {session.loai_banh}kg
+                  {session.loai_csr} · {session.loai_banh}kg
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap max-w-[200px] truncate">
                   {session.boc}
                 </span>
                 {session.pallet.length > 0 && (
                   <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                    {session.pallet.join(" Â· ")}
+                    {session.pallet.join(" · ")}
                   </span>
                 )}
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
                   CT:{session.chi_thi}
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                  ThĂ£m {session.tham === "Cá»§" ? "cÅ©" : session.tham}
+                  Thảm {session.tham === "Cũ" ? "cũ" : session.tham}
                 </span>
-                <span className="text-slate-300 text-xs">â”‚</span>
+                <span className="text-slate-300 text-xs">|</span>
                 {caSections.map((cs, ci) => {
                   const caKg =
                     Math.round(
@@ -2835,7 +2836,7 @@ export default function ProductPage() {
                 })}
                 {kgLanNay > 0 && (
                   <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[11px] font-extrabold rounded-full whitespace-nowrap">
-                    Tá»•ng: {Math.round(kgLanNay).toLocaleString("vi-VN")} kg
+                    Tổng: {Math.round(kgLanNay).toLocaleString("vi-VN")} kg
                   </span>
                 )}
                 <div className="ml-auto flex gap-2 shrink-0">
@@ -2843,7 +2844,7 @@ export default function ProductPage() {
                     onClick={() => setView("list")}
                     className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                   >
-                    Há»§y
+                    Hủy
                   </button>
                   {nganPct >= 100 && !nganBlocked ? (
                     <button
@@ -2854,8 +2855,8 @@ export default function ProductPage() {
                       className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
                     >
                       {saving
-                        ? "Äang lÆ°u..."
-                        : `âœ“ LÆ°u Â· ÄĂ¡nh dáº¥u ngÄƒn ÄĂ£ sáº£n xuáº¥t`}
+                        ? "Đang lưu..."
+                        : `Lưu · đánh dấu ngăn Đã sản xuất`}
                     </button>
                   ) : (
                     <button
@@ -2869,8 +2870,8 @@ export default function ProductPage() {
                       className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
                     >
                       {saving
-                        ? "Äang lÆ°u..."
-                        : `LÆ°u ${sessionTotals.banh > 0 ? sessionTotals.banh + " bĂ nh" : "lĂ´"}`}
+                        ? "Đang lưu..."
+                        : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bánh" : "lô"}`}
                     </button>
                   )}
                 </div>
@@ -2886,7 +2887,7 @@ export default function ProductPage() {
                 onClick={() => setView("list")}
                 className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
-                Há»§y
+                Hủy
               </button>
               <button
                 disabled
@@ -3186,7 +3187,7 @@ export default function ProductPage() {
                           <Trash2 size={12} />
                           {preCheckLoading
                             ? "Äang kiá»ƒm tra..."
-                            : `XĂ³a ${selectedDeleteIds.size} lĂ´`}
+                            : `Xóa ${selectedDeleteIds.size} dòng`}
                         </button>
                         <button
                           onClick={(e) => {
@@ -3298,22 +3299,22 @@ export default function ProductPage() {
                                   {caContribs.map((c) => (
                                     <tr
                                       key={c.uid}
-                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && selectedDeleteIds.has(c.id) ? "bg-red-50" : ""}`}
+                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && selectedDeleteIds.has(c.uid) ? "bg-red-50" : ""}`}
                                     >
                                       {deleteMode === date && (
                                         <td className="px-3 py-2.5">
                                           <input
                                             type="checkbox"
                                             checked={selectedDeleteIds.has(
-                                              c.id,
+                                              c.uid,
                                             )}
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
-                                                if (next.has(c.id)) {
-                                                  next.delete(c.id);
+                                                if (next.has(c.uid)) {
+                                                  next.delete(c.uid);
                                                 } else {
-                                                  next.add(c.id);
+                                                  next.add(c.uid);
                                                 }
                                                 return next;
                                               })
@@ -3871,13 +3872,13 @@ export default function ProductPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="font-extrabold text-slate-800 mb-2">
-              XĂ¡c nháº­n xĂ³a?
+              Xác nhận xóa?
             </h3>
             {lotsBlockedByKn.length > 0 && (
               <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                 <p className="text-xs font-bold text-amber-700">
-                  â ï¸ {lotsBlockedByKn.length} lĂ´ Ä‘Ă£ cĂ³ phiáº¿u KN â€” sáº½ khĂ´ng Ä‘Æ°á»£c
-                  xĂ³a:
+                  {lotsBlockedByKn.length} lô đã có phiếu KN - sẽ không được
+                  xóa:
                 </p>
                 <p className="text-xs text-amber-600 mt-1 break-all">
                   {lotsBlockedByKn
@@ -3890,14 +3891,14 @@ export default function ProductPage() {
             <p className="text-sm text-slate-500 mb-5">
               {delConfirm === "bulk"
                 ? lotsBlockedByKn.length === selectedDeleteIds.size
-                  ? "Táº¥t cáº£ lĂ´ Ä‘Ă£ chá»n Ä‘á»u cĂ³ phiáº¿u KN, khĂ´ng thá»ƒ xĂ³a."
+                  ? "Tất cả dòng đã chọn đều có phiếu KN, không thể xóa."
                   : lotsBlockedByKn.length > 0
-                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lĂ´ chÆ°a cĂ³ KN sáº½ bá»‹ xĂ³a vÄ©nh viá»…n.`
-                    : `${selectedDeleteIds.size} lĂ´ Ä‘Ă£ chá»n sáº½ bá»‹ xĂ³a vÄ©nh viá»…n.`
-                : "LĂ´ nĂ y sáº½ bá»‹ xĂ³a vÄ©nh viá»…n."}{" "}
+                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} dòng chưa có KN sẽ bị xóa vĩnh viễn.`
+                    : `${selectedDeleteIds.size} dòng đã chọn sẽ bị xóa vĩnh viễn.`
+                : "Dòng này sẽ bị xóa vĩnh viễn."}{" "}
               {(delConfirm !== "bulk" ||
                 lotsBlockedByKn.length < selectedDeleteIds.size) &&
-                "NgÄƒn lÆ°u liĂªn quan sáº½ Ä‘Æ°á»£c cáº­p nháº­t tráº¡ng thĂ¡i tá»± Ä‘á»™ng."}
+                "Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động."}
             </p>
             <div className="flex gap-3">
               {delConfirm === "bulk" &&
@@ -3909,7 +3910,7 @@ export default function ProductPage() {
                   }}
                   className="w-full py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
-                  ÄĂ³ng
+                  Đóng
                 </button>
               ) : (
                 <>
@@ -3917,7 +3918,7 @@ export default function ProductPage() {
                     onClick={() => setDelConfirm(null)}
                     className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                   >
-                    Há»§y
+                    Hủy
                   </button>
                   <button
                     onClick={() =>
@@ -3927,7 +3928,7 @@ export default function ProductPage() {
                     }
                     className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
                   >
-                    XĂ³a
+                    Xóa
                   </button>
                 </>
               )}
