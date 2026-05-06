@@ -68,6 +68,26 @@ export interface Lot {
   ghi_chu: string
 }
 
+export interface LotTransaction {
+  id: string
+  lot_id: string
+  ngan_id: string
+  ca: string
+  ngay_nhap: string
+  kien_a: number
+  kien_b: number
+  kien_c: number
+  kien_d: number
+  so_banh: number
+  so_kg: number
+  created_at?: string
+  created_by?: string | null
+}
+
+export interface LotWithTransactions extends Lot {
+  lot_transactions?: LotTransaction[]
+}
+
 export interface QCResult {
   id: string
   factory_id: string

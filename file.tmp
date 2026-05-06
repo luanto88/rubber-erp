@@ -88,29 +88,6 @@ Phai filter theo nha may va day chuyen:
 }
 ```
 
-### Schema chi tiet giao dich lo (`lot_transactions`)
-
-```ts
-{
-  id: UUID,
-  lot_id: UUID,
-  ngan_id: UUID,
-  ca: string,         // A | B | C
-  ngay_nhap: date,    // ngay thuc te cua ca nhap
-  kien_a: number,
-  kien_b: number,
-  kien_c: number,
-  kien_d: number,
-  so_banh: number,    // san luong delta cua dong giao dich
-  so_kg: number,      // san luong kg delta cua dong giao dich
-}
-```
-
-- `lots` la bang master tong hop theo `ma_lo`
-- `lot_transactions` la lich su chi tiet theo tung ca / tung ngay / tung ngan
-- Mot `ma_lo` co the co nhieu dong `lot_transactions`
-- Trong cung `factory_id`, chi duoc 1 dong `lots` cho moi `ma_lo`
-
 ### Source of truth cho option
 
 `du_lieu_nha_may.xlsx` la source cao nhat cho:
@@ -149,11 +126,11 @@ Quy tac loc:
 
 ```ts
 if (loai_banh === 20) {
-  lo_tron = 240;
+  lo_tron = 240
 } else {
-  lo_tron = 144;
+  lo_tron = 144
 }
-trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang";
+trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang"
 ```
 
 ### Auto-calc
@@ -174,7 +151,7 @@ trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang";
 ### Kien toi da theo loai banh
 
 ```ts
-const maxKienValue = loai_banh === 20 ? 60 : 36;
+const maxKienValue = loai_banh === 20 ? 60 : 36
 ```
 
 ### Rule `tham`
@@ -194,24 +171,12 @@ Khi lo cuoi ca truoc dang do:
   - update chinh ban ghi `Do dang` hien co
   - khong tao ban ghi `lots` moi cung `ma_lo`
   - set `ngay_ht = ngay_sx` cua lan nhap hoan tat
-  - luu them 1 dong vao `lot_transactions` cho ca dang nhap
 
 ### Quy tac duy nhat `ma_lo`
 
 - Trong cung `factory_id`, `ma_lo` la dinh danh nghiep vu duy nhat
 - Khong duoc ton tai dong thoi 2 ban ghi `lots` cung `ma_lo` voi cac trang thai khac nhau
 - Neu lo `Do dang` da ton tai, thao tac sau phai tiep tuc cap nhat ban ghi do, khong duoc tao lo moi
-
-### Rule xoa dong san xuat
-
-- Xoa trong session thanh pham la xoa theo tung dong `lot_transactions`
-- Khong xoa ca `lots` khi van con it nhat 1 giao dich
-- Chi duoc xoa dong giao dich moi nhat cua lo dang do (de bao toan lich su va tinh dong nhat)
-- Khi xoa xong phai tinh lai `lots`:
-  - `tong_banh`, `tong_kg`
-  - `trang_thai` (`Do dang` / `Hoan thanh` / `Xuat hang`)
-  - `ngan_id`, `ca`, `ngay_ht` theo giao dich moi nhat con lai
-- Neu lo khong con giao dich nao -> cho phep xoa master `lots`
 
 ## 5. Quan he Ngan va Thanh pham
 
@@ -224,15 +189,7 @@ Khi lo cuoi ca truoc dang do:
   - `< 100%` -> `Dang san xuat`
   - `100% - 110%` -> giu nguyen trang thai hien tai
   - Ngan khong con lo -> `Cho san xuat`
-
-### Rule tinh trang thai ngan sau khi xoa/sua
-
-- Luon tinh tong kg theo `lot_transactions` cua tung `ngan_id` (khong dua vao 1 truong snapshot don le)
-- Neu ngan khong con san luong -> `Cho san xuat`
-- Neu ty le lap day `< 100%` -> `Dang san xuat`
-- Neu ty le `100% - 110%`:
-  - Neu ngan dang la `Da san xuat` -> giu nguyen `Da san xuat`
-  - Neu ngan dang la trang thai khac -> giu theo workflow hien tai
+- **Gợi ý ngăn:** Khi tạo lô mới, hệ thống tự gợi ý ngăn đang ở trạng thái `Dang san xuat` gần nhất thuộc cùng `day_chuyen`.
 
 ## 5.1. Chi tiet ngan luu tren UI
 
@@ -245,17 +202,5 @@ Khi lo cuoi ca truoc dang do:
 
 ## 6. Quan he Thanh pham va Xuat hang
 
-- Lo `Hoan thanh` duoc hien thi tai module `Xuat hang`
-- Xuat het remaining -> lo chuyen `Xuat hang`
-- Xoa don hang -> tinh lai remaining
+- Xoa don hang -> tinh lai remaining. Nếu hàng quay về kho, trạng thái lô tại màn Thành phẩm phải tự động chuyển từ `Xuat hang` về `Hoan thanh` tức thì.
 - Neu con hang kha dung tro lai -> lo quay ve `Hoan thanh`
-
-### Dong bo canh bao Do dang
-
-- Danh sach canh bao do dang toan cuc va canh bao trong form nhap thanh pham phai dung cung 1 nguon du lieu va cung 1 rule loc
-- Khong de truong hop ngoai form bao `Do dang` nhung trong form khong con lo do dang (hoac nguoc lai)
-
-### Goi y tu dong trong form nhap
-
-- Goi y `so lo gan nhat` dua theo lo `Do dang` gan nhat trong cung series (`loai_csr + loai_banh + year`)
-- Goi y `ngan_id` uu tien theo giao dich gan nhat cung `day_chuyen` de tranh nham day chuyen

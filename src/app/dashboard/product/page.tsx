@@ -1,7 +1,15 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
+import {
+  deleteLotTransaction,
+  saveLotTransaction,
+} from "@/app/dashboard/product/actions";
+import {
+  dedupeLotsByMaLo,
+  normalizeLotStatus,
+} from "@/app/dashboard/product/shared";
 import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import {
   Plus,
@@ -22,9 +30,10 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type Lot = {
   id: string;
+  factory_id?: string;
   ma_lo: string;
   num: number;
   suffix: string;
@@ -48,10 +57,27 @@ type Lot = {
   tong_kg: number;
   trang_thai: string;
   ghi_chu: string;
-  dd_snapshot?: any;
   image_url_1?: string;
   image_url_2?: string;
+  created_at?: string;
+  updated_at?: string;
   ngans?: { ten_ngan: string; ma_ngan: string; loai_nl: string };
+  lot_transactions?: LotTransaction[];
+};
+
+type LotTransaction = {
+  id: string;
+  lot_id: string;
+  ngan_id: string;
+  ca: string;
+  ngay_nhap: string;
+  kien_a: number;
+  kien_b: number;
+  kien_c: number;
+  kien_d: number;
+  so_banh: number;
+  so_kg: number;
+  created_at?: string;
 };
 
 type Ngan = {
@@ -75,11 +101,11 @@ type SuffixItem = {
 
 type SessionHeader = {
   year: string;
-  ngay_sx: string; // dùng chung mọi ca, mặc định maxDate+1
+  ngay_sx: string; // d\u00f9ng chung m\u1ecdi ca, m\u1eb7c \u0111\u1ecbnh maxDate+1
   day_chuyen: string;
   so_ca: 1 | 2 | 3;
   ngan_id: string;
-  suffix: string; // "" = Trống
+  suffix: string; // "" = Tr\u1ed1ng
   loai_csr: string;
   loai_banh: number;
   boc: string;
@@ -88,17 +114,6 @@ type SessionHeader = {
   pallet: string[];
   image_url_1: string;
   image_url_2: string;
-};
-
-type HistoryEntry = {
-  ca: string;
-  ngay_sx: string;
-  kien_a: number;
-  kien_b: number;
-  kien_c: number;
-  kien_d: number;
-  added_banh: number;
-  timestamp: string;
 };
 
 type LotDraft = {
@@ -119,7 +134,6 @@ type LotDraft = {
   is_continuation: boolean;
   existing_id?: string;
   is_already_completed?: boolean;
-  existing_snapshot?: any;
   tong_banh: number;
   tong_kg: number;
   trang_thai: string;
@@ -159,6 +173,7 @@ type EditForm = {
 
 type LotContribution = Lot & {
   uid: string;
+  transaction_id?: string;
   tong_banh_cua_ca: number;
   tong_kg_cua_ca: number;
   locked_a?: boolean;
@@ -177,13 +192,13 @@ type LotSeries = {
   year: string;
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const CA_OPTS = ["A", "B", "C"];
-const THAM_OPTS = ["cũ", "Mới"];
-const TRANG_THAI_OPTS = ["Hoàn thành", "Dở dang", "Xuất hàng"];
-const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
+const THAM_OPTS = ["c\u0169", "M\u1edbi"];
+const TRANG_THAI_OPTS = ["Ho\u00e0n th\u00e0nh", "D\u1edf dang", "Xu\u1ea5t h\u00e0ng"];
+const PALLET_OPTS = ["S\u1eaft \u0111\u1ebf g\u1ed7", "S\u1eaft \u0111\u1ebf nh\u1ef1a", "S\u1eaft m\u1ecfng", "MB5", "G\u1ed7"];
 
-// ─── Business Logic ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Business Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) {
     const b = selected_banh || 35;
@@ -206,21 +221,21 @@ function getLoaiBanhOptions(loai_csr: string): number[] {
 }
 
 function getLoaiCSRByDayChuyen(dc: string, prefix: "CSR" | "SVR"): string[] {
-  if (dc === "Mủ nước")
+  if (dc === "M\u1ee7 n\u01b0\u1edbc")
     return [
       `${prefix}L`,
       `${prefix}3L`,
       `${prefix}CV50`,
       `${prefix}CV60`,
-      "Ngoại lệ",
+      "Ngo\u1ea1i l\u1ec7",
     ];
-  return [`${prefix}10`, `${prefix}20`, "Ngoại lệ"];
+  return [`${prefix}10`, `${prefix}20`, "Ngo\u1ea1i l\u1ec7"];
 }
 
 function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
-  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${loai_csr}`];
-  if (dc === "Mủ nước")
-    return [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${loai_csr}`];
+  const base = [`B\u1ecdc tr\u01a1n 0,04`, `B\u1ecdc nh\u00e3n 0,04 VRG ${loai_csr}`];
+  if (dc === "M\u1ee7 n\u01b0\u1edbc")
+    return [...base, `B\u1ecdc tr\u01a1n 0,13`, `B\u1ecdc nh\u00e3n 0,13 VRG ${loai_csr}`];
   return base;
 }
 
@@ -229,9 +244,9 @@ function autoTrangThai(
   lo_tron: number,
   current: string,
 ): string {
-  if (current === "Xuất hàng") return "Xuất hàng";
-  if (tong_banh >= lo_tron) return "Hoàn thành";
-  return "Dở dang";
+  if (current === "Xu\u1ea5t h\u00e0ng") return "Xu\u1ea5t h\u00e0ng";
+  if (tong_banh >= lo_tron) return "Ho\u00e0n th\u00e0nh";
+  return "D\u1edf dang";
 }
 
 function getLotCompletionDate(
@@ -239,7 +254,7 @@ function getLotCompletionDate(
   currentNgaySX: string,
   previousNgayHT?: string | null,
 ): string | null {
-  if (trang_thai === "Hoàn thành" || trang_thai === "Xuất hàng") {
+  if (trang_thai === "Ho\u00e0n th\u00e0nh" || trang_thai === "Xu\u1ea5t h\u00e0ng") {
     return currentNgaySX || previousNgayHT || null;
   }
   return null;
@@ -345,7 +360,7 @@ function generateLotDrafts(
             : "giua";
 
     const isCompleted =
-      dbLot && ["Hoàn thành", "Xuất hàng"].includes(dbLot.trang_thai);
+      dbLot && ["Ho\u00e0n th\u00e0nh", "Xu\u1ea5t h\u00e0ng"].includes(dbLot.trang_thai);
     if (isCompleted) {
       drafts.push({
         num: n,
@@ -373,11 +388,11 @@ function generateLotDrafts(
     }
 
     const fromPrevDraft =
-      n === fromNum && prevCaLastDraft?.trang_thai === "Dở dang"
+      n === fromNum && prevCaLastDraft?.trang_thai === "D\u1edf dang"
         ? prevCaLastDraft
         : undefined;
     const fromDB =
-      n === fromNum && dbLot?.trang_thai === "Dở dang" && !fromPrevDraft
+      n === fromNum && dbLot?.trang_thai === "D\u1edf dang" && !fromPrevDraft
         ? dbLot
         : undefined;
     const contSource = fromPrevDraft || fromDB;
@@ -403,7 +418,7 @@ function generateLotDrafts(
         is_continuation: false,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: "Hoàn thành",
+        trang_thai: "Ho\u00e0n th\u00e0nh",
       });
       continue;
     }
@@ -453,12 +468,9 @@ function generateLotDrafts(
         existing_id:
           (fromDB as Lot | undefined)?.id ??
           (fromPrevDraft as LotDraft | undefined)?.existing_id,
-        existing_snapshot:
-          (fromDB as Lot | undefined)?.dd_snapshot ??
-          (fromPrevDraft as LotDraft | undefined)?.existing_snapshot,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: autoTrangThai(tb, lo_tron, "Dở dang"),
+        trang_thai: autoTrangThai(tb, lo_tron, "D\u1edf dang"),
       });
     } else {
       const tb = max_per_kien * 4;
@@ -480,7 +492,7 @@ function generateLotDrafts(
         is_continuation: false,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: "Hoàn thành",
+        trang_thai: "Ho\u00e0n th\u00e0nh",
       });
     }
   }
@@ -496,16 +508,16 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
   return {
     year: normalizeLotYear(yearFromDate(todayStr())),
     ngay_sx: todayStr(),
-    day_chuyen: "Mủ tạp",
+    day_chuyen: "M\u1ee7 t\u1ea1p",
     so_ca: 2,
     ngan_id: "",
     suffix: "cs",
     loai_csr: defaultCsr,
     loai_banh: 35,
-    boc: `Bọc nhãn 0,04 VRG ${defaultCsr}`,
-    tham: "Củ",
+    boc: `B\u1ecdc nh\u00e3n 0,04 VRG ${defaultCsr}`,
+    tham: "C\u0169",
     chi_thi: "1",
-    pallet: ["Sắt đế gỗ"],
+    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
     image_url_1: "",
     image_url_2: "",
   };
@@ -524,12 +536,12 @@ function emptyEditForm(): EditForm {
     ngay_sx: todayStr(),
     ca: "A",
     ngan_id: "",
-    day_chuyen: "Mủ tạp",
+    day_chuyen: "M\u1ee7 t\u1ea1p",
     loai_csr: "CSR10",
     loai_banh: 35,
-    boc: "Bọc nhãn 0,04 VRG CSR10",
-    tham: "Củ",
-    pallet: ["Sắt đế gỗ"],
+    boc: "B\u1ecdc nh\u00e3n 0,04 VRG CSR10",
+    tham: "C\u0169",
+    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
     chi_thi: "1",
     kien_a: 36,
     kien_b: 36,
@@ -537,19 +549,16 @@ function emptyEditForm(): EditForm {
     kien_d: 36,
     tong_banh: 144,
     tong_kg: 5040,
-    trang_thai: "Hoàn thành",
+    trang_thai: "Ho\u00e0n th\u00e0nh",
     ghi_chu: "",
   };
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
-  const [lotsStats, setLotsStats] = useState<
-    { ngan_id: string | null; tong_kg: number }[]
-  >([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [factoryId, setFactoryId] = useState<string | null>(null);
   const [factory, setFactory] = useState<{ id: string; name: string } | null>(
     null,
@@ -594,31 +603,43 @@ export default function ProductPage() {
     defaultCaSection("A"),
   ]);
 
-  // ── Load data ──────────────────────────────────────────────────────────────
+  // â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const loadData = useCallback(async (fid: string) => {
     setLoading(true);
     try {
       const q = supabase
         .from("lots")
-        .select("*, ngans(ten_ngan, ma_ngan, loai_nl)")
+        .select(
+          "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at)",
+        )
         .eq("factory_id", fid)
         .order("ngay_sx", { ascending: false })
         .order("created_at", { ascending: false });
 
-      const [{ data: lotsData }, { data: ngansData }, { data: statsData }] =
-        await Promise.all([
-          q,
-          supabase
-            .from("ngans")
-            .select(
-              "id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt",
-            )
-            .eq("factory_id", fid),
-          supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid),
-        ]);
-      setLots(lotsData || []);
+      const [{ data: lotsData }, { data: ngansData }] = await Promise.all([
+        q,
+        supabase
+          .from("ngans")
+          .select(
+            "id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt",
+          )
+          .eq("factory_id", fid),
+      ]);
+      const normalizedLots = (lotsData || []).map((lot) => ({
+        ...lot,
+        trang_thai: normalizeLotStatus(lot.trang_thai),
+        lot_transactions: [...(lot.lot_transactions || [])].sort((a, b) => {
+          const dateDiff =
+            new Date(a.ngay_nhap).getTime() - new Date(b.ngay_nhap).getTime();
+          if (dateDiff !== 0) return dateDiff;
+          return (
+            new Date(a.created_at || 0).getTime() -
+            new Date(b.created_at || 0).getTime()
+          );
+        }),
+      }));
+      setLots(dedupeLotsByMaLo(normalizedLots));
       setNgans(ngansData || []);
-      setLotsStats(statsData || []);
     } finally {
       setLoading(false);
     }
@@ -654,7 +675,7 @@ export default function ProductPage() {
 
       supabase
         .from("lots")
-        .update({ day_chuyen: "Mủ tạp" })
+        .update({ day_chuyen: "Má»§ táº¡p" })
         .eq("factory_id", fid)
         .or("day_chuyen.is.null,day_chuyen.eq.")
         .then(() => {});
@@ -662,39 +683,33 @@ export default function ProductPage() {
     void bootstrap();
   }, [loadData]);
 
-  // ── Computed Bóc tách sản lượng (Contributions) ────────────────────────────
+  // â”€â”€ Computed BĂ³c tĂ¡ch sáº£n lÆ°á»£ng (Contributions) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const contributions = useMemo(() => {
     const arr: LotContribution[] = [];
     lots.forEach((lot) => {
-      if (
-        lot.dd_snapshot &&
-        Array.isArray(lot.dd_snapshot.history) &&
-        lot.dd_snapshot.history.length > 0
-      ) {
-        const history = lot.dd_snapshot.history as HistoryEntry[];
-        history.forEach((h, i) => {
-          const prev = i > 0 ? history[i - 1] : null;
+      const transactions = lot.lot_transactions || [];
+      if (transactions.length > 0) {
+        transactions.forEach((tx, index) => {
           arr.push({
             ...lot,
-            ngay_sx: h.ngay_sx || lot.ngay_sx,
-            uid: `${lot.id}-${i}`,
-            ca: h.ca,
-            tong_banh_cua_ca: h.added_banh,
-            tong_kg_cua_ca: h.added_banh * lot.loai_banh,
-            trang_thai: i === history.length - 1 ? lot.trang_thai : "Dở dang",
-            kien_a: h.kien_a,
-            kien_b: h.kien_b,
-            kien_c: h.kien_c,
-            kien_d: h.kien_d,
-            tong_banh: h.kien_a + h.kien_b + h.kien_c + h.kien_d,
-            locked_a: prev !== null && h.kien_a === prev.kien_a && h.kien_a > 0,
-            locked_b: prev !== null && h.kien_b === prev.kien_b && h.kien_b > 0,
-            locked_c: prev !== null && h.kien_c === prev.kien_c && h.kien_c > 0,
-            locked_d: prev !== null && h.kien_d === prev.kien_d && h.kien_d > 0,
-            disp_a: prev !== null ? h.kien_a - prev.kien_a : h.kien_a,
-            disp_b: prev !== null ? h.kien_b - prev.kien_b : h.kien_b,
-            disp_c: prev !== null ? h.kien_c - prev.kien_c : h.kien_c,
-            disp_d: prev !== null ? h.kien_d - prev.kien_d : h.kien_d,
+            uid: tx.id,
+            transaction_id: tx.id,
+            ngay_sx: tx.ngay_nhap || lot.ngay_sx,
+            ca: tx.ca,
+            ngan_id: tx.ngan_id || lot.ngan_id,
+            tong_banh_cua_ca: tx.so_banh,
+            tong_kg_cua_ca: tx.so_kg,
+            trang_thai:
+              index === transactions.length - 1 ? lot.trang_thai : "D\u1edf dang",
+            kien_a: tx.kien_a,
+            kien_b: tx.kien_b,
+            kien_c: tx.kien_c,
+            kien_d: tx.kien_d,
+            tong_banh: tx.so_banh,
+            disp_a: tx.kien_a,
+            disp_b: tx.kien_b,
+            disp_c: tx.kien_c,
+            disp_d: tx.kien_d,
           });
         });
       } else {
@@ -712,8 +727,6 @@ export default function ProductPage() {
     });
     return arr;
   }, [lots]);
-
-  // ── List Filters & Grouping ────────────────────────────────────────────────
   const filteredContribs = useMemo(() => {
     return contributions.filter((c) => {
       if (
@@ -744,7 +757,7 @@ export default function ProductPage() {
   const groupedByDateAndCa = useMemo(() => {
     const groups: Record<string, Record<string, LotContribution[]>> = {};
     filteredContribs.forEach((c) => {
-      const date = c.ngay_sx || "Chưa có ngày";
+      const date = c.ngay_sx || "ChÆ°a cĂ³ ngĂ y";
       if (!groups[date]) groups[date] = {};
       if (!groups[date][c.ca]) groups[date][c.ca] = [];
       groups[date][c.ca].push(c);
@@ -755,9 +768,9 @@ export default function ProductPage() {
   const stats = {
     total: lots.length,
     hoanThanh: lots.filter(
-      (l) => l.trang_thai === "Hoàn thành" || l.trang_thai === "Xuất hàng",
+      (l) => l.trang_thai === "HoĂ n thĂ nh" || l.trang_thai === "Xuáº¥t hĂ ng",
     ).length,
-    dorDang: lots.filter((l) => l.trang_thai === "Dở dang").length,
+    dorDang: lots.filter((l) => l.trang_thai === "Dá»Ÿ dang").length,
     tongBanh: filteredContribs.reduce(
       (s, c) => s + (c.tong_banh_cua_ca || 0),
       0,
@@ -765,34 +778,35 @@ export default function ProductPage() {
     tongKg: filteredContribs.reduce((s, c) => s + (c.tong_kg_cua_ca || 0), 0),
   };
 
-  // ── Create view computed ───────────────────────────────────────────────────
+  // â”€â”€ Create view computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const nganKgMap = useMemo(() => {
     const map: Record<string, number> = {};
-    lotsStats.forEach((ls) => {
-      if (ls.ngan_id)
-        map[ls.ngan_id] = (map[ls.ngan_id] || 0) + (ls.tong_kg || 0);
+    contributions.forEach((c) => {
+      if (c.ngan_id) {
+        map[c.ngan_id] = (map[c.ngan_id] || 0) + (c.tong_kg_cua_ca || 0);
+      }
     });
     return map;
-  }, [lotsStats]);
+  }, [contributions]);
 
   const eligibleNgans = useMemo(() => {
     const now = new Date();
     const validLoaiNl =
-      session.day_chuyen === "Mủ tạp"
+      session.day_chuyen === "Má»§ táº¡p"
         ? [
-            "Mủ chén",
-            "Mủ đông chén",
-            "Mủ đông khối",
-            "Mủ dây",
-            "Mủ dơ",
-            "Mủ tạp",
+            "Má»§ chĂ©n",
+            "Má»§ Ä‘Ă´ng chĂ©n",
+            "Má»§ Ä‘Ă´ng khá»‘i",
+            "Má»§ dĂ¢y",
+            "Má»§ dÆ¡",
+            "Má»§ táº¡p",
           ]
-        : ["Mủ nước"];
+        : ["Má»§ nÆ°á»›c"];
 
     return ngans
       .filter((n) => {
         if (!validLoaiNl.includes(n.loai_nl)) return false;
-        if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
+        if (["ÄĂ³ng", "ÄĂ£ sáº£n xuáº¥t"].includes(n.trang_thai)) return false;
         if (!n.ngay_bd) return false;
         const days = Math.floor(
           (now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000,
@@ -811,9 +825,13 @@ export default function ProductPage() {
   }, [ngans, session.day_chuyen]);
 
   const selectedNgan = ngans.find((n) => n.id === session.ngan_id);
-  const dorDangLots = lots.filter(
-    (l) => l.ngan_id === session.ngan_id && l.trang_thai === "Dở dang",
+  const allDorDangLots = lots.filter(
+    (l) =>
+      l.trang_thai === "Dá»Ÿ dang" &&
+      l.tong_banh > 0 &&
+      (!filterDC || l.day_chuyen === filterDC),
   );
+  const dorDangLots = allDorDangLots.filter((l) => l.ngan_id === session.ngan_id);
 
   const kgDaCoTrongNgan = nganKgMap[session.ngan_id] || 0;
 
@@ -885,7 +903,11 @@ export default function ProductPage() {
     return getJumpedLotNums(existingNums, plannedNums);
   }, [caSections, currentSeries, lots]);
 
-  const getMaxLotNum = (loai_csr: string, loai_banh: number, year: string) =>
+  const getMaxLotNum = (
+    loai_csr: string,
+    loai_banh: number,
+    year: string,
+  ) =>
     lots
       .filter((l) => isSameLotSeries(l, { loai_csr, loai_banh, year }))
       .reduce((m, l) => Math.max(m, l.num || 0), 0);
@@ -899,7 +921,7 @@ export default function ProductPage() {
       .filter(
         (l) =>
           isSameLotSeries(l, { loai_csr, loai_banh, year }) &&
-          l.trang_thai === "Dở dang",
+          l.trang_thai === "Dá»Ÿ dang",
       )
       .sort((a, b) => {
         if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
@@ -912,28 +934,32 @@ export default function ProductPage() {
   useEffect(() => {
     if (!factoryId) return;
     setMaxNumFromDB(
-      getMaxLotNum(session.loai_csr, session.loai_banh, sessionYear),
+      getMaxLotNum(
+        session.loai_csr,
+        session.loai_banh,
+        sessionYear,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, session.loai_csr, session.loai_banh, sessionYear, lots]);
 
-  // ── Session handlers ───────────────────────────────────────────────────────
+  // â”€â”€ Session handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const autoSelectNganId = (dayChuyenVal: string): string => {
     const validNl =
-      dayChuyenVal === "Mủ tạp"
+      dayChuyenVal === "Má»§ táº¡p"
         ? [
-            "Mủ chén",
-            "Mủ đông chén",
-            "Mủ đông khối",
-            "Mủ dây",
-            "Mủ dơ",
-            "Mủ tạp",
+            "Má»§ chĂ©n",
+            "Má»§ Ä‘Ă´ng chĂ©n",
+            "Má»§ Ä‘Ă´ng khá»‘i",
+            "Má»§ dĂ¢y",
+            "Má»§ dÆ¡",
+            "Má»§ táº¡p",
           ]
-        : ["Mủ nước"];
+        : ["Má»§ nÆ°á»›c"];
     const now = new Date();
     const eligible = ngans.filter((n) => {
       if (!validNl.includes(n.loai_nl)) return false;
-      if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
+      if (["ÄĂ³ng", "ÄĂ£ sáº£n xuáº¥t"].includes(n.trang_thai)) return false;
       if (!n.ngay_bd) return false;
       return (
         Math.floor(
@@ -942,14 +968,27 @@ export default function ProductPage() {
       );
     });
     const dangSX = eligible
-      .filter((n) => n.trang_thai === "Đang sản xuất")
+      .filter((n) => n.trang_thai === "Äang sáº£n xuáº¥t")
       .sort(
         (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
       )[0];
+    const recentFromSameDayChuyen = contributions
+      .filter(
+        (c) =>
+          c.day_chuyen === dayChuyenVal &&
+          c.ngan_id &&
+          c.tong_kg_cua_ca > 0 &&
+          eligible.some((n) => n.id === c.ngan_id),
+      )
+      .sort((a, b) => {
+        if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
+        return (CA_ORDER_MAP[b.ca] || 0) - (CA_ORDER_MAP[a.ca] || 0);
+      })[0];
+    if (recentFromSameDayChuyen?.ngan_id) return recentFromSameDayChuyen.ngan_id;
     if (dangSX) return dangSX.id;
-    // Fallback: ngăn Chờ sản xuất MỚI NHẤT (ngay_bd lớn nhất)
+    // Fallback: ngÄƒn Chá» sáº£n xuáº¥t Má»I NHáº¤T (ngay_bd lá»›n nháº¥t)
     const newest = eligible
-      .filter((n) => n.trang_thai === "Chờ sản xuất")
+      .filter((n) => n.trang_thai === "Chá» sáº£n xuáº¥t")
       .sort(
         (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
       )[0];
@@ -1016,7 +1055,7 @@ export default function ProductPage() {
               newBanh,
               lots,
               newYear,
-              prevLast?.trang_thai === "Dở dang" ? prevLast : undefined,
+              prevLast?.trang_thai === "Dá»Ÿ dang" ? prevLast : undefined,
             ),
           };
         });
@@ -1040,11 +1079,11 @@ export default function ProductPage() {
         const prevSection = prev[i - 1];
         const prevLastDraft = prevSection?.lots.at(-1);
         const fromNum =
-          prevLastDraft?.trang_thai === "Dở dang"
+          prevLastDraft?.trang_thai === "Dá»Ÿ dang"
             ? prevSection.to_num
             : (prevSection?.to_num || 0) + 1;
         const prevLast =
-          prevLastDraft?.trang_thai === "Dở dang" ? prevLastDraft : undefined;
+          prevLastDraft?.trang_thai === "Dá»Ÿ dang" ? prevLastDraft : undefined;
         const newSection: CaSection = {
           ca: caLabels[i],
           from_num: fromNum,
@@ -1066,9 +1105,9 @@ export default function ProductPage() {
     });
   };
 
-  // ── Ca section handler ─────────────────────────────────────────────────────
+  // â”€â”€ Ca section handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const updateCaSection = (idx: number, patch: Partial<CaSection>) => {
-    // Nếu chỉ đổi ca letter (không đổi from_num/to_num), giữ nguyên kien values
+    // Náº¿u chá»‰ Ä‘á»•i ca letter (khĂ´ng Ä‘á»•i from_num/to_num), giá»¯ nguyĂªn kien values
     if ("ca" in patch && !("from_num" in patch) && !("to_num" in patch)) {
       setCaSections((prev) =>
         prev.map((cs, i) =>
@@ -1099,7 +1138,7 @@ export default function ProductPage() {
           session.loai_banh,
           lots,
           sessionYear,
-          prevLast?.trang_thai === "Dở dang" ? prevLast : undefined,
+          prevLast?.trang_thai === "Dá»Ÿ dang" ? prevLast : undefined,
         ),
       };
       if (idx + 1 < updated.length) {
@@ -1108,7 +1147,7 @@ export default function ProductPage() {
         if (nextSec.from_num === prevToNum || nextSec.from_num === 0) {
           const lastDraft = updated[idx].lots.at(-1);
           const suggestFrom =
-            lastDraft?.trang_thai === "Dở dang" ? cs.to_num : cs.to_num + 1;
+            lastDraft?.trang_thai === "Dá»Ÿ dang" ? cs.to_num : cs.to_num + 1;
           const nextLast = updated[idx].lots.at(-1);
           updated[idx + 1] = {
             ...nextSec,
@@ -1121,7 +1160,7 @@ export default function ProductPage() {
               session.loai_banh,
               lots,
               sessionYear,
-              lastDraft?.trang_thai === "Dở dang" ? nextLast : undefined,
+              lastDraft?.trang_thai === "Dá»Ÿ dang" ? nextLast : undefined,
             ),
           };
         }
@@ -1130,7 +1169,7 @@ export default function ProductPage() {
     });
   };
 
-  // ── Lot draft handler ──────────────────────────────────────────────────────
+  // â”€â”€ Lot draft handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const updateLotDraft = (
     caIdx: number,
     lotIdx: number,
@@ -1170,7 +1209,7 @@ export default function ProductPage() {
     );
   };
 
-  // Reset một kiện về 0 (hoặc về prev nếu là lô kế thừa)
+  // Reset má»™t kiá»‡n vá» 0 (hoáº·c vá» prev náº¿u lĂ  lĂ´ káº¿ thá»«a)
   const resetKien = (
     caIdx: number,
     lotIdx: number,
@@ -1197,7 +1236,7 @@ export default function ProductPage() {
     );
   };
 
-  // ── Open create ────────────────────────────────────────────────────────────
+  // â”€â”€ Open create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openCreate = async (presetDate?: string) => {
     if (!factoryId) return;
     const maxDate =
@@ -1219,7 +1258,7 @@ export default function ProductPage() {
       "cs";
 
     const defaultCsr =
-      getLoaiCSRByDayChuyen("Mủ tạp", factoryPrefix)[0] || `${factoryPrefix}10`;
+      getLoaiCSRByDayChuyen("Má»§ táº¡p", factoryPrefix)[0] || `${factoryPrefix}10`;
     const cfg = getLoaiBanhConfig(defaultCsr);
     const latestDang = lots
       .filter(
@@ -1227,7 +1266,7 @@ export default function ProductPage() {
           l.loai_csr === defaultCsr &&
           Number(l.loai_banh) === Number(cfg.loai_banh) &&
           l.year === yrStr &&
-          l.trang_thai === "Dở dang",
+          l.trang_thai === "Dá»Ÿ dang",
       )
       .sort((a, b) => {
         if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
@@ -1240,19 +1279,19 @@ export default function ProductPage() {
     const s: SessionHeader = {
       year: yrStr,
       ngay_sx: ngaySX,
-      day_chuyen: "Mủ tạp",
+      day_chuyen: "Má»§ táº¡p",
       so_ca: 2,
-      ngan_id: autoSelectNganId("Mủ tạp"),
+      ngan_id: autoSelectNganId("Má»§ táº¡p"),
       suffix: defaultSuffix,
       loai_csr: defaultCsr,
       loai_banh: cfg.loai_banh,
       boc:
-        getBocsForLoaiCSR("Mủ tạp", defaultCsr)[1] ||
-        getBocsForLoaiCSR("Mủ tạp", defaultCsr)[0] ||
+        getBocsForLoaiCSR("Má»§ táº¡p", defaultCsr)[1] ||
+        getBocsForLoaiCSR("Má»§ táº¡p", defaultCsr)[0] ||
         "",
-      tham: "cũ",
+      tham: "cÅ©",
       chi_thi: lastChiThi,
-      pallet: ["Sắt đế gỗ"],
+      pallet: ["Sáº¯t Ä‘áº¿ gá»—"],
       image_url_1: "",
       image_url_2: "",
     };
@@ -1261,199 +1300,98 @@ export default function ProductPage() {
     setView("create");
   };
 
-  // ── Save create ────────────────────────────────────────────────────────────
+  // â”€â”€ Save create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCreateSave = async (markNganDone: boolean) => {
     if (!factoryId || !session.ngan_id) return;
     const lotYear = normalizeLotYear(session.year, session.ngay_sx);
     if (lotYear.length !== 2) {
-      setSaveError("Năm lô phải có đúng 2 chữ số.");
+      setSaveError("NÄƒm lĂ´ pháº£i cĂ³ Ä‘Ăºng 2 chá»¯ sá»‘.");
       return;
     }
     setSaving(true);
     setSaveError(null);
     let hasError = false;
-    // Theo dõi ID các lô vừa INSERT trong phiên này để các ca sau cùng phiên có thể UPDATE thay vì INSERT lại
-    const insertedLotIds = new Map<string, string>(); // ma_lo → id
     try {
       const cfg = getLoaiBanhConfig(session.loai_csr, session.loai_banh);
       const year = lotYear;
       for (const cs of caSections) {
         for (const draft of cs.lots) {
-          if (draft.is_already_completed) continue; // Bỏ qua lô đã khóa
+          if (draft.is_already_completed) continue;
+
+          const deltaA = draft.is_continuation
+            ? Math.max(0, draft.kien_a - draft.prev_a)
+            : draft.kien_a;
+          const deltaB = draft.is_continuation
+            ? Math.max(0, draft.kien_b - draft.prev_b)
+            : draft.kien_b;
+          const deltaC = draft.is_continuation
+            ? Math.max(0, draft.kien_c - draft.prev_c)
+            : draft.kien_c;
+          const deltaD = draft.is_continuation
+            ? Math.max(0, draft.kien_d - draft.prev_d)
+            : draft.kien_d;
+          const added_banh = deltaA + deltaB + deltaC + deltaD;
+
+          if (added_banh <= 0) continue;
+
+          const ma_lo = buildMaLo(draft.num, session.suffix, year);
+          const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
+          if (!draft.is_continuation && duplicateLot) {
+            setSaveError(
+              duplicateLot.trang_thai === "D\u1edf dang"
+                ? `L\u00f4 ${ma_lo} \u0111ang t\u1ed3n t\u1ea1i \u1edf tr\u1ea1ng th\u00e1i D\u1edf dang. H\u00e3y ti\u1ebfp t\u1ee5c l\u00f4 hi\u1ec7n c\u00f3 thay v\u00ec t\u1ea1o m\u1edbi.`
+                : `L\u00f4 ${ma_lo} \u0111\u00e3 t\u1ed3n t\u1ea1i trong th\u00e0nh ph\u1ea9m, kh\u00f4ng th\u1ec3 t\u1ea1o tr\u00f9ng.`,
+            );
+            hasError = true;
+            break;
+          }
 
           const tb = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d;
-          const tong_kg = Math.round(tb * session.loai_banh * 100) / 100;
-          const trang_thai = autoTrangThai(tb, cfg.lo_tron, "Dở dang");
+          const trang_thai = autoTrangThai(tb, cfg.lo_tron, "D\u1edf dang");
 
-          const added_banh = draft.is_continuation
-            ? Math.max(0, draft.kien_a - draft.prev_a) +
-              Math.max(0, draft.kien_b - draft.prev_b) +
-              Math.max(0, draft.kien_c - draft.prev_c) +
-              Math.max(0, draft.kien_d - draft.prev_d)
-            : tb;
-
-          // History Tracking
-          let history: HistoryEntry[] = [];
-          if (
-            draft.is_continuation &&
-            draft.existing_snapshot?.history?.length
-          ) {
-            history = [...draft.existing_snapshot.history];
-          } else if (draft.is_continuation && draft.existing_snapshot) {
-            const existingLot = lots.find((l) => l.id === draft.existing_id);
-            history = [
-              {
-                ca: draft.existing_snapshot.ca || existingLot?.ca || "?",
-                ngay_sx: existingLot?.ngay_sx || "",
-                kien_a: draft.prev_a,
-                kien_b: draft.prev_b,
-                kien_c: draft.prev_c,
-                kien_d: draft.prev_d,
-                added_banh:
-                  draft.prev_a + draft.prev_b + draft.prev_c + draft.prev_d,
-                timestamp:
-                  draft.existing_snapshot.timestamp || new Date().toISOString(),
-              },
-            ];
-          } else if (draft.is_continuation && draft.existing_id) {
-            // Lô dở dang không có dd_snapshot — tạo entry gốc từ lot thực tế
-            const existingLot = lots.find((l) => l.id === draft.existing_id);
-            if (existingLot) {
-              history = [
-                {
-                  ca: existingLot.ca,
-                  ngay_sx: existingLot.ngay_sx,
-                  kien_a: draft.prev_a,
-                  kien_b: draft.prev_b,
-                  kien_c: draft.prev_c,
-                  kien_d: draft.prev_d,
-                  added_banh:
-                    draft.prev_a + draft.prev_b + draft.prev_c + draft.prev_d,
-                  timestamp:
-                    (existingLot as any).created_at || new Date().toISOString(),
-                },
-              ];
-            }
-          }
-          history.push({
-            ca: cs.ca,
-            ngay_sx: session.ngay_sx,
-            kien_a: draft.kien_a,
-            kien_b: draft.kien_b,
-            kien_c: draft.kien_c,
-            kien_d: draft.kien_d,
-            added_banh,
-            timestamp: new Date().toISOString(),
-          });
-
-          const dd_snapshot = {
-            kien_a: draft.kien_a,
-            kien_b: draft.kien_b,
-            kien_c: draft.kien_c,
-            kien_d: draft.kien_d,
-            timestamp: new Date().toISOString(),
-            history,
-            ca: cs.ca,
-          };
-
-          const ma_lo_cur = buildMaLo(draft.num, session.suffix, year);
-          // Lô kế thừa: ưu tiên existing_id từ DB, fallback sang ID vừa INSERT trong phiên này
-          const resolvedExistingId =
-            draft.existing_id || insertedLotIds.get(ma_lo_cur);
-
-          if (draft.is_continuation && resolvedExistingId) {
-            const ngay_ht = getLotCompletionDate(
+          await saveLotTransaction({
+            lot: {
+              factory_id: factoryId,
+              ma_lo,
+              num: draft.num,
+              suffix: session.suffix,
+              year,
+              ngay_sx: session.ngay_sx,
+              ca: cs.ca,
+              ngan_id: session.ngan_id,
+              day_chuyen: session.day_chuyen,
+              loai_csr: session.loai_csr,
+              loai_banh: session.loai_banh,
+              boc: session.boc,
+              tham: session.tham,
+              chi_thi: session.chi_thi,
+              pallet: session.pallet,
+              ghi_chu: "",
+              image_url_1: session.image_url_1 || null,
+              image_url_2: session.image_url_2 || null,
               trang_thai,
-              session.ngay_sx,
-              lots.find((l) => l.id === resolvedExistingId)?.ngay_ht,
-            );
-            const { error } = await supabase
-              .from("lots")
-              .update({
-                kien_a: draft.kien_a,
-                kien_b: draft.kien_b,
-                kien_c: draft.kien_c,
-                kien_d: draft.kien_d,
-                tong_banh: tb,
-                tong_kg,
-                trang_thai,
-                ngay_ht,
-                dd_snapshot,
-                ca: cs.ca,
-              })
-              .eq("id", resolvedExistingId);
-            if (error) {
-              setSaveError(`Lỗi cập nhật lô ${draft.num}: ${error.message}`);
-              hasError = true;
-              break;
-            }
-          } else {
-            const ma_lo = ma_lo_cur;
-            const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
-            if (duplicateLot) {
-              setSaveError(
-                duplicateLot.trang_thai === "Dở dang"
-                  ? `Lô ${ma_lo} đang tồn tại ở trạng thái Dở dang. Hãy tiếp tục lô hiện có thay vì tạo mới.`
-                  : `Lô ${ma_lo} đã tồn tại trong thành phẩm, không thể tạo trùng.`,
-              );
-              hasError = true;
-              break;
-            }
-            const ngay_ht = getLotCompletionDate(trang_thai, session.ngay_sx);
-            const { data: insertData, error } = await supabase
-              .from("lots")
-              .insert({
-                factory_id: factoryId,
-                day_chuyen: session.day_chuyen,
-                ma_lo,
-                num: draft.num,
-                suffix: session.suffix,
-                year,
-                ngay_sx: session.ngay_sx,
-                ngay_ht,
-                ca: cs.ca,
-                ngan_id: session.ngan_id,
-                loai_csr: session.loai_csr,
-                loai_banh: session.loai_banh,
-                boc: session.boc,
-                tham: session.tham,
-                chi_thi: session.chi_thi,
-                pallet: session.pallet,
-                kien_a: draft.kien_a,
-                kien_b: draft.kien_b,
-                kien_c: draft.kien_c,
-                kien_d: draft.kien_d,
-                tong_banh: tb,
-                tong_kg,
-                trang_thai,
-                dd_snapshot,
-                ghi_chu: "",
-                is_manual_edit: false,
-                image_url_1: session.image_url_1 || null,
-                image_url_2: session.image_url_2 || null,
-              })
-              .select("id")
-              .single();
-            if (error) {
-              setSaveError(`Lỗi tạo lô ${ma_lo}: ${error.message}`);
-              hasError = true;
-              break;
-            }
-            // Lưu ID để các ca sau trong cùng phiên có thể UPDATE thay vì INSERT lại
-            if (insertData?.id) {
-              insertedLotIds.set(ma_lo, insertData.id);
-            }
-          }
-          if (hasError) break;
+            },
+            transaction: {
+              ngan_id: session.ngan_id,
+              ca: cs.ca,
+              ngay_nhap: session.ngay_sx,
+              kien_a: deltaA,
+              kien_b: deltaB,
+              kien_c: deltaC,
+              kien_d: deltaD,
+              so_banh: added_banh,
+              so_kg: Math.round(added_banh * session.loai_banh * 100) / 100,
+            },
+          });
         }
         if (hasError) break;
       }
     } catch (err) {
-      setSaveError(`Lỗi không xác định: ${String(err)}`);
+      setSaveError(err instanceof Error ? err.message : String(err));
       hasError = true;
     }
     if (!hasError) {
-      const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất";
+      const nganStatus = markNganDone ? "\u0110\u00e3 s\u1ea3n xu\u1ea5t" : "\u0110ang s\u1ea3n xu\u1ea5t";
       await supabase
         .from("ngans")
         .update({ trang_thai: nganStatus })
@@ -1465,11 +1403,9 @@ export default function ProductPage() {
       setSaving(false);
     }
   };
-
-  // ── Edit individual lot ────────────────────────────────────────────────────
   const openEdit = (lot: Lot) => {
-    if (lot.trang_thai === "Xuất hàng") {
-      setSaveError("Lô đã xuất hàng, không thể sửa.");
+    if (lot.trang_thai === "Xuáº¥t hĂ ng") {
+      setSaveError("LĂ´ Ä‘Ă£ xuáº¥t hĂ ng, khĂ´ng thá»ƒ sá»­a.");
       return;
     }
     setEditForm({
@@ -1480,7 +1416,7 @@ export default function ProductPage() {
       ngay_sx: lot.ngay_sx?.slice(0, 10) || "",
       ca: lot.ca,
       ngan_id: lot.ngan_id || "",
-      day_chuyen: lot.day_chuyen || "Mủ tạp",
+      day_chuyen: lot.day_chuyen || "Má»§ táº¡p",
       loai_csr: lot.loai_csr,
       loai_banh: lot.loai_banh || 35,
       boc: lot.boc,
@@ -1549,31 +1485,45 @@ export default function ProductPage() {
     const ngan = ngans.find((item) => item.id === nganId);
     if (!ngan) return;
 
-    const { data: nganLots, error: lotsError } = await supabase
+    const { data: lotsWithTx, error: lotsError } = await supabase
       .from("lots")
-      .select("id,tong_kg")
-      .eq("factory_id", factoryId!)
-      .eq("ngan_id", nganId);
+      .select("lot_transactions(ngan_id,so_kg)")
+      .eq("factory_id", factoryId!);
     if (lotsError) throw new Error(lotsError.message);
 
-    if (!nganLots || nganLots.length === 0) {
+    const totalKg =
+      lotsWithTx?.reduce((sum, lot) => {
+        const txs = (lot.lot_transactions || []) as { ngan_id: string; so_kg: number }[];
+        return (
+          sum +
+          txs
+            .filter((tx) => tx.ngan_id === nganId)
+            .reduce((inner, tx) => inner + Number(tx.so_kg || 0), 0)
+        );
+      }, 0) || 0;
+
+    if (totalKg <= 0) {
       const { error: emptyStatusError } = await supabase
         .from("ngans")
-        .update({ trang_thai: "Chờ sản xuất" })
+        .update({ trang_thai: "Ch\u1edd s\u1ea3n xu\u1ea5t" })
         .eq("id", nganId);
       if (emptyStatusError) throw new Error(emptyStatusError.message);
       return;
     }
 
-    const totalKg = nganLots.reduce((sum, lot) => sum + (lot.tong_kg || 0), 0);
     const pct = ngan.tong_kho > 0 ? (totalKg / ngan.tong_kho) * 100 : 0;
 
     if (pct < 100) {
       const { error: underStatusError } = await supabase
         .from("ngans")
-        .update({ trang_thai: "Đang sản xuất" })
+        .update({ trang_thai: "\u0110ang s\u1ea3n xu\u1ea5t" })
         .eq("id", nganId);
       if (underStatusError) throw new Error(underStatusError.message);
+      return;
+    }
+
+    if (pct <= 110 && ngan.trang_thai === "ÄĂ£ sáº£n xuáº¥t") {
+      return;
     }
   };
 
@@ -1581,15 +1531,14 @@ export default function ProductPage() {
     if (!factoryId || !editId) return;
     const lotYear = normalizeLotYear(editForm.year, editForm.ngay_sx);
     if (lotYear.length !== 2) {
-      setSaveError("Năm lô phải có đúng 2 chữ số.");
+      setSaveError("N\u0103m l\u00f4 ph\u1ea3i c\u00f3 \u0111\u00fang 2 ch\u1eef s\u1ed1.");
       return;
     }
     setSaving(true);
     try {
-      // Lấy dbLot cũ để xem có history không
       const dbLot = lots.find((l) => l.id === editId);
       if (!dbLot) {
-        setSaveError("Không tìm thấy lô cần sửa.");
+        setSaveError("Kh\u00f4ng t\u00ecm th\u1ea5y l\u00f4 c\u1ea7n s\u1eeda.");
         return;
       }
 
@@ -1601,18 +1550,74 @@ export default function ProductPage() {
             : getProjectedNganPct(targetNganId);
         if (projectedPct > 110) {
           setSaveError(
-            `Không thể chuyển sang ngăn này vì tỷ lệ lấp đầy sẽ là ${projectedPct.toFixed(1)}%, vượt 110%.`,
+            `Kh\u00f4ng th\u1ec3 chuy\u1ec3n sang ng\u0103n n\u00e0y v\u00ec t\u1ef7 l\u1ec7 l\u1ea5p \u0111\u1ea7y s\u1ebd l\u00e0 ${projectedPct.toFixed(1)}%, v\u01b0\u1ee3t 110%.`,
           );
           return;
         }
       }
-      const dd_snapshot = dbLot?.dd_snapshot || {};
-      dd_snapshot.kien_a = editForm.kien_a;
-      dd_snapshot.kien_b = editForm.kien_b;
-      dd_snapshot.kien_c = editForm.kien_c;
-      dd_snapshot.kien_d = editForm.kien_d;
-      dd_snapshot.timestamp = new Date().toISOString();
-      // Note: manual edit doesnt touch history array to keep it simple, but marks it edited
+
+      const transactions = dbLot.lot_transactions || [];
+      const latestTx = transactions[transactions.length - 1];
+      if (!latestTx) {
+        setSaveError("L\u00f4 n\u00e0y ch\u01b0a c\u00f3 giao d\u1ecbch \u0111\u1ec3 s\u1eeda.");
+        return;
+      }
+
+      const previousTransactions = transactions.slice(0, -1);
+      const prevA = previousTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
+      const prevB = previousTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
+      const prevC = previousTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
+      const prevD = previousTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+
+      if (
+        editForm.kien_a < prevA ||
+        editForm.kien_b < prevB ||
+        editForm.kien_c < prevC ||
+        editForm.kien_d < prevD
+      ) {
+        setSaveError("Kh\u00f4ng th\u1ec3 gi\u1ea3m s\u1ed1 ki\u1ec7n nh\u1ecf h\u01a1n t\u1ed5ng c\u1ee7a c\u00e1c ca tr\u01b0\u1edbc.");
+        return;
+      }
+
+      const deltaA = editForm.kien_a - prevA;
+      const deltaB = editForm.kien_b - prevB;
+      const deltaC = editForm.kien_c - prevC;
+      const deltaD = editForm.kien_d - prevD;
+      const deltaBanh = deltaA + deltaB + deltaC + deltaD;
+
+      await saveLotTransaction({
+        lot: {
+          factory_id: factoryId,
+          ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
+          num: editForm.num,
+          suffix: editForm.suffix,
+          year: lotYear,
+          ngay_sx: editForm.ngay_sx,
+          ca: editForm.ca,
+          ngan_id: editForm.ngan_id || null,
+          day_chuyen: editForm.day_chuyen,
+          loai_csr: editForm.loai_csr,
+          loai_banh: editForm.loai_banh,
+          boc: editForm.boc,
+          tham: editForm.tham,
+          chi_thi: editForm.chi_thi,
+          pallet: editForm.pallet,
+          ghi_chu: editForm.ghi_chu,
+          trang_thai: editForm.trang_thai,
+        },
+        transaction: {
+          id: latestTx.id,
+          ngan_id: editForm.ngan_id || latestTx.ngan_id,
+          ca: editForm.ca,
+          ngay_nhap: editForm.ngay_sx,
+          kien_a: deltaA,
+          kien_b: deltaB,
+          kien_c: deltaC,
+          kien_d: deltaD,
+          so_banh: deltaBanh,
+          so_kg: Math.round(deltaBanh * editForm.loai_banh * 100) / 100,
+        },
+      });
 
       const { error: updateError } = await supabase
         .from("lots")
@@ -1627,12 +1632,11 @@ export default function ProductPage() {
             editForm.ngay_sx,
             dbLot.ngay_ht,
           ),
-          dd_snapshot,
           is_manual_edit: true,
         })
         .eq("id", editId);
       if (updateError) {
-        setSaveError(`Lỗi cập nhật lô: ${updateError.message}`);
+        setSaveError(`L\u1ed7i c\u1eadp nh\u1eadt l\u00f4: ${updateError.message}`);
         return;
       }
       const affectedNganIds = Array.from(
@@ -1646,32 +1650,69 @@ export default function ProductPage() {
       setSaveError(null);
     } catch (err) {
       setSaveError(
-        `Lỗi cập nhật ngăn lưu: ${err instanceof Error ? err.message : String(err)}`,
+        `L\u1ed7i c\u1eadp nh\u1eadt ng\u0103n l\u01b0u: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setSaving(false);
     }
   };
-
-  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (uid: string) => {
     if (!factoryId) return;
-    const dashIdx = uid.lastIndexOf("-");
-    const isHistoryUid = dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
-    const lotId = isHistoryUid ? uid.slice(0, dashIdx) : uid;
-    const histIdx = isHistoryUid ? Number(uid.slice(dashIdx + 1)) : 0;
 
+    const contribution = contributions.find((item) => item.uid === uid);
+    const lotId = contribution?.id || uid;
     const lot = lots.find((l) => l.id === lotId);
     if (!lot) return;
 
-    const history: HistoryEntry[] = lot.dd_snapshot?.history || [];
+    const transactionId = contribution?.transaction_id;
+    const transactionCount = lot.lot_transactions?.length || 0;
+    const latestTransactionId =
+      transactionCount > 0
+        ? lot.lot_transactions?.[transactionCount - 1]?.id
+        : null;
 
-    if (!isHistoryUid || history.length <= 1) {
-      // Xóa hẳn lô
-      const { error: delError } = await supabase
-        .from("lots")
-        .delete()
-        .eq("id", lotId);
+    if (transactionId && transactionCount > 1) {
+      if (transactionId !== latestTransactionId) {
+        setSaveError("Chá»‰ Ä‘Æ°á»£c xĂ³a contribution má»›i nháº¥t cá»§a lĂ´ dá»Ÿ.");
+        setDelConfirm(null);
+        return;
+      }
+      try {
+        const result = await deleteLotTransaction({ transactionId });
+        const affectedNganIds = Array.from(
+          new Set([result?.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
+        );
+        for (const nganId of affectedNganIds) {
+          await syncNganStatusAfterLotEdit(nganId);
+        }
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+        setDelConfirm(null);
+        return;
+      }
+      setDelConfirm(null);
+      loadData(factoryId);
+      return;
+    }
+
+    if (transactionCount === 1 && lot.lot_transactions?.[0]?.id) {
+      try {
+        const result = await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
+        const affectedNganIds = Array.from(
+          new Set([result?.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
+        );
+        for (const nganId of affectedNganIds) {
+          await syncNganStatusAfterLotEdit(nganId);
+        }
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+        setDelConfirm(null);
+        return;
+      }
+    }
+
+    if (!transactionId && transactionCount === 0) {
+      const { error: delError } = await supabase.from("lots").delete().eq("id", lotId);
       if (delError) {
         setSaveError(
           delError.code === "23503"
@@ -1682,59 +1723,13 @@ export default function ProductPage() {
         return;
       }
       if (lot.ngan_id) {
-        const { data: rem } = await supabase
-          .from("lots")
-          .select("id")
-          .eq("ngan_id", lot.ngan_id)
-          .neq("id", lotId);
-        const newStatus =
-          (rem?.length ?? 0) === 0 ? "Chờ sản xuất" : "Đang sản xuất";
-        await supabase
-          .from("ngans")
-          .update({ trang_thai: newStatus })
-          .eq("id", lot.ngan_id);
+        await syncNganStatusAfterLotEdit(lot.ngan_id);
       }
-    } else {
-      // Chỉ xóa entry cuối — revert về entry trước
-      if (histIdx !== history.length - 1) {
-        setSaveError("Chỉ có thể xóa ca sản xuất mới nhất của lô này.");
-        setDelConfirm(null);
-        return;
-      }
-      const prevEntry = history[history.length - 2];
-      const newHistory = history.slice(0, -1);
-      const { kien_a, kien_b, kien_c, kien_d, ca: prevCa } = prevEntry;
-      const newTongBanh = kien_a + kien_b + kien_c + kien_d;
-      const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
-      const newTrangThai = autoTrangThai(newTongBanh, cfg.lo_tron, "Dở dang");
-      const revertedKiens = { kien_a, kien_b, kien_c, kien_d };
-      await supabase
-        .from("lots")
-        .update({
-          ...revertedKiens,
-          tong_banh: newTongBanh,
-          tong_kg: Math.round(newTongBanh * lot.loai_banh * 100) / 100,
-          trang_thai: newTrangThai,
-          ca: prevCa,
-          ngay_sx: prevEntry.ngay_sx || lot.ngay_sx,
-          ngay_ht: getLotCompletionDate(
-            newTrangThai,
-            prevEntry.ngay_sx || lot.ngay_sx,
-            lot.ngay_ht,
-          ),
-          dd_snapshot: {
-            ...lot.dd_snapshot,
-            ...revertedKiens,
-            history: newHistory,
-            ca: prevCa,
-          },
-        })
-        .eq("id", lotId);
     }
+
     setDelConfirm(null);
     loadData(factoryId);
   };
-
   const handleBulkDelete = async () => {
     const deletable = Array.from(selectedDeleteIds).filter(
       (id) => !lotsBlockedByKn.includes(id),
@@ -1769,9 +1764,9 @@ export default function ProductPage() {
     );
   };
 
-  // ══════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // CREATE VIEW
-  // ══════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   if (view === "create") {
     const cfg = getLoaiBanhConfig(session.loai_csr, session.loai_banh);
     const csrOpts = getLoaiCSRByDayChuyen(session.day_chuyen, factoryPrefix);
@@ -1785,11 +1780,11 @@ export default function ProductPage() {
         : [
             {
               code: "cs",
-              name: "Nội tuyển PEFC",
+              name: "Ná»™i tuyá»ƒn PEFC",
               nguon: "NT",
               chung_nhan: "PEFC CS",
             },
-            { code: "m", name: "Mua ngoài", nguon: "M", chung_nhan: "" },
+            { code: "m", name: "Mua ngoĂ i", nguon: "M", chung_nhan: "" },
           ];
 
     return (
@@ -1799,14 +1794,14 @@ export default function ProductPage() {
             onClick={() => setView("list")}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-all"
           >
-            <ChevronLeft size={16} /> Quay lại
+            <ChevronLeft size={16} /> Quay láº¡i
           </button>
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">
-              Nhập thành phẩm
+              Nháº­p thĂ nh pháº©m
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Tạo lô mới theo ca sản xuất
+              Táº¡o lĂ´ má»›i theo ca sáº£n xuáº¥t
             </p>
           </div>
         </div>
@@ -1815,10 +1810,10 @@ export default function ProductPage() {
           <div className="flex flex-wrap items-end gap-6">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-2">
-                Dây chuyền <span className="text-red-500">*</span>
+                DĂ¢y chuyá»n <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-3">
-                {["Mủ tạp", "Mủ nước"].map((dc) => (
+                {["Má»§ táº¡p", "Má»§ nÆ°á»›c"].map((dc) => (
                   <button
                     key={dc}
                     onClick={() => {
@@ -1838,7 +1833,7 @@ export default function ProductPage() {
             </div>
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-2">
-                Số ca <span className="text-red-500">*</span>
+                Sá»‘ ca <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-3">
                 {([1, 2, 3] as const).map((n) => (
@@ -1861,16 +1856,16 @@ export default function ProductPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
           <h3 className="text-sm font-extrabold text-slate-700 mb-4 flex items-center gap-2">
-            <Package size={15} className="text-emerald-600" /> Thông tin sản
-            phẩm (dùng chung mọi ca)
+            <Package size={15} className="text-emerald-600" /> ThĂ´ng tin sáº£n
+            pháº©m (dĂ¹ng chung má»i ca)
           </h3>
 
           <div className="space-y-3">
-            {/* Hàng 1: Ngày sản xuất — Năm lô — Hậu tố */}
+            {/* HĂ ng 1: NgĂ y sáº£n xuáº¥t â€” NÄƒm lĂ´ â€” Háº­u tá»‘ */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ngày sản xuất <span className="text-red-500">*</span>
+                  NgĂ y sáº£n xuáº¥t <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
@@ -1879,12 +1874,12 @@ export default function ProductPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Năm lô: {sessionYear}
+                  NÄƒm lĂ´: {sessionYear}
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Năm lô
+                  NÄƒm lĂ´
                 </label>
                 <input
                   value={session.year}
@@ -1897,33 +1892,33 @@ export default function ProductPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Chỉnh tay khi giao thoa cuối năm
+                  Chá»‰nh tay khi giao thoa cuá»‘i nÄƒm
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Hậu tố *
+                  Háº­u tá»‘ *
                 </label>
                 <select
                   value={session.suffix}
                   onChange={(e) => updateSession({ suffix: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 >
-                  <option value="">Trống (không hậu tố)</option>
+                  <option value="">Trá»‘ng (khĂ´ng háº­u tá»‘)</option>
                   {displaySuffixes.map((s) => (
                     <option key={s.code} value={s.code}>
-                      {s.code} — {s.name}
+                      {s.code} â€” {s.name}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
 
-            {/* Hàng 2: Loại CSR — Bành — Bọc — Thảm */}
+            {/* HĂ ng 2: Loáº¡i CSR â€” BĂ nh â€” Bá»c â€” Tháº£m */}
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại CSR *
+                  Loáº¡i CSR *
                 </label>
                 <select
                   value={session.loai_csr}
@@ -1937,7 +1932,7 @@ export default function ProductPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Bành (kg/bành) *
+                  BĂ nh (kg/bĂ nh) *
                 </label>
                 {banhOpts.length > 1 ? (
                   <select
@@ -1961,12 +1956,12 @@ export default function ProductPage() {
                   />
                 )}
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Lô tròn: {cfg.lo_tron} bành
+                  LĂ´ trĂ²n: {cfg.lo_tron} bĂ nh
                 </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Bọc *
+                  Bá»c *
                 </label>
                 <select
                   value={session.boc}
@@ -1980,7 +1975,7 @@ export default function ProductPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Thảm *
+                  Tháº£m *
                 </label>
                 <select
                   value={session.tham}
@@ -1994,11 +1989,11 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* Hàng 3: Chỉ thị sx (1/3) — Pallet (2/3) */}
+            {/* HĂ ng 3: Chá»‰ thá»‹ sx (1/3) â€” Pallet (2/3) */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Chỉ thị SX
+                  Chá»‰ thá»‹ SX
                 </label>
                 <input
                   value={session.chi_thi}
@@ -2029,7 +2024,7 @@ export default function ProductPage() {
                             : "border-slate-200 text-slate-500 hover:border-slate-300"
                         }`}
                       >
-                        {checked ? "✓ " : ""}
+                        {checked ? "âœ“ " : ""}
                         {p}
                       </button>
                     );
@@ -2038,13 +2033,13 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* Hàng 4: Hình ảnh 1 — Hình ảnh 2 */}
+            {/* HĂ ng 4: HĂ¬nh áº£nh 1 â€” HĂ¬nh áº£nh 2 */}
             <div className="grid grid-cols-2 gap-3">
               <InventoryImageUpload
                 factoryId={factoryId}
                 bucket="product-files"
                 documentType="lots"
-                label="Hình ảnh 1"
+                label="HĂ¬nh áº£nh 1"
                 value={session.image_url_1}
                 onChange={(url) => updateSession({ image_url_1: url })}
               />
@@ -2052,7 +2047,7 @@ export default function ProductPage() {
                 factoryId={factoryId}
                 bucket="product-files"
                 documentType="lots"
-                label="Hình ảnh 2"
+                label="HĂ¬nh áº£nh 2"
                 value={session.image_url_2}
                 onChange={(url) => updateSession({ image_url_2: url })}
               />
@@ -2062,11 +2057,11 @@ export default function ProductPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
           <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
-            <Warehouse size={15} className="text-blue-600" /> Chọn ngăn lưu{" "}
+            <Warehouse size={15} className="text-blue-600" /> Chá»n ngÄƒn lÆ°u{" "}
             <span className="text-red-500">*</span>
           </h3>
           <p className="text-xs text-slate-400 mb-4">
-            Hiển thị ngăn đủ 21 ngày ủ của dây chuyền{" "}
+            Hiá»ƒn thá»‹ ngÄƒn Ä‘á»§ 21 ngĂ y á»§ cá»§a dĂ¢y chuyá»n{" "}
             <strong>{session.day_chuyen}</strong>
           </p>
 
@@ -2075,7 +2070,7 @@ export default function ProductPage() {
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-amber-600" />
                 <span className="text-xs font-bold text-amber-700">
-                  Lô dở dang cần hoàn thành ({dorDangLots.length} lô)
+                  LĂ´ dá»Ÿ dang cáº§n hoĂ n thĂ nh ({dorDangLots.length} lĂ´)
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2084,7 +2079,7 @@ export default function ProductPage() {
                     key={l.id}
                     className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg"
                   >
-                    {l.ma_lo} · {l.tong_banh} bành
+                    {l.ma_lo} Â· {l.tong_banh} bĂ nh
                   </span>
                 ))}
               </div>
@@ -2096,13 +2091,13 @@ export default function ProductPage() {
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-rose-600" />
                 <span className="text-xs font-bold text-rose-700">
-                  Cảnh báo nhảy lô {session.loai_csr} · {session.loai_banh}kg (
-                  {jumpLotNums.length} số còn trống)
+                  Cáº£nh bĂ¡o nháº£y lĂ´ {session.loai_csr} Â· {session.loai_banh}kg (
+                  {jumpLotNums.length} sá»‘ cĂ²n trá»‘ng)
                 </span>
               </div>
               <div className="text-[11px] text-rose-600 mb-2">
-                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên
-                tục.
+                CĂ¹ng loáº¡i thĂ nh pháº©m vĂ  cĂ¹ng loáº¡i bĂ¡nh pháº£i dĂ¹ng dĂ£y sá»‘ lĂ´ liĂªn
+                tá»¥c.
               </div>
               <div className="flex flex-wrap gap-2">
                 {jumpLotNums.map((num) => (
@@ -2120,9 +2115,9 @@ export default function ProductPage() {
           {eligibleNgans.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Warehouse size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Không có ngăn đủ điều kiện sản xuất</p>
+              <p className="text-sm">KhĂ´ng cĂ³ ngÄƒn Ä‘á»§ Ä‘iá»u kiá»‡n sáº£n xuáº¥t</p>
               <p className="text-xs mt-1">
-                Cần ngăn ≥ 21 ngày ủ và trạng thái Chờ/Đang SX
+                Cáº§n ngÄƒn â‰¥ 21 ngĂ y á»§ vĂ  tráº¡ng thĂ¡i Chá»/Äang SX
               </p>
             </div>
           ) : (
@@ -2138,7 +2133,7 @@ export default function ProductPage() {
                 );
                 const selected = session.ngan_id === n.id;
                 const hasDorDang = lots.some(
-                  (l) => l.ngan_id === n.id && l.trang_thai === "Dở dang",
+                  (l) => l.ngan_id === n.id && l.trang_thai === "Dá»Ÿ dang",
                 );
                 return (
                   <button
@@ -2157,23 +2152,23 @@ export default function ProductPage() {
                       <div className="flex gap-1">
                         {hasDorDang && (
                           <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">
-                            Dở dang
+                            Dá»Ÿ dang
                           </span>
                         )}
                         <span
                           className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
-                            n.trang_thai === "Đang sản xuất"
+                            n.trang_thai === "Äang sáº£n xuáº¥t"
                               ? "bg-emerald-100 text-emerald-700"
-                              : n.trang_thai === "Hoàn thành"
+                              : n.trang_thai === "HoĂ n thĂ nh"
                                 ? "bg-blue-100 text-blue-700"
                                 : "bg-amber-100 text-amber-700"
                           }`}
                         >
-                          {n.trang_thai === "Đang sản xuất"
-                            ? "Đang SX"
-                            : n.trang_thai === "Hoàn thành"
+                          {n.trang_thai === "Äang sáº£n xuáº¥t"
+                            ? "Äang SX"
+                            : n.trang_thai === "HoĂ n thĂ nh"
                               ? "HT"
-                              : "Chờ SX"}
+                              : "Chá» SX"}
                         </span>
                       </div>
                     </div>
@@ -2183,7 +2178,7 @@ export default function ProductPage() {
                     <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
                       <span>SX: {fmtKg(kgUsed)}</span>
                       <span className="font-bold text-teal-700">
-                        Còn: {fmtKg(n.tong_kho - kgUsed)}
+                        CĂ²n: {fmtKg(n.tong_kho - kgUsed)}
                       </span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-1.5 mb-1">
@@ -2193,10 +2188,10 @@ export default function ProductPage() {
                       />
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      {n.loai_nl} · {days} ngày ủ · DK SX:{" "}
+                      {n.loai_nl} Â· {days} ngĂ y á»§ Â· DK SX:{" "}
                       {n.ngay_kt
                         ? new Date(n.ngay_kt).toLocaleDateString("vi-VN")
-                        : "—"}
+                        : "â€”"}
                     </p>
                   </button>
                 );
@@ -2270,7 +2265,7 @@ export default function ProductPage() {
                   </select>
                   {caTongBanh > 0 && (
                     <span className="ml-auto text-xs font-bold text-slate-600">
-                      Ca {caLabel}: {caTongBanh} bành · {fmtKg(caTongKg)}
+                      Ca {caLabel}: {caTongBanh} bĂ nh Â· {fmtKg(caTongKg)}
                     </span>
                   )}
                 </div>
@@ -2279,9 +2274,9 @@ export default function ProductPage() {
                   <div className="flex items-center gap-3 mb-5">
                     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 flex-wrap">
                       <span className="text-xs font-bold text-slate-500">
-                        Khoảng lô:
+                        Khoáº£ng lĂ´:
                       </span>
-                      <span className="text-xs text-slate-400">Từ lô</span>
+                      <span className="text-xs text-slate-400">Tá»« lĂ´</span>
                       <input
                         type="number"
                         min={1}
@@ -2294,7 +2289,7 @@ export default function ProductPage() {
                         }
                         className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-sm text-center outline-none focus:border-emerald-500 font-bold"
                       />
-                      <span className="text-xs text-slate-400">đến lô</span>
+                      <span className="text-xs text-slate-400">Ä‘áº¿n lĂ´</span>
                       <input
                         type="number"
                         min={cs.from_num}
@@ -2315,13 +2310,13 @@ export default function ProductPage() {
                       </span>
                       {caIdx === 0 && maxNumFromDB > 0 && (
                         <span className="text-[10px] text-slate-400 italic">
-                          (gần nhất: {maxNumFromDB}
+                          (gáº§n nháº¥t: {maxNumFromDB}
                           {session.suffix}/{sessionYear})
                         </span>
                       )}
                       {loCount > 0 && (
                         <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
-                          {loCount} lô
+                          {loCount} lĂ´
                         </span>
                       )}
                     </div>
@@ -2329,7 +2324,7 @@ export default function ProductPage() {
 
                   {cs.lots.length === 0 ? (
                     <p className="text-xs text-slate-400 italic text-center py-4">
-                      Nhập khoảng lô để hiển thị...
+                      Nháº­p khoáº£ng lĂ´ Ä‘á»ƒ hiá»ƒn thá»‹...
                     </p>
                   ) : (
                     <div className="space-y-4">
@@ -2349,9 +2344,9 @@ export default function ProductPage() {
                               </span>
                               <div className="flex items-center gap-2 text-xs">
                                 <span className="bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-bold">
-                                  🔒 Đã {lot.trang_thai}
+                                  đŸ”’ ÄĂ£ {lot.trang_thai}
                                 </span>
-                                <span>{lot.tong_banh} bành</span>
+                                <span>{lot.tong_banh} bĂ nh</span>
                               </div>
                             </div>
                           );
@@ -2374,15 +2369,15 @@ export default function ProductPage() {
                             >
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-bold text-slate-500">
-                                  Lô giữa: {midStart}
-                                  {sfxPart} → {midEnd}
+                                  LĂ´ giá»¯a: {midStart}
+                                  {sfxPart} â†’ {midEnd}
                                   {sfxPart}
                                   <span className="ml-2 text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
-                                    {midCount} lô tròn
+                                    {midCount} lĂ´ trĂ²n
                                   </span>
                                 </span>
                                 <span className="text-xs text-slate-500 font-bold">
-                                  {midCount} × {cfg.lo_tron} bành ={" "}
+                                  {midCount} Ă— {cfg.lo_tron} bĂ nh ={" "}
                                   {(
                                     (midCount *
                                       cfg.lo_tron *
@@ -2399,7 +2394,7 @@ export default function ProductPage() {
                                     className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5 text-center"
                                   >
                                     <div className="text-[10px] font-bold text-emerald-600">
-                                      Kiện {k}
+                                      Kiá»‡n {k}
                                     </div>
                                     <div className="text-sm font-extrabold text-emerald-700">
                                       {cfg.max_per_kien}{" "}
@@ -2423,10 +2418,10 @@ export default function ProductPage() {
                           lot.role === "single"
                             ? ""
                             : lot.role === "dau"
-                              ? " · Lô đầu"
-                              : " · Lô cuối";
+                              ? " Â· LĂ´ Ä‘áº§u"
+                              : " Â· LĂ´ cuá»‘i";
                         const contLabel = lot.is_continuation
-                          ? " · Kế thừa"
+                          ? " Â· Káº¿ thá»«a"
                           : "";
                         const kienKeys = [
                           "kien_a",
@@ -2472,19 +2467,19 @@ export default function ProductPage() {
                               </span>
                               <div className="flex items-center gap-3 text-xs text-slate-500">
                                 <span>
-                                  Tổng:{" "}
+                                  Tá»•ng:{" "}
                                   <strong
                                     className={
-                                      lot.trang_thai === "Hoàn thành"
+                                      lot.trang_thai === "HoĂ n thĂ nh"
                                         ? "text-emerald-600"
                                         : "text-amber-600"
                                     }
                                   >
-                                    {lot.tong_banh} bành
+                                    {lot.tong_banh} bĂ nh
                                   </strong>
                                 </span>
                                 <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${lot.trang_thai === "Hoàn thành" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${lot.trang_thai === "HoĂ n thĂ nh" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
                                 >
                                   {lot.trang_thai}
                                 </span>
@@ -2506,7 +2501,7 @@ export default function ProductPage() {
                                       className="flex flex-col items-center gap-1"
                                     >
                                       <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full whitespace-nowrap">
-                                        Ca trước · đã đủ
+                                        Ca trÆ°á»›c Â· Ä‘Ă£ Ä‘á»§
                                       </span>
                                       <div className="w-full border border-indigo-300 bg-indigo-50 rounded-xl px-2 py-2 flex items-center justify-between">
                                         <span className="text-xs font-extrabold text-indigo-500">
@@ -2540,7 +2535,7 @@ export default function ProductPage() {
                                       className="flex flex-col items-center gap-1"
                                     >
                                       <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap">
-                                        Thêm ≤{remaining}
+                                        ThĂªm â‰¤{remaining}
                                       </span>
                                       <div
                                         className={`relative border rounded-xl overflow-hidden w-full ${
@@ -2593,7 +2588,7 @@ export default function ProductPage() {
                                                 resetKeys[ki],
                                               )
                                             }
-                                            title={`Reset về ca trước (${prev})`}
+                                            title={`Reset vá» ca trÆ°á»›c (${prev})`}
                                             className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors"
                                           >
                                             <X size={10} />
@@ -2601,7 +2596,7 @@ export default function ProductPage() {
                                         )}
                                       </div>
                                       <div className="text-[10px] text-center text-amber-600 font-bold">
-                                        +{delta} bành ca này
+                                        +{delta} bĂ nh ca nĂ y
                                       </div>
                                     </div>
                                   );
@@ -2657,7 +2652,7 @@ export default function ProductPage() {
                                               resetKeys[ki],
                                             )
                                           }
-                                          title="Reset về 0"
+                                          title="Reset vá» 0"
                                           className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-slate-300 hover:text-red-400 rounded transition-colors"
                                         >
                                           <X size={10} />
@@ -2677,7 +2672,7 @@ export default function ProductPage() {
                             </div>
 
                             <div className="mt-2 text-xs text-slate-400 text-right">
-                              {fmtKg(lot.tong_kg)} · {lot.tong_banh} bành
+                              {fmtKg(lot.tong_kg)} Â· {lot.tong_banh} bĂ nh
                             </div>
                           </div>
                         );
@@ -2688,17 +2683,17 @@ export default function ProductPage() {
                   {caTongBanh > 0 && (
                     <div className="mt-3 flex items-center flex-wrap gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
                       <span className="text-xs font-extrabold text-blue-700">
-                        Tổng Ca {caLabel}:
+                        Tá»•ng Ca {caLabel}:
                       </span>
                       <span className="text-sm font-extrabold text-blue-800">
-                        {caTongBanh} bành
+                        {caTongBanh} bĂ nh
                       </span>
-                      <span className="text-xs text-blue-400">·</span>
+                      <span className="text-xs text-blue-400">Â·</span>
                       <span className="text-sm font-extrabold text-blue-800">
                         {Math.round(caTongKg).toLocaleString("vi-VN")} kg
                       </span>
                       <span className="ml-auto text-xs text-blue-500">
-                        ≈ {fmtKg(caTongKg)}
+                        â‰ˆ {fmtKg(caTongKg)}
                       </span>
                     </div>
                   )}
@@ -2725,7 +2720,7 @@ export default function ProductPage() {
             <div className="max-w-7xl mx-auto px-6 py-3">
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-xs font-bold text-slate-600 shrink-0">
-                  Ngăn {selectedNgan.ten_ngan}
+                  NgÄƒn {selectedNgan.ten_ngan}
                 </span>
                 <div className="flex-1 bg-slate-100 rounded-full h-1.5">
                   <div
@@ -2745,7 +2740,7 @@ export default function ProductPage() {
                 </span>
                 {nganBlocked && (
                   <span className="text-[10px] text-red-600 font-bold shrink-0">
-                    ⛔ Vượt 110%
+                    â›” VÆ°á»£t 110%
                   </span>
                 )}
               </div>
@@ -2757,23 +2752,23 @@ export default function ProductPage() {
                   )}
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                  {session.loai_csr} · {session.loai_banh}kg
+                  {session.loai_csr} Â· {session.loai_banh}kg
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap max-w-[200px] truncate">
                   {session.boc}
                 </span>
                 {session.pallet.length > 0 && (
                   <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                    {session.pallet.join(" · ")}
+                    {session.pallet.join(" Â· ")}
                   </span>
                 )}
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
                   CT:{session.chi_thi}
                 </span>
                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[11px] font-semibold rounded-full whitespace-nowrap">
-                  Thãm {session.tham === "Củ" ? "cũ" : session.tham}
+                  ThĂ£m {session.tham === "Cá»§" ? "cÅ©" : session.tham}
                 </span>
-                <span className="text-slate-300 text-xs">│</span>
+                <span className="text-slate-300 text-xs">â”‚</span>
                 {caSections.map((cs, ci) => {
                   const caKg =
                     Math.round(
@@ -2807,7 +2802,7 @@ export default function ProductPage() {
                 })}
                 {kgLanNay > 0 && (
                   <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[11px] font-extrabold rounded-full whitespace-nowrap">
-                    Tổng: {Math.round(kgLanNay).toLocaleString("vi-VN")} kg
+                    Tá»•ng: {Math.round(kgLanNay).toLocaleString("vi-VN")} kg
                   </span>
                 )}
                 <div className="ml-auto flex gap-2 shrink-0">
@@ -2815,7 +2810,7 @@ export default function ProductPage() {
                     onClick={() => setView("list")}
                     className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                   >
-                    Hủy
+                    Há»§y
                   </button>
                   {nganPct >= 100 && !nganBlocked ? (
                     <button
@@ -2826,8 +2821,8 @@ export default function ProductPage() {
                       className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
                     >
                       {saving
-                        ? "Đang lưu..."
-                        : `✓ Lưu · Đánh dấu ngăn Đã sản xuất`}
+                        ? "Äang lÆ°u..."
+                        : `âœ“ LÆ°u Â· ÄĂ¡nh dáº¥u ngÄƒn ÄĂ£ sáº£n xuáº¥t`}
                     </button>
                   ) : (
                     <button
@@ -2841,8 +2836,8 @@ export default function ProductPage() {
                       className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
                     >
                       {saving
-                        ? "Đang lưu..."
-                        : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bành" : "lô"}`}
+                        ? "Äang lÆ°u..."
+                        : `LÆ°u ${sessionTotals.banh > 0 ? sessionTotals.banh + " bĂ nh" : "lĂ´"}`}
                     </button>
                   )}
                 </div>
@@ -2858,13 +2853,13 @@ export default function ProductPage() {
                 onClick={() => setView("list")}
                 className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
-                Hủy
+                Há»§y
               </button>
               <button
                 disabled
                 className="px-5 py-2 bg-slate-300 text-white text-sm font-bold rounded-xl cursor-not-allowed"
               >
-                Chọn ngăn lưu trước
+                Chá»n ngÄƒn lÆ°u trÆ°á»›c
               </button>
             </div>
           </div>
@@ -2873,23 +2868,23 @@ export default function ProductPage() {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // LIST VIEW
-  // ══════════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800">ThĂ nh pháº©m</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Quản lý lô và phân tách sản lượng theo Ca
+            Quáº£n lĂ½ lĂ´ vĂ  phĂ¢n tĂ¡ch sáº£n lÆ°á»£ng theo Ca
           </p>
         </div>
         <button
           onClick={() => openCreate()}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
         >
-          <Plus size={16} /> Thêm lô
+          <Plus size={16} /> ThĂªm lĂ´
         </button>
       </div>
 
@@ -2897,35 +2892,35 @@ export default function ProductPage() {
         {(
           [
             {
-              label: "Tổng lô",
+              label: "Tá»•ng lĂ´",
               value: stats.total,
               color: "text-slate-700",
               Icon: Package,
               ic: "text-slate-400",
             },
             {
-              label: "Hoàn thành",
+              label: "HoĂ n thĂ nh",
               value: stats.hoanThanh,
               color: "text-emerald-600",
               Icon: CheckCircle,
               ic: "text-emerald-400",
             },
             {
-              label: "Dở dang",
+              label: "Dá»Ÿ dang",
               value: stats.dorDang,
               color: "text-amber-600",
               Icon: Clock,
               ic: "text-amber-400",
             },
             {
-              label: "Tổng bành (lọc)",
+              label: "Tá»•ng bĂ nh (lá»c)",
               value: stats.tongBanh.toLocaleString("vi-VN"),
               color: "text-blue-600",
               Icon: Layers,
               ic: "text-blue-400",
             },
             {
-              label: "Tổng tấn (lọc)",
+              label: "Tá»•ng táº¥n (lá»c)",
               value: fmtKg(stats.tongKg),
               color: "text-purple-600",
               Icon: Weight,
@@ -2947,14 +2942,7 @@ export default function ProductPage() {
       </div>
 
       {(() => {
-        const curYear = new Date().getFullYear().toString().slice(-2);
-        const allDorDang = lots.filter(
-          (l) =>
-            l.trang_thai === "Dở dang" &&
-            l.tong_banh > 0 &&
-            l.year === curYear &&
-            (!filterDC || l.day_chuyen === filterDC),
-        );
+        const allDorDang = allDorDangLots;
         return allDorDang.length > 0 ? (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
             <AlertTriangle
@@ -2972,7 +2960,7 @@ export default function ProductPage() {
                     key={l.id}
                     className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold"
                   >
-                    {l.ma_lo} · {l.tong_banh} bành
+                    {l.ma_lo} · {l.tong_banh} bánh
                   </span>
                 ))}
               </div>
@@ -2989,7 +2977,7 @@ export default function ProductPage() {
             onChange={(e) => {
               setSearch(e.target.value);
             }}
-            placeholder="Tìm mã lô, ngăn..."
+            placeholder="TĂ¬m mĂ£ lĂ´, ngÄƒn..."
             className="flex-1 text-sm outline-none"
           />
         </div>
@@ -3000,9 +2988,9 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Tất cả dây chuyền</option>
-          <option value="Mủ tạp">Mủ tạp</option>
-          <option value="Mủ nước">Mủ nước</option>
+          <option value="">Táº¥t cáº£ dĂ¢y chuyá»n</option>
+          <option value="Má»§ táº¡p">Má»§ táº¡p</option>
+          <option value="Má»§ nÆ°á»›c">Má»§ nÆ°á»›c</option>
         </select>
         <select
           value={filterLoai}
@@ -3011,7 +2999,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Tất cả loại</option>
+          <option value="">Táº¥t cáº£ loáº¡i</option>
           {[
             "CSR10",
             "CSR20",
@@ -3026,7 +3014,7 @@ export default function ProductPage() {
             "SVRCV50",
             "SVRCV60",
             "CSR5",
-            "Ngoại lệ",
+            "Ngoáº¡i lá»‡",
           ].map((l) => (
             <option key={l}>{l}</option>
           ))}
@@ -3038,7 +3026,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Tất cả trạng thái</option>
+          <option value="">Táº¥t cáº£ tráº¡ng thĂ¡i</option>
           {TRANG_THAI_OPTS.map((t) => (
             <option key={t}>{t}</option>
           ))}
@@ -3050,7 +3038,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Tất cả ca</option>
+          <option value="">Táº¥t cáº£ ca</option>
           {CA_OPTS.map((c) => (
             <option key={c} value={c}>
               Ca {c}
@@ -3065,7 +3053,7 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         />
-        <span className="text-slate-400 text-sm">→</span>
+        <span className="text-slate-400 text-sm">â†’</span>
         <input
           type="date"
           value={filterTo}
@@ -3093,7 +3081,7 @@ export default function ProductPage() {
             }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500"
           >
-            <X size={14} /> Xóa lọc
+            <X size={14} /> XĂ³a lá»c
           </button>
         )}
       </div>
@@ -3133,24 +3121,24 @@ export default function ProductPage() {
                       />
                     )}
                     <span className="font-extrabold text-slate-800 text-base">
-                      {date !== "Chưa có ngày"
+                      {date !== "ChÆ°a cĂ³ ngĂ y"
                         ? new Date(date).toLocaleDateString("vi-VN")
                         : date}
                     </span>
                     <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full">
-                      {Object.values(dateGroups).flat().length} lần nhập
+                      {Object.values(dateGroups).flat().length} láº§n nháº­p
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
-                      <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
+                      <span>{dayBanh.toLocaleString("vi-VN")} bĂ nh</span>
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
                     {deleteMode === date ? (
                       <>
                         <span className="text-xs text-red-600 font-bold shrink-0">
-                          Chọn lô cần xóa...
+                          Chá»n lĂ´ cáº§n xĂ³a...
                         </span>
                         <button
                           disabled={
@@ -3164,8 +3152,8 @@ export default function ProductPage() {
                         >
                           <Trash2 size={12} />
                           {preCheckLoading
-                            ? "Đang kiểm tra..."
-                            : `Xóa ${selectedDeleteIds.size} lô`}
+                            ? "Äang kiá»ƒm tra..."
+                            : `XĂ³a ${selectedDeleteIds.size} lĂ´`}
                         </button>
                         <button
                           onClick={(e) => {
@@ -3176,7 +3164,7 @@ export default function ProductPage() {
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
-                          Hủy
+                          Há»§y
                         </button>
                       </>
                     ) : (
@@ -3187,9 +3175,9 @@ export default function ProductPage() {
                             openCreate(date);
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="Thêm ca sản xuất cho ngày này"
+                          title="ThĂªm ca sáº£n xuáº¥t cho ngĂ y nĂ y"
                         >
-                          <Plus size={12} /> Thêm
+                          <Plus size={12} /> ThĂªm
                         </button>
                         <button
                           onClick={(e) => {
@@ -3197,9 +3185,9 @@ export default function ProductPage() {
                             setEditDateModal(date);
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="Sửa lô trong ngày này"
+                          title="Sá»­a lĂ´ trong ngĂ y nĂ y"
                         >
-                          <Edit2 size={12} /> Sửa
+                          <Edit2 size={12} /> Sá»­a
                         </button>
                         <button
                           onClick={(e) => {
@@ -3208,9 +3196,9 @@ export default function ProductPage() {
                             setSelectedDeleteIds(new Set());
                           }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="Xóa lô trong ngày này"
+                          title="XĂ³a lĂ´ trong ngĂ y nĂ y"
                         >
-                          <Trash2 size={12} /> Xóa
+                          <Trash2 size={12} /> XĂ³a
                         </button>
                       </>
                     )}
@@ -3239,7 +3227,7 @@ export default function ProductPage() {
                                 Ca {ca}
                               </span>
                               <span className="text-xs font-bold text-slate-500">
-                                {caBanh.toLocaleString("vi-VN")} bành ·{" "}
+                                {caBanh.toLocaleString("vi-VN")} b\u00e1nh \u00b7{" "}
                                 {fmtKg(caKg)}
                               </span>
                             </div>
@@ -3251,25 +3239,25 @@ export default function ProductPage() {
                                       <th className="px-3 py-2.5 w-10" />
                                     )}
                                     <th className="px-4 py-2.5 text-left">
-                                      Mã lô
+                                      M\u00e3 l\u00f4
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Ngăn
+                                      Ng\u0103n
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Loại
+                                      Lo\u1ea1i
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Bọc
+                                      B\u1ecdc
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      SL Thực tế ca này
+                                      SL Th\u1ef1c t\u1ebf ca n\u00e0y
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Kiện (A/B/C/D) thời điểm
+                                      Ki\u1ec7n (A/B/C/D) th\u1eddi \u0111i\u1ec3m
                                     </th>
                                     <th className="px-4 py-2.5 text-left">
-                                      Trạng thái
+                                      Tr\u1ea1ng th\u00e1i
                                     </th>
                                   </tr>
                                 </thead>
@@ -3289,9 +3277,11 @@ export default function ProductPage() {
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
-                                                next.has(c.id)
-                                                  ? next.delete(c.id)
-                                                  : next.add(c.id);
+                                                if (next.has(c.id)) {
+                                                  next.delete(c.id);
+                                                } else {
+                                                  next.add(c.id);
+                                                }
                                                 return next;
                                               })
                                             }
@@ -3303,7 +3293,7 @@ export default function ProductPage() {
                                         {c.ma_lo}
                                       </td>
                                       <td className="px-4 py-2.5 text-slate-500 text-xs">
-                                        {c.ngans?.ten_ngan || "—"}
+                                        {c.ngans?.ten_ngan || "-"}
                                       </td>
                                       <td className="px-4 py-2.5">
                                         <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
@@ -3314,7 +3304,7 @@ export default function ProductPage() {
                                         className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate"
                                         title={c.boc || ""}
                                       >
-                                        {c.boc || "—"}
+                                        {c.boc || "-"}
                                       </td>
                                       <td className="px-4 py-2.5 font-extrabold text-blue-700">
                                         +{c.tong_banh_cua_ca}{" "}
@@ -3360,9 +3350,9 @@ export default function ProductPage() {
                                       <td className="px-4 py-2.5">
                                         <span
                                           className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            c.trang_thai === "Hoàn thành"
+                                            c.trang_thai === "HoĂ n thĂ nh"
                                               ? "bg-emerald-100 text-emerald-700"
-                                              : c.trang_thai === "Xuất hàng"
+                                              : c.trang_thai === "Xuáº¥t hĂ ng"
                                                 ? "bg-purple-100 text-purple-700"
                                                 : "bg-amber-100 text-amber-700"
                                           }`}
@@ -3386,7 +3376,7 @@ export default function ProductPage() {
         {Object.keys(groupedByDateAndCa).length === 0 && (
           <div className="p-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
             <Package size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có dữ liệu phù hợp</p>
+            <p>Kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u ph\u00f9 h\u1ee3p</p>
           </div>
         )}
       </div>
@@ -3396,7 +3386,7 @@ export default function ProductPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-lg font-extrabold text-slate-800">
-                Sửa lô {editForm.ma_lo}
+                S\u1eeda l\u00f4 {editForm.ma_lo}
               </h2>
               <button
                 onClick={() => setEditModal(false)}
@@ -3412,17 +3402,17 @@ export default function ProductPage() {
                   className="text-amber-600 mt-0.5 shrink-0"
                 />
                 <p className="text-xs text-amber-700">
-                  <strong>Lưu ý:</strong> Việc sửa gốc sẽ thay đổi số liệu toàn
-                  cục của lô này nhưng không sửa đổi các nhánh History phân ca
-                  của nó. Chỉ sửa tay khi phát hiện sai sót số lượng tổng.
+                  <strong>L\u01b0u \u00fd:</strong> Vi\u1ec7c s\u1eeda g\u1ed1c s\u1ebd thay \u0111\u1ed5i s\u1ed1 li\u1ec7u to\u00e0n
+                  c\u1ee5c c\u1ee7a l\u00f4 n\u00e0y nh\u01b0ng kh\u00f4ng s\u1eeda \u0111\u1ed5i c\u00e1c nh\u00e1nh History ph\u00e2n ca
+                  c\u1ee7a n\u00f3. Ch\u1ec9 s\u1eeda tay khi ph\u00e1t hi\u1ec7n sai s\u00f3t s\u1ed1 l\u01b0\u1ee3ng t\u1ed5ng.
                 </p>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <label className="text-xs font-bold text-slate-600 block mb-2">
-                  Dây chuyền *
+                  D\u00e2y chuy\u1ec1n *
                 </label>
                 <div className="flex gap-3">
-                  {["Mủ tạp", "Mủ nước"].map((dc) => (
+                  {["M\u1ee7 t\u1ea1p", "M\u1ee7 n\u01b0\u1edbc"].map((dc) => (
                     <button
                       key={dc}
                       onClick={() => updateEditForm({ day_chuyen: dc })}
@@ -3441,7 +3431,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Số lô *
+                    Sá»‘ lĂ´ *
                   </label>
                   <input
                     type="number"
@@ -3452,7 +3442,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Mã lô
+                    MĂ£ lĂ´
                   </label>
                   <input
                     readOnly
@@ -3462,23 +3452,23 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Hậu tố
+                    Háº­u tá»‘
                   </label>
                   <select
                     value={editForm.suffix}
                     onChange={(e) => updateEditForm({ suffix: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="">Trống</option>
+                    <option value="">Trá»‘ng</option>
                     {(suffixList.length > 0
                       ? suffixList
                       : [
-                          { code: "cs", name: "Nội tuyển PEFC" },
-                          { code: "m", name: "Mua ngoài" },
+                          { code: "cs", name: "Ná»™i tuyá»ƒn PEFC" },
+                          { code: "m", name: "Mua ngoĂ i" },
                         ]
                     ).map((s) => (
                       <option key={s.code} value={s.code}>
-                        {s.code} — {s.name}
+                        {s.code} â€” {s.name}
                       </option>
                     ))}
                   </select>
@@ -3488,7 +3478,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Ngày SX *
+                    NgĂ y SX *
                   </label>
                   <input
                     type="date"
@@ -3501,7 +3491,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Năm lô
+                    NÄƒm lĂ´
                   </label>
                   <input
                     value={editForm.year}
@@ -3530,7 +3520,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loại CSR *
+                    Loáº¡i CSR *
                   </label>
                   <select
                     value={editForm.loai_csr}
@@ -3552,7 +3542,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Ngăn lưu
+                    NgÄƒn lÆ°u
                   </label>
                   <select
                     value={editForm.ngan_id}
@@ -3561,21 +3551,21 @@ export default function ProductPage() {
                     }
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="">-- Chọn ngăn --</option>
+                    <option value="">-- Chá»n ngÄƒn --</option>
                     {ngans.map((n) => (
                       <option key={n.id} value={n.id}>
-                        {n.ten_ngan} — {n.ma_ngan}
+                        {n.ten_ngan} â€” {n.ma_ngan}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loại bành
+                    Loáº¡i bĂ nh
                   </label>
                   <input
                     readOnly
-                    value={`${editForm.loai_banh} kg/bành`}
+                    value={`${editForm.loai_banh} kg/bĂ nh`}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />
                 </div>
@@ -3584,7 +3574,7 @@ export default function ProductPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loại bọc
+                    Loáº¡i bá»c
                   </label>
                   <select
                     value={editForm.boc}
@@ -3601,7 +3591,7 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Thảm
+                    Tháº£m
                   </label>
                   <select
                     value={editForm.tham}
@@ -3625,10 +3615,10 @@ export default function ProductPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-xs font-bold text-slate-600">
-                        Số bành kiện (A / B / C / D)
+                        Sá»‘ bĂ nh kiá»‡n (A / B / C / D)
                       </label>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
-                        Max {maxK} bành · Lô tròn = {cfg2.lo_tron} bành
+                        Max {maxK} bĂ nh Â· LĂ´ trĂ²n = {cfg2.lo_tron} bĂ nh
                       </span>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
@@ -3663,7 +3653,7 @@ export default function ProductPage() {
                               />
                               {isLocked && (
                                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-[10px] font-bold">
-                                  🔒
+                                  đŸ”’
                                 </span>
                               )}
                             </div>
@@ -3673,22 +3663,22 @@ export default function ProductPage() {
                     </div>
                     <div className="mt-2 flex gap-4 text-xs text-slate-500">
                       <span>
-                        Tổng bành:{" "}
+                        Tá»•ng bĂ nh:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_banh}
                         </strong>
                       </span>
                       <span>
-                        Tổng kg:{" "}
+                        Tá»•ng kg:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_kg.toLocaleString()}
                         </strong>
                       </span>
                       <span>
-                        Trạng thái:{" "}
+                        Tráº¡ng thĂ¡i:{" "}
                         <strong
                           className={
-                            editForm.trang_thai === "Hoàn thành"
+                            editForm.trang_thai === "HoĂ n thĂ nh"
                               ? "text-emerald-600"
                               : "text-amber-600"
                           }
@@ -3703,7 +3693,7 @@ export default function ProductPage() {
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ghi chú
+                  Ghi chĂº
                 </label>
                 <input
                   value={editForm.ghi_chu}
@@ -3717,14 +3707,14 @@ export default function ProductPage() {
                 onClick={() => setEditModal(false)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
-                Hủy
+                Há»§y
               </button>
               <button
                 onClick={handleEditSave}
                 disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
               >
-                {saving ? "Đang lưu..." : "Lưu thay đổi"}
+                {saving ? "Äang lÆ°u..." : "LÆ°u thay Ä‘á»•i"}
               </button>
             </div>
           </div>
@@ -3748,11 +3738,11 @@ export default function ProductPage() {
                 <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
                   <div>
                     <h3 className="font-extrabold text-slate-800">
-                      Sửa ngày{" "}
+                      Sá»­a ngĂ y{" "}
                       {new Date(editDateModal).toLocaleDateString("vi-VN")}
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Click vào lô để mở form sửa
+                      Click vĂ o lĂ´ Ä‘á»ƒ má»Ÿ form sá»­a
                     </p>
                   </div>
                   <button
@@ -3776,12 +3766,17 @@ export default function ProductPage() {
                               (s, c) => s + c.tong_banh_cua_ca,
                               0,
                             )}{" "}
-                            bành
+                            bĂ nh
                           </span>
                         </div>
                         {grouped[ca].map((c) => {
                           const lot = lots.find((l) => l.id === c.id);
-                          const canEdit = c.trang_thai !== "Xuất hàng";
+                          const latestTransactionId =
+                            lot?.lot_transactions?.[lot.lot_transactions.length - 1]?.id;
+                          const isLatestContribution =
+                            !c.transaction_id || c.transaction_id === latestTransactionId;
+                          const canEdit =
+                            isLatestContribution && c.trang_thai !== "Xuáº¥t hĂ ng";
                           return (
                             <div
                               key={c.uid}
@@ -3792,14 +3787,14 @@ export default function ProductPage() {
                                   {c.ma_lo}
                                 </span>
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  +{c.tong_banh_cua_ca} bành ·{" "}
+                                  +{c.tong_banh_cua_ca} bĂ nh Â·{" "}
                                   {fmtKg(c.tong_kg_cua_ca)}
                                 </span>
                                 <span
                                   className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                                    c.trang_thai === "Hoàn thành"
+                                    c.trang_thai === "HoĂ n thĂ nh"
                                       ? "bg-emerald-100 text-emerald-700"
-                                      : c.trang_thai === "Xuất hàng"
+                                      : c.trang_thai === "Xuáº¥t hĂ ng"
                                         ? "bg-purple-100 text-purple-700"
                                         : "bg-amber-100 text-amber-700"
                                   }`}
@@ -3815,11 +3810,11 @@ export default function ProductPage() {
                                   }}
                                   className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                                 >
-                                  <Edit2 size={12} /> Sửa lô
+                                  <Edit2 size={12} /> Sá»­a lĂ´
                                 </button>
                               ) : (
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  Đã xuất hàng
+                                  ÄĂ£ xuáº¥t hĂ ng
                                 </span>
                               )}
                             </div>
@@ -3829,7 +3824,7 @@ export default function ProductPage() {
                     ))}
                   {dateLots.length === 0 && (
                     <div className="p-8 text-center text-slate-400 text-sm">
-                      Không có lô nào
+                      KhĂ´ng cĂ³ lĂ´ nĂ o
                     </div>
                   )}
                 </div>
@@ -3842,13 +3837,13 @@ export default function ProductPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="font-extrabold text-slate-800 mb-2">
-              Xác nhận xóa?
+              XĂ¡c nháº­n xĂ³a?
             </h3>
             {lotsBlockedByKn.length > 0 && (
               <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                 <p className="text-xs font-bold text-amber-700">
-                  ⚠️ {lotsBlockedByKn.length} lô đã có phiếu KN — sẽ không được
-                  xóa:
+                  â ï¸ {lotsBlockedByKn.length} lĂ´ Ä‘Ă£ cĂ³ phiáº¿u KN â€” sáº½ khĂ´ng Ä‘Æ°á»£c
+                  xĂ³a:
                 </p>
                 <p className="text-xs text-amber-600 mt-1 break-all">
                   {lotsBlockedByKn
@@ -3861,14 +3856,14 @@ export default function ProductPage() {
             <p className="text-sm text-slate-500 mb-5">
               {delConfirm === "bulk"
                 ? lotsBlockedByKn.length === selectedDeleteIds.size
-                  ? "Tất cả lô đã chọn đều có phiếu KN, không thể xóa."
+                  ? "Táº¥t cáº£ lĂ´ Ä‘Ă£ chá»n Ä‘á»u cĂ³ phiáº¿u KN, khĂ´ng thá»ƒ xĂ³a."
                   : lotsBlockedByKn.length > 0
-                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lô chưa có KN sẽ bị xóa vĩnh viễn.`
-                    : `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
-                : "Lô này sẽ bị xóa vĩnh viễn."}{" "}
+                    ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lĂ´ chÆ°a cĂ³ KN sáº½ bá»‹ xĂ³a vÄ©nh viá»…n.`
+                    : `${selectedDeleteIds.size} lĂ´ Ä‘Ă£ chá»n sáº½ bá»‹ xĂ³a vÄ©nh viá»…n.`
+                : "LĂ´ nĂ y sáº½ bá»‹ xĂ³a vÄ©nh viá»…n."}{" "}
               {(delConfirm !== "bulk" ||
                 lotsBlockedByKn.length < selectedDeleteIds.size) &&
-                "Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động."}
+                "NgÄƒn lÆ°u liĂªn quan sáº½ Ä‘Æ°á»£c cáº­p nháº­t tráº¡ng thĂ¡i tá»± Ä‘á»™ng."}
             </p>
             <div className="flex gap-3">
               {delConfirm === "bulk" &&
@@ -3880,7 +3875,7 @@ export default function ProductPage() {
                   }}
                   className="w-full py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
-                  Đóng
+                  ÄĂ³ng
                 </button>
               ) : (
                 <>
@@ -3888,7 +3883,7 @@ export default function ProductPage() {
                     onClick={() => setDelConfirm(null)}
                     className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                   >
-                    Hủy
+                    Há»§y
                   </button>
                   <button
                     onClick={() =>
@@ -3898,7 +3893,7 @@ export default function ProductPage() {
                     }
                     className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
                   >
-                    Xóa
+                    XĂ³a
                   </button>
                 </>
               )}
@@ -3909,3 +3904,6 @@ export default function ProductPage() {
     </div>
   );
 }
+
+
+

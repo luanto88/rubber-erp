@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
@@ -23,7 +23,7 @@ import {
 import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type Vehicle = {
   id: string;
   loai_xe: string;
@@ -119,33 +119,33 @@ type QcResult = {
   ngay_kn: string;
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LOAI_XE_OPTS = [
   "Container 20ft",
   "Container 40ft",
-  "Xe tải mui bạt",
-  "Khác",
+  "Xe táº£i mui báº¡t",
+  "KhĂ¡c",
 ];
 const CSR_OPTS = ["CSR10", "CSR20", "CSR3L", "CSRL", "CSRCV50", "CSRCV60"];
 const SVR_OPTS = ["SVR10", "SVR20", "SVR3L", "SVRL", "SVRCV50", "SVRCV60"];
-const PALLET_XUAT_BASE = ["Rời", "PE đế gỗ", "PE đế nhựa", "Gỗ", "MB4", "MB5"];
+const PALLET_XUAT_BASE = ["Rá»i", "PE Ä‘áº¿ gá»—", "PE Ä‘áº¿ nhá»±a", "Gá»—", "MB4", "MB5"];
 const CHI_TIEU_LIST = [
-  "Tạp chất",
+  "Táº¡p cháº¥t",
   "Tro",
-  "Bay hơi",
-  "Nitơ",
+  "Bay hÆ¡i",
+  "NitÆ¡",
   "Po",
   "PRI",
-  "Độ nhớt",
+  "Äá»™ nhá»›t",
 ];
 const CHI_TIEU_KEY: Record<string, string> = {
-  "Tạp chất": "tap_chat",
-  Tro: "tro",
-  "Bay hơi": "bay_hoi",
-  Nitơ: "nito",
-  Po: "po",
-  PRI: "pri",
-  "Độ nhớt": "mooney",
+  "Táº¡p cháº¥t": "tap_chat",
+  "Tro": "tro",
+  "Bay hÆ¡i": "bay_hoi",
+  "NitÆ¡": "nito",
+  "Po": "po",
+  "PRI": "pri",
+  "Äá»™ nhá»›t": "mooney",
 };
 
 const emptyVehicle = (): Vehicle => ({
@@ -176,15 +176,15 @@ const emptyForm = (prefix: "CSR" | "SVR" = "CSR") => ({
   so_hop_dong: "",
   customer_id: "",
   chung_loai: `${prefix}10`,
-  loai_pallet: "Rời",
+  loai_pallet: "Rá»i",
   loai_banh: 35,
-  loai_boc: `Bọc nhãn 0,04 VRG ${prefix}10`,
+  loai_boc: `Bá»c nhĂ£n 0,04 VRG ${prefix}10`,
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
   yeu_cau_chi_tieu: [] as ChiTieuReq[],
 });
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getLoaiBanhOptions(chung_loai: string): number[] {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(chung_loai))
     return [35, 20];
@@ -204,9 +204,9 @@ function getBocOpts(chung_loai: string): string[] {
     "SVRCV50",
     "SVRCV60",
   ].includes(chung_loai);
-  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${chung_loai}`];
+  const base = [`Bá»c trÆ¡n 0,04`, `Bá»c nhĂ£n 0,04 VRG ${chung_loai}`];
   return isMuNuoc
-    ? [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${chung_loai}`]
+    ? [...base, `Bá»c trÆ¡n 0,13`, `Bá»c nhĂ£n 0,13 VRG ${chung_loai}`]
     : base;
 }
 
@@ -218,7 +218,7 @@ function ddmmyy(dateStr: string) {
   return `${dd}${mm}${yy}`;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function ExportPage() {
   const [orders, setOrders] = useState<ExportOrder[]>([]);
   const [lotsRaw, setLotsRaw] = useState<LotRaw[]>([]);
@@ -235,7 +235,7 @@ export default function ExportPage() {
   );
   const csrOpts = useMemo(() => (isNMCP ? SVR_OPTS : CSR_OPTS), [isNMCP]);
 
-  // Pallet xuất: base list + custom options added at runtime
+  // Pallet xuáº¥t: base list + custom options added at runtime
   const [palletExtra, setPalletExtra] = useState<string[]>([]);
   const [newPalletInput, setNewPalletInput] = useState("");
   const palletOpts = useMemo(
@@ -280,7 +280,7 @@ export default function ExportPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const loadData = useCallback(
     async (fid: string) => {
       setLoading(true);
@@ -311,7 +311,7 @@ export default function ExportPage() {
         "id,ma_lo,loai_csr,loai_banh,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai",
       )
       .eq("factory_id", fid)
-      .in("trang_thai", ["Hoàn thành", "Xuất hàng"])
+      .in("trang_thai", ["HoĂ n thĂ nh", "Xuáº¥t hĂ ng"])
       .order("num", { ascending: false });
     setLotsRaw(data || []);
   }, []);
@@ -335,7 +335,7 @@ export default function ExportPage() {
     setCustomers(data || []);
   }, []);
 
-  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadXxx trong deps
+  // Bootstrap: chá»‰ cháº¡y 1 láº§n Ä‘á»ƒ láº¥y factoryId, khĂ´ng cĂ³ loadXxx trong deps
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId();
@@ -356,7 +356,7 @@ export default function ExportPage() {
     void bootstrap();
   }, []);
 
-  // Reload khi factoryId hoặc filter thay đổi
+  // Reload khi factoryId hoáº·c filter thay Ä‘á»•i
   useEffect(() => {
     if (!factoryId) return;
     void loadData(factoryId);
@@ -365,7 +365,7 @@ export default function ExportPage() {
     void loadCustomers(factoryId);
   }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers]);
 
-  // ── Compute remaining per lot ─────────────────────────────────────────────
+  // â”€â”€ Compute remaining per lot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const lotsExt = useMemo<LotExt[]>(() => {
     const pastAssignments = orders
       .filter((o) => o.id !== editId)
@@ -395,7 +395,7 @@ export default function ExportPage() {
       .filter((l) => l.rem_a + l.rem_b + l.rem_c + l.rem_d > 0);
   }, [lotsRaw, orders, editId]);
 
-  // ── Vehicle history suggestions ───────────────────────────────────────────
+  // â”€â”€ Vehicle history suggestions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const vehicleSuggestions = useMemo(() => {
     const seen = new Set<string>();
     return orders
@@ -407,7 +407,7 @@ export default function ExportPage() {
       });
   }, [orders]);
 
-  // ── Filter lots for picker ────────────────────────────────────────────────
+  // â”€â”€ Filter lots for picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const availLots = useMemo(() => {
     let base = lotsExt.filter((l) => l.loai_csr === form.chung_loai);
     if (lotSearch)
@@ -432,20 +432,20 @@ export default function ExportPage() {
     });
   }, [lotsExt, form.chung_loai, form.yeu_cau_chi_tieu, lotSearch, qcResults]);
 
-  // ── Ma don auto ───────────────────────────────────────────────────────────
+  // â”€â”€ Ma don auto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (editId) return; // don't recalculate in edit mode
     if (form.customer_id && form.so_thong_bao && form.ngay) {
       const kh = customers.find((c) => c.id === form.customer_id)?.ma_kh ?? "";
       const d = ddmmyy(form.ngay);
 
-      // Tìm các đơn xuất của cùng Khách hàng trong cùng Ngày
+      // TĂ¬m cĂ¡c Ä‘Æ¡n xuáº¥t cá»§a cĂ¹ng KhĂ¡ch hĂ ng trong cĂ¹ng NgĂ y
       const sameDayCustomerOrders = orders.filter(
         (o) =>
           o.customer_id === form.customer_id && o.ngay?.startsWith(form.ngay),
       );
 
-      // Tìm số thứ tự lớn nhất hiện tại
+      // TĂ¬m sá»‘ thá»© tá»± lá»›n nháº¥t hiá»‡n táº¡i
       let maxStt = 0;
       sameDayCustomerOrders.forEach((o) => {
         if (o.ma_don && o.ma_don.includes("/")) {
@@ -456,7 +456,7 @@ export default function ExportPage() {
           }
         }
       });
-      // Fallback nếu có đơn cũ chưa có định dạng dấu /
+      // Fallback náº¿u cĂ³ Ä‘Æ¡n cÅ© chÆ°a cĂ³ Ä‘á»‹nh dáº¡ng dáº¥u /
       if (maxStt === 0 && sameDayCustomerOrders.length > 0) {
         maxStt = sameDayCustomerOrders.length;
       }
@@ -479,14 +479,14 @@ export default function ExportPage() {
     orders,
   ]);
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stats = {
     total: orders.length,
     tongBanh: orders.reduce((s, o) => s + (o.tong_banh || 0), 0),
     tongXe: orders.reduce((s, o) => s + (o.vehicles?.length || 0), 0),
   };
 
-  // ── Open Edit ─────────────────────────────────────────────────────────────
+  // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openEdit = (order: ExportOrder) => {
     setForm({
       ma_don: order.ma_don || "",
@@ -496,11 +496,11 @@ export default function ExportPage() {
       so_hop_dong: order.so_hop_dong || "",
       customer_id: order.customer_id || "",
       chung_loai: order.chung_loai || (isNMCP ? "SVR10" : "CSR10"),
-      loai_pallet: order.loai_pallet || "Rời",
+      loai_pallet: order.loai_pallet || "Rá»i",
       loai_banh: order.loai_banh || 35,
       loai_boc:
         order.loai_boc ||
-        `Bọc nhãn 0,04 VRG ${order.chung_loai || (isNMCP ? "SVR10" : "CSR10")}`,
+        `Bá»c nhĂ£n 0,04 VRG ${order.chung_loai || (isNMCP ? "SVR10" : "CSR10")}`,
       vehicles: order.vehicles?.length
         ? order.vehicles.map((v) => ({ ...v }))
         : [emptyVehicle()],
@@ -509,7 +509,7 @@ export default function ExportPage() {
         : [],
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
     });
-    // nếu loai_pallet của đơn cũ không có trong base list thì thêm vào palletExtra
+    // náº¿u loai_pallet cá»§a Ä‘Æ¡n cÅ© khĂ´ng cĂ³ trong base list thĂ¬ thĂªm vĂ o palletExtra
     if (order.loai_pallet && !PALLET_XUAT_BASE.includes(order.loai_pallet)) {
       setPalletExtra((prev) =>
         prev.includes(order.loai_pallet) ? prev : [...prev, order.loai_pallet],
@@ -519,7 +519,7 @@ export default function ExportPage() {
     setView("add");
   };
 
-  // ── Assignment helpers ────────────────────────────────────────────────────
+  // â”€â”€ Assignment helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const updateAssignment = (
     lot_id: string,
     vehicleIdx: number,
@@ -566,7 +566,7 @@ export default function ExportPage() {
     0,
   );
 
-  // ── Drag & Drop ───────────────────────────────────────────────────────────
+  // â”€â”€ Drag & Drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleDragStart = (e: React.DragEvent, lotId: string) => {
     e.dataTransfer.setData("lot_id", lotId);
     setDraggingLotId(lotId);
@@ -607,7 +607,7 @@ export default function ExportPage() {
     }));
   };
 
-  // ── Yeu cau chi tieu ─────────────────────────────────────────────────────
+  // â”€â”€ Yeu cau chi tieu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const toggleChiTieu = (ten: string) => {
     setForm((prev) => {
       const exists = prev.yeu_cau_chi_tieu.find((r) => r.ten === ten);
@@ -631,11 +631,11 @@ export default function ExportPage() {
     }));
   };
 
-  // ── Save ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleSave = async () => {
     if (!factoryId) return;
     if (!form.ma_don) {
-      showToast("Chưa có mã đơn — cần chọn KH + số thông báo + ngày", "error");
+      showToast("ChÆ°a cĂ³ mĂ£ Ä‘Æ¡n â€” cáº§n chá»n KH + sá»‘ thĂ´ng bĂ¡o + ngĂ y", "error");
       return;
     }
     setSaving(true);
@@ -664,7 +664,7 @@ export default function ExportPage() {
           ];
           await supabase
             .from("lots")
-            .update({ trang_thai: "Hoàn thành" })
+            .update({ trang_thai: "HoĂ n thĂ nh" })
             .in("id", oldLotIds);
         }
         const { error } = await supabase
@@ -675,14 +675,14 @@ export default function ExportPage() {
           showToast(error.message, "error");
           return;
         }
-        showToast("Đã cập nhật đơn xuất hàng");
+        showToast("ÄĂ£ cáº­p nháº­t Ä‘Æ¡n xuáº¥t hĂ ng");
       } else {
         const { error } = await supabase.from("export_orders").insert(payload);
         if (error) {
           showToast(error.message, "error");
           return;
         }
-        showToast("Đã tạo đơn xuất hàng mới");
+        showToast("ÄĂ£ táº¡o Ä‘Æ¡n xuáº¥t hĂ ng má»›i");
       }
       // Update lot status based on remaining
       for (const lotId of newLotIds) {
@@ -704,7 +704,7 @@ export default function ExportPage() {
           lot.rem_a + lot.rem_b + lot.rem_c + lot.rem_d - totalAssigned;
         await supabase
           .from("lots")
-          .update({ trang_thai: remaining <= 0 ? "Xuất hàng" : "Hoàn thành" })
+          .update({ trang_thai: remaining <= 0 ? "Xuáº¥t hĂ ng" : "HoĂ n thĂ nh" })
           .eq("id", lotId);
       }
       setView("list");
@@ -714,7 +714,7 @@ export default function ExportPage() {
       void loadLots(factoryId);
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : "Lỗi không xác định",
+        err instanceof Error ? err.message : "Lá»—i khĂ´ng xĂ¡c Ä‘á»‹nh",
         "error",
       );
     } finally {
@@ -722,38 +722,60 @@ export default function ExportPage() {
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
+  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleDelete = async (id: string) => {
     if (!factoryId) return;
     const order = orders.find((o) => o.id === id);
-    if (order?.assignments?.length) {
-      const lotIds = [
-        ...new Set(order.assignments.map((a: Assignment) => a.lot_id)),
-      ];
-      await supabase
-        .from("lots")
-        .update({ trang_thai: "Hoàn thành" })
-        .in("id", lotIds);
-    }
+    const affectedLotIds = order?.assignments?.length
+      ? [...new Set(order.assignments.map((a: Assignment) => a.lot_id))]
+      : [];
+
     const { error } = await supabase
       .from("export_orders")
       .delete()
       .eq("id", id);
+
     if (error) {
       showToast(error.message, "error");
       return;
     }
+
+    if (affectedLotIds.length > 0) {
+      const remainingOrders = orders.filter((o) => o.id !== id);
+      for (const lotId of affectedLotIds) {
+        const lot = lotsRaw.find((l) => l.id === lotId);
+        if (!lot) continue;
+        const assigned = remainingOrders
+          .flatMap((o) => o.assignments || [])
+          .filter((a) => a.lot_id === lotId)
+          .reduce(
+            (s, a) =>
+              s +
+              (a.kien_a || 0) +
+              (a.kien_b || 0) +
+              (a.kien_c || 0) +
+              (a.kien_d || 0),
+            0,
+          );
+        const remaining = Number(lot.tong_banh || 0) - assigned;
+        await supabase
+          .from("lots")
+          .update({ trang_thai: remaining <= 0 ? "Xuất hàng" : "Hoàn thành" })
+          .eq("id", lotId);
+      }
+    }
+
     setDelConfirm(null);
     showToast("Đã xóa đơn xuất hàng");
     loadData(factoryId);
     loadLots(factoryId);
   };
 
-  // ── Create customer inline ────────────────────────────────────────────────
+  // â”€â”€ Create customer inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCreateCustomer = async () => {
     if (!factoryId) return;
     if (!custForm.ma_kh || !custForm.ten_kh_en) {
-      setCustError("Cần điền Mã KH và Tên KH");
+      setCustError("Cáº§n Ä‘iá»n MĂ£ KH vĂ  TĂªn KH");
       return;
     }
     setCustSaving(true);
@@ -772,15 +794,15 @@ export default function ExportPage() {
       setForm((p) => ({ ...p, customer_id: data.id }));
       setCustModal(false);
       setCustForm(emptyCustomerForm());
-      showToast(`Đã tạo khách hàng ${data.ten_kh_en}`);
+      showToast(`ÄĂ£ táº¡o khĂ¡ch hĂ ng ${data.ten_kh_en}`);
     } catch (err) {
-      setCustError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setCustError(err instanceof Error ? err.message : "Lá»—i khĂ´ng xĂ¡c Ä‘á»‹nh");
     } finally {
       setCustSaving(false);
     }
   };
 
-  // ── Filtered orders ───────────────────────────────────────────────────────
+  // â”€â”€ Filtered orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const filtered = orders.filter(
     (o) =>
       !search ||
@@ -789,7 +811,7 @@ export default function ExportPage() {
       o.customers?.ma_kh?.toLowerCase().includes(search.toLowerCase()),
   );
 
-  // ── RENDER: Toast ─────────────────────────────────────────────────────────
+  // â”€â”€ RENDER: Toast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const Toast = () =>
     toast ? (
       <div
@@ -804,7 +826,7 @@ export default function ExportPage() {
       </div>
     ) : null;
 
-  // ── RENDER: LIST ──────────────────────────────────────────────────────────
+  // â”€â”€ RENDER: LIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (view === "list")
     return (
       <div>
@@ -812,10 +834,10 @@ export default function ExportPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">
-              Xuất hàng
+              Xuáº¥t hĂ ng
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Quản lý đơn xuất hàng
+              Quáº£n lĂ½ Ä‘Æ¡n xuáº¥t hĂ ng
             </p>
           </div>
           <button
@@ -826,7 +848,7 @@ export default function ExportPage() {
             }}
             className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
           >
-            <Plus size={16} /> Tạo đơn xuất
+            <Plus size={16} /> Táº¡o Ä‘Æ¡n xuáº¥t
           </button>
         </div>
 
@@ -834,21 +856,21 @@ export default function ExportPage() {
         <div className="grid grid-cols-3 gap-3 mb-6">
           {[
             {
-              label: "Tổng đơn xuất",
+              label: "Tá»•ng Ä‘Æ¡n xuáº¥t",
               value: stats.total,
               color: "text-slate-700",
               Icon: FileOutput,
               ic: "text-slate-400",
             },
             {
-              label: "Tổng bành xuất",
+              label: "Tá»•ng bĂ nh xuáº¥t",
               value: stats.tongBanh.toLocaleString(),
               color: "text-emerald-600",
               Icon: Package,
               ic: "text-emerald-400",
             },
             {
-              label: "Tổng xe",
+              label: "Tá»•ng xe",
               value: stats.tongXe,
               color: "text-blue-600",
               Icon: Truck,
@@ -875,7 +897,7 @@ export default function ExportPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm mã đơn, khách hàng..."
+              placeholder="TĂ¬m mĂ£ Ä‘Æ¡n, khĂ¡ch hĂ ng..."
               className="flex-1 text-sm outline-none"
             />
           </div>
@@ -884,7 +906,7 @@ export default function ExportPage() {
             onChange={(e) => setFilterLoai(e.target.value)}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
           >
-            <option value="">Tất cả loại</option>
+            <option value="">Táº¥t cáº£ loáº¡i</option>
             {csrOpts.map((l) => (
               <option key={l}>{l}</option>
             ))}
@@ -895,7 +917,7 @@ export default function ExportPage() {
             onChange={(e) => setFilterFrom(e.target.value)}
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
           />
-          <span className="text-slate-400 text-sm">→</span>
+          <span className="text-slate-400 text-sm">â†’</span>
           <input
             type="date"
             value={filterTo}
@@ -912,7 +934,7 @@ export default function ExportPage() {
               }}
               className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500"
             >
-              <X size={14} /> Xóa lọc
+              <X size={14} /> XĂ³a lá»c
             </button>
           )}
         </div>
@@ -920,24 +942,24 @@ export default function ExportPage() {
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="p-12 text-center text-slate-400">Đang tải...</div>
+            <div className="p-12 text-center text-slate-400">Äang táº£i...</div>
           ) : filtered.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <FileOutput size={40} className="mx-auto mb-3 opacity-30" />
-              <p>Không có đơn xuất hàng nào</p>
+              <p>KhĂ´ng cĂ³ Ä‘Æ¡n xuáº¥t hĂ ng nĂ o</p>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   {[
-                    "Mã đơn",
-                    "Ngày",
-                    "Khách hàng",
-                    "Loại",
+                    "MĂ£ Ä‘Æ¡n",
+                    "NgĂ y",
+                    "KhĂ¡ch hĂ ng",
+                    "Loáº¡i",
                     "Xe",
-                    "Tổng bành",
-                    "Hợp đồng",
+                    "Tá»•ng bĂ nh",
+                    "Há»£p Ä‘á»“ng",
                     "",
                   ].map((h) => (
                     <th
@@ -965,11 +987,11 @@ export default function ExportPage() {
                       <td className="px-4 py-3 text-slate-600">
                         {order.ngay
                           ? new Date(order.ngay).toLocaleDateString("vi-VN")
-                          : "—"}
+                          : "â€”"}
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-700">
-                          {order.customers?.ten_kh_en || "—"}
+                          {order.customers?.ten_kh_en || "â€”"}
                         </div>
                         <div className="text-xs text-slate-400">
                           {order.customers?.ma_kh}
@@ -987,7 +1009,7 @@ export default function ExportPage() {
                         {(order.tong_banh || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">
-                        {order.so_hop_dong || "—"}
+                        {order.so_hop_dong || "â€”"}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
@@ -997,7 +1019,7 @@ export default function ExportPage() {
                               openEdit(order);
                             }}
                             className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
-                            title="Sửa"
+                            title="Sá»­a"
                           >
                             <Edit2 size={14} />
                           </button>
@@ -1007,7 +1029,7 @@ export default function ExportPage() {
                               setDelConfirm(order.id);
                             }}
                             className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
-                            title="Xóa"
+                            title="XĂ³a"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -1029,10 +1051,10 @@ export default function ExportPage() {
                             {/* Customer info */}
                             <div className="space-y-1">
                               <div className="font-bold text-slate-600 mb-2">
-                                Khách hàng
+                                KhĂ¡ch hĂ ng
                               </div>
                               <div className="font-bold text-slate-700 text-sm">
-                                {order.customers?.ten_kh_en || "—"}
+                                {order.customers?.ten_kh_en || "â€”"}
                               </div>
                               {order.customers?.dia_chi && (
                                 <div className="text-slate-500 whitespace-pre-line">
@@ -1041,7 +1063,7 @@ export default function ExportPage() {
                               )}
                               {order.customers?.nguoi_lien_he && (
                                 <div className="text-slate-500">
-                                  Liên hệ: {order.customers.nguoi_lien_he}
+                                  LiĂªn há»‡: {order.customers.nguoi_lien_he}
                                 </div>
                               )}
                               {order.customers?.email && (
@@ -1057,26 +1079,26 @@ export default function ExportPage() {
                               <div className="pt-2 space-y-0.5 border-t border-slate-200 mt-2">
                                 <div className="flex gap-2">
                                   <span className="text-slate-400 w-24">
-                                    Số thông báo:
+                                    Sá»‘ thĂ´ng bĂ¡o:
                                   </span>
                                   <span className="font-semibold">
-                                    {order.so_thong_bao || "—"}
+                                    {order.so_thong_bao || "â€”"}
                                   </span>
                                 </div>
                                 <div className="flex gap-2">
                                   <span className="text-slate-400 w-24">
-                                    Số hóa đơn:
+                                    Sá»‘ hĂ³a Ä‘Æ¡n:
                                   </span>
                                   <span className="font-semibold">
-                                    {order.so_hoa_don || "—"}
+                                    {order.so_hoa_don || "â€”"}
                                   </span>
                                 </div>
                                 <div className="flex gap-2">
                                   <span className="text-slate-400 w-24">
-                                    Loại pallet:
+                                    Loáº¡i pallet:
                                   </span>
                                   <span className="font-semibold">
-                                    {order.loai_pallet || "—"}
+                                    {order.loai_pallet || "â€”"}
                                   </span>
                                 </div>
                               </div>
@@ -1119,10 +1141,10 @@ export default function ExportPage() {
                                             (a) => a.vehicleIdx === i,
                                           ).length
                                         }{" "}
-                                        lô
+                                        lĂ´
                                       </span>
                                     </div>
-                                    {/* Hiển thị hình ảnh đính kèm nếu có */}
+                                    {/* Hiá»ƒn thá»‹ hĂ¬nh áº£nh Ä‘Ă­nh kĂ¨m náº¿u cĂ³ */}
                                     {(v.image_url_1 ||
                                       v.image_url_2 ||
                                       v.image_url_3) && (
@@ -1132,12 +1154,12 @@ export default function ExportPage() {
                                             href={v.image_url_1}
                                             target="_blank"
                                             rel="noreferrer"
-                                            title="Xem ảnh lớn"
+                                            title="Xem áº£nh lá»›n"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
                                             <img
                                               src={v.image_url_1}
-                                              alt="Biển số"
+                                              alt="Biá»ƒn sá»‘"
                                               className="w-full h-full object-cover"
                                             />
                                           </a>
@@ -1147,12 +1169,12 @@ export default function ExportPage() {
                                             href={v.image_url_2}
                                             target="_blank"
                                             rel="noreferrer"
-                                            title="Xem ảnh lớn"
+                                            title="Xem áº£nh lá»›n"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
                                             <img
                                               src={v.image_url_2}
-                                              alt="Niêm phong"
+                                              alt="NiĂªm phong"
                                               className="w-full h-full object-cover"
                                             />
                                           </a>
@@ -1162,12 +1184,12 @@ export default function ExportPage() {
                                             href={v.image_url_3}
                                             target="_blank"
                                             rel="noreferrer"
-                                            title="Xem ảnh lớn"
+                                            title="Xem áº£nh lá»›n"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
                                             <img
                                               src={v.image_url_3}
-                                              alt="Chứng từ"
+                                              alt="Chá»©ng tá»«"
                                               className="w-full h-full object-cover"
                                             />
                                           </a>
@@ -1180,7 +1202,7 @@ export default function ExportPage() {
                               {(order.assignments || []).length > 0 && (
                                 <div className="mt-2">
                                   <div className="font-bold text-slate-600 mb-1">
-                                    Lô hàng
+                                    LĂ´ hĂ ng
                                   </div>
                                   <div className="flex flex-wrap gap-1">
                                     {(order.assignments || []).map((a) => (
@@ -1188,7 +1210,7 @@ export default function ExportPage() {
                                         key={a.lot_id + a.vehicleIdx}
                                         className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700"
                                       >
-                                        {a.ma_lo} · Xe {a.vehicleIdx + 1}
+                                        {a.ma_lo} Â· Xe {a.vehicleIdx + 1}
                                       </span>
                                     ))}
                                   </div>
@@ -1197,12 +1219,12 @@ export default function ExportPage() {
                               {(order.yeu_cau_chi_tieu || []).length > 0 && (
                                 <div className="mt-2 p-2 bg-amber-50 rounded-lg border border-amber-200">
                                   <div className="font-bold text-amber-700 mb-1">
-                                    Yêu cầu chỉ tiêu
+                                    YĂªu cáº§u chá»‰ tiĂªu
                                   </div>
                                   {(order.yeu_cau_chi_tieu || []).map((r) => (
                                     <div key={r.ten} className="text-amber-600">
                                       {r.ten}: {r.min ? `Min ${r.min}` : ""}
-                                      {r.min && r.max ? " – " : ""}
+                                      {r.min && r.max ? " â€“ " : ""}
                                       {r.max ? `Max ${r.max}` : ""}
                                     </div>
                                   ))}
@@ -1212,7 +1234,7 @@ export default function ExportPage() {
                             {/* QR Code */}
                             <div className="flex flex-col items-center justify-start gap-2">
                               <div className="font-bold text-slate-600 mb-1 self-start">
-                                Mã QR EUDR
+                                MĂ£ QR EUDR
                               </div>
                               <div className="p-2 bg-white border border-slate-200 rounded-xl">
                                 <QRCode
@@ -1235,7 +1257,7 @@ export default function ExportPage() {
                                 target="_blank"
                                 className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-bold mt-1"
                               >
-                                <Printer size={11} /> In Biên bản
+                                <Printer size={11} /> In BiĂªn báº£n
                               </a>
                             </div>
                           </div>
@@ -1254,23 +1276,23 @@ export default function ExportPage() {
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
               <h3 className="font-extrabold text-slate-800 mb-2">
-                Xác nhận xóa?
+                XĂ¡c nháº­n xĂ³a?
               </h3>
               <p className="text-sm text-slate-500 mb-5">
-                Đơn xuất hàng này sẽ bị xóa vĩnh viễn.
+                ÄÆ¡n xuáº¥t hĂ ng nĂ y sáº½ bá»‹ xĂ³a vÄ©nh viá»…n.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setDelConfirm(null)}
                   className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
-                  Hủy
+                  Há»§y
                 </button>
                 <button
                   onClick={() => handleDelete(delConfirm)}
                   className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md"
                 >
-                  Xóa
+                  XĂ³a
                 </button>
               </div>
             </div>
@@ -1279,7 +1301,7 @@ export default function ExportPage() {
       </div>
     );
 
-  // ── RENDER: ADD / EDIT ────────────────────────────────────────────────────
+  // â”€â”€ RENDER: ADD / EDIT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const selCust = customers.find((c) => c.id === form.customer_id);
 
   return (
@@ -1292,7 +1314,7 @@ export default function ExportPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
-                <UserPlus size={18} /> Tạo khách hàng mới
+                <UserPlus size={18} /> Táº¡o khĂ¡ch hĂ ng má»›i
               </h3>
               <button
                 onClick={() => {
@@ -1312,15 +1334,15 @@ export default function ExportPage() {
                 </div>
               )}
               {[
-                { label: "Mã KH *", field: "ma_kh", placeholder: "KUMHO" },
+                { label: "MĂ£ KH *", field: "ma_kh", placeholder: "KUMHO" },
                 {
-                  label: "Tên KH *",
+                  label: "TĂªn KH *",
                   field: "ten_kh_en",
                   placeholder: "Kumho Petrochemical Co., Ltd.",
                 },
-                { label: "Quốc gia", field: "quoc_gia", placeholder: "Korea" },
+                { label: "Quá»‘c gia", field: "quoc_gia", placeholder: "Korea" },
                 {
-                  label: "Địa chỉ",
+                  label: "Äá»‹a chá»‰",
                   field: "dia_chi",
                   placeholder: "Economic Zone, Room 303...",
                 },
@@ -1330,9 +1352,9 @@ export default function ExportPage() {
                   placeholder: "purchasing@kumho.com",
                 },
                 {
-                  label: "Người liên hệ",
+                  label: "NgÆ°á»i liĂªn há»‡",
                   field: "nguoi_lien_he",
-                  placeholder: "Nguyễn Văn A",
+                  placeholder: "Nguyá»…n VÄƒn A",
                 },
               ].map((f) => (
                 <div key={f.field}>
@@ -1376,14 +1398,14 @@ export default function ExportPage() {
                 }}
                 className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
-                Hủy
+                Há»§y
               </button>
               <button
                 onClick={handleCreateCustomer}
                 disabled={custSaving}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50"
               >
-                {custSaving ? "Đang lưu..." : "Tạo khách hàng"}
+                {custSaving ? "Äang lÆ°u..." : "Táº¡o khĂ¡ch hĂ ng"}
               </button>
             </div>
           </div>
@@ -1402,22 +1424,22 @@ export default function ExportPage() {
         </button>
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">
-            {editId ? "Sửa đơn xuất hàng" : "Tạo đơn xuất hàng"}
+            {editId ? "Sá»­a Ä‘Æ¡n xuáº¥t hĂ ng" : "Táº¡o Ä‘Æ¡n xuáº¥t hĂ ng"}
           </h1>
         </div>
       </div>
 
       <div className="flex gap-4" style={{ height: "calc(100vh - 200px)" }}>
-        {/* ─── LEFT PANEL ─────────────────────────────────────────────────── */}
+        {/* â”€â”€â”€ LEFT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="w-1/2 overflow-y-auto pr-2 space-y-4">
-          {/* Thông tin đơn */}
+          {/* ThĂ´ng tin Ä‘Æ¡n */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h3 className="font-bold text-slate-700 mb-4">Thông tin đơn</h3>
+            <h3 className="font-bold text-slate-700 mb-4">ThĂ´ng tin Ä‘Æ¡n</h3>
             <div className="grid grid-cols-2 gap-3">
-              {/* Khách hàng */}
+              {/* KhĂ¡ch hĂ ng */}
               <div className="col-span-2">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Khách hàng
+                  KhĂ¡ch hĂ ng
                 </label>
                 <div className="flex gap-2">
                   <select
@@ -1427,7 +1449,7 @@ export default function ExportPage() {
                     }
                     className="flex-1 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
-                    <option value="">-- Chọn khách hàng --</option>
+                    <option value="">-- Chá»n khĂ¡ch hĂ ng --</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.ten_kh_en} ({c.ma_kh})
@@ -1438,14 +1460,14 @@ export default function ExportPage() {
                     onClick={() => setCustModal(true)}
                     className="flex items-center gap-1 px-3 py-2 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 text-xs font-bold rounded-xl border border-slate-200 transition-all whitespace-nowrap"
                   >
-                    <UserPlus size={13} /> Tạo mới
+                    <UserPlus size={13} /> Táº¡o má»›i
                   </button>
                 </div>
                 {selCust && (
                   <div className="mt-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2 space-y-0.5">
                     {selCust.dia_chi && <div>{selCust.dia_chi}</div>}
                     {selCust.nguoi_lien_he && (
-                      <div>Liên hệ: {selCust.nguoi_lien_he}</div>
+                      <div>LiĂªn há»‡: {selCust.nguoi_lien_he}</div>
                     )}
                     {selCust.email && <div>{selCust.email}</div>}
                     {selCust.quoc_gia && <div>{selCust.quoc_gia}</div>}
@@ -1453,22 +1475,22 @@ export default function ExportPage() {
                 )}
               </div>
 
-              {/* Mã đơn */}
+              {/* MĂ£ Ä‘Æ¡n */}
               <div className="col-span-2">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Mã đơn (tự động)
+                  MĂ£ Ä‘Æ¡n (tá»± Ä‘á»™ng)
                 </label>
                 <input
                   readOnly
                   value={form.ma_don}
-                  placeholder="Chọn KH + điền số thông báo + ngày để tạo tự động"
+                  placeholder="Chá»n KH + Ä‘iá»n sá»‘ thĂ´ng bĂ¡o + ngĂ y Ä‘á»ƒ táº¡o tá»± Ä‘á»™ng"
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-600 font-mono cursor-default"
                 />
               </div>
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ngày xuất
+                  NgĂ y xuáº¥t
                 </label>
                 <input
                   type="date"
@@ -1481,7 +1503,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Số thông báo *
+                  Sá»‘ thĂ´ng bĂ¡o *
                 </label>
                 <input
                   value={form.so_thong_bao}
@@ -1494,7 +1516,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại CSR
+                  Loáº¡i CSR
                 </label>
                 <select
                   value={form.chung_loai}
@@ -1518,7 +1540,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại pallet xuất
+                  Loáº¡i pallet xuáº¥t
                 </label>
                 <select
                   value={form.loai_pallet}
@@ -1544,7 +1566,7 @@ export default function ExportPage() {
                         setNewPalletInput("");
                       }
                     }}
-                    placeholder="Thêm loại khác..."
+                    placeholder="ThĂªm loáº¡i khĂ¡c..."
                     className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"
                   />
                   <button
@@ -1565,7 +1587,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Số hóa đơn
+                  Sá»‘ hĂ³a Ä‘Æ¡n
                 </label>
                 <input
                   value={form.so_hoa_don}
@@ -1577,7 +1599,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Số hợp đồng
+                  Sá»‘ há»£p Ä‘á»“ng
                 </label>
                 <input
                   value={form.so_hop_dong}
@@ -1589,7 +1611,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại bành (kg)
+                  Loáº¡i bĂ nh (kg)
                 </label>
                 <div className="flex gap-2 flex-wrap">
                   {getLoaiBanhOptions(form.chung_loai).map((opt) => (
@@ -1610,7 +1632,7 @@ export default function ExportPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại bọc
+                  Loáº¡i bá»c
                 </label>
                 <select
                   value={form.loai_boc}
@@ -1627,17 +1649,17 @@ export default function ExportPage() {
             </div>
           </div>
 
-          {/* Yêu cầu chỉ tiêu */}
+          {/* YĂªu cáº§u chá»‰ tiĂªu */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-700 mb-3">
-              Yêu cầu chỉ tiêu KN
+              YĂªu cáº§u chá»‰ tiĂªu KN
             </h3>
             <div className="flex flex-wrap gap-2 mb-3">
               <span
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 cursor-pointer transition-all ${form.yeu_cau_chi_tieu.length === 0 ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}
                 onClick={() => setForm((p) => ({ ...p, yeu_cau_chi_tieu: [] }))}
               >
-                Không
+                KhĂ´ng
               </span>
               {CHI_TIEU_LIST.map((ct) => {
                 const active = !!form.yeu_cau_chi_tieu.find(
@@ -1672,7 +1694,7 @@ export default function ExportPage() {
                         onChange={(e) =>
                           updateChiTieu(req.ten, "min", e.target.value)
                         }
-                        placeholder="—"
+                        placeholder="â€”"
                         className="w-20 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
                       />
                       <label className="text-xs text-slate-500">Max</label>
@@ -1682,7 +1704,7 @@ export default function ExportPage() {
                         onChange={(e) =>
                           updateChiTieu(req.ten, "max", e.target.value)
                         }
-                        placeholder="—"
+                        placeholder="â€”"
                         className="w-20 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
                       />
                     </div>
@@ -1713,7 +1735,7 @@ export default function ExportPage() {
                 }
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
               >
-                <Plus size={13} /> Thêm xe
+                <Plus size={13} /> ThĂªm xe
               </button>
             </div>
             <div className="space-y-3">
@@ -1756,7 +1778,7 @@ export default function ExportPage() {
                       </div>
                       <div className="relative">
                         <label className="text-xs text-slate-500 block mb-1">
-                          Biển trước
+                          Biá»ƒn trÆ°á»›c
                         </label>
                         <input
                           value={v.bien_truoc}
@@ -1782,7 +1804,7 @@ export default function ExportPage() {
                       </div>
                       <div className="relative">
                         <label className="text-xs text-slate-500 block mb-1">
-                          Biển sau
+                          Biá»ƒn sau
                         </label>
                         <input
                           value={v.bien_sau}
@@ -1808,7 +1830,7 @@ export default function ExportPage() {
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 block mb-1">
-                          Ghi chú
+                          Ghi chĂº
                         </label>
                         <input
                           value={v.ghi_chu}
@@ -1845,13 +1867,13 @@ export default function ExportPage() {
                       </button>
                     </div>
 
-                    {/* Ảnh xe */}
+                    {/* áº¢nh xe */}
                     <div className="grid grid-cols-3 gap-2 px-3 pb-3">
                       <InventoryImageUpload
                         factoryId={factoryId}
                         bucket="order-files"
                         documentType="vehicles"
-                        label="Hình ảnh 1"
+                        label="HĂ¬nh áº£nh 1"
                         value={v.image_url_1 || ""}
                         onChange={(url) =>
                           setForm((p) => ({
@@ -1866,7 +1888,7 @@ export default function ExportPage() {
                         factoryId={factoryId}
                         bucket="order-files"
                         documentType="vehicles"
-                        label="Hình ảnh 2"
+                        label="HĂ¬nh áº£nh 2"
                         value={v.image_url_2 || ""}
                         onChange={(url) =>
                           setForm((p) => ({
@@ -1881,7 +1903,7 @@ export default function ExportPage() {
                         factoryId={factoryId}
                         bucket="order-files"
                         documentType="vehicles"
-                        label="Hình ảnh 3"
+                        label="HĂ¬nh áº£nh 3"
                         value={v.image_url_3 || ""}
                         onChange={(url) =>
                           setForm((p) => ({
@@ -1903,7 +1925,7 @@ export default function ExportPage() {
                           size={14}
                           className="mx-auto mb-1 opacity-50"
                         />
-                        Kéo lô hàng vào đây
+                        KĂ©o lĂ´ hĂ ng vĂ o Ä‘Ă¢y
                       </div>
                     ) : (
                       <div className="mx-3 mb-3 space-y-1.5">
@@ -1978,7 +2000,7 @@ export default function ExportPage() {
                         {/* Still show drop zone hint */}
                         {dropTarget === idx && (
                           <div className="border-2 border-dashed border-emerald-400 rounded-xl p-2 text-center text-xs text-emerald-600 bg-emerald-50">
-                            + Thả thêm lô
+                            + Tháº£ thĂªm lĂ´
                           </div>
                         )}
                       </div>
@@ -1992,19 +2014,19 @@ export default function ExportPage() {
           {/* Summary */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex items-center justify-between">
             <div>
-              <div className="text-xs text-slate-500">Tổng bành</div>
+              <div className="text-xs text-slate-500">Tá»•ng bĂ nh</div>
               <div className="text-2xl font-extrabold text-emerald-600">
                 {totalBanh.toLocaleString()}
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Tổng lô</div>
+              <div className="text-xs text-slate-500">Tá»•ng lĂ´</div>
               <div className="text-2xl font-extrabold text-slate-700">
                 {[...new Set(form.assignments.map((a) => a.lot_id))].length}
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Tổng xe</div>
+              <div className="text-xs text-slate-500">Tá»•ng xe</div>
               <div className="text-2xl font-extrabold text-slate-700">
                 {form.vehicles.length}
               </div>
@@ -2012,16 +2034,16 @@ export default function ExportPage() {
           </div>
         </div>
 
-        {/* ─── RIGHT PANEL: Lot picker ─────────────────────────────────────── */}
+        {/* â”€â”€â”€ RIGHT PANEL: Lot picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="w-1/2 overflow-y-auto pl-2 space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-0 z-10">
             <h3 className="font-bold text-slate-700 mb-1">
-              Lô hàng — {form.chung_loai}
+              LĂ´ hĂ ng â€” {form.chung_loai}
               <span className="ml-2 text-xs text-slate-400 font-normal">
-                {availLots.length} lô có sẵn
+                {availLots.length} lĂ´ cĂ³ sáºµn
                 {form.yeu_cau_chi_tieu.length > 0 && (
                   <span className="ml-1 text-amber-500">
-                    · đang lọc theo chỉ tiêu
+                    Â· Ä‘ang lá»c theo chá»‰ tiĂªu
                   </span>
                 )}
               </span>
@@ -2029,7 +2051,7 @@ export default function ExportPage() {
             <input
               value={lotSearch}
               onChange={(e) => setLotSearch(e.target.value)}
-              placeholder="Tìm mã lô..."
+              placeholder="TĂ¬m mĂ£ lĂ´..."
               className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-400"
             />
           </div>
@@ -2039,10 +2061,10 @@ export default function ExportPage() {
             {availLots.length === 0 ? (
               <div className="col-span-2 p-8 text-center text-slate-400">
                 <Package size={32} className="mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Không có lô {form.chung_loai} nào</p>
+                <p className="text-sm">KhĂ´ng cĂ³ lĂ´ {form.chung_loai} nĂ o</p>
                 {form.yeu_cau_chi_tieu.length > 0 && (
                   <p className="text-xs mt-1">
-                    Thử bỏ yêu cầu chỉ tiêu để xem thêm lô
+                    Thá»­ bá» yĂªu cáº§u chá»‰ tiĂªu Ä‘á»ƒ xem thĂªm lĂ´
                   </p>
                 )}
               </div>
@@ -2079,7 +2101,7 @@ export default function ExportPage() {
                       {lot.ma_lo}
                     </div>
 
-                    {/* Kiện remaining */}
+                    {/* Kiá»‡n remaining */}
                     <div className="grid grid-cols-2 gap-1 text-[11px]">
                       {[
                         { k: "A", v: rem.a },
@@ -2103,7 +2125,7 @@ export default function ExportPage() {
                         className={`mt-2 text-center text-[10px] font-bold rounded-full px-2 py-0.5 ${isFullyAssigned ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
                       >
                         {isFullyAssigned
-                          ? "✓ Đã phân đủ"
+                          ? "âœ“ ÄĂ£ phĂ¢n Ä‘á»§"
                           : `Xe ${assignedVehicles.map((a) => `${a.vehicleIdx + 1}`).join(",")}`}
                       </div>
                     )}
@@ -2116,7 +2138,7 @@ export default function ExportPage() {
           {/* Instructions */}
           <div className="text-xs text-slate-400 text-center py-2">
             <GripVertical size={14} className="inline mr-1" />
-            Kéo thả pill vào vùng xe bên trái để phân lô
+            KĂ©o tháº£ pill vĂ o vĂ¹ng xe bĂªn trĂ¡i Ä‘á»ƒ phĂ¢n lĂ´
           </div>
         </div>
       </div>
@@ -2130,7 +2152,7 @@ export default function ExportPage() {
           }}
           className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
         >
-          Hủy
+          Há»§y
         </button>
         <button
           onClick={handleSave}
@@ -2138,12 +2160,13 @@ export default function ExportPage() {
           className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50"
         >
           {saving
-            ? "Đang lưu..."
+            ? "Äang lÆ°u..."
             : editId
-              ? "Lưu thay đổi"
-              : `Lưu đơn xuất (${totalBanh.toLocaleString()} bành)`}
+              ? "LÆ°u thay Ä‘á»•i"
+              : `LÆ°u Ä‘Æ¡n xuáº¥t (${totalBanh.toLocaleString()} bĂ nh)`}
         </button>
       </div>
     </div>
   );
 }
+

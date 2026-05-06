@@ -2,6 +2,14 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
+import {
+  deleteLotTransaction,
+  saveLotTransaction,
+} from "@/app/dashboard/product/actions";
+import {
+  dedupeLotsByMaLo,
+  normalizeLotStatus,
+} from "@/app/dashboard/product/shared";
 import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import {
   Plus,
@@ -25,6 +33,7 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Lot = {
   id: string;
+  factory_id?: string;
   ma_lo: string;
   num: number;
   suffix: string;
@@ -48,10 +57,27 @@ type Lot = {
   tong_kg: number;
   trang_thai: string;
   ghi_chu: string;
-  dd_snapshot?: any;
   image_url_1?: string;
   image_url_2?: string;
+  created_at?: string;
+  updated_at?: string;
   ngans?: { ten_ngan: string; ma_ngan: string; loai_nl: string };
+  lot_transactions?: LotTransaction[];
+};
+
+type LotTransaction = {
+  id: string;
+  lot_id: string;
+  ngan_id: string;
+  ca: string;
+  ngay_nhap: string;
+  kien_a: number;
+  kien_b: number;
+  kien_c: number;
+  kien_d: number;
+  so_banh: number;
+  so_kg: number;
+  created_at?: string;
 };
 
 type Ngan = {
@@ -75,11 +101,11 @@ type SuffixItem = {
 
 type SessionHeader = {
   year: string;
-  ngay_sx: string; // dùng chung mọi ca, mặc định maxDate+1
+  ngay_sx: string; // d\u00f9ng chung m\u1ecdi ca, m\u1eb7c \u0111\u1ecbnh maxDate+1
   day_chuyen: string;
   so_ca: 1 | 2 | 3;
   ngan_id: string;
-  suffix: string; // "" = Trống
+  suffix: string; // "" = Tr\u1ed1ng
   loai_csr: string;
   loai_banh: number;
   boc: string;
@@ -88,18 +114,6 @@ type SessionHeader = {
   pallet: string[];
   image_url_1: string;
   image_url_2: string;
-};
-
-type HistoryEntry = {
-  ca: string;
-  ngay_sx: string;
-  ngan_id?: string;
-  kien_a: number;
-  kien_b: number;
-  kien_c: number;
-  kien_d: number;
-  added_banh: number;
-  timestamp: string;
 };
 
 type LotDraft = {
@@ -120,7 +134,6 @@ type LotDraft = {
   is_continuation: boolean;
   existing_id?: string;
   is_already_completed?: boolean;
-  existing_snapshot?: any;
   tong_banh: number;
   tong_kg: number;
   trang_thai: string;
@@ -160,6 +173,7 @@ type EditForm = {
 
 type LotContribution = Lot & {
   uid: string;
+  transaction_id?: string;
   tong_banh_cua_ca: number;
   tong_kg_cua_ca: number;
   locked_a?: boolean;
@@ -180,9 +194,9 @@ type LotSeries = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CA_OPTS = ["A", "B", "C"];
-const THAM_OPTS = ["cũ", "Mới"];
-const TRANG_THAI_OPTS = ["Hoàn thành", "Dở dang", "Xuất hàng"];
-const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
+const THAM_OPTS = ["c\u0169", "M\u1edbi"];
+const TRANG_THAI_OPTS = ["Ho\u00e0n th\u00e0nh", "D\u1edf dang", "Xu\u1ea5t h\u00e0ng"];
+const PALLET_OPTS = ["S\u1eaft \u0111\u1ebf g\u1ed7", "S\u1eaft \u0111\u1ebf nh\u1ef1a", "S\u1eaft m\u1ecfng", "MB5", "G\u1ed7"];
 
 // ─── Business Logic ───────────────────────────────────────────────────────────
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
@@ -207,21 +221,21 @@ function getLoaiBanhOptions(loai_csr: string): number[] {
 }
 
 function getLoaiCSRByDayChuyen(dc: string, prefix: "CSR" | "SVR"): string[] {
-  if (dc === "Mủ nước")
+  if (dc === "M\u1ee7 n\u01b0\u1edbc")
     return [
       `${prefix}L`,
       `${prefix}3L`,
       `${prefix}CV50`,
       `${prefix}CV60`,
-      "Ngoại lệ",
+      "Ngo\u1ea1i l\u1ec7",
     ];
-  return [`${prefix}10`, `${prefix}20`, "Ngoại lệ"];
+  return [`${prefix}10`, `${prefix}20`, "Ngo\u1ea1i l\u1ec7"];
 }
 
 function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
-  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${loai_csr}`];
-  if (dc === "Mủ nước")
-    return [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${loai_csr}`];
+  const base = [`B\u1ecdc tr\u01a1n 0,04`, `B\u1ecdc nh\u00e3n 0,04 VRG ${loai_csr}`];
+  if (dc === "M\u1ee7 n\u01b0\u1edbc")
+    return [...base, `B\u1ecdc tr\u01a1n 0,13`, `B\u1ecdc nh\u00e3n 0,13 VRG ${loai_csr}`];
   return base;
 }
 
@@ -230,9 +244,9 @@ function autoTrangThai(
   lo_tron: number,
   current: string,
 ): string {
-  if (current === "Xuất hàng") return "Xuất hàng";
-  if (tong_banh >= lo_tron) return "Hoàn thành";
-  return "Dở dang";
+  if (current === "Xu\u1ea5t h\u00e0ng") return "Xu\u1ea5t h\u00e0ng";
+  if (tong_banh >= lo_tron) return "Ho\u00e0n th\u00e0nh";
+  return "D\u1edf dang";
 }
 
 function getLotCompletionDate(
@@ -240,7 +254,7 @@ function getLotCompletionDate(
   currentNgaySX: string,
   previousNgayHT?: string | null,
 ): string | null {
-  if (trang_thai === "Hoàn thành" || trang_thai === "Xuất hàng") {
+  if (trang_thai === "Ho\u00e0n th\u00e0nh" || trang_thai === "Xu\u1ea5t h\u00e0ng") {
     return currentNgaySX || previousNgayHT || null;
   }
   return null;
@@ -346,7 +360,7 @@ function generateLotDrafts(
             : "giua";
 
     const isCompleted =
-      dbLot && ["Hoàn thành", "Xuất hàng"].includes(dbLot.trang_thai);
+      dbLot && ["Ho\u00e0n th\u00e0nh", "Xu\u1ea5t h\u00e0ng"].includes(dbLot.trang_thai);
     if (isCompleted) {
       drafts.push({
         num: n,
@@ -374,11 +388,11 @@ function generateLotDrafts(
     }
 
     const fromPrevDraft =
-      n === fromNum && prevCaLastDraft?.trang_thai === "Dở dang"
+      n === fromNum && prevCaLastDraft?.trang_thai === "D\u1edf dang"
         ? prevCaLastDraft
         : undefined;
     const fromDB =
-      n === fromNum && dbLot?.trang_thai === "Dở dang" && !fromPrevDraft
+      n === fromNum && dbLot?.trang_thai === "D\u1edf dang" && !fromPrevDraft
         ? dbLot
         : undefined;
     const contSource = fromPrevDraft || fromDB;
@@ -404,7 +418,7 @@ function generateLotDrafts(
         is_continuation: false,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: "Hoàn thành",
+        trang_thai: "Ho\u00e0n th\u00e0nh",
       });
       continue;
     }
@@ -454,12 +468,9 @@ function generateLotDrafts(
         existing_id:
           (fromDB as Lot | undefined)?.id ??
           (fromPrevDraft as LotDraft | undefined)?.existing_id,
-        existing_snapshot:
-          (fromDB as Lot | undefined)?.dd_snapshot ??
-          (fromPrevDraft as LotDraft | undefined)?.existing_snapshot,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: autoTrangThai(tb, lo_tron, "Dở dang"),
+        trang_thai: autoTrangThai(tb, lo_tron, "D\u1edf dang"),
       });
     } else {
       const tb = max_per_kien * 4;
@@ -481,7 +492,7 @@ function generateLotDrafts(
         is_continuation: false,
         tong_banh: tb,
         tong_kg: Math.round(tb * loai_banh * 100) / 100,
-        trang_thai: "Hoàn thành",
+        trang_thai: "Ho\u00e0n th\u00e0nh",
       });
     }
   }
@@ -497,16 +508,16 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
   return {
     year: normalizeLotYear(yearFromDate(todayStr())),
     ngay_sx: todayStr(),
-    day_chuyen: "Mủ tạp",
+    day_chuyen: "M\u1ee7 t\u1ea1p",
     so_ca: 2,
     ngan_id: "",
     suffix: "cs",
     loai_csr: defaultCsr,
     loai_banh: 35,
-    boc: `Bọc nhãn 0,04 VRG ${defaultCsr}`,
-    tham: "Củ",
+    boc: `B\u1ecdc nh\u00e3n 0,04 VRG ${defaultCsr}`,
+    tham: "C\u0169",
     chi_thi: "1",
-    pallet: ["Sắt đế gỗ"],
+    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
     image_url_1: "",
     image_url_2: "",
   };
@@ -525,12 +536,12 @@ function emptyEditForm(): EditForm {
     ngay_sx: todayStr(),
     ca: "A",
     ngan_id: "",
-    day_chuyen: "Mủ tạp",
+    day_chuyen: "M\u1ee7 t\u1ea1p",
     loai_csr: "CSR10",
     loai_banh: 35,
-    boc: "Bọc nhãn 0,04 VRG CSR10",
-    tham: "Củ",
-    pallet: ["Sắt đế gỗ"],
+    boc: "B\u1ecdc nh\u00e3n 0,04 VRG CSR10",
+    tham: "C\u0169",
+    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
     chi_thi: "1",
     kien_a: 36,
     kien_b: 36,
@@ -538,7 +549,7 @@ function emptyEditForm(): EditForm {
     kien_d: 36,
     tong_banh: 144,
     tong_kg: 5040,
-    trang_thai: "Hoàn thành",
+    trang_thai: "Ho\u00e0n th\u00e0nh",
     ghi_chu: "",
   };
 }
@@ -547,7 +558,7 @@ function emptyEditForm(): EditForm {
 export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [factoryId, setFactoryId] = useState<string | null>(null);
   const [factory, setFactory] = useState<{ id: string; name: string } | null>(
     null,
@@ -599,7 +610,9 @@ export default function ProductPage() {
     try {
       const q = supabase
         .from("lots")
-        .select("*, ngans(ten_ngan, ma_ngan, loai_nl)")
+        .select(
+          "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at)",
+        )
         .eq("factory_id", fid)
         .order("ngay_sx", { ascending: false })
         .order("created_at", { ascending: false });
@@ -613,7 +626,20 @@ export default function ProductPage() {
           )
           .eq("factory_id", fid),
       ]);
-      setLots(lotsData || []);
+      const normalizedLots = (lotsData || []).map((lot) => ({
+        ...lot,
+        trang_thai: normalizeLotStatus(lot.trang_thai),
+        lot_transactions: [...(lot.lot_transactions || [])].sort((a, b) => {
+          const dateDiff =
+            new Date(a.ngay_nhap).getTime() - new Date(b.ngay_nhap).getTime();
+          if (dateDiff !== 0) return dateDiff;
+          return (
+            new Date(a.created_at || 0).getTime() -
+            new Date(b.created_at || 0).getTime()
+          );
+        }),
+      }));
+      setLots(dedupeLotsByMaLo(normalizedLots));
       setNgans(ngansData || []);
     } finally {
       setLoading(false);
@@ -662,21 +688,17 @@ export default function ProductPage() {
   const contributions = useMemo(() => {
     const arr: LotContribution[] = [];
     lots.forEach((lot) => {
-      if (
-        lot.dd_snapshot &&
-        Array.isArray(lot.dd_snapshot.history) &&
-        lot.dd_snapshot.history.length > 0
-      ) {
-        const history = lot.dd_snapshot.history as HistoryEntry[];
-        history.forEach((h, i) => {
-          const prev = i > 0 ? history[i - 1] : null;
-          const histNganId = h.ngan_id || lot.ngan_id;
-          const mappedNgan = ngans.find((n) => n.id === histNganId);
-
+      const transactions = lot.lot_transactions || [];
+      if (transactions.length > 0) {
+        transactions.forEach((tx, index) => {
+          const mappedNgan = ngans.find((n) => n.id === (tx.ngan_id || lot.ngan_id));
           arr.push({
             ...lot,
-            ngay_sx: h.ngay_sx || lot.ngay_sx,
-            ngan_id: histNganId,
+            uid: tx.id,
+            transaction_id: tx.id,
+            ngay_sx: tx.ngay_nhap || lot.ngay_sx,
+            ca: tx.ca,
+            ngan_id: tx.ngan_id || lot.ngan_id,
             ngans: mappedNgan
               ? {
                   ten_ngan: mappedNgan.ten_ngan,
@@ -684,24 +706,19 @@ export default function ProductPage() {
                   loai_nl: mappedNgan.loai_nl,
                 }
               : lot.ngans,
-            uid: `${lot.id}-${i}`,
-            ca: h.ca,
-            tong_banh_cua_ca: h.added_banh,
-            tong_kg_cua_ca: h.added_banh * lot.loai_banh,
-            trang_thai: i === history.length - 1 ? lot.trang_thai : "Dở dang",
-            kien_a: h.kien_a,
-            kien_b: h.kien_b,
-            kien_c: h.kien_c,
-            kien_d: h.kien_d,
-            tong_banh: h.kien_a + h.kien_b + h.kien_c + h.kien_d,
-            locked_a: prev !== null && h.kien_a === prev.kien_a && h.kien_a > 0,
-            locked_b: prev !== null && h.kien_b === prev.kien_b && h.kien_b > 0,
-            locked_c: prev !== null && h.kien_c === prev.kien_c && h.kien_c > 0,
-            locked_d: prev !== null && h.kien_d === prev.kien_d && h.kien_d > 0,
-            disp_a: prev !== null ? h.kien_a - prev.kien_a : h.kien_a,
-            disp_b: prev !== null ? h.kien_b - prev.kien_b : h.kien_b,
-            disp_c: prev !== null ? h.kien_c - prev.kien_c : h.kien_c,
-            disp_d: prev !== null ? h.kien_d - prev.kien_d : h.kien_d,
+            tong_banh_cua_ca: tx.so_banh,
+            tong_kg_cua_ca: tx.so_kg,
+            trang_thai:
+              index === transactions.length - 1 ? lot.trang_thai : "D\u1edf dang",
+            kien_a: tx.kien_a,
+            kien_b: tx.kien_b,
+            kien_c: tx.kien_c,
+            kien_d: tx.kien_d,
+            tong_banh: tx.so_banh,
+            disp_a: tx.kien_a,
+            disp_b: tx.kien_b,
+            disp_c: tx.kien_c,
+            disp_d: tx.kien_d,
           });
         });
       } else {
@@ -719,8 +736,6 @@ export default function ProductPage() {
     });
     return arr;
   }, [lots, ngans]);
-
-  // ── List Filters & Grouping ────────────────────────────────────────────────
   const filteredContribs = useMemo(() => {
     return contributions.filter((c) => {
       if (
@@ -907,7 +922,11 @@ export default function ProductPage() {
     return getJumpedLotNums(existingNums, plannedNums);
   }, [caSections, currentSeries, lots]);
 
-  const getMaxLotNum = (loai_csr: string, loai_banh: number, year: string) =>
+  const getMaxLotNum = (
+    loai_csr: string,
+    loai_banh: number,
+    year: string,
+  ) =>
     lots
       .filter((l) => isSameLotSeries(l, { loai_csr, loai_banh, year }))
       .reduce((m, l) => Math.max(m, l.num || 0), 0);
@@ -934,7 +953,11 @@ export default function ProductPage() {
   useEffect(() => {
     if (!factoryId) return;
     setMaxNumFromDB(
-      getMaxLotNum(session.loai_csr, session.loai_banh, sessionYear),
+      getMaxLotNum(
+        session.loai_csr,
+        session.loai_banh,
+        sessionYear,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, session.loai_csr, session.loai_banh, sessionYear, lots]);
@@ -963,13 +986,18 @@ export default function ProductPage() {
         ) >= 21
       );
     });
+    }).filter(n => n.loai_nl === (dayChuyenVal === "Mủ tạp" ? "Mủ tạp" : "Mủ nước") || validNl.includes(n.loai_nl));
+
     const dangSX = eligible
       .filter((n) => n.trang_thai === "Đang sản xuất")
       .sort(
         (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
       )[0];
+      .sort((a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime())[0];
+    
     if (dangSX) return dangSX.id;
     // Fallback: ngăn Chờ sản xuất MỚI NHẤT (ngay_bd lớn nhất)
+
     const newest = eligible
       .filter((n) => n.trang_thai === "Chờ sản xuất")
       .sort(
@@ -1294,191 +1322,87 @@ export default function ProductPage() {
     setSaving(true);
     setSaveError(null);
     let hasError = false;
-    // Theo dõi ID các lô vừa INSERT trong phiên này để các ca sau cùng phiên có thể UPDATE thay vì INSERT lại
-    const insertedLotIds = new Map<string, string>(); // ma_lo → id
     try {
       const cfg = getLoaiBanhConfig(session.loai_csr, session.loai_banh);
       const year = lotYear;
       for (const cs of caSections) {
         for (const draft of cs.lots) {
-          if (draft.is_already_completed) continue; // Bỏ qua lô đã khóa
+          if (draft.is_already_completed) continue;
+
+          const deltaA = draft.is_continuation
+            ? Math.max(0, draft.kien_a - draft.prev_a)
+            : draft.kien_a;
+          const deltaB = draft.is_continuation
+            ? Math.max(0, draft.kien_b - draft.prev_b)
+            : draft.kien_b;
+          const deltaC = draft.is_continuation
+            ? Math.max(0, draft.kien_c - draft.prev_c)
+            : draft.kien_c;
+          const deltaD = draft.is_continuation
+            ? Math.max(0, draft.kien_d - draft.prev_d)
+            : draft.kien_d;
+          const added_banh = deltaA + deltaB + deltaC + deltaD;
+
+          if (added_banh <= 0) continue;
+
+          const ma_lo = buildMaLo(draft.num, session.suffix, year);
+          const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
+          if (!draft.is_continuation && duplicateLot) {
+            setSaveError(
+              duplicateLot.trang_thai === "D\u1edf dang"
+                ? `L\u00f4 ${ma_lo} \u0111ang t\u1ed3n t\u1ea1i \u1edf tr\u1ea1ng th\u00e1i D\u1edf dang. H\u00e3y ti\u1ebfp t\u1ee5c l\u00f4 hi\u1ec7n c\u00f3 thay v\u00ec t\u1ea1o m\u1edbi.`
+                : `L\u00f4 ${ma_lo} \u0111\u00e3 t\u1ed3n t\u1ea1i trong th\u00e0nh ph\u1ea9m, kh\u00f4ng th\u1ec3 t\u1ea1o tr\u00f9ng.`,
+            );
+            hasError = true;
+            break;
+          }
 
           const tb = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d;
-          const tong_kg = Math.round(tb * session.loai_banh * 100) / 100;
-          const trang_thai = autoTrangThai(tb, cfg.lo_tron, "Dở dang");
+          const trang_thai = autoTrangThai(tb, cfg.lo_tron, "D\u1edf dang");
 
-          const added_banh = draft.is_continuation
-            ? Math.max(0, draft.kien_a - draft.prev_a) +
-              Math.max(0, draft.kien_b - draft.prev_b) +
-              Math.max(0, draft.kien_c - draft.prev_c) +
-              Math.max(0, draft.kien_d - draft.prev_d)
-            : tb;
-
-          // History Tracking
-          let history: HistoryEntry[] = [];
-          if (
-            draft.is_continuation &&
-            draft.existing_snapshot?.history?.length
-          ) {
-            history = [...draft.existing_snapshot.history];
-          } else if (draft.is_continuation && draft.existing_snapshot) {
-            const existingLot = lots.find((l) => l.id === draft.existing_id);
-            history = [
-              {
-                ca: draft.existing_snapshot.ca || existingLot?.ca || "?",
-                ngay_sx: existingLot?.ngay_sx || "",
-                ngan_id: existingLot?.ngan_id || undefined,
-                kien_a: draft.prev_a,
-                kien_b: draft.prev_b,
-                kien_c: draft.prev_c,
-                kien_d: draft.prev_d,
-                added_banh:
-                  draft.prev_a + draft.prev_b + draft.prev_c + draft.prev_d,
-                timestamp:
-                  draft.existing_snapshot.timestamp || new Date().toISOString(),
-              },
-            ];
-          } else if (draft.is_continuation && draft.existing_id) {
-            // Lô dở dang không có dd_snapshot — tạo entry gốc từ lot thực tế
-            const existingLot = lots.find((l) => l.id === draft.existing_id);
-            if (existingLot) {
-              history = [
-                {
-                  ca: existingLot.ca,
-                  ngay_sx: existingLot.ngay_sx,
-                  ngan_id: existingLot.ngan_id || undefined,
-                  kien_a: draft.prev_a,
-                  kien_b: draft.prev_b,
-                  kien_c: draft.prev_c,
-                  kien_d: draft.prev_d,
-                  added_banh:
-                    draft.prev_a + draft.prev_b + draft.prev_c + draft.prev_d,
-                  timestamp:
-                    (existingLot as any).created_at || new Date().toISOString(),
-                },
-              ];
-            }
-          }
-          history.push({
-            ca: cs.ca,
-            ngay_sx: session.ngay_sx,
-            ngan_id: session.ngan_id,
-            kien_a: draft.kien_a,
-            kien_b: draft.kien_b,
-            kien_c: draft.kien_c,
-            kien_d: draft.kien_d,
-            added_banh,
-            timestamp: new Date().toISOString(),
-          });
-
-          const dd_snapshot = {
-            kien_a: draft.kien_a,
-            kien_b: draft.kien_b,
-            kien_c: draft.kien_c,
-            kien_d: draft.kien_d,
-            timestamp: new Date().toISOString(),
-            history,
-            ca: cs.ca,
-          };
-
-          const ma_lo_cur = buildMaLo(draft.num, session.suffix, year);
-          // Lô kế thừa: ưu tiên existing_id từ DB, fallback sang ID vừa INSERT trong phiên này
-          const resolvedExistingId =
-            draft.existing_id || insertedLotIds.get(ma_lo_cur);
-
-          if (draft.is_continuation && resolvedExistingId) {
-            const ngay_ht = getLotCompletionDate(
+          await saveLotTransaction({
+            lot: {
+              factory_id: factoryId,
+              ma_lo,
+              num: draft.num,
+              suffix: session.suffix,
+              year,
+              ngay_sx: session.ngay_sx,
+              ca: cs.ca,
+              ngan_id: session.ngan_id,
+              day_chuyen: session.day_chuyen,
+              loai_csr: session.loai_csr,
+              loai_banh: session.loai_banh,
+              boc: session.boc,
+              tham: session.tham,
+              chi_thi: session.chi_thi,
+              pallet: session.pallet,
+              ghi_chu: "",
+              image_url_1: session.image_url_1 || null,
+              image_url_2: session.image_url_2 || null,
               trang_thai,
-              session.ngay_sx,
-              lots.find((l) => l.id === resolvedExistingId)?.ngay_ht,
-            );
-            const { error } = await supabase
-              .from("lots")
-              .update({
-                kien_a: draft.kien_a,
-                kien_b: draft.kien_b,
-                kien_c: draft.kien_c,
-                kien_d: draft.kien_d,
-                tong_banh: tb,
-                tong_kg,
-                trang_thai,
-                ngay_ht,
-                dd_snapshot,
-                ca: cs.ca,
-              })
-              .eq("id", resolvedExistingId);
-            if (error) {
-              setSaveError(`Lỗi cập nhật lô ${draft.num}: ${error.message}`);
-              hasError = true;
-              break;
-            }
-          } else {
-            const ma_lo = ma_lo_cur;
-            const duplicateLot = lots.find((lot) => lot.ma_lo === ma_lo);
-            if (duplicateLot) {
-              setSaveError(
-                duplicateLot.trang_thai === "Dở dang"
-                  ? `Lô ${ma_lo} đang tồn tại ở trạng thái Dở dang. Hãy tiếp tục lô hiện có thay vì tạo mới.`
-                  : `Lô ${ma_lo} đã tồn tại trong thành phẩm, không thể tạo trùng.`,
-              );
-              hasError = true;
-              break;
-            }
-            const ngay_ht = getLotCompletionDate(trang_thai, session.ngay_sx);
-            const { data: insertData, error } = await supabase
-              .from("lots")
-              .insert({
-                factory_id: factoryId,
-                day_chuyen: session.day_chuyen,
-                ma_lo,
-                num: draft.num,
-                suffix: session.suffix,
-                year,
-                ngay_sx: session.ngay_sx,
-                ngay_ht,
-                ca: cs.ca,
-                ngan_id: session.ngan_id,
-                loai_csr: session.loai_csr,
-                loai_banh: session.loai_banh,
-                boc: session.boc,
-                tham: session.tham,
-                chi_thi: session.chi_thi,
-                pallet: session.pallet,
-                kien_a: draft.kien_a,
-                kien_b: draft.kien_b,
-                kien_c: draft.kien_c,
-                kien_d: draft.kien_d,
-                tong_banh: tb,
-                tong_kg,
-                trang_thai,
-                dd_snapshot,
-                ghi_chu: "",
-                is_manual_edit: false,
-                image_url_1: session.image_url_1 || null,
-                image_url_2: session.image_url_2 || null,
-              })
-              .select("id")
-              .single();
-            if (error) {
-              setSaveError(`Lỗi tạo lô ${ma_lo}: ${error.message}`);
-              hasError = true;
-              break;
-            }
-            // Lưu ID để các ca sau trong cùng phiên có thể UPDATE thay vì INSERT lại
-            if (insertData?.id) {
-              insertedLotIds.set(ma_lo, insertData.id);
-            }
-          }
-          if (hasError) break;
+            },
+            transaction: {
+              ngan_id: session.ngan_id,
+              ca: cs.ca,
+              ngay_nhap: session.ngay_sx,
+              kien_a: deltaA,
+              kien_b: deltaB,
+              kien_c: deltaC,
+              kien_d: deltaD,
+              so_banh: added_banh,
+              so_kg: Math.round(added_banh * session.loai_banh * 100) / 100,
+            },
+          });
         }
         if (hasError) break;
       }
     } catch (err) {
-      setSaveError(`Lỗi không xác định: ${String(err)}`);
+      setSaveError(err instanceof Error ? err.message : String(err));
       hasError = true;
     }
     if (!hasError) {
-      const nganStatus = markNganDone ? "Đã sản xuất" : "Đang sản xuất";
+      const nganStatus = markNganDone ? "\u0110\u00e3 s\u1ea3n xu\u1ea5t" : "\u0110ang s\u1ea3n xu\u1ea5t";
       await supabase
         .from("ngans")
         .update({ trang_thai: nganStatus })
@@ -1490,8 +1414,6 @@ export default function ProductPage() {
       setSaving(false);
     }
   };
-
-  // ── Edit individual lot ────────────────────────────────────────────────────
   const openEdit = (lot: Lot) => {
     if (lot.trang_thai === "Xuất hàng") {
       setSaveError("Lô đã xuất hàng, không thể sửa.");
@@ -1616,7 +1538,6 @@ export default function ProductPage() {
     }
     setSaving(true);
     try {
-      // Lấy dbLot cũ để xem có history không
       const dbLot = lots.find((l) => l.id === editId);
       if (!dbLot) {
         setSaveError("Không tìm thấy lô cần sửa.");
@@ -1636,13 +1557,69 @@ export default function ProductPage() {
           return;
         }
       }
-      const dd_snapshot = dbLot?.dd_snapshot || {};
-      dd_snapshot.kien_a = editForm.kien_a;
-      dd_snapshot.kien_b = editForm.kien_b;
-      dd_snapshot.kien_c = editForm.kien_c;
-      dd_snapshot.kien_d = editForm.kien_d;
-      dd_snapshot.timestamp = new Date().toISOString();
-      // Note: manual edit doesnt touch history array to keep it simple, but marks it edited
+
+      const transactions = dbLot.lot_transactions || [];
+      const latestTx = transactions[transactions.length - 1];
+      if (!latestTx) {
+        setSaveError("L\u00f4 n\u00e0y ch\u01b0a c\u00f3 giao d\u1ecbch \u0111\u1ec3 s\u1eeda.");
+        return;
+      }
+
+      const previousTransactions = transactions.slice(0, -1);
+      const prevA = previousTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
+      const prevB = previousTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
+      const prevC = previousTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
+      const prevD = previousTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+
+      if (
+        editForm.kien_a < prevA ||
+        editForm.kien_b < prevB ||
+        editForm.kien_c < prevC ||
+        editForm.kien_d < prevD
+      ) {
+        setSaveError("Không thể giảm số kiện nhỏ hơn tổng của các ca trước.");
+        return;
+      }
+
+      const deltaA = editForm.kien_a - prevA;
+      const deltaB = editForm.kien_b - prevB;
+      const deltaC = editForm.kien_c - prevC;
+      const deltaD = editForm.kien_d - prevD;
+      const deltaBanh = deltaA + deltaB + deltaC + deltaD;
+
+      await saveLotTransaction({
+        lot: {
+          factory_id: factoryId,
+          ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
+          num: editForm.num,
+          suffix: editForm.suffix,
+          year: lotYear,
+          ngay_sx: editForm.ngay_sx,
+          ca: editForm.ca,
+          ngan_id: editForm.ngan_id || null,
+          day_chuyen: editForm.day_chuyen,
+          loai_csr: editForm.loai_csr,
+          loai_banh: editForm.loai_banh,
+          boc: editForm.boc,
+          tham: editForm.tham,
+          chi_thi: editForm.chi_thi,
+          pallet: editForm.pallet,
+          ghi_chu: editForm.ghi_chu,
+          trang_thai: editForm.trang_thai,
+        },
+        transaction: {
+          id: latestTx.id,
+          ngan_id: editForm.ngan_id || latestTx.ngan_id,
+          ca: editForm.ca,
+          ngay_nhap: editForm.ngay_sx,
+          kien_a: deltaA,
+          kien_b: deltaB,
+          kien_c: deltaC,
+          kien_d: deltaD,
+          so_banh: deltaBanh,
+          so_kg: Math.round(deltaBanh * editForm.loai_banh * 100) / 100,
+        },
+      });
 
       const { error: updateError } = await supabase
         .from("lots")
@@ -1657,7 +1634,6 @@ export default function ProductPage() {
             editForm.ngay_sx,
             dbLot.ngay_ht,
           ),
-          dd_snapshot,
           is_manual_edit: true,
         })
         .eq("id", editId);
@@ -1682,8 +1658,6 @@ export default function ProductPage() {
       setSaving(false);
     }
   };
-
-  // ── Quick Close Lot (Ép đóng lô) ───────────────────────────────────────────
   const handleQuickCloseLot = async (lotId: string) => {
     if (!factoryId) return;
     try {
@@ -1703,93 +1677,85 @@ export default function ProductPage() {
         .eq("id", lotId);
       if (error) throw error;
       loadData(factoryId);
-    } catch (err: any) {
-      setSaveError("Lỗi ép đóng lô: " + err.message);
+    } catch (err) {
+      setSaveError(
+        "L\u1ed7i \u00e9p \u0111\u00f3ng l\u00f4: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
     }
   };
-
-  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (uid: string) => {
     if (!factoryId) return;
-    const dashIdx = uid.lastIndexOf("-");
-    const isHistoryUid = dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
-    const lotId = isHistoryUid ? uid.slice(0, dashIdx) : uid;
-    const histIdx = isHistoryUid ? Number(uid.slice(dashIdx + 1)) : 0;
 
+    const contribution = contributions.find((item) => item.uid === uid);
+    const lotId = contribution?.id || uid;
     const lot = lots.find((l) => l.id === lotId);
     if (!lot) return;
 
-    const history: HistoryEntry[] = lot.dd_snapshot?.history || [];
+    const transactionId = contribution?.transaction_id;
+    const transactionCount = lot.lot_transactions?.length || 0;
+    const latestTransactionId =
+      transactionCount > 0
+        ? lot.lot_transactions?.[transactionCount - 1]?.id
+        : null;
 
-    if (!isHistoryUid || history.length <= 1) {
-      // Xóa hẳn lô
-      const { error: delError } = await supabase
+    if (transactionId && transactionCount > 1) {
+      if (transactionId !== latestTransactionId) {
+        setSaveError("Chỉ được xóa contribution mới nhất của lô dở.");
+        setDelConfirm(null);
+        return;
+      }
+      try {
+        await deleteLotTransaction({ transactionId });
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+        setDelConfirm(null);
+        return;
+      }
+      setDelConfirm(null);
+      loadData(factoryId);
+      return;
+    }
+
+    if (transactionCount === 1 && lot.lot_transactions?.[0]?.id) {
+      try {
+        await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+        setDelConfirm(null);
+        return;
+      }
+    }
+
+    const { error: delError } = await supabase
+      .from("lots")
+      .delete()
+      .eq("id", lotId);
+    if (delError) {
+      setSaveError(
+        delError.code === "23503"
+          ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
+          : delError.message,
+      );
+      setDelConfirm(null);
+      return;
+    }
+    if (lot.ngan_id) {
+      const { data: rem } = await supabase
         .from("lots")
-        .delete()
-        .eq("id", lotId);
-      if (delError) {
-        setSaveError(
-          delError.code === "23503"
-            ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
-            : delError.message,
-        );
-        setDelConfirm(null);
-        return;
-      }
-      if (lot.ngan_id) {
-        const { data: rem } = await supabase
-          .from("lots")
-          .select("id")
-          .eq("ngan_id", lot.ngan_id)
-          .neq("id", lotId);
-        const newStatus =
-          (rem?.length ?? 0) === 0 ? "Chờ sản xuất" : "Đang sản xuất";
-        await supabase
-          .from("ngans")
-          .update({ trang_thai: newStatus })
-          .eq("id", lot.ngan_id);
-      }
-    } else {
-      // Chỉ xóa entry cuối — revert về entry trước
-      if (histIdx !== history.length - 1) {
-        setSaveError("Chỉ có thể xóa ca sản xuất mới nhất của lô này.");
-        setDelConfirm(null);
-        return;
-      }
-      const prevEntry = history[history.length - 2];
-      const newHistory = history.slice(0, -1);
-      const { kien_a, kien_b, kien_c, kien_d, ca: prevCa } = prevEntry;
-      const newTongBanh = kien_a + kien_b + kien_c + kien_d;
-      const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
-      const newTrangThai = autoTrangThai(newTongBanh, cfg.lo_tron, "Dở dang");
-      const revertedKiens = { kien_a, kien_b, kien_c, kien_d };
+        .select("id")
+        .eq("ngan_id", lot.ngan_id)
+        .neq("id", lotId);
+      const newStatus =
+        (rem?.length ?? 0) === 0 ? "Ch\u1edd s\u1ea3n xu\u1ea5t" : "\u0110ang s\u1ea3n xu\u1ea5t";
       await supabase
-        .from("lots")
-        .update({
-          ...revertedKiens,
-          tong_banh: newTongBanh,
-          tong_kg: Math.round(newTongBanh * lot.loai_banh * 100) / 100,
-          trang_thai: newTrangThai,
-          ca: prevCa,
-          ngay_sx: prevEntry.ngay_sx || lot.ngay_sx,
-          ngay_ht: getLotCompletionDate(
-            newTrangThai,
-            prevEntry.ngay_sx || lot.ngay_sx,
-            lot.ngay_ht,
-          ),
-          dd_snapshot: {
-            ...lot.dd_snapshot,
-            ...revertedKiens,
-            history: newHistory,
-            ca: prevCa,
-          },
-        })
-        .eq("id", lotId);
+        .from("ngans")
+        .update({ trang_thai: newStatus })
+        .eq("id", lot.ngan_id);
     }
     setDelConfirm(null);
     loadData(factoryId);
   };
-
   const handleBulkDelete = async () => {
     const deletable = Array.from(selectedDeleteIds).filter(
       (id) => !lotsBlockedByKn.includes(id),
@@ -3345,9 +3311,11 @@ export default function ProductPage() {
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
-                                                next.has(c.id)
-                                                  ? next.delete(c.id)
-                                                  : next.add(c.id);
+                                                if (next.has(c.id)) {
+                                                  next.delete(c.id);
+                                                } else {
+                                                  next.add(c.id);
+                                                }
                                                 return next;
                                               })
                                             }
@@ -3858,7 +3826,12 @@ export default function ProductPage() {
                         </div>
                         {grouped[ca].map((c) => {
                           const lot = lots.find((l) => l.id === c.id);
-                          const canEdit = c.trang_thai === "Dở dang";
+                          const latestTransactionId =
+                            lot?.lot_transactions?.[lot.lot_transactions.length - 1]?.id;
+                          const isLatestContribution =
+                            !c.transaction_id || c.transaction_id === latestTransactionId;
+                          const canEdit =
+                            isLatestContribution && c.trang_thai === "Dở dang";
                           return (
                             <div
                               key={c.uid}
@@ -3885,7 +3858,9 @@ export default function ProductPage() {
                                 </span>
                               </div>
                               <div className="flex gap-2 shrink-0">
-                                {c.trang_thai === "Dở dang" && lot && (
+                                {isLatestContribution &&
+                                  c.trang_thai === "Dở dang" &&
+                                  lot && (
                                   <button
                                     onClick={() => handleQuickCloseLot(lot.id)}
                                     className="flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors"

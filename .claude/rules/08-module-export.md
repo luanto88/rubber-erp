@@ -26,6 +26,18 @@ description: Module xuat hang, assignments, EUDR
   yeu_cau_chi_tieu: object[],
   files: object[],
 }
+
+// Cấu trúc Vehicle (lưu trong mảng JSONB `vehicles`)
+type Vehicle = {
+  id: string,
+  loai_xe: string,
+  bien_truoc: string,
+  bien_sau: string,
+  ghi_chu: string,
+  image_url_1?: string, // Ảnh xe/Biển số (Lưu trên bucket order-files)
+  image_url_2?: string, // Ảnh hàng hóa/Niêm phong
+  image_url_3?: string, // Ảnh chứng từ/Phiếu cân
+}
 ```
 
 ## Rule `loai_pallet_xuat`
@@ -62,7 +74,7 @@ Rule chinh thuc:
 ## Ma don
 
 ```ts
-ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`
+ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`;
 ```
 
 - Read-only
@@ -81,6 +93,14 @@ ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`
 - Con remaining -> giu `Hoan thanh`
 - Xoa don hang -> phai tinh lai remaining cua tung lo
 - Neu lo co hang kha dung tro lai sau khi xoa don -> quay ve `Hoan thanh`
+
+### Rule dong bo khi xoa don xuat
+
+- Khi xoa 1 `export_order`, khong update trang thai lo theo kieu cung nhac
+- Bat buoc tinh lai theo cac don xuat con lai:
+  - `remaining <= 0` -> `Xuat hang`
+  - `remaining > 0` -> `Hoan thanh`
+- Ket qua tinh lai phai phan anh ngay o module `Thanh pham` (dong bo 2 chieu)
 
 ## Khach hang
 
