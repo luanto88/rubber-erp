@@ -1,0 +1,77 @@
+Tro: Tính giá trị trung bình 6 mẫu tro vừa nhập và cộng với độ lệch chuẩn (3SD) so với cột 4 tương ứng với sản phẩm đã chọn
+Tạp chất: Tính giá trị trung bình 6 mẫu tạp chất vừa nhập và cộng với độ lệch chuẩn (3SD) so với cột 3 tương ứng với sản phẩm đã chọn
+Kiểm thường mỗi chỉ tiêu sẽ hiển thi 6 mẫu (Người dùng nhập mẫu 1 đến mẫu 6) Cách tính toán và so với bảng tiêu chuẩn như sau
+dùng nhập liệu.
+Các ô trống trong 2 bảng chỉ tiêu là các chỉ tiêu không yêu cầu cho sản phẩm tương ứng ví dụ (sản phẩm L, 3L không yêu cầu chỉ tiêu Độ nhớt (cột 14-15) căn cứ vào đây mà hiển thị từng chỉ tiêu cho người 
+số cũ, số mới, người sửa giờ sửa)
+nghiệm, nếu người dùng chọn kiểm lại thì chỉ hiển thị các lô đã xếp loại rớt hạng, kiểm lại sẽ hiển thi kết quả cũ và người dùng sửa trên kết quả đó, mọi thay đổi về số liệu sẽ lưu lại cột ghi chú sửa chỉ tiêu gì? 
+Đầu tiên sẽ chọn thông tin Ngày KN, Chủng loại, Loại kiểm nghiệm (Kiểm thường, Kiểm ngặt, Kiểm lại), Lô kiểm nghiệm (Lô được lọc từ thành phẩm với tất cả thông tin trên cùng với điều kiện chưa được kiểm 
+Flow xếp hạng chất lượng như sau:
+đạt)
+Có 3 loại kiểm nghiệm: Kiểm thường: mỗi chỉ tiêu 4-6 mẫu; Kiểm ngặt: Kiểm tối đa số mẫu (14); Kiểm lại (có 2 trường hợp: Kiểm lại sau khi lưu kho 6 tháng và Cắt mẫu kiểm nghiệm lại các lô có chỉ tiêu chưa 
+đó người dùng chỉnh sửa các thông số chỉ tiêu theo yêu cầu khách hàng và lưu lại sử dụng cho lần sau). Khi người dùng chọn tiêu chuẩn nào thì code sẽ so sánh với tiêu chuẩn đó.
+Có 3 tiêu chuẩn để xếp hạng thành phẩm 1: TCCS 112:2022; 2: TCVN 3769:2016; Tiêu chuẩn khách hàng (khi chọn tiêu chuẩn khách hàng sẽ phải điền tên khách hàng và code copy bảng TCCS 112:2022 sau 
+phẩm có thể thêm khi phát sinh
+Có các loại thành phẩm cơ bản như "L, 3L, 5, CV50, CV 60, 10, 20" nếu sản xuất ở nhà máy Campuchia (Kampong Thom) thì thêm mã CSR, nếu sản xuất nhà máy Việt nam thì thêm mã SVR các loại thành 
+xếp loại.
+Các lô thành phẩm được tạo bởi nhà máy (tạo từ modun Thành phẩm nếu bành 33,33 ; 35 phải đủ 144 bành, bành 20 phải đủ 240 bành ) sẽ cắt mẫu (mỗi lô 14 mẫu) gởi phòng QLCL tiến hành kiểm nghiệm và 
+720       0,16    0,8  0,8       0,6     30     40  50
+610       0,08    0,6  0,8       0,6     30     50  60       73    93
+5V60      0,02    0,4  0,8       0,6          60  70       55    65
+4CV50      0,02    0,4  0,8       0,6          60  70       45    55
+35       0,05    0,6  0,8       0,6     30     60  70
+23L       0,03    0,5  0,8       0,6     35     60  70       73    93   6
+1L       0,02    0,4  0,8       0,6     35     60  70                4
+key  chung_loaitap_chat_x+3sd tro_x+3sd bay_hoibay_hoi_dr  nito  nito_drpo_min po_drpri_minpri_tb pri_dr mooney_min mooney_max mau_max mau_dr
+TCVN 3769:2016
+720       0,15    0,7  0,7  0,01    0,5 0,06  30  8  40  50  10
+610       0,07    0,6  0,7  0,01    0,5 0,06  30  8  50  60  10    73    93
+5V60      0,02    0,4  0,7  0,01    0,5 0,06        60  70  10    55    65
+4CV50      0,02    0,4  0,7  0,01    0,5 0,06        60  70  10    45    55
+35       0,04    0,5  0,7  0,01    0,5 0,06  30     60  70  10
+23L       0,03    0,4  0,7  0,01    0,5 0,06  35  8  60  70  10    73    93   6   1
+1L       0,02    0,4  0,7  0,01    0,5 0,06  35  8  60  70  10             4   1
+key  chung_loaitap_chat_x+3sd tro_x+3sd bay_hoibay_hoi_dr  nito  nito_drpo_min po_drpri_minpri_tb pri_dr mooney_min mooney_max mau_max mau_dr
+TCCS 112:2022 2    3    4   5   6    7   8  9  10  11  12  13   14    15   16   17
+Thiết kế modun Chất lượng
+----------------Page (0) Break----------------
+Cột Lô PKN được phòng QLCL đánh số từ 1 đến hết ví dụ như nhà máy ngày 1/1/2026 giao 10 lô CSR10, 10 lô CSR20 phòng QLCL kiểm nghiệm tất cả sẽ đánh số từ 1 đến 20
+Sau khi xếp hạng tất cả lô hàng trong 1 ngày người dùng sẽ xuất file pdf như sau:
+hạng là CSR10 nếu rớt hạng là CSR10RH
+Chỉ khi nhập hết các chỉ tiêu lô hàng mới được xếp hạng, nhập chưa đủ sẽ có cảnh báo cho lô hàng đó. Kế quả được xếp như sau: nếu đạt sẽ giữ nguyên tên chủng loại ví dụ: hạng dự kiến CSR10 thì Đạt 
+Xếp loại từng chỉ tiêu nếu 1 chỉ tiêu không đạt cã lô hàng sẽ không đạt
+Kiểm thường so sánh 6 mẫu thì kiểm ngặt 14 mẫu
++So từng giá trị mẫu màu người dùng vừa nhập với cột 16 nếu nhỏ hơn hoặc bằng là đạt, không tính độ rộng
+TCVN 3769:2016: 
++Lấy giá trị trung bình của 6 mẫu vừa nhập so sánh với cột 17 nếu nhỏ hơn hoặc bằng thì đạt
++So từng giá trị mẫu màu người dùng vừa nhập với cột 16 nếu nhỏ hơn hoặc bằng là đạt
+Màu: Nếu TCCS 112:2022: Nếu 1 trong 2 tiêu chí không đạt xếp hạng không đạt
++So sánh giá trị độ nhớt Max trong 6 mẫu người dùng vừa nhập với giá trị cột 15 nếu thấp hơn hoặc bằng và lớn hơn hoặc bằng cột 14 là đạt
++So sánh giá trị độ nhớt Min trong 6 mẫu người dùng vừa nhập với giá trị cột 14 nếu cao hơn hoặc bằng là đạt
+Độ nhớt: nếu không đạt 1 trong 2 tiêu chí xếp hạng không đạt
++Lấy giá trị trung bình của 6 mẫu vừa nhập so sánh với cột 12 nếu lớn hơn hoặc bằng thì đạt, không tính độ rộng
++So từng giá trị mẫu Pri người dùng vừa nhập với cột 11 nếu lớn hơn hoặc bằng là đạt
+TCVN 3769:2016: 
++Lấy giá trị Max trong 6 mẫu trừ cho giá trị Min lấy kết quả so sánh với cột 13 nếu nhỏ hơn hoặc bằng thì đạt
++Lấy giá trị trung bình của 6 mẫu vừa nhập so sánh với cột 12 nếu lớn hơn hoặc bằng thì đạt
++So từng giá trị mẫu Pri người dùng vừa nhập với cột 11 nếu lớn hơn hoặc bằng là đạt
+Nếu TCCS 112:2022: Nếu 1 trong 3 tiêu chí không đạt xếp hạng không đạt
+Pri:
+TCVN 3769:2016: So từng giá trị mẫu Po người dùng vừa nhập với cột 9 nếu lớn hơn hoặc bằng là đạt. Không có giá trị độ rộng
++Lấy giá trị Max trong 6 mẫu trừ cho giá trị Min lấy kết quả so sánh với cột 10 nếu nhỏ hơn hoặc bằng thì đạt
++So từng giá trị mẫu Po người dùng vừa nhập với cột 9 nếu lớn hơn hoặc bằng là đạt
+Nếu TCCS 112:2022: Nếu 1 trong 2 tiêu chí không đạt xếp hạng không đạt
+Po:
+TCVN 3769:2016: So từng giá trị mẫu Nitơ người dùng vừa nhập với cột 7 nếu nhỏ hơn hoặc bằng là đạt. Không có giá trị độ rộng
++Lấy giá trị Max trong 6 mẫu trừ cho giá trị min lấy kết quả so sánh với cột 8 nếu nhỏ hơn hoặc bằng thì đạt
++So từng giá trị mẫu Nitơ người dùng vừa nhập với cột 7 nếu nhỏ hơn hoặc bằng là đạt
+Nếu TCCS 112:2022: Nếu 1 trong 2 tiêu chí không đạt xếp hạng không đạt
+Nitơ:
+TCVN 3769:2016: So từng giá trị mẫu bay hơi người dùng vừa nhập với cột 5 nếu nhỏ hơn hoặc bằng là đạt. Không có giá trị độ rộng
++Lấy giá trị Max trong 6 mẫu trừ cho giá trị min lấy kết quả so sánh với cột 6 nếu nhỏ hơn hoặc bằng thì đạt
++So từng giá trị mẫu bay hơi người dùng vừa nhập với cột 5 nếu nhỏ hơn hoặc bằng là đạt
+Nếu TCCS 112:2022: Nếu 1 trong 2 tiêu chí không đạt xếp hạng không đạt
+Bay hơi: 
+----------------Page (1) Break----------------
+
+----------------Page (2) Break----------------

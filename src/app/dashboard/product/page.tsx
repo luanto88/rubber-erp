@@ -296,7 +296,10 @@ function isSameLotSeries(
   );
 }
 
-function getJumpedLotNums(existingNums: number[], plannedNums: number[]): number[] {
+function getJumpedLotNums(
+  existingNums: number[],
+  plannedNums: number[],
+): number[] {
   const anchor = existingNums.length > 0 ? Math.max(...existingNums) : 0;
   const futureNums = Array.from(
     new Set(plannedNums.filter((num) => num > anchor)),
@@ -329,7 +332,9 @@ function generateLotDrafts(
   const series: LotSeries = { loai_csr, loai_banh, year: yearStr };
 
   for (let n = fromNum; n <= toNum; n++) {
-    const dbLot = existingLots.find((l) => l.num === n && isSameLotSeries(l, series));
+    const dbLot = existingLots.find(
+      (l) => l.num === n && isSameLotSeries(l, series),
+    );
     const role: LotDraft["role"] =
       fromNum === toNum
         ? "single"
@@ -575,11 +580,13 @@ export default function ProductPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
-  const [lotsBlockedByKn, setLotsBlockedByKn] = useState<string[]>([])
-  const [preCheckLoading, setPreCheckLoading] = useState(false)
+  const [lotsBlockedByKn, setLotsBlockedByKn] = useState<string[]>([]);
+  const [preCheckLoading, setPreCheckLoading] = useState(false);
   const [editDateModal, setEditDateModal] = useState<string | null>(null);
   const [deleteMode, setDeleteMode] = useState<string | null>(null);
-  const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set());
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [maxNumFromDB, setMaxNumFromDB] = useState(0);
 
   const [session, setSession] = useState<SessionHeader>(defaultSession());
@@ -627,30 +634,30 @@ export default function ProductPage() {
       setFactoryId(fid);
       loadData(fid);
 
-    supabase
-      .from("factories")
-      .select("id,name")
-      .eq("id", fid)
-      .single()
-      .then(({ data }) => {
-        if (data) setFactory(data);
-      });
+      supabase
+        .from("factories")
+        .select("id,name")
+        .eq("id", fid)
+        .single()
+        .then(({ data }) => {
+          if (data) setFactory(data);
+        });
 
-    supabase
-      .from("suffixes")
-      .select("code,name,nguon,chung_nhan")
-      .eq("factory_id", fid)
-      .order("code")
-      .then(({ data }) => {
-        if (data) setSuffixList(data);
-      });
+      supabase
+        .from("suffixes")
+        .select("code,name,nguon,chung_nhan")
+        .eq("factory_id", fid)
+        .order("code")
+        .then(({ data }) => {
+          if (data) setSuffixList(data);
+        });
 
-    supabase
-      .from("lots")
-      .update({ day_chuyen: "Mủ tạp" })
-      .eq("factory_id", fid)
-      .or("day_chuyen.is.null,day_chuyen.eq.")
-      .then(() => {});
+      supabase
+        .from("lots")
+        .update({ day_chuyen: "Mủ tạp" })
+        .eq("factory_id", fid)
+        .or("day_chuyen.is.null,day_chuyen.eq.")
+        .then(() => {});
     };
     void bootstrap();
   }, [loadData]);
@@ -859,11 +866,14 @@ export default function ProductPage() {
   }, [caSections]);
 
   const sessionYear = session.year;
-  const currentSeries = useMemo<LotSeries>(() => ({
-    loai_csr: session.loai_csr,
-    loai_banh: session.loai_banh,
-    year: sessionYear,
-  }), [session.loai_csr, session.loai_banh, sessionYear]);
+  const currentSeries = useMemo<LotSeries>(
+    () => ({
+      loai_csr: session.loai_csr,
+      loai_banh: session.loai_banh,
+      year: sessionYear,
+    }),
+    [session.loai_csr, session.loai_banh, sessionYear],
+  );
   const jumpLotNums = useMemo(() => {
     const existingNums = lots
       .filter((l) => isSameLotSeries(l, currentSeries))
@@ -875,11 +885,7 @@ export default function ProductPage() {
     return getJumpedLotNums(existingNums, plannedNums);
   }, [caSections, currentSeries, lots]);
 
-  const getMaxLotNum = (
-    loai_csr: string,
-    loai_banh: number,
-    year: string,
-  ) =>
+  const getMaxLotNum = (loai_csr: string, loai_banh: number, year: string) =>
     lots
       .filter((l) => isSameLotSeries(l, { loai_csr, loai_banh, year }))
       .reduce((m, l) => Math.max(m, l.num || 0), 0);
@@ -906,36 +912,47 @@ export default function ProductPage() {
   useEffect(() => {
     if (!factoryId) return;
     setMaxNumFromDB(
-      getMaxLotNum(
-        session.loai_csr,
-        session.loai_banh,
-        sessionYear,
-      ),
+      getMaxLotNum(session.loai_csr, session.loai_banh, sessionYear),
     );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, session.loai_csr, session.loai_banh, sessionYear, lots]);
 
   // ── Session handlers ───────────────────────────────────────────────────────
   const autoSelectNganId = (dayChuyenVal: string): string => {
     const validNl =
       dayChuyenVal === "Mủ tạp"
-        ? ["Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây", "Mủ dơ", "Mủ tạp"]
+        ? [
+            "Mủ chén",
+            "Mủ đông chén",
+            "Mủ đông khối",
+            "Mủ dây",
+            "Mủ dơ",
+            "Mủ tạp",
+          ]
         : ["Mủ nước"];
     const now = new Date();
     const eligible = ngans.filter((n) => {
       if (!validNl.includes(n.loai_nl)) return false;
       if (["Đóng", "Đã sản xuất"].includes(n.trang_thai)) return false;
       if (!n.ngay_bd) return false;
-      return Math.floor((now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000) >= 21;
+      return (
+        Math.floor(
+          (now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000,
+        ) >= 21
+      );
     });
     const dangSX = eligible
       .filter((n) => n.trang_thai === "Đang sản xuất")
-      .sort((a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime())[0];
+      .sort(
+        (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
+      )[0];
     if (dangSX) return dangSX.id;
     // Fallback: ngăn Chờ sản xuất MỚI NHẤT (ngay_bd lớn nhất)
     const newest = eligible
       .filter((n) => n.trang_thai === "Chờ sản xuất")
-      .sort((a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime())[0];
+      .sort(
+        (a, b) => new Date(b.ngay_bd).getTime() - new Date(a.ngay_bd).getTime(),
+      )[0];
     return newest?.id || "";
   };
 
@@ -968,19 +985,20 @@ export default function ProductPage() {
       const newSuffix =
         patch.suffix !== undefined ? patch.suffix : session.suffix;
       const newBanh = patch.loai_banh ?? session.loai_banh;
-      const newYear = normalizeLotYear(patch.year ?? session.year, session.year);
+      const newYear = normalizeLotYear(
+        patch.year ?? session.year,
+        session.year,
+      );
       setCaSections((prev) => {
         return prev.map((cs, ci) => {
           let fromNum = cs.from_num;
           let toNum = cs.to_num;
           if (
             ci === 0 &&
-            (
-              patch.suffix !== undefined ||
+            (patch.suffix !== undefined ||
               patch.loai_csr !== undefined ||
               patch.loai_banh !== undefined ||
-              patch.year !== undefined
-            )
+              patch.year !== undefined)
           ) {
             fromNum = getSuggestedStartNum(newCsr, newBanh, newYear);
             toNum = Math.max(fromNum, cs.to_num);
@@ -1055,7 +1073,11 @@ export default function ProductPage() {
       setCaSections((prev) =>
         prev.map((cs, i) =>
           i === idx
-            ? { ...cs, ca: patch.ca as "A" | "B" | "C", lots: cs.lots.map((d) => ({ ...d, ca: patch.ca as string })) }
+            ? {
+                ...cs,
+                ca: patch.ca as "A" | "B" | "C",
+                lots: cs.lots.map((d) => ({ ...d, ca: patch.ca as string })),
+              }
             : cs,
         ),
       );
@@ -1272,7 +1294,10 @@ export default function ProductPage() {
 
           // History Tracking
           let history: HistoryEntry[] = [];
-          if (draft.is_continuation && draft.existing_snapshot?.history?.length) {
+          if (
+            draft.is_continuation &&
+            draft.existing_snapshot?.history?.length
+          ) {
             history = [...draft.existing_snapshot.history];
           } else if (draft.is_continuation && draft.existing_snapshot) {
             const existingLot = lots.find((l) => l.id === draft.existing_id);
@@ -1375,36 +1400,40 @@ export default function ProductPage() {
               break;
             }
             const ngay_ht = getLotCompletionDate(trang_thai, session.ngay_sx);
-            const { data: insertData, error } = await supabase.from("lots").insert({
-              factory_id: factoryId,
-              day_chuyen: session.day_chuyen,
-              ma_lo,
-              num: draft.num,
-              suffix: session.suffix,
-              year,
-              ngay_sx: session.ngay_sx,
-              ngay_ht,
-              ca: cs.ca,
-              ngan_id: session.ngan_id,
-              loai_csr: session.loai_csr,
-              loai_banh: session.loai_banh,
-              boc: session.boc,
-              tham: session.tham,
-              chi_thi: session.chi_thi,
-              pallet: session.pallet,
-              kien_a: draft.kien_a,
-              kien_b: draft.kien_b,
-              kien_c: draft.kien_c,
-              kien_d: draft.kien_d,
-              tong_banh: tb,
-              tong_kg,
-              trang_thai,
-              dd_snapshot,
-              ghi_chu: "",
-              is_manual_edit: false,
-              image_url_1: session.image_url_1 || null,
-              image_url_2: session.image_url_2 || null,
-            }).select("id").single();
+            const { data: insertData, error } = await supabase
+              .from("lots")
+              .insert({
+                factory_id: factoryId,
+                day_chuyen: session.day_chuyen,
+                ma_lo,
+                num: draft.num,
+                suffix: session.suffix,
+                year,
+                ngay_sx: session.ngay_sx,
+                ngay_ht,
+                ca: cs.ca,
+                ngan_id: session.ngan_id,
+                loai_csr: session.loai_csr,
+                loai_banh: session.loai_banh,
+                boc: session.boc,
+                tham: session.tham,
+                chi_thi: session.chi_thi,
+                pallet: session.pallet,
+                kien_a: draft.kien_a,
+                kien_b: draft.kien_b,
+                kien_c: draft.kien_c,
+                kien_d: draft.kien_d,
+                tong_banh: tb,
+                tong_kg,
+                trang_thai,
+                dd_snapshot,
+                ghi_chu: "",
+                is_manual_edit: false,
+                image_url_1: session.image_url_1 || null,
+                image_url_2: session.image_url_2 || null,
+              })
+              .select("id")
+              .single();
             if (error) {
               setSaveError(`Lỗi tạo lô ${ma_lo}: ${error.message}`);
               hasError = true;
@@ -1440,8 +1469,8 @@ export default function ProductPage() {
   // ── Edit individual lot ────────────────────────────────────────────────────
   const openEdit = (lot: Lot) => {
     if (lot.trang_thai === "Xuất hàng") {
-      setSaveError("Lô đã xuất hàng, không thể sửa.")
-      return
+      setSaveError("Lô đã xuất hàng, không thể sửa.");
+      return;
     }
     setEditForm({
       ma_lo: lot.ma_lo,
@@ -1628,8 +1657,7 @@ export default function ProductPage() {
   const handleDelete = async (uid: string) => {
     if (!factoryId) return;
     const dashIdx = uid.lastIndexOf("-");
-    const isHistoryUid =
-      dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
+    const isHistoryUid = dashIdx > 0 && !isNaN(Number(uid.slice(dashIdx + 1)));
     const lotId = isHistoryUid ? uid.slice(0, dashIdx) : uid;
     const histIdx = isHistoryUid ? Number(uid.slice(dashIdx + 1)) : 0;
 
@@ -1640,7 +1668,10 @@ export default function ProductPage() {
 
     if (!isHistoryUid || history.length <= 1) {
       // Xóa hẳn lô
-      const { error: delError } = await supabase.from("lots").delete().eq("id", lotId);
+      const { error: delError } = await supabase
+        .from("lots")
+        .delete()
+        .eq("id", lotId);
       if (delError) {
         setSaveError(
           delError.code === "23503"
@@ -1847,7 +1878,9 @@ export default function ProductPage() {
                   onChange={(e) => updateSession({ ngay_sx: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">Năm lô: {sessionYear}</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Năm lô: {sessionYear}
+                </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -1863,7 +1896,9 @@ export default function ProductPage() {
                   placeholder="25"
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">Chỉnh tay khi giao thoa cuối năm</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Chỉnh tay khi giao thoa cuối năm
+                </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -1925,7 +1960,9 @@ export default function ProductPage() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />
                 )}
-                <p className="text-[10px] text-slate-400 mt-1">Lô tròn: {cfg.lo_tron} bành</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Lô tròn: {cfg.lo_tron} bành
+                </p>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -2059,11 +2096,13 @@ export default function ProductPage() {
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={14} className="text-rose-600" />
                 <span className="text-xs font-bold text-rose-700">
-                  Cảnh báo nhảy lô {session.loai_csr} · {session.loai_banh}kg ({jumpLotNums.length} số còn trống)
+                  Cảnh báo nhảy lô {session.loai_csr} · {session.loai_banh}kg (
+                  {jumpLotNums.length} số còn trống)
                 </span>
               </div>
               <div className="text-[11px] text-rose-600 mb-2">
-                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên tục.
+                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên
+                tục.
               </div>
               <div className="flex flex-wrap gap-2">
                 {jumpLotNums.map((num) => (
@@ -2231,8 +2270,7 @@ export default function ProductPage() {
                   </select>
                   {caTongBanh > 0 && (
                     <span className="ml-auto text-xs font-bold text-slate-600">
-                      Ca {caLabel}: {caTongBanh} bành ·{" "}
-                      {fmtKg(caTongKg)}
+                      Ca {caLabel}: {caTongBanh} bành · {fmtKg(caTongKg)}
                     </span>
                   )}
                 </div>
@@ -2639,8 +2677,7 @@ export default function ProductPage() {
                             </div>
 
                             <div className="mt-2 text-xs text-slate-400 text-right">
-                              {fmtKg(lot.tong_kg)} ·{" "}
-                              {lot.tong_banh} bành
+                              {fmtKg(lot.tong_kg)} · {lot.tong_banh} bành
                             </div>
                           </div>
                         );
@@ -2920,10 +2957,14 @@ export default function ProductPage() {
         );
         return allDorDang.length > 0 ? (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
-            <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+            <AlertTriangle
+              size={15}
+              className="text-amber-600 mt-0.5 shrink-0"
+            />
             <div>
               <span className="text-xs font-bold text-amber-700 block mb-1">
-                {allDorDang.length} lô dở dang cần hoàn thành{filterDC ? ` (${filterDC})` : ""}:
+                {allDorDang.length} lô dở dang cần hoàn thành
+                {filterDC ? ` (${filterDC})` : ""}:
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {allDorDang.map((l) => (
@@ -3081,9 +3122,15 @@ export default function ProductPage() {
                     className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
                   >
                     {isExpanded ? (
-                      <ChevronDown size={18} className="text-slate-400 shrink-0" />
+                      <ChevronDown
+                        size={18}
+                        className="text-slate-400 shrink-0"
+                      />
                     ) : (
-                      <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                      <ChevronRight
+                        size={18}
+                        className="text-slate-400 shrink-0"
+                      />
                     )}
                     <span className="font-extrabold text-slate-800 text-base">
                       {date !== "Chưa có ngày"
@@ -3106,15 +3153,27 @@ export default function ProductPage() {
                           Chọn lô cần xóa...
                         </span>
                         <button
-                          disabled={selectedDeleteIds.size === 0 || preCheckLoading}
-                          onClick={(e) => { e.stopPropagation(); void handleDeletePreCheck(); }}
+                          disabled={
+                            selectedDeleteIds.size === 0 || preCheckLoading
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDeletePreCheck();
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
                           <Trash2 size={12} />
-                          {preCheckLoading ? "Đang kiểm tra..." : `Xóa ${selectedDeleteIds.size} lô`}
+                          {preCheckLoading
+                            ? "Đang kiểm tra..."
+                            : `Xóa ${selectedDeleteIds.size} lô`}
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteMode(null); setSelectedDeleteIds(new Set()); setLotsBlockedByKn([]); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteMode(null);
+                            setSelectedDeleteIds(new Set());
+                            setLotsBlockedByKn([]);
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
                         >
                           Hủy
@@ -3123,21 +3182,31 @@ export default function ProductPage() {
                     ) : (
                       <>
                         <button
-                          onClick={(e) => { e.stopPropagation(); openCreate(date); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCreate(date);
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                           title="Thêm ca sản xuất cho ngày này"
                         >
                           <Plus size={12} /> Thêm
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setEditDateModal(date); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditDateModal(date);
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                           title="Sửa lô trong ngày này"
                         >
                           <Edit2 size={12} /> Sửa
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteMode(date); setSelectedDeleteIds(new Set()); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteMode(date);
+                            setSelectedDeleteIds(new Set());
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                           title="Xóa lô trong ngày này"
                         >
@@ -3214,11 +3283,15 @@ export default function ProductPage() {
                                         <td className="px-3 py-2.5">
                                           <input
                                             type="checkbox"
-                                            checked={selectedDeleteIds.has(c.id)}
+                                            checked={selectedDeleteIds.has(
+                                              c.id,
+                                            )}
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
-                                                next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                                                next.has(c.id)
+                                                  ? next.delete(c.id)
+                                                  : next.add(c.id);
                                                 return next;
                                               })
                                             }
@@ -3237,7 +3310,10 @@ export default function ProductPage() {
                                           {c.loai_csr}
                                         </span>
                                       </td>
-                                      <td className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate" title={c.boc || ""}>
+                                      <td
+                                        className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate"
+                                        title={c.boc || ""}
+                                      >
                                         {c.boc || "—"}
                                       </td>
                                       <td className="px-4 py-2.5 font-extrabold text-blue-700">
@@ -3248,16 +3324,36 @@ export default function ProductPage() {
                                       </td>
                                       <td className="px-4 py-2.5 text-xs text-slate-500">
                                         <span className="flex items-center gap-0.5 flex-wrap">
-                                          {c.locked_a && <Lock size={9} className="text-indigo-400 shrink-0" />}
+                                          {c.locked_a && (
+                                            <Lock
+                                              size={9}
+                                              className="text-indigo-400 shrink-0"
+                                            />
+                                          )}
                                           <span>{c.disp_a}</span>
                                           <span>/</span>
-                                          {c.locked_b && <Lock size={9} className="text-indigo-400 shrink-0" />}
+                                          {c.locked_b && (
+                                            <Lock
+                                              size={9}
+                                              className="text-indigo-400 shrink-0"
+                                            />
+                                          )}
                                           <span>{c.disp_b}</span>
                                           <span>/</span>
-                                          {c.locked_c && <Lock size={9} className="text-indigo-400 shrink-0" />}
+                                          {c.locked_c && (
+                                            <Lock
+                                              size={9}
+                                              className="text-indigo-400 shrink-0"
+                                            />
+                                          )}
                                           <span>{c.disp_c}</span>
                                           <span>/</span>
-                                          {c.locked_d && <Lock size={9} className="text-indigo-400 shrink-0" />}
+                                          {c.locked_d && (
+                                            <Lock
+                                              size={9}
+                                              className="text-indigo-400 shrink-0"
+                                            />
+                                          )}
                                           <span>{c.disp_d}</span>
                                         </span>
                                       </td>
@@ -3635,92 +3731,112 @@ export default function ProductPage() {
         </div>
       )}
 
-      {editDateModal && (() => {
-        const dateLots = contributions.filter((c) => c.ngay_sx === editDateModal);
-        const grouped: Record<string, typeof dateLots> = {};
-        dateLots.forEach((c) => {
-          const k = c.ca || "?";
-          if (!grouped[k]) grouped[k] = [];
-          grouped[k].push(c);
-        });
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-              <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-                <div>
-                  <h3 className="font-extrabold text-slate-800">
-                    Sửa ngày {new Date(editDateModal).toLocaleDateString("vi-VN")}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Click vào lô để mở form sửa
-                  </p>
-                </div>
-                <button
-                  onClick={() => setEditDateModal(null)}
-                  className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
-                >
-                  <X size={18} className="text-slate-500" />
-                </button>
-              </div>
-              <div className="overflow-y-auto flex-1">
-                {Object.keys(grouped).sort().map((ca) => (
-                  <div key={ca}>
-                    <div className="px-6 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-extrabold rounded-lg">
-                        Ca {ca}
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {grouped[ca].reduce((s, c) => s + c.tong_banh_cua_ca, 0)} bành
-                      </span>
-                    </div>
-                    {grouped[ca].map((c) => {
-                      const lot = lots.find((l) => l.id === c.id);
-                      const canEdit = c.trang_thai !== "Xuất hàng";
-                      return (
-                        <div
-                          key={c.uid}
-                          className="px-6 py-3 flex items-center justify-between border-b border-slate-100 hover:bg-slate-50 transition-colors"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="font-bold text-slate-800 shrink-0">{c.ma_lo}</span>
-                            <span className="text-xs text-slate-400 shrink-0">
-                              +{c.tong_banh_cua_ca} bành · {fmtKg(c.tong_kg_cua_ca)}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                                c.trang_thai === "Hoàn thành"
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : c.trang_thai === "Xuất hàng"
-                                    ? "bg-purple-100 text-purple-700"
-                                    : "bg-amber-100 text-amber-700"
-                              }`}
-                            >
-                              {c.trang_thai}
-                            </span>
-                          </div>
-                          {canEdit && lot ? (
-                            <button
-                              onClick={() => { setEditDateModal(null); openEdit(lot); }}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                            >
-                              <Edit2 size={12} /> Sửa lô
-                            </button>
-                          ) : (
-                            <span className="text-xs text-slate-400 shrink-0">Đã xuất hàng</span>
-                          )}
-                        </div>
-                      );
-                    })}
+      {editDateModal &&
+        (() => {
+          const dateLots = contributions.filter(
+            (c) => c.ngay_sx === editDateModal,
+          );
+          const grouped: Record<string, typeof dateLots> = {};
+          dateLots.forEach((c) => {
+            const k = c.ca || "?";
+            if (!grouped[k]) grouped[k] = [];
+            grouped[k].push(c);
+          });
+          return (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800">
+                      Sửa ngày{" "}
+                      {new Date(editDateModal).toLocaleDateString("vi-VN")}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Click vào lô để mở form sửa
+                    </p>
                   </div>
-                ))}
-                {dateLots.length === 0 && (
-                  <div className="p-8 text-center text-slate-400 text-sm">Không có lô nào</div>
-                )}
+                  <button
+                    onClick={() => setEditDateModal(null)}
+                    className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                  >
+                    <X size={18} className="text-slate-500" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {Object.keys(grouped)
+                    .sort()
+                    .map((ca) => (
+                      <div key={ca}>
+                        <div className="px-6 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-extrabold rounded-lg">
+                            Ca {ca}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {grouped[ca].reduce(
+                              (s, c) => s + c.tong_banh_cua_ca,
+                              0,
+                            )}{" "}
+                            bành
+                          </span>
+                        </div>
+                        {grouped[ca].map((c) => {
+                          const lot = lots.find((l) => l.id === c.id);
+                          const canEdit = c.trang_thai !== "Xuất hàng";
+                          return (
+                            <div
+                              key={c.uid}
+                              className="px-6 py-3 flex items-center justify-between border-b border-slate-100 hover:bg-slate-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="font-bold text-slate-800 shrink-0">
+                                  {c.ma_lo}
+                                </span>
+                                <span className="text-xs text-slate-400 shrink-0">
+                                  +{c.tong_banh_cua_ca} bành ·{" "}
+                                  {fmtKg(c.tong_kg_cua_ca)}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                                    c.trang_thai === "Hoàn thành"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : c.trang_thai === "Xuất hàng"
+                                        ? "bg-purple-100 text-purple-700"
+                                        : "bg-amber-100 text-amber-700"
+                                  }`}
+                                >
+                                  {c.trang_thai}
+                                </span>
+                              </div>
+                              {canEdit && lot ? (
+                                <button
+                                  onClick={() => {
+                                    setEditDateModal(null);
+                                    openEdit(lot);
+                                  }}
+                                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                                >
+                                  <Edit2 size={12} /> Sửa lô
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400 shrink-0">
+                                  Đã xuất hàng
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  {dateLots.length === 0 && (
+                    <div className="p-8 text-center text-slate-400 text-sm">
+                      Không có lô nào
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
       {delConfirm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -3731,7 +3847,8 @@ export default function ProductPage() {
             {lotsBlockedByKn.length > 0 && (
               <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                 <p className="text-xs font-bold text-amber-700">
-                  ⚠️ {lotsBlockedByKn.length} lô đã có phiếu KN — sẽ không được xóa:
+                  ⚠️ {lotsBlockedByKn.length} lô đã có phiếu KN — sẽ không được
+                  xóa:
                 </p>
                 <p className="text-xs text-amber-600 mt-1 break-all">
                   {lotsBlockedByKn
@@ -3749,13 +3866,18 @@ export default function ProductPage() {
                     ? `${selectedDeleteIds.size - lotsBlockedByKn.length} lô chưa có KN sẽ bị xóa vĩnh viễn.`
                     : `${selectedDeleteIds.size} lô đã chọn sẽ bị xóa vĩnh viễn.`
                 : "Lô này sẽ bị xóa vĩnh viễn."}{" "}
-              {(delConfirm !== "bulk" || lotsBlockedByKn.length < selectedDeleteIds.size) &&
+              {(delConfirm !== "bulk" ||
+                lotsBlockedByKn.length < selectedDeleteIds.size) &&
                 "Ngăn lưu liên quan sẽ được cập nhật trạng thái tự động."}
             </p>
             <div className="flex gap-3">
-              {delConfirm === "bulk" && lotsBlockedByKn.length === selectedDeleteIds.size ? (
+              {delConfirm === "bulk" &&
+              lotsBlockedByKn.length === selectedDeleteIds.size ? (
                 <button
-                  onClick={() => { setDelConfirm(null); setLotsBlockedByKn([]); }}
+                  onClick={() => {
+                    setDelConfirm(null);
+                    setLotsBlockedByKn([]);
+                  }}
                   className="w-full py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
                   Đóng

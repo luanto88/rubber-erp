@@ -1,0 +1,9 @@
+Mô tả Ngăn lưu
++ Căn cứ cảnh báo các Ngày và xe chưa vào ngăn người dùng tạo ngăn
++ Số ngăn: Gợi ý từ N1-N24 ẩn các ngăn đang chứa nguyên liệu, và có thể nhập tay tên ngăn lưu tùy ý tối đa 10ký tự.
++ Trạng thái ngăn Nếu chỉ có ngày bắt đầu là: Đang nhận, nếu có ngày kết thúc trạng thái là "Đóng", ngày bắt đầu kết thúc chap nhận cùng 1 ngày, khi đủ 21 ngày trạng thái tự chuyển thành "Chờ sản xuất" và xuất hiện tại modun Thành phẩm.
+- Khi tạo ngăn chọn nguyên liệu là gì thì code chỉ hiển thị và cộng đúng loại nguyên liệu đó vào quy  khô ngăn. Ví dụ chọn Mủ đông chén thì chỉ cộng cột khối lượng tươi và khối lượng khô  mủ đông chén.
+- Khi chọn xe vào ngăn các xe không được chọn tiếp tục hiển thị tại phần cảnh báo.
+Mô tả thành phẩm
++ Tại modun Thành phẩm người dùng chọn Ngăn để sản xuất thì trạng thái ngăn sẽ chuyển ngay thành "Đang sản xuất" và cập nhật Trạng thái tại ngăn tương ứng tại modun Ngăn lưu. Khi đạt 100% sẽ hiển thị nút "Lưu và đánh dấu đã sản xuất" lúc này người dùng có thể bấm để đổi trạng thái hoặc nhập thêm thành phẩm nhưng đến khi vượt quá 110% sẽ không thêm thành phẩm được nữa bắt buộc phải bấm "Lưu và đánh dấu đã sản xuất". Lúc này trạng thái ngăn sẽ là "Đã sản xuất" và code cập nhật ngay trạng thái về Ngăn lưu.Sự tương tác này liên tục.
++ Khi người dùng xóa thành phẩm của ngăn đó lúc này tỷ lệ sản xuất giãm về dưới 100% thì trạng thái ngăn tự trả về "Đang sản xuất" và cập nhật ngay về modun Ngăn lưu. Khi xóa hết thành phẩm của ngăn code sẽ tự cập nhật trạng thái ngăn là Chờ sản xuất và cập nhật ngay về Modun ngăn lưu.

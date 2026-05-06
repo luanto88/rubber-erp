@@ -1,0 +1,343 @@
+﻿category_id;code;name;unit;factory_id;specification;default_warehouse_ids;manages_lot;manages_expiry;min_stock;max_stock;opening_stock;image_url;equipment_name;is_active;created_at;updated_at
+Vật tư hoá chất;AF;Acid Formic 85%;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 35;KB;;;25000;1000;6685;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;MT;Metabisunfit;kg;0268ab41-a564-4538-acf1-6297ac372f57;Bao 25;KB;;;1000;25;925;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;AM;Amoniac;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 30;KT;;;10000;2375;6753;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;AA;Acid acetic 99%;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 30;KB;;;12000;1500;90;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;DCS;Dầu cao su;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 25;KA;;;2000;25;209;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;LP152;LP 152;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 25;KB;;;500;100;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;HAS;HAS;kg;0268ab41-a564-4538-acf1-6297ac372f57;Bao 25;KB;;;5000;375;1865;; ;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;NA;Sút;kg;0268ab41-a564-4538-acf1-6297ac372f57;Bao 25;KNH;;;1000;25;1025;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VS60;Bọc PE 0,04 VRG SVRCV60;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG SVRCV60;KA;;;3000;375;550;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VC60;Bọc PE 0,04 VRG CSRCV60;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG CSRCV60;KA;;;3000;375;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VS3L;Bọc PE 0,04 VRG SVR3L;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG SVR3L;KA;;;3000;375;1800;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VC3L;Bọc PE 0,04 VRG CSR3L;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG CSR3L;KA;;;18000;1650;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VS10;Bọc PE 0,04 VRG SVR10;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG SVR10;KA;;;18000;1650;1690;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004VC10;Bọc PE 0,04 VRG CSR10;kg;0268ab41-a564-4538-acf1-6297ac372f57;VRG CSR10;KA;;;18000;1650;2853;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004K;Bọc PE 0,04 Không nhãn;kg;0268ab41-a564-4538-acf1-6297ac372f57;Không nhãn;KA;;;18000;1650;195;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B004H;Bọc PE 0,04 Mẫu hủy (SVRCV50/60);kg;0268ab41-a564-4538-acf1-6297ac372f57;Mẫu hủy (SVRCV50/60/5);KA;;;18000;1650;1008;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;B013H;Bọc PE 0,13 Mẫu hủy (SVR50/60);kg;0268ab41-a564-4538-acf1-6297ac372f57;Mẫu hủy (SVR50/60);KA;;;50400;4620;134;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;TT;Thảm trong;kg;0268ab41-a564-4538-acf1-6297ac372f57;Cuồn;KA;;;1000;275;1459;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;DPH;Pallet sắt dày;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;1000;100;610;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;MUBEZ;Pallet sắt mỏng UBE, Zeon;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;500;100;315;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;PG;Pallet gỗ;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;200;200;49;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;NG;Nắp gỗ;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;250;200;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;NS;Nắp sắt;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;250;10;236;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;ĐG;Đế gỗ;cái;0268ab41-a564-4538-acf1-6297ac372f57;TCCT;KTPMT, KTPMN;;;250;200;955;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;N50;Nhớt 50;lít;0268ab41-a564-4538-acf1-6297ac372f57;Phi 200;KDDX;;;400;50;494;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;N90;Nhớt 90;lít;0268ab41-a564-4538-acf1-6297ac372f57;Phi 200;KDDX;;;400;50;26;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;MOTH;Mỡ thường;kg;0268ab41-a564-4538-acf1-6297ac372f57;Thùng;KA;;;100;13;91;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;MOCN;Mỡ chịu nhiệt;kg;0268ab41-a564-4538-acf1-6297ac372f57;Thùng;KA;;;100;4;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;X92;Xăng;lít;0268ab41-a564-4538-acf1-6297ac372f57;Can nhựa;KDDX;;;200;30;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOX;Dầu vận chuyển;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX, KDMFL;;;10000;5000;9530;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOSXT;Dầu lò sấy mủ tạp;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 20000L;KDMT, KDMFL;;;20000;5000;2340;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;N140;Nhớt 140;lít;0268ab41-a564-4538-acf1-6297ac372f57;Phi 200;KDDX;;;400;13;185;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;APH;Acid Phosphoric 85%;kg;0268ab41-a564-4538-acf1-6297ac372f57;Can 35;KA;;;500;200;315;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư hoá chất;XPD;Xà phòng 72% dầu;kg;0268ab41-a564-4538-acf1-6297ac372f57;Cục vuông  5*5;KBHLD;;;100;10;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;GTCS;Găng tay cao su;đôi;0268ab41-a564-4538-acf1-6297ac372f57;Túi (1 đôi);KBHLD;;;100;50;425;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;PMB5;Pallet sắt MB5;cái;0268ab41-a564-4538-acf1-6297ac372f57;MB5;KTPMT, KTPMN;;;;;715;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Dụng cụ;CHC;Chổi cỏ;cây;0268ab41-a564-4538-acf1-6297ac372f57;;KBHLD;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHAT;Áo thun;cái;0268ab41-a564-4538-acf1-6297ac372f57;Xanh dương Nam Nữ;KBHLD;;;;;53;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHAM;Áo mưa;cái;0268ab41-a564-4538-acf1-6297ac372f57;Áo mưa;KBHLD;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHTD;Tạp dề chống ướt;cái;0268ab41-a564-4538-acf1-6297ac372f57;Màu trong suốt;KBHLD;;;;;308;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHBTV;Bao tay vải;đôi;0268ab41-a564-4538-acf1-6297ac372f57;Ngắn, màu trắng, chất liệu vải;KBHLD;;;;;278;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHN;Nón vải;cái;0268ab41-a564-4538-acf1-6297ac372f57;Màu xanh lá, lưỡi trai;KBHLD;;;;;27;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHDTO;Dép tổ ong;đôi;0268ab41-a564-4538-acf1-6297ac372f57;Màu trắng, có lỗ như tổ ong;KBHLD;;;;;203;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHKTV;Khẩu trang vải;cái;0268ab41-a564-4538-acf1-6297ac372f57;Màu đen;KBHLD;;;;;27;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHMBT;Mũ bọc tóc;cái;0268ab41-a564-4538-acf1-6297ac372f57;Màu xanh;KBHLD;;;;;232;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Dụng cụ;BHCHTC;Chổi cứng;cái;0268ab41-a564-4538-acf1-6297ac372f57;Chổi cứng;KBHLD;;;;;21;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHUCS;Ủng cao su;đôi;0268ab41-a564-4538-acf1-6297ac372f57;Màu xanh, đen;KBHLD;;;0;;238;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Cáp tủ bù 16mm (50m)+coss 16 (đồng);Cáp tủ bù 16mm (50m)+coss 16 (đồng);mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;50;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Cáp tủ bù 35mm (20m)+coss 35 (đồng);Cáp tủ bù 35mm (20m)+coss 35 (đồng);mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Bộ bảo vệ áp;Bộ bảo vệ áp;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;AMMERTER;AMMERTER;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 12b;Khởi động từ MC 12b;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 18b;Khởi động từ MC 18b;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ 22b;Khởi động từ 22b;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 32A;Khởi động từ MC 32A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 40A;Khởi động từ MC 40A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 85A;Khởi động từ MC 85A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 100A;Khởi động từ MC 100A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Khởi động từ MC 225a;Khởi động từ MC 225a;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Rơle MT 32A;Rơle MT 32A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;28;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;IC TIMER 60S;IC TIMER 60S;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;IC TIMER 999M;IC TIMER 999M;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Bộ điều khiển nhiệt độ lò sấy;Bộ điều khiển nhiệt độ lò sấy;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Đầu dò nhiệt độ 3 dây;Đầu dò nhiệt độ 3 dây;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Bộ nguồn 24VDC (FDR-180-24);Bộ nguồn 24VDC (FDR-180-24);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Ruột cầu chì OMEGA 2A;Ruột cầu chì OMEGA 2A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Đồng hồ đo tiếp đất;Đồng hồ đo tiếp đất;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;MCCB 30A;MCCB 30A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 175A;CB 175A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 250A;CB 250A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 300A;CB 300A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 400A;CB 400A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 3pha 100A;CB 3pha 100A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 3pha 50A;CB 3pha 50A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 3pha 32A;CB 3pha 32A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 3pha 20A;CB 3pha 20A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 1pha 50A;CB 1pha 50A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 1pha 30A;CB 1pha 30A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;CB 1pha 16A;CB 1pha 16A;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Hộp nút bấm 3 lỗ;Hộp nút bấm 3 lỗ;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Hộp nút bấm 2 lỗ;Hộp nút bấm 2 lỗ;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;SWICH 2 tới 3 vị trí;SWICH 2 tới 3 vị trí;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Nút bấm dừng khẩn cấp;Nút bấm dừng khẩn cấp;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;17;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Nút bấm khởi động;Nút bấm khởi động;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Nút bấm dừng;Nút bấm dừng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Nút bấm chạy ngược;Nút bấm chạy ngược;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Đèn báo pha xanh;Đèn báo pha xanh;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;7;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Đèn báo pha đỏ;Đèn báo pha đỏ;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;7;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Đèn báo pha vàng;Đèn báo pha vàng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Máy say sinh tố;Máy say sinh tố;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị điện;Lò vi sóng;Lò vi sóng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Ống gân mềm phi 60;Ống gân mềm phi 60;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;20;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bánh răng 28R trục cán 510;Bánh răng 28R trục cán 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bánh răng 35R trục cán 510;Bánh răng 35R trục cán 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đầu đốt RL 130;Đầu đốt RL 130;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Vỏ xe-ruột-yếm-vành;Vỏ xe-ruột-yếm-vành;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dao băm (máy băm thô/băm tinh);Dao băm (máy băm thô/băm tinh);con;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dao tĩnh máy cắt miếng 16 dao;Dao tĩnh máy cắt miếng 16 dao;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 15R f50 x f132 trục tiếp liệu;Nhông 15R f50 x f132 trục tiếp liệu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 18R f60 x f317 (trục đẩy thùng);Nhông 18R f60 x f317 (trục đẩy thùng);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 22R f110 x f280 (khớp nối hs tiếp liệu);Nhông 22R f110 x f280 (khớp nối hs tiếp liệu);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 22R f110 x f380 (khớp nối hsMC 510);Nhông 22R f110 x f380 (khớp nối hsMC 510);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 22R f120 x f380 (khớp nối hsMC 510);Nhông 22R f120 x f380 (khớp nối hsMC 510);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 22R f130 x f380 (khớp nối trục cán 510);Nhông 22R f130 x f380 (khớp nối trục cán 510);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông 28R f75 x f300 (MC 3 trục);Nhông 28R f75 x f300 (MC 3 trục);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông khớp nối máy ép kiện;Nhông khớp nối máy ép kiện;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Vít me máy cán 510;Vít me máy cán 510;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Cụm tạo rung;Cụm tạo rung;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Thân bơm chuyền cốm;Thân bơm chuyền cốm;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối đỡ SNG 513-611;Gối đỡ SNG 513-611;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối đỡ SNG 519-616;Gối đỡ SNG 519-616;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối đỡ SNG 520-617;Gối đỡ SNG 520-617;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối đỡ SNG 526;Gối đỡ SNG 526;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối đỡ SNG 528 GLH;Gối đỡ SNG 528 GLH;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bộ bánh xe đẩy thùng;Bộ bánh xe đẩy thùng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đá cắt 150;Đá cắt 150;viên;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;24;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đá cắt 180;Đá cắt 180;viên;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;226;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đá cắt 300;Đá cắt 300;viên;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;15;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Que hàn sắt 4,0mm;Que hàn sắt 4,0mm;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Que hàn sắt 3,2mm;Que hàn sắt 3,2mm;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Que hàn thép;Que hàn thép;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;30;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Que hàn inox;Que hàn inox;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Kìm hàn;Kìm hàn;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bộ cờ lê (Bộ chìa khóa 8-32);Bộ cờ lê (Bộ chìa khóa 8-32);bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đơn 60;Xích đơn 60;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đơn 80;Xích đơn 80;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đơn 100;Xích đơn 100;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đơn 120;Xích đơn 120;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích 120 đôi;Xích 120 đôi;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đơn 160;Xích đơn 160;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;18;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Khóa mắc xích đơn 60;Khóa mắc xích đơn 60;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Khóa mắc xích đơn 80;Khóa mắc xích đơn 80;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Khóa mắc xích đơn 100;Khóa mắc xích đơn 100;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Khóa mắc xích đôi 120;Khóa mắc xích đôi 120;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Khóa mắc xích đôi 160;Khóa mắc xích đôi 160;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Băng tải cao su dài 8m95;Băng tải cao su dài 8m95;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;11;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Băng tải cao su tiếp liệu dài 14m6;Băng tải cao su tiếp liệu dài 14m6;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6004 theo con lăn (UCP 203);Bạc đạn 6004 theo con lăn (UCP 203);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6301Z;Bạc đạn 6301Z;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;70;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6306 theo con lăn thùng sấy;Bạc đạn 6306 theo con lăn thùng sấy;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;95;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6314;Bạc đạn 6314;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 480311;Bạc đạn 480311;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6217;Bạc đạn 6217;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22211;Bạc đạn 22211;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22213 EK-NTN;Bạc đạn 22213 EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22219 EK-NTN;Bạc đạn 22219 EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;15;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22220EK-NTN;Bạc đạn 22220EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;15;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22226 EK-NTN;Bạc đạn 22226 EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22228 EK-NTN;Bạc đạn 22228 EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn hộp số mc 6412;Bạc đạn hộp số mc 6412;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;11;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn hộp số mc 30318;Bạc đạn hộp số mc 30318;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn hộp số mc 32226;Bạc đạn hộp số mc 32226;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Măng xông H311;Măng xông H311;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;13;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Ô bi máy ép kiện;Ô bi máy ép kiện;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCP 207;Bạc đạn UCP 207;cái;0268ab41-a564-4538-acf1-6297ac372f57;UCP;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCP 208;Bạc đạn UCP 208;cái;0268ab41-a564-4538-acf1-6297ac372f57;UCP;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCP 209;Bạc đạn UCP 209;cái;0268ab41-a564-4538-acf1-6297ac372f57;UCP;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCT 205;Bạc đạn UCT 205;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCF 212;Bạc đạn UCF 212;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UCF 214;Bạc đạn UCF 214;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 511-609;Phốt 511-609;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 513-611;Phốt 513-611;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 519;Phốt 519;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 520-617;Phốt 520-617;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Cân điện tử;Cân điện tử;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Cân điện tử 150kg Toledo;Cân điện tử 150kg Toledo;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bộ quả cân chuẩn M1;Bộ quả cân chuẩn M1;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bóng đèn LED;Bóng đèn LED;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Tủ bù 3 pha 40 KVA;Tủ bù 3 pha 40 KVA;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nam châm hút kim loại;Nam châm hút kim loại;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Ống máy xi;Ống máy xi;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Mortor 4 kw;Mortor 4 kw;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Mortor 5.5 kw;Mortor 5.5 kw;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Mortor 18.5 kw;Mortor 18.5 kw;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Hộp số băng tải cao su;Hộp số băng tải cao su;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đầu bơm máy xi 3-5KW;Đầu bơm máy xi 3-5KW;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Hộp số quậy mủ VSS 135;Hộp số quậy mủ VSS 135;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B45;Dây cuaroa B45;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B46;Dây cuaroa B46;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B59;Dây cuaroa B59;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA, KNB;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B68;Dây cuaroa B68;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B75;Dây cuaroa B75;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa B78;Dây cuaroa B78;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C82;Dây cuaroa C82;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C83;Dây cuaroa C83;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C86;Dây cuaroa C86;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;16;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C89;Dây cuaroa C89;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C90;Dây cuaroa C90;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C91;Dây cuaroa C91;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;7;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C95;Dây cuaroa C95;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;18;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C119;Dây cuaroa C119;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaroa C133;Dây cuaroa C133;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Sơn nước xanh nhạt;Sơn nước xanh nhạt;thùng;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Máy bơm nước 6,5hp- HINOTA;Máy bơm nước 6,5hp- HINOTA;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dây curoa MF 6410;Dây curoa MF 6410;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dây curoa MF 6430;Dây curoa MF 6430;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dây curoa MF 6400;Dây curoa MF 6400;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;56;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dây curoa MF 6440;Dây curoa MF 6440;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dây curoa MF 6570;Dây curoa MF 6570;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc dầu;Lọc dầu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt;Lọc nhớt;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc gió;Lọc gió;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Cupben thắng trước;Cupben thắng trước;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Cupben thắng sau;Cupben thắng sau;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Heo amada thắng sau;Heo amada thắng sau;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;19;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bạc đạn láp cầu sau ( xe isuzu);Bạc đạn láp cầu sau ( xe isuzu);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bạc đạn láp cầu sau (xe cozon);Bạc đạn láp cầu sau (xe cozon);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Rotil (xe isuzu);Rotil (xe isuzu);bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Rotil (xe cozon);Rotil (xe cozon);bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bình ắc quy;Bình ắc quy;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Vỏ + ruột xe 825-16;Vỏ + ruột xe 825-16;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;22;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đắt cắt (d10 cm);Đắt cắt (d10 cm);viên;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đá mài (d10 cm);Đá mài (d10 cm);viên;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Que hàn 2.6 mm;Que hàn 2.6 mm;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Que hàn 3.2 mm;Que hàn 3.2 mm;kg;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dầu thắng;Dầu thắng;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;42;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Nhớt động cơ;Nhớt động cơ;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;140;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Nhớt 90 (đội xe);Nhớt 90 (đội xe);lít;0268ab41-a564-4538-acf1-6297ac372f57;;KT;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Nhớt thủy lực;Nhớt thủy lực;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bố amada;Bố amada;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;27;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đề ISUZU;Đề ISUZU;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Khóa đề ISUZU;Khóa đề ISUZU;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bugi xông động cơ;Bugi xông động cơ;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bạc đạn treo láp cầu;Bạc đạn treo láp cầu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bố thắng;Bố thắng;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;19;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Két nước;Két nước;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đà dọc lót thùng (gỗ);Đà dọc lót thùng (gỗ);cây;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOSXN;Dầu lò sấy mủ nước;;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaro B55;Dây cuaro B55;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;1;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cuaro B56;Dây cuaro B56;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;1;19;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;MONLGI3;Mỡ đa năng;kg;0268ab41-a564-4538-acf1-6297ac372f57;Thùng nhựa 15 kg;KA;;;150;15;18;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;UCP 212;Bạc đạn UCP 212;cái;0268ab41-a564-4538-acf1-6297ac372f57;UCP;KA;;;20;1;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 23132;Bạc đạn 23132;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;10;7;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đề xe xúc;Đề xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;1;5;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Rơle heo dầu xe xúc;Rơle heo dầu xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;1;5;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Máy cắt miếng 16 dao;Máy cắt miếng 16 dao;cái;0268ab41-a564-4538-acf1-6297ac372f57;16 dao;KT;;;1;3;8985;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;UCP 203;Bạc đạn UCP 203;cái;0268ab41-a564-4538-acf1-6297ac372f57;UCP;KA, KNB;;;100;5;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 145-170;Phốt 145-170;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;100;1;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Amiang;Amiang bảng;cuộn;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;2;1;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đồng Hồ;Đồng hồ nước;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;1;1;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 22230EK-NTN;Bạc đạn 22230EK-NTN;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;N15W-40;Nhớt 15W-40;lít;0268ab41-a564-4538-acf1-6297ac372f57;Phi 208;KDDX;;;500;100;181;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DON;Dầu xe nâng sản xuất;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6121;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOXU12;Dầu xe xúc sản xuất;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;5951;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOXU3;Dầu xe xúc Biomass;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KBO;;;10000;5000;48;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOFORD;Dầu xe Ford văn phòng;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6823;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOFAT;Dầu máy phát sinh hoạt;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;11544;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOCZNB;Dầu xe Cozon nội bộ;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6001;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;UC 208;Bạc đạn UC 208;cái;0268ab41-a564-4538-acf1-6297ac372f57;UC (chỉ có bạc đạn);KNB;;;100;10;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;PHỐT 145 x 170 x 14;Phốt trục cán;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Coaroa B56;Dây coaroa B56;sợi;0268ab41-a564-4538-acf1-6297ac372f57;Sợi;KA;;;;;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Mortor;Mortor 45kw;cái;0268ab41-a564-4538-acf1-6297ac372f57;;;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;Nhớt T32;Nhớt Shell tubor T32;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KXLNT;;;;;40;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOCZVC;Dầu DO Cozon vận chuyển;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;10000;5000;9530;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;P203;Phíp P203;cái;0268ab41-a564-4538-acf1-6297ac372f57;45*38*18;KA;;;;;105;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Pallet các loại;MCH;Pallet sắt mỏng Chemie;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KTPMT;;;;;40;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Gối 511-609;Gối đỡ 511-609;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;100-1Rx10FT;Xích đơn 100;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;3;3;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;SNL511-609;Gối đỡ 511-609;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;1;1;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;TC 60x85x10;Phốt tròn TC 60x85x10;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;3;3;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MITSHUBOSHI;Dây coaroa C91;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;5;5;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MITSHUBOSHI C90;Dây coaroa C90;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;5;5;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MIÍTHUBOSHI C-88;Dây coaroa;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;5;4;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MITSHUBOSHI C95;Dây coaroa C95;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;5;5;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MITSHUBOSHI C82;Dây coaroa C82;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;5;5;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;MITSHUBOSHI B-56;Dây coaroa B56;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;6;6;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Măng xông 3128;Măng xông 3128;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 60*85*12;Phốt 60*85*12;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;20;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn 6313;6313;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bạc đạn UC 208;UC 208;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây curoa C56;Dây curoa C56;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;14;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt TNSG 530;Phốt TNSG 530;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;Nhớt ATF;Nhớt ATF;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;;;106;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc dầu xe xúc;Lọc dầu xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt động cơ xe xúc;Lọc nhớt động cơ xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;16;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt hộp số xe xúc;Lọc nhớt hộp số xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc thuỷ lực đi;Lọc thuỷ lực đi xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc tách nước;Lọc tách nước xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc gió xe xúc;Lọc gió xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc dầu xe nâng;Lọc dầu xe nâng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt động cơ xe nâng;Lọc nhớt động cơ xe nâng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt hộp số xe nâng;Lọc nhớt hộp số xe nâng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc thuỷ lực xe nâng;Lọc thuỷ lực xe nâng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc gió xe nâng;Lọc gió xe nâng;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt xe isuzu;Lọc nhớt xe isuzu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;13;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đệm nhíp xe isuzu;Đệm nhíp xe isuzu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;175;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Tổng phanh bánh xe isuzu;Tổng phanh bánh xe isuzu;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Tổng côn trên bánh xe isuzu;Tổng côn trên bánh xe isuzu;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;17;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bulon tắc kê trước isuzu;Bulon tắc kê trước isuzu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;40;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bulon tắc kê sau isuzu;Bulon tắc kê sau isuzu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;56;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Rô tuyn tay lái;Rô tuyn tay lái;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc dầu cozone;Lọc dầu cozone;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lọc nhớt cozone;Lọc nhớt cozone;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Hộp số tiếp liệu (120-10);Hộp số tiếp liệu (120-10);cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Nhông băng tải tiếp liệu;Nhông băng tải tiếp liệu;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Bạc đạn chữ thập;Bạc đạn chữ thập;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;N68;Nhớt 68;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;400;100;181;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Xích đôi 160;Xích đôi 160;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;7;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Silicon;Silicon;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phíp bakelite dạng cây 100mm;Phíp bakelite dạng cây 100mm;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;0.5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Tủ bù samwha RHC;Tủ bù samwha RHC;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đĩa thổi khí;Đĩa thổi khí;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;100;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cáp CADIVI 4x1,5;Dây cáp CADIVI 4x1,5;mét;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;150;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây curoa 5V670;Dây curoa 5V670;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây curoa 3v335;Dây curoa 3v335;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây curoa A45;Dây curoa A45;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;8;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây curoa C88;Dây curoa C88;sợi;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;;;5;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHNL;Nón lá;cái;0268ab41-a564-4538-acf1-6297ac372f57;28x45cm;KBHLD;;;;;36;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Bảo hộ;BHKTCD;Khẩu trang chống độc;cái;0268ab41-a564-4538-acf1-6297ac372f57;Màu trắng;KBHLD;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;P55088;Lọc dầu xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;BU4330037;Lọc thủy lực xe xúc;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Hộp số vô cấp SITI 1,5 KW;Hộp số vô cấp SITI 1,5 KW;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;1;1;3;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;SITI;Hộp số vô cấp SITI 1,5KW;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;1;1;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Trục cán cắt;Trục cán cắt;cái;0268ab41-a564-4538-acf1-6297ac372f57;Trục;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Băng tải cao su (băng tải máy xé);Băng tải cao su (băng tải máy xé);cái;0268ab41-a564-4538-acf1-6297ac372f57;Cuộn;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Ắc sàn rung;Ắc sàn rung;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đĩa phân phối khí HD340 Jager;Đĩa phân phối khí HD340 Jager;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KXLNT;;;;;100;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây cáp điện CADIVI 4x1,5;Dây cáp điện CADIVI 4x1,5;mét;0268ab41-a564-4538-acf1-6297ac372f57;Cuộn;KXLNT;;;;;150;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây coaroa 5V670;Sợi;sợi;0268ab41-a564-4538-acf1-6297ac372f57;Sợi;KXLNT;;;;;9;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dây coaroa 3V335;Dây coaroa 3V335;sợi;0268ab41-a564-4538-acf1-6297ac372f57;Sợi;KXLNT;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Ống thủy lực 5/8;Ống thủy lực 5/8;mét;0268ab41-a564-4538-acf1-6297ac372f57;Mét;KA;;;;;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Ống thủy lực 1/2;Ống thủy lực 1/2;mét;0268ab41-a564-4538-acf1-6297ac372f57;Mét;KA;;;;;10;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Sắt hộp 20x40x2mm (sắt đen);Sắt hộp 20x40x2mm (sắt đen);cây;0268ab41-a564-4538-acf1-6297ac372f57;Mét;KA;;;;;30;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lốp xe trước 12.5-18-BKT;Lốp xe trước 12.5-18-BKT;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Ruột xe trước 12.5-18;Ruột xe trước 12.5-18;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Dinamo (cozon, Isuzu);Dinamo (cozon, Isuzu);cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Đề ISUZU-COZON;Đề ISUZU-COZON;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;1;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Lốp sau 16.9/18-BKT;Lốp sau 16.9/18-BKT;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Vật tư xe vận chuyển;Ruột sau 16.9/18;Ruột sau 16.9/18;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;Nhớt Petro Appolo 50;Nhớt PA 50;lít;0268ab41-a564-4538-acf1-6297ac372f57;Can;KDDX;;;80;10;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOSXMN;Dầu DO sản xuất mủ nước;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KDMN;;;10000;1000;-120;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phíp nhựa 203;Phíp nhựa 203;cái;0268ab41-a564-4538-acf1-6297ac372f57;cái;KA;;;;;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 145x170x15;Phốt 145x170x15;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phốt 175x200x15;Phốt 175x200x15;cái;0268ab41-a564-4538-acf1-6297ac372f57;cái;KA;;;;;;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DO750K;Dầu máy phát 750KVA;lít;0268ab41-a564-4538-acf1-6297ac372f57;;KDMFL, KDMT;;;20000;1000;3560;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Đầu thổi khí;Đầu thổi khí;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Mortor bơm chìm 1,5 kw;Mortor bơm chìm 1,5 kw;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Phao báo mực nước Matin 5m;Cái;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Bình ắc quy N150 (12v-150ah);Bình ắc quy N150 (12v-150ah);cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Dung dịch làm mát;Dung dịch làm mát;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Trục cán 510;Trục cán 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Thiết bị phụ tùng thay thế;Trục tiếp liệu cán cắt 510;Trục tiếp liệu cán cắt 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00

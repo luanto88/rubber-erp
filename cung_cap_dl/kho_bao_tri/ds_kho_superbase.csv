@@ -1,0 +1,12 @@
+﻿code;name;factory_id;keeper_name;warehouse_type;is_active;created_at;updated_at
+KTPMT;Kho thành phẩm mủ tạp;0268ab41-a564-4538-acf1-6297ac372f57;Neàng Ry Ta;Thành phẩm;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KTPMN;Kho thành phẩm mủ nước;0268ab41-a564-4538-acf1-6297ac372f57;Neàng Ry Ta;Thành phẩm;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KDDX;Kho dầu đội xe;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Nhiên liệu;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KDMT;Kho dầu mủ tạp;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Nhiên liệu;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KT;Kho xưởng cơ khí;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Cơ khí;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KDMFL;Kho dầu máy phát lớn;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Nhiên liệu;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KBO;Kho dầu Biomass;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Nhiên liệu;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KNB;Kho nội bộ;0268ab41-a564-4538-acf1-6297ac372f57;Chau Nho;Tạm;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KXLNT;Kho nước thải;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Vật tư hóa chất;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KDMN;Kho dầu mủ nước;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Nhiên liệu;TRUE;03/05/2026 4:50;03/05/2026 4:50
+KNH;Kho nguy hại;0268ab41-a564-4538-acf1-6297ac372f57;Nguyễn Hữu Thọ;Chất thải nguy hại;TRUE;03/05/2026 4:50;03/05/2026 4:50

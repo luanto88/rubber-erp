@@ -1,0 +1,2577 @@
+{
+  "generated_at": "2026-04-30T20:48:05.368Z",
+  "assumptions": {
+    "KA": "Kho vật tư",
+    "KB": "Kho hóa chất",
+    "hsd_and_lot_priority": "Đa số áp dụng cho hóa chất"
+  },
+  "warehouses": [
+    {
+      "ma_kho": "KA",
+      "ten_kho": "Kho vật tư",
+      "thu_kho": "Chau Nho"
+    },
+    {
+      "ma_kho": "KB",
+      "ten_kho": "Kho hóa chất",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KTPMT",
+      "ten_kho": "Kho thành phẩm mủ tạp",
+      "thu_kho": "Neàng Ry Ta"
+    },
+    {
+      "ma_kho": "KTPMN",
+      "ten_kho": "Kho thành phẩm mủ nước",
+      "thu_kho": "Neàng Ry Ta"
+    },
+    {
+      "ma_kho": "KDDX",
+      "ten_kho": "Kho dầu đội xe",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KDMT",
+      "ten_kho": "Kho dầu mủ tạp",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KT",
+      "ten_kho": "Kho xưởng cơ khí",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KDMFL",
+      "ten_kho": "Kho dầu máy phát lớn",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KBHLD",
+      "ten_kho": "Kho bảo hộ lao động",
+      "thu_kho": "Neàng Ry Ta"
+    },
+    {
+      "ma_kho": "KBO",
+      "ten_kho": "Kho dầu Biomass",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KNB",
+      "ten_kho": "Kho nội bộ",
+      "thu_kho": "Chau Nho"
+    },
+    {
+      "ma_kho": "KXLNT",
+      "ten_kho": "Kho nước thải",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KDMN",
+      "ten_kho": "Kho dầu mủ nước",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    },
+    {
+      "ma_kho": "KNH",
+      "ten_kho": "Kho nguy hại",
+      "thu_kho": "Nguyễn Hữu Thọ"
+    }
+  ],
+  "item_cleanup": {
+    "total_rows": 372,
+    "changed_rows": 20,
+    "unique_kho_chua_after": [
+      "Kho bảo hộ lao động",
+      "Kho dầu Biomass",
+      "Kho dầu máy phát lớn, Kho dầu mủ tạp",
+      "Kho dầu mủ nước",
+      "Kho dầu mủ tạp, Kho dầu máy phát lớn",
+      "Kho dầu đội xe",
+      "Kho dầu đội xe, Kho dầu máy phát lớn",
+      "Kho hóa chất",
+      "Kho nguy hại",
+      "Kho nước thải",
+      "Kho nội bộ",
+      "Kho thành phẩm mủ tạp",
+      "Kho thành phẩm mủ tạp, Kho thành phẩm mủ nước",
+      "Kho vật tư",
+      "Kho xưởng cơ khí"
+    ],
+    "changes": [
+      {
+        "ma_vat_tu": "N90",
+        "ten_vat_tu": "Nhớt 90",
+        "kho_chua_cu": "Kho dầu đội xe , , , , , , , ,  , ,  , ",
+        "kho_chua_moi": "Kho dầu đội xe"
+      },
+      {
+        "ma_vat_tu": "X92",
+        "ten_vat_tu": "Xăng",
+        "kho_chua_cu": "Kho dầu đội xe , , , ",
+        "kho_chua_moi": "Kho dầu đội xe"
+      },
+      {
+        "ma_vat_tu": "DOX",
+        "ten_vat_tu": "Dầu vận chuyển",
+        "kho_chua_cu": "Kho dầu đội xe , Kho dầu máy phát lớn , ",
+        "kho_chua_moi": "Kho dầu đội xe, Kho dầu máy phát lớn"
+      },
+      {
+        "ma_vat_tu": "DOSXT",
+        "ten_vat_tu": "Dầu lò sấy mủ tạp",
+        "kho_chua_cu": "Kho dầu mủ tạp , Kho dầu máy phát lớn , ",
+        "kho_chua_moi": "Kho dầu mủ tạp, Kho dầu máy phát lớn"
+      },
+      {
+        "ma_vat_tu": "N140",
+        "ten_vat_tu": "Nhớt 140",
+        "kho_chua_cu": "Kho dầu đội xe , , , , , ",
+        "kho_chua_moi": "Kho dầu đội xe"
+      },
+      {
+        "ma_vat_tu": "XPD",
+        "ten_vat_tu": "Xà phòng 72% dầu",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "GTCS",
+        "ten_vat_tu": "Găng tay cao su",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "CHC",
+        "ten_vat_tu": "Chổi cỏ",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHAT",
+        "ten_vat_tu": "Áo thun",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHAM",
+        "ten_vat_tu": "Áo mưa",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHTD",
+        "ten_vat_tu": "Tạp dề chống ướt",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHBTV",
+        "ten_vat_tu": "Bao tay vải",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHN",
+        "ten_vat_tu": "Nón vải",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHDTO",
+        "ten_vat_tu": "Dép tổ ong",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHKTV",
+        "ten_vat_tu": "Khẩu trang vải",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHMBT",
+        "ten_vat_tu": "Mũ bọc tóc",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHCHTC",
+        "ten_vat_tu": "Chổi cứng",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHUCS",
+        "ten_vat_tu": "Ủng cao su",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHNL",
+        "ten_vat_tu": "Nón lá",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      },
+      {
+        "ma_vat_tu": "BHKTCD",
+        "ten_vat_tu": "Khẩu trang chống độc",
+        "kho_chua_cu": "Kho hóa chấtảo hộ lao động",
+        "kho_chua_moi": "Kho bảo hộ lao động"
+      }
+    ]
+  },
+  "movement_cleanup": {
+    "total_rows": 335,
+    "changed_rows": 334,
+    "unique_kho_after": [
+      "Kho bảo hộ lao động",
+      "Kho dầu máy phát lớn",
+      "Kho dầu đội xe",
+      "Kho hóa chất",
+      "Kho nguy hại",
+      "Kho thành phẩm mủ tạp",
+      "Kho vật tư",
+      "Kho xưởng cơ khí"
+    ],
+    "changes": [
+      {
+        "ma_nx": "N290724140321",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N290724140321",
+        "ma_vt": "APH",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X290724205616",
+        "ma_vt": "N140",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X290724205616",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X290724205616",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X290724205616",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724012032",
+        "ma_vt": "LP152",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "X300724065538",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724065833",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724070115",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724070115",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724070115",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724070115",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724070507",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724070507",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724104353",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724104353",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724130203",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724130203",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724130203",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030724000000",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030724000000",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030724000000",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040724000000",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040724000000",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040724000000",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724140551",
+        "ma_vt": "AF",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "X300724140551",
+        "ma_vt": "AA",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "X300724140551",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724140551",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724130203",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724150533",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724151205",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724151205",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724151353",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724151649",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724151921",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724151921",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724151921",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724153118",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724153118",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724153310",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724153446",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724153446",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724153716",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724153716",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724153716",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "B013H",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154634",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154634",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154634",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724155202",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724155202",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724155421",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724155421",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724155421",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724165739",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724165739",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724165914",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724165914",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724210245",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724210245",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724062646",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724062646",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724062646",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724063119",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724063524",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724063640",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724063640",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724063847",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724063847",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064135",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064330",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064330",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064330",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724165739",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724165914",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724170303",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724170303",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064135",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724064220",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X010824115500",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724104353",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724151205",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X310724064135",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040724000000",
+        "ma_vt": "MOTH",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "N50",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724154018",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X310724063119",
+        "ma_vt": "X92",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300724151649",
+        "ma_vt": "AF",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "X020824075152",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N020824110524",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X020824075152",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030824063304",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030824063643",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N030824105044",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N030824105044",
+        "ma_vt": "APH",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040824170620",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X060824104026",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824104026",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824104026",
+        "ma_vt": "N50",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824104026",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105532",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105532",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824104026",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105954",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105954",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105954",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824105954",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824110918",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824110918",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824110918",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060824182056",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X070824095951",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X070824095951",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X070824095951",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X070824144815",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X070824144815",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X070824144815",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N070824161839",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X070824150218",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080824212042",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080824212042",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080824212732",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080824212732",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080824212732",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X090824025920",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X090824084907",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X090824093129",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X090824093129",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X090824093129",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100824083722",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X100824085952",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100824085952",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100824092140",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X100824085952",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110824074746",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110824074746",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110824074746",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110824100722",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X120824070816",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X120824070916",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X120824070916",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110824074746",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X140824094709",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X140824094821",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X140824110303",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X140824110303",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150824081442",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150824081442",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150824081631",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X150824081631",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X140824094709",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824074544",
+        "ma_vt": "B004H",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X160824074544",
+        "ma_vt": "B013H",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X160824090149",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824090149",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824090149",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824090149",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824090149",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160824102846",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X160824183048",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X160824183048",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X180824072621",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X180824072621",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X180824135156",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X180824135156",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X180824135156",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X190824095714",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X120824070916",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X190824095714",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "TT",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004VS10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B013H",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004VS3L",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004VS60",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "B004H",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824155955",
+        "ma_vt": "MT",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "N200824155955",
+        "ma_vt": "AF",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "N200824155955",
+        "ma_vt": "HAS",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "N200824155955",
+        "ma_vt": "AA",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "N200824155955",
+        "ma_vt": "LP152",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "N200824160516",
+        "ma_vt": "AM",
+        "kho_cu": "Kho xưởng cơ khí",
+        "kho_moi": "Kho xưởng cơ khí",
+        "kho_ma": "KT"
+      },
+      {
+        "ma_nx": "N200824160554",
+        "ma_vt": "NA",
+        "kho_cu": "Kho nguy hại",
+        "kho_moi": "Kho nguy hại",
+        "kho_ma": "KNH"
+      },
+      {
+        "ma_nx": "N200824160625",
+        "ma_vt": "PG",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N200824160625",
+        "ma_vt": "ĐG",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N200824160625",
+        "ma_vt": "DPH",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N200824160625",
+        "ma_vt": "NS",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "N50",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "N140",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "DOSXT",
+        "kho_cu": "Kho dầu máy phát lớn",
+        "kho_moi": "Kho dầu máy phát lớn",
+        "kho_ma": "KDMFL"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "X92",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "MOTH",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N200824154538",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X200824072406",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X200824072406",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X200824072406",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X210824075556",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X210824075556",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X220824100738",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X220824100738",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824073240",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X230824073240",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X230824080636",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824080636",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824081432",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824081638",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824081638",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824081638",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824081638",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X230824154312",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X240824075202",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X240824105406",
+        "ma_vt": "NA",
+        "kho_cu": "Kho nguy hại",
+        "kho_moi": "Kho nguy hại",
+        "kho_ma": "KNH"
+      },
+      {
+        "ma_nx": "X240824151319",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X240824151319",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X240824151319",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X240824164845",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X250824074448",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X250824074448",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X250824151957",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X250824164535",
+        "ma_vt": "NA",
+        "kho_cu": "Kho nguy hại",
+        "kho_moi": "Kho nguy hại",
+        "kho_ma": "KNH"
+      },
+      {
+        "ma_nx": "X260824074306",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X260824074306",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X260824074708",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X260824074708",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824161253",
+        "ma_vt": "N90",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X260824155759",
+        "ma_vt": "N90",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X270824074526",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X270824074526",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X270824170203",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X270824170203",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X280824080335",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X280824080335",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X280824162321",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X290824054514",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X290824054514",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X290824054756",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X290824054756",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300824055522",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300824055522",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X300824055825",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X300824055825",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N300824200443",
+        "ma_vt": "GTCS",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X310824073005",
+        "ma_vt": "NA",
+        "kho_cu": "Kho nguy hại",
+        "kho_moi": "Kho nguy hại",
+        "kho_ma": "KNH"
+      },
+      {
+        "ma_nx": "X310824073118",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N310824113216",
+        "ma_vt": "PMB5",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N310824205654",
+        "ma_vt": "CHC",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X010924110109",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X010924110109",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X010924150403",
+        "ma_vt": "AF",
+        "kho_cu": "Kho hóa chất",
+        "kho_moi": "Kho hóa chất",
+        "kho_ma": "KB"
+      },
+      {
+        "ma_nx": "X020924110035",
+        "ma_vt": "N50",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X020924120553",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X020924173258",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X020924173258",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030924083157",
+        "ma_vt": "MOCN",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030924101848",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924101848",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924104656",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924104656",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924104934",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924104934",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924104934",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X030924110104",
+        "ma_vt": "GTCS",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X030924110840",
+        "ma_vt": "GTCS",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X030924111202",
+        "ma_vt": "CHC",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X030924171505",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X030924171505",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040924080703",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040924080703",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040924092224",
+        "ma_vt": "N90",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040924092614",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040924154240",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X040924170032",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X040924170032",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X050924080959",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X050924080959",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X050924153215",
+        "ma_vt": "N90",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X050924153348",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X050924183251",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X050924183251",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X060924074440",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060924074440",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X060924113724",
+        "ma_vt": "N90",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N200824160625",
+        "ma_vt": "MUBEZ",
+        "kho_cu": "Kho thành phẩm mủ tạp",
+        "kho_moi": "Kho thành phẩm mủ tạp",
+        "kho_ma": "KTPMT"
+      },
+      {
+        "ma_nx": "N080924144014",
+        "ma_vt": "B004VC10",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "N080924144014",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X080924152059",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924152059",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924152313",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924152313",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924152313",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924152059",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X080924161846",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X080924161846",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X100924075134",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100924075134",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100924075409",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100924075409",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X100924173521",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X110924144358",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X110924144358",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X110924173852",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X110924173852",
+        "ma_vt": "DOX",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "N130924141557",
+        "ma_vt": "BHAT",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X130924143445",
+        "ma_vt": "BHAT",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924145200",
+        "ma_vt": "BHAM",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924145620",
+        "ma_vt": "BHTD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924150348",
+        "ma_vt": "BHBTV",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924150629",
+        "ma_vt": "BHN",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924151115",
+        "ma_vt": "BHDTO",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924151318",
+        "ma_vt": "BHKTV",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924151510",
+        "ma_vt": "BHMBT",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "N130924151904",
+        "ma_vt": "BHCHTC",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X150924202824",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150924202824",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150924203643",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150924203643",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X150924203924",
+        "ma_vt": "N68",
+        "kho_cu": "Kho dầu đội xe",
+        "kho_moi": "Kho dầu đội xe",
+        "kho_ma": "KDDX"
+      },
+      {
+        "ma_nx": "X160924084026",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X160924135850",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X160924135850",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X170924201831",
+        "ma_vt": "DCS",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X170924201831",
+        "ma_vt": "B004K",
+        "kho_cu": "Kho vật tư",
+        "kho_moi": "Kho vật tư",
+        "kho_ma": "KA"
+      },
+      {
+        "ma_nx": "X180924112923",
+        "ma_vt": "XPD",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X180924113025",
+        "ma_vt": "CHC",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      },
+      {
+        "ma_nx": "X180924113136",
+        "ma_vt": "BHDTO",
+        "kho_cu": "Kho bảo hộ lao động",
+        "kho_moi": "Kho bảo hộ lao động",
+        "kho_ma": "KBHLD"
+      }
+    ]
+  }
+}

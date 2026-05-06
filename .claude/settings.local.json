@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:qlsxkpt.vercel.app)",
+      "Bash(xargs grep *)",
+      "Bash(unzip -p \"c:/Users/Software/rubber-erp/Tong_quan.docx\" word/document.xml)",
+      "Bash(grep -v '^$')",
+      "Bash(grep -v '^ *$')",
+      "Bash(unzip -l \"c:/Users/Software/rubber-erp/Tong_quan.docx\")",
+      "Bash(mkdir -p /tmp/tong_quan_imgs)",
+      "Bash(unzip -p \"c:/Users/Software/rubber-erp/Tong_quan.docx\" word/media/image2.jpeg)",
+      "Bash(unzip -p \"c:/Users/Software/rubber-erp/Tong_quan.docx\" word/media/image3.png)",
+      "Read(//tmp/tong_quan_imgs/**)",
+      "Read(//c/tmp/tong_quan_imgs/**)",
+      "Bash(unzip -p \"c:/Users/Software/rubber-erp/Tong_quan.docx\" \"word/media/image1.png\")",
+      "Bash(npx tsc *)",
+      "Bash(unzip -p \"c:/Users/Software/rubber-erp/Quy_trinh_sx.docx\" word/document.xml)",
+      "Bash(grep -v '^[[:space:]]*$')",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git commit -m 'feat: thêm trang đăng nhập /login *)",
+      "Bash(git commit -m 'feat: thêm module bản đồ + GeoJSON + assets *)",
+      "Bash(node -e ' *)",
+      "Bash(git commit -m 'fix: chuyển lô V5T từ Đội 0 sang Đội 11 *)",
+      "Bash(git commit -m 'docs: cập nhật chuẩn UI card — gradient header, icon+label, value bold, border-dashed *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Software\\rubber-erp\\public\\images"
+    ]
+  }
+}

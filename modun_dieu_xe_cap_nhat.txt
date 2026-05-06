@@ -1,0 +1,16 @@
+Lên kế hoạch thiết kế modun điều xe
+-Mã điều xe: DX-ddmmyy/số phiếu lần 1 là 1 lần 2 là 2
+-Tài xế hiển thị mặc định nhưng có thể chọn người khác trong danh sách.
+-Danh sách hiển thị các phiếu điều xe theo thứ tự ngày lớn đầu tiên nhỏ cuối cùng cột đầu tiên là Mã điều xe
+-Trường Ngày điều xe mặc định ngày lớn nhất +1
+-Trường nhà máy điểm đến mặc định theo thông tin đăng nhập khóa không cho sửa.
+-Trường chứng nhận mặc định PEFC CS bỏ ISO trong danh sách chọn
+Ngày vận chuyển mặc định ngày lớn sửa và cập nhật các ngày còn trống PEFC CS.
+-Danh sách các xe bên dưới lấy cả danh sách đầy đủ (để trống khối lượng) của ngày gần nhất cho người dùng thêm sửa xóa-Lưu ý sửa danh sách trổ chọn của các trường thông minh hơn trổ theo hướng người dùng dể thao tác nhất.
+-Chuyến: ví dụ trong 1 ngày chọn 7A lần 1 mặc định là chuyến 1, chọn lần 2 mặc định là chuyến 2 khó không thể sửa thành chuyến 1. Hiển thị thêm cảnh báo
+-Lộ trình chỉ chọn các điểm cùng đội với Điểm giao nhận ví dụ như Điểm giao nhận chọn E1 (đội 1), J7 (đội 3) thì lộ trình chỉ hiển thị các điểm của đội 1 và 3
+-Phần lô thu hoạch hiện tại chưa hiển thị khi được chọn sửa và cập nhật các cột còn trống
+-Nút tải bảng (chỉ có admin thấy) dùng để tải mẫu nhập liệu của nhiều ngày sau đó up lên hệ thống khi người dùng vì lý do gì đó lâu ngày  không nhập liệu. Sau này bạn thấy nút này đều có nghĩa như vậy điền đầy đủ thông tin và tạo nút inport mẫu (chỉ admin thấy) để up lên. Sau đó phần mềm nhận diện và phân tách theo ngày và tự tính khối lượng. Tham khảo file dieu_xe_mau.csv 
+-Nút Geojdson dùng tải file geojson của phiếu điều xe ngày đó bao gồm các lô có trong trường lô thu hoạch.
+-Phần nhập khối lượng: các trường đày đủ là Đông chén tươi-DRC%-Đông chén khô; Đông khối tươi-DRC%-Đông khối khô; Mủ dây tươi-DRC%-Dây khô. Sửa tất cả các trường liên quan đến mủ dây-hiện tại bạn đang viết sai là mủ dập, DRC mủ dây hãy để mặc định là 65 và có thể sửa
+Sau khi thay đổi cập nhật vào claude.md và các file rules liên quan
