@@ -134,3 +134,14 @@ Khi xoa phieu kiem nghiem:
 - Rule nay ap dung cho ca:
   - xoa 1 phieu
   - xoa hang loat nhieu phieu
+
+## Rule quay lai Xuat hang sau KN lai
+
+- `Kiem nghiem lai (Rot hang)` co 2 context:
+  - mo truc tiep trong module `Kiem nghiem`
+  - mo tu form `Xuat hang` khi nguoi dung co gang gan 1 lo rot hang len xe
+- Chi context mo tu `Xuat hang` moi duoc phep:
+  - nhan draft form `Xuat hang` tu `sessionStorage`
+  - save xong quay lai `Xuat hang`
+  - neu ket qua KN lai dat thi auto-gan lo ve dung xe dang cho
+- Neu nguoi dung dang o module `Kiem nghiem` va tao / sua `KN lai (Rot hang)` truc tiep, save xong o lai luong `Kiem nghiem`, khong redirect sang `Xuat hang`

@@ -1993,7 +1993,7 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* Hàng 2: Loại CSR - Bánh - Bọc - Thảm */}
+            {/* Hàng 2: Loại CSR - Bành - Bọc - Thảm */}
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -2011,7 +2011,7 @@ export default function ProductPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Bánh (kg/bánh) *
+                  Bành (kg/bành) *
                 </label>
                 {banhOpts.length > 1 ? (
                   <select
@@ -2035,7 +2035,7 @@ export default function ProductPage() {
                   />
                 )}
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Lô tròn: {cfg.lo_tron} bánh
+                  Lô tròn: {cfg.lo_tron} bành
                 </p>
               </div>
               <div>
@@ -2163,7 +2163,7 @@ export default function ProductPage() {
                     key={l.id}
                     className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg"
                   >
-                    {l.ma_lo} · {l.tong_banh} bánh
+                    {l.ma_lo} · {l.tong_banh} bành
                   </span>
                 ))}
               </div>
@@ -2180,7 +2180,7 @@ export default function ProductPage() {
                 </span>
               </div>
               <div className="text-[11px] text-rose-600 mb-2">
-                Cùng loại thành phẩm và cùng loại bánh phải dùng dãy số lô liên
+                Cùng loại thành phẩm và cùng loại bành phải dùng dãy số lô liên
                 tục.
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2349,7 +2349,7 @@ export default function ProductPage() {
                   </select>
                   {caTongBanh > 0 && (
                     <span className="ml-auto text-xs font-bold text-slate-600">
-                      Ca {caLabel}: {caTongBanh} bánh · {fmtKg(caTongKg)}
+                      Ca {caLabel}: {caTongBanh} bành · {fmtKg(caTongKg)}
                     </span>
                   )}
                 </div>
@@ -2430,7 +2430,7 @@ export default function ProductPage() {
                                 <span className="bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full font-bold">
                                   Đã {normalizeLotStatus(lot.trang_thai)}
                                 </span>
-                                <span>{lot.tong_banh} bánh</span>
+                                <span>{lot.tong_banh} bành</span>
                               </div>
                             </div>
                           );
@@ -2461,7 +2461,7 @@ export default function ProductPage() {
                                   </span>
                                 </span>
                                 <span className="text-xs text-slate-500 font-bold">
-                                  {midCount} × {cfg.lo_tron} bánh ={" "}
+                                  {midCount} × {cfg.lo_tron} bành ={" "}
                                   {(
                                     (midCount *
                                       cfg.lo_tron *
@@ -2559,7 +2559,7 @@ export default function ProductPage() {
                                         : "text-amber-600"
                                     }
                                   >
-                                    {lot.tong_banh} bánh
+                                    {lot.tong_banh} bành
                                   </strong>
                                 </span>
                                 <span
@@ -2680,7 +2680,7 @@ export default function ProductPage() {
                                         )}
                                       </div>
                                       <div className="text-[10px] text-center text-amber-600 font-bold">
-                                        +{delta} bánh ca này
+                                        +{delta} bành ca này
                                       </div>
                                     </div>
                                   );
@@ -2756,7 +2756,7 @@ export default function ProductPage() {
                             </div>
 
                             <div className="mt-2 text-xs text-slate-400 text-right">
-                              {fmtKg(lot.tong_kg)} · {lot.tong_banh} bánh
+                              {fmtKg(lot.tong_kg)} · {lot.tong_banh} bành
                             </div>
                           </div>
                         );
@@ -2770,7 +2770,7 @@ export default function ProductPage() {
                         Tổng Ca {caLabel}:
                       </span>
                       <span className="text-sm font-extrabold text-blue-800">
-                        {caTongBanh} bánh
+                        {caTongBanh} bành
                       </span>
                       <span className="text-xs text-blue-400">·</span>
                       <span className="text-sm font-extrabold text-blue-800">
@@ -2921,7 +2921,7 @@ export default function ProductPage() {
                     >
                       {saving
                         ? "Đang lưu..."
-                        : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bánh" : "lô"}`}
+                        : `Lưu ${sessionTotals.banh > 0 ? sessionTotals.banh + " bành" : "lô"}`}
                     </button>
                   )}
                 </div>
@@ -2997,7 +2997,7 @@ export default function ProductPage() {
               ic: "text-amber-400",
             },
             {
-              label: "Tổng bánh (lọc)",
+              label: "Tổng bành (lọc)",
               value: stats.tongBanh.toLocaleString("vi-VN"),
               color: "text-blue-600",
               Icon: Layers,
@@ -3044,7 +3044,7 @@ export default function ProductPage() {
                     key={l.id}
                     className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold"
                   >
-                    {l.ma_lo} · {l.tong_banh} bánh
+                    {l.ma_lo} · {l.tong_banh} bành
                   </span>
                 ))}
               </div>
@@ -3215,7 +3215,7 @@ export default function ProductPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
-                      <span>{dayBanh.toLocaleString("vi-VN")} bánh</span>
+                      <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
@@ -3311,7 +3311,7 @@ export default function ProductPage() {
                                 Ca {ca}
                               </span>
                               <span className="text-xs font-bold text-slate-500">
-                                {caBanh.toLocaleString("vi-VN")} bánh ·{" "}
+                                {caBanh.toLocaleString("vi-VN")} bành ·{" "}
                                 {fmtKg(caKg)}
                               </span>
                             </div>
@@ -3639,11 +3639,11 @@ export default function ProductPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loại bánh
+                    Loại bành
                   </label>
                   <input
                     readOnly
-                    value={`${editForm.loai_banh} kg/bánh`}
+                    value={`${editForm.loai_banh} kg/bành`}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />
                 </div>
@@ -3693,10 +3693,10 @@ export default function ProductPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-xs font-bold text-slate-600">
-                        Số bánh kiện (A / B / C / D)
+                        Số bành kiện (A / B / C / D)
                       </label>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
-                        Max {maxK} bánh · Lô tròn = {cfg2.lo_tron} bánh
+                        Max {maxK} bành · Lô tròn = {cfg2.lo_tron} bành
                       </span>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
@@ -3741,7 +3741,7 @@ export default function ProductPage() {
                     </div>
                     <div className="mt-2 flex gap-4 text-xs text-slate-500">
                       <span>
-                        Tổng bánh:{" "}
+                        Tổng bành:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_banh}
                         </strong>
@@ -3842,7 +3842,7 @@ export default function ProductPage() {
                               (s, c) => s + c.tong_banh_cua_ca,
                               0,
                             )}{" "}
-                            bánh
+                            bành
                           </span>
                         </div>
                         {grouped[ca].map((c) => {
@@ -3864,7 +3864,7 @@ export default function ProductPage() {
                                   {c.ma_lo}
                                 </span>
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  +{c.tong_banh_cua_ca} bánh ·{" "}
+                                  +{c.tong_banh_cua_ca} bành ·{" "}
                                   {fmtKg(c.tong_kg_cua_ca)}
                                 </span>
                                 <span

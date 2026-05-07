@@ -130,6 +130,11 @@ Quy tac loc:
 - Banh `35` va `33.33`: 4 kien, moi kien 36 banh -> lo tron `144`
 - Banh `20`: 4 kien, moi kien 60 banh -> lo tron `240`
 
+### Quy tac ngon ngu hien thi trong Thanh pham
+
+- Ten field ky thuat va schema DB giu nguyen dang `banh` / `loai_banh` / `tong_banh`
+- UI nghiep vu cua module `Thanh pham` phai hien thi theo cach goi `bành`
+
 ### Trang thai lo
 
 - `Hoan thanh`
@@ -206,10 +211,11 @@ Khi lo cuoi ca truoc dang do:
 
 - Xoa trong session thanh pham la xoa theo tung dong `lot_transactions`
 - Khong xoa ca `lots` khi van con it nhat 1 giao dich
-- Chi duoc xoa dong giao dich moi nhat cua lo dang do (de bao toan lich su va tinh dong nhat)
+- Khong duoc map theo `lot.id` khi nguoi dung dang chon 1 dong session; phai map theo `lot_transactions.id`
+- Co the xoa bat ky dong `lot_transactions` nao duoc chon trong session, khong con rule chan "chi xoa transaction moi nhat"
 - Khi xoa xong phai tinh lai `lots`:
   - `tong_banh`, `tong_kg`
-  - `trang_thai` (`Do dang` / `Hoan thanh` / `Xuat hang`)
+  - `trang_thai` (`Do dang` / `Hoan thanh`)
   - `ngan_id`, `ca`, `ngay_ht` theo giao dich moi nhat con lai
 - Neu lo khong con giao dich nao -> cho phep xoa master `lots`
 
@@ -266,3 +272,4 @@ Khi lo cuoi ca truoc dang do:
 
 - Mac dinh noi dung UI, thong bao, canh bao va tai lieu noi bo phai viet bang tieng Viet co dau, dung chinh ta
 - Chi duoc bo dau hoac doi ngon ngu khi nguoi dung yeu cau ro rang
+- Khi sua chuoi UI o `Thanh pham`, uu tien sua truc tiep tung cum hien thi; khong dung script convert encoding hang loat

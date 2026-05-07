@@ -9,6 +9,7 @@ description: UI components, mau sac, animation
 - Chi dung Tailwind CSS + lucide-react
 - Khong import UI library ngoai
 - Component tu viet, uu tien don gian va dong nhat
+- Tren web, luon dam bao noi dung hien thi bang tieng Viet co dau, dung chinh ta, ngoai tru khi nguoi dung yeu cau khac ro rang
 
 ## Component classes chuan
 

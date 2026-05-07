@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
@@ -459,6 +460,7 @@ const padSamples = (arr: (string|number)[]|undefined, n: number): string[] =>
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function QualityPage() {
+  const searchParams = useSearchParams()
   // ── Core state ──────────────────────────────────────────────────────────────
   const [factoryId,   setFactoryId]   = useState<string|null>(null)
   const [factoryCode, setFactoryCode] = useState("NM")
@@ -501,6 +503,8 @@ export default function QualityPage() {
   const [editingResultId,setEditingResultId]= useState<string|null>(null)
   const [lotsLoading,    setLotsLoading]    = useState(false)
   const eligibleLotsReqRef = useRef(0)
+  const handledRetestQueryRef = useRef("")
+  const pendingRetestLotRef = useRef<{ lotId: string; maLo: string } | null>(null)
 
   // ── TCKH modal ───────────────────────────────────────────────────────────────
   const [tkhModal,    setTkhModal]    = useState(false)
@@ -516,6 +520,37 @@ export default function QualityPage() {
 
   // ── KN lại date filter (ngay_sx dropdown cho kl_rot_hang & kl_6thang) ─────────
   const [knDateFilter, setKnDateFilter] = useState<string>("")
+
+  useEffect(() => {
+    const raw = searchParams.toString()
+    if (!raw || handledRetestQueryRef.current === raw) return
+
+    const mode = searchParams.get("mode")
+    if (mode !== "retest") return
+
+    handledRetestQueryRef.current = raw
+    const lotId = searchParams.get("lotId") || ""
+    const maLo = searchParams.get("maLo") || ""
+    const chungLoai = searchParams.get("chungLoai") || "10"
+    const ngaySx = searchParams.get("ngaySx") || ""
+
+    pendingRetestLotRef.current = lotId || maLo ? { lotId, maLo } : null
+    setMainTab("xep_hang")
+    setView("create")
+    setEditingResultId(null)
+    setSelectedLotIds(new Set())
+    setActiveTabLotId(null)
+    setTabData({})
+    setCreateForm((prev) => ({
+      ...prev,
+      chung_loai: chungLoai,
+      loai_kn: "kl_rot_hang",
+      so_mau: 6,
+      tuy_chon_mau: 6,
+      ngay_sx: "",
+    }))
+    setKnDateFilter(ngaySx)
+  }, [searchParams])
 
   // ── Admin / Import ───────────────────────────────────────────────────────────
   const [userRole,     setUserRole]     = useState("")
@@ -970,6 +1005,9 @@ export default function QualityPage() {
     const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
     const customLimits = customStds.find(s=>s.id===createForm.tieu_chuan)?.limits
     const user = JSON.parse(localStorage.getItem("erp_user")||"{}")
+    const returnTo = searchParams.get("returnTo") || ""
+    let retestReturnLotId = ""
+    let retestPassed = false
 
     if (editingResultId) {
       // Update single existing result
@@ -1003,6 +1041,10 @@ export default function QualityPage() {
         if (!lot||!td) continue
         const samples = Object.fromEntries(Object.entries(td.samples).map(([k,v])=>[k,v.map(Number)]))
         const { grade, dat_hang, trang_thai } = calcGrade(td.samples, loaiCsr, createForm.tieu_chuan, customLimits)
+        if (createForm.loai_kn === "kl_rot_hang") {
+          retestReturnLotId = lot.id
+          retestPassed = !dat_hang?.endsWith("RH")
+        }
         const parentId = isRetest ? lot.prev_qc?.id : null
         const lan = parentId ? ((lot.prev_qc?.lan||1)+1) : 1
 
@@ -1033,6 +1075,15 @@ export default function QualityPage() {
         nextLoKN++
       }
       showToast(`Đã lưu phiếu ${formatPKN(batchPKN, createForm.ngay_kn, factoryCode)} — ${selectedLotIds.size} lô`)
+      if (createForm.loai_kn === "kl_rot_hang" && returnTo) {
+        const params = new URLSearchParams({
+          draft: "restore",
+          retestLotId: retestReturnLotId,
+          retestPassed: retestPassed ? "1" : "0",
+        })
+        window.location.assign(`${returnTo}?${params.toString()}`)
+        return
+      }
     }
     setView("list")
     loadResults(factoryId)
@@ -1353,6 +1404,35 @@ export default function QualityPage() {
       return eligibleLots
     return eligibleLots.filter(l => getLotQcDate(l) === knDateFilter)
   }, [createForm.loai_kn, eligibleLots, knDateFilter])
+
+  useEffect(() => {
+    const pending = pendingRetestLotRef.current
+    if (!pending || createForm.loai_kn !== "kl_rot_hang") return
+
+    const targetLot = eligibleLots.find((lot) =>
+      (pending.lotId && lot.id === pending.lotId) ||
+      (pending.maLo && normalizeLotCode(lot.ma_lo) === normalizeLotCode(pending.maLo))
+    )
+    if (!targetLot) return
+
+    const initSamples: Samples = targetLot.prev_qc
+      ? Object.fromEntries(
+          ALL_FIELDS.map((field) => [
+            field.key,
+            padSamples(targetLot.prev_qc!.samples?.[field.key], createForm.so_mau),
+          ]),
+        )
+      : emptyTabSamples(createForm.so_mau)
+
+    const lotDate = getLotQcDate(targetLot)
+    if (lotDate && knDateFilter !== lotDate) {
+      setKnDateFilter(lotDate)
+    }
+    setSelectedLotIds(new Set([targetLot.id]))
+    setTabData({ [targetLot.id]: { samples: initSamples, preview: null } })
+    setActiveTabLotId(targetLot.id)
+    pendingRetestLotRef.current = null
+  }, [createForm.loai_kn, createForm.so_mau, eligibleLots, knDateFilter])
 
   // Map: qc_result.id gốc → kết quả KN lại rớt hạng mới nhất (để hiện badge)
   const retestByParentId = useMemo(() => {
