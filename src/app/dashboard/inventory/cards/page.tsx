@@ -82,8 +82,8 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function getSignedQuantity(movementType: InventoryStockMovementRow["movement_type"], quantity: number) {
-  return movementType === "export" || movementType === "transfer_out" ? -quantity : quantity
+function getReportQuantity(quantity: number) {
+  return Math.abs(quantity)
 }
 
 function formatSelectedLabels(labels: string[], fallback: string) {
@@ -286,7 +286,7 @@ export default function InventoryCardsPage() {
       code: movement.item.code,
       name: movement.item.name,
       unit: movement.item.unit,
-      quantity: getSignedQuantity(movement.movement_type, movement.quantity),
+      quantity: getReportQuantity(movement.quantity),
       note: [getMovementLabel(movement.movement_type), lineNotesById[movement.document_line_id] || ""]
         .filter(Boolean)
         .join(" | "),
@@ -304,7 +304,7 @@ export default function InventoryCardsPage() {
               quantity: 0,
             }
           }
-          acc[key].quantity += getSignedQuantity(movement.movement_type, movement.quantity)
+          acc[key].quantity += getReportQuantity(movement.quantity)
           return acc
         },
         {},
@@ -315,7 +315,7 @@ export default function InventoryCardsPage() {
       ["CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM"],
       ["NHÀ MÁY CHẾ BIẾN"],
       [],
-      ["", "", "Báo cáo", "", `[${formatSelectedLabels(selectedTypeLabels, "Tất cả loại phiếu")}]`],
+      ["", "", "Báo cáo", "", formatSelectedLabels(selectedTypeLabels, "Tất cả loại phiếu")],
       [],
       ["Từ ngày", fromDate || "", "", "", "Người báo cáo", currentUser?.username || currentUser?.full_name || ""],
       ["Đến ngày", toDate || "", "", "", "Lúc", new Date().toLocaleString("vi-VN")],

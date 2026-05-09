@@ -277,7 +277,7 @@ export default function InventoryPrintReportPage() {
 
   const selectedWarehouseLabels = warehouseIds
     .map((id) => warehouseMap.get(id))
-    .filter(Boolean)
+    .filter((warehouse): warehouse is InventoryWarehouseOption => Boolean(warehouse))
     .map((warehouse) => `${warehouse.code} - ${warehouse.name}`)
   const selectedCategoryLabels = categoryIds
     .map((id) => items.find((item) => item.category_id === id)?.category_name || "")
@@ -285,7 +285,7 @@ export default function InventoryPrintReportPage() {
     .filter((value, index, arr) => arr.indexOf(value) === index)
   const selectedItemLabels = itemIds
     .map((id) => itemMap.get(id))
-    .filter(Boolean)
+    .filter((item): item is InventoryItemOption => Boolean(item))
     .map((item) => `${item.code} - ${item.name}`)
 
   return (
@@ -296,13 +296,24 @@ export default function InventoryPrintReportPage() {
             size: A4 landscape;
             margin: 10mm;
           }
+          body * {
+            visibility: hidden;
+          }
           body {
             background: white !important;
+          }
+          .print-sheet,
+          .print-sheet * {
+            visibility: visible;
           }
           .print-hidden {
             display: none !important;
           }
           .print-sheet {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
             box-shadow: none !important;
             border: none !important;
             margin: 0 !important;
