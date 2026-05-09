@@ -198,7 +198,21 @@ Vi du:
 - Roadmap: `.claude/rules/10-roadmap.md`
 - Factory config: `.claude/rules/11-factory-config.md`
 - Settings + permissions: `.claude/rules/12-settings-permissions.md`
+- Inventory: `.claude/rules/13-inventory-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
+
+## Ghi chu cap nhat module kho (2026-05-09)
+
+- Tab `Nhap kho`:
+  - Nut `Them moi` cua `Phan loai vat tu` va `Ma vat tu` phai nam cung hang voi field tuong ung, canh phai dung layout.
+  - `Them moi` cua `Phan loai vat tu` mo modal form va ghi vao `inventory_item_categories`.
+  - `Them moi` cua `Ma vat tu` mo modal form va ghi vao `inventory_items`.
+  - Khi tao nhanh `Ma vat tu`, phai tao kem rule kho mac dinh theo kho nhap dang chon trong `inventory_item_warehouse_rules`.
+- Tat ca dropdown `Ma vat tu` cua module kho uu tien dung component co o `Tim nhanh` ngay trong menu.
+- Tab `Ton kho` va `The kho`:
+  - Dropdown bo loc phai noi tren bang du lieu, khong bi chim duoi `Bang ton hien tai` hoac `Lich su phat sinh`.
+  - `Phan loai vat tu` trong `The kho` chi hien thi ten phan loai, khong hien thi UUID / id ben duoi.
+  - Xuat Excel `The kho` phai bam theo mau `cung_cap_dl/mau_the_kho.png`.
 
 ## Nho ky
 

@@ -5,7 +5,7 @@
 - `KA`: Kho vật tư
 - `KB`: Kho hóa chất
 - Hạn sử dụng và số lô ưu tiên quản lý chặt cho nhóm hóa chất.
-- Một vật tư có thể nằm ở nhiều kho; cột `kho_chua` sẽ lưu danh sách kho chuẩn, phân tách bằng dấu phẩy.
+- Một vật tư có thể nằm ở nhiều kho; danh sách kho chứa cần chuẩn hóa theo danh mục kho.
 - Mã phiếu:
   - `N-MAKHO-DDMMYY/XXX`
   - `X-MAKHO-DDMMYY/XXX`
@@ -78,9 +78,12 @@
 
 ### 4.1 Nhập kho
 
-- Tạo phiếu `Nháp`.
+- Tạo phiếu `Nhập`.
 - Chọn kho nhập, ngày chứng từ, người giao, người nhận, nguồn nhập.
-- Thêm các dòng vật tư.
+- Có bộ lọc `Phân loại vật tư` và `Mã vật tư` ở phần đầu form.
+- Nút `Thêm mới` của `Phân loại vật tư` phải nằm cùng hàng với field và mở modal để thêm trực tiếp vào `inventory_item_categories`.
+- Nút `Thêm mới` của `Mã vật tư` phải nằm cùng hàng với field và mở modal để thêm trực tiếp vào `inventory_items`.
+- Khi thêm nhanh `Mã vật tư`, phải chọn sẵn kho nhập và đúng 1 phân loại; hệ thống lưu `default_warehouse_ids` và tạo rule kho mặc định tương ứng.
 - Với hóa chất hoặc vật tư có bật quản lý lô/hạn:
   - bắt buộc `số lô`
   - bắt buộc `hạn sử dụng`
@@ -93,8 +96,10 @@
 
 ### 4.2 Xuất kho
 
-- Tạo phiếu `Nháp`.
+- Tạo phiếu `Xuất`.
 - Chọn kho xuất, bộ phận nhận, người nhận, mục đích xuất.
+- Có thêm trường lọc `Mã vật tư` ở phần header để thu hẹp danh sách chọn.
+- Danh sách vật tư phải lọc theo kho đã chọn và phân loại đang chọn.
 - Kiểm tra tồn khả dụng trước khi ghi sổ.
 - Với hàng có hạn:
   - gợi ý lô theo `FEFO`
@@ -105,8 +110,9 @@
 
 ### 4.3 Chuyển kho
 
-- Tạo phiếu `Nháp`.
+- Tạo phiếu `Chuyển`.
 - Chọn kho nguồn, kho đích.
+- Header dòng 2 có thêm trường `Mã vật tư`.
 - Chọn vật tư, lô, hạn, số lượng.
 - Trước khi ghi sổ cần cảnh báo:
   - kho nguồn sau chuyển có thấp hơn `tồn tối thiểu`
@@ -202,6 +208,18 @@
 - Danh sách vật tư thấp hơn tối thiểu hoặc cao hơn tối đa.
 - Báo cáo định mức tháng: sản lượng thành phẩm, nhu cầu định mức, tiêu hao thực tế, chênh lệch.
 - Xuất file kiểm tra nhập xuất tồn để đối chiếu nội bộ.
+
+### 7.1 Cập nhật UI và xuất báo cáo đã triển khai
+
+- Tất cả bộ lọc `Kho`, `Phân loại vật tư`, `Mã vật tư` trong `Tồn kho` và `Thẻ kho` hỗ trợ chọn nhiều.
+- Dropdown `Mã vật tư` phải có ô tìm kiếm nhanh trong menu.
+- Các dropdown bộ lọc phải nổi trên bảng dữ liệu, không bị chìm dưới `Bảng tồn hiện tại` hoặc `Lịch sử phát sinh`.
+- `Phân loại vật tư` trong `Thẻ kho` chỉ hiển thị tên phân loại, không hiển thị UUID / id bên dưới.
+- File Excel `Thẻ kho` phải bám bố cục mẫu [mau_the_kho.png](/c:/Users/Software/rubber-erp/cung_cap_dl/mau_the_kho.png), gồm:
+  - khối tiêu đề công ty / nhà máy
+  - khối tham số báo cáo
+  - bảng chi tiết bên trái
+  - bảng tổng hợp bên phải
 
 ## 8. Định mức tiêu hao
 

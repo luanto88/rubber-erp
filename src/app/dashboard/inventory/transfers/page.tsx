@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
+import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
@@ -289,7 +290,7 @@ export default function InventoryTransfersPage() {
   const [balances, setBalances] = useState<BalanceRow[]>([])
   const [lotBalances, setLotBalances] = useState<LotBalanceRow[]>(fallbackLotBalances)
   const [categories, setCategories] = useState<InventoryCategoryOption[]>([])
-  const [selectedCategoryId, setSelectedCategoryId] = useState("")
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
   const [draft, setDraft] = useState<TransferDraftState>(defaultDraft())
 
   useEffect(() => {
@@ -446,7 +447,7 @@ export default function InventoryTransfersPage() {
     () => draft.documentCode || formatDocCode(sourceWarehouse?.code || "", draft.documentDate),
     [draft.documentCode, draft.documentDate, sourceWarehouse?.code],
   )
-  const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=transfer&code=${encodeURIComponent(documentCode)}` : null
+  const documentQrPath = draft.documentId ? `/dashboard/inventory/print?type=transfer&documentId=${encodeURIComponent(draft.documentId)}` : null
 
   const balanceMap = useMemo(
     () => new Map(balances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0])),
@@ -458,9 +459,16 @@ export default function InventoryTransfersPage() {
       (item) => !draft.sourceWarehouseId || item.default_warehouse_ids.includes(draft.sourceWarehouseId),
     )
     if (scoped.length === 0) scoped = items
-    if (selectedCategoryId) scoped = scoped.filter((item) => item.category_id === selectedCategoryId)
+    if (selectedCategoryIds.length > 0) {
+      scoped = scoped.filter((item) => selectedCategoryIds.includes(item.category_id || ""))
+    }
     return scoped
-  }, [draft.sourceWarehouseId, items, selectedCategoryId])
+  }, [draft.sourceWarehouseId, items, selectedCategoryIds])
+
+  const visibleItemCards = useMemo(() => {
+    if (draft.selectedItemIds.length === 0) return sourceScopedItems
+    return sourceScopedItems.filter((item) => draft.selectedItemIds.includes(item.id))
+  }, [draft.selectedItemIds, sourceScopedItems])
 
   const warehouseScopedCategories = useMemo(() => {
     const base = (() => {
@@ -1015,7 +1023,7 @@ export default function InventoryTransfersPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho nguồn *</label>
             <select
@@ -1029,7 +1037,7 @@ export default function InventoryTransfersPage() {
                   selectedItemIds: [],
                   lines: [],
                 }))
-                setSelectedCategoryId("")
+                setSelectedCategoryIds([])
               }}
               className={INPUT_CLASS}
             >
@@ -1090,31 +1098,49 @@ export default function InventoryTransfersPage() {
             />
           </div>
 
-          {draft.sourceWarehouseId && warehouseScopedCategories.length >= 2 ? (
-            <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại vật tư</label>
-              <select
-                value={selectedCategoryId}
-                onChange={(e) => setSelectedCategoryId(e.target.value)}
-                className={INPUT_CLASS}
-              >
-                <option value="">Tất cả phân loại</option>
-                {warehouseScopedCategories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : null}
+          <div className="relative z-30 xl:col-span-3">
+            <div className="mb-2 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <div>
+                <MultiSelectField
+                  label="Phân loại vật tư"
+                  options={warehouseScopedCategories.map((category) => ({
+                    value: category.id,
+                    label: category.name,
+                    meta: category.code,
+                  }))}
+                  selectedValues={selectedCategoryIds}
+                  onChange={setSelectedCategoryIds}
+                  placeholder="Tất cả phân loại"
+                  disabled={!draft.sourceWarehouseId}
+                />
+              </div>
 
-          <div className="xl:col-span-2">
+              <div>
+                <MultiSelectField
+                  label="Mã vật tư"
+                  options={sourceScopedItems.map((item) => ({
+                    value: item.id,
+                    label: item.code,
+                    meta: item.name,
+                  }))}
+                  selectedValues={draft.selectedItemIds}
+                  onChange={(values) => setDraft((prev) => ({ ...prev, selectedItemIds: values }))}
+                  placeholder="Chọn nhiều mã vật tư"
+                  disabled={!draft.sourceWarehouseId}
+                />
+              </div>
+
+              <div />
+            </div>
+
             <label className="mb-2 block text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
             {!draft.sourceWarehouseId ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
                 Vui lòng chọn kho nguồn trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {sourceScopedItems.map((item) => {
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = warehouses.reduce(
                     (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
@@ -1122,48 +1148,30 @@ export default function InventoryTransfersPage() {
                   const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)
+                  const breakdownText =
+                    warehouseStocks.length > 1
+                      ? warehouseStocks
+                          .map((w) => `${w.code}: ${w.stock.toLocaleString("vi-VN")}`)
+                          .join(" | ")
+                      : null
 
                   return (
-                    <button
+                    <CompactItemSelectorCard
                       key={item.id}
-                      type="button"
-                      onClick={() => toggleSelectedItem(item.id)}
-                      className={`rounded-xl border p-4 text-left transition-all ${
-                        selected
-                          ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-bold text-slate-800">{item.code}</div>
-                          <div className="mt-1 text-sm text-slate-600">{item.name}</div>
-                          <div className="mt-2 text-xs text-slate-500">
-                            Tổng tồn: {totalStock.toLocaleString("vi-VN")} {item.unit}
-                          </div>
-                          {warehouseStocks.length > 1 &&
-                            warehouseStocks.map((w) => (
-                              <div key={w.code} className="text-xs text-slate-400">
-                                {w.code}: {w.stock.toLocaleString("vi-VN")} {item.unit}
-                              </div>
-                            ))}
-                        </div>
-                        <div
-                          className={`shrink-0 rounded-full p-1.5 ${
-                            selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
-                          }`}
-                        >
-                          <Check size={14} />
-                        </div>
-                      </div>
-                    </button>
+                      onToggle={() => toggleSelectedItem(item.id)}
+                      code={item.code}
+                      name={item.name}
+                      stockText={`Tồn: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
+                      breakdownText={breakdownText}
+                      selected={selected}
+                    />
                   )
                 })}
               </div>
             )}
           </div>
 
-          <div className="xl:col-span-2">
+          <div className="xl:col-span-3">
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Ghi chú phiếu</label>
             <textarea
               value={draft.note}

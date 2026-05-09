@@ -5,6 +5,7 @@ import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
 import { getActiveFactoryId } from "@/lib/auth"
+import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
@@ -801,9 +802,20 @@ export default function QualityPage() {
           .eq("trang_thai","Hoàn thành")
           .order("num", {ascending:true})
         if (lotsError) throw lotsError
+        let sourceLots = lots || []
+        if (sourceLots.length === 0) {
+          const { data: fallbackLots, error: fallbackLotsError } = await supabase.from("lots")
+            .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+            .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .order("num", {ascending:true})
+          if (fallbackLotsError) throw fallbackLotsError
+          sourceLots = (fallbackLots || []).filter(l =>
+            ["Hoàn thành", "Xuất hàng"].includes(normalizeLotStatus(l.trang_thai))
+          )
+        }
 
         if (reqId === eligibleLotsReqRef.current) {
-          setEligibleLots((lots||[]).filter(l =>
+          setEligibleLots(sourceLots.filter(l =>
             getLotQcDate(l) === createForm.ngay_sx &&
             !excludeIds.has(l.id) &&
             !excludeRows.some(r => matchesLotCode(l.ma_lo, r.ma_lo))
@@ -902,7 +914,7 @@ export default function QualityPage() {
   // ── Create flow ──────────────────────────────────────────────────────────────
   const openCreate = (prefillDate?: string) => {
     const kn = prefillDate || new Date().toISOString().slice(0,10)
-    const sx = new Date(new Date(kn).getTime()-86400000).toISOString().slice(0,10)
+    const sx = kn
     setCreateForm({ ngay_kn:kn, ngay_sx:sx, chung_loai:"10", loai_kn:"thuong",
       so_mau:6, tuy_chon_mau:6, tieu_chuan:"TCCS 112:2022" })
     setEligibleLots([]); setSelectedLotIds(new Set())
@@ -969,6 +981,21 @@ export default function QualityPage() {
   const handleCreateFormChange = (patch: Partial<CreateForm>) => {
     setCreateForm(prev => {
       const next = { ...prev, ...patch }
+      if (
+        patch.ngay_kn &&
+        patch.ngay_sx === undefined &&
+        !["kl_rot_hang", "kl_6thang"].includes(next.loai_kn)
+      ) {
+        next.ngay_sx = patch.ngay_kn
+      }
+      if (
+        patch.loai_kn &&
+        patch.ngay_sx === undefined &&
+        !["kl_rot_hang", "kl_6thang"].includes(patch.loai_kn) &&
+        !next.ngay_sx
+      ) {
+        next.ngay_sx = next.ngay_kn
+      }
       // Resize all tab samples if so_mau changed
       if (patch.so_mau !== undefined && patch.so_mau !== prev.so_mau) {
         setTabData(td => Object.fromEntries(

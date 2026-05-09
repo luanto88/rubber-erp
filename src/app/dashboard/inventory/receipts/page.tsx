@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
+import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
@@ -65,6 +66,28 @@ type LineDetail = {
   missingExpiry: boolean
 }
 
+type QuickModalType = "category" | "item" | null
+
+type QuickCategoryForm = {
+  code: string
+  name: string
+  sort_order: string
+  is_active: boolean
+}
+
+type QuickItemForm = {
+  category_id: string
+  code: string
+  name: string
+  unit: string
+  specification: string
+  min_stock: string
+  max_stock: string
+  manages_lot: boolean
+  manages_expiry: boolean
+  is_active: boolean
+}
+
 const DRAFT_STORAGE_KEY = "inventory-receipt-draft-v5"
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
@@ -97,6 +120,30 @@ function defaultDraft(): DraftState {
     note: "",
     selectedItemIds: [],
     lines: [],
+  }
+}
+
+function emptyQuickCategoryForm(nextSortOrder = 0): QuickCategoryForm {
+  return {
+    code: "",
+    name: "",
+    sort_order: String(nextSortOrder),
+    is_active: true,
+  }
+}
+
+function emptyQuickItemForm(categoryId = ""): QuickItemForm {
+  return {
+    category_id: categoryId,
+    code: "",
+    name: "",
+    unit: "",
+    specification: "",
+    min_stock: "0",
+    max_stock: "0",
+    manages_lot: false,
+    manages_expiry: false,
+    is_active: true,
   }
 }
 
@@ -235,8 +282,16 @@ export default function InventoryReceiptsPage() {
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
   const [balances, setBalances] = useState<{ warehouse_id: string; item_id: string; on_hand: number }[]>([])
   const [categories, setCategories] = useState<InventoryCategoryOption[]>([])
-  const [selectedCategoryId, setSelectedCategoryId] = useState("")
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  const [sourceSuggestions, setSourceSuggestions] = useState<string[]>([])
   const [draft, setDraft] = useState<DraftState>(defaultDraft())
+  const [quickModal, setQuickModal] = useState<QuickModalType>(null)
+  const [quickSaving, setQuickSaving] = useState(false)
+  const [quickFormError, setQuickFormError] = useState<string | null>(null)
+  const [quickCategoryForm, setQuickCategoryForm] = useState<QuickCategoryForm>(() =>
+    emptyQuickCategoryForm(),
+  )
+  const [quickItemForm, setQuickItemForm] = useState<QuickItemForm>(() => emptyQuickItemForm())
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -360,6 +415,41 @@ export default function InventoryReceiptsPage() {
     window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
   }, [draft, loading])
 
+  useEffect(() => {
+    const loadSourceSuggestions = async () => {
+      if (!factoryId) {
+        setSourceSuggestions([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from("inventory_documents")
+        .select("source_name")
+        .eq("factory_id", factoryId)
+        .eq("document_type", "import")
+        .not("source_name", "is", null)
+        .order("document_date", { ascending: false })
+        .limit(100)
+
+      if (error || !data) {
+        setSourceSuggestions([])
+        return
+      }
+
+      setSourceSuggestions(
+        Array.from(
+          new Set(
+            data
+              .map((row) => row.source_name?.trim() || "")
+              .filter(Boolean),
+          ),
+        ),
+      )
+    }
+
+    void loadSourceSuggestions()
+  }, [factoryId])
+
   const selectedWarehouse = useMemo(
     () => warehouses.find((warehouse) => warehouse.id === draft.warehouseId) || null,
     [draft.warehouseId, warehouses],
@@ -379,9 +469,16 @@ export default function InventoryReceiptsPage() {
   const warehouseScopedItems = useMemo(() => {
     let scoped = items.filter((item) => !draft.warehouseId || item.default_warehouse_ids.includes(draft.warehouseId))
     if (scoped.length === 0) scoped = items
-    if (selectedCategoryId) scoped = scoped.filter((item) => item.category_id === selectedCategoryId)
+    if (selectedCategoryIds.length > 0) {
+      scoped = scoped.filter((item) => selectedCategoryIds.includes(item.category_id || ""))
+    }
     return scoped
-  }, [draft.warehouseId, items, selectedCategoryId])
+  }, [draft.warehouseId, items, selectedCategoryIds])
+
+  const visibleItemCards = useMemo(() => {
+    if (draft.selectedItemIds.length === 0) return warehouseScopedItems
+    return warehouseScopedItems.filter((item) => draft.selectedItemIds.includes(item.id))
+  }, [draft.selectedItemIds, warehouseScopedItems])
 
   const warehouseScopedCategories = useMemo(() => {
     const base = (() => {
@@ -430,7 +527,10 @@ export default function InventoryReceiptsPage() {
       const rule = item && draft.warehouseId ? findRule(item.id, draft.warehouseId, warehouseRules) : null
       const minStock = rule?.min_stock ?? item?.min_stock ?? 0
       const maxStock = rule?.max_stock ?? item?.max_stock ?? 0
-      const currentStock = item?.opening_stock ?? 0
+      const currentStock =
+        item && draft.warehouseId
+          ? (balanceMap.get(`${draft.warehouseId}:${item.id}`) ?? 0)
+          : 0
       const projectedStock = currentStock + quantity
 
       return {
@@ -447,7 +547,7 @@ export default function InventoryReceiptsPage() {
         missingExpiry: !!item?.manages_expiry && !line.expiryDate,
       }
     })
-  }, [draft.lines, draft.warehouseId, items, warehouseRules])
+  }, [balanceMap, draft.lines, draft.warehouseId, items, warehouseRules])
 
   const summary = useMemo(() => {
     const totalQty = lineDetails.reduce((sum, detail) => sum + detail.quantity, 0)
@@ -474,6 +574,297 @@ export default function InventoryReceiptsPage() {
           : [...prev.selectedItemIds, itemId],
       }
     })
+  }
+
+  const createCategory = async () => {
+    openQuickCategoryModal()
+    const shouldUseLegacyPrompt = false
+    if (!shouldUseLegacyPrompt) return
+
+    if (!factoryId) {
+      setSaveError("Chưa xác định được nhà máy để thêm phân loại vật tư.")
+      return
+    }
+
+    const code = window.prompt("Nhập mã phân loại vật tư mới")?.trim().toUpperCase() || ""
+    if (!code) return
+    const name = window.prompt("Nhập tên phân loại vật tư mới")?.trim() || ""
+    if (!name) return
+
+    const { data, error } = await supabase
+      .from("inventory_item_categories")
+      .insert({
+        factory_id: factoryId,
+        code,
+        name,
+        sort_order: categories.length + 1,
+        is_active: true,
+      })
+      .select("id, code, name")
+      .single()
+
+    if (error || !data) {
+      setSaveError(error?.message || "Không thể thêm phân loại vật tư mới.")
+      return
+    }
+
+    const nextCategory = data as InventoryCategoryOption
+    setCategories((prev) => [...prev, nextCategory].sort((a, b) => a.name.localeCompare(b.name, "vi")))
+    setSelectedCategoryIds((prev) => (prev.includes(nextCategory.id) ? prev : [...prev, nextCategory.id]))
+    setSaveSuccess(`Đã thêm phân loại vật tư ${nextCategory.code}.`)
+  }
+
+  const createItem = async () => {
+    openQuickItemModal()
+    const shouldUseLegacyPrompt = false
+    if (!shouldUseLegacyPrompt) return
+
+    if (!factoryId) {
+      setSaveError("Chưa xác định được nhà máy để thêm mã vật tư.")
+      return
+    }
+    if (!draft.warehouseId) {
+      setSaveError("Vui lòng chọn kho nhập trước khi thêm mã vật tư.")
+      return
+    }
+    if (selectedCategoryIds.length !== 1) {
+      setSaveError("Vui lòng chọn đúng 1 phân loại vật tư trước khi thêm mã mới.")
+      return
+    }
+
+    const code = window.prompt("Nhập mã vật tư mới")?.trim().toUpperCase() || ""
+    if (!code) return
+    const name = window.prompt("Nhập tên vật tư mới")?.trim() || ""
+    if (!name) return
+    const unit = window.prompt("Nhập đơn vị tính", "kg")?.trim() || ""
+    if (!unit) return
+
+    const categoryId = selectedCategoryIds[0]
+
+    const { data, error } = await supabase
+      .from("inventory_items")
+      .insert({
+        factory_id: factoryId,
+        category_id: categoryId,
+        code,
+        name,
+        unit,
+        default_warehouse_ids: [draft.warehouseId],
+        manages_lot: false,
+        manages_expiry: false,
+        min_stock: 0,
+        max_stock: 0,
+        opening_stock: 0,
+        is_active: true,
+      })
+      .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, is_active")
+      .single()
+
+    if (error || !data) {
+      setSaveError(error?.message || "Không thể thêm mã vật tư mới.")
+      return
+    }
+
+    const category = categories.find((entry) => entry.id === categoryId)
+    const nextItem = {
+      ...(data as Omit<InventoryItemOption, "category_name" | "warehouse_codes">),
+      category_name: category?.name || "Chưa phân loại",
+      warehouse_codes: warehouses.filter((warehouse) => warehouse.id === draft.warehouseId).map((warehouse) => warehouse.code),
+    } satisfies InventoryItemOption
+
+    setItems((prev) => [...prev, nextItem].sort((a, b) => a.code.localeCompare(b.code, "vi")))
+    setDraft((prev) => ({
+      ...prev,
+      selectedItemIds: prev.selectedItemIds.includes(nextItem.id) ? prev.selectedItemIds : [...prev.selectedItemIds, nextItem.id],
+    }))
+    setSaveSuccess(`Đã thêm mã vật tư ${nextItem.code}.`)
+  }
+
+  const closeQuickModal = () => {
+    setQuickModal(null)
+    setQuickFormError(null)
+    setQuickSaving(false)
+  }
+
+  const openQuickCategoryModal = () => {
+    if (!factoryId) {
+      setSaveError("Chưa xác định được nhà máy để thêm phân loại vật tư.")
+      return
+    }
+
+    setQuickFormError(null)
+    setQuickCategoryForm(emptyQuickCategoryForm(categories.length + 1))
+    setQuickModal("category")
+  }
+
+  const openQuickItemModal = () => {
+    if (!factoryId) {
+      setSaveError("Chưa xác định được nhà máy để thêm mã vật tư.")
+      return
+    }
+    if (!draft.warehouseId) {
+      setSaveError("Vui lòng chọn kho nhập trước khi thêm mã vật tư.")
+      return
+    }
+    if (selectedCategoryIds.length !== 1) {
+      setSaveError("Vui lòng chọn đúng 1 phân loại vật tư trước khi thêm mã mới.")
+      return
+    }
+
+    setQuickFormError(null)
+    setQuickItemForm(emptyQuickItemForm(selectedCategoryIds[0]))
+    setQuickModal("item")
+  }
+
+  const saveQuickCategory = async () => {
+    if (!factoryId) {
+      setQuickFormError("Chưa xác định được nhà máy.")
+      return
+    }
+    if (!quickCategoryForm.code.trim()) {
+      setQuickFormError("Mã phân loại vật tư không được để trống.")
+      return
+    }
+    if (!quickCategoryForm.name.trim()) {
+      setQuickFormError("Tên phân loại vật tư không được để trống.")
+      return
+    }
+
+    setQuickSaving(true)
+    setQuickFormError(null)
+    try {
+      const { data, error } = await supabase
+        .from("inventory_item_categories")
+        .insert({
+          factory_id: factoryId,
+          code: quickCategoryForm.code.trim().toUpperCase(),
+          name: quickCategoryForm.name.trim(),
+          sort_order: Number(quickCategoryForm.sort_order) || 0,
+          is_active: quickCategoryForm.is_active,
+        })
+        .select("id, code, name")
+        .single()
+
+      if (error || !data) {
+        setQuickFormError(error?.message || "Không thể thêm phân loại vật tư mới.")
+        return
+      }
+
+      const nextCategory = data as InventoryCategoryOption
+      setCategories((prev) => [...prev, nextCategory].sort((a, b) => a.name.localeCompare(b.name, "vi")))
+      setSelectedCategoryIds([nextCategory.id])
+      setSaveSuccess(`Đã thêm phân loại vật tư ${nextCategory.code}.`)
+      closeQuickModal()
+    } finally {
+      setQuickSaving(false)
+    }
+  }
+
+  const saveQuickItem = async () => {
+    if (!factoryId) {
+      setQuickFormError("Chưa xác định được nhà máy.")
+      return
+    }
+    if (!draft.warehouseId) {
+      setQuickFormError("Vui lòng chọn kho nhập trước khi thêm mã vật tư.")
+      return
+    }
+    if (!quickItemForm.category_id) {
+      setQuickFormError("Vui lòng chọn phân loại vật tư.")
+      return
+    }
+    if (!quickItemForm.code.trim()) {
+      setQuickFormError("Mã vật tư không được để trống.")
+      return
+    }
+    if (!quickItemForm.name.trim()) {
+      setQuickFormError("Tên vật tư không được để trống.")
+      return
+    }
+    if (!quickItemForm.unit.trim()) {
+      setQuickFormError("Đơn vị tính không được để trống.")
+      return
+    }
+
+    setQuickSaving(true)
+    setQuickFormError(null)
+    try {
+      const payload = {
+        factory_id: factoryId,
+        category_id: quickItemForm.category_id,
+        code: quickItemForm.code.trim().toUpperCase(),
+        name: quickItemForm.name.trim(),
+        unit: quickItemForm.unit.trim(),
+        specification: quickItemForm.specification.trim() || null,
+        default_warehouse_ids: [draft.warehouseId],
+        manages_lot: quickItemForm.manages_lot,
+        manages_expiry: quickItemForm.manages_expiry,
+        min_stock: Number(quickItemForm.min_stock) || 0,
+        max_stock: Number(quickItemForm.max_stock) || 0,
+        opening_stock: 0,
+        is_active: quickItemForm.is_active,
+      }
+
+      const { data, error } = await supabase
+        .from("inventory_items")
+        .insert(payload)
+        .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, is_active")
+        .single()
+
+      if (error || !data) {
+        setQuickFormError(error?.message || "Không thể thêm mã vật tư mới.")
+        return
+      }
+
+      const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert({
+        factory_id: factoryId,
+        item_id: data.id as string,
+        warehouse_id: draft.warehouseId,
+        min_stock: Number(quickItemForm.min_stock) || 0,
+        max_stock: Number(quickItemForm.max_stock) || 0,
+        reorder_point: Number(quickItemForm.min_stock) || 0,
+        safety_stock: Number(quickItemForm.min_stock) || 0,
+        is_primary: true,
+      })
+
+      if (rulesResult.error) {
+        setQuickFormError(rulesResult.error.message)
+        return
+      }
+
+      const category = categories.find((entry) => entry.id === quickItemForm.category_id)
+      const nextItem = {
+        ...(data as Omit<InventoryItemOption, "category_name" | "warehouse_codes">),
+        category_name: category?.name || "Chưa phân loại",
+        warehouse_codes: warehouses
+          .filter((warehouse) => warehouse.id === draft.warehouseId)
+          .map((warehouse) => warehouse.code),
+      } satisfies InventoryItemOption
+
+      setItems((prev) => [...prev, nextItem].sort((a, b) => a.code.localeCompare(b.code, "vi")))
+      setWarehouseRules((prev) => [
+        ...prev,
+        {
+          item_id: nextItem.id,
+          warehouse_id: draft.warehouseId,
+          min_stock: Number(quickItemForm.min_stock) || 0,
+          max_stock: Number(quickItemForm.max_stock) || 0,
+          reorder_point: Number(quickItemForm.min_stock) || 0,
+          safety_stock: Number(quickItemForm.min_stock) || 0,
+          is_primary: true,
+        },
+      ])
+      setDraft((prev) => ({
+        ...prev,
+        selectedItemIds: prev.selectedItemIds.includes(nextItem.id)
+          ? prev.selectedItemIds
+          : [...prev.selectedItemIds, nextItem.id],
+      }))
+      setSaveSuccess(`Đã thêm mã vật tư ${nextItem.code}.`)
+      closeQuickModal()
+    } finally {
+      setQuickSaving(false)
+    }
   }
 
   const updateLine = (lineId: string, patch: Partial<ReceiptLineDraft>) => {
@@ -873,7 +1264,7 @@ export default function InventoryReceiptsPage() {
                   selectedItemIds: [],
                   lines: [],
                 }))
-                setSelectedCategoryId("")
+                setSelectedCategoryIds([])
               }}
               className={INPUT_CLASS}
             >
@@ -906,80 +1297,89 @@ export default function InventoryReceiptsPage() {
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Nguồn nhập</label>
             <input
+              list="inventory-receipt-source-suggestions"
               value={draft.sourceName}
               onChange={(e) => setDraft((prev) => ({ ...prev, sourceName: e.target.value }))}
               placeholder="Nhà cung cấp / bộ phận giao"
               className={INPUT_CLASS}
             />
+            <datalist id="inventory-receipt-source-suggestions">
+              {sourceSuggestions.map((source) => (
+                <option key={source} value={source} />
+              ))}
+            </datalist>
           </div>
 
-          {draft.warehouseId && warehouseScopedCategories.length >= 2 ? (
-            <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại vật tư</label>
-              <select
-                value={selectedCategoryId}
-                onChange={(e) => setSelectedCategoryId(e.target.value)}
-                className={INPUT_CLASS}
-              >
-                <option value="">Tất cả phân loại</option>
-                {warehouseScopedCategories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          ) : null}
+          <div className="relative z-30 xl:col-span-2">
+            <div className="mb-2 grid gap-3 xl:grid-cols-2">
+              <div className="flex items-end gap-3">
+                <div className="min-w-0 flex-1">
+                <MultiSelectField
+                  label="Phân loại vật tư"
+                  options={warehouseScopedCategories.map((category) => ({
+                    value: category.id,
+                    label: category.name,
+                    meta: category.code,
+                  }))}
+                  selectedValues={selectedCategoryIds}
+                  onChange={setSelectedCategoryIds}
+                  placeholder="Tất cả phân loại"
+                  disabled={!draft.warehouseId}
+                />
+                </div>
+                <AddItemButton disabled={!factoryId} onClick={() => void createCategory()} />
+              </div>
 
-          <div className="xl:col-span-2">
+              <div className="flex items-end gap-3">
+                <div className="min-w-0 flex-1">
+                <MultiSelectField
+                  label="Mã vật tư"
+                  options={warehouseScopedItems.map((item) => ({
+                    value: item.id,
+                    label: item.code,
+                    meta: item.name,
+                  }))}
+                  selectedValues={draft.selectedItemIds}
+                  onChange={(values) => setDraft((prev) => ({ ...prev, selectedItemIds: values }))}
+                  placeholder="Chọn nhiều mã vật tư"
+                  disabled={!draft.warehouseId}
+                />
+                </div>
+                <AddItemButton disabled={!factoryId || !draft.warehouseId} onClick={() => void createItem()} />
+              </div>
+            </div>
+
             <label className="mb-2 block text-xs font-bold text-slate-600">Danh sách vật tư theo kho đã chọn</label>
             {!draft.warehouseId ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {warehouseScopedItems.map((item) => {
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = warehouses.reduce(
                     (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
                   )
-                  const displayStock = balances.length > 0 ? totalStock : (item.opening_stock ?? 0)
                   const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)
+                  const breakdownText =
+                    warehouseStocks.length > 1
+                      ? warehouseStocks
+                          .map((w) => `${w.code}: ${w.stock.toLocaleString("vi-VN")}`)
+                          .join(" | ")
+                      : null
                   return (
-                    <button
+                    <CompactItemSelectorCard
                       key={item.id}
-                      type="button"
-                      onClick={() => toggleSelectedItem(item.id)}
-                      className={`rounded-lg border p-2.5 text-left transition-all ${
-                        selected
-                          ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-800">{item.code}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-slate-600">{item.name}</div>
-                          <div className="mt-1 text-[10px] text-slate-500">
-                            Tồn: {displayStock.toLocaleString("vi-VN")} {item.unit}
-                          </div>
-                          {warehouseStocks.length > 1 &&
-                            warehouseStocks.map((w) => (
-                              <div key={w.code} className="text-[10px] text-slate-400">
-                                {w.code}: {w.stock.toLocaleString("vi-VN")}
-                              </div>
-                            ))}
-                        </div>
-                        <div
-                          className={`shrink-0 rounded-full p-1 ${
-                            selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
-                          }`}
-                        >
-                          <Check size={11} />
-                        </div>
-                      </div>
-                    </button>
+                      onToggle={() => toggleSelectedItem(item.id)}
+                      code={item.code}
+                      name={item.name}
+                      stockText={`Tồn: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
+                      breakdownText={breakdownText}
+                      selected={selected}
+                    />
                   )
                 })}
               </div>
@@ -1133,6 +1533,222 @@ export default function InventoryReceiptsPage() {
         )}
       </section>
     </InventoryPageShell>
+
+    {quickModal ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">
+                {quickModal === "category" ? "Thêm phân loại vật tư" : "Thêm mã vật tư"}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {quickModal === "category"
+                  ? "Lưu trực tiếp vào bảng inventory_item_categories."
+                  : "Lưu trực tiếp vào bảng inventory_items và gán kho mặc định theo kho nhập đang chọn."}
+              </p>
+            </div>
+            <button onClick={closeQuickModal} className="text-slate-400 hover:text-slate-700">
+              <X size={18} />
+            </button>
+          </div>
+
+          {quickFormError ? (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {quickFormError}
+            </div>
+          ) : null}
+
+          {quickModal === "category" ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold text-slate-600">Mã phân loại *</label>
+                <input
+                  value={quickCategoryForm.code}
+                  onChange={(event) =>
+                    setQuickCategoryForm((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))
+                  }
+                  className={INPUT_CLASS}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold text-slate-600">Thứ tự</label>
+                <input
+                  value={quickCategoryForm.sort_order}
+                  onChange={(event) =>
+                    setQuickCategoryForm((prev) => ({ ...prev, sort_order: event.target.value }))
+                  }
+                  className={INPUT_CLASS}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên phân loại *</label>
+                <input
+                  value={quickCategoryForm.name}
+                  onChange={(event) => setQuickCategoryForm((prev) => ({ ...prev, name: event.target.value }))}
+                  className={INPUT_CLASS}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-slate-700 md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={quickCategoryForm.is_active}
+                  onChange={(event) =>
+                    setQuickCategoryForm((prev) => ({ ...prev, is_active: event.target.checked }))
+                  }
+                />
+                Đang hoạt động
+              </label>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại vật tư *</label>
+                  <select
+                    value={quickItemForm.category_id}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, category_id: event.target.value }))}
+                    className={INPUT_CLASS}
+                  >
+                    <option value="">Chọn phân loại</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.code} - {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho mặc định *</label>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                    {selectedWarehouse ? `${selectedWarehouse.code} - ${selectedWarehouse.name}` : "Chưa chọn kho"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Mã vật tư *</label>
+                  <input
+                    value={quickItemForm.code}
+                    onChange={(event) =>
+                      setQuickItemForm((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))
+                    }
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Đơn vị tính *</label>
+                  <input
+                    value={quickItemForm.unit}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, unit: event.target.value }))}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên vật tư *</label>
+                  <input
+                    value={quickItemForm.name}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, name: event.target.value }))}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Quy cách</label>
+                  <input
+                    value={quickItemForm.specification}
+                    onChange={(event) =>
+                      setQuickItemForm((prev) => ({ ...prev, specification: event.target.value }))
+                    }
+                    className={INPUT_CLASS}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Tồn tối thiểu</label>
+                  <input
+                    value={quickItemForm.min_stock}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, min_stock: event.target.value }))}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Tồn tối đa</label>
+                  <input
+                    value={quickItemForm.max_stock}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, max_stock: event.target.value }))}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={quickItemForm.manages_lot}
+                    onChange={(event) =>
+                      setQuickItemForm((prev) => ({ ...prev, manages_lot: event.target.checked }))
+                    }
+                  />
+                  Quản lý lô
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={quickItemForm.manages_expiry}
+                    onChange={(event) =>
+                      setQuickItemForm((prev) => ({ ...prev, manages_expiry: event.target.checked }))
+                    }
+                  />
+                  Quản lý hạn
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={quickItemForm.is_active}
+                    onChange={(event) =>
+                      setQuickItemForm((prev) => ({ ...prev, is_active: event.target.checked }))
+                    }
+                  />
+                  Đang hoạt động
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeQuickModal}
+              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            >
+              Đóng
+            </button>
+            <button
+              type="button"
+              onClick={() => void (quickModal === "category" ? saveQuickCategory() : saveQuickItem())}
+              disabled={quickSaving}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+            >
+              {quickSaving ? "Đang lưu..." : "Lưu mới"}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
 
     {cancelModal ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

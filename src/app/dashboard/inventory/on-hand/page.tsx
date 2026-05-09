@@ -21,6 +21,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { MultiSelectField } from "../_components/inventory-ui"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
@@ -65,15 +66,10 @@ function SummaryCard({
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return "Chưa có"
-  }
+  if (!value) return "Chưa có"
 
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
+  if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString("vi-VN")
 }
 
@@ -90,10 +86,11 @@ export default function InventoryOnHandPage() {
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
   const [stockBalances, setStockBalances] = useState<InventoryStockBalanceRow[]>([])
   const [lotBalances, setLotBalances] = useState<InventoryLotBalanceRow[]>([])
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState("all")
-  const [selectedCategoryId, setSelectedCategoryId] = useState("")
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<string[]>([])
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [search, setSearch] = useState("")
+
   useEffect(() => {
     const bootstrap = async () => {
       setLoading(true)
@@ -118,36 +115,54 @@ export default function InventoryOnHandPage() {
     () => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse])),
     [warehouses],
   )
-
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
+  const warehouseFilterSet = useMemo(() => new Set(selectedWarehouseIds), [selectedWarehouseIds])
+  const categoryFilterSet = useMemo(() => new Set(selectedCategoryIds), [selectedCategoryIds])
+  const itemFilterSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds])
 
-  // Chỉ hiển thị phân loại có tồn trong kho đang chọn (như Nhập/Xuất/Chuyển)
   const availableCategories = useMemo(() => {
     const relevantBalances =
-      selectedWarehouseId === "all"
+      selectedWarehouseIds.length === 0
         ? stockBalances
-        : stockBalances.filter((b) => b.warehouse_id === selectedWarehouseId)
-    const presentItemIds = new Set(relevantBalances.map((b) => b.item_id))
+        : stockBalances.filter((balance) => warehouseFilterSet.has(balance.warehouse_id))
+
+    const presentItemIds = new Set(relevantBalances.map((balance) => balance.item_id))
     const presentCategoryIds = new Set(
       items
         .filter((item) => presentItemIds.has(item.id))
         .map((item) => item.category_id)
         .filter(Boolean),
     )
-    return categories.filter((c) => presentCategoryIds.has(c.id))
-  }, [categories, items, selectedWarehouseId, stockBalances])
+
+    return categories.filter((category) => presentCategoryIds.has(category.id))
+  }, [categories, items, selectedWarehouseIds.length, stockBalances, warehouseFilterSet])
+
+  const availableItems = useMemo(() => {
+    const stockedItemIds = new Set(
+      stockBalances
+        .filter((balance) => selectedWarehouseIds.length === 0 || warehouseFilterSet.has(balance.warehouse_id))
+        .map((balance) => balance.item_id),
+    )
+
+    return items.filter((item) => {
+      if (!stockedItemIds.has(item.id)) return false
+      if (selectedCategoryIds.length > 0 && !categoryFilterSet.has(item.category_id || "")) return false
+      return true
+    })
+  }, [categoryFilterSet, items, selectedCategoryIds.length, selectedWarehouseIds.length, stockBalances, warehouseFilterSet])
 
   const onHandRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
 
     return stockBalances
-      .filter((balance) => selectedWarehouseId === "all" || balance.warehouse_id === selectedWarehouseId)
+      .filter((balance) => selectedWarehouseIds.length === 0 || warehouseFilterSet.has(balance.warehouse_id))
       .map((balance) => {
         const item = itemMap.get(balance.item_id)
-        if (!item) return null
-        if (selectedCategoryId && item.category_id !== selectedCategoryId) return null
-
         const warehouse = warehouseMap.get(balance.warehouse_id)
+        if (!item || !warehouse) return null
+        if (selectedCategoryIds.length > 0 && !categoryFilterSet.has(item.category_id || "")) return null
+        if (selectedItemIds.length > 0 && !itemFilterSet.has(item.id)) return null
+
         const rule = getRule(item.id, balance.warehouse_id, warehouseRules)
         const minStock = Number(rule?.min_stock ?? item.min_stock ?? 0)
         const maxStock = Number(rule?.max_stock ?? item.max_stock ?? 0)
@@ -158,12 +173,6 @@ export default function InventoryOnHandPage() {
           .filter((lot) => lot.expiry_date)
           .sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)))[0]?.expiry_date
         const totalOnHand = Number(balance.on_hand || 0)
-        const status =
-          minStock > 0 && totalOnHand < minStock
-            ? "low"
-            : maxStock > 0 && totalOnHand > maxStock
-              ? "high"
-              : "safe"
 
         if (
           normalizedSearch &&
@@ -177,29 +186,55 @@ export default function InventoryOnHandPage() {
           id: `${balance.warehouse_id}-${balance.item_id}`,
           item,
           warehouse,
+          categoryName: item.category_name,
           onHand: totalOnHand,
           minStock,
           maxStock,
           lotCount: matchingLots.length,
           nearestExpiry: nearestExpiry || null,
-          status,
+          status:
+            minStock > 0 && totalOnHand < minStock
+              ? "low"
+              : maxStock > 0 && totalOnHand > maxStock
+                ? "high"
+                : "safe",
         }
       })
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
-      .sort((a, b) => a.item.code.localeCompare(b.item.code, "vi"))
-  }, [itemMap, lotBalances, search, selectedCategoryId, selectedWarehouseId, stockBalances, warehouseMap, warehouseRules])
+      .sort((a, b) => {
+        const warehouseCompare = a.warehouse.code.localeCompare(b.warehouse.code, "vi")
+        if (warehouseCompare !== 0) return warehouseCompare
+        const categoryCompare = a.categoryName.localeCompare(b.categoryName, "vi")
+        if (categoryCompare !== 0) return categoryCompare
+        return a.item.code.localeCompare(b.item.code, "vi")
+      })
+  }, [
+    categoryFilterSet,
+    itemFilterSet,
+    itemMap,
+    lotBalances,
+    search,
+    selectedCategoryIds.length,
+    selectedItemIds.length,
+    selectedWarehouseIds.length,
+    stockBalances,
+    warehouseFilterSet,
+    warehouseMap,
+    warehouseRules,
+  ])
 
   const lotRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
+
     return lotBalances
       .filter((lot) => lot.on_hand > 0)
-      .filter((lot) => selectedWarehouseId === "all" || lot.warehouse_id === selectedWarehouseId)
-      .filter((lot) => !selectedItemId || lot.item_id === selectedItemId)
+      .filter((lot) => selectedWarehouseIds.length === 0 || warehouseFilterSet.has(lot.warehouse_id))
+      .filter((lot) => selectedItemIds.length === 0 || itemFilterSet.has(lot.item_id))
       .map((lot) => {
         const item = itemMap.get(lot.item_id)
         const warehouse = warehouseMap.get(lot.warehouse_id)
         if (!item || !warehouse) return null
-        if (selectedCategoryId && item.category_id !== selectedCategoryId) return null
+        if (selectedCategoryIds.length > 0 && !categoryFilterSet.has(item.category_id || "")) return null
 
         if (
           normalizedSearch &&
@@ -214,6 +249,7 @@ export default function InventoryOnHandPage() {
           id: `${lot.warehouse_id}-${lot.item_id}-${lot.lot_no}-${lot.expiry_date || "na"}`,
           item,
           warehouse,
+          categoryName: item.category_name,
           lotNo: lot.lot_no,
           expiryDate: lot.expiry_date,
           onHand: Number(lot.on_hand || 0),
@@ -221,11 +257,41 @@ export default function InventoryOnHandPage() {
       })
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
       .sort((a, b) => {
-        const expiryA = a.expiryDate || "9999-12-31"
-        const expiryB = b.expiryDate || "9999-12-31"
-        return expiryA.localeCompare(expiryB, "vi")
+        const warehouseCompare = a.warehouse.code.localeCompare(b.warehouse.code, "vi")
+        if (warehouseCompare !== 0) return warehouseCompare
+        const categoryCompare = a.categoryName.localeCompare(b.categoryName, "vi")
+        if (categoryCompare !== 0) return categoryCompare
+        const codeCompare = a.item.code.localeCompare(b.item.code, "vi")
+        if (codeCompare !== 0) return codeCompare
+        return (a.expiryDate || "9999-12-31").localeCompare(b.expiryDate || "9999-12-31", "vi")
       })
-  }, [itemMap, lotBalances, search, selectedCategoryId, selectedItemId, selectedWarehouseId, warehouseMap])
+  }, [
+    categoryFilterSet,
+    itemFilterSet,
+    itemMap,
+    lotBalances,
+    search,
+    selectedCategoryIds.length,
+    selectedItemIds.length,
+    selectedWarehouseIds.length,
+    warehouseFilterSet,
+    warehouseMap,
+  ])
+
+  const searchSuggestions = useMemo(() => {
+    const values = new Set<string>()
+
+    onHandRows.forEach((row) => {
+      values.add(row.item.code)
+      values.add(row.item.name)
+    })
+
+    lotRows.forEach((row) => {
+      values.add(row.lotNo)
+    })
+
+    return [...values].slice(0, 80)
+  }, [lotRows, onHandRows])
 
   const stats = useMemo(() => {
     const lowCount = onHandRows.filter((row) => row.status === "low").length
@@ -248,7 +314,7 @@ export default function InventoryOnHandPage() {
       description="Theo dõi tồn hiện tại theo kho, vật tư, số lô và hạn sử dụng để phục vụ xuất kho, chuyển kho và cảnh báo tồn an toàn."
       action={
         <Link
-          href={`/dashboard/inventory/print-report?kind=on-hand&warehouse=${encodeURIComponent(selectedWarehouseId)}&search=${encodeURIComponent(search)}`}
+          href={`/dashboard/inventory/print-report?kind=on-hand&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&search=${encodeURIComponent(search)}`}
           className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
         >
           <Printer size={16} />
@@ -300,62 +366,79 @@ export default function InventoryOnHandPage() {
         />
       </ScrollReveal>
 
-      <ScrollRevealSection className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="min-w-[180px] flex-1">
-          <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
-          <select
-            value={selectedWarehouseId}
-            onChange={(event) => {
-              setSelectedWarehouseId(event.target.value)
-              setSelectedItemId(null)
-              setSelectedCategoryId("")
+      <ScrollRevealSection className="relative z-40 mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="min-w-[220px] flex-1">
+          <MultiSelectField
+            label="Kho"
+            options={warehouses.map((warehouse) => ({
+              value: warehouse.id,
+              label: warehouse.code,
+              meta: warehouse.name,
+            }))}
+            selectedValues={selectedWarehouseIds}
+            onChange={(values) => {
+              setSelectedWarehouseIds(values)
+              setSelectedCategoryIds([])
+              setSelectedItemIds([])
             }}
-            className={INPUT_CLASS}
-          >
-            <option value="all">Tất cả kho</option>
-            {warehouses.map((warehouse) => (
-              <option key={warehouse.id} value={warehouse.id}>
-                {warehouse.code} - {warehouse.name}
-              </option>
-            ))}
-          </select>
+            placeholder="Tất cả kho"
+          />
         </div>
 
-        {availableCategories.length >= 2 ? (
-          <div className="min-w-[180px] flex-1">
-            <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại</label>
-            <select
-              value={selectedCategoryId}
-              onChange={(event) => { setSelectedCategoryId(event.target.value); setSelectedItemId(null) }}
-              className={INPUT_CLASS}
-            >
-              <option value="">Tất cả phân loại</option>
-              {availableCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
+        <div className="min-w-[220px] flex-1">
+          <MultiSelectField
+            label="Phân loại"
+            options={availableCategories.map((category) => ({
+              value: category.id,
+              label: category.name,
+              meta: category.code,
+            }))}
+            selectedValues={selectedCategoryIds}
+            onChange={(values) => {
+              setSelectedCategoryIds(values)
+              setSelectedItemIds([])
+            }}
+            placeholder="Tất cả phân loại"
+          />
+        </div>
+
+        <div className="min-w-[240px] flex-1">
+          <MultiSelectField
+            label="Mã vật tư"
+            options={availableItems.map((item) => ({
+              value: item.id,
+              label: item.code,
+              meta: item.name,
+            }))}
+            selectedValues={selectedItemIds}
+            onChange={setSelectedItemIds}
+            placeholder="Tất cả mã vật tư"
+          />
+        </div>
 
         <div className="min-w-[220px] flex-1">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Tìm vật tư hoặc số lô</label>
           <input
+            list="inventory-on-hand-suggestions"
             value={search}
-            onChange={(event) => { setSearch(event.target.value); setSelectedItemId(null) }}
+            onChange={(event) => setSearch(event.target.value)}
             placeholder="Mã, tên vật tư hoặc số lô"
             className={INPUT_CLASS}
           />
+          <datalist id="inventory-on-hand-suggestions">
+            {searchSuggestions.map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
         </div>
       </ScrollRevealSection>
 
-      <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <ScrollRevealSection className="relative z-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
             <h2 className="text-base font-bold text-slate-800">Bảng tồn hiện tại</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Kiểm tra tồn theo kho, vật tư và trạng thái min-max ngay trên lưới.
+              Kiểm tra tồn theo kho, phân loại, mã vật tư và trạng thái min-max ngay trên lưới.
             </p>
           </div>
         </div>
@@ -372,7 +455,7 @@ export default function InventoryOnHandPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  {["Kho", "Mã", "Vật tư", "Đơn vị", "Tồn hiện tại", "Min", "Max", "Số lô", "Hạn gần nhất", "Trạng thái"].map(
+                  {["Kho", "Phân loại", "Mã", "Vật tư", "Đơn vị", "Tồn hiện tại", "Min", "Max", "Số lô", "Hạn gần nhất", "Trạng thái"].map(
                     (head) => (
                       <th key={head} className="px-4 py-3 text-left font-bold">
                         {head}
@@ -385,18 +468,21 @@ export default function InventoryOnHandPage() {
                 {onHandRows.map((row) => (
                   <tr
                     key={row.id}
-                    className={`border-t border-slate-100 cursor-pointer transition-colors duration-150 ${
-                      selectedItemId === row.item.id
-                        ? "bg-emerald-50 hover:bg-emerald-100"
-                        : "hover:bg-slate-50"
+                    className={`cursor-pointer border-t border-slate-100 transition-colors duration-150 ${
+                      selectedItemIds.includes(row.item.id) ? "bg-emerald-50 hover:bg-emerald-100" : "hover:bg-slate-50"
                     }`}
-                    onClick={() => setSelectedItemId(selectedItemId === row.item.id ? null : row.item.id)}
-                    title={selectedItemId === row.item.id ? "Bấm để bỏ lọc lô" : "Bấm để xem lô của vật tư này"}
+                    onClick={() =>
+                      setSelectedItemIds((prev) =>
+                        prev.includes(row.item.id) ? prev.filter((id) => id !== row.item.id) : [...prev, row.item.id],
+                      )
+                    }
+                    title={selectedItemIds.includes(row.item.id) ? "Bấm để bỏ lọc vật tư" : "Bấm để thêm vật tư vào bộ lọc"}
                   >
                     <td className="px-4 py-3 text-slate-600">
-                      <div className="font-semibold text-slate-700">{row.warehouse?.code || "N/A"}</div>
-                      <div className="text-xs text-slate-500">{row.warehouse?.name || "Chưa xác định"}</div>
+                      <div className="font-semibold text-slate-700">{row.warehouse.code}</div>
+                      <div className="text-xs text-slate-500">{row.warehouse.name}</div>
                     </td>
+                    <td className="px-4 py-3 text-slate-600">{row.categoryName}</td>
                     <td className="px-4 py-3">
                       <Link
                         href={`/dashboard/inventory/item?code=${encodeURIComponent(row.item.code)}`}
@@ -407,9 +493,7 @@ export default function InventoryOnHandPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">{row.item.name}</td>
                     <td className="px-4 py-3 text-slate-500">{row.item.unit}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">
-                      {row.onHand.toLocaleString("vi-VN")}
-                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-800">{row.onHand.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-500">{row.minStock.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-500">{row.maxStock.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-500">{row.lotCount.toLocaleString("vi-VN")}</td>
@@ -435,20 +519,20 @@ export default function InventoryOnHandPage() {
         )}
       </ScrollRevealSection>
 
-      <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <ScrollRevealSection className="relative z-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
-            {selectedItemId ? (
+            {selectedItemIds.length > 0 ? (
               <>
                 <h2 className="text-base font-bold text-slate-800">
                   Lô của{" "}
                   <span className="text-emerald-700">
-                    {items.find((i) => i.id === selectedItemId)?.name || selectedItemId}
+                    {selectedItemIds.length === 1
+                      ? items.find((item) => item.id === selectedItemIds[0])?.name || selectedItemIds[0]
+                      : `${selectedItemIds.length} vật tư đã chọn`}
                   </span>
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  Đang lọc theo vật tư đã chọn ở bảng trên.
-                </p>
+                <p className="mt-0.5 text-xs text-slate-500">Đang lọc theo mã vật tư đã chọn ở bảng trên.</p>
               </>
             ) : (
               <>
@@ -459,13 +543,13 @@ export default function InventoryOnHandPage() {
               </>
             )}
           </div>
-          {selectedItemId ? (
+          {selectedItemIds.length > 0 ? (
             <button
               type="button"
-              onClick={() => setSelectedItemId(null)}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              onClick={() => setSelectedItemIds([])}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
             >
-              Xem tất cả ×
+              Xem tất cả
             </button>
           ) : null}
         </div>
@@ -482,7 +566,7 @@ export default function InventoryOnHandPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  {["Kho", "Mã", "Vật tư", "Số lô", "Hạn sử dụng", "Tồn lô"].map((head) => (
+                  {["Kho", "Phân loại", "Mã", "Vật tư", "Số lô", "Hạn sử dụng", "Tồn lô"].map((head) => (
                     <th key={head} className="px-4 py-3 text-left font-bold">
                       {head}
                     </th>
@@ -496,13 +580,12 @@ export default function InventoryOnHandPage() {
                       <div className="font-semibold text-slate-700">{row.warehouse.code}</div>
                       <div className="text-xs text-slate-500">{row.warehouse.name}</div>
                     </td>
+                    <td className="px-4 py-3 text-slate-600">{row.categoryName}</td>
                     <td className="px-4 py-3 font-bold text-slate-700">{row.item.code}</td>
                     <td className="px-4 py-3 text-slate-700">{row.item.name}</td>
                     <td className="px-4 py-3 text-slate-700">{row.lotNo}</td>
                     <td className="px-4 py-3 text-slate-500">{formatDate(row.expiryDate)}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">
-                      {row.onHand.toLocaleString("vi-VN")}
-                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-800">{row.onHand.toLocaleString("vi-VN")}</td>
                   </tr>
                 ))}
               </tbody>
