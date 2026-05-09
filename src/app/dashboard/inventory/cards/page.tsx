@@ -449,9 +449,9 @@ export default function InventoryCardsPage() {
 
       <section
         ref={revealRef}
-        className="scroll-reveal relative z-40 mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+        className="scroll-reveal relative z-40 mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4"
       >
-        <div className="min-w-[220px] flex-1">
+        <div className="w-full">
           <MultiSelectField
             label="Kho"
             options={warehouses.map((warehouse) => ({
@@ -469,7 +469,7 @@ export default function InventoryCardsPage() {
           />
         </div>
 
-        <div className="min-w-[220px] flex-1">
+        <div className="w-full">
           <MultiSelectField
             label="Phân loại"
             options={availableCategories.map((category) => ({
@@ -485,7 +485,7 @@ export default function InventoryCardsPage() {
           />
         </div>
 
-        <div className="min-w-[240px] flex-1">
+        <div className="w-full">
           <MultiSelectField
             label="Mã vật tư"
             options={availableItems.map((item) => ({
@@ -499,7 +499,7 @@ export default function InventoryCardsPage() {
           />
         </div>
 
-        <div className="min-w-[220px] flex-1">
+        <div className="w-full">
           <MultiSelectField
             label="Loại phiếu"
             options={[
@@ -513,12 +513,12 @@ export default function InventoryCardsPage() {
           />
         </div>
 
-        <div className="min-w-[180px] flex-1">
+        <div className="w-full">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Từ ngày</label>
           <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={INPUT_CLASS} />
         </div>
 
-        <div className="min-w-[180px] flex-1">
+        <div className="w-full">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Đến ngày</label>
           <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className={INPUT_CLASS} />
         </div>
