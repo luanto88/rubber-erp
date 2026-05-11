@@ -29,6 +29,10 @@ import {
   Database,
   Download,
   Upload,
+  Wrench,
+  Car,
+  UserCog,
+  ShoppingBag,
 } from "lucide-react"
 
 type Suffix = {
@@ -91,9 +95,41 @@ type UserEditor = {
   mode: "approve" | "edit"
 }
 
-type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data"
+type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data" | "maintenance"
 
 type FactoryConfigTab = "warehouses" | "categories" | "items"
+
+type MaintenanceTab = "assets" | "staff" | "ext-materials"
+
+type MaintenanceAssetRow = {
+  id: string
+  factory_id: string
+  ma_tb: string
+  ten_tb: string
+  bo_phan: string
+  loai: string
+  nam_sd: string | null
+  bien_so: string | null
+  mo_ta: string | null
+  trang_thai: string
+}
+
+type MaintenanceStaffRow = {
+  id: string
+  factory_id: string
+  ten: string
+  chuc_vu: string | null
+  active: boolean
+}
+
+type MaintenanceExtMaterialRow = {
+  id: string
+  factory_id: string
+  ten_vat_tu: string
+  dvt: string | null
+}
+
+const BO_PHAN_OPTIONS = ["Mủ tạp", "Mủ nước", "Nước thải", "Biomass", "Đội xe", "Văn phòng", "Khác"] as const
 
 type InvWarehouseRow = {
   id: string
@@ -269,6 +305,22 @@ export default function SettingsPage() {
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
+  // Maintenance tab state
+  const [maintTab, setMaintTab] = useState<MaintenanceTab>("assets")
+  const [maintAssets, setMaintAssets] = useState<MaintenanceAssetRow[]>([])
+  const [maintStaff, setMaintStaff] = useState<MaintenanceStaffRow[]>([])
+  const [maintExtMats, setMaintExtMats] = useState<MaintenanceExtMaterialRow[]>([])
+  const [maintLoading, setMaintLoading] = useState(false)
+  const [maintLoaded, setMaintLoaded] = useState(false)
+  const [maintModal, setMaintModal] = useState<"asset" | "staff" | "ext-mat" | null>(null)
+  const [maintEditId, setMaintEditId] = useState<string | null>(null)
+  const [maintSaving, setMaintSaving] = useState(false)
+  const [maintError, setMaintError] = useState("")
+  const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "ext-mat"; id: string; label: string } | null>(null)
+  const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
+  const [staffForm, setStaffForm] = useState({ ten: "", chuc_vu: "", active: true })
+  const [extMatForm, setExtMatForm] = useState({ ten_vat_tu: "", dvt: "" })
+
   const loadSuffixes = useCallback(async (fid: string) => {
     const { data } = await supabase.from("suffixes").select("*").eq("factory_id", fid).order("code")
     setSuffixes(data || [])
@@ -342,6 +394,77 @@ export default function SettingsPage() {
       setConfigLoading(false)
     }
   }, [])
+
+  const loadMaintenanceData = useCallback(async (fid: string) => {
+    setMaintLoading(true)
+    try {
+      const [aRes, sRes, mRes] = await Promise.all([
+        supabase.from("maintenance_assets").select("*").eq("factory_id", fid).order("bo_phan").order("ma_tb"),
+        supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
+        supabase.from("maintenance_external_materials").select("*").eq("factory_id", fid).order("ten_vat_tu"),
+      ])
+      setMaintAssets((aRes.data || []) as MaintenanceAssetRow[])
+      setMaintStaff((sRes.data || []) as MaintenanceStaffRow[])
+      setMaintExtMats((mRes.data || []) as MaintenanceExtMaterialRow[])
+      setMaintLoaded(true)
+    } finally {
+      setMaintLoading(false)
+    }
+  }, [])
+
+  const saveMaintAsset = async () => {
+    if (!factoryId) return
+    if (!assetForm.ma_tb.trim()) { setMaintError("Mã thiết bị không được để trống"); return }
+    if (!assetForm.ten_tb.trim()) { setMaintError("Tên thiết bị không được để trống"); return }
+    setMaintSaving(true); setMaintError("")
+    try {
+      const payload = { factory_id: factoryId, ma_tb: assetForm.ma_tb.trim(), ten_tb: assetForm.ten_tb.trim(), bo_phan: assetForm.bo_phan, loai: assetForm.loai, nam_sd: assetForm.nam_sd.trim() || null, bien_so: assetForm.bien_so.trim() || null, mo_ta: assetForm.mo_ta.trim() || null, trang_thai: assetForm.trang_thai }
+      const result = maintEditId
+        ? await supabase.from("maintenance_assets").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
+        : await supabase.from("maintenance_assets").insert(payload)
+      if (result.error) { setMaintError(result.error.message); return }
+      setMaintModal(null)
+      void loadMaintenanceData(factoryId)
+    } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
+  }
+
+  const saveMaintStaff = async () => {
+    if (!factoryId) return
+    if (!staffForm.ten.trim()) { setMaintError("Tên không được để trống"); return }
+    setMaintSaving(true); setMaintError("")
+    try {
+      const payload = { factory_id: factoryId, ten: staffForm.ten.trim(), chuc_vu: staffForm.chuc_vu.trim() || null, active: staffForm.active }
+      const result = maintEditId
+        ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
+        : await supabase.from("maintenance_staff").insert(payload)
+      if (result.error) { setMaintError(result.error.message); return }
+      setMaintModal(null)
+      void loadMaintenanceData(factoryId)
+    } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
+  }
+
+  const saveMaintExtMat = async () => {
+    if (!factoryId) return
+    if (!extMatForm.ten_vat_tu.trim()) { setMaintError("Tên vật tư không được để trống"); return }
+    setMaintSaving(true); setMaintError("")
+    try {
+      const payload = { factory_id: factoryId, ten_vat_tu: extMatForm.ten_vat_tu.trim(), dvt: extMatForm.dvt.trim() || null }
+      const result = maintEditId
+        ? await supabase.from("maintenance_external_materials").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
+        : await supabase.from("maintenance_external_materials").insert(payload)
+      if (result.error) { setMaintError(result.error.message); return }
+      setMaintModal(null)
+      void loadMaintenanceData(factoryId)
+    } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
+  }
+
+  const deleteMaintItem = async () => {
+    if (!factoryId || !maintDelConfirm) return
+    const table = maintDelConfirm.type === "asset" ? "maintenance_assets" : maintDelConfirm.type === "staff" ? "maintenance_staff" : "maintenance_external_materials"
+    await supabase.from(table).delete().eq("id", maintDelConfirm.id).eq("factory_id", factoryId)
+    setMaintDelConfirm(null)
+    void loadMaintenanceData(factoryId)
+  }
 
   const saveConfigWarehouse = async () => {
     if (!factoryId) return
@@ -552,6 +675,12 @@ export default function SettingsPage() {
       void loadConfigData(factoryId)
     }
   }, [tab, factoryId, configLoaded, configLoading, loadConfigData])
+
+  useEffect(() => {
+    if (tab === "maintenance" && factoryId && !maintLoaded && !maintLoading) {
+      void loadMaintenanceData(factoryId)
+    }
+  }, [tab, factoryId, maintLoaded, maintLoading, loadMaintenanceData])
 
   const groupedPermissions = useMemo(() => {
     return permissionOptions.reduce<Record<string, PermissionOption[]>>((acc, item) => {
@@ -801,6 +930,7 @@ export default function SettingsPage() {
     { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
     { key: "factory-config" as const, label: "Cấu hình nhà máy", icon: SlidersHorizontal, show: canManageSettings },
     { key: "master-data" as const, label: "Danh mục", icon: Database, show: true },
+    { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: true },
   ].filter((item) => item.show)
 
   return (
@@ -1354,6 +1484,277 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+        </div>
+      )}
+
+      {tab === "maintenance" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-50 to-amber-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wrench size={16} className="text-orange-600" />
+                <span className="font-extrabold text-slate-700">Bảo trì</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => {
+                    setMaintEditId(null); setMaintError("")
+                    if (maintTab === "assets") { setAssetForm({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" }); setMaintModal("asset") }
+                    else if (maintTab === "staff") { setStaffForm({ ten: "", chuc_vu: "", active: true }); setMaintModal("staff") }
+                    else { setExtMatForm({ ten_vat_tu: "", dvt: "" }); setMaintModal("ext-mat") }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm mới
+                </button>
+              )}
+            </div>
+
+            <div className="p-4">
+              <div className="flex gap-2 mb-4">
+                {(["assets", "staff", "ext-materials"] as const).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setMaintTab(key)}
+                    className={"flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all " + (maintTab === key ? "bg-orange-100 text-orange-700 border border-orange-200" : "text-slate-500 hover:bg-slate-50")}
+                  >
+                    {key === "assets" ? <><Car size={13} /> Thiết bị</> : key === "staff" ? <><UserCog size={13} /> Nhân sự bảo trì</> : <><ShoppingBag size={13} /> Vật tư ngoài</>}
+                  </button>
+                ))}
+              </div>
+
+              {maintLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : maintTab === "assets" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã TB", "Tên thiết bị", "Bộ phận", "Loại", "Năm SD", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {maintAssets.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có thiết bị nào</td></tr>
+                    ) : maintAssets.map((a) => (
+                      <tr key={a.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{a.ma_tb}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">{a.ten_tb}</td>
+                        <td className="px-4 py-3 text-slate-500">{a.bo_phan}</td>
+                        <td className="px-4 py-3 text-slate-500">{a.loai === "xe" ? "Xe" : "Máy móc"}</td>
+                        <td className="px-4 py-3 text-slate-400 text-xs">{a.nam_sd || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (a.trang_thai === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{a.trang_thai === "active" ? "Đang dùng" : "Ngừng"}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setMaintEditId(a.id); setMaintError(""); setAssetForm({ ma_tb: a.ma_tb, ten_tb: a.ten_tb, bo_phan: a.bo_phan, loai: a.loai, nam_sd: a.nam_sd || "", bien_so: a.bien_so || "", mo_ta: a.mo_ta || "", trang_thai: a.trang_thai }); setMaintModal("asset") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setMaintDelConfirm({ type: "asset", id: a.id, label: a.ten_tb })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : maintTab === "staff" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Tên", "Chức vụ", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {maintStaff.length === 0 ? (
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự</td></tr>
+                    ) : maintStaff.map((s) => (
+                      <tr key={s.id} className="row-hover">
+                        <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{s.active ? "Đang làm" : "Ngừng"}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setMaintEditId(s.id); setMaintError(""); setStaffForm({ ten: s.ten, chuc_vu: s.chuc_vu || "", active: s.active }); setMaintModal("staff") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setMaintDelConfirm({ type: "staff", id: s.id, label: s.ten })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Tên vật tư", "Đơn vị tính", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {maintExtMats.length === 0 ? (
+                      <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
+                    ) : maintExtMats.map((m) => (
+                      <tr key={m.id} className="row-hover">
+                        <td className="px-4 py-3 font-medium text-slate-700">{m.ten_vat_tu}</td>
+                        <td className="px-4 py-3 text-slate-500">{m.dvt || "—"}</td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "" }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setMaintDelConfirm({ type: "ext-mat", id: m.id, label: m.ten_vat_tu })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Maintenance modals */}
+      {maintModal === "asset" && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa thiết bị" : "Thêm thiết bị mới"}</h2>
+              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã thiết bị *</label>
+                  <input value={assetForm.ma_tb} onChange={e => setAssetForm(p => ({ ...p, ma_tb: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: MCC-1" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại *</label>
+                  <select value={assetForm.loai} onChange={e => setAssetForm(p => ({ ...p, loai: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                    <option value="may_moc">Máy móc</option>
+                    <option value="xe">Xe</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên thiết bị *</label>
+                <input value={assetForm.ten_tb} onChange={e => setAssetForm(p => ({ ...p, ten_tb: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Máy cán cắt 1" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Bộ phận *</label>
+                  <select value={assetForm.bo_phan} onChange={e => setAssetForm(p => ({ ...p, bo_phan: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                    {BO_PHAN_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Năm sử dụng</label>
+                  <input value={assetForm.nam_sd} onChange={e => setAssetForm(p => ({ ...p, nam_sd: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: 2019" />
+                </div>
+              </div>
+              {assetForm.loai === "xe" && (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Biển số</label>
+                  <input value={assetForm.bien_so} onChange={e => setAssetForm(p => ({ ...p, bien_so: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: 12A-12345" />
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả</label>
+                <input value={assetForm.mo_ta} onChange={e => setAssetForm(p => ({ ...p, mo_ta: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Trạng thái</label>
+                <select value={assetForm.trang_thai} onChange={e => setAssetForm(p => ({ ...p, trang_thai: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  <option value="active">Đang dùng</option>
+                  <option value="inactive">Ngừng sử dụng</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={saveMaintAsset} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintModal === "staff" && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhân sự" : "Thêm nhân sự bảo trì"}</h2>
+              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Họ tên *</label>
+                <input value={staffForm.ten} onChange={e => setStaffForm(p => ({ ...p, ten: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nguyễn Văn A" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ</label>
+                <input value={staffForm.chuc_vu} onChange={e => setStaffForm(p => ({ ...p, chuc_vu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nhân viên kỹ thuật" />
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
+                <label htmlFor="staff-active" className="text-sm font-bold text-slate-600">Đang làm việc</label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={saveMaintStaff} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintModal === "ext-mat" && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa vật tư" : "Thêm vật tư ngoài"}</h2>
+              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
+                <input value={extMatForm.ten_vat_tu} onChange={e => setExtMatForm(p => ({ ...p, ten_vat_tu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Bạc đạn 22211" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
+                <input value={extMatForm.dvt} onChange={e => setExtMatForm(p => ({ ...p, dvt: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: cái, sợi, kg" />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={saveMaintExtMat} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintDelConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
+            <p className="text-sm text-slate-600 mb-6">Xóa <span className="font-bold text-red-600">"{maintDelConfirm.label}"</span>? Thao tác không thể hoàn tác.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setMaintDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={deleteMaintItem} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
+            </div>
+          </div>
         </div>
       )}
 

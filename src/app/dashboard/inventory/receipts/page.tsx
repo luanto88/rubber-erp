@@ -10,11 +10,12 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
-import { getStockContextLabel } from "../_components/inventory-stock"
+import { buildEffectiveStockBalances, getStockContextLabel } from "../_components/inventory-stock"
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
+  type InventoryOilPoolBalanceRow,
   type InventoryCategoryOption,
   type InventoryItemOption,
   type InventoryWarehouseOption,
@@ -312,12 +313,24 @@ export default function InventoryReceiptsPage() {
         setCategories(inventoryData.categories)
 
         if (inventoryData.factoryId) {
-          const balanceResult = await supabase
-            .from("inventory_stock_balances")
-            .select("warehouse_id, item_id, on_hand")
-            .eq("factory_id", inventoryData.factoryId)
-          if (!balanceResult.error) {
-            setBalances((balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[])
+          const [balanceResult, oilPoolResult] = await Promise.all([
+            supabase
+              .from("inventory_stock_balances")
+              .select("warehouse_id, item_id, on_hand")
+              .eq("factory_id", inventoryData.factoryId),
+            supabase
+              .from("inventory_oil_stock_pools")
+              .select("warehouse_id, on_hand")
+              .eq("factory_id", inventoryData.factoryId),
+          ])
+          if (!balanceResult.error && !oilPoolResult.error) {
+            setBalances(
+              buildEffectiveStockBalances({
+                items: inventoryData.items,
+                stockBalances: (balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[],
+                oilPoolBalances: (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[],
+              }),
+            )
           }
         }
 
@@ -1361,10 +1374,13 @@ export default function InventoryReceiptsPage() {
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
-                  const totalStock = warehouses.reduce(
-                    (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
+                  const totalStock = draft.warehouseId
+                    ? (balanceMap.get(`${draft.warehouseId}:${item.id}`) ?? 0)
+                    : warehouses.reduce((sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0)
+                  const warehouseStocks = (draft.warehouseId
+                    ? warehouses.filter((w) => w.id === draft.warehouseId)
+                    : warehouses
                   )
-                  const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)
                   const breakdownText =

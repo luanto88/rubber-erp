@@ -177,6 +177,21 @@ src/app/dashboard/inventory/
 - Một mã Dầu dùng chung bồn có thể gắn nhiều kho; tại mỗi kho hệ thống dùng pool tồn riêng của chính kho đó
 - Các kho dầu chỉ có `1 mã Dầu` vẫn dùng cùng logic này để thống nhất vận hành và mở rộng sau này
 
+### Mapping đã chốt (2026-05-11)
+
+- `KDDX`: `DOX`, `DOSXN`, `DON`, `DOXU12`, `DOFORD`, `DOFAT`, `DOCZNB`, `DOCZVC`, `DOXU3`
+- `KDMN`: `DOSXMN`
+- `KDMT`: `DOX`, `DOSXN`, `DON`, `DOXU12`, `DOFORD`, `DOFAT`, `DOCZNB`, `DOCZVC`, `DOXU3`, `DOSXT`, `DO750K`
+- `KDMFL`: `DO750K`
+- `KBO`: `DOXU3`
+
+### Ghi chú vận hành
+
+- `DO750K` trong database đang dùng kho `KDMFL` làm mã kho đúng; không dùng `KDMPL`
+- Khi seed dữ liệu cho các mã trên, phải bật `uses_shared_oil_stock = true`
+- Khi hiển thị trên UI, các mã Dầu cùng một kho phải cùng nhìn một số tồn chung của kho đó
+- Lịch sử phát sinh, chứng từ nhập, chứng từ xuất và báo cáo sử dụng vẫn phải giữ theo đúng `mã vật tư` người dùng đã chọn
+
 ## Update 2026-05-09
 
 ### Chọn nhiều cho Phân loại vật tư và Mã vật tư

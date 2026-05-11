@@ -17,6 +17,7 @@ import {
   Shield,
   Truck,
   Warehouse,
+  Wrench,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import {
@@ -79,6 +80,7 @@ const NAV: NavItem[] = [
         permission: "quality.view",
       },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
+      { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
     ],
   },
   { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, permission: "settings.view" },
@@ -253,6 +255,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
       </div>
     )
+  }
+
+  // Print pages bypass the sidebar layout entirely
+  if (pathname.includes("/print")) {
+    return <>{children}</>
   }
 
   return (

@@ -10,11 +10,12 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
-import { getStockContextLabel } from "../_components/inventory-stock"
+import { buildEffectiveStockBalances, getStockContextLabel } from "../_components/inventory-stock"
 import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
+  type InventoryOilPoolBalanceRow,
   type InventoryCategoryOption,
   type InventoryItemOption,
   type InventoryWarehouseOption,
@@ -306,7 +307,7 @@ export default function InventoryIssuesPage() {
         setActorName(currentActor)
 
         if (resolvedFactoryId) {
-          const [balanceResult, lotBalanceResult] = await Promise.all([
+          const [balanceResult, lotBalanceResult, oilPoolResult] = await Promise.all([
             supabase
               .from("inventory_stock_balances")
               .select("warehouse_id, item_id, on_hand")
@@ -315,11 +316,22 @@ export default function InventoryIssuesPage() {
               .from("inventory_lot_balances")
               .select("warehouse_id, item_id, lot_no, expiry_date, on_hand")
               .eq("factory_id", resolvedFactoryId),
+            supabase
+              .from("inventory_oil_stock_pools")
+              .select("warehouse_id, on_hand")
+              .eq("factory_id", resolvedFactoryId),
           ])
 
-          if (!balanceResult.error) {
+          if (!balanceResult.error && !oilPoolResult.error) {
             const realBalances = (balanceResult.data || []) as BalanceRow[]
-            setBalances(realBalances)
+            const oilPoolBalances = (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[]
+            setBalances(
+              buildEffectiveStockBalances({
+                items: inventoryData.items,
+                stockBalances: realBalances,
+                oilPoolBalances,
+              }) as BalanceRow[],
+            )
           }
 
           if (!lotBalanceResult.error && (lotBalanceResult.data || []).length > 0) {
@@ -617,7 +629,7 @@ export default function InventoryIssuesPage() {
   }
 
   const refreshBalances = async (fid: string) => {
-    const [balanceResult, lotBalanceResult] = await Promise.all([
+    const [balanceResult, lotBalanceResult, oilPoolResult] = await Promise.all([
       supabase
         .from("inventory_stock_balances")
         .select("warehouse_id, item_id, on_hand")
@@ -626,9 +638,21 @@ export default function InventoryIssuesPage() {
         .from("inventory_lot_balances")
         .select("warehouse_id, item_id, lot_no, expiry_date, on_hand")
         .eq("factory_id", fid),
+      supabase
+        .from("inventory_oil_stock_pools")
+        .select("warehouse_id, on_hand")
+        .eq("factory_id", fid),
     ])
 
-    if (!balanceResult.error) setBalances((balanceResult.data || []) as BalanceRow[])
+    if (!balanceResult.error && !oilPoolResult.error) {
+      setBalances(
+        buildEffectiveStockBalances({
+          items,
+          stockBalances: (balanceResult.data || []) as BalanceRow[],
+          oilPoolBalances: (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[],
+        }) as BalanceRow[],
+      )
+    }
     if (!lotBalanceResult.error) setLotBalances((lotBalanceResult.data || []) as LotBalanceRow[])
   }
 
@@ -1079,10 +1103,13 @@ export default function InventoryIssuesPage() {
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
-                  const totalStock = warehouses.reduce(
-                    (sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0,
+                  const totalStock = draft.warehouseId
+                    ? (balanceMap.get(`${draft.warehouseId}:${item.id}`) ?? 0)
+                    : warehouses.reduce((sum, w) => sum + (balanceMap.get(`${w.id}:${item.id}`) ?? 0), 0)
+                  const warehouseStocks = (draft.warehouseId
+                    ? warehouses.filter((w) => w.id === draft.warehouseId)
+                    : warehouses
                   )
-                  const warehouseStocks = warehouses
                     .map((w) => ({ code: w.code, stock: balanceMap.get(`${w.id}:${item.id}`) ?? 0 }))
                     .filter((w) => w.stock > 0)
                   const breakdownText =

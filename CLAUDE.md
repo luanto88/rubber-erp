@@ -199,6 +199,7 @@ Vi du:
 - Factory config: `.claude/rules/11-factory-config.md`
 - Settings + permissions: `.claude/rules/12-settings-permissions.md`
 - Inventory: `.claude/rules/13-inventory-module.md`
+- Bao tri: `.claude/rules/14-maintenance-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
 
 ## Ghi chu cap nhat module kho (2026-05-09)
