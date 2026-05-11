@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
+import { getStockContextLabel } from "../_components/inventory-stock"
 import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
@@ -1161,7 +1162,7 @@ export default function InventoryTransfersPage() {
                       onToggle={() => toggleSelectedItem(item.id)}
                       code={item.code}
                       name={item.name}
-                      stockText={`Tồn: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
+                      stockText={`${getStockContextLabel(item, sourceWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
                       selected={selected}
                     />
@@ -1246,7 +1247,9 @@ export default function InventoryTransfersPage() {
                         className={INPUT_CLASS}
                       />
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <AlertPill tone="blue">Tồn kho nguồn: {detail.currentStock.toLocaleString("vi-VN")}</AlertPill>
+                        <AlertPill tone="blue">
+                          {getStockContextLabel(detail.item, sourceWarehouse?.code)} nguồn: {detail.currentStock.toLocaleString("vi-VN")}
+                        </AlertPill>
                         {detail.currentLotStock !== null ? (
                           <AlertPill tone="blue">Tồn lô: {detail.currentLotStock.toLocaleString("vi-VN")}</AlertPill>
                         ) : null}

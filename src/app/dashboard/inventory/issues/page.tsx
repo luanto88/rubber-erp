@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
+import { getStockContextLabel } from "../_components/inventory-stock"
 import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
@@ -1097,7 +1098,7 @@ export default function InventoryIssuesPage() {
                       onToggle={() => toggleSelectedItem(item.id)}
                       code={item.code}
                       name={item.name}
-                      stockText={`Tồn: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
+                      stockText={`${getStockContextLabel(item, selectedWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
                       selected={selected}
                     />
@@ -1183,14 +1184,14 @@ export default function InventoryIssuesPage() {
                       />
                       <div className="mt-2 flex flex-wrap gap-2">
                         <AlertPill tone="blue">
-                          Tồn hiện tại: {detail.currentStock.toLocaleString("vi-VN")} {detail.item?.unit || ""}
+                          {getStockContextLabel(detail.item, selectedWarehouse?.code)} hiện tại: {detail.currentStock.toLocaleString("vi-VN")} {detail.item?.unit || ""}
                         </AlertPill>
                         {detail.currentLotStock !== null ? (
                           <AlertPill tone="blue">
                             Tồn lô: {detail.currentLotStock.toLocaleString("vi-VN")} {detail.item?.unit || ""}
                           </AlertPill>
                         ) : null}
-                        <AlertPill>Tồn sau xuất: {detail.projectedStock.toLocaleString("vi-VN")}</AlertPill>
+                        <AlertPill>{getStockContextLabel(detail.item, selectedWarehouse?.code)} sau xuất: {detail.projectedStock.toLocaleString("vi-VN")}</AlertPill>
                         {detail.exceedsStock ? <AlertPill tone="red">Vượt tồn kho nguồn</AlertPill> : null}
                         {detail.exceedsLotStock ? <AlertPill tone="red">Vượt tồn lô</AlertPill> : null}
                         {detail.belowMin ? <AlertPill>Tồn sau xuất dưới mức min</AlertPill> : null}

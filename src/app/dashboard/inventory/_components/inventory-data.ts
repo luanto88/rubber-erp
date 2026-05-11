@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { buildEffectiveStockBalances } from "./inventory-stock"
 
 export type InventoryWarehouseOption = {
   id: string
@@ -33,6 +34,7 @@ export type InventoryItemOption = {
   category_name: string
   default_warehouse_ids: string[]
   warehouse_codes: string[]
+  uses_shared_oil_stock: boolean
 }
 
 export type InventoryWarehouseRule = {
@@ -48,6 +50,12 @@ export type InventoryWarehouseRule = {
 export type InventoryStockBalanceRow = {
   warehouse_id: string
   item_id: string
+  on_hand: number
+  updated_at?: string | null
+}
+
+export type InventoryOilPoolBalanceRow = {
+  warehouse_id: string
   on_hand: number
   updated_at?: string | null
 }
@@ -105,6 +113,7 @@ export const fallbackItems: InventoryItemOption[] = [
     category_name: "Vật tư hóa chất",
     default_warehouse_ids: ["kb"],
     warehouse_codes: ["KB"],
+    uses_shared_oil_stock: false,
   },
   {
     id: "aa",
@@ -121,6 +130,7 @@ export const fallbackItems: InventoryItemOption[] = [
     category_name: "Vật tư hóa chất",
     default_warehouse_ids: ["kb"],
     warehouse_codes: ["KB"],
+    uses_shared_oil_stock: false,
   },
   {
     id: "dox",
@@ -137,6 +147,7 @@ export const fallbackItems: InventoryItemOption[] = [
     category_name: "Nhiên liệu chế biến",
     default_warehouse_ids: ["kddx"],
     warehouse_codes: ["KDDX"],
+    uses_shared_oil_stock: true,
   },
 ]
 
@@ -150,6 +161,10 @@ export const fallbackStockBalances: InventoryStockBalanceRow[] = [
   { warehouse_id: "kb", item_id: "af", on_hand: 1500, updated_at: "2026-05-01T08:00:00.000Z" },
   { warehouse_id: "kb", item_id: "aa", on_hand: 90, updated_at: "2026-05-01T08:00:00.000Z" },
   { warehouse_id: "kddx", item_id: "dox", on_hand: 0, updated_at: "2026-05-01T08:00:00.000Z" },
+]
+
+export const fallbackOilPoolBalances: InventoryOilPoolBalanceRow[] = [
+  { warehouse_id: "kddx", on_hand: 0, updated_at: "2026-05-01T08:00:00.000Z" },
 ]
 
 export const fallbackLotBalances: InventoryLotBalanceRow[] = [
@@ -250,7 +265,7 @@ export async function loadInventoryAdminData() {
       .order("code"),
     supabase
       .from("inventory_items")
-      .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, is_active")
+      .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, uses_shared_oil_stock, is_active")
       .eq("factory_id", factoryId)
       .eq("is_active", true)
       .order("code"),
@@ -311,12 +326,16 @@ export async function loadInventorySnapshotData() {
   if (!adminData.factoryId || adminData.warning) {
     return {
       ...adminData,
-      stockBalances: fallbackStockBalances,
+      stockBalances: buildEffectiveStockBalances({
+        items: adminData.items.length > 0 ? adminData.items : fallbackItems,
+        stockBalances: fallbackStockBalances,
+        oilPoolBalances: fallbackOilPoolBalances,
+      }),
       lotBalances: fallbackLotBalances,
     }
   }
 
-  const [stockBalanceResult, lotBalanceResult] = await Promise.all([
+  const [stockBalanceResult, lotBalanceResult, oilPoolResult] = await Promise.all([
     supabase
       .from("inventory_stock_balances")
       .select("warehouse_id, item_id, on_hand, updated_at")
@@ -325,15 +344,23 @@ export async function loadInventorySnapshotData() {
       .from("inventory_lot_balances")
       .select("warehouse_id, item_id, lot_no, expiry_date, on_hand, updated_at")
       .eq("factory_id", adminData.factoryId),
+    supabase
+      .from("inventory_oil_stock_pools")
+      .select("warehouse_id, on_hand, updated_at")
+      .eq("factory_id", adminData.factoryId),
   ])
 
-  if (stockBalanceResult.error || lotBalanceResult.error) {
+  if (stockBalanceResult.error || lotBalanceResult.error || oilPoolResult.error) {
     return {
       ...adminData,
       warning:
         adminData.warning ||
         "Chưa tải được dữ liệu tồn kho từ Supabase. Đang dùng dữ liệu mẫu local để tiếp tục thao tác.",
-      stockBalances: fallbackStockBalances,
+      stockBalances: buildEffectiveStockBalances({
+        items: adminData.items.length > 0 ? adminData.items : fallbackItems,
+        stockBalances: fallbackStockBalances,
+        oilPoolBalances: fallbackOilPoolBalances,
+      }),
       lotBalances: fallbackLotBalances,
     }
   }
@@ -342,17 +369,30 @@ export async function loadInventorySnapshotData() {
     ...row,
     on_hand: Number(row.on_hand || 0),
   }))
+  const oilPoolBalances = ((oilPoolResult.data || []) as InventoryOilPoolBalanceRow[]).map((row) => ({
+    ...row,
+    on_hand: Number(row.on_hand || 0),
+  }))
   const lotBalances = ((lotBalanceResult.data || []) as InventoryLotBalanceRow[]).map((row) => ({
     ...row,
     on_hand: Number(row.on_hand || 0),
   }))
+  const effectiveStockBalances = buildEffectiveStockBalances({
+    items: adminData.items,
+    stockBalances,
+    oilPoolBalances,
+  })
 
-  if (stockBalances.length === 0) {
+  if (effectiveStockBalances.length === 0) {
     return {
       ...adminData,
       warning:
         "Bảng tồn kho hiện chưa có dữ liệu. Đang dùng dữ liệu mẫu local để tiếp tục thao tác.",
-      stockBalances: fallbackStockBalances,
+      stockBalances: buildEffectiveStockBalances({
+        items: adminData.items.length > 0 ? adminData.items : fallbackItems,
+        stockBalances: fallbackStockBalances,
+        oilPoolBalances: fallbackOilPoolBalances,
+      }),
       lotBalances: lotBalances.length > 0 ? lotBalances : fallbackLotBalances,
     }
   }
@@ -360,7 +400,7 @@ export async function loadInventorySnapshotData() {
   return {
     ...adminData,
     warning: null,
-    stockBalances,
+    stockBalances: effectiveStockBalances,
     lotBalances,
   }
 }

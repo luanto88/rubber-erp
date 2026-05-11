@@ -165,6 +165,18 @@ src/app/dashboard/inventory/
 - Trigger hoặc function backend được phép dùng để chặn phát sinh xuất vượt tồn
 - Trong các stored procedures như `inventory_post_export_document`, `inventory_post_import_document`, `inventory_post_transfer_document`, các cột `document_id` trong câu `JOIN` phải dùng table alias rõ ràng để tránh lỗi `column reference "document_id" is ambiguous`
 
+## Rule riêng cho dầu dùng chung bồn
+
+- Chỉ áp dụng cho các `mã Dầu` được bật cờ `uses_shared_oil_stock = true`
+- Nhớt và vật tư khác vẫn giữ logic tồn riêng theo `warehouse_id + item_id`
+- Với mã Dầu dùng chung bồn:
+  - chứng từ vẫn bắt buộc chọn `mã vật tư`
+  - nhập mã nào thì cộng vào tồn chung của kho dầu đó
+  - xuất mã nào thì kiểm tra và trừ vào tồn chung của kho dầu đó
+  - thẻ mã vật tư, cảnh báo dưới trường số lượng, tồn kho và số dư sau giao dịch phải hiển thị theo tồn chung của bồn
+- Một mã Dầu dùng chung bồn có thể gắn nhiều kho; tại mỗi kho hệ thống dùng pool tồn riêng của chính kho đó
+- Các kho dầu chỉ có `1 mã Dầu` vẫn dùng cùng logic này để thống nhất vận hành và mở rộng sau này
+
 ## Update 2026-05-09
 
 ### Chọn nhiều cho Phân loại vật tư và Mã vật tư

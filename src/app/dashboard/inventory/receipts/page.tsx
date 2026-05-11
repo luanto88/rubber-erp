@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
+import { getStockContextLabel } from "../_components/inventory-stock"
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import {
   getLineTypeLabel,
@@ -655,9 +656,10 @@ export default function InventoryReceiptsPage() {
         min_stock: 0,
         max_stock: 0,
         opening_stock: 0,
+        uses_shared_oil_stock: false,
         is_active: true,
       })
-      .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, is_active")
+      .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, uses_shared_oil_stock, is_active")
       .single()
 
     if (error || !data) {
@@ -802,13 +804,14 @@ export default function InventoryReceiptsPage() {
         min_stock: Number(quickItemForm.min_stock) || 0,
         max_stock: Number(quickItemForm.max_stock) || 0,
         opening_stock: 0,
+        uses_shared_oil_stock: false,
         is_active: quickItemForm.is_active,
       }
 
       const { data, error } = await supabase
         .from("inventory_items")
         .insert(payload)
-        .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, is_active")
+        .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, uses_shared_oil_stock, is_active")
         .single()
 
       if (error || !data) {
@@ -1376,7 +1379,7 @@ export default function InventoryReceiptsPage() {
                       onToggle={() => toggleSelectedItem(item.id)}
                       code={item.code}
                       name={item.name}
-                      stockText={`Tồn: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
+                      stockText={`${getStockContextLabel(item, selectedWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
                       selected={selected}
                     />
@@ -1454,8 +1457,12 @@ export default function InventoryReceiptsPage() {
                       className={INPUT_CLASS}
                     />
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <AlertPill tone="blue">Tồn hiện tại: {detail.currentStock.toLocaleString("vi-VN")}</AlertPill>
-                      <AlertPill tone="blue">Tồn sau nhập: {detail.projectedStock.toLocaleString("vi-VN")}</AlertPill>
+                      <AlertPill tone="blue">
+                        {getStockContextLabel(detail.item, selectedWarehouse?.code)} hiện tại: {detail.currentStock.toLocaleString("vi-VN")}
+                      </AlertPill>
+                      <AlertPill tone="blue">
+                        {getStockContextLabel(detail.item, selectedWarehouse?.code)} sau nhập: {detail.projectedStock.toLocaleString("vi-VN")}
+                      </AlertPill>
                       {detail.exceedsMax ? <AlertPill tone="red">Sau nhập vượt max</AlertPill> : null}
                       {detail.belowMin ? <AlertPill>Dưới mức min</AlertPill> : null}
                     </div>

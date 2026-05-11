@@ -226,7 +226,7 @@ Vật tư xe vận chuyển;Bạc đạn treo láp cầu;Bạc đạn treo láp 
 Vật tư xe vận chuyển;Bố thắng;Bố thắng;bộ;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;19;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Vật tư xe vận chuyển;Két nước;Két nước;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Vật tư xe vận chuyển;Đà dọc lót thùng (gỗ);Đà dọc lót thùng (gỗ);cây;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;2;6;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
-;DOSXN;Dầu lò sấy mủ nước;;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOSXN;Dầu lò sấy mủ nước;;0268ab41-a564-4538-acf1-6297ac372f57;;KDDX;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Thiết bị phụ tùng thay thế;Dây cuaro B55;Dây cuaro B55;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;1;4;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Thiết bị phụ tùng thay thế;Dây cuaro B56;Dây cuaro B56;cái;0268ab41-a564-4538-acf1-6297ac372f57;;KA;;;20;1;19;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;MONLGI3;Mỡ đa năng;kg;0268ab41-a564-4538-acf1-6297ac372f57;Thùng nhựa 15 kg;KA;;;150;15;18;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
@@ -243,7 +243,7 @@ Thiết bị phụ tùng thay thế;Bạc đạn 22230EK-NTN;Bạc đạn 22230E
 Nhiên liệu chế biến;N15W-40;Nhớt 15W-40;lít;0268ab41-a564-4538-acf1-6297ac372f57;Phi 208;KDDX;;;500;100;181;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;DON;Dầu xe nâng sản xuất;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6121;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;DOXU12;Dầu xe xúc sản xuất;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;5951;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
-Nhiên liệu chế biến;DOXU3;Dầu xe xúc Biomass;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KBO;;;10000;5000;48;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+Nhiên liệu chế biến;DOXU3;Dầu xe xúc Biomass;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX, KBO;;;10000;5000;48;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;DOFORD;Dầu xe Ford văn phòng;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6823;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;DOFAT;Dầu máy phát sinh hoạt;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;11544;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Nhiên liệu chế biến;DOCZNB;Dầu xe Cozon nội bộ;lít;0268ab41-a564-4538-acf1-6297ac372f57;Bồn cố định 10000L;KDDX;;;10000;5000;6001;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
@@ -341,3 +341,11 @@ Thiết bị phụ tùng thay thế;Bình ắc quy N150 (12v-150ah);Bình ắc q
 Thiết bị phụ tùng thay thế;Dung dịch làm mát;Dung dịch làm mát;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;0;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Thiết bị phụ tùng thay thế;Trục cán 510;Trục cán 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;12;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
 Thiết bị phụ tùng thay thế;Trục tiếp liệu cán cắt 510;Trục tiếp liệu cán cắt 510;cái;0268ab41-a564-4538-acf1-6297ac372f57;Cái;KA;;;;;2;;;TRUE;03/05/2026 6:00;03/05/2026 6:00
+;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;
+;KDDX:;;;;;DOX, DOSXN, DON, DOXU12, DOFORD, DOFAT, DOCZNB, DOCZVC, DOXU3;;;;;;;;;;
+;KDMN:;;;;;DOSXMN;;;;;;;;;;
+;KDMT:;;;;;DOX, DOSXN, DON, DOXU12, DOFORD, DOFAT, DOCZNB, DOCZVC, DOXU3, DOSXT, DO750K;;;;;;;;;;
+;KDMPL:;;;;;DO750K;;;;;;;;;;
+;KBO:;;;;;DOXU3;;;;;;;;;;

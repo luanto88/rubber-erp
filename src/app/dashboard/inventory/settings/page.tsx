@@ -67,6 +67,7 @@ type ItemRow = {
   opening_stock: number
   image_url: string | null
   equipment_name: string | null
+  uses_shared_oil_stock: boolean
   is_active: boolean
   categoryName: string
   warehouseCodes: string[]
@@ -101,6 +102,7 @@ type ItemForm = {
   opening_stock: string
   image_url: string
   equipment_name: string
+  uses_shared_oil_stock: boolean
   is_active: boolean
 }
 
@@ -146,6 +148,7 @@ const fallbackItems: ItemRow[] = [
     opening_stock: 6685,
     image_url: null,
     equipment_name: null,
+    uses_shared_oil_stock: false,
     is_active: true,
     categoryName: "Vật tư hóa chất",
     warehouseCodes: ["KB"],
@@ -166,6 +169,7 @@ const fallbackItems: ItemRow[] = [
     opening_stock: 90,
     image_url: null,
     equipment_name: null,
+    uses_shared_oil_stock: false,
     is_active: true,
     categoryName: "Vật tư hóa chất",
     warehouseCodes: ["KB"],
@@ -186,6 +190,7 @@ const fallbackItems: ItemRow[] = [
     opening_stock: 0,
     image_url: null,
     equipment_name: null,
+    uses_shared_oil_stock: true,
     is_active: true,
     categoryName: "Nhiên liệu chế biến",
     warehouseCodes: ["KDDX", "KDMFL"],
@@ -232,6 +237,7 @@ function emptyItemForm(): ItemForm {
     opening_stock: "0",
     image_url: "",
     equipment_name: "",
+    uses_shared_oil_stock: false,
     is_active: true,
   }
 }
@@ -343,7 +349,7 @@ export default function InventorySettingsPage() {
         supabase
           .from("inventory_items")
           .select(
-            "id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, image_url, equipment_name, is_active",
+            "id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, image_url, equipment_name, uses_shared_oil_stock, is_active",
           )
           .eq("factory_id", fid)
           .order("code"),
@@ -483,6 +489,7 @@ export default function InventorySettingsPage() {
             opening_stock: String(row.opening_stock ?? 0),
             image_url: row.image_url || "",
             equipment_name: row.equipment_name || "",
+            uses_shared_oil_stock: row.uses_shared_oil_stock,
             is_active: row.is_active,
           }
         : {
@@ -570,7 +577,6 @@ export default function InventorySettingsPage() {
     if (!itemForm.name.trim()) { setFormError("Tên vật tư không được để trống."); return }
     if (!itemForm.unit.trim()) { setFormError("Đơn vị tính không được để trống."); return }
     if (itemForm.selected_warehouse_ids.length === 0) { setFormError("Phai chon it nhat 1 kho chua."); return }
-
     setSaving(true)
     setFormError("")
     try {
@@ -589,6 +595,7 @@ export default function InventorySettingsPage() {
         opening_stock: Number(itemForm.opening_stock) || 0,
         image_url: itemForm.image_url.trim() || null,
         equipment_name: itemForm.equipment_name.trim() || null,
+        uses_shared_oil_stock: itemForm.uses_shared_oil_stock,
         is_active: itemForm.is_active,
       }
       const result = editingId
@@ -936,6 +943,9 @@ export default function InventorySettingsPage() {
                         <div className="flex gap-2">
                           {row.manages_lot ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-700">Lô</span> : null}
                           {row.manages_expiry ? <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-bold text-violet-700">Hạn</span> : null}
+                          {row.uses_shared_oil_stock ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700">Dầu dùng chung bồn</span>
+                          ) : null}
                           {!row.manages_lot && !row.manages_expiry ? (
                             <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">Thường</span>
                           ) : null}
@@ -1230,6 +1240,27 @@ export default function InventorySettingsPage() {
                       />
                     </div>
                   </div>
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <label className="flex items-start gap-3 text-sm text-amber-900">
+                      <input
+                        type="checkbox"
+                        checked={itemForm.uses_shared_oil_stock}
+                        onChange={(e) =>
+                          setItemForm((prev) => ({
+                            ...prev,
+                            uses_shared_oil_stock: e.target.checked,
+                          }))
+                        }
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block font-bold">Mã Dầu dùng tồn chung của kho dầu</span>
+                        <span className="mt-1 block text-xs leading-5 text-amber-800">
+                          Chỉ bật cho các mã Dầu dùng chung bồn theo từng kho. Một mã có thể thuộc nhiều kho; ở mỗi kho hệ thống sẽ dùng tồn chung của chính kho đó. Nhớt và vật tư khác giữ logic tồn riêng từng mã.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-bold text-slate-600">Hình ảnh URL</label>
                     <input
@@ -1356,4 +1387,3 @@ export default function InventorySettingsPage() {
     </InventoryPageShell>
   )
 }
-
