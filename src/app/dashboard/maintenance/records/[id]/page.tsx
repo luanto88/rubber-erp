@@ -752,35 +752,58 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <>
               {record?.trang_thai === "da_duyet" ? (
                 <>
-                  <Link
-                    href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
-                    target="_blank"
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
-                  >
-                    <Printer size={14} /> Sự cố
-                  </Link>
-                  <Link
-                    href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
-                    target="_blank"
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
-                  >
-                    <Printer size={14} /> Đề nghị
-                  </Link>
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan !== "Đội xe" ? (
+                    <Link
+                      href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
+                      target="_blank"
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                    >
+                      <Printer size={14} /> In biên bản
+                    </Link>
+                  ) : (
+                    <>
+                      <Link
+                        href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
+                        target="_blank"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                      >
+                        <Printer size={14} /> Sự cố
+                      </Link>
+                      <Link
+                        href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
+                        target="_blank"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                      >
+                        <Printer size={14} /> Đề nghị
+                      </Link>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
-                  <span
-                    title="Chỉ in được sau khi biên bản được phê duyệt"
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
-                  >
-                    <Printer size={14} /> Sự cố
-                  </span>
-                  <span
-                    title="Chỉ in được sau khi biên bản được phê duyệt"
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
-                  >
-                    <Printer size={14} /> Đề nghị
-                  </span>
+                  {record?.hang_muc === "Sửa chữa" && record?.bo_phan !== "Đội xe" ? (
+                    <span
+                      title="Chỉ in được sau khi biên bản được phê duyệt"
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                    >
+                      <Printer size={14} /> In biên bản
+                    </span>
+                  ) : (
+                    <>
+                      <span
+                        title="Chỉ in được sau khi biên bản được phê duyệt"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                      >
+                        <Printer size={14} /> Sự cố
+                      </span>
+                      <span
+                        title="Chỉ in được sau khi biên bản được phê duyệt"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                      >
+                        <Printer size={14} /> Đề nghị
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </>

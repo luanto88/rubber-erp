@@ -298,19 +298,34 @@ Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau k
 
 ## Lý lịch thiết bị / xe
 
-Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu `ll_xe.pdf` / `ll_may.pdf`:
+Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu F01:
 
-| Ngày | Nội dung sửa chữa, thay thế phụ tùng | Giá trị | Người thực hiện | Người theo dõi |
+| Thời gian | Nội dung sửa chữa, thay thế phụ tùng | Giá trị | Người thực hiện | Người theo dõi |
 |---|---|---|---|---|
 
 - `Người theo dõi` = `nv_phu_trach` của biên bản
 - `Giá trị` = `chi_phi_dk` + ký hiệu tiền (`$`, `៛`, `₫`)
 - Chỉ hiển thị biên bản `da_duyet`
-- Xuất PDF bám mẫu `ll_xe.pdf` (cho xe) và `ll_may.pdf` (cho máy)
+- Xuất PDF bám mẫu F01 (`KHXD-QT02-F01.docx`)
+
+### UI tab Lý lịch thiết bị (`history/page.tsx`)
+
+**Asset picker multi-select** (giống form tạo biên bản):
+- Button trigger hiển thị số lượng thiết bị đã chọn
+- Dropdown mở ra gồm: filter Bộ phận (select) + ô tìm kiếm nhanh (input) + danh sách checkbox
+- Danh sách checkbox: mỗi item hiện `ma_tb` (monospace) + `ten_tb` + bộ phận + loại (Xe/Máy)
+- Thiết bị đã chọn hiển thị dưới dạng chip tags với nút × bỏ chọn riêng lẻ
+- Nút "Chọn tất cả (N)" và "Bỏ chọn tất cả" trong dropdown
+- Dropdown đóng khi click ngoài (`useRef` + `mousedown` listener)
+
+**Nút "In lý lịch"** chỉ hiện khi `selectedAssetIds.length > 0`:
+- URL: `?type=ly_lich&asset_ids=id1,id2,...&from=...&to=...`
+- Label: "In lý lịch (N thiết bị)"
+- Mỗi thiết bị được in 1 trang F01 riêng với page break
 
 **Kỹ thuật query**: Do Supabase JS v2 không hỗ trợ `.order("related_table(col)")` cross-table, lịch sử phải dùng two-step query:
 1. Query `maintenance_records` với filter/order trước → lấy danh sách `id`
-2. Query `maintenance_record_lines` với `.in("record_id", ids)`
+2. Query `maintenance_record_lines` với `.in("record_id", ids)` và `.in("asset_id", selectedAssetIds)` nếu có chọn
 3. Client-side sort kết quả cuối
 
 ---
@@ -353,29 +368,78 @@ Sau khi chạy migration thêm cột `email`, vào **Cài đặt → Bảo trì 
 
 ---
 
-## In biên bản (3 mẫu)
+## In biên bản (4 type)
 
-| `?type=` | Mẫu in | Tham chiếu |
-|---|---|---|
-| `su_co` | Biên bản kiểm tra sự cố | `bb_mu_tap.pdf`, `bb_dx.pdf` |
-| `de_nghi` | Giấy đề nghị sửa chữa + Biên bản nghiệm thu | `bb_bd_mt.pdf`, `bb_bd_xe.pdf` |
-| `ly_lich` | Lý lịch thiết bị | `ll_xe.pdf`, `ll_may.pdf` |
+| `?type=` | Mẫu in | Tham chiếu | Áp dụng |
+|---|---|---|---|
+| `su_co` | F13 — Biên bản kiểm tra sự cố | `bb_mu_tap.pdf`, `bb_dx.pdf` | Bảo dưỡng hoặc Đội xe |
+| `de_nghi` | F10 + F15 — Giấy đề nghị + Nghiệm thu | `bb_bd_mt.pdf`, `bb_bd_xe.pdf` | Bảo dưỡng hoặc Đội xe |
+| `su_co_nho` | F13 + F10 + F15 + Ảnh gộp 1 PDF | mẫu `sua_chua_nho_che_bien/` | Sửa chữa **ngoài** Đội xe |
+| `ly_lich` | F01 — Lý lịch máy móc / thiết bị | `ll_xe.pdf`, `ll_may.pdf` | Từ tab Lý lịch |
 
-Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id` query param.
+Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id` / `asset_ids` query param.
 
 **Trang in bypass sidebar**: `dashboard/layout.tsx` kiểm tra `pathname.includes("/print")` và render `{children}` trực tiếp, không có sidebar.
 
-Mỗi mẫu in `su_co` / `de_nghi` có QR code ở góc trên phải, trỏ về trang chi tiết biên bản (dùng `QRCodeSVG` từ `qrcode.react`, size=64).
+### Nút in trên trang chi tiết biên bản
 
-Cấu trúc biên bản `su_co` / `de_nghi`:
-- Header: số biên bản + QR, ngày, địa điểm
-- Danh sách tham dự (4 vị trí: Giám đốc, Phó GĐ, NV kỹ thuật, Tổ bảo trì)
-- Thông tin thiết bị + nội dung xử lý
-- Khối ký tên (3-4 cột)
+Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
+- `hang_muc === "Sửa chữa"` **VÀ** `bo_phan !== "Đội xe"` → **1 nút** "In biên bản" → `type=su_co_nho`
+- Các trường hợp còn lại (Bảo dưỡng, hoặc Đội xe) → **2 nút** riêng: "Sự cố" (`type=su_co`) + "Đề nghị" (`type=de_nghi`)
+- Nút in chỉ là `<Link>` (clickable) khi `trang_thai === "da_duyet"`; còn lại là `<span>` cursor-not-allowed có tooltip
+
+### Cấu trúc mẫu in
+
+**F13 (`PrintSuCo`)** — Biên bản kiểm tra sự cố (KHXD-QT02-F13):
+- Header: Tên NM + Bộ phận | QR code góc trên phải
+- "Hôm nay vào lúc ... giờ, ngày ... tháng ... năm ..."
+- "Chúng tôi gồm:" — liệt kê nhân sự có chức vụ
+- Per thiết bị: Tên máy, số hiệu, Tình trạng sự cố, Nguyên nhân, Cách khắc phục, bảng vật tư
+- "Kết luận và những kiến nghị lên Giám đốc nhà máy"
+- Ký tên 4 cột: BGĐ phụ trách | NV kỹ thuật | Tổ cơ điện | Giám đốc nhà máy
+- Footer: `KHXD-QT02-F13 · Lần ban hành: 01`
+
+**F10 (`PrintF10`)** — Giấy đề nghị sửa chữa (KHXD-QT02-F10):
+- "Kampong Thom, ngày ... tháng ... năm ..." (căn phải)
+- "Kính gửi: Giám đốc Nhà máy..."
+- Đề nghị cho sửa chữa: tên máy, đính kèm biên bản số
+- Thời gian, người thực hiện, bảng nội dung thay thế
+- Ký tên 3 cột: Giám đốc nhà máy | NV kỹ thuật | BGĐ phụ trách
+- Footer: `KHXD-QT02-F10`
+
+**F15 (`PrintF15`)** — Biên bản nghiệm thu (KHXD-QT02-F15):
+- "Xe/máy/thiết bị: ... Biển số/số hiệu: ..."
+- "Căn cứ: Giấy đề nghị sửa chữa số ..."
+- "Hôm nay, ngày ... Tại ..."
+- "Chúng tôi gồm:" với chức vụ đầy đủ
+- Khối lượng sửa chữa, bảng vật tư (không hiện Đơn giá / Nguồn)
+- Checkbox ☐ Đạt yêu cầu / ☐ Không đạt
+- Giá trị sửa chữa, Kết luận
+- Ký tên 4 cột: BGĐ phụ trách | NV phụ trách | Người nghiệm thu | Giám đốc nhà máy
+- Footer: `KHXD-QT02-F15`
+
+**F01 (`PrintLyLich`)** — Lý lịch máy móc / thiết bị (KHXD-QT02-F01):
+- **Section I**: Thông tin thiết bị (Tên, Mã, Bộ phận, Năm sử dụng, Biển số nếu là xe)
+- **Section II**: "BẢO TRÌ, SỬA CHỮA, THAY THẾ PHỤ TÙNG" — bảng 6 cột: STT | Thời gian | Nội dung | Giá trị | Người thực hiện | Người theo dõi
+- Ký tên 4 cột: Người lập | Tổ cơ điện | BGĐ phụ trách | Giám đốc nhà máy
+- Footer: `KHXD-QT02-F01`
+
+**Component `DocumentFooter`**: render ở cuối mỗi mẫu in — mã tài liệu bên trái, "Lần ban hành: 01" bên phải, viền trên mỏng.
 
 **Cấu trúc `SignatureRow`**: Chức vụ → khoảng trắng `h-16` (≈2.5 cm để ký tay) → đường kẻ ngang → Tên → "(Ký và ghi rõ họ tên)".
 
-**Nút in chỉ sáng khi `da_duyet`**: Khi biên bản ở trạng thái `cho_duyet` hoặc `huy`, nút in hiển thị dưới dạng `<span>` không thể click (cursor-not-allowed, tooltip giải thích). Khi `da_duyet`, nút in là `<Link>` mở trang in.
+### Print URL params
+
+| Param | Mô tả |
+|---|---|
+| `type` | `su_co` \| `de_nghi` \| `su_co_nho` \| `ly_lich` |
+| `record_id` | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho) |
+| `asset_id` | UUID 1 thiết bị (ly_lich đơn) |
+| `asset_ids` | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich** |
+| `from` | Ngày bắt đầu lọc (ly_lich) |
+| `to` | Ngày kết thúc lọc (ly_lich) |
+
+Multi-device ly_lich: `?type=ly_lich&asset_ids=uuid1,uuid2,uuid3&from=...&to=...` → mỗi thiết bị 1 trang F01, ngăn cách bằng `page-break-before-always`.
 
 ---
 
