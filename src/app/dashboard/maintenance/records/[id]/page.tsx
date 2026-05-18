@@ -6,9 +6,9 @@ import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ImagePlus, Loader2, Plus,
-  Printer, QrCode, Save, Trash2, Wrench, X,
+  Printer, QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
 } from "lucide-react"
-import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
 import {
@@ -110,6 +110,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [notifying, setNotifying] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
@@ -239,9 +240,44 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const canApprove = hasPermission(user, "maintenance.approve")
-  const canEdit = hasPermission(user, "maintenance.edit")
-  const isReadOnly = record?.trang_thai === "da_duyet" || record?.trang_thai === "huy"
+  const isCreator = isNew || (
+    record?.nguoi_tao != null &&
+    (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
+  )
+  // Người dùng hiện tại có phải Giám đốc hoặc BGĐ phụ trách được chọn trong form không
+  const userName = user?.full_name || user?.username || ""
+  const isGdOrBgd = !!userName && !isCreator && (
+    (giamDoc && userName === giamDoc) ||
+    (bgdPhuTrach && userName === bgdPhuTrach)
+  )
+  // Form chỉ cho chỉnh sửa khi đang tạo mới hoặc là người soạn thảo (khi chờ duyệt)
+  const isReadOnly =
+    record?.trang_thai === "da_duyet" ||
+    record?.trang_thai === "huy" ||
+    (!isNew && !isCreator)
+
+  const handleNotify = async () => {
+    if (!id || !factoryId) return
+    setNotifying(true)
+    try {
+      const res = await fetch("/api/maintenance/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId: id, factoryId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Lỗi gửi thông báo")
+      if (data.errors?.length > 0) {
+        setSaveError(`Thông báo gửi một phần: ${(data.errors as string[]).join("; ")}`)
+      } else {
+        setSaveSuccess("Đã gửi thông báo thành công")
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi gửi thông báo")
+    } finally {
+      setNotifying(false)
+    }
+  }
 
   // Staff categories
   const bgdStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("giám đốc"))
@@ -261,12 +297,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
     const { data: balances } = await supabase
       .from("inventory_stock_balances")
-      .select("item_id, quantity_on_hand")
+      .select("item_id, on_hand")
       .eq("factory_id", fid)
 
     const balanceMap = new Map<string, number>()
     for (const b of (balances || [])) {
-      balanceMap.set(b.item_id, (balanceMap.get(b.item_id) || 0) + (b.quantity_on_hand || 0))
+      balanceMap.set(b.item_id, (balanceMap.get(b.item_id) || 0) + (b.on_hand || 0))
     }
 
     setInventoryItems(
@@ -397,6 +433,41 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         .eq("factory_id", factoryId)
       if (error) { setSaveError(error.message); return }
       setSaveSuccess(`Biên bản ${record?.ma_bb || ""} đã được hủy.`)
+      void loadRecord(factoryId, id)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUnApprove = async () => {
+    if (!factoryId || !id || id === "new") return
+    if (!window.confirm("Hủy phê duyệt? Biên bản sẽ về trạng thái Chờ duyệt để người tạo chỉnh sửa lại.")) return
+    setSaving(true); setSaveError(null)
+    try {
+      // Hủy phiếu xuất kho liên quan nếu có
+      if (record?.inventory_issue_doc_id) {
+        await supabase
+          .from("inventory_documents")
+          .update({
+            status: "cancelled",
+            cancel_reason: `Hủy phê duyệt biên bản ${record.ma_bb || ""}`,
+            cancelled_at: new Date().toISOString(),
+          })
+          .eq("id", record.inventory_issue_doc_id)
+          .eq("factory_id", factoryId)
+      }
+      const { error } = await supabase
+        .from("maintenance_records")
+        .update({
+          trang_thai: "cho_duyet",
+          nguoi_duyet: null,
+          ngay_duyet: null,
+          inventory_issue_doc_id: null,
+        })
+        .eq("id", id)
+        .eq("factory_id", factoryId)
+      if (error) { setSaveError(error.message); return }
+      setSaveSuccess(`Đã hủy phê duyệt. Biên bản ${record?.ma_bb || ""} về trạng thái Chờ duyệt.`)
       void loadRecord(factoryId, id)
     } finally {
       setSaving(false)
@@ -553,39 +624,61 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       // Check if there are trong_kho materials
       const inStockMats = lines.flatMap((l) => l.materials.filter((m) => m.nguon === "trong_kho" && m.inventory_item_id))
 
+      // Validate stock trước khi duyệt
+      for (const mat of inStockMats) {
+        const item = inventoryItems.find((i) => i.id === mat.inventory_item_id)
+        if (item && parseFloat(mat.so_luong) > item.currentStock) {
+          setSaveError(`Vật tư "${item.name}" không đủ tồn (cần ${mat.so_luong} ${item.unit}, còn ${item.currentStock} ${item.unit})`)
+          return
+        }
+      }
+
       let issueDocId: string | null = null
 
       if (inStockMats.length > 0) {
-        // Auto-create inventory issue document
+        const docCode = `X-BT-${record?.ma_bb || id}`
         const assetNames = lines.map((l) => l.ten_tb).filter(Boolean).join(", ")
-        const issuePayload = {
-          factory_id: factoryId,
-          document_type: "issue",
-          document_code: `X-BT-${record?.ma_bb || id}`,
-          document_date: ngay,
-          status: "posted",
-          note: `${hangMuc} thiết bị: ${assetNames}`,
-          requester_name: approverName,
-        }
 
-        const { data: issueDoc, error: issueErr } = await supabase
+        // Kiểm tra xem phiếu xuất đã tồn tại chưa (tránh lỗi duplicate key khi retry)
+        const { data: existingDoc } = await supabase
           .from("inventory_documents")
-          .insert(issuePayload)
           .select("id")
-          .single()
+          .eq("factory_id", factoryId)
+          .eq("document_code", docCode)
+          .maybeSingle()
 
-        if (issueErr) { setSaveError(`Lỗi tạo phiếu xuất kho: ${issueErr.message}`); return }
-        issueDocId = issueDoc.id
+        if (existingDoc) {
+          // Reuse phiếu xuất cũ — xóa dòng cũ rồi insert lại để đảm bảo đúng
+          issueDocId = existingDoc.id
+          await supabase.from("inventory_document_lines").delete().eq("document_id", issueDocId)
+        } else {
+          const issuePayload = {
+            factory_id: factoryId,
+            document_type: "export",
+            document_code: docCode,
+            document_date: ngay,
+            status: "posted",
+            notes: `${hangMuc} thiết bị: ${assetNames}`,
+            requester_name: approverName,
+          }
+          const { data: issueDoc, error: issueErr } = await supabase
+            .from("inventory_documents")
+            .insert(issuePayload)
+            .select("id")
+            .single()
+          if (issueErr) { setSaveError(`Lỗi tạo phiếu xuất kho: ${issueErr.message}`); return }
+          issueDocId = issueDoc.id
+        }
 
         // Insert issue lines
         const issueLines = inStockMats.map((m, i) => ({
-          document_id: issueDoc.id,
+          document_id: issueDocId,
           factory_id: factoryId,
           item_id: m.inventory_item_id,
           quantity: parseFloat(m.so_luong) || 0,
           lot_no: null,
           expiry_date: null,
-          note: m.ten_vat_tu,
+          line_notes: m.ten_vat_tu,
           sort_order: i,
         }))
 
@@ -657,50 +750,90 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         <div className="flex items-center gap-2">
           {!isNew && (
             <>
-              <Link
-                href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
-                target="_blank"
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
-              >
-                <Printer size={14} /> Sự cố
-              </Link>
-              <Link
-                href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
-                target="_blank"
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
-              >
-                <Printer size={14} /> Đề nghị
-              </Link>
-            </>
-          )}
-          {!isReadOnly && (
-            <>
-              {!isNew && canApprove && record?.trang_thai === "cho_duyet" && (
+              {record?.trang_thai === "da_duyet" ? (
                 <>
-                  <button
-                    onClick={handleCancel}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl border border-red-200 transition-all disabled:opacity-50"
+                  <Link
+                    href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
+                    target="_blank"
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
                   >
-                    <X size={14} /> Hủy biên bản
-                  </button>
-                  <button
-                    onClick={handleApprove}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                    <Printer size={14} /> Sự cố
+                  </Link>
+                  <Link
+                    href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
+                    target="_blank"
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
                   >
-                    <CheckCircle2 size={16} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
-                  </button>
+                    <Printer size={14} /> Đề nghị
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <span
+                    title="Chỉ in được sau khi biên bản được phê duyệt"
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                  >
+                    <Printer size={14} /> Sự cố
+                  </span>
+                  <span
+                    title="Chỉ in được sau khi biên bản được phê duyệt"
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                  >
+                    <Printer size={14} /> Đề nghị
+                  </span>
                 </>
               )}
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                <Save size={16} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
-              </button>
             </>
+          )}
+          {/* GỬI PHÊ DUYỆT — creator khi cho_duyet (thông báo Telegram + Email cho GĐ/BGĐ) */}
+          {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
+            <button
+              onClick={handleNotify}
+              disabled={notifying}
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-bold rounded-xl border border-blue-200 transition-all disabled:opacity-50"
+            >
+              <Send size={14} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
+            </button>
+          )}
+          {/* HỦY BIÊN BẢN (vĩnh viễn) — chỉ creator khi cho_duyet */}
+          {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
+            <button
+              onClick={handleCancel}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl border border-red-200 transition-all disabled:opacity-50"
+            >
+              <X size={14} /> Hủy biên bản
+            </button>
+          )}
+          {/* PHÊ DUYỆT — chỉ GĐ/BGĐ khi cho_duyet */}
+          {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
+            <button
+              onClick={handleApprove}
+              disabled={saving}
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+            >
+              <CheckCircle2 size={16} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
+            </button>
+          )}
+          {/* HỦY PHÊ DUYỆT — chỉ GĐ/BGĐ khi da_duyet, trả về cho_duyet */}
+          {!isNew && record?.trang_thai === "da_duyet" && isGdOrBgd && (
+            <button
+              onClick={handleUnApprove}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl border border-amber-200 transition-all disabled:opacity-50"
+            >
+              <RotateCcw size={14} /> {saving ? "Đang xử lý..." : "Hủy phê duyệt"}
+            </button>
+          )}
+          {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới */}
+          {!isReadOnly && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+            >
+              <Save size={16} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
+            </button>
           )}
         </div>
       </div>
@@ -1188,8 +1321,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         value={mat.so_luong}
                         onChange={(e) => updateMaterial(line.id, mat.id, { so_luong: e.target.value })}
                         disabled={isReadOnly}
-                        className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                        className={`w-full px-2 py-1.5 border rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white ${
+                          mat.nguon === "trong_kho" && mat.inventory_item_id &&
+                          parseFloat(mat.so_luong) > (inventoryItems.find(i => i.id === mat.inventory_item_id)?.currentStock ?? Infinity)
+                            ? "border-red-400 bg-red-50"
+                            : "border-slate-300"
+                        }`}
                       />
+                      {mat.nguon === "trong_kho" && mat.inventory_item_id && (() => {
+                        const item = inventoryItems.find(i => i.id === mat.inventory_item_id)
+                        if (item && parseFloat(mat.so_luong) > item.currentStock)
+                          return <p className="text-red-500 text-[10px] mt-0.5">Vượt tồn ({item.currentStock})</p>
+                      })()}
                     </div>
 
                     {mat.nguon === "ben_ngoai" && (

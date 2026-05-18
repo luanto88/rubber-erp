@@ -30,6 +30,7 @@ export type MaintenanceStaff = {
   factory_id: string
   ten: string
   chuc_vu: string | null
+  email: string | null
   active: boolean
 }
 

@@ -318,7 +318,7 @@ export default function SettingsPage() {
   const [maintError, setMaintError] = useState("")
   const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "ext-mat"; id: string; label: string } | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
-  const [staffForm, setStaffForm] = useState({ ten: "", chuc_vu: "", active: true })
+  const [staffForm, setStaffForm] = useState({ ten: "", chuc_vu: "", email: "", active: true })
   const [extMatForm, setExtMatForm] = useState({ ten_vat_tu: "", dvt: "" })
 
   const loadSuffixes = useCallback(async (fid: string) => {
@@ -433,7 +433,7 @@ export default function SettingsPage() {
     if (!staffForm.ten.trim()) { setMaintError("Tên không được để trống"); return }
     setMaintSaving(true); setMaintError("")
     try {
-      const payload = { factory_id: factoryId, ten: staffForm.ten.trim(), chuc_vu: staffForm.chuc_vu.trim() || null, active: staffForm.active }
+      const payload = { factory_id: factoryId, ten: staffForm.ten.trim(), chuc_vu: staffForm.chuc_vu.trim() || null, email: staffForm.email.trim() || null, active: staffForm.active }
       const result = maintEditId
         ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
         : await supabase.from("maintenance_staff").insert(payload)
@@ -1500,7 +1500,7 @@ export default function SettingsPage() {
                   onClick={() => {
                     setMaintEditId(null); setMaintError("")
                     if (maintTab === "assets") { setAssetForm({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" }); setMaintModal("asset") }
-                    else if (maintTab === "staff") { setStaffForm({ ten: "", chuc_vu: "", active: true }); setMaintModal("staff") }
+                    else if (maintTab === "staff") { setStaffForm({ ten: "", chuc_vu: "", email: "", active: true }); setMaintModal("staff") }
                     else { setExtMatForm({ ten_vat_tu: "", dvt: "" }); setMaintModal("ext-mat") }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
@@ -1581,7 +1581,7 @@ export default function SettingsPage() {
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setMaintEditId(s.id); setMaintError(""); setStaffForm({ ten: s.ten, chuc_vu: s.chuc_vu || "", active: s.active }); setMaintModal("staff") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setMaintEditId(s.id); setMaintError(""); setStaffForm({ ten: s.ten, chuc_vu: s.chuc_vu || "", email: (s as { email?: string | null }).email || "", active: s.active }); setMaintModal("staff") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "staff", id: s.id, label: s.ten })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -1705,6 +1705,10 @@ export default function SettingsPage() {
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ</label>
                 <input value={staffForm.chuc_vu} onChange={e => setStaffForm(p => ({ ...p, chuc_vu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nhân viên kỹ thuật" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Email nhận thông báo</label>
+                <input type="email" value={staffForm.email} onChange={e => setStaffForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: giamdoc@gmail.com" />
               </div>
               <div className="flex items-center gap-3">
                 <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />

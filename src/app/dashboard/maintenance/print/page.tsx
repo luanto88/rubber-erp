@@ -124,9 +124,11 @@ function SignatureRow({ cols }: { cols: SigCol[] }) {
       {cols.map((col, i) => (
         <div key={i}>
           <div className="font-bold text-slate-700 mb-1">{col.role}</div>
-          <div className="text-slate-500 italic text-[10px]">(Ký và ghi rõ họ tên)</div>
-          <div className="mt-14 border-t border-dashed border-slate-400 pt-1 font-semibold text-slate-600 min-h-[1.25rem]">
-            {col.name || ""}
+          {/* Khoảng trắng để ký tên — ~2.5cm cho in */}
+          <div className="h-16" />
+          <div className="border-t border-slate-600 pt-1">
+            <div className="font-semibold text-slate-700 min-h-[1.25rem]">{col.name || " "}</div>
+            <div className="text-slate-400 italic text-[10px] mt-0.5">(Ký và ghi rõ họ tên)</div>
           </div>
         </div>
       ))}

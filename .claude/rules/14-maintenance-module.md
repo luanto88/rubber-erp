@@ -84,8 +84,14 @@ id        UUID PK
 factory_id UUID
 ten        TEXT
 chuc_vu    TEXT
+email      TEXT    -- dùng cho thông báo email BGĐ (thêm bằng migration)
 active     BOOLEAN DEFAULT true
 created_at
+```
+
+SQL migration (chạy trong Supabase SQL Editor):
+```sql
+ALTER TABLE maintenance_staff ADD COLUMN IF NOT EXISTS email TEXT;
 ```
 
 Seed từ `cung_cap_dl/kho_bao_tri/bao_tri/danh_sach_nm.xlsx` (14 người).
@@ -230,11 +236,33 @@ Ví dụ: `MT-110426/001`
 
 ---
 
+## Quyền chỉnh sửa biên bản
+
+Biên bản `cho_duyet` chỉ được sửa bởi:
+- **Người tạo biên bản** (`nguoi_tao` khớp với `full_name` hoặc `username` của user hiện tại), **hoặc**
+- **User có quyền `maintenance.approve`**
+
+Biên bản `da_duyet` hoặc `huy`: read-only với tất cả mọi người.
+
+```typescript
+const isCreator = isNew || (
+  record?.nguoi_tao != null &&
+  (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
+)
+const isReadOnly =
+  record?.trang_thai === "da_duyet" ||
+  record?.trang_thai === "huy" ||
+  (!isNew && !isCreator && !canApprove)
+```
+
+---
+
 ## Workflow phê duyệt
 
 ```
 Tạo → cho_duyet
 Phê duyệt (maintenance.approve) → da_duyet
+  └─ Kiểm tra tồn kho vật tư trong_kho (chặn nếu không đủ)
   └─ Nếu có vật tư trong_kho:
       → Tạo inventory_documents (loại Xuất kho, status = posted)
       → Ghi sổ inventory stock movements
@@ -254,6 +282,7 @@ Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau k
 - `document_code`: `X-BT-{ma_bb}`
 - Kiểm tra tồn kho tại thời điểm phê duyệt, không tại thời điểm tạo biên bản
 - Nếu không đủ tồn: hiển thị lỗi, chặn phê duyệt
+- Tồn kho lấy từ cột `on_hand` trong bảng `inventory_stock_balances` (không phải `quantity_on_hand`)
 
 ---
 
@@ -286,6 +315,44 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 
 ---
 
+## Thông báo BGĐ
+
+Nút **"Thông báo BGĐ"** hiển thị khi biên bản ở trạng thái `cho_duyet`. Gọi API route `POST /api/maintenance/notify` với `{ recordId, factoryId }`.
+
+### Kênh 1 — Telegram
+
+- Gửi đến group cấu hình bởi `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID`
+- Nội dung HTML có: mã biên bản, hạng mục, bộ phận, ngày, người tạo, thiết bị, BGĐ phụ trách, Giám đốc
+- Link "Xem và phê duyệt biên bản" trỏ về `{NEXT_PUBLIC_APP_URL}/dashboard/maintenance/records/{id}`
+
+### Kênh 2 — Email (Gmail SMTP)
+
+- Lấy email của `bgd_phu_trach` và `giam_doc` từ bảng `maintenance_staff.email`
+- Gửi qua `nodemailer` với Gmail SMTP, xác thực bằng App Password (không phải mật khẩu thường)
+- Email HTML có header cam, bảng thông tin biên bản, nút CTA link về trang chi tiết
+
+### Biến môi trường cần thiết
+
+```
+TELEGRAM_BOT_TOKEN=<bot token>
+TELEGRAM_CHAT_ID=<group chat id (âm)>
+GMAIL_USER=<gmail gửi đi>
+GMAIL_APP_PASSWORD=<Google App Password — bật 2FA trước, tạo tại Google Account → Security → App passwords>
+NEXT_PUBLIC_APP_URL=https://qlsxkpt.vercel.app  (fallback nếu không có)
+```
+
+### Xử lý lỗi
+
+- Hai kênh hoạt động độc lập — lỗi một kênh không ảnh hưởng kênh còn lại
+- HTTP 207 trả về khi có lỗi một phần, kèm mảng `errors`
+- Nếu `GMAIL_APP_PASSWORD` trống → bỏ qua email, không báo lỗi
+
+### Thiết lập email nhân sự
+
+Sau khi chạy migration thêm cột `email`, vào **Cài đặt → Bảo trì → Nhân sự bảo trì** để điền email cho từng BGĐ / Giám đốc.
+
+---
+
 ## In biên bản (3 mẫu)
 
 | `?type=` | Mẫu in | Tham chiếu |
@@ -305,6 +372,10 @@ Cấu trúc biên bản `su_co` / `de_nghi`:
 - Danh sách tham dự (4 vị trí: Giám đốc, Phó GĐ, NV kỹ thuật, Tổ bảo trì)
 - Thông tin thiết bị + nội dung xử lý
 - Khối ký tên (3-4 cột)
+
+**Cấu trúc `SignatureRow`**: Chức vụ → khoảng trắng `h-16` (≈2.5 cm để ký tay) → đường kẻ ngang → Tên → "(Ký và ghi rõ họ tên)".
+
+**Nút in chỉ sáng khi `da_duyet`**: Khi biên bản ở trạng thái `cho_duyet` hoặc `huy`, nút in hiển thị dưới dạng `<span>` không thể click (cursor-not-allowed, tooltip giải thích). Khi `da_duyet`, nút in là `<Link>` mở trang in.
 
 ---
 
@@ -358,7 +429,7 @@ src/app/dashboard/maintenance/
 - Dùng card picker inline (không tách component riêng) theo kiểu `CompactItemSelectorCard` của inventory
 - Mỗi card: `ma_tb` (monospace), `ten_tb` (2-line clamp), loại (Xe / Máy + biển số nếu có)
 - Viền cam + dấu check cam khi đã chọn; badge đếm số đã chọn ở tiêu đề; nút "Bỏ chọn tất cả"
-- Ô tìm kiếm lọc theo mã hoặc tên, nổi phía trên grid card
+- Ô tìm kiếm lọc theo mã hoặc tên, nổi phía trên grid card — container ô tìm kiếm phải có `z-10` để không bị thẻ card đè lên
 - Grid: `grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5`
 
 ### Dòng thiết bị
@@ -369,6 +440,9 @@ src/app/dashboard/maintenance/
 ### Vật tư
 - `ben_ngoai`: `<input>` với `<datalist>` từ `maintenance_external_materials`; tên mới tự động được lưu vào master khi save biên bản
 - `trong_kho`: `<select>` từ `inventory_items` với thông tin tồn kho
+- Tồn kho lấy từ `inventory_stock_balances.on_hand` (không phải `quantity_on_hand`)
+- **Cảnh báo inline**: Khi `so_luong > currentStock`, ô nhập chuyển viền đỏ và hiện text đỏ bên dưới: `"Vượt tồn (X)"`
+- **Chặn phê duyệt**: `handleApprove` validate toàn bộ vật tư `trong_kho` trước khi tạo phiếu xuất; hiện `saveError` và return sớm nếu bất kỳ vật tư nào vượt tồn
 
 ### Nhân sự
 - `nguoi_thuc_hien`: chip multi-select, chỉ hiển thị `workerStaff`
