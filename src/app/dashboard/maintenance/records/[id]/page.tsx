@@ -126,6 +126,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [extMaterials, setExtMaterials] = useState<MaintenanceExtMaterial[]>([])
   const [inventoryItems, setInventoryItems] = useState<InventoryItemOption[]>([])
 
+  type NewItemModalContext = { lineId: string; matId: string }
+  const [newItemModal, setNewItemModal] = useState<NewItemModalContext | null>(null)
+  const [newItemForm, setNewItemForm] = useState({ code: "", name: "", unit: "" })
+  const [savingNewItem, setSavingNewItem] = useState(false)
+
   // Header form
   const [hangMuc, setHangMuc] = useState<"Sửa chữa" | "Bảo dưỡng">("Sửa chữa")
   const [ngay, setNgay] = useState(new Date().toISOString().slice(0, 10))
@@ -250,11 +255,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     (giamDoc && userName === giamDoc) ||
     (bgdPhuTrach && userName === bgdPhuTrach)
   )
-  // Form chỉ cho chỉnh sửa khi đang tạo mới hoặc là người soạn thảo (khi chờ duyệt)
+  const isAdmin = user?.role === "admin"
+  // Admin có thể chỉnh sửa kể cả trạng thái đã duyệt; hủy thì luôn read-only
   const isReadOnly =
-    record?.trang_thai === "da_duyet" ||
     record?.trang_thai === "huy" ||
-    (!isNew && !isCreator)
+    (record?.trang_thai === "da_duyet" && !isAdmin) ||
+    (!isNew && !isCreator && !isAdmin)
 
   const handleNotify = async () => {
     if (!id || !factoryId) return
@@ -570,7 +576,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               factory_id: factoryId,
               sort_order: mi,
               nguon: m.nguon,
-              inventory_item_id: m.nguon === "trong_kho" ? (m.inventory_item_id || null) : null,
+              inventory_item_id: m.inventory_item_id || null,
               ten_vat_tu: m.ten_vat_tu.trim(),
               dvt: m.dvt.trim() || null,
               so_luong: parseFloat(m.so_luong) || 0,
@@ -707,6 +713,48 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
+  const handleSaveNewItem = async () => {
+    if (!factoryId || !newItemModal) return
+    if (!newItemForm.code.trim() || !newItemForm.name.trim()) {
+      setSaveError("Vui lòng nhập mã và tên vật tư")
+      return
+    }
+    setSavingNewItem(true)
+    try {
+      const { data: inserted, error } = await supabase
+        .from("inventory_items")
+        .insert({
+          factory_id: factoryId,
+          code: newItemForm.code.trim(),
+          name: newItemForm.name.trim(),
+          unit: newItemForm.unit.trim() || null,
+          is_active: true,
+        })
+        .select("id, code, name, unit")
+        .single()
+      if (error) { setSaveError(error.message); return }
+      const newItem: InventoryItemOption = {
+        id: inserted.id,
+        code: inserted.code as string,
+        name: inserted.name as string,
+        unit: (inserted.unit as string | null) || "",
+        currentStock: 0,
+      }
+      setInventoryItems((prev) => [...prev, newItem])
+      updateMaterial(newItemModal.lineId, newItemModal.matId, {
+        inventory_item_id: inserted.id,
+        ten_vat_tu: inserted.name as string,
+        dvt: (inserted.unit as string | null) || "",
+      })
+      setNewItemModal(null)
+      setNewItemForm({ code: "", name: "", unit: "" })
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư")
+    } finally {
+      setSavingNewItem(false)
+    }
+  }
+
   const recordQrUrl = useMemo(() => {
     if (!record?.id || typeof window === "undefined") return ""
     return `${window.location.origin}/dashboard/maintenance/records/${record.id}`
@@ -747,7 +795,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {!isNew && (
             <>
               {record?.trang_thai === "da_duyet" ? (
@@ -756,25 +804,25 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     <Link
                       href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
                       target="_blank"
-                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
                     >
-                      <Printer size={14} /> In biên bản
+                      <Printer size={12} /> In biên bản
                     </Link>
                   ) : (
                     <>
                       <Link
                         href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
                         target="_blank"
-                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
                       >
-                        <Printer size={14} /> Sự cố
+                        <Printer size={12} /> Sự cố
                       </Link>
                       <Link
                         href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
                         target="_blank"
-                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
                       >
-                        <Printer size={14} /> Đề nghị
+                        <Printer size={12} /> Đề nghị
                       </Link>
                     </>
                   )}
@@ -784,23 +832,23 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   {record?.hang_muc === "Sửa chữa" && record?.bo_phan !== "Đội xe" ? (
                     <span
                       title="Chỉ in được sau khi biên bản được phê duyệt"
-                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
                     >
-                      <Printer size={14} /> In biên bản
+                      <Printer size={12} /> In biên bản
                     </span>
                   ) : (
                     <>
                       <span
                         title="Chỉ in được sau khi biên bản được phê duyệt"
-                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
                       >
-                        <Printer size={14} /> Sự cố
+                        <Printer size={12} /> Sự cố
                       </span>
                       <span
                         title="Chỉ in được sau khi biên bản được phê duyệt"
-                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 text-slate-300 text-sm font-bold rounded-xl cursor-not-allowed select-none"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
                       >
-                        <Printer size={14} /> Đề nghị
+                        <Printer size={12} /> Đề nghị
                       </span>
                     </>
                   )}
@@ -813,9 +861,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleNotify}
               disabled={notifying}
-              className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-bold rounded-xl border border-blue-200 transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
             >
-              <Send size={14} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
+              <Send size={12} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
             </button>
           )}
           {/* HỦY BIÊN BẢN (vĩnh viễn) — chỉ creator khi cho_duyet */}
@@ -823,9 +871,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleCancel}
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl border border-red-200 transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50"
             >
-              <X size={14} /> Hủy biên bản
+              <X size={12} /> Hủy biên bản
             </button>
           )}
           {/* PHÊ DUYỆT — chỉ GĐ/BGĐ khi cho_duyet */}
@@ -833,9 +881,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleApprove}
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
-              <CheckCircle2 size={16} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
+              <CheckCircle2 size={13} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
             </button>
           )}
           {/* HỦY PHÊ DUYỆT — chỉ GĐ/BGĐ khi da_duyet, trả về cho_duyet */}
@@ -843,9 +891,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleUnApprove}
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl border border-amber-200 transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg border border-amber-200 transition-all disabled:opacity-50"
             >
-              <RotateCcw size={14} /> {saving ? "Đang xử lý..." : "Hủy phê duyệt"}
+              <RotateCcw size={12} /> {saving ? "Đang xử lý..." : "Hủy phê duyệt"}
             </button>
           )}
           {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới */}
@@ -853,9 +901,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+              className="flex items-center gap-1 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
-              <Save size={16} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
+              <Save size={13} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
             </button>
           )}
         </div>
@@ -1292,7 +1340,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
                     {mat.nguon === "trong_kho" ? (
                       <div className="flex-1 min-w-[200px]">
-                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Vật tư kho</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-slate-500">Vật tư kho</label>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => { setNewItemModal({ lineId: line.id, matId: mat.id }); setNewItemForm({ code: "", name: "", unit: mat.dvt }) }}
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                            >
+                              <Plus size={10} /> Thêm mới
+                            </button>
+                          )}
+                        </div>
                         <select
                           value={mat.inventory_item_id}
                           onChange={(e) => {
@@ -1312,18 +1371,34 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       </div>
                     ) : (
                       <div className="flex-1 min-w-[200px]">
-                        <label className="text-[10px] font-bold text-slate-500 block mb-1">Tên vật tư</label>
-                        <input
-                          list={`ext-mat-${mat.id}`}
-                          value={mat.ten_vat_tu}
-                          onChange={(e) => updateMaterial(line.id, mat.id, { ten_vat_tu: e.target.value })}
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-slate-500">Vật tư bên ngoài</label>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => { setNewItemModal({ lineId: line.id, matId: mat.id }); setNewItemForm({ code: "", name: "", unit: mat.dvt }) }}
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                            >
+                              <Plus size={10} /> Thêm mới
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={mat.inventory_item_id}
+                          onChange={(e) => {
+                            const item = inventoryItems.find((i) => i.id === e.target.value)
+                            updateMaterial(line.id, mat.id, { inventory_item_id: e.target.value, ten_vat_tu: item?.name || "", dvt: item?.unit || mat.dvt })
+                          }}
                           disabled={isReadOnly}
-                          placeholder="Nhập hoặc chọn từ danh sách"
                           className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                        />
-                        <datalist id={`ext-mat-${mat.id}`}>
-                          {extMaterials.map((m) => <option key={m.id} value={m.ten_vat_tu} />)}
-                        </datalist>
+                        >
+                          <option value="">— Chọn vật tư —</option>
+                          {inventoryItems.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.code} - {item.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     )}
 
@@ -1465,6 +1540,63 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         className="hidden"
         onChange={handleSlotFileChange}
       />
+
+      {/* Modal thêm vật tư mới vào inventory_items */}
+      {newItemModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-slate-800">Thêm vật tư mới</h3>
+              <button onClick={() => setNewItemModal(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Mã vật tư *</label>
+                <input
+                  autoFocus
+                  value={newItemForm.code}
+                  onChange={(e) => setNewItemForm((p) => ({ ...p, code: e.target.value }))}
+                  placeholder="VD: VT001"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Tên vật tư *</label>
+                <input
+                  value={newItemForm.name}
+                  onChange={(e) => setNewItemForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Tên đầy đủ của vật tư"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Đơn vị tính</label>
+                <input
+                  value={newItemForm.unit}
+                  onChange={(e) => setNewItemForm((p) => ({ ...p, unit: e.target.value }))}
+                  placeholder="Cái, kg, lít..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setNewItemModal(null)}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-600 font-bold rounded-xl text-sm hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleSaveNewItem}
+                disabled={savingNewItem}
+                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm disabled:opacity-50"
+              >
+                {savingNewItem ? "Đang lưu..." : "Lưu vật tư"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Personnel section */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
