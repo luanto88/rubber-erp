@@ -219,12 +219,12 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
   const isBoDoi = record.bo_phan === "Đội xe"
 
   const participants: { name: string; role: string }[] = []
+  if (record.giam_doc) participants.push({ name: record.giam_doc, role: "Giám đốc nhà máy" })
   if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: "BGĐ phụ trách" })
   if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: "Nhân viên kỹ thuật" })
-  if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: "Tổ cơ điện" })
-  if (record.giam_doc) participants.push({ name: record.giam_doc, role: "Giám đốc nhà máy" })
+  if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: "Tổ trưởng cơ điện" })
   record.nguoi_thuc_hien.forEach((n) => {
-    if (n && !participants.find((p) => p.name === n)) participants.push({ name: n, role: "" })
+    if (n && !participants.find((p) => p.name === n)) participants.push({ name: n, role: "Công nhân bảo trì" })
   })
 
   return (
@@ -249,7 +249,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       </div>
 
       {/* Body text */}
-      <div className="text-xs leading-7 space-y-1">
+      <div className="text-xs leading-6 space-y-1">
         <p>
           Hôm nay vào lúc <span className="px-2">{fmtTime(record.tu_gio)}</span> giờ,
           {" "}ngày <span className="px-2">{dd}</span> tháng{" "}
@@ -279,7 +279,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
       {/* Equipment lines */}
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mt-4 text-xs leading-7 space-y-1">
+        <div key={line.id} className="mt-4 text-xs leading-6 space-y-1">
           {record.lines.length > 1 && (
             <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-1">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
@@ -315,12 +315,13 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
             <BlankLine count={line.cac_khac_phuc ? 0 : 2} />
           </div>
 
-          {line.materials.length > 0 && (
-            <div className="mt-2">
-              <p className="font-semibold">Vật tư sử dụng:</p>
-              <MaterialsTable materials={line.materials} showDonGia />
-            </div>
-          )}
+          <div className="mt-2">
+            <p className="font-semibold">Vật tư sử dụng:</p>
+            {line.materials.length > 0
+              ? <MaterialsTable materials={line.materials} showDonGia />
+              : <p className="italic text-xs mt-0.5">Không có</p>
+            }
+          </div>
 
           <div className="flex gap-8 mt-1">
             <p>Chi phí ước tính: <strong>{fmtValue(line.chi_phi_dk, line.loai_tien)}</strong></p>
@@ -332,7 +333,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         </div>
       ))}
 
-      <div className="mt-4 text-xs leading-7">
+      <div className="mt-4 text-xs leading-6">
         <p className="font-semibold">Kết luận và những kiến nghị lên Giám đốc nhà máy{" "}
           <span className="font-normal italic">(đối với những trường hợp không khắc phục ngay được):</span>
         </p>
@@ -389,7 +390,7 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
-      <div className="text-xs leading-7 space-y-2">
+      <div className="text-xs leading-6 space-y-2">
         <p>
           <strong>Kính gửi:</strong> Giám đốc Nhà máy chế biến Phước Hòa Kampong Thom
         </p>
@@ -488,7 +489,7 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       </div>
 
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mb-4 text-xs leading-7">
+        <div key={line.id} className="mb-4 text-xs leading-6">
           {record.lines.length > 1 && (
             <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
@@ -505,7 +506,7 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         </div>
       ))}
 
-      <div className="text-xs leading-7 space-y-1">
+      <div className="text-xs leading-6 space-y-1">
         <p>
           Đơn vị quản lý, sử dụng:{" "}
           <span>Nhà máy chế biến Phước Hòa Kampong Thom</span>
@@ -943,6 +944,9 @@ export default function MaintenancePrintPage() {
 
   return (
     <>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+      <link href="https://fonts.googleapis.com/css2?family=Tinos:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -950,7 +954,10 @@ export default function MaintenancePrintPage() {
           body { font-size: 11pt; }
           .print\\:page-break-before-always { page-break-before: always; }
         }
-        .print-page { max-width: 800px; margin: 0 auto; padding: 16px; }
+        .print-page {
+          max-width: 800px; margin: 0 auto; padding: 16px;
+          font-family: 'Tinos', 'Times New Roman', Times, serif !important;
+        }
         @media screen {
           body { background: #f1f5f9; }
           .print-page { background: white; box-shadow: 0 2px 12px rgba(0,0,0,.12); border-radius: 8px; padding: 40px 48px; margin-bottom: 24px; }
