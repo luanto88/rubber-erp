@@ -2,12 +2,14 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map, Lock, Unlock, Upload } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
   uid: string
   _date: string
+  day_chuyen?: string
   so_xe: string
   chuyen: number
   tai_xe: string
@@ -55,9 +57,6 @@ type GeoJsonFeature = {
 }
 
 // ─── Master Data ──────────────────────────────────────────────────────────────
-const FACTORY_LAT = 12.581870
-const FACTORY_LNG = 105.497249
-
 type VehicleInfo = { key: string; ten: string; loai: string; ma_hieu: string; tai_xe: string }
 const VEHICLES: VehicleInfo[] = [
   { key:"xe001", ten:"Cozon nội bộ 1B",      loai:"Cozon nội bộ",     ma_hieu:"1B",  tai_xe:"Sreng Seng Hoang" },
@@ -137,10 +136,6 @@ const DIEM_GN: DiemGN[] = [
 const XU_LY_OPTS = ["Xé","Không xé","Hỗn hợp"]
 const DRIVERS = [...new Set(VEHICLES.map(v => v.tai_xe))].sort()
 
-function getAllowedDoi(diemGn: string[]): number[] {
-  return [...new Set(diemGn.map(d => DIEM_GN.find(g => g.ma_lo === d)?.doi ?? 0).filter(x => x > 0))]
-}
-
 // ─── Manhattan distance calc ──────────────────────────────────────────────────
 function calcManhattanKm(stops: string[]) {
   if (stops.length === 0) return 0
@@ -191,6 +186,7 @@ function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
 const emptyRow = (): DxRow => ({
   uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
   _date: new Date().toISOString().slice(0,10),
+  day_chuyen: "Mủ tạp",
   so_xe: "", chuyen: 1, tai_xe: "",
   diem_gn: [], phien: [], lo_thu_hoach: [],
   xu_ly: "Xé", lo_trinh: [],
@@ -203,6 +199,18 @@ const emptyRow = (): DxRow => ({
   ngan_ref: [],
   locked: false,
 })
+
+function inferDayChuyenFromRows(rows: DxRow[] | undefined, fallback = "Mủ tạp") {
+  if (!rows || rows.length === 0) return fallback
+  const explicit = rows.find(r => r.day_chuyen)?.day_chuyen
+  if (explicit) return explicit
+  const hasMuNuoc = rows.some(r =>
+    Boolean((r.kl_mn || "").trim()) ||
+    Boolean((r.drc_mn || "").trim()) ||
+    Boolean((r.kl_mnk || "").trim())
+  )
+  return hasMuNuoc ? "Mủ nước" : fallback
+}
 
 // ─── MultiSelect inline dropdown ─────────────────────────────────────────────
 function MultiSelect({ options, selected, onChange, placeholder }: {
@@ -302,6 +310,7 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function DispatchPage() {
   const [entries, setEntries]     = useState<DispatchEntry[]>([])
+  const [deliveryPoints, setDeliveryPoints] = useState<DiemGN[]>(DIEM_GN)
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
   const [search, setSearch]       = useState("")
@@ -335,8 +344,38 @@ export default function DispatchPage() {
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
+  const loadDeliveryPoints = useCallback(async (fid: string) => {
+    const { data, error } = await supabase
+      .from("dispatch_delivery_points")
+      .select("ma_lo, lat, lng, doi, phien_a, phien_b, phien_c, phien_d")
+      .eq("factory_id", fid)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("ma_lo", { ascending: true })
+
+    if (error) {
+      console.error("Không tải được điểm giao nhận từ DB:", error)
+      setDeliveryPoints(DIEM_GN)
+      return
+    }
+
+    setDeliveryPoints(normalizeDeliveryPoints(data))
+  }, [])
+
+  const resolveLoThuHoach = useCallback((diemGn: string[], phien: string[], points = deliveryPoints) => {
+    return buildLoThuHoachFromPoints(diemGn, phien, points)
+  }, [deliveryPoints])
+
+  const resolveAllowedDoi = useCallback((diemGn: string[]) => {
+    return getAllowedDoiFromPoints(deliveryPoints, diemGn)
+  }, [deliveryPoints])
+
+  const resolveSoKm = useCallback((stops: string[]) => {
+    return calcManhattanKmFromPoints(stops, deliveryPoints)
+  }, [deliveryPoints])
+
   // ── Load ──────────────────────────────────────────────────────────────────
-  const loadData = useCallback(async (fid: string) => {
+  const loadData = useCallback(async (fid: string, points = deliveryPoints) => {
     setLoading(true)
     try {
       let q = supabase.from("dispatch_entries")
@@ -351,11 +390,13 @@ export default function DispatchPage() {
     // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
     const rehydrated = raw.map(e => ({
       ...e,
+      day_chuyen: e.day_chuyen || inferDayChuyenFromRows(e.rows),
       rows: (e.rows || []).map(r => ({
         ...r,
+        day_chuyen: r.day_chuyen || e.day_chuyen || inferDayChuyenFromRows(e.rows),
         lo_thu_hoach: r.lo_thu_hoach?.length
           ? r.lo_thu_hoach
-          : buildLoThuHoach(r.diem_gn || [], r.phien || [])
+          : resolveLoThuHoach(r.diem_gn || [], r.phien || [], points)
       }))
     }))
 
@@ -382,7 +423,7 @@ export default function DispatchPage() {
     } finally {
       setLoading(false)
     }
-  }, [filterFrom, filterTo])
+  }, [deliveryPoints, filterFrom, filterTo, resolveLoThuHoach])
 
   // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadData trong deps
   useEffect(() => {
@@ -406,8 +447,14 @@ export default function DispatchPage() {
 
   // Reload khi factoryId hoặc filter thay đổi
   useEffect(() => {
-    if (factoryId) void loadData(factoryId)
-  }, [factoryId, loadData])
+    if (!factoryId) return
+    void loadDeliveryPoints(factoryId)
+  }, [factoryId, loadDeliveryPoints])
+
+  useEffect(() => {
+    if (!factoryId) return
+    void loadData(factoryId, deliveryPoints)
+  }, [deliveryPoints, factoryId, loadData])
 
   // ── Filtered ──────────────────────────────────────────────────────────────
   const filtered = entries.filter(e =>
@@ -447,7 +494,7 @@ export default function DispatchPage() {
       setFormRows([emptyRow()])
     }
     setFormCN("PEFC CS")
-    setFormDayChuyen(latest?.day_chuyen || "Mủ tạp")
+    setFormDayChuyen(latest?.day_chuyen || inferDayChuyenFromRows(latest?.rows))
     setEditId(null)
     setView("add")
   }
@@ -457,7 +504,7 @@ export default function DispatchPage() {
     setEditId(entry.id)
     setFormNgay(entry.ngay ? toISO(entry.ngay) : new Date().toISOString().slice(0,10))
     setFormCN(entry.chung_nhan || "PEFC CS")
-    setFormDayChuyen(entry.day_chuyen || "Mủ tạp")
+    setFormDayChuyen(entry.day_chuyen || inferDayChuyenFromRows(entry.rows))
     setFormRows(entry.rows?.length ? entry.rows.map(r => ({ ...r })) : [emptyRow()])
     setView("edit")
   }
@@ -471,8 +518,12 @@ export default function DispatchPage() {
         factory_id: factoryId,
         ngay: formNgay,
         chung_nhan: formCN,
-        day_chuyen: formDayChuyen,
-        rows: formRows.map((r,i) => ({ ...r, uid: r.uid || `r_${i}_${Date.now()}`, _date: formNgay })),
+        rows: formRows.map((r,i) => ({
+          ...r,
+          uid: r.uid || `r_${i}_${Date.now()}`,
+          _date: formNgay,
+          day_chuyen: formDayChuyen,
+        })),
       }
       if (editId) {
         const { error } = await supabase.from("dispatch_entries").update(payload).eq("id", editId)
@@ -538,10 +589,10 @@ export default function DispatchPage() {
 
       // Khi Điểm GN thay đổi: lọc lộ trình theo đội
       if (field === "diem_gn") {
-        const allowed = getAllowedDoi(val as string[])
+        const allowed = resolveAllowedDoi(val as string[])
         if (allowed.length > 0) {
           next.lo_trinh = next.lo_trinh.filter(lt => {
-            const d = DIEM_GN.find(g => g.ma_lo === lt)
+            const d = deliveryPoints.find(g => g.ma_lo === lt)
             return d && allowed.includes(d.doi)
           })
         }
@@ -550,11 +601,11 @@ export default function DispatchPage() {
       // Auto-calc khoảng cách Manhattan khi lộ trình / điểm GN thay đổi
       if (field === "lo_trinh" || field === "diem_gn") {
         const stops = field === "lo_trinh" ? val as string[] : next.lo_trinh
-        next.so_km = calcManhattanKm(stops.length > 0 ? stops : (next.diem_gn || []))
+        next.so_km = resolveSoKm(stops.length > 0 ? stops : (next.diem_gn || []))
       }
 
       if (field === "phien" || field === "diem_gn") {
-        next.lo_thu_hoach = buildLoThuHoach(
+        next.lo_thu_hoach = resolveLoThuHoach(
           field === "diem_gn" ? val as string[] : next.diem_gn,
           field === "phien"   ? val as string[] : next.phien,
         )
@@ -626,7 +677,7 @@ export default function DispatchPage() {
         phien: phiens,
         lo_thu_hoach: buildLoThuHoach(dgns, phiens), xu_ly: xu_ly.trim() || "Xé",
         lo_trinh: lo_trinh_raw.split(",").map(s => s.trim()).filter(Boolean),
-        so_km: parseFloat(so_km) || 0,
+        so_km: parseFloat(so_km) || calcManhattanKm(dgns),
         kl_ct, drc_c, kl_ck: autoCalcKLK(kl_ct, drc_c),
         kl_dct, drc_dc, kl_dck: autoCalcKLK(kl_dct, drc_dc),
         kl_dkt: "", drc_dk, kl_dkk: "",
@@ -1039,7 +1090,7 @@ export default function DispatchPage() {
                 <td className="px-2 py-1.5 min-w-[140px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.diem_gn.join(", ") || "—"}</span>
-                    : <MultiSelect options={DIEM_GN.map(d => d.ma_lo)} selected={row.diem_gn}
+                    : <MultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn}
                         onChange={val => updateRow(idx,"diem_gn",val)} placeholder="Chọn điểm..."/>
                   }
                 </td>
@@ -1083,10 +1134,10 @@ export default function DispatchPage() {
                   {row.locked
                     ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "—"}</span>
                     : (() => {
-                        const allowed = getAllowedDoi(row.diem_gn)
+                        const allowed = resolveAllowedDoi(row.diem_gn)
                         const opts = allowed.length > 0
-                          ? DIEM_GN.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
-                          : DIEM_GN.map(d => d.ma_lo)
+                          ? deliveryPoints.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
+                          : deliveryPoints.map(d => d.ma_lo)
                         return <MultiSelect options={opts} selected={row.lo_trinh}
                           onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
                       })()

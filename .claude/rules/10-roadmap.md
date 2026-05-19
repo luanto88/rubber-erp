@@ -1,33 +1,34 @@
 ---
-description: Roadmap phat trien
+description: Roadmap phát triển
 ---
 
 # Roadmap
 
-## Phase A - Chuan hoa nen tang
+## Phase A - Chuẩn hóa nền tảng
 
-- Chuan hoa tai lieu `CLAUDE.md` va `rules`
-- Dua matrix cau hinh nha may vao spec rieng
-- Dua master data va phan quyen ve `Cai dat`
-- Chuan hoa dang ky, duyet tai khoan, permission guard
+- Chuẩn hóa tài liệu `CLAUDE.md` và `rules`
+- Đưa matrix cấu hình nhà máy vào spec riêng
+- Đưa master data và phân quyền về `Cài đặt`
+- Chuẩn hóa đăng ký, duyệt tài khoản, permission guard
 
-## Phase B - Hoan thien nghiep vu
+## Phase B - Hoàn thiện nghiệp vụ
 
-- Chuan hoa cau hinh runtime trong database thay vi hard-code
-- Hoan thien quan he `Thanh pham <-> Xuat hang`
-- Hoan thien quan ly remaining va rollback trang thai lo khi xoa don
-- Chuan hoa `Tham` ve 2 gia tri `Cu`, `Moi`
+- Chuẩn hóa cấu hình runtime trong database thay vì hard-code
+- Đưa danh mục điểm giao nhận của điều xe sang bảng `dispatch_delivery_points` và quản trị trong `Cài đặt`
+- Hoàn thiện quan hệ `Thành phẩm <-> Xuất hàng`
+- Hoàn thiện quản lý remaining và rollback trạng thái lô khi xóa đơn
+- Chuẩn hóa `Thảm` về 2 giá trị `Cũ`, `Mới`
 
-## Phase C - Dashboard va bao cao
+## Phase C - Dashboard và báo cáo
 
-- Bieu do san luong theo thang
-- Bieu do KL kho theo chung loai
-- Bieu do ti le dat kiem nghiem
-- Bao cao tong hop / PDF / in an
+- Biểu đồ sản lượng theo tháng
+- Biểu đồ KL khô theo chủng loại
+- Biểu đồ tỷ lệ đạt kiểm nghiệm
+- Báo cáo tổng hợp / PDF / in ấn
 
-## Phase D - Tiep tuc mo rong
+## Phase D - Tiếp tục mở rộng
 
-- EUDR da trien khai, tiep tuc hoan thien
-- Bao tri may moc
-- Quan ly kho vat tu
-- Nang cap responsive va browser compatibility
+- EUDR đã triển khai, tiếp tục hoàn thiện
+- Bảo trì máy móc
+- Quản lý kho vật tư
+- Nâng cấp responsive và browser compatibility

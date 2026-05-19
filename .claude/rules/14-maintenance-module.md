@@ -125,7 +125,7 @@ dvt          TEXT
 created_at
 ```
 
-**Auto-save**: Khi lưu biên bản, mọi tên vật tư `ben_ngoai` chưa có trong master list sẽ được tự động insert vào bảng này để hiện ra ở datalist lần sau.
+**Lưu ý**: Bảng này dùng làm gợi ý tên vật tư bên ngoài. UI hiện tại không còn dùng `<datalist>` — xem mục Vật tư trong Quy tắc UI.
 
 ### `maintenance_records` — Biên bản (document header)
 
@@ -204,8 +204,8 @@ line_id               UUID → maintenance_record_lines
 record_id             UUID → maintenance_records   -- dễ query tổng hợp
 factory_id            UUID
 nguon                 TEXT    -- trong_kho | ben_ngoai
-inventory_item_id     UUID    -- → inventory_items (nullable, chỉ trong_kho)
-ten_vat_tu            TEXT    -- snapshot tên
+inventory_item_id     UUID    -- → inventory_items (nullable); lưu cho CẢ trong_kho VÀ ben_ngoai
+ten_vat_tu            TEXT    -- snapshot tên tại thời điểm lưu
 dvt                   TEXT
 so_luong              NUMERIC
 don_gia               NUMERIC    -- chỉ ben_ngoai
@@ -213,6 +213,8 @@ loai_tien             TEXT       -- chỉ ben_ngoai
 thanh_tien            NUMERIC    -- so_luong * don_gia
 sort_order            INTEGER
 ```
+
+**Quan trọng**: `inventory_item_id` được lưu cho cả hai loại nguồn (`trong_kho` và `ben_ngoai`) — không chỉ `trong_kho`. Lý do: vật tư bên ngoài cũng được chọn từ `inventory_items` thông qua `<select>`. `ten_vat_tu` vẫn là snapshot bất biến.
 
 ### Quan hệ bảng
 
@@ -242,18 +244,22 @@ Biên bản `cho_duyet` chỉ được sửa bởi:
 - **Người tạo biên bản** (`nguoi_tao` khớp với `full_name` hoặc `username` của user hiện tại), **hoặc**
 - **User có quyền `maintenance.approve`**
 
-Biên bản `da_duyet` hoặc `huy`: read-only với tất cả mọi người.
+Biên bản `da_duyet`: read-only với tất cả, **ngoại trừ Admin** (`user.role === "admin"`).  
+Biên bản `huy`: read-only hoàn toàn với mọi người.
 
 ```typescript
+const isAdmin = user?.role === "admin"
 const isCreator = isNew || (
   record?.nguoi_tao != null &&
   (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
 )
 const isReadOnly =
-  record?.trang_thai === "da_duyet" ||
   record?.trang_thai === "huy" ||
-  (!isNew && !isCreator && !canApprove)
+  (record?.trang_thai === "da_duyet" && !isAdmin) ||
+  (!isNew && !isCreator && !isAdmin)
 ```
+
+**Quy tắc `isAdmin`**: Dùng `user?.role === "admin"` (không dùng permission code riêng). Admin có thể thêm/sửa/xóa vật tư và chỉnh sửa biên bản đã duyệt. Biên bản `huy` là trường hợp duy nhất admin cũng không sửa được.
 
 ---
 
@@ -394,23 +400,46 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 ### Cấu trúc mẫu in
 
 **F13 (`PrintSuCo`)** — Biên bản kiểm tra sự cố (KHXD-QT02-F13):
-- Header: Tên NM (9px, compact) + Bộ phận | QR code góc trên phải; tiêu đề 13pt
+- Header: Tên NM (12px, màu #000000) + Bộ phận | QR code góc trên phải; tiêu đề 13pt
 - "Hôm nay vào lúc ... giờ, ngày ... tháng ... năm ..."
 - "Chúng tôi gồm:" — thứ tự cố định từ lớn đến nhỏ:
   1. `giam_doc` → chức vụ từ `staffMap` hoặc "Giám đốc nhà máy"
   2. `bgd_phu_trach` → chức vụ từ `staffMap` hoặc "BGĐ phụ trách"
   3. `nv_phu_trach` (nếu có) → chức vụ từ `staffMap` hoặc "Nhân viên phụ trách"
   4. `phu_trach_bao_tri` (nếu có) → chức vụ từ `staffMap` hoặc "Phụ trách bảo trì"
-  - Nếu cả 3 và 4 đều trống → thêm placeholder `"................................."` – Tổ trưởng cơ điện
-  - **Không** thêm `nguoi_tao`, **Không** thêm `nguoi_thuc_hien` (công nhân bảo trì)
+  5. **Tổ trưởng cơ điện từ `nguoi_thuc_hien`** (nếu có): lọc `staffMap.get(name)` chứa "tổ trưởng" **VÀ** "cơ điện" → thêm người thật vào cuối danh sách với tên và chức vụ thật
+  - Nếu cả 3, 4 đều trống **VÀ** không tìm được Tổ trưởng cơ điện từ `nguoi_thuc_hien` → thêm placeholder `"................................."` – Tổ trưởng cơ điện
+  - **Không** thêm `nguoi_tao`, **Không** thêm `nguoi_thuc_hien` (trừ Tổ trưởng cơ điện như trên)
   - Placeholder name="" hiển thị dòng gạch để ký tay
-- Per thiết bị: Tên máy, số hiệu, Tình trạng sự cố, Nguyên nhân, Cách khắc phục, bảng vật tư
-  - Nội dung sau dấu hai chấm viết liền trên cùng dòng với label: "Tình trạng sự cố: [nội dung]"
+
+```typescript
+const toTruongCoDien = record.nguoi_thuc_hien.filter(name => {
+  const role = staffMap.get(name)?.toLowerCase() || ""
+  return role.includes("tổ trưởng") && role.includes("cơ điện")
+})
+const participants: { name: string; role: string }[] = []
+if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
+if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+for (const name of toTruongCoDien) {
+  participants.push({ name, role: staffMap.get(name) || "Tổ trưởng cơ điện" })
+}
+if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length === 0)
+  participants.push({ name: "", role: "Tổ trưởng cơ điện" })
+```
+
+- Per thiết bị: Tên máy, số hiệu, Tình trạng sự cố, Nguyên nhân, Cách khắc phục, vật tư
+  - Nội dung sau dấu hai chấm viết liền trên **cùng dòng** với label: "Tình trạng sự cố: [nội dung]"
   - Nếu trống: label hiện trước, blank lines bên dưới để ký tay
   - **Không hiển thị chi phí ước tính** trong F13 (chi phí thuộc F10)
-  - Vật tư sử dụng: hiện bảng nếu có; hiện italic "Không có" nếu trống
-- "Kết luận và những kiến nghị lên Giám đốc nhà máy"
-- Ký tên 4 cột: BGĐ phụ trách | NV kỹ thuật | Tổ cơ điện | Giám đốc nhà máy
+  - **"Vật tư sử dụng:"** và trạng thái nằm trên **cùng 1 dòng**:
+    - Có vật tư → hiện `MaterialsTable` ngay bên dưới label
+    - Không có → `<span className="italic">Không có</span>` inline ngay sau label
+- **"Kết luận và những kiến nghị..."**: label + nội dung viết **inline cùng dòng**:
+  - Có `ghi_chu` → in nội dung liền sau label
+  - Trống → `<BlankLine count={3} />` bên dưới label
+- Ký tên 4 cột: BGĐ phụ trách | Nhân viên kỹ thuật | Tổ cơ điện | Giám đốc nhà máy
 - Footer: `KHXD-QT02-F13 (01-15/05/2026)`
 
 **Kỹ thuật `staffMap` (dùng cho F13 và F15)**:
@@ -418,6 +447,8 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 - Build `Map<string, string>` với key = `ten`, value = `chuc_vu`
 - Truyền vào `PrintSuCo`, `PrintF15` qua prop `staffMap`
 - Wrappers `PrintDeNghi`, `PrintSuCoNho` nhận và truyền tiếp `staffMap` xuống
+- **Dùng để tra chức vụ**: `staffMap.get(name)` → tên chức vụ thật; fallback là label mặc định theo vai trò
+- **Lọc Tổ trưởng cơ điện**: `staffMap.get(name)?.toLowerCase()` chứa `"tổ trưởng"` **VÀ** `"cơ điện"` → người thật; không phụ thuộc string so sánh cứng
 
 **F10 (`PrintF10`)** — Giấy đề nghị sửa chữa (KHXD-QT02-F10):
 - "Kampong Thom, ngày ... tháng ... năm ..." (căn phải)
@@ -441,14 +472,15 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
   3. `nv_phu_trach` (nếu có) → staffMap hoặc "Nhân viên phụ trách"
   4. `phu_trach_bao_tri` (nếu có) → staffMap hoặc "Phụ trách bảo trì"
   - Nếu cả 3 và 4 đều trống → thêm dòng `Ông: "................................." – Tổ trưởng cơ điện`
-  - **Không** hiển thị `nguoi_thuc_hien`
+  - **Không** hiển thị `nguoi_thuc_hien` trong F15
 - **"Khối lượng đã sửa chữa, thay thế phụ tùng:"** viết **inline** cùng dòng với nội dung (`cac_khac_phuc` hoặc `noi_dung`):
   - 1 thiết bị: `<span>Khối lượng đã sửa chữa...: </span>[nội dung]` trên cùng 1 dòng
   - Nhiều thiết bị: mỗi device có số thứ tự + tên, rồi label + nội dung inline bên dưới
   - Bảng vật tư (nếu có) hiện bên dưới từng device (không hiện Đơn giá / Nguồn)
 - Checkbox ☐ Đạt yêu cầu / ☐ Không đạt
-- Giá trị sửa chữa, Kết luận
-- Ký tên 4 cột: BGĐ phụ trách | NV phụ trách | Người nghiệm thu | Giám đốc nhà máy
+- Giá trị sửa chữa
+- **Kết luận**: 2 dòng kẻ, mỗi dòng cao `2rem` (1.5x line-height chuẩn) với `border-bottom` nhạt để ký tay
+- Ký tên **3 cột** (đã bỏ "Người nghiệm thu"): BGĐ phụ trách | Nhân viên phụ trách | Giám đốc nhà máy
 - Footer: `KHXD-QT02-F15 (01-15/05/2026)`
 
 **F01 (`PrintLyLich`)** — Lý lịch máy móc / thiết bị (KHXD-QT02-F01):
@@ -461,7 +493,7 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 
 **Cấu trúc `SignatureRow`**: Chức vụ → khoảng trắng `h-16` (≈2.5 cm để ký tay) → Tên → "(Ký và ghi rõ họ tên)". **Không có đường kẻ ngang** giữa khoảng ký và tên (`border-t` đã bỏ).
 
-**`CompanyHeader`**: font `9px` (nhỏ hơn ~30% so với nội dung), không có `tracking-wide`. Mục đích: dành nhiều không gian hơn cho nội dung biên bản.
+**`CompanyHeader`**: font `12px`, màu `#000000`, không có `tracking-wide`. Tên công ty in đậm uppercase, dòng bộ phận bên dưới cùng cỡ chữ.
 
 **Typography toàn mẫu**:
 - Body text: `font-size: 12pt` (CSS `@page`), `leading-5`, `space-y-0.5`
@@ -544,11 +576,14 @@ src/app/dashboard/maintenance/
 - 6 slot ảnh cố định per dòng — upload qua shared hidden `<input type="file">` + `activeSlotRef` track slot đang upload
 
 ### Vật tư
-- `ben_ngoai`: `<input>` với `<datalist>` từ `maintenance_external_materials`; tên mới tự động được lưu vào master khi save biên bản
-- `trong_kho`: `<select>` từ `inventory_items` với thông tin tồn kho
+- **Cả hai loại** `trong_kho` và `ben_ngoai` đều dùng `<select>` dropdown chọn từ `inventory_items`
+- Mỗi loại có nút **"+ Thêm mới"** (text-[10px], emerald-600) mở modal tạo vật tư mới trực tiếp vào `inventory_items`
+- Modal tạo vật tư mới có 3 trường: Mã vật tư (required), Tên vật tư (required), Đơn vị tính; sau khi lưu tự động chọn vào dòng vật tư đang mở, đóng modal
+- `inventory_item_id` được lưu cho **cả** `trong_kho` và `ben_ngoai` — payload save không phân biệt loại nguồn
 - Tồn kho lấy từ `inventory_stock_balances.on_hand` (không phải `quantity_on_hand`)
 - **Cảnh báo inline**: Khi `so_luong > currentStock`, ô nhập chuyển viền đỏ và hiện text đỏ bên dưới: `"Vượt tồn (X)"`
 - **Chặn phê duyệt**: `handleApprove` validate toàn bộ vật tư `trong_kho` trước khi tạo phiếu xuất; hiện `saveError` và return sớm nếu bất kỳ vật tư nào vượt tồn
+- `ben_ngoai` vẫn có trường Đơn giá và Loại tiền; `trong_kho` chỉ có Số lượng (không có Đơn giá)
 
 ### Nhân sự
 - `nguoi_thuc_hien`: chip multi-select, chỉ hiển thị `workerStaff`

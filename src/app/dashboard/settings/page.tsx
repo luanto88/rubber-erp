@@ -97,7 +97,7 @@ type UserEditor = {
 
 type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data" | "maintenance"
 
-type FactoryConfigTab = "warehouses" | "categories" | "items"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points"
 
 type MaintenanceTab = "assets" | "staff" | "ext-materials"
 
@@ -177,6 +177,34 @@ type InvItemForm = {
   min_stock: string; max_stock: string; is_active: boolean
 }
 
+type DispatchDeliveryPointRow = {
+  id: string
+  factory_id: string
+  ma_lo: string
+  doi: number
+  lat: number
+  lng: number
+  phien_a: string[]
+  phien_b: string[]
+  phien_c: string[]
+  phien_d: string[]
+  sort_order: number
+  is_active: boolean
+}
+
+type DispatchDeliveryPointForm = {
+  ma_lo: string
+  doi: string
+  lat: string
+  lng: string
+  phien_a: string
+  phien_b: string
+  phien_c: string
+  phien_d: string
+  sort_order: string
+  is_active: boolean
+}
+
 const SYSTEM_CODES = ["cs", "m"]
 
 function emptyForm(): SuffixForm {
@@ -192,6 +220,28 @@ function emptyFactoryInfo(): FactoryInfo {
     website: "",
     country_en: "",
   }
+}
+
+function emptyDeliveryPointForm(sortOrder = "0"): DispatchDeliveryPointForm {
+  return {
+    ma_lo: "",
+    doi: "",
+    lat: "",
+    lng: "",
+    phien_a: "",
+    phien_b: "",
+    phien_c: "",
+    phien_d: "",
+    sort_order: sortOrder,
+    is_active: true,
+  }
+}
+
+function parsePointPhaseList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function labelPermission(code: string) {
@@ -290,17 +340,19 @@ export default function SettingsPage() {
   const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
   const [invCategories, setInvCategories] = useState<InvCategoryRow[]>([])
   const [invItems, setInvItems] = useState<InvItemRow[]>([])
+  const [deliveryPoints, setDeliveryPoints] = useState<DispatchDeliveryPointRow[]>([])
   const [configLoading, setConfigLoading] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
 
-  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | null>(null)
+  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | "delivery-point" | null>(null)
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
   const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+  const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState("")
-  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item"; id: string; label: string } | null>(null)
+  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point"; id: string; label: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -364,11 +416,12 @@ export default function SettingsPage() {
   const loadConfigData = useCallback(async (fid: string) => {
     setConfigLoading(true)
     try {
-      const [wRes, cRes, iItemsRes, iCatCountRes] = await Promise.all([
+      const [wRes, cRes, iItemsRes, iCatCountRes, dRes] = await Promise.all([
         supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
+        supabase.from("dispatch_delivery_points").select("id, factory_id, ma_lo, doi, lat, lng, phien_a, phien_b, phien_c, phien_d, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("ma_lo"),
       ])
 
       const nextWarehouses = (wRes.data || []) as InvWarehouseRow[]
@@ -386,9 +439,12 @@ export default function SettingsPage() {
         warehouseCodes: (row.default_warehouse_ids || []).map((id) => warehouseCodeMap.get(id) || id),
       }))
 
+      const nextDeliveryPoints = (dRes.data || []) as DispatchDeliveryPointRow[]
+
       setInvWarehouses(nextWarehouses)
       setInvCategories(nextCategories)
       setInvItems(nextItems)
+      setDeliveryPoints(nextDeliveryPoints)
       setConfigLoaded(true)
     } finally {
       setConfigLoading(false)
@@ -537,11 +593,53 @@ export default function SettingsPage() {
     }
   }
 
+  const saveDeliveryPoint = async () => {
+    if (!factoryId) return
+    if (!deliveryPointForm.ma_lo.trim()) { setConfigError("Mã điểm không được để trống"); return }
+    if (!deliveryPointForm.doi.trim()) { setConfigError("Đội không được để trống"); return }
+    if (!deliveryPointForm.lat.trim() || Number.isNaN(Number(deliveryPointForm.lat))) { setConfigError("Vĩ độ không hợp lệ"); return }
+    if (!deliveryPointForm.lng.trim() || Number.isNaN(Number(deliveryPointForm.lng))) { setConfigError("Kinh độ không hợp lệ"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        ma_lo: deliveryPointForm.ma_lo.trim().toUpperCase(),
+        doi: Number(deliveryPointForm.doi),
+        lat: Number(deliveryPointForm.lat),
+        lng: Number(deliveryPointForm.lng),
+        phien_a: parsePointPhaseList(deliveryPointForm.phien_a),
+        phien_b: parsePointPhaseList(deliveryPointForm.phien_b),
+        phien_c: parsePointPhaseList(deliveryPointForm.phien_c),
+        phien_d: parsePointPhaseList(deliveryPointForm.phien_d),
+        sort_order: Number(deliveryPointForm.sort_order) || 0,
+        is_active: deliveryPointForm.is_active,
+      }
+      const result = configEditId
+        ? await supabase.from("dispatch_delivery_points").update(payload).eq("id", configEditId).eq("factory_id", factoryId)
+        : await supabase.from("dispatch_delivery_points").insert(payload)
+      if (result.error) { setConfigError(result.error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
   const deleteConfigItem = async () => {
     if (!configDelConfirm || !factoryId) return
     setConfigSaving(true)
     try {
-      const table = configDelConfirm.type === "warehouse" ? "inventory_warehouses" : configDelConfirm.type === "category" ? "inventory_item_categories" : "inventory_items"
+      const table =
+        configDelConfirm.type === "warehouse"
+          ? "inventory_warehouses"
+          : configDelConfirm.type === "category"
+            ? "inventory_item_categories"
+            : configDelConfirm.type === "item"
+              ? "inventory_items"
+              : "dispatch_delivery_points"
       await supabase.from(table).delete().eq("id", configDelConfirm.id).eq("factory_id", factoryId)
       setConfigDelConfirm(null)
       void loadConfigData(factoryId)
@@ -1197,15 +1295,15 @@ export default function SettingsPage() {
               {canManageSettings && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => downloadConfigTemplate(configTab)}
+                    onClick={() => { if (configTab !== "delivery-points") downloadConfigTemplate(configTab) }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
                     title="Tải file mẫu CSV để điền dữ liệu và import"
                   >
                     <Download size={13} /> Tải mẫu
                   </button>
                   <button
-                    onClick={() => { setImportResult(null); importFileRef.current?.click() }}
-                    disabled={importing}
+                    onClick={() => { if (configTab === "delivery-points") return; setImportResult(null); importFileRef.current?.click() }}
+                    disabled={importing || configTab === "delivery-points"}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
                   >
                     <Upload size={13} /> {importing ? "Đang nhập..." : "Nhập CSV"}
@@ -1221,10 +1319,14 @@ export default function SettingsPage() {
                         setConfigEditId(null)
                         setInvCategoryForm({ code: "", name: "", sort_order: String(invCategories.length + 1), is_active: true })
                         setConfigModal("category")
-                      } else {
+                      } else if (configTab === "items") {
                         setConfigEditId(null)
                         setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
                         setConfigModal("item")
+                      } else {
+                        setConfigEditId(null)
+                        setDeliveryPointForm(emptyDeliveryPointForm(String(deliveryPoints.length + 1)))
+                        setConfigModal("delivery-point")
                       }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
@@ -1246,19 +1348,27 @@ export default function SettingsPage() {
                     {key === "warehouses" ? "Kho" : key === "categories" ? "Nhóm vật tư" : "Vật tư / Hóa chất"}
                   </button>
                 ))}
+                <button
+                  onClick={() => { setConfigTab("delivery-points"); setImportResult(null) }}
+                  className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === "delivery-points" ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
+                >
+                  Điểm giao nhận
+                </button>
               </div>
 
-              <input
-                ref={importFileRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void handleImportFile(file)
-                  e.target.value = ""
-                }}
-              />
+              {configTab !== "delivery-points" && (
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handleImportFile(file)
+                    e.target.value = ""
+                  }}
+                />
+              )}
 
               {importResult && (
                 <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${importResult.errors.length === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
@@ -1351,7 +1461,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
-              ) : (
+              ) : configTab === "items" ? (
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -1389,6 +1499,70 @@ export default function SettingsPage() {
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active }); setConfigModal("item") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setConfigDelConfirm({ type: "item", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã điểm", "Đội", "Tọa độ", "Phiên", "Thứ tự", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {deliveryPoints.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có điểm giao nhận nào</td></tr>
+                    ) : deliveryPoints.map((row) => (
+                      <tr key={row.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.ma_lo}</td>
+                        <td className="px-4 py-3 text-slate-700 font-semibold">Đội {row.doi}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{row.lat}, {row.lng}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          A:{row.phien_a.length} · B:{row.phien_b.length} · C:{row.phien_c.length} · D:{row.phien_d.length}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{row.sort_order}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                            {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setConfigError("")
+                                  setConfigEditId(row.id)
+                                  setDeliveryPointForm({
+                                    ma_lo: row.ma_lo,
+                                    doi: String(row.doi),
+                                    lat: String(row.lat),
+                                    lng: String(row.lng),
+                                    phien_a: row.phien_a.join(", "),
+                                    phien_b: row.phien_b.join(", "),
+                                    phien_c: row.phien_c.join(", "),
+                                    phien_d: row.phien_d.join(", "),
+                                    sort_order: String(row.sort_order),
+                                    is_active: row.is_active,
+                                  })
+                                  setConfigModal("delivery-point")
+                                }}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setConfigDelConfirm({ type: "delivery-point", id: row.id, label: row.ma_lo })}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
                             </div>
                           )}
                         </td>
@@ -1753,7 +1927,7 @@ export default function SettingsPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
             <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
-            <p className="text-sm text-slate-600 mb-6">Xóa <span className="font-bold text-red-600">"{maintDelConfirm.label}"</span>? Thao tác không thể hoàn tác.</p>
+            <p className="text-sm text-slate-600 mb-6">Xóa <span className="font-bold text-red-600">&quot;{maintDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setMaintDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteMaintItem} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
@@ -1962,7 +2136,13 @@ export default function SettingsPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-base font-extrabold text-slate-800">
-                {configModal === "warehouse" ? (configEditId ? "Sửa kho" : "Thêm kho mới") : configModal === "category" ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư") : (configEditId ? "Sửa vật tư" : "Thêm vật tư")}
+                {configModal === "warehouse"
+                  ? (configEditId ? "Sửa kho" : "Thêm kho mới")
+                  : configModal === "category"
+                    ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư")
+                    : configModal === "item"
+                      ? (configEditId ? "Sửa vật tư" : "Thêm vật tư")
+                      : (configEditId ? "Sửa điểm giao nhận" : "Thêm điểm giao nhận")}
               </h2>
               <button onClick={() => setConfigModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
             </div>
@@ -2075,12 +2255,67 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+              {configModal === "delivery-point" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã điểm *</label>
+                      <input value={deliveryPointForm.ma_lo} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, ma_lo: e.target.value.toUpperCase() }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội *</label>
+                      <input value={deliveryPointForm.doi} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, doi: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Vĩ độ *</label>
+                      <input value={deliveryPointForm.lat} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, lat: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Kinh độ *</label>
+                      <input value={deliveryPointForm.lng} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, lng: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên A</label>
+                      <input value={deliveryPointForm.phien_a} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_a: e.target.value }))} placeholder="A1, A2, B1" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên B</label>
+                      <input value={deliveryPointForm.phien_b} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_b: e.target.value }))} placeholder="A1, B2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên C</label>
+                      <input value={deliveryPointForm.phien_c} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_c: e.target.value }))} placeholder="C1, D2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên D</label>
+                      <input value={deliveryPointForm.phien_d} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_d: e.target.value }))} placeholder="D1, E2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                      <input value={deliveryPointForm.sort_order} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" checked={deliveryPointForm.is_active} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang hoạt động
+                      </label>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setConfigModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button
-                onClick={configModal === "warehouse" ? saveConfigWarehouse : configModal === "category" ? saveConfigCategory : saveConfigItem}
+                onClick={configModal === "warehouse" ? saveConfigWarehouse : configModal === "category" ? saveConfigCategory : configModal === "item" ? saveConfigItem : saveDeliveryPoint}
                 disabled={configSaving}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
               >
@@ -2113,3 +2348,4 @@ export default function SettingsPage() {
     </div>
   )
 }
+

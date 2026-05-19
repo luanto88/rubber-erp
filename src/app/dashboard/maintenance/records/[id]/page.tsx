@@ -8,7 +8,7 @@ import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ImagePlus, Loader2, Plus,
   Printer, QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
 } from "lucide-react"
-import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
 import {
@@ -447,21 +447,23 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   const handleUnApprove = async () => {
     if (!factoryId || !id || id === "new") return
-    if (!window.confirm("Hủy phê duyệt? Biên bản sẽ về trạng thái Chờ duyệt để người tạo chỉnh sửa lại.")) return
+    if (!window.confirm("Hủy phê duyệt? Biên bản sẽ về trạng thái Chờ duyệt và phiếu xuất kho sẽ bị hủy (vật tư hoàn về kho).")) return
     setSaving(true); setSaveError(null)
     try {
-      // Hủy phiếu xuất kho liên quan nếu có
+      const session = await getFreshAuthSession()
+      if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
+
+      // Hủy phiếu xuất kho qua RPC để hoàn tồn kho đúng cách
       if (record?.inventory_issue_doc_id) {
-        await supabase
-          .from("inventory_documents")
-          .update({
-            status: "cancelled",
-            cancel_reason: `Hủy phê duyệt biên bản ${record.ma_bb || ""}`,
-            cancelled_at: new Date().toISOString(),
-          })
-          .eq("id", record.inventory_issue_doc_id)
-          .eq("factory_id", factoryId)
+        const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
+          p_factory_id: factoryId,
+          p_document_id: record.inventory_issue_doc_id,
+          p_cancelled_by: session.user.id,
+          p_cancel_reason: `Hủy phê duyệt biên bản ${record.ma_bb || ""}`,
+        })
+        if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
       }
+
       const { error } = await supabase
         .from("maintenance_records")
         .update({
@@ -473,7 +475,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         .eq("id", id)
         .eq("factory_id", factoryId)
       if (error) { setSaveError(error.message); return }
-      setSaveSuccess(`Đã hủy phê duyệt. Biên bản ${record?.ma_bb || ""} về trạng thái Chờ duyệt.`)
+      setSaveSuccess(`Đã hủy phê duyệt. Biên bản ${record?.ma_bb || ""} về trạng thái Chờ duyệt. Tồn kho đã được hoàn nguyên.`)
       void loadRecord(factoryId, id)
     } finally {
       setSaving(false)
@@ -625,12 +627,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (!factoryId || !id || id === "new") return
     setSaving(true); setSaveError(null)
     try {
+      const session = await getFreshAuthSession()
+      if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
       const approverName = user?.full_name || user?.username || null
 
-      // Check if there are trong_kho materials
+      // Chỉ lấy vật tư trong_kho có item id
       const inStockMats = lines.flatMap((l) => l.materials.filter((m) => m.nguon === "trong_kho" && m.inventory_item_id))
 
-      // Validate stock trước khi duyệt
+      // Validate tồn kho trước khi duyệt
       for (const mat of inStockMats) {
         const item = inventoryItems.find((i) => i.id === mat.inventory_item_id)
         if (item && parseFloat(mat.so_luong) > item.currentStock) {
@@ -643,40 +647,44 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       if (inStockMats.length > 0) {
         const docCode = `X-BT-${record?.ma_bb || id}`
-        const assetNames = lines.map((l) => l.ten_tb).filter(Boolean).join(", ")
+        const maBB = record?.ma_bb || id
 
-        // Kiểm tra xem phiếu xuất đã tồn tại chưa (tránh lỗi duplicate key khi retry)
+        // Kiểm tra phiếu xuất đã tồn tại chưa (tránh duplicate khi retry)
         const { data: existingDoc } = await supabase
           .from("inventory_documents")
-          .select("id")
+          .select("id, status")
           .eq("factory_id", factoryId)
           .eq("document_code", docCode)
           .maybeSingle()
 
         if (existingDoc) {
-          // Reuse phiếu xuất cũ — xóa dòng cũ rồi insert lại để đảm bảo đúng
           issueDocId = existingDoc.id
+          // Xóa dòng cũ để insert lại cho đúng
           await supabase.from("inventory_document_lines").delete().eq("document_id", issueDocId)
-        } else {
-          const issuePayload = {
-            factory_id: factoryId,
-            document_type: "export",
-            document_code: docCode,
-            document_date: ngay,
-            status: "posted",
-            notes: `${hangMuc} thiết bị: ${assetNames}`,
-            requester_name: approverName,
+          // Đặt lại về draft nếu đã posted, để post lại
+          if (existingDoc.status !== "draft") {
+            await supabase.from("inventory_documents").update({ status: "draft" }).eq("id", issueDocId)
           }
+        } else {
+          // Tạo phiếu xuất với status = "draft" — RPC sẽ chuyển sang "posted" và trừ tồn
           const { data: issueDoc, error: issueErr } = await supabase
             .from("inventory_documents")
-            .insert(issuePayload)
+            .insert({
+              factory_id: factoryId,
+              document_type: "export",
+              document_code: docCode,
+              document_date: ngay,
+              status: "draft",
+              notes: `Xuất kho cho biên bản sửa chữa/bảo trì số: ${maBB}`,
+              requester_name: approverName,
+            })
             .select("id")
             .single()
           if (issueErr) { setSaveError(`Lỗi tạo phiếu xuất kho: ${issueErr.message}`); return }
           issueDocId = issueDoc.id
         }
 
-        // Insert issue lines
+        // Insert dòng vật tư
         const issueLines = inStockMats.map((m, i) => ({
           document_id: issueDocId,
           factory_id: factoryId,
@@ -687,9 +695,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           line_notes: m.ten_vat_tu,
           sort_order: i,
         }))
-
         const { error: lineErr } = await supabase.from("inventory_document_lines").insert(issueLines)
         if (lineErr) { setSaveError(`Lỗi thêm dòng phiếu xuất: ${lineErr.message}`); return }
+
+        // Ghi sổ — trừ tồn kho thực tế
+        const { error: postErr } = await supabase.rpc("inventory_post_export_document", {
+          p_factory_id: factoryId,
+          p_document_id: issueDocId,
+          p_posted_by: session.user.id,
+        })
+        if (postErr) { setSaveError(`Lỗi ghi sổ phiếu xuất: ${postErr.message}`); return }
       }
 
       const { error: appErr } = await supabase

@@ -1,5 +1,5 @@
 ---
-description: Source of truth va cau hinh nha may cho matrix san pham
+description: Source of truth và cấu hình nhà máy cho matrix sản phẩm
 ---
 
 # Factory Config Matrix
@@ -10,7 +10,7 @@ File:
 
 - `cung_cap_dl/du_lieu_nha_may.xlsx`
 
-la source of truth cao nhat cho:
+là source of truth cao nhất cho:
 
 - `loai_banh`
 - `loai_boc`
@@ -18,102 +18,115 @@ la source of truth cao nhat cho:
 - `loai_pallet_sx`
 - `loai_pallet_xuat`
 
-## Cach dien giai
+## Cách diễn giải
 
-- Excel = du lieu chuan ban dau de seed va doi chieu spec
-- Database = nguon chay thuc te
-- Gia tri mo rong runtime cua tung nha may duoc luu vao database
+- Excel = dữ liệu chuẩn ban đầu để seed và đối chiếu spec
+- Database = nguồn chạy thực tế
+- Giá trị mở rộng runtime của từng nhà máy được lưu vào database
 
-Khong ghi nguoc gia tri runtime vao file Excel.
+Không ghi ngược giá trị runtime vào file Excel.
 
-## Quy tac loc
+## Quy tắc lọc
 
-### Theo nha may
+### Theo nhà máy
 
 - `loai_pallet_xuat`
+- `dispatch_delivery_points`
 
-### Theo nha may + day chuyen + chung loai SP
+### Theo nhà máy + dây chuyền + chủng loại SP
 
 - `loai_banh`
 - `loai_boc`
 - `loai_tham`
 
-### Theo matrix cau hinh nha may
+### Theo matrix cấu hình nhà máy
 
 - `loai_pallet_sx`
 
 ## Rule `loai_tham`
 
-- Ten cot cau hinh: `loai_tham`
-- Y nghia: loai tham ngan cach cac banh mu
-- UI hien thi: `Tham`
-- La dropdown
-- Du lieu su dung 2 gia tri chuan: `Cu`, `Moi`
-- Khi doc du lieu cu phai normalize cac gia tri lech ve `Cu` hoac `Moi`
+- Tên cột cấu hình: `loai_tham`
+- Ý nghĩa: loại thảm ngăn cách các bánh mủ
+- UI hiển thị: `Thảm`
+- Là dropdown
+- Dữ liệu sử dụng 2 giá trị chuẩn: `Cũ`, `Mới`
+- Khi đọc dữ liệu cũ phải normalize các giá trị lệch về `Cũ` hoặc `Mới`
 
-## Cau hinh mac dinh theo Excel
+## Cấu hình mặc định theo Excel
 
 ### NMPHK
 
-- `Mu tap / 10`
+- `Mủ tạp / 10`
   - `loai_banh`: `35`
-  - `loai_boc`: `Boc tron 0,04`, `Boc nhan 0,04 VRG CSR10`
-  - `loai_pallet_sx`: `Pallet sat de go`, `Pallet sat mong`, `Pallet MB5`, `Pallet go`
-  - `loai_pallet_xuat`: `Roi`, `Pallet sat de go`
-- `Mu tap / 20`
+  - `loai_boc`: `Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG CSR10`
+  - `loai_pallet_sx`: `Pallet sắt đế gỗ`, `Pallet sắt mỏng`, `Pallet MB5`, `Pallet gỗ`
+  - `loai_pallet_xuat`: `Rời`, `Pallet sắt đế gỗ`
+- `Mủ tạp / 20`
   - `loai_banh`: `35`
-  - `loai_boc`: `Boc tron 0,04`, `Boc nhan 0,04 VRG CSR20`
-  - `loai_pallet_sx`: nhu tren
-  - `loai_pallet_xuat`: nhu tren
-- `Mu nuoc / L`
+  - `loai_boc`: `Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG CSR20`
+  - `loai_pallet_sx`: như trên
+  - `loai_pallet_xuat`: như trên
+- `Mủ nước / L`
   - `loai_banh`: `35`, `33.33`
-- `Mu nuoc / 3L`
+- `Mủ nước / 3L`
   - `loai_banh`: `35`, `33.33`
-- `Mu nuoc / CV50`
+- `Mủ nước / CV50`
   - `loai_banh`: `35`, `20`
-- `Mu nuoc / CV60`
+- `Mủ nước / CV60`
   - `loai_banh`: `35`, `20`
 
 ### NMCP
 
-- `Mu tap / 10`
+- `Mủ tạp / 10`
   - `loai_banh`: `35`
-  - `loai_boc`: `Boc tron 0,04`, `Boc nhan 0,04 VRG SVR10`
-  - `loai_pallet_sx`: `Pallet sat de go`, `Pallet sat de nhua`, `Pallet sat mong`, `Pallet MB5`, `Pallet go`
-  - `loai_pallet_xuat`: `Roi`, `PE de go`, `PE de nhua`, `Pallet go`, `MB4`, `MB5`
-- `Mu tap / 20`
+  - `loai_boc`: `Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG SVR10`
+  - `loai_pallet_sx`: `Pallet sắt đế gỗ`, `Pallet sắt đế nhựa`, `Pallet sắt mỏng`, `Pallet MB5`, `Pallet gỗ`
+  - `loai_pallet_xuat`: `Rời`, `PE đế gỗ`, `PE đế nhựa`, `Pallet gỗ`, `MB4`, `MB5`
+- `Mủ tạp / 20`
   - `loai_banh`: `35`
-  - `loai_boc`: `Boc tron 0,04`, `Boc nhan 0,04 VRG SVR20`
-  - `loai_pallet_sx`: nhu tren
-  - `loai_pallet_xuat`: nhu tren
-- `Mu nuoc / L`
+  - `loai_boc`: `Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG SVR20`
+  - `loai_pallet_sx`: như trên
+  - `loai_pallet_xuat`: như trên
+- `Mủ nước / L`
   - `loai_banh`: `35`, `33.33`
-- `Mu nuoc / 3L`
+- `Mủ nước / 3L`
   - `loai_banh`: `35`, `33.33`
-- `Mu nuoc / CV50`
+- `Mủ nước / CV50`
   - `loai_banh`: `35`, `20`
-- `Mu nuoc / CV60`
+- `Mủ nước / CV60`
   - `loai_banh`: `35`, `20`
 
-## Cau hinh runtime trong database
+## Cấu hình runtime trong database
 
-Nen co bang cau hinh nha may de van hanh thuc te, co the thiet ke theo logic cua Excel va cho phep chinh sua toan bo.
+Hệ thống phải có cấu hình nhà máy để vận hành thực tế, có thể thiết kế theo logic của Excel và cho phép chỉnh sửa toàn bộ.
 
-Bang nay phai ho tro:
+Nhóm cấu hình này phải hỗ trợ:
 
-- chinh `loai_banh`
-- chinh `loai_boc`
-- chinh `loai_tham`
-- chinh `loai_pallet_sx`
-- chinh `loai_pallet_xuat`
-- luu gia tri mo rong theo tung nha may
+- chỉnh `loai_banh`
+- chỉnh `loai_boc`
+- chỉnh `loai_tham`
+- chỉnh `loai_pallet_sx`
+- chỉnh `loai_pallet_xuat`
+- lưu giá trị mở rộng theo từng nhà máy
 
-## Nut them nhanh
+## Điểm giao nhận trong cấu hình nhà máy
 
-Trong module nghiep vu, `loai_pallet_sx` va `loai_pallet_xuat` co the co nut `+`.
+Danh mục điểm giao nhận thuộc nhóm cấu hình theo nhà máy, không phải danh mục dùng chung toàn hệ thống.
+
+Rule chính thức:
+
+- Dữ liệu lưu trong bảng `dispatch_delivery_points`
+- Quản trị tại `Cài đặt -> Cấu hình nhà máy -> Điểm giao nhận`
+- Mỗi điểm gồm tối thiểu: `ma_lo`, `doi`, `lat`, `lng`, `phien_a`, `phien_b`, `phien_c`, `phien_d`, `sort_order`, `is_active`
+- Module `Điều xe` và `EUDR` phải đọc theo bảng này
+- Khi chỉnh cấu hình điểm giao nhận, các lần điều xe và truy xuất sau đó phải dùng logic mới
+
+## Nút thêm nhanh
+
+Trong module nghiệp vụ, `loai_pallet_sx` và `loai_pallet_xuat` có thể có nút `+`.
 
 Rule:
 
-- Gia tri moi chi ap dung cho nha may dang dang nhap
-- Luu vao database
-- Tu dong bo sung vao cau hinh nha may de dung cho cac lan sau
+- Giá trị mới chỉ áp dụng cho nhà máy đang đăng nhập
+- Lưu vào database
+- Tự động bổ sung vào cấu hình nhà máy để dùng cho các lần sau

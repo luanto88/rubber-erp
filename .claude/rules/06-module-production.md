@@ -1,19 +1,19 @@
 ---
-description: Business logic cac module san xuat - Dieu xe, Kho nguyen lieu, Thanh pham
+description: Business logic các module sản xuất - Điều xe, Kho nguyên liệu, Thành phẩm
 ---
 
-# Business Logic: San xuat
+# Business Logic: Sản xuất
 
 ## 1. Rule chung
 
-- Moi query phai filter theo `factory_id`
-- Moi form CRUD phai co field `day_chuyen` dat o dau form
-- Cac dropdown phu thuoc phai reset khi doi `day_chuyen`
-- Cac option san pham phai lay tu matrix cau hinh nha may, khong hard-code rai rac
+- Mọi query phải filter theo `factory_id`
+- Mọi form CRUD phải có field `day_chuyen` đặt ở đầu form khi nghiệp vụ phụ thuộc dây chuyền
+- Các dropdown phụ thuộc phải reset khi đổi `day_chuyen`
+- Các option sản phẩm phải lấy từ matrix cấu hình nhà máy, không hard-code rải rác
 
-## 2. Module Dieu xe (`dispatch_entries`)
+## 2. Module Điều xe (`dispatch_entries`)
 
-### Schema chinh
+### Schema chính
 
 ```ts
 {
@@ -27,44 +27,49 @@ description: Business logic cac module san xuat - Dieu xe, Kho nguyen lieu, Than
 }
 ```
 
-### Rule quan trong
+### Rule quan trọng
 
 - `ma_dx` format: `DX-ddmmyy/N`
-- `chung_nhan`: chi duoc la `PEFC CS`, `PEFC FM`, `Khong`
-- KL kho phai auto-calc tu KL tuoi va DRC
-- `chuyen` duoc auto-assign theo xe trong ngay
-- `lo_trinh` chi hien thi diem cung doi voi `diem_gn`
+- `chung_nhan`: chỉ được là `PEFC CS`, `PEFC FM`, `Không`
+- KL khô phải auto-calc từ KL tươi và DRC
+- `chuyen` được auto-assign theo xe trong ngày
+- `lo_trinh` chỉ hiển thị các điểm cùng `đội` với `diem_gn` đã chọn
+- Danh mục `diem_gn` là master data riêng trong bảng `dispatch_delivery_points`, filter theo `factory_id`
+- `dispatch_entries.rows[].diem_gn` chỉ lưu các mã điểm được chọn cho từng chuyến, không thay thế bảng master
+- `dispatch_entries.rows[].lo_thu_hoach` phải được suy ra từ `diem_gn + phiên` dựa trên cấu hình phiên A/B/C/D của `dispatch_delivery_points`
+- Nếu nhà máy chưa có dữ liệu master mới, hệ thống chỉ được fallback tạm thời về dữ liệu mặc định trong code để tránh gãy màn hình; nguồn chuẩn vẫn là database
 
-## 3. Module Kho nguyen lieu (`ngans`)
+## 3. Module Kho nguyên liệu (`ngans`)
 
-### Trang thai hop le
+### Trạng thái hợp lệ
 
-- `Dang nhan`
-- `Dong`
-- `Cho san xuat`
-- `Dang san xuat`
-- `Da san xuat`
+- `Đang nhận`
+- `Đóng`
+- `Chờ sản xuất`
+- `Đang sản xuất`
+- `Đã sản xuất`
 
-Chi tiet state machine xem them trong `storage.md`.
+Chi tiết state machine xem thêm trong `storage.md`.
 
-### Rule quan trong
+### Rule quan trọng
 
-- Khong co trang thai `Hoan thanh` cho ngan
-- Ngan du 21 ngay moi chuyen sang `Cho san xuat`
-- Chi ngan `Cho san xuat` moi duoc chon trong `Thanh pham`
-- Chon ngan trong `Thanh pham` -> cap nhat ngay sang `Dang san xuat`
-- Bam `Luu va danh dau da san xuat` -> cap nhat ngan sang `Da san xuat`
+- Không có trạng thái `Hoàn thành` cho ngăn
+- Ngăn đủ 21 ngày mới chuyển sang `Chờ sản xuất`
+- Chỉ ngăn `Chờ sản xuất` mới được chọn trong `Thành phẩm`
+- Chọn ngăn trong `Thành phẩm` -> cập nhật ngay sang `Đang sản xuất`
+- Bấm `Lưu và đánh dấu đã sản xuất` -> cập nhật ngăn sang `Đã sản xuất`
+- Module `Ngăn lưu` không đọc trực tiếp bảng `dispatch_delivery_points`; nó vẫn tiêu thụ dữ liệu từ `dispatch_entries`
 
-### Loai nguyen lieu
+### Loại nguyên liệu
 
-Phai filter theo nha may va day chuyen:
+Phải filter theo nhà máy và dây chuyền:
 
-- `Mu tap`: su dung cac loai nguyen lieu hop le cua nha may
-- `Mu nuoc`: chi duoc `Mu nuoc`
+- `Mủ tạp`: sử dụng các loại nguyên liệu hợp lệ của nhà máy
+- `Mủ nước`: chỉ được `Mủ nước`
 
-## 4. Module Thanh pham (`lots`)
+## 4. Module Thành phẩm (`lots`)
 
-### Schema chinh
+### Schema chính
 
 ```ts
 {
@@ -88,69 +93,69 @@ Phai filter theo nha may va day chuyen:
 }
 ```
 
-### Schema chi tiet giao dich lo (`lot_transactions`)
+### Schema chi tiết giao dịch lô (`lot_transactions`)
 
 ```ts
 {
   id: UUID,
   lot_id: UUID,
   ngan_id: UUID,
-  ca: string,         // A | B | C
-  ngay_nhap: date,    // ngay thuc te cua ca nhap
+  ca: string,
+  ngay_nhap: date,
   kien_a: number,
   kien_b: number,
   kien_c: number,
   kien_d: number,
-  so_banh: number,    // san luong delta cua dong giao dich
-  so_kg: number,      // san luong kg delta cua dong giao dich
+  so_banh: number,
+  so_kg: number,
 }
 ```
 
-- `lots` la bang master tong hop theo `ma_lo`
-- `lot_transactions` la lich su chi tiet theo tung ca / tung ngay / tung ngan
-- Mot `ma_lo` co the co nhieu dong `lot_transactions`
-- Trong cung `factory_id`, chi duoc 1 dong `lots` cho moi `ma_lo`
+- `lots` là bảng master tổng hợp theo `ma_lo`
+- `lot_transactions` là lịch sử chi tiết theo từng ca / từng ngày / từng ngăn
+- Một `ma_lo` có thể có nhiều dòng `lot_transactions`
+- Trong cùng `factory_id`, chỉ được 1 dòng `lots` cho mỗi `ma_lo`
 
 ### Source of truth cho option
 
-`du_lieu_nha_may.xlsx` la source cao nhat cho:
+`du_lieu_nha_may.xlsx` là source cao nhất cho:
 
 - `loai_banh`
 - `loai_boc`
 - `loai_tham`
 - `loai_pallet_sx`
 
-Quy tac loc:
+Quy tắc lọc:
 
-- `loai_banh`, `loai_boc`, `loai_tham`: theo `nha may + day_chuyen + chung loai SP`
-- `loai_pallet_sx`: theo cau hinh nha may, co the mo rong runtime va luu DB
+- `loai_banh`, `loai_boc`, `loai_tham`: theo `nhà máy + dây chuyền + chủng loại SP`
+- `loai_pallet_sx`: theo cấu hình nhà máy, có thể mở rộng runtime và lưu DB
 
-### Quy tac lo tron
+### Quy tắc lô tròn
 
-- Banh `35` va `33.33`: 4 kien, moi kien 36 banh -> lo tron `144`
-- Banh `20`: 4 kien, moi kien 60 banh -> lo tron `240`
+- Bánh `35` và `33.33`: 4 kiện, mỗi kiện 36 bánh -> lô tròn `144`
+- Bánh `20`: 4 kiện, mỗi kiện 60 bánh -> lô tròn `240`
 
-### Quy tac ngon ngu hien thi trong Thanh pham
+### Quy tắc ngôn ngữ hiển thị trong Thành phẩm
 
-- Ten field ky thuat va schema DB giu nguyen dang `banh` / `loai_banh` / `tong_banh`
-- UI nghiep vu cua module `Thanh pham` phai hien thi theo cach goi `bành`
+- Tên field kỹ thuật và schema DB giữ nguyên dạng `banh` / `loai_banh` / `tong_banh`
+- UI nghiệp vụ của module `Thành phẩm` phải hiển thị theo cách gọi `bánh`
 
-### Trang thai lo
+### Trạng thái lô
 
-- `Hoan thanh`
-- `Do dang`
-- `Xuat hang`
+- `Hoàn thành`
+- `Dở dang`
+- `Xuất hàng`
 
-### Quy tac ngay cua lo
+### Quy tắc ngày của lô
 
-- `ngay_sx`: ngay mo lo ban dau
-- `ngay_ht`: ngay tron lo / ngay hoan tat lo
-- Neu lo duoc nhap qua nhieu ca hoac nhieu ngay:
-  - `ngay_sx` khong doi
-  - `ngay_ht` chi duoc set khi lo chuyen sang `Hoan thanh` hoac `Xuat hang`
-- Cac module downstream can uu tien `ngay_ht` khi can ngay thanh pham hoan tat
+- `ngay_sx`: ngày mở lô ban đầu
+- `ngay_ht`: ngày tròn lô / ngày hoàn tất lô
+- Nếu lô được nhập qua nhiều ca hoặc nhiều ngày:
+  - `ngay_sx` không đổi
+  - `ngay_ht` chỉ được set khi lô chuyển sang `Hoàn thành` hoặc `Xuất hàng`
+- Các module downstream cần ưu tiên `ngay_ht` khi cần ngày thành phẩm hoàn tất
 
-### Xac dinh trang thai
+### Xác định trạng thái
 
 ```ts
 if (loai_banh === 20) {
@@ -158,7 +163,7 @@ if (loai_banh === 20) {
 } else {
   lo_tron = 144;
 }
-trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang";
+trang_thai = tong_banh >= lo_tron ? "Hoàn thành" : "Dở dang";
 ```
 
 ### Auto-calc
@@ -167,109 +172,52 @@ trang_thai = tong_banh >= lo_tron ? "Hoan thanh" : "Do dang";
 - `tong_kg = tong_banh * loai_banh`
 - `ma_lo = ${num}${suffix}/${year}`
 
-### Quy tac day so lo
+### Quy tắc dãy số lô
 
-- Day so lo phai lien tuc trong tung nhom `loai thanh pham + loai banh`
-- Day so lo trong nam khong phu thuoc `suffix`, `boc`, `tham`, `pallet` hay cac thuoc tinh khac
-- Nguoi dung tu chu dong reset ve `01` khi sang nam moi, nen `year` la diem cat day so
-- Tai thoi diem giao thoa cuoi nam, `so lo max` giu `/nam cu` va `so lo 01` dung `/nam moi`, khong phu thuoc tuyet doi vao `ngay_sx` la `31/12` hay `01/01`
-- Khi nguoi dung nhap so lo nhay coc trong cung nhom tren, UI phai canh bao cac so lo con trong
-- Goi y `so lo gan nhat` va logic xac dinh lo tiep theo phai tinh theo cung nhom `loai thanh pham + loai banh`
+- Dãy số lô phải liên tục trong từng nhóm `loại thành phẩm + loại bánh`
+- Dãy số lô trong năm không phụ thuộc `suffix`, `bọc`, `thảm`, `pallet` hay các thuộc tính khác
+- Người dùng tự chủ động reset về `01` khi sang năm mới, nên `year` là điểm cắt dãy số
+- Tại thời điểm giao thoa cuối năm, `số lô max` giữ `/năm cũ` và `số lô 01` dùng `/năm mới`, không phụ thuộc tuyệt đối vào `ngay_sx` là `31/12` hay `01/01`
+- Khi người dùng nhập số lô nhảy cóc trong cùng nhóm trên, UI phải cảnh báo các số lô còn trống
+- Gợi ý `số lô gần nhất` và logic xác định lô tiếp theo phải tính theo cùng nhóm `loại thành phẩm + loại bánh`
 
-### Kien toi da theo loai banh
+### Kiện tối đa theo loại bánh
 
 ```ts
 const maxKienValue = loai_banh === 20 ? 60 : 36;
 ```
 
-### Rule `tham`
+### Rule `thảm`
 
-- Field ky thuat: `tham`
-- Cau hinh nguon: `loai_tham`
-- UI hien thi: `Tham`
-- Du lieu cu phai duoc normalize ve 2 gia tri chuan: `Cu`, `Moi`
+- Field kỹ thuật: `tham`
+- Cấu hình nguồn: `loai_tham`
+- UI hiển thị: `Thảm`
+- Dữ liệu cũ phải được normalize về 2 giá trị chuẩn: `Cũ`, `Mới`
 
-### Rule lo ke thua
+### Rule lô kế thừa
 
-Khi lo cuoi ca truoc dang do:
+Khi lô cuối ca trước đang dở:
 
-- Kien da du tu ca truoc -> read-only, khong tinh vao san luong ca nay
-- Kien chua du -> nhap tiep, chi tinh phan delta them vao
-- Neu lo vua dat tron trong lan nhap tiep:
-  - update chinh ban ghi `Do dang` hien co
-  - khong tao ban ghi `lots` moi cung `ma_lo`
-  - set `ngay_ht = ngay_sx` cua lan nhap hoan tat
-  - luu them 1 dong vao `lot_transactions` cho ca dang nhap
+- Kiện đã đủ từ ca trước -> read-only, không tính vào sản lượng ca này
+- Kiện chưa đủ -> nhập tiếp, chỉ tính phần delta thêm vào
+- Nếu lô vừa đạt tròn trong lần nhập tiếp:
+  - update chính bản ghi `Dở dang` hiện có
+  - không tạo bản ghi `lots` mới cùng `ma_lo`
+  - set `ngay_ht = ngay_sx` của lần nhập hoàn tất
+  - lưu thêm 1 dòng vào `lot_transactions` cho ca đang nhập
 
-### Quy tac duy nhat `ma_lo`
+### Quy tắc duy nhất `ma_lo`
 
-- Trong cung `factory_id`, `ma_lo` la dinh danh nghiep vu duy nhat
-- Khong duoc ton tai dong thoi 2 ban ghi `lots` cung `ma_lo` voi cac trang thai khac nhau
-- Neu lo `Do dang` da ton tai, thao tac sau phai tiep tuc cap nhat ban ghi do, khong duoc tao lo moi
+- Trong cùng `factory_id`, `ma_lo` là định danh nghiệp vụ duy nhất
+- Không được tồn tại đồng thời 2 bản ghi `lots` cùng `ma_lo` với các trạng thái khác nhau
+- Nếu lô `Dở dang` đã tồn tại, thao tác sau phải tiếp tục cập nhật bản ghi đó, không được tạo lô mới
 
-### Rule xoa dong san xuat
+### Rule xóa dòng sản xuất
 
-- Xoa trong session thanh pham la xoa theo tung dong `lot_transactions`
-- Khong xoa ca `lots` khi van con it nhat 1 giao dich
-- Khong duoc map theo `lot.id` khi nguoi dung dang chon 1 dong session; phai map theo `lot_transactions.id`
-- Co the xoa bat ky dong `lot_transactions` nao duoc chon trong session, khong con rule chan "chi xoa transaction moi nhat"
-- Khi xoa xong phai tinh lai `lots`:
+- Xóa trong session thành phẩm là xóa theo từng dòng `lot_transactions`
+- Không xóa cả `lots` khi vẫn còn ít nhất 1 giao dịch
+- Không được map theo `lot.id` khi người dùng đang chọn 1 dòng session; phải map theo `lot_transactions.id`
+- Có thể xóa bất kỳ dòng `lot_transactions` nào được chọn trong session, không còn rule chặn "chỉ xóa transaction mới nhất"
+- Khi xóa xong phải tính lại `lots`:
   - `tong_banh`, `tong_kg`
-  - `trang_thai` (`Do dang` / `Hoan thanh`)
-  - `ngan_id`, `ca`, `ngay_ht` theo giao dich moi nhat con lai
-- Neu lo khong con giao dich nao -> cho phep xoa master `lots`
-
-## 5. Quan he Ngan va Thanh pham
-
-- `eligibleNgans`: chi lay `Cho san xuat`
-- Chon ngan -> cap nhat `Dang san xuat`
-- Xoa het lo cua ngan -> ngan quay ve `Cho san xuat`
-- Sua lo va doi ngan:
-  - Chan neu ngan dich vuot `110%`
-  - Sau khi luu, tinh lai ca ngan cu va ngan moi
-  - `< 100%` -> `Dang san xuat`
-  - `100% - 110%` -> giu nguyen trang thai hien tai
-  - Ngan khong con lo -> `Cho san xuat`
-
-### Rule tinh trang thai ngan sau khi xoa/sua
-
-- Luon tinh tong kg theo `lot_transactions` cua tung `ngan_id` (khong dua vao 1 truong snapshot don le)
-- Neu ngan khong con san luong -> `Cho san xuat`
-- Neu ty le lap day `< 100%` -> `Dang san xuat`
-- Neu ty le `100% - 110%`:
-  - Neu ngan dang la `Da san xuat` -> giu nguyen `Da san xuat`
-  - Neu ngan dang la trang thai khac -> giu theo workflow hien tai
-
-## 5.1. Chi tiet ngan luu tren UI
-
-- Modal chi tiet ngan phai hien `Thong tin ngan` truoc
-- Phan thanh pham phai gom nhom theo `loai thanh pham + loai banh + loai boc`
-- Mac dinh chi hien header tong hop cua tung nhom, khong do danh sach lo dai ngay tu dau
-- Click header nhom -> mo danh sach `ngay san xuat`
-- Click tung ngay -> mo danh sach `lo thanh pham` chi tiet
-- Moi tang hien thi phai co thong tin tong hop `kg` va so luong de nguoi dung doc nhanh
-
-## 6. Quan he Thanh pham va Xuat hang
-
-- Lo `Hoan thanh` duoc hien thi tai module `Xuat hang`
-- Xuat het remaining -> lo chuyen `Xuat hang`
-- Xoa don hang -> tinh lai remaining
-- Neu con hang kha dung tro lai -> lo quay ve `Hoan thanh`
-
-### Dong bo canh bao Do dang
-
-- Danh sach canh bao do dang toan cuc va canh bao trong form nhap thanh pham phai dung cung 1 nguon du lieu va cung 1 rule loc
-- Khong de truong hop ngoai form bao `Do dang` nhung trong form khong con lo do dang (hoac nguoc lai)
-- Hien tai, canh bao lo do dang trong `/dashboard/product` duoc hien thi theo **toan bo lo do dang cung day chuyen**, khong loc theo `year` cua thanh pham
-- Neu can hien thi theo nam trong tuong lai, phai doi dong bo o ca canh bao toan cuc va canh bao trong form tao moi, khong sua le 1 ben
-
-### Goi y tu dong trong form nhap
-
-- Goi y `so lo gan nhat` dua theo lo `Do dang` gan nhat trong cung series (`loai_csr + loai_banh + year`)
-- Goi y `ngan_id` uu tien theo giao dich gan nhat cung `day_chuyen` de tranh nham day chuyen
-
-### Quy tac ngon ngu hien thi
-
-- Mac dinh noi dung UI, thong bao, canh bao va tai lieu noi bo phai viet bang tieng Viet co dau, dung chinh ta
-- Chi duoc bo dau hoac doi ngon ngu khi nguoi dung yeu cau ro rang
-- Khi sua chuoi UI o `Thanh pham`, uu tien sua truc tiep tung cum hien thi; khong dung script convert encoding hang loat
+  - `trang_thai` (`Dở dang` / `Hoàn thành`)

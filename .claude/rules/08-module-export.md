@@ -1,10 +1,10 @@
 ---
-description: Module xuat hang, assignments, EUDR
+description: Module xuất hàng, assignments, EUDR
 ---
 
-# Module Xuat hang
+# Module Xuất hàng
 
-## Schema chinh (`export_orders`)
+## Schema chính (`export_orders`)
 
 ```ts
 {
@@ -27,110 +27,111 @@ description: Module xuat hang, assignments, EUDR
   files: object[],
 }
 
-// Cấu trúc Vehicle (lưu trong mảng JSONB `vehicles`)
 type Vehicle = {
   id: string,
   loai_xe: string,
   bien_truoc: string,
   bien_sau: string,
   ghi_chu: string,
-  image_url_1?: string, // Ảnh xe/Biển số (Lưu trên bucket order-files)
-  image_url_2?: string, // Ảnh hàng hóa/Niêm phong
-  image_url_3?: string, // Ảnh chứng từ/Phiếu cân
+  image_url_1?: string,
+  image_url_2?: string,
+  image_url_3?: string,
 }
 ```
 
 ## Rule `loai_pallet_xuat`
 
-`du_lieu_nha_may.xlsx` la source cao nhat cho `loai_pallet_xuat`.
+`du_lieu_nha_may.xlsx` là source cao nhất cho `loai_pallet_xuat`.
 
-Rule chinh thuc:
+Rule chính thức:
 
-- `loai_pallet_xuat` chi loc theo `nha may`
-- Gia tri mac dinh ban dau lay tu Excel
-- Gia tri mo rong runtime duoc luu vao database theo dung nha may
-- UI co nut `+` ben phai o chon de them moi
-- Gia tri them moi phai duoc dung lai cho lan sau cua cung nha may
+- `loai_pallet_xuat` chỉ lọc theo `nhà máy`
+- Giá trị mặc định ban đầu lấy từ Excel
+- Giá trị mở rộng runtime được lưu vào database theo đúng nhà máy
+- UI có nút `+` bên phải ô chọn để thêm mới
+- Giá trị thêm mới phải được dùng lại cho lần sau của cùng nhà máy
 
 ### NMPHK
 
-- `Roi`
-- `Pallet sat de go`
+- `Rời`
+- `Pallet sắt đế gỗ`
 
 ### NMCP
 
-- `Roi`
-- `PE de go`
-- `PE de nhua`
-- `Pallet go`
+- `Rời`
+- `PE đế gỗ`
+- `PE đế nhựa`
+- `Pallet gỗ`
 - `MB4`
 - `MB5`
 
 ## Rule `loai_boc`
 
-- `loai_boc` phai filter theo `nha may + day_chuyen + chung_loai`
-- Khong dung danh sach chung hard-code cho tat ca nha may
+- `loai_boc` phải filter theo `nhà máy + dây chuyền + chủng loại`
+- Không dùng danh sách chung hard-code cho tất cả nhà máy
 
-## Ma don
+## Mã đơn
 
 ```ts
 ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`;
 ```
 
 - Read-only
-- Chi auto tao khi du thong tin
-- Edit mode giu nguyen ma da luu
+- Chỉ auto tạo khi đủ thông tin
+- Edit mode giữ nguyên mã đã lưu
 
-## Chon lo va remaining
+## Chọn lô và remaining
 
-- Hien thi lo co `trang_thai IN ("Hoan thanh", "Xuat hang")`
-- Chi dua lo vao panel neu con `remaining > 0`
-- `remaining` = tong so kien cua lo - tong da gan trong cac don khac
-- Neu bo loc lot picker khong ra lo, kiem tra truoc tien:
-  - chuoi `trang_thai` cua query co dung tieng Viet chuan
-  - chuoi `loai_boc`, `loai_pallet`, `chi tieu` co bi mojibake hay sai chinh ta khong
-  - text tim kiem `ma_lo` co dang duoc normalize dung khong
+- Hiển thị lô có `trang_thai IN ("Hoàn thành", "Xuất hàng")`
+- Chỉ đưa lô vào panel nếu còn `remaining > 0`
+- `remaining` = tổng số kiện của lô - tổng đã gán trong các đơn khác
+- Nếu bộ lọc lot picker không ra lô, kiểm tra trước tiên:
+  - chuỗi `trang_thai` của query có đúng tiếng Việt chuẩn
+  - chuỗi `loai_boc`, `loai_pallet`, `chỉ tiêu` có bị sai chính tả hoặc lỗi mã hóa không
+  - text tìm kiếm `ma_lo` có đang được normalize đúng không
 
-## Quan he voi Thanh pham
+## Quan hệ với Thành phẩm
 
-- Xuat het remaining -> lo chuyen `Xuat hang`
-- Con remaining -> giu `Hoan thanh`
-- Xoa don hang -> phai tinh lai remaining cua tung lo
-- Neu lo co hang kha dung tro lai sau khi xoa don -> quay ve `Hoan thanh`
+- Xuất hết remaining -> lô chuyển `Xuất hàng`
+- Còn remaining -> giữ `Hoàn thành`
+- Xóa đơn hàng -> phải tính lại remaining của từng lô
+- Nếu lô có hàng khả dụng trở lại sau khi xóa đơn -> quay về `Hoàn thành`
 
-### Rule KN lai tu flow Xuat hang
+### Rule KN lại từ flow Xuất hàng
 
-- Neu nguoi dung keo 1 lo `rot hang` trong form `Xuat hang`, he thong duoc phep mo flow `Kiem nghiem lai`
-- Draft form `Xuat hang` chi duoc luu tam bang `sessionStorage` de giu UI state; day khong phai source of truth nghiep vu
-- Sau khi luu KN lai:
-  - neu flow duoc mo tu `Xuat hang` thi quay lai form `Xuat hang` va khoi phuc draft
-  - neu ket qua KN lai `dat hang` thi lo do tu dong nam lai tren dung xe ma nguoi dung vua dinh keo vao
-  - neu ket qua van `rot hang` thi van quay lai form `Xuat hang`, giu draft nhung khong gan lo len xe
-- Neu nguoi dung mo `Kiem nghiem lai` truc tiep trong module `Kiem nghiem` (khong di tu `Xuat hang`) thi save xong khong duoc tu dong quay ve form `Xuat hang`
+- Nếu người dùng kéo 1 lô `rớt hạng` trong form `Xuất hàng`, hệ thống được phép mở flow `Kiểm nghiệm lại`
+- Draft form `Xuất hàng` chỉ được lưu tạm bằng `sessionStorage` để giữ UI state; đây không phải source of truth nghiệp vụ
+- Sau khi lưu KN lại:
+  - nếu flow được mở từ `Xuất hàng` thì quay lại form `Xuất hàng` và khôi phục draft
+  - nếu kết quả KN lại `đạt hạng` thì lô đó tự động nằm lại trên đúng xe mà người dùng vừa định kéo vào
+  - nếu kết quả vẫn `rớt hạng` thì vẫn quay lại form `Xuất hàng`, giữ draft nhưng không gán lô lên xe
+- Nếu người dùng mở `Kiểm nghiệm lại` trực tiếp trong module `Kiểm nghiệm` thì save xong không được tự động quay về form `Xuất hàng`
 
-### Rule dong bo khi xoa don xuat
+### Rule đồng bộ khi xóa đơn xuất
 
-- Khi xoa 1 `export_order`, khong update trang thai lo theo kieu cung nhac
-- Bat buoc tinh lai theo cac don xuat con lai:
-  - `remaining <= 0` -> `Xuat hang`
-  - `remaining > 0` -> `Hoan thanh`
-- Ket qua tinh lai phai phan anh ngay o module `Thanh pham` (dong bo 2 chieu)
+- Khi xóa 1 `export_order`, không update trạng thái lô theo kiểu cứng nhắc
+- Bắt buộc tính lại theo các đơn xuất còn lại:
+  - `remaining <= 0` -> `Xuất hàng`
+  - `remaining > 0` -> `Hoàn thành`
+- Kết quả tính lại phải phản ánh ngay ở module `Thành phẩm` theo hướng đồng bộ 2 chiều
 
-## Khach hang
+## Khách hàng
 
-- Co thao tac tao nhanh trong module `Xuat hang`
-- Dong thoi phai co trang quan tri day du trong `Cai dat`
+- Có thao tác tạo nhanh trong module `Xuất hàng`
+- Đồng thời phải có trang quản trị đầy đủ trong `Cài đặt`
 
 ## EUDR
 
-EUDR da duoc trien khai, khong con la y tuong tuong lai.
+EUDR đã được triển khai, không còn là ý tưởng tương lai.
 
 - Module: `/dashboard/eudr`
-- Truy xuat tu `export_orders -> lots -> ngans -> dispatch_entries -> GeoJSON`
-- Ho tro QR code, zip file, file dinh kem
+- Chuỗi truy xuất chính: `export_orders -> lots -> ngans -> dispatch_entries`
+- Từ `dispatch_entries.rows[].diem_gn` và `phiên`, hệ thống phải tra bảng `dispatch_delivery_points` theo `factory_id` để suy ra `lô thu hoạch`
+- Không dùng một danh sách điểm giao nhận hard-code chung cho tất cả nhà máy làm source of truth
+- Hỗ trợ QR code, zip file, file đính kèm
 
-## Ngon ngu giao dien
+## Ngôn ngữ giao diện
 
-- Session `Xuat hang` phai hien thi tieng Viet co dau, dung chinh ta
-- Session `Xuat hang` hien tai phai dong bo cach goi so luong theo thuat ngu nghiep vu la `banh`
-- Cac nhan quan trong can giu dung dang chuan: `Xuat hang`, `Tao don xuat`, `Tong banh`, `Khach hang`, `Lo hang`, `Yeu cau chi tieu`
+- Session `Xuất hàng` phải hiển thị tiếng Việt có dấu, đúng chính tả
+- Session `Xuất hàng` hiện tại phải đồng bộ cách gọi số lượng theo thuật ngữ nghiệp vụ là `bánh`
+- Các nhãn quan trọng cần giữ đúng dạng chuẩn: `Xuất hàng`, `Tạo đơn xuất`, `Tổng bánh`, `Khách hàng`, `Lô hàng`, `Yêu cầu chỉ tiêu`

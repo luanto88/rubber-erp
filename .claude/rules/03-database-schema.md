@@ -1,5 +1,5 @@
 ---
-description: Schema Supabase — tham chiếu khi viết query, migration, hoặc làm việc với dữ liệu
+description: Schema Supabase - tham chiếu khi viết query, migration hoặc làm việc với dữ liệu
 ---
 
 # Database Schema
@@ -14,7 +14,8 @@ description: Schema Supabase — tham chiếu khi viết query, migration, hoặ
 | `ngans` | Ngăn lưu mủ cao su | `id` UUID |
 | `lots` | Lô thành phẩm | `id` UUID |
 | `qc_results` | Kết quả kiểm nghiệm | `id` UUID |
-| `dispatch_entries` | Bảng phân xe điều mủ | `id` UUID |
+| `dispatch_entries` | Bảng điều xe / phân xe | `id` UUID |
+| `dispatch_delivery_points` | Danh mục điểm giao nhận theo nhà máy | `id` UUID |
 | `export_orders` | Đơn xuất hàng | `id` UUID |
 | `customers` | Khách hàng | `id` UUID |
 | `suffixes` | Hậu tố mã lô | `code` TEXT |
@@ -22,23 +23,23 @@ description: Schema Supabase — tham chiếu khi viết query, migration, hoặ
 | `role_permissions` | Permission mặc định theo role | `(role, permission_code)` |
 | `user_permissions` | Permission gán thực tế cho user | `(user_id, permission_code)` |
 | `kv_store` | Key-value store (legacy) | `id` UUID |
-| `inventory_*` | Cum bang module quan ly kho vat tu / hoa chat | UUID / theo tung bang |
+| `inventory_*` | Cụm bảng module quản lý kho vật tư / hóa chất | UUID / theo từng bảng |
 
-## Bang mo rong nen co / se can them
+## Bảng mở rộng nên có / sẽ cần thêm
 
-De ho tro `Cai dat`, cau hinh nha may, duyet tai khoan va phan quyen, he thong nen co cac bang mo rong sau:
+Để hỗ trợ `Cài đặt`, cấu hình nhà máy, duyệt tài khoản và phân quyền, hệ thống nên có các bảng mở rộng sau:
 
 | Bảng | Mục đích |
 |---|---|
-| `factory_product_configs` | Matrix cau hinh theo nha may: `loai_banh`, `loai_boc`, `loai_tham`, `loai_pallet_sx`, `loai_pallet_xuat` |
-| `vehicles` | Danh muc xe, kem thong tin tai xe hien hanh |
-| `maintenance_assets` | Danh muc thiet bi cho module bao tri tuong lai |
-| `maintenance_areas` | Khu vuc / vi tri thiet bi cho module bao tri tuong lai |
-| `inventory_warehouses`, `inventory_items`, `inventory_documents`, ... | Module kho vat tu / hoa chat; tat ca bang deu phai co `factory_id` |
+| `factory_product_configs` | Matrix cấu hình theo nhà máy: `loai_banh`, `loai_boc`, `loai_tham`, `loai_pallet_sx`, `loai_pallet_xuat` |
+| `vehicles` | Danh mục xe, kèm thông tin tài xế hiện hành |
+| `maintenance_assets` | Danh mục thiết bị cho module bảo trì tương lai |
+| `maintenance_areas` | Khu vực / vị trí thiết bị cho module bảo trì tương lai |
+| `inventory_warehouses`, `inventory_items`, `inventory_documents`, ... | Module kho vật tư / hóa chất; tất cả bảng đều phải có `factory_id` |
 
 ## Quan hệ
 
-```
+```text
 factories
   ├── profiles (factory_id)
   ├── ngans (factory_id)
@@ -47,6 +48,7 @@ factories
   ├── qc_results (factory_id)
   │     └── lot_id → lots.id
   ├── dispatch_entries (factory_id)
+  ├── dispatch_delivery_points (factory_id)
   ├── export_orders (factory_id)
   │     └── customer_id → customers.id
   ├── customers (factory_id)
@@ -56,6 +58,7 @@ factories
 ## Schema chi tiết
 
 ### `ngans`
+
 ```sql
 id UUID PK, factory_id UUID, ma_ngan TEXT, ten_ngan TEXT,
 loai_nl TEXT, nguon_goc TEXT, xu_ly TEXT, chung_nhan TEXT,
@@ -66,6 +69,7 @@ created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
 ### `lots`
+
 ```sql
 id UUID PK, factory_id UUID, ma_lo TEXT, num INTEGER,
 suffix TEXT, year TEXT, ngay_sx DATE, ngay_ht DATE, ca TEXT,
@@ -77,13 +81,14 @@ dd_snapshot JSONB, is_manual_edit BOOLEAN, edit_key TEXT,
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
-Ghi chu van hanh:
+Ghi chú vận hành:
 
-- `ngay_sx`: ngay mo lo ban dau
-- `ngay_ht`: ngay tron lo / ngay hoan tat lo
-- `ma_lo` la dinh danh nghiep vu duy nhat theo `factory_id`; khong duoc phep ton tai 2 ban ghi `lots` cung `ma_lo`
+- `ngay_sx`: ngày mở lô ban đầu
+- `ngay_ht`: ngày tròn lô / ngày hoàn tất lô
+- `ma_lo` là định danh nghiệp vụ duy nhất theo `factory_id`; không được phép tồn tại 2 bản ghi `lots` cùng `ma_lo`
 
 ### `qc_results`
+
 ```sql
 id UUID PK, factory_id UUID, lot_id UUID→lots,
 ma_lo TEXT, pkn INTEGER, ma_kl TEXT,
@@ -94,22 +99,47 @@ dat_hang TEXT, trang_thai TEXT, parent_id UUID, lan INTEGER,
 created_at TIMESTAMPTZ
 ```
 
-Ghi chu van hanh:
+Ghi chú vận hành:
 
-- `lot_id` la khoa lien ket uu tien
-- `ma_lo` duoc giu de in an, truy vet va backfill du lieu cu
-- `ngay_sx` trong `qc_results` phai la ngay thanh pham hoan tat cua lo:
-  - uu tien `lots.ngay_ht`
+- `lot_id` là khóa liên kết ưu tiên
+- `ma_lo` được giữ để in ấn, truy vết và backfill dữ liệu cũ
+- `ngay_sx` trong `qc_results` phải là ngày thành phẩm hoàn tất của lô:
+  - ưu tiên `lots.ngay_ht`
   - fallback `lots.ngay_sx`
 
 ### `dispatch_entries`
+
 ```sql
 id UUID PK, factory_id UUID,
 ngay TEXT, chung_nhan TEXT, rows JSONB,
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
+Ghi chú vận hành:
+
+- `rows` lưu danh sách chuyến điều xe trong ngày
+- `rows[].diem_gn` chỉ lưu các mã điểm giao nhận đã chọn của từng chuyến
+- Mọi metadata của điểm giao nhận như `đội`, tọa độ, phiên A/B/C/D, thứ tự hiển thị phải lấy từ bảng `dispatch_delivery_points`
+
+### `dispatch_delivery_points`
+
+```sql
+id UUID PK, factory_id UUID,
+ma_lo TEXT, doi INTEGER, lat DOUBLE PRECISION, lng DOUBLE PRECISION,
+phien_a TEXT[], phien_b TEXT[], phien_c TEXT[], phien_d TEXT[],
+sort_order INTEGER, is_active BOOLEAN,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- Đây là bảng master data cho module `Điều xe` và `EUDR`
+- Dữ liệu phải tách theo `factory_id`
+- `ma_lo` là mã điểm giao nhận duy nhất trong phạm vi từng nhà máy
+- `is_active = false` nghĩa là tạm ngưng sử dụng trên UI nhưng vẫn giữ dữ liệu lịch sử
+
 ### `export_orders`
+
 ```sql
 id UUID PK, factory_id UUID,
 ma_don TEXT, ngay DATE, so_thong_bao TEXT, so_hoa_don TEXT,
@@ -120,6 +150,7 @@ created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
 ### `customers`
+
 ```sql
 id UUID PK, factory_id UUID,
 ma_kh TEXT UNIQUE, ten_kh_en TEXT, email TEXT, dia_chi TEXT,
@@ -127,6 +158,7 @@ created_at TIMESTAMPTZ
 ```
 
 ### `profiles`
+
 ```sql
 id UUID PK -> auth.users(id),
 username TEXT UNIQUE, auth_email TEXT UNIQUE,
@@ -137,24 +169,27 @@ disabled_by UUID, disabled_at TIMESTAMPTZ,
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
-Ghi chu van hanh:
+Ghi chú vận hành:
 
-- `auth_email` la email noi bo de anh xa `username` vao `auth.users`
-- Dinh dang hien tai: `username@auth.rubber-erp.example.com`
-- Email `.local` chi giu de tuong thich nguoc, khong dung de tao moi
+- `auth_email` là email nội bộ để ánh xạ `username` vào `auth.users`
+- Định dạng hiện tại: `username@auth.rubber-erp.example.com`
+- Email `.local` chỉ giữ để tương thích ngược, không dùng để tạo mới
 
 ### `permissions`
+
 ```sql
 code TEXT PK, module_name TEXT, action_name TEXT, created_at TIMESTAMPTZ
 ```
 
 ### `role_permissions`
+
 ```sql
 role TEXT, permission_code TEXT -> permissions(code), created_at TIMESTAMPTZ
 PRIMARY KEY (role, permission_code)
 ```
 
 ### `user_permissions`
+
 ```sql
 user_id UUID -> profiles(id),
 permission_code TEXT -> permissions(code),

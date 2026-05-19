@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { buildLoThuHoach } from "@/lib/dispatch-master"
+import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -151,6 +151,13 @@ export default function EudrClient() {
       // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
       const { data: dispatches } = await supabase.from("dispatch_entries")
         .select("ngay,rows").eq("factory_id", ord.factory_id)
+      const { data: pointRows } = await supabase.from("dispatch_delivery_points")
+        .select("ma_lo, lat, lng, doi, phien_a, phien_b, phien_c, phien_d")
+        .eq("factory_id", ord.factory_id)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("ma_lo", { ascending: true })
+      const deliveryPoints = normalizeDeliveryPoints(pointRows) || DIEM_GN
       // Normalize DD/MM/YYYY → YYYY-MM-DD (dispatch_entries.ngay từ CSV import dùng format này)
       const toISO = (d: string) => d?.includes("/") ? d.split("/").reverse().join("-") : (d || "")
 
@@ -167,7 +174,7 @@ export default function EudrClient() {
       const extractPlots = (row: any): string[] =>
         (row.lo_thu_hoach||[]).length
           ? row.lo_thu_hoach
-          : buildLoThuHoach(row.diem_gn || [], row.phien || [])
+          : buildLoThuHoach(row.diem_gn || [], row.phien || [], deliveryPoints)
 
       const diemGn = new Set<string>()
       let matchedRows = 0

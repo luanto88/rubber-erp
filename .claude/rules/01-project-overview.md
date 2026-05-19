@@ -1,12 +1,12 @@
 ---
-description: Tong quan du an Rubber ERP - doc file nay dau tien khi bat dau task
+description: Tổng quan dự án Rubber ERP - đọc file này đầu tiên khi bắt đầu task
 ---
 
 # Rubber ERP - Project Overview
 
-## Muc tieu
+## Mục tiêu
 
-He thong ERP quan ly san xuat cao su theo nha may, day chuyen, lo thanh pham, kiem nghiem, xuat hang, va truy xuat EUDR.
+Hệ thống ERP quản lý sản xuất cao su theo nhà máy, dây chuyền, lô thành phẩm, kiểm nghiệm, xuất hàng và truy xuất EUDR.
 
 ## Stack
 
@@ -15,24 +15,24 @@ He thong ERP quan ly san xuat cao su theo nha may, day chuyen, lo thanh pham, ki
 - Styling: Tailwind CSS
 - Backend: Supabase
 - Icons: lucide-react
-- UI: tu viet, khong dung component library ngoai
+- UI: tự viết, không dùng component library ngoài
 
 ## Multi-tenant
 
-He thong co nhieu nha may, moi du lieu nghiep vu deu thuoc 1 `factory_id`.
-Moi query va moi danh sach hien thi deu phai filter theo nha may dang dang nhap.
+Hệ thống có nhiều nhà máy, mọi dữ liệu nghiệp vụ đều thuộc một `factory_id`.
+Mọi query và mọi danh sách hiển thị đều phải filter theo nhà máy đang đăng nhập.
 
-## Day chuyen va matrix san pham
+## Dây chuyền và matrix sản phẩm
 
-Truc nghiep vu bat buoc:
+Trục nghiệp vụ bắt buộc:
 
-`Nha may -> Day chuyen -> Chung loai SP -> Loai banh / Loai boc / Loai tham / Pallet`
+`Nhà máy -> Dây chuyền -> Chủng loại SP -> Loại bánh / Loại bọc / Loại thảm / Pallet`
 
-Nguon cao nhat cho matrix nay la:
+Nguồn cao nhất cho matrix này là:
 
 - `cung_cap_dl/du_lieu_nha_may.xlsx`
 
-Excel la source of truth ban dau cho:
+Excel là source of truth ban đầu cho:
 
 - `loai_banh`
 - `loai_boc`
@@ -40,64 +40,71 @@ Excel la source of truth ban dau cho:
 - `loai_pallet_sx`
 - `loai_pallet_xuat`
 
-Quy tac loc:
+Quy tắc lọc:
 
-- `loai_pallet_xuat`: theo nha may
-- `loai_banh`, `loai_boc`, `loai_tham`: theo `nha may + day_chuyen + chung loai SP`
-- `loai_pallet_sx`: theo matrix cau hinh nha may
+- `loai_pallet_xuat`: theo nhà máy
+- `loai_banh`, `loai_boc`, `loai_tham`: theo `nhà máy + dây chuyền + chủng loại SP`
+- `loai_pallet_sx`: theo matrix cấu hình nhà máy
 
-## Quy tac lo tron
+## Quy tắc master data runtime
 
-- Banh `35` va `33.33`: 4 kien x 36 banh = 144 banh
-- Banh `20`: 4 kien x 60 banh = 240 banh
+- Excel dùng để seed và đối chiếu spec ban đầu
+- Database là nguồn chạy thực tế
+- Giá trị mở rộng runtime theo từng nhà máy phải lưu vào database
+- Không hard-code option rải rác trong từng page
 
-## Quy tac van hanh cau hinh
+Riêng danh mục điểm giao nhận của module điều xe:
 
-- Excel dung de seed va doi chieu spec
-- Database la nguon chay thuc te
-- Gia tri mo rong runtime theo nha may phai luu vao database
-- Khong hard-code option rai rac trong tung page
+- Master data được lưu trong bảng `dispatch_delivery_points`
+- Dữ liệu phải filter theo `factory_id`
+- `dispatch_entries.rows[].diem_gn` chỉ lưu các mã điểm đã chọn cho từng chuyến, không thay thế bảng master
 
-## Module Cai dat
+## Quy tắc lô tròn
 
-`Cai dat` la noi quan tri tap trung cho:
+- Bánh `35` và `33.33`: 4 kiện x 36 bánh = 144 bánh
+- Bánh `20`: 4 kiện x 60 bánh = 240 bánh
+
+## Module Cài đặt
+
+`Cài đặt` là nơi quản trị tập trung cho:
 
 - Xe
-- Hau to
-- Khach hang
-- Cau hinh nha may
-- Nguoi dung
-- Phan quyen
-- Cac danh muc mo rong duoc them nhanh trong module nghiep vu
+- Hậu tố
+- Khách hàng
+- Cấu hình nhà máy
+- Người dùng
+- Phân quyền
+- Các danh mục mở rộng được thêm nhanh trong module nghiệp vụ
 
-Giao dien `Cai dat` duoc to chuc theo nhieu tab:
+Giao diện `Cài đặt` được tổ chức theo nhiều tab:
 
-- `Cong ty`
-- `Nguoi dung`
-- `Phan quyen`
-- `Cau hinh nha may`
-- `Danh muc`
+- `Công ty`
+- `Người dùng`
+- `Phân quyền`
+- `Cấu hình nhà máy`
+- `Danh mục`
 
-Nguyen tac:
+Nguyên tắc:
 
-- Matrix cau hinh theo nha may -> `Cau hinh nha may`
-- Master data dung chung -> `Danh muc`
-- Domain moi nhu `Bao tri` ban dau dua vao `Danh muc`, khi du lon co the tach thanh tab rieng
+- Matrix cấu hình theo nhà máy -> `Cấu hình nhà máy`
+- Danh mục điểm giao nhận theo nhà máy -> `Cấu hình nhà máy`
+- Master data dùng chung -> `Danh mục`
+- Domain mới như `Bảo trì` ban đầu đưa vào `Danh mục`, khi đủ lớn có thể tách thành tab riêng
 
-Module nghiep vu co the giu nut them nhanh, nhung du lieu tao ra phai dong bo ve `Cai dat`.
+Module nghiệp vụ có thể giữ nút thêm nhanh, nhưng dữ liệu tạo ra phải đồng bộ về `Cài đặt`.
 
-## Dang ky va phan quyen
+## Đăng ký và phân quyền
 
-- User moi dang ky -> `pending`
-- Admin duyet trong `Cai dat`
-- Phan quyen theo `module + action chuan`, them mot so action dac biet
+- User mới đăng ký -> `pending`
+- Admin duyệt trong `Cài đặt`
+- Phân quyền theo `module + action` chuẩn, thêm một số action đặc biệt
 
-## Modules chinh
+## Modules chính
 
-- `dispatch`: Dieu xe
-- `storage`: Kho nguyen lieu / Ngan luu / Ho chua
-- `product`: Thanh pham
-- `quality`: Kiem nghiem
-- `export`: Xuat hang
-- `eudr`: Truy xuat chuoi cung ung
-- `settings`: Quan tri danh muc, cau hinh, user, phan quyen
+- `dispatch`: Điều xe
+- `storage`: Kho nguyên liệu / Ngăn lưu / Hồ chứa
+- `product`: Thành phẩm
+- `quality`: Kiểm nghiệm
+- `export`: Xuất hàng
+- `eudr`: Truy xuất chuỗi cung ứng
+- `settings`: Quản trị danh mục, cấu hình, user, phân quyền
