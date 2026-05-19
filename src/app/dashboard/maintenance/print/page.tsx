@@ -43,6 +43,7 @@ type LineData = {
 
 type RecordData = {
   id: string
+  factory_id: string
   ma_bb: string | null
   hang_muc: string
   ngay: string
@@ -120,13 +121,13 @@ function fmtValue(chi_phi: number, loai_tien: string) {
 
 function CompanyHeader({ boPhan }: { boPhan?: string }) {
   return (
-    <div className="flex items-start justify-between mb-1">
+    <div className="flex items-start justify-between mb-0.5">
       <div>
-        <div className="text-xs font-bold uppercase tracking-wide text-slate-800">
+        <div className="font-bold uppercase text-slate-800" style={{ fontSize: "9px" }}>
           Nhà máy chế biến Phước Hòa Kampong Thom
         </div>
         {boPhan && (
-          <div className="text-xs text-slate-600">Bộ phận: {boPhan}</div>
+          <div className="text-slate-600" style={{ fontSize: "9px" }}>Bộ phận: {boPhan}</div>
         )}
       </div>
     </div>
@@ -214,18 +215,17 @@ function MaterialsTable({ materials, showDonGia = true }: { materials: MaterialR
 
 // ─── Template F13: Biên bản kiểm tra sự cố ────────────────────────────────────
 
-function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
 
+  // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì; fallback Tổ trưởng cơ điện nếu cả 2 trống
   const participants: { name: string; role: string }[] = []
-  if (record.giam_doc) participants.push({ name: record.giam_doc, role: "Giám đốc nhà máy" })
-  if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: "BGĐ phụ trách" })
-  if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: "Nhân viên kỹ thuật" })
-  if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: "Tổ trưởng cơ điện" })
-  record.nguoi_thuc_hien.forEach((n) => {
-    if (n && !participants.find((p) => p.name === n)) participants.push({ name: n, role: "Công nhân bảo trì" })
-  })
+  if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
+  if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+  if (!record.nv_phu_trach && !record.phu_trach_bao_tri) participants.push({ name: "", role: "Tổ trưởng cơ điện" })
 
   return (
     <div className="print-page font-serif">
@@ -234,7 +234,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       {/* Title + QR */}
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="text-sm font-extrabold uppercase tracking-wide">Biên bản kiểm tra sự cố</h2>
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản kiểm tra sự cố</h2>
           <div className="text-[10px] italic text-slate-500 mt-0.5">
             (Áp dụng cho {isBoDoi ? "phương tiện vận tải" : "thiết bị sơ chế cao su"})
           </div>
@@ -249,7 +249,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       </div>
 
       {/* Body text */}
-      <div className="text-xs leading-6 space-y-1">
+      <div className="text-xs leading-5 space-y-0.5">
         <p>
           Hôm nay vào lúc <span className="px-2">{fmtTime(record.tu_gio)}</span> giờ,
           {" "}ngày <span className="px-2">{dd}</span> tháng{" "}
@@ -264,7 +264,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         {participants.length > 0 ? (
           participants.map((p, i) => (
             <p key={i}>
-              {i + 1}- <strong>{p.name}</strong>
+              {i + 1}- <strong>{p.name || "................................."}</strong>
               {p.role ? ` – ${p.role}` : ""}
             </p>
           ))
@@ -279,7 +279,7 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
       {/* Equipment lines */}
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mt-4 text-xs leading-6 space-y-1">
+        <div key={line.id} className="mt-2 text-xs leading-5 space-y-0.5">
           {record.lines.length > 1 && (
             <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-1">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
@@ -296,23 +296,20 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
           </p>
 
           <div className="mt-1">
-            <span className="font-semibold">Tình trạng {record.hang_muc === "Sửa chữa" ? "sự cố" : "thiết bị"}:</span>
-            <div className="mt-1">{line.noi_dung || ""}</div>
-            <BlankLine count={line.noi_dung ? 0 : 2} />
+            <span className="font-semibold">Tình trạng {record.hang_muc === "Sửa chữa" ? "sự cố" : "thiết bị"}: </span>
+            {line.noi_dung ? <span>{line.noi_dung}</span> : <BlankLine count={2} />}
           </div>
 
           {record.hang_muc === "Sửa chữa" && (
-            <div>
-              <span className="font-semibold">Nguyên nhân sự cố:</span>
-              <div className="mt-1">{line.nguyen_nhan || ""}</div>
-              <BlankLine count={line.nguyen_nhan ? 0 : 2} />
+            <div className="mt-1">
+              <span className="font-semibold">Nguyên nhân sự cố: </span>
+              {line.nguyen_nhan ? <span>{line.nguyen_nhan}</span> : <BlankLine count={2} />}
             </div>
           )}
 
-          <div>
-            <span className="font-semibold">Cách khắc phục xử lý:</span>
-            <div className="mt-1">{line.cac_khac_phuc || ""}</div>
-            <BlankLine count={line.cac_khac_phuc ? 0 : 2} />
+          <div className="mt-1">
+            <span className="font-semibold">Cách khắc phục xử lý: </span>
+            {line.cac_khac_phuc ? <span>{line.cac_khac_phuc}</span> : <BlankLine count={2} />}
           </div>
 
           <div className="mt-2">
@@ -322,18 +319,10 @@ function PrintSuCo({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
               : <p className="italic text-xs mt-0.5">Không có</p>
             }
           </div>
-
-          <div className="flex gap-8 mt-1">
-            <p>Chi phí ước tính: <strong>{fmtValue(line.chi_phi_dk, line.loai_tien)}</strong></p>
-            {line.loai_sua_chua && (
-              <p>Phân loại: <strong>{line.loai_sua_chua === "lon" ? "Sửa chữa lớn (>200$)" : "Sửa chữa nhỏ (≤200$)"}</strong></p>
-            )}
-            {line.cong_tho > 0 && <p>Công thợ: <strong>{fmtValue(line.cong_tho, line.loai_tien)}</strong></p>}
-          </div>
         </div>
       ))}
 
-      <div className="mt-4 text-xs leading-6">
+      <div className="mt-2 text-xs leading-5">
         <p className="font-semibold">Kết luận và những kiến nghị lên Giám đốc nhà máy{" "}
           <span className="font-normal italic">(đối với những trường hợp không khắc phục ngay được):</span>
         </p>
@@ -385,12 +374,12 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       </div>
 
       <div className="text-center mb-4">
-        <h2 className="text-sm font-extrabold uppercase tracking-wide">Giấy đề nghị sửa chữa</h2>
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Giấy đề nghị sửa chữa</h2>
         <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa thiết bị sơ chế cao su)</div>
         <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
-      <div className="text-xs leading-6 space-y-2">
+      <div className="text-xs leading-5 space-y-1">
         <p>
           <strong>Kính gửi:</strong> Giám đốc Nhà máy chế biến Phước Hòa Kampong Thom
         </p>
@@ -427,13 +416,14 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
           ))}
 
           {/* Combined materials table */}
+          <div className="mt-2">
+            <span className="font-semibold">Vật tư thay thế: </span>
+            {allMaterials.length === 0 && (
+              <span className="italic text-slate-500">Không có</span>
+            )}
+          </div>
           {allMaterials.length > 0 && (
-            <div className="mt-2">
-              <MaterialsTable materials={allMaterials} showDonGia />
-            </div>
-          )}
-          {allMaterials.length === 0 && (
-            <p className="text-slate-400 italic text-xs mt-2">Không có</p>
+            <MaterialsTable materials={allMaterials} showDonGia />
           )}
         </div>
 
@@ -466,7 +456,7 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
 // ─── Template F15: Biên bản nghiệm thu ───────────────────────────────────────
 
-function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
   const nguoiNghiemThu = record.nguoi_duyet || record.bgd_phu_trach || "..."
 
@@ -476,7 +466,7 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="text-sm font-extrabold uppercase tracking-wide">Biên bản nghiệm thu</h2>
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản nghiệm thu</h2>
           <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
           <div className="text-xs text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
         </div>
@@ -489,7 +479,7 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
       </div>
 
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mb-4 text-xs leading-6">
+        <div key={line.id} className="mb-2 text-xs leading-5">
           {record.lines.length > 1 && (
             <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
@@ -506,7 +496,7 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         </div>
       ))}
 
-      <div className="text-xs leading-6 space-y-1">
+      <div className="text-xs leading-5 space-y-0.5">
         <p>
           Đơn vị quản lý, sử dụng:{" "}
           <span>Nhà máy chế biến Phước Hòa Kampong Thom</span>
@@ -527,28 +517,38 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         <p>Tại: <span>{record.bo_phan}</span></p>
 
         <p className="font-semibold mt-2">Chúng tôi gồm:</p>
-        {record.giam_doc && <p>Ông: <strong>{record.giam_doc}</strong> – Giám đốc Nhà máy</p>}
-        {record.bgd_phu_trach && <p>Ông: <strong>{record.bgd_phu_trach}</strong> – BGĐ phụ trách</p>}
-        {record.nv_phu_trach && <p>Ông: <strong>{record.nv_phu_trach}</strong> – Nhân viên kỹ thuật</p>}
-        {record.phu_trach_bao_tri && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – Tổ cơ điện</p>}
-        {record.nguoi_thuc_hien.map((n, i) => (
-          <p key={i}>Ông: <strong>{n}</strong> – Người thực hiện</p>
-        ))}
+        {record.giam_doc && <p>Ông: <strong>{record.giam_doc}</strong> – {staffMap.get(record.giam_doc) || "Giám đốc Nhà máy"}</p>}
+        {record.bgd_phu_trach && <p>Ông: <strong>{record.bgd_phu_trach}</strong> – {staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách"}</p>}
+        {record.nv_phu_trach && <p>Ông: <strong>{record.nv_phu_trach}</strong> – {staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách"}</p>}
+        {record.phu_trach_bao_tri && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – {staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì"}</p>}
+        {!record.nv_phu_trach && !record.phu_trach_bao_tri && (
+          <p>Ông: <strong>.................................</strong> – Tổ trưởng cơ điện</p>
+        )}
 
         <p className="mt-2">
           Cùng tiến hành kiểm tra chất lượng sửa chữa. Kết quả như sau:
         </p>
 
         <div className="mt-2">
-          <p className="font-semibold">Khối lượng đã sửa chữa, thay thế phụ tùng:</p>
           {record.lines.map((line, idx) => {
             const allMats = line.materials
+            const content = line.cac_khac_phuc || line.noi_dung || ""
             return (
               <div key={idx} className="mt-1">
-                {record.lines.length > 1 && (
-                  <p className="font-bold">{idx + 1}. {line.ten_tb}:</p>
+                {record.lines.length > 1 ? (
+                  <>
+                    <p className="font-bold">{idx + 1}. {line.ten_tb}:</p>
+                    <p className="pl-3">
+                      <span className="font-semibold">Khối lượng đã sửa chữa, thay thế phụ tùng: </span>
+                      {content}
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    <span className="font-semibold">Khối lượng đã sửa chữa, thay thế phụ tùng: </span>
+                    {content || ".............................."}
+                  </p>
                 )}
-                <p className="pl-3">{line.cac_khac_phuc || line.noi_dung || ""}</p>
                 {allMats.length > 0 && <MaterialsTable materials={allMats} showDonGia={false} />}
               </div>
             )
@@ -599,12 +599,12 @@ function PrintF15({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
 // ─── Wrapper: F10 + F15 gộp ──────────────────────────────────────────────────
 
-function PrintDeNghi({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+function PrintDeNghi({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   return (
     <div className="font-serif">
       <PrintF10 record={record} qrUrl={qrUrl} />
-      <div className="print:page-break-before-always mt-8 border-t-2 border-dashed border-slate-300 pt-8" />
-      <PrintF15 record={record} qrUrl={qrUrl} />
+      <div className="print:page-break-before-always mt-6 pt-6" />
+      <PrintF15 record={record} qrUrl={qrUrl} staffMap={staffMap} />
     </div>
   )
 }
@@ -622,7 +622,7 @@ function PrintLyLich({ rows, asset, filterFrom, filterTo }: {
       <CompanyHeader boPhan={asset?.bo_phan} />
 
       <div className="text-center mt-2 mb-4">
-        <h2 className="text-sm font-extrabold uppercase tracking-wide">
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>
           Lý lịch {asset?.loai === "xe" ? "xe" : "máy móc / thiết bị"}
         </h2>
         <div className="text-[10px] italic text-slate-500 mt-0.5">(KHXD-QT02-F01)</div>
@@ -784,16 +784,16 @@ function PrintImages({ lines, record }: { lines: LineData[]; record: RecordData 
 
 // ─── Template gộp: F13 + F10 + F15 + Ảnh ────────────────────────────────────
 
-function PrintSuCoNho({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+function PrintSuCoNho({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean))
   return (
     <div className="font-serif">
-      <PrintSuCo record={record} qrUrl={qrUrl} />
-      <div className="print:page-break-before-always mt-8 border-t-2 border-dashed border-slate-300 pt-8" />
-      <PrintDeNghi record={record} qrUrl={qrUrl} />
+      <PrintSuCo record={record} qrUrl={qrUrl} staffMap={staffMap} />
+      <div className="print:page-break-before-always mt-6 pt-6" />
+      <PrintDeNghi record={record} qrUrl={qrUrl} staffMap={staffMap} />
       {hasImages && (
         <>
-          <div className="print:page-break-before-always mt-8 border-t-2 border-dashed border-slate-300 pt-8" />
+          <div className="print:page-break-before-always mt-6 pt-6" />
           <PrintImages lines={record.lines} record={record} />
         </>
       )}
@@ -815,6 +815,7 @@ export default function MaintenancePrintPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [record, setRecord] = useState<RecordData | null>(null)
+  const [staffMap, setStaffMap] = useState<Map<string, string>>(new Map())
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([])
   const [assetInfo, setAssetInfo] = useState<AssetInfo | null>(null)
   const [multiAssets, setMultiAssets] = useState<{ info: AssetInfo; rows: HistoryRow[] }[]>([])
@@ -920,7 +921,20 @@ export default function MaintenancePrintPage() {
               .order("sort_order")
             lines.push({ ...(ln as Omit<LineData, "materials">), materials: (mats || []) as MaterialRow[] })
           }
-          setRecord({ ...(rec as Omit<RecordData, "lines">), lines })
+          const recordData = { ...(rec as Omit<RecordData, "lines">), lines }
+          setRecord(recordData)
+
+          // Build name → chuc_vu map for accurate role display in print templates
+          const { data: staffData } = await supabase
+            .from("maintenance_staff")
+            .select("ten, chuc_vu")
+            .eq("factory_id", (rec as { factory_id: string }).factory_id)
+            .eq("active", true)
+          const map = new Map<string, string>()
+          for (const s of (staffData || []) as { ten: string; chuc_vu: string | null }[]) {
+            if (s.ten && s.chuc_vu) map.set(s.ten, s.chuc_vu)
+          }
+          setStaffMap(map)
         }
       } catch {
         setError("Lỗi tải dữ liệu")
@@ -951,7 +965,7 @@ export default function MaintenancePrintPage() {
         @media print {
           .no-print { display: none !important; }
           @page { margin: 15mm; size: A4 portrait; }
-          body { font-size: 11pt; }
+          body { font-size: 12pt; }
           .print\\:page-break-before-always { page-break-before: always; }
         }
         .print-page {
@@ -988,9 +1002,9 @@ export default function MaintenancePrintPage() {
 
         {!loading && !error && printType !== "ly_lich" && record && (
           <>
-            {printType === "su_co" && <PrintSuCo record={record} qrUrl={qrUrl} />}
-            {printType === "de_nghi" && <PrintDeNghi record={record} qrUrl={qrUrl} />}
-            {printType === "su_co_nho" && <PrintSuCoNho record={record} qrUrl={qrUrl} />}
+            {printType === "su_co" && <PrintSuCo record={record} qrUrl={qrUrl} staffMap={staffMap} />}
+            {printType === "de_nghi" && <PrintDeNghi record={record} qrUrl={qrUrl} staffMap={staffMap} />}
+            {printType === "su_co_nho" && <PrintSuCoNho record={record} qrUrl={qrUrl} staffMap={staffMap} />}
           </>
         )}
 
@@ -1000,7 +1014,7 @@ export default function MaintenancePrintPage() {
               multiAssets.map((item, idx) => (
                 <div key={item.info.ma_tb}>
                   {idx > 0 && (
-                    <div className="print:page-break-before-always mt-4 border-t-2 border-dashed border-slate-300 pt-4" />
+                    <div className="print:page-break-before-always mt-4 pt-4" />
                   )}
                   <PrintLyLich rows={item.rows} asset={item.info} filterFrom={filterFrom} filterTo={filterTo} />
                 </div>

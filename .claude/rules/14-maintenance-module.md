@@ -394,20 +394,40 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 ### Cấu trúc mẫu in
 
 **F13 (`PrintSuCo`)** — Biên bản kiểm tra sự cố (KHXD-QT02-F13):
-- Header: Tên NM + Bộ phận | QR code góc trên phải
+- Header: Tên NM (9px, compact) + Bộ phận | QR code góc trên phải; tiêu đề 13pt
 - "Hôm nay vào lúc ... giờ, ngày ... tháng ... năm ..."
-- "Chúng tôi gồm:" — BGĐ phụ trách, NV kỹ thuật, Tổ cơ điện, **Giám đốc nhà máy**, Người thực hiện (theo thứ tự này)
+- "Chúng tôi gồm:" — thứ tự cố định từ lớn đến nhỏ:
+  1. `giam_doc` → chức vụ từ `staffMap` hoặc "Giám đốc nhà máy"
+  2. `bgd_phu_trach` → chức vụ từ `staffMap` hoặc "BGĐ phụ trách"
+  3. `nv_phu_trach` (nếu có) → chức vụ từ `staffMap` hoặc "Nhân viên phụ trách"
+  4. `phu_trach_bao_tri` (nếu có) → chức vụ từ `staffMap` hoặc "Phụ trách bảo trì"
+  - Nếu cả 3 và 4 đều trống → thêm placeholder `"................................."` – Tổ trưởng cơ điện
+  - **Không** thêm `nguoi_tao`, **Không** thêm `nguoi_thuc_hien` (công nhân bảo trì)
+  - Placeholder name="" hiển thị dòng gạch để ký tay
 - Per thiết bị: Tên máy, số hiệu, Tình trạng sự cố, Nguyên nhân, Cách khắc phục, bảng vật tư
+  - Nội dung sau dấu hai chấm viết liền trên cùng dòng với label: "Tình trạng sự cố: [nội dung]"
+  - Nếu trống: label hiện trước, blank lines bên dưới để ký tay
+  - **Không hiển thị chi phí ước tính** trong F13 (chi phí thuộc F10)
+  - Vật tư sử dụng: hiện bảng nếu có; hiện italic "Không có" nếu trống
 - "Kết luận và những kiến nghị lên Giám đốc nhà máy"
 - Ký tên 4 cột: BGĐ phụ trách | NV kỹ thuật | Tổ cơ điện | Giám đốc nhà máy
 - Footer: `KHXD-QT02-F13 (01-15/05/2026)`
+
+**Kỹ thuật `staffMap` (dùng cho F13 và F15)**:
+- Sau khi load record, fetch `maintenance_staff` theo `factory_id` của record
+- Build `Map<string, string>` với key = `ten`, value = `chuc_vu`
+- Truyền vào `PrintSuCo`, `PrintF15` qua prop `staffMap`
+- Wrappers `PrintDeNghi`, `PrintSuCoNho` nhận và truyền tiếp `staffMap` xuống
 
 **F10 (`PrintF10`)** — Giấy đề nghị sửa chữa (KHXD-QT02-F10):
 - "Kampong Thom, ngày ... tháng ... năm ..." (căn phải)
 - "Kính gửi: Giám đốc Nhà máy..."
 - Đề nghị cho sửa chữa: tên máy, đính kèm biên bản số
 - Thời gian, người thực hiện, bảng nội dung thay thế
-- Vật tư: hiển thị `MaterialsTable` nếu có; hiển thị chữ nghiêng "Không có" nếu trống (không dùng bảng rỗng 3 hàng)
+- Vật tư: dòng label **"Vật tư thay thế:"** + nội dung trên **cùng 1 dòng**:
+  - Nếu có vật tư → hiện `MaterialsTable` ngay bên dưới label
+  - Nếu không có → `<span className="italic text-slate-500">Không có</span>` inline ngay sau label
+  - **Không** dùng bảng rỗng 3 hàng, **không** để "Không có" xuống dòng riêng
 - Ký tên 3 cột: Giám đốc nhà máy | NV kỹ thuật | BGĐ phụ trách
 - Footer: `KHXD-QT02-F10 (01-15/05/2026)`
 
@@ -415,7 +435,7 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 - "Xe/máy/thiết bị: ... Biển số/số hiệu: ..."
 - "Căn cứ: Giấy đề nghị sửa chữa số ..."
 - "Hôm nay, ngày ... Tại ..."
-- "Chúng tôi gồm:" với chức vụ đầy đủ
+- "Chúng tôi gồm:" — chức vụ lấy từ `staffMap` (giống F13), fallback nhãn mặc định
 - Khối lượng sửa chữa, bảng vật tư (không hiện Đơn giá / Nguồn)
 - Checkbox ☐ Đạt yêu cầu / ☐ Không đạt
 - Giá trị sửa chữa, Kết luận
