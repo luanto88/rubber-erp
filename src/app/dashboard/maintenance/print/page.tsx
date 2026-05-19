@@ -123,11 +123,11 @@ function CompanyHeader({ boPhan }: { boPhan?: string }) {
   return (
     <div className="flex items-start justify-between mb-0.5">
       <div>
-        <div className="font-bold uppercase text-slate-800" style={{ fontSize: "9px" }}>
+        <div className="font-bold uppercase" style={{ fontSize: "12px", color: "#000000" }}>
           Nhà máy chế biến Phước Hòa Kampong Thom
         </div>
         {boPhan && (
-          <div className="text-slate-600" style={{ fontSize: "9px" }}>Bộ phận: {boPhan}</div>
+          <div style={{ fontSize: "12px", color: "#000000" }}>Bộ phận: {boPhan}</div>
         )}
       </div>
     </div>
@@ -219,13 +219,21 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
 
-  // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì; fallback Tổ trưởng cơ điện nếu cả 2 trống
+  // Tổ trưởng cơ điện được chọn trong nguoi_thuc_hien (nếu có)
+  const toTruongCoDien = record.nguoi_thuc_hien.filter(name => {
+    const role = staffMap.get(name)?.toLowerCase() || ""
+    return role.includes("tổ trưởng") && role.includes("cơ điện")
+  })
+  // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì → Tổ trưởng cơ điện (từ nguoi_thuc_hien)
   const participants: { name: string; role: string }[] = []
   if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
   if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
   if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
   if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
-  if (!record.nv_phu_trach && !record.phu_trach_bao_tri) participants.push({ name: "", role: "Tổ trưởng cơ điện" })
+  for (const name of toTruongCoDien) {
+    participants.push({ name, role: staffMap.get(name) || "Tổ trưởng cơ điện" })
+  }
+  if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length === 0) participants.push({ name: "", role: "Tổ trưởng cơ điện" })
 
   return (
     <div className="print-page font-serif">
@@ -313,21 +321,20 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
           </div>
 
           <div className="mt-2">
-            <p className="font-semibold">Vật tư sử dụng:</p>
-            {line.materials.length > 0
-              ? <MaterialsTable materials={line.materials} showDonGia />
-              : <p className="italic text-xs mt-0.5">Không có</p>
-            }
+            <span className="font-semibold">Vật tư sử dụng: </span>
+            {line.materials.length === 0 && (
+              <span className="italic">Không có</span>
+            )}
+            {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia />}
           </div>
         </div>
       ))}
 
       <div className="mt-2 text-xs leading-5">
-        <p className="font-semibold">Kết luận và những kiến nghị lên Giám đốc nhà máy{" "}
-          <span className="font-normal italic">(đối với những trường hợp không khắc phục ngay được):</span>
-        </p>
+        <span className="font-semibold">Kết luận và những kiến nghị lên Giám đốc nhà máy </span>
+        <span className="italic">(đối với những trường hợp không khắc phục ngay được): </span>
         {record.ghi_chu ? (
-          <p className="mt-1">{record.ghi_chu}</p>
+          <span>{record.ghi_chu}</span>
         ) : (
           <BlankLine count={3} />
         )}
@@ -458,7 +465,6 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
 function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
-  const nguoiNghiemThu = record.nguoi_duyet || record.bgd_phu_trach || "..."
 
   return (
     <div className="print-page font-serif">
@@ -581,14 +587,15 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
 
         <div className="mt-1">
           <p className="font-semibold">Kết luận:</p>
-          <BlankLine count={2} />
+          {[0, 1].map(i => (
+            <div key={i} style={{ height: "2rem", borderBottom: "1px solid #cbd5e1", marginTop: "0.5rem" }} />
+          ))}
         </div>
       </div>
 
       <SignatureRow cols={[
         { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
         { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-        { role: "Người nghiệm thu", name: nguoiNghiemThu },
         { role: "Giám đốc nhà máy", name: record.giam_doc },
       ]} />
 

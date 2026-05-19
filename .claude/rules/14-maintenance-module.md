@@ -435,8 +435,17 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 - "Xe/máy/thiết bị: ... Biển số/số hiệu: ..."
 - "Căn cứ: Giấy đề nghị sửa chữa số ..."
 - "Hôm nay, ngày ... Tại ..."
-- "Chúng tôi gồm:" — chức vụ lấy từ `staffMap` (giống F13), fallback nhãn mặc định
-- Khối lượng sửa chữa, bảng vật tư (không hiện Đơn giá / Nguồn)
+- "Chúng tôi gồm:" — thứ tự giống F13 (format "Ông: [Tên] – [Chức vụ]"):
+  1. `giam_doc` → staffMap hoặc "Giám đốc Nhà máy"
+  2. `bgd_phu_trach` → staffMap hoặc "BGĐ phụ trách"
+  3. `nv_phu_trach` (nếu có) → staffMap hoặc "Nhân viên phụ trách"
+  4. `phu_trach_bao_tri` (nếu có) → staffMap hoặc "Phụ trách bảo trì"
+  - Nếu cả 3 và 4 đều trống → thêm dòng `Ông: "................................." – Tổ trưởng cơ điện`
+  - **Không** hiển thị `nguoi_thuc_hien`
+- **"Khối lượng đã sửa chữa, thay thế phụ tùng:"** viết **inline** cùng dòng với nội dung (`cac_khac_phuc` hoặc `noi_dung`):
+  - 1 thiết bị: `<span>Khối lượng đã sửa chữa...: </span>[nội dung]` trên cùng 1 dòng
+  - Nhiều thiết bị: mỗi device có số thứ tự + tên, rồi label + nội dung inline bên dưới
+  - Bảng vật tư (nếu có) hiện bên dưới từng device (không hiện Đơn giá / Nguồn)
 - Checkbox ☐ Đạt yêu cầu / ☐ Không đạt
 - Giá trị sửa chữa, Kết luận
 - Ký tên 4 cột: BGĐ phụ trách | NV phụ trách | Người nghiệm thu | Giám đốc nhà máy
@@ -451,6 +460,15 @@ Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 **Component `DocumentFooter`**: render ở cuối mỗi mẫu in — mã tài liệu + ngày ban hành dạng `(01-15/05/2026)`, canh trái, viền trên mỏng. **Không** hiển thị "Lần ban hành: 01" riêng bên phải.
 
 **Cấu trúc `SignatureRow`**: Chức vụ → khoảng trắng `h-16` (≈2.5 cm để ký tay) → Tên → "(Ký và ghi rõ họ tên)". **Không có đường kẻ ngang** giữa khoảng ký và tên (`border-t` đã bỏ).
+
+**`CompanyHeader`**: font `9px` (nhỏ hơn ~30% so với nội dung), không có `tracking-wide`. Mục đích: dành nhiều không gian hơn cho nội dung biên bản.
+
+**Typography toàn mẫu**:
+- Body text: `font-size: 12pt` (CSS `@page`), `leading-5`, `space-y-0.5`
+- Tiêu đề h2: `font-size: 13pt` (inline style)
+- Khoảng cách giữa section: `mt-2` (giảm từ `mt-4`)
+
+**Divider giữa các mẫu** (PrintSuCoNho, PrintDeNghi): chỉ dùng `page-break-before-always` + margin, **không** có `border-t-2 border-dashed`.
 
 ### Print URL params
 
