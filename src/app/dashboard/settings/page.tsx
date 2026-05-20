@@ -1,6 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
+
+const PolygonDrawMap = dynamic(
+  () => import("./_components/PolygonDrawMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-80 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-sm">
+        Đang tải bản đồ...
+      </div>
+    ),
+  }
+)
 import { supabase } from "@/lib/supabase"
 import {
   DEFAULT_PERMISSION_CODES,
@@ -96,11 +109,15 @@ type UserEditor = {
   mode: "approve" | "edit"
 }
 
-type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data" | "maintenance"
+type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance"
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "vehicles"
+type SystemTab = "users" | "permissions"
 
-type MaintenanceTab = "assets" | "staff" | "ext-materials"
+type MasterDataTab = "suffixes" | "company" | "customers"
+
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots"
+
+type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 
 type MaintenanceAssetRow = {
   id: string
@@ -128,6 +145,26 @@ type MaintenanceExtMaterialRow = {
   factory_id: string
   ten_vat_tu: string
   dvt: string | null
+  code: string | null
+  specification: string | null
+  category_id: string | null
+  is_active: boolean
+}
+
+type CustomerRow = {
+  id: string
+  factory_id: string
+  ma_kh: string | null
+  ten_kh_en: string | null
+  email: string | null
+  dia_chi: string | null
+}
+
+type CustomerForm = {
+  ma_kh: string
+  ten_kh_en: string
+  email: string
+  dia_chi: string
 }
 
 const BO_PHAN_OPTIONS = ["Mủ tạp", "Mủ nước", "Nước thải", "Biomass", "Đội xe", "Văn phòng", "Khác"] as const
@@ -203,6 +240,32 @@ type DispatchDeliveryPointForm = {
   phien_c: string
   phien_d: string
   sort_order: string
+  is_active: boolean
+}
+
+type ForestPlotRow = {
+  id: string
+  factory_id: string
+  ten: string
+  ma_lo_full: string | null
+  nong_truong: string | null
+  doi: number | null
+  giong: string | null
+  dien_tich_ha: number | null
+  nam_trong: number | null
+  nam_cao_up: number | null
+  is_active: boolean
+}
+
+type ForestPlotForm = {
+  ten: string
+  ma_lo_full: string
+  nong_truong: string
+  doi: string
+  giong: string
+  dien_tich_ha: string
+  nam_trong: string
+  nam_cao_up: string
   is_active: boolean
 }
 
@@ -288,6 +351,14 @@ function emptyDeliveryPointForm(sortOrder = "0"): DispatchDeliveryPointForm {
     phien_d: "",
     sort_order: sortOrder,
     is_active: true,
+  }
+}
+
+function emptyForestPlotForm(): ForestPlotForm {
+  return {
+    ten: "", ma_lo_full: "", nong_truong: "",
+    doi: "", giong: "", dien_tich_ha: "",
+    nam_trong: "", nam_cao_up: "", is_active: true,
   }
 }
 
@@ -378,19 +449,16 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
         "# Ghi chú: ma_kho hỗ trợ nhiều kho ngăn cách dấu chấm phẩy vd: KA;KB",
       ],
     },
-    vehicles: {
-      filename: "mau_xe_tai_xe.csv",
-      rows: [
-        "ma_xe,ten_xe,loai_xe,tai_xe_chinh,hieu_luc_tu,trang_thai",
-        "1B,Cozon nội bộ 1B,Cozon nội bộ,Sreng Seng Hoang,2000-01-01,true",
-      ],
-    },
     "delivery-points": {
       filename: "mau_diem_giao_nhan.csv",
       rows: [
         "ma_lo,doi,lat,lng,phien_a,phien_b,phien_c,phien_d,sort_order,is_active",
         "B5,2,12.632736,105.495549,\"A3,A4,A5\",\"B4,C4,D4,E4\",\"E5,D5D,C5D,C5T\",\"A3,A4,A5\",1,true",
       ],
+    },
+    "forest-plots": {
+      filename: "lo_vuon.csv",
+      rows: [],
     },
   }
   const cfg = cfgs[tab]
@@ -404,7 +472,9 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>("company")
+  const [tab, setTab] = useState<SettingsTab>("system")
+  const [systemTab, setSystemTab] = useState<SystemTab>("users")
+  const [masterDataTab, setMasterDataTab] = useState<MasterDataTab>("suffixes")
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [suffixes, setSuffixes] = useState<Suffix[]>([])
@@ -441,10 +511,15 @@ export default function SettingsPage() {
   const [dispatchDrivers, setDispatchDrivers] = useState<DispatchDriverRow[]>([])
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicleRow[]>([])
   const [dispatchVehicleAssignments, setDispatchVehicleAssignments] = useState<DispatchVehicleAssignmentRow[]>([])
+  const [forestPlots, setForestPlots] = useState<ForestPlotRow[]>([])
+  const [forestPlotForm, setForestPlotForm] = useState<ForestPlotForm>(emptyForestPlotForm())
+  const [forestPlotGeometry, setForestPlotGeometry] = useState<unknown>(null)
+  const [forestPlotGeoImporting, setForestPlotGeoImporting] = useState(false)
+  const forestPlotGeoImportRef = useRef<HTMLInputElement>(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
 
-  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle" | null>(null)
+  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle" | "forest-plot" | null>(null)
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
@@ -455,7 +530,7 @@ export default function SettingsPage() {
   const [assignmentHistoryVehicleId, setAssignmentHistoryVehicleId] = useState<string | null>(null)
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState("")
-  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle"; id: string; label: string } | null>(null)
+  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle" | "forest-plot"; id: string; label: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -474,7 +549,19 @@ export default function SettingsPage() {
   const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "ext-mat"; id: string; label: string } | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
   const [staffForm, setStaffForm] = useState({ ten: "", chuc_vu: "", email: "", active: true })
-  const [extMatForm, setExtMatForm] = useState({ ten_vat_tu: "", dvt: "" })
+  const [extMatForm, setExtMatForm] = useState({ ten_vat_tu: "", dvt: "", code: "", specification: "", category_id: "", is_active: true })
+
+  // Customers state
+  const [customers, setCustomers] = useState<CustomerRow[]>([])
+  const [customerLoading, setCustomerLoading] = useState(false)
+  const [customerLoaded, setCustomerLoaded] = useState(false)
+  const [customerModal, setCustomerModal] = useState<"add" | "edit" | null>(null)
+  const [customerEditId, setCustomerEditId] = useState<string | null>(null)
+  const [customerForm, setCustomerForm] = useState<CustomerForm>({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "" })
+  const [customerSaving, setCustomerSaving] = useState(false)
+  const [customerError, setCustomerError] = useState("")
+  const [customerDelConfirm, setCustomerDelConfirm] = useState<{ id: string; label: string } | null>(null)
+  const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
 
   const loadSuffixes = useCallback(async (fid: string) => {
     const { data } = await supabase.from("suffixes").select("*").eq("factory_id", fid).order("code")
@@ -519,20 +606,12 @@ export default function SettingsPage() {
   const loadConfigData = useCallback(async (fid: string) => {
     setConfigLoading(true)
     try {
-      const [wRes, cRes, iItemsRes, iCatCountRes, dRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
+      const [wRes, cRes, iItemsRes, iCatCountRes, dRes] = await Promise.all([
         supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
         supabase.from("dispatch_delivery_points").select("id, factory_id, ma_lo, doi, lat, lng, phien_a, phien_b, phien_c, phien_d, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("ma_lo"),
-        supabase.from("dispatch_drivers").select("id, factory_id, code, name, phone, is_active").eq("factory_id", fid).order("name"),
-        supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
-        supabase
-          .from("dispatch_vehicle_driver_assignments")
-          .select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note")
-          .eq("factory_id", fid)
-          .order("is_current", { ascending: false })
-          .order("effective_from", { ascending: false }),
       ])
 
       const nextWarehouses = (wRes.data || []) as InvWarehouseRow[]
@@ -551,41 +630,19 @@ export default function SettingsPage() {
       }))
 
       const nextDeliveryPoints = (dRes.data || []) as DispatchDeliveryPointRow[]
-      const nextDrivers = (driverRes.data || []) as DispatchDriverRow[]
-      const nextAssignments = (assignmentRes.data || []) as DispatchVehicleAssignmentRow[]
-      const driverNameMap = new Map(nextDrivers.map((row) => [row.id, row.name]))
-      const currentAssignmentMap = new Map<string, DispatchVehicleAssignmentRow>()
-      for (const assignment of nextAssignments) {
-        const existing = currentAssignmentMap.get(assignment.vehicle_id)
-        if (!existing && assignment.is_current) {
-          currentAssignmentMap.set(assignment.vehicle_id, assignment)
-          continue
-        }
-        if (!existing) {
-          currentAssignmentMap.set(assignment.vehicle_id, assignment)
-          continue
-        }
-        if (!existing.is_current && assignment.is_current) {
-          currentAssignmentMap.set(assignment.vehicle_id, assignment)
-        }
-      }
-      const nextVehicles = ((vehicleRes.data || []) as Omit<DispatchVehicleRow, "current_driver_id" | "current_driver_name" | "current_assignment_from">[]).map((row) => {
-        const currentAssignment = currentAssignmentMap.get(row.id)
-        return {
-          ...row,
-          current_driver_id: currentAssignment?.driver_id || null,
-          current_driver_name: currentAssignment ? driverNameMap.get(currentAssignment.driver_id) || "Không xác định" : "",
-          current_assignment_from: currentAssignment?.effective_from || null,
-        }
-      })
+
+      const { data: forestPlotsData } = await supabase
+        .from("forest_plots")
+        .select("id, factory_id, ten, ma_lo_full, nong_truong, doi, giong, dien_tich_ha, nam_trong, nam_cao_up, is_active")
+        .eq("factory_id", fid)
+        .order("doi", { ascending: true, nullsFirst: false })
+        .order("ten")
 
       setInvWarehouses(nextWarehouses)
       setInvCategories(nextCategories)
       setInvItems(nextItems)
       setDeliveryPoints(nextDeliveryPoints)
-      setDispatchDrivers(nextDrivers)
-      setDispatchVehicles(nextVehicles)
-      setDispatchVehicleAssignments(nextAssignments)
+      setForestPlots(forestPlotsData || [])
       setConfigLoaded(true)
     } finally {
       setConfigLoading(false)
@@ -595,17 +652,49 @@ export default function SettingsPage() {
   const loadMaintenanceData = useCallback(async (fid: string) => {
     setMaintLoading(true)
     try {
-      const [aRes, sRes, mRes] = await Promise.all([
+      const [aRes, sRes, mRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
         supabase.from("maintenance_assets").select("*").eq("factory_id", fid).order("bo_phan").order("ma_tb"),
         supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
         supabase.from("maintenance_external_materials").select("*").eq("factory_id", fid).order("ten_vat_tu"),
+        supabase.from("dispatch_drivers").select("id, factory_id, code, name, phone, is_active").eq("factory_id", fid).order("name"),
+        supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
+        supabase.from("dispatch_vehicle_driver_assignments").select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note").eq("factory_id", fid).order("is_current", { ascending: false }).order("effective_from", { ascending: false }),
       ])
       setMaintAssets((aRes.data || []) as MaintenanceAssetRow[])
       setMaintStaff((sRes.data || []) as MaintenanceStaffRow[])
       setMaintExtMats((mRes.data || []) as MaintenanceExtMaterialRow[])
+
+      const nextDrivers = (driverRes.data || []) as DispatchDriverRow[]
+      const nextAssignments = (assignmentRes.data || []) as DispatchVehicleAssignmentRow[]
+      const driverNameMap = new Map(nextDrivers.map((r) => [r.id, r.name]))
+      const currentAssignmentMap = new Map<string, DispatchVehicleAssignmentRow>()
+      for (const a of nextAssignments) {
+        const existing = currentAssignmentMap.get(a.vehicle_id)
+        if (!existing && a.is_current) { currentAssignmentMap.set(a.vehicle_id, a); continue }
+        if (!existing) { currentAssignmentMap.set(a.vehicle_id, a); continue }
+        if (!existing.is_current && a.is_current) currentAssignmentMap.set(a.vehicle_id, a)
+      }
+      const nextVehicles = ((vehicleRes.data || []) as Omit<DispatchVehicleRow, "current_driver_id" | "current_driver_name" | "current_assignment_from">[]).map((row) => {
+        const ca = currentAssignmentMap.get(row.id)
+        return { ...row, current_driver_id: ca?.driver_id || null, current_driver_name: ca ? driverNameMap.get(ca.driver_id) || "Không xác định" : "", current_assignment_from: ca?.effective_from || null }
+      })
+      setDispatchDrivers(nextDrivers)
+      setDispatchVehicles(nextVehicles)
+      setDispatchVehicleAssignments(nextAssignments)
       setMaintLoaded(true)
     } finally {
       setMaintLoading(false)
+    }
+  }, [])
+
+  const loadCustomers = useCallback(async (fid: string) => {
+    setCustomerLoading(true)
+    try {
+      const { data } = await supabase.from("customers").select("id, factory_id, ma_kh, ten_kh_en, email, dia_chi").eq("factory_id", fid).order("ten_kh_en")
+      setCustomers((data || []) as CustomerRow[])
+      setCustomerLoaded(true)
+    } finally {
+      setCustomerLoading(false)
     }
   }, [])
 
@@ -645,7 +734,15 @@ export default function SettingsPage() {
     if (!extMatForm.ten_vat_tu.trim()) { setMaintError("Tên vật tư không được để trống"); return }
     setMaintSaving(true); setMaintError("")
     try {
-      const payload = { factory_id: factoryId, ten_vat_tu: extMatForm.ten_vat_tu.trim(), dvt: extMatForm.dvt.trim() || null }
+      const payload = {
+        factory_id: factoryId,
+        ten_vat_tu: extMatForm.ten_vat_tu.trim(),
+        dvt: extMatForm.dvt.trim() || null,
+        code: extMatForm.code.trim() || null,
+        specification: extMatForm.specification.trim() || null,
+        category_id: extMatForm.category_id || null,
+        is_active: extMatForm.is_active,
+      }
       const result = maintEditId
         ? await supabase.from("maintenance_external_materials").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
         : await supabase.from("maintenance_external_materials").insert(payload)
@@ -865,6 +962,82 @@ export default function SettingsPage() {
     }
   }
 
+  const saveForestPlot = async () => {
+    if (!factoryId) return
+    if (!forestPlotForm.ten.trim()) { setConfigError("Mã ngắn (Ten) không được để trống"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        ten: forestPlotForm.ten.trim().toUpperCase(),
+        ma_lo_full: forestPlotForm.ma_lo_full.trim() || null,
+        nong_truong: forestPlotForm.nong_truong.trim() || null,
+        doi: forestPlotForm.doi ? (parseInt(forestPlotForm.doi) || null) : null,
+        giong: forestPlotForm.giong.trim() || null,
+        dien_tich_ha: forestPlotForm.dien_tich_ha ? (parseFloat(forestPlotForm.dien_tich_ha) || null) : null,
+        nam_trong: forestPlotForm.nam_trong ? (parseInt(forestPlotForm.nam_trong) || null) : null,
+        nam_cao_up: forestPlotForm.nam_cao_up ? (parseInt(forestPlotForm.nam_cao_up) || null) : null,
+        geometry: forestPlotGeometry || null,
+        is_active: forestPlotForm.is_active,
+      }
+      const { error } = configEditId
+        ? await supabase.from("forest_plots").update(payload).eq("id", configEditId)
+        : await supabase.from("forest_plots").insert(payload)
+      if (error) { setConfigError(error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const handleImportForestPlotGeoJSON = async (file: File) => {
+    if (!factoryId) return
+    setForestPlotGeoImporting(true)
+    setConfigError("")
+    try {
+      const geojson = JSON.parse(await file.text())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const features: any[] = geojson?.features ?? []
+      if (!features.length) { setConfigError("File GeoJSON không có features"); return }
+      const seen = new Set<string>()
+      const rows = features.flatMap((f: any) => {
+        const p = f?.properties || {}
+        const ten = String(p.Ten || "").trim()
+        if (!ten || seen.has(ten)) return []
+        seen.add(ten)
+        return [{
+          factory_id: factoryId,
+          ten,
+          ma_lo_full: p.Ma_lo_2026 ? String(p.Ma_lo_2026).trim() : null,
+          nong_truong: p.Nong_truong ? String(p.Nong_truong).trim() : null,
+          doi: p.Doi_2026 != null ? (parseInt(p.Doi_2026) || null) : null,
+          giong: p.Giong ? String(p.Giong).trim() : null,
+          dien_tich_ha: p.Dtich2026_ha != null ? (parseFloat(p.Dtich2026_ha) || null) : null,
+          nam_trong: p.Nam_trong != null ? (parseInt(p.Nam_trong) || null) : null,
+          nam_cao_up: p.Nam_cao_up != null ? (parseInt(p.Nam_cao_up) || null) : null,
+          geometry: f.geometry || null,
+          is_active: true,
+        }]
+      })
+      let errBatches = 0
+      for (let i = 0; i < rows.length; i += 50) {
+        const { error } = await supabase
+          .from("forest_plots")
+          .upsert(rows.slice(i, i + 50), { onConflict: "factory_id,ten" })
+        if (error) errBatches++
+      }
+      void loadConfigData(factoryId)
+      setImportResult({ success: rows.length - errBatches * 50, errors: errBatches > 0 ? [`${errBatches} batch lỗi khi upsert`] : [] })
+    } catch (e: unknown) {
+      setConfigError("Không đọc được file: " + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setForestPlotGeoImporting(false)
+      if (forestPlotGeoImportRef.current) forestPlotGeoImportRef.current.value = ""
+    }
+  }
+
   const deleteConfigItem = async () => {
     if (!configDelConfirm || !factoryId) return
     setConfigSaving(true)
@@ -880,7 +1053,9 @@ export default function SettingsPage() {
                 ? "dispatch_delivery_points"
                 : configDelConfirm.type === "driver"
                   ? "dispatch_drivers"
-                  : "dispatch_vehicles"
+                  : configDelConfirm.type === "forest-plot"
+                    ? "forest_plots"
+                    : "dispatch_vehicles"
       await supabase.from(table).delete().eq("id", configDelConfirm.id).eq("factory_id", factoryId)
       setConfigDelConfirm(null)
       void loadConfigData(factoryId)
@@ -1021,6 +1196,12 @@ export default function SettingsPage() {
     }
   }, [tab, factoryId, maintLoaded, maintLoading, loadMaintenanceData])
 
+  useEffect(() => {
+    if (tab === "master-data" && masterDataTab === "customers" && factoryId && !customerLoaded && !customerLoading) {
+      void loadCustomers(factoryId)
+    }
+  }, [tab, masterDataTab, factoryId, customerLoaded, customerLoading, loadCustomers])
+
   const selectedVehicleAssignmentHistory = useMemo(() => {
     if (!assignmentHistoryVehicleId) return []
     const driverNameMap = new Map(dispatchDrivers.map((row) => [row.id, row.name]))
@@ -1058,7 +1239,7 @@ export default function SettingsPage() {
     setFactoryMsg(null)
     const { error: err } = await supabase.from("factories").update(factoryInfo).eq("id", factoryId)
     setSavingFactory(false)
-    setFactoryMsg(err ? { ok: false, text: err.message } : { ok: true, text: "Da luu thong tin cong ty" })
+    setFactoryMsg(err ? { ok: false, text: err.message } : { ok: true, text: "Đã lưu thông tin công ty" })
     setTimeout(() => setFactoryMsg(null), 3000)
   }
 
@@ -1081,7 +1262,7 @@ export default function SettingsPage() {
     setError("")
 
     if (!form.code.trim()) {
-      setError("Ma hau to khong duoc de trong")
+      setError("Mã hậu tố không được để trống")
       return
     }
     if (!form.name.trim()) {
@@ -1089,7 +1270,7 @@ export default function SettingsPage() {
       return
     }
     if (!/^[a-z0-9]+$/.test(form.code.trim())) {
-      setError("Ma hau to chi duoc dung chu thuong va so")
+      setError("Mã hậu tố chỉ được dùng chữ thường và số")
       return
     }
 
@@ -1199,11 +1380,11 @@ export default function SettingsPage() {
   const saveUserApproval = async () => {
     if (!userEditor || !user) return
     if (!userEditor.factoryId) {
-      setUserError("Vui long chon nha may")
+      setUserError("Vui lòng chọn nhà máy")
       return
     }
     if (userEditor.permissions.length === 0) {
-      setUserError("Vui long chon it nhat 1 permission")
+      setUserError("Vui lòng chọn ít nhất 1 quyền")
       return
     }
 
@@ -1282,14 +1463,34 @@ export default function SettingsPage() {
     if (!error && factoryId) await loadProfiles(factoryId)
   }
 
+  const saveCustomer = async () => {
+    if (!factoryId) return
+    if (!customerForm.ten_kh_en.trim()) { setCustomerError("Tên khách hàng không được để trống"); return }
+    setCustomerSaving(true); setCustomerError("")
+    try {
+      const payload = { factory_id: factoryId, ma_kh: customerForm.ma_kh.trim() || null, ten_kh_en: customerForm.ten_kh_en.trim(), email: customerForm.email.trim() || null, dia_chi: customerForm.dia_chi.trim() || null }
+      const result = customerEditId
+        ? await supabase.from("customers").update(payload).eq("id", customerEditId).eq("factory_id", factoryId)
+        : await supabase.from("customers").insert(payload)
+      if (result.error) { setCustomerError(result.error.message); return }
+      setCustomerModal(null); setCustomerEditId(null)
+      void loadCustomers(factoryId)
+    } catch (e) { setCustomerError(e instanceof Error ? e.message : "Lỗi") } finally { setCustomerSaving(false) }
+  }
+
+  const deleteCustomer = async () => {
+    if (!factoryId || !customerDelConfirm) return
+    await supabase.from("customers").delete().eq("id", customerDelConfirm.id).eq("factory_id", factoryId)
+    setCustomerDelConfirm(null)
+    void loadCustomers(factoryId)
+  }
+
   const pendingUsers = profiles.filter((item) => item.status === "pending")
   const activeUsers = profiles.filter((item) => item.status === "active")
   const disabledUsers = profiles.filter((item) => item.status === "disabled")
 
   const tabs = [
-    { key: "company" as const, label: "Công ty", icon: Building2, show: true },
-    { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
-    { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
+    { key: "system" as const, label: "Hệ thống", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
     { key: "factory-config" as const, label: "Cấu hình nhà máy", icon: SlidersHorizontal, show: canManageSettings },
     { key: "master-data" as const, label: "Danh mục", icon: Database, show: true },
     { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: true },
@@ -1324,63 +1525,33 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {tab === "company" && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-        <div className="bg-gradient-to-r from-violet-50 to-purple-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Building2 size={16} className="text-violet-600" />
-            <span className="font-extrabold text-slate-700">Thông tin công ty (EUDR Seller)</span>
-          </div>
-          {canManageSettings && (
-            <button
-              onClick={handleSaveFactory}
-              disabled={savingFactory}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
-            >
-              <Save size={13} /> {savingFactory ? "Đang lưu..." : "Lưu thông tin"}
-            </button>
-          )}
-        </div>
-
-        <div className="p-5">
-          {factoryMsg && (
-            <div
-              className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 ${
-                factoryMsg.ok
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                  : "bg-red-50 text-red-600 border border-red-200"
-              }`}
-            >
-              {factoryMsg.ok ? <Save size={14} /> : <AlertTriangle size={14} />} {factoryMsg.text}
+      {tab === "system" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
+            <div className="flex gap-2">
+              {([
+                { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
+                { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canEditPermissions },
+              ] as const).filter((t) => t.show).map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setSystemTab(item.key)}
+                  className={
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all " +
+                    (systemTab === item.key
+                      ? "bg-blue-50 text-blue-700 border border-blue-200"
+                      : "text-slate-600 hover:bg-slate-50")
+                  }
+                >
+                  <item.icon size={14} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
             </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { label: "Ten cong ty (tieng Anh)", field: "full_name_en", colSpan: true },
-              { label: "Dia chi", field: "address_en", colSpan: true },
-              { label: "Nguoi lien he", field: "contact_person", colSpan: false },
-              { label: "Email", field: "contact_email", colSpan: false },
-              { label: "Website", field: "website", colSpan: false },
-              { label: "Quoc gia", field: "country_en", colSpan: false },
-            ].map(({ label, field, colSpan }) => (
-              <div key={field} className={colSpan ? "col-span-2" : ""}>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
-                <input
-                  value={factoryInfo[field as keyof FactoryInfo]}
-                  onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
-                  disabled={!canManageSettings}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </div>
-            ))}
           </div>
-        </div>
-      </div>
-      )}
 
-      {tab === "users" && canViewUsers && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+          {systemTab === "users" && canViewUsers && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
           <div className="bg-gradient-to-r from-blue-50 to-cyan-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
             <Users size={16} className="text-blue-600" />
             <span className="font-extrabold text-slate-700">Người dùng và phê duyệt</span>
@@ -1389,9 +1560,9 @@ export default function SettingsPage() {
           <div className="p-5 space-y-6">
             <div className="grid grid-cols-3 gap-4">
               {[
-                { label: "Cho duyet", value: pendingUsers.length, tone: "amber" },
+                { label: "Chờ duyệt", value: pendingUsers.length, tone: "amber" },
                 { label: "Đang hoạt động", value: activeUsers.length, tone: "emerald" },
-                { label: "Da khoa", value: disabledUsers.length, tone: "red" },
+                { label: "Đã khóa", value: disabledUsers.length, tone: "red" },
               ].map((item) => (
                 <div key={item.label} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                   <div className="text-xs text-slate-500">{item.label}</div>
@@ -1403,13 +1574,13 @@ export default function SettingsPage() {
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <UserCheck size={15} className="text-amber-600" />
-                <h2 className="font-bold text-slate-800">Tai khoan cho duyet</h2>
+                <h2 className="font-bold text-slate-800">Tài khoản chờ duyệt</h2>
               </div>
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Username", "Ho ten", "Phong ban", "Role", "Trang thai", ""].map((head) => (
+                      {["Username", "Họ tên", "Phòng ban", "Role", "Trạng thái", ""].map((head) => (
                         <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
                           {head}
                         </th>
@@ -1432,7 +1603,7 @@ export default function SettingsPage() {
                           <td className="px-4 py-3 text-slate-500">{profile.role}</td>
                           <td className="px-4 py-3">
                             <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
-                              pending
+                              Chờ duyệt
                             </span>
                           </td>
                           <td className="px-4 py-3">
@@ -1442,7 +1613,7 @@ export default function SettingsPage() {
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
                               >
                                 <CheckCircle2 size={13} />
-                                Duyet
+                                Duyệt
                               </button>
                             )}
                           </td>
@@ -1457,13 +1628,13 @@ export default function SettingsPage() {
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <ShieldCheck size={15} className="text-emerald-600" />
-                <h2 className="font-bold text-slate-800">Tai khoan dang hoat dong</h2>
+                <h2 className="font-bold text-slate-800">Tài khoản đang hoạt động</h2>
               </div>
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Username", "Ho ten", "Role", "Trang thai", "Phe duyet luc", ""].map((head) => (
+                      {["Username", "Họ tên", "Role", "Trạng thái", "Phê duyệt lúc", ""].map((head) => (
                         <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
                           {head}
                         </th>
@@ -1512,39 +1683,40 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      )}
+          )}
 
-      {tab === "permissions" && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-          <div className="bg-gradient-to-r from-indigo-50 to-sky-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
-            <ShieldCheck size={16} className="text-indigo-600" />
-            <span className="font-extrabold text-slate-700">Phân quyền</span>
-          </div>
-
-          <div className="p-5 space-y-5">
-            <div className="text-sm text-slate-500">
-              Khu nay se la noi quan tri tap trung quyen theo module va action. Hien tai quyen dang duoc gan trong modal duyet user,
-              va danh sach permission he thong da duoc tai san.
+          {systemTab === "permissions" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-50 to-sky-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <ShieldCheck size={16} className="text-indigo-600" />
+              <span className="font-extrabold text-slate-700">Phân quyền</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {Object.entries(groupedPermissions).map(([moduleName, options]) => (
-                <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
-                  <div className="font-bold text-slate-800 mb-3">{moduleName}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {options.map((option) => (
-                      <span
-                        key={option.code}
-                        className="px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700"
-                      >
-                        {option.action_name}
-                      </span>
-                    ))}
+            <div className="p-5 space-y-5">
+              <div className="text-sm text-slate-500">
+                Đây là nơi quản trị tập trung quyền theo module và action. Hiện tại quyền được gán trong modal duyệt user, và danh sách permission hệ thống đã được tải sẵn.
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {Object.entries(groupedPermissions).map(([moduleName, options]) => (
+                  <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
+                    <div className="font-bold text-slate-800 mb-3">{moduleName}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {options.map((option) => (
+                        <span
+                          key={option.code}
+                          className="px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700"
+                        >
+                          {option.action_name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -1558,20 +1730,45 @@ export default function SettingsPage() {
               </div>
               {canManageSettings && (
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => { if (configTab !== "delivery-points" && configTab !== "vehicles") downloadConfigTemplate(configTab) }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
-                    title="Tải file mẫu CSV để điền dữ liệu và import"
-                  >
-                    <Download size={13} /> Tải mẫu
-                  </button>
-                  <button
-                    onClick={() => { if (configTab === "delivery-points" || configTab === "vehicles") return; setImportResult(null); importFileRef.current?.click() }}
-                    disabled={importing || configTab === "delivery-points" || configTab === "vehicles"}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
-                  >
-                    <Upload size={13} /> {importing ? "Đang nhập..." : "Nhập CSV"}
-                  </button>
+                  {configTab !== "forest-plots" && (
+                    <>
+                      <button
+                        onClick={() => { if (configTab !== "delivery-points") downloadConfigTemplate(configTab) }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
+                        title="Tải file mẫu CSV để điền dữ liệu và import"
+                      >
+                        <Download size={13} /> Tải mẫu
+                      </button>
+                      <button
+                        onClick={() => { if (configTab === "delivery-points") return; setImportResult(null); importFileRef.current?.click() }}
+                        disabled={importing || configTab === "delivery-points"}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
+                      >
+                        <Upload size={13} /> {importing ? "Đang nhập..." : "Nhập CSV"}
+                      </button>
+                    </>
+                  )}
+                  {configTab === "forest-plots" && (
+                    <>
+                      <input
+                        ref={forestPlotGeoImportRef}
+                        type="file"
+                        accept=".geojson,.json"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) void handleImportForestPlotGeoJSON(f)
+                        }}
+                      />
+                      <button
+                        onClick={() => { setImportResult(null); forestPlotGeoImportRef.current?.click() }}
+                        disabled={forestPlotGeoImporting}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
+                      >
+                        <Upload size={13} /> {forestPlotGeoImporting ? "Đang import..." : "Import GeoJSON"}
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => {
                       setConfigError("")
@@ -1587,14 +1784,15 @@ export default function SettingsPage() {
                         setConfigEditId(null)
                         setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
                         setConfigModal("item")
-                      } else if (configTab === "vehicles") {
-                        setConfigEditId(null)
-                        setDispatchVehicleForm(emptyDispatchVehicleForm(String(dispatchVehicles.length + 1)))
-                        setConfigModal("vehicle")
-                      } else {
+                      } else if (configTab === "delivery-points") {
                         setConfigEditId(null)
                         setDeliveryPointForm(emptyDeliveryPointForm(String(deliveryPoints.length + 1)))
                         setConfigModal("delivery-point")
+                      } else if (configTab === "forest-plots") {
+                        setConfigEditId(null)
+                        setForestPlotForm(emptyForestPlotForm())
+                        setForestPlotGeometry(null)
+                        setConfigModal("forest-plot")
                       }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
@@ -1606,37 +1804,13 @@ export default function SettingsPage() {
             </div>
 
             <div className="p-4">
-              <div className="hidden">
-                {(["warehouses", "categories", "items"] as const).map((key) => (
-                  <button
-                    key={key}
-                    onClick={() => { setConfigTab(key); setImportResult(null) }}
-                    className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === key ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
-                  >
-                    {key === "warehouses" ? "Kho" : key === "categories" ? "Nhóm vật tư" : "Vật tư / Hóa chất"}
-                  </button>
-                ))}
-                <button
-                  onClick={() => { setConfigTab("vehicles"); setImportResult(null) }}
-                  className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === "vehicles" ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
-                >
-                  Xe &amp; tĂ i xáº¿
-                </button>
-                <button
-                  onClick={() => { setConfigTab("delivery-points"); setImportResult(null) }}
-                  className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === "delivery-points" ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
-                >
-                  Điểm giao nhận
-                </button>
-              </div>
-
               <div className="flex gap-2 mb-4">
                 {[
                   { key: "warehouses" as const, label: "Kho" },
                   { key: "categories" as const, label: "Nhóm vật tư" },
                   { key: "items" as const, label: "Vật tư / Hóa chất" },
-                  { key: "vehicles" as const, label: "Xe & tài xế" },
                   { key: "delivery-points" as const, label: "Điểm giao nhận" },
+                  { key: "forest-plots" as const, label: "Lô vườn" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -1648,7 +1822,7 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              {configTab !== "delivery-points" && configTab !== "vehicles" && (
+              {configTab !== "delivery-points" && (
                 <input
                   ref={importFileRef}
                   type="file"
@@ -1798,261 +1972,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
-              ) : configTab === "vehicles" ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <UserCog size={15} className="text-amber-600" />
-                        <span className="font-bold text-slate-800">Tài xế</span>
-                      </div>
-                      {canManageSettings && (
-                        <button
-                          onClick={() => {
-                            setConfigError("")
-                            setConfigEditId(null)
-                            setDispatchDriverForm(emptyDispatchDriverForm())
-                            setConfigModal("driver")
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200"
-                        >
-                          <Plus size={13} /> Thêm tài xế
-                        </button>
-                      )}
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          {["Tài xế", "Xe đang phụ trách", "Trạng thái", ""].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {dispatchDrivers.length === 0 ? (
-                          <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Chưa có tài xế nào</td></tr>
-                        ) : dispatchDrivers.map((row) => {
-                          const assignedVehicles = driverAssignedVehiclesMap.get(row.id) || []
-                          return (
-                            <tr key={row.id} className="row-hover">
-                              <td className="px-4 py-3">
-                                <div className="font-semibold text-slate-800">{row.name}</div>
-                                {row.code && <div className="text-xs text-slate-400">Mã: {row.code}</div>}
-                              </td>
-                              <td className="px-4 py-3 text-slate-500">
-                                {assignedVehicles.length > 0 ? assignedVehicles.join(", ") : "Chưa phụ trách xe nào"}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
-                                  {row.is_active ? "Đang dùng" : "Tạm dừng"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                {canManageSettings && (
-                                  <div className="flex items-center gap-1">
-                                    <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setDispatchDriverForm({ code: row.code || "", name: row.name, phone: row.phone || "", is_active: row.is_active }); setConfigModal("driver") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
-                                    <button onClick={() => setConfigDelConfirm({ type: "driver", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <Car size={15} className="text-emerald-600" />
-                        <span className="font-bold text-slate-800">Xe và tài xế chính</span>
-                      </div>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          {["Mã xe", "Tên xe", "Loại xe", "Tài xế chính", "Hiệu lực từ", "Trạng thái", ""].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {dispatchVehicles.length === 0 ? (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có xe nào</td></tr>
-                        ) : dispatchVehicles.map((row) => (
-                          <tr key={row.id} className="row-hover">
-                            <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
-                            <td className="px-4 py-3 text-slate-500">{row.vehicle_type || "—"}</td>
-                            <td className="px-4 py-3 text-slate-700">{row.current_driver_name || "Chưa gán"}</td>
-                            <td className="px-4 py-3 text-slate-500">{row.current_assignment_from || "—"}</td>
-                            <td className="px-4 py-3">
-                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
-                                {row.is_active ? "Đang dùng" : "Tạm dừng"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              {canManageSettings && (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => {
-                                      setConfigError("")
-                                      setConfigEditId(row.id)
-                                      setDispatchVehicleForm({
-                                        code: row.code,
-                                        name: row.name,
-                                        vehicle_type: row.vehicle_type || "",
-                                        plate_number: row.plate_number || "",
-                                        sort_order: String(row.sort_order),
-                                        primary_driver_id: row.current_driver_id || "",
-                                        effective_from: row.current_assignment_from || new Date().toISOString().slice(0, 10),
-                                        note: "",
-                                        is_active: row.is_active,
-                                      })
-                                      setConfigModal("vehicle")
-                                    }}
-                                    className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
-                                  >
-                                    <Edit2 size={13} />
-                                  </button>
-                                  <button onClick={() => setAssignmentHistoryVehicleId(row.id)} className="p-1.5 hover:bg-amber-50 text-amber-500 rounded-lg transition-colors"><Calendar size={13} /></button>
-                                  <button onClick={() => setConfigDelConfirm({ type: "vehicle", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : false ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <UserCog size={15} className="text-amber-600" />
-                        <span className="font-bold text-slate-800">Tai xe</span>
-                      </div>
-                      {canManageSettings && (
-                        <button
-                          onClick={() => {
-                            setConfigError("")
-                            setConfigEditId(null)
-                            setDispatchDriverForm(emptyDispatchDriverForm())
-                            setConfigModal("driver")
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200"
-                        >
-                          <Plus size={13} /> Them tai xe
-                        </button>
-                      )}
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          {["Ma", "Ten tai xe", "So dien thoai", "Trang thai", ""].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {dispatchDrivers.length === 0 ? (
-                          <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Chua co tai xe nao</td></tr>
-                        ) : dispatchDrivers.map((row) => (
-                          <tr key={row.id} className="row-hover">
-                            <td className="px-4 py-3 font-mono text-slate-600">{row.code || "—"}</td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
-                            <td className="px-4 py-3 text-slate-500">{row.phone || "—"}</td>
-                            <td className="px-4 py-3">
-                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
-                                {row.is_active ? "Dang dung" : "Tam dung"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              {canManageSettings && (
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setDispatchDriverForm({ code: row.code || "", name: row.name, phone: row.phone || "", is_active: row.is_active }); setConfigModal("driver") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
-                                  <button onClick={() => setConfigDelConfirm({ type: "driver", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <Car size={15} className="text-emerald-600" />
-                        <span className="font-bold text-slate-800">Xe va tai xe chinh</span>
-                      </div>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          {["Ma xe", "Ten xe", "Loai xe", "Tai xe chinh", "Hieu luc tu", "Trang thai", ""].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {dispatchVehicles.length === 0 ? (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chua co xe nao</td></tr>
-                        ) : dispatchVehicles.map((row) => (
-                          <tr key={row.id} className="row-hover">
-                            <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
-                            <td className="px-4 py-3">
-                              <div className="font-semibold text-slate-800">{row.name}</div>
-                              <div className="text-xs text-slate-400">{row.plate_number || "—"}</div>
-                            </td>
-                            <td className="px-4 py-3 text-slate-500">{row.vehicle_type || "—"}</td>
-                            <td className="px-4 py-3 text-slate-700">{row.current_driver_name || "Chua gan"}</td>
-                            <td className="px-4 py-3 text-slate-500">{row.current_assignment_from || "—"}</td>
-                            <td className="px-4 py-3">
-                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
-                                {row.is_active ? "Dang dung" : "Tam dung"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              {canManageSettings && (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => {
-                                      setConfigError("")
-                                      setConfigEditId(row.id)
-                                      setDispatchVehicleForm({
-                                        code: row.code,
-                                        name: row.name,
-                                        vehicle_type: row.vehicle_type || "",
-                                        plate_number: row.plate_number || "",
-                                        sort_order: String(row.sort_order),
-                                        primary_driver_id: row.current_driver_id || "",
-                                        effective_from: row.current_assignment_from || new Date().toISOString().slice(0, 10),
-                                        note: "",
-                                        is_active: row.is_active,
-                                      })
-                                      setConfigModal("vehicle")
-                                    }}
-                                    className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
-                                  >
-                                    <Edit2 size={13} />
-                                  </button>
-                                  <button onClick={() => setAssignmentHistoryVehicleId(row.id)} className="p-1.5 hover:bg-amber-50 text-amber-500 rounded-lg transition-colors"><Calendar size={13} /></button>
-                                  <button onClick={() => setConfigDelConfirm({ type: "vehicle", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
+              ) : configTab === "delivery-points" ? (
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -2116,7 +2036,72 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
-              )}
+              ) : configTab === "forest-plots" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã ngắn", "Mã đầy đủ", "Nông trường", "Đội", "Diện tích (ha)", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {forestPlots.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có lô vườn nào. Import GeoJSON hoặc thêm mới.</td></tr>
+                    ) : forestPlots.map((row) => (
+                      <tr key={row.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.ten}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{row.ma_lo_full || "—"}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.nong_truong || "—"}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.doi != null ? `Đội ${row.doi}` : "—"}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.dien_tich_ha != null ? row.dien_tich_ha.toFixed(2) : "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                            {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={async () => {
+                                  setConfigError("")
+                                  setConfigEditId(row.id)
+                                  setForestPlotForm({
+                                    ten: row.ten,
+                                    ma_lo_full: row.ma_lo_full || "",
+                                    nong_truong: row.nong_truong || "",
+                                    doi: row.doi != null ? String(row.doi) : "",
+                                    giong: row.giong || "",
+                                    dien_tich_ha: row.dien_tich_ha != null ? String(row.dien_tich_ha) : "",
+                                    nam_trong: row.nam_trong != null ? String(row.nam_trong) : "",
+                                    nam_cao_up: row.nam_cao_up != null ? String(row.nam_cao_up) : "",
+                                    is_active: row.is_active,
+                                  })
+                                  // Load geometry riêng để tránh nặng khi hiển thị list
+                                  const { data } = await supabase
+                                    .from("forest_plots").select("geometry").eq("id", row.id).single()
+                                  setForestPlotGeometry(data?.geometry ?? null)
+                                  setConfigModal("forest-plot")
+                                }}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setConfigDelConfirm({ type: "forest-plot", id: row.id, label: row.ten })}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
             </div>
           </div>
 
@@ -2127,85 +2112,267 @@ export default function SettingsPage() {
       )}
 
       {tab === "master-data" && (
-        <div className="space-y-6">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Tag size={16} className="text-emerald-600" />
-            <span className="font-extrabold text-slate-700">Hậu tố mã lô</span>
-            <span className="text-xs text-slate-500 ml-1">({suffixes.length} hậu tố)</span>
-          </div>
-          {canManageSettings && (
-            <button
-              onClick={openAdd}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
-            >
-              <Plus size={13} /> Thêm hậu tố
-            </button>
-          )}
-        </div>
-
-        <div className="p-4">
-          {loading ? (
-            <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
-          ) : suffixes.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">
-              <Tag size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Chưa có hậu tố nào</p>
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
+            <div className="flex gap-2">
+              {[
+                { key: "suffixes" as const, label: "Hậu tố lô", icon: Tag },
+                { key: "company" as const, label: "Thông tin công ty", icon: Building2 },
+                { key: "customers" as const, label: "Khách hàng", icon: ShoppingBag },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setMasterDataTab(item.key)}
+                  className={
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all " +
+                    (masterDataTab === item.key
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "text-slate-600 hover:bg-slate-50")
+                  }
+                >
+                  <item.icon size={14} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
             </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  {["Ma", "Ten", "Nguon goc", "Chung nhan", "Vi du ma lo", ""].map((head) => (
-                    <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                      {head}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {suffixes.map((item) => (
-                  <tr key={item.code} className="row-hover">
-                    <td className="px-4 py-3">
-                      <span className="font-bold text-emerald-700 font-mono">{item.code}</span>
-                      {SYSTEM_CODES.includes(item.code) && (
-                        <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] font-bold rounded-full">
-                          He thong
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700 font-medium">{item.name}</td>
-                    <td className="px-4 py-3 text-slate-500">{item.nguon || "—"}</td>
-                    <td className="px-4 py-3 text-slate-500">{item.chung_nhan || "—"}</td>
-                    <td className="px-4 py-3 text-slate-400 font-mono text-xs">{`01${item.code}/26`}</td>
-                    <td className="px-4 py-3">
-                      {canManageSettings && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => openEdit(item)}
-                            className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            onClick={() => setDelConfirm(item.code)}
-                            className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          </div>
+
+          {masterDataTab === "suffixes" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Tag size={16} className="text-emerald-600" />
+                <span className="font-extrabold text-slate-700">Hậu tố lô</span>
+                <span className="text-xs text-slate-500 ml-1">({suffixes.length} hậu tố)</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 hidden md:block">Ký tự hậu tố dùng trong mã lô (VD: 01cs/26) và phân loại lô sản phẩm</span>
+                {canManageSettings && (
+                  <button
+                    onClick={openAdd}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                  >
+                    <Plus size={13} /> Thêm hậu tố
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4">
+              {loading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : suffixes.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <Tag size={32} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Chưa có hậu tố nào</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã", "Tên", "Nguồn gốc", "Chứng nhận", "Ví dụ mã lô", ""].map((head) => (
+                        <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          {head}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {suffixes.map((item) => (
+                      <tr key={item.code} className="row-hover">
+                        <td className="px-4 py-3">
+                          <span className="font-bold text-emerald-700 font-mono">{item.code}</span>
+                          {SYSTEM_CODES.includes(item.code) && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] font-bold rounded-full">
+                              Hệ thống
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 font-medium">{item.name}</td>
+                        <td className="px-4 py-3 text-slate-500">{item.nguon || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{item.chung_nhan || "—"}</td>
+                        <td className="px-4 py-3 text-slate-400 font-mono text-xs">{`01${item.code}/26`}</td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => openEdit(item)}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setDelConfirm(item.code)}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
           )}
-        </div>
-      </div>
+
+          {masterDataTab === "company" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-violet-50 to-purple-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 size={16} className="text-violet-600" />
+                <span className="font-extrabold text-slate-700">Thông tin công ty (EUDR Seller)</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={handleSaveFactory}
+                  disabled={savingFactory}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
+                >
+                  <Save size={13} /> {savingFactory ? "Đang lưu..." : "Lưu thông tin"}
+                </button>
+              )}
+            </div>
+
+            <div className="p-5">
+              {factoryMsg && (
+                <div
+                  className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 ${
+                    factoryMsg.ok
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-red-50 text-red-600 border border-red-200"
+                  }`}
+                >
+                  {factoryMsg.ok ? <Save size={14} /> : <AlertTriangle size={14} />} {factoryMsg.text}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { label: "Tên công ty (tiếng Anh)", field: "full_name_en", colSpan: true },
+                  { label: "Địa chỉ", field: "address_en", colSpan: true },
+                  { label: "Người liên hệ", field: "contact_person", colSpan: false },
+                  { label: "Email", field: "contact_email", colSpan: false },
+                  { label: "Website", field: "website", colSpan: false },
+                  { label: "Quốc gia", field: "country_en", colSpan: false },
+                ].map(({ label, field, colSpan }) => (
+                  <div key={field} className={colSpan ? "col-span-2" : ""}>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
+                    <input
+                      value={factoryInfo[field as keyof FactoryInfo]}
+                      onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
+                      disabled={!canManageSettings}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {masterDataTab === "customers" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-50 to-cyan-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingBag size={16} className="text-blue-600" />
+                <span className="font-extrabold text-slate-700">Khách hàng</span>
+                <span className="text-xs text-slate-400 ml-1">({customers.length} khách hàng)</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => {
+                    setCustomerEditId(null)
+                    setCustomerForm({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "" })
+                    setCustomerError("")
+                    setCustomerModal("add")
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm khách hàng
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-hidden">
+              {customerLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : customers.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <ShoppingBag size={32} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Chưa có khách hàng nào</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã KH", "Tên khách hàng", "Email", "Địa chỉ", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {customers.map((c) => (
+                      <React.Fragment key={c.id}>
+                        <tr
+                          className={"row-hover cursor-pointer " + (expandedCustomerId === c.id ? "bg-blue-50" : "")}
+                          onClick={() => setExpandedCustomerId(expandedCustomerId === c.id ? null : c.id)}
+                        >
+                          <td className="px-4 py-3 font-mono font-bold text-blue-700">{c.ma_kh || "—"}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{c.ten_kh_en || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">{c.email || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500 max-w-xs truncate">{c.dia_chi || "—"}</td>
+                          <td className="px-4 py-3">
+                            {canManageSettings && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setCustomerEditId(c.id)
+                                    setCustomerForm({ ma_kh: c.ma_kh || "", ten_kh_en: c.ten_kh_en || "", email: c.email || "", dia_chi: c.dia_chi || "" })
+                                    setCustomerError("")
+                                    setCustomerModal("edit")
+                                  }}
+                                  className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setCustomerDelConfirm({ id: c.id, label: c.ten_kh_en || c.ma_kh || "khách hàng" }) }}
+                                  className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                        {expandedCustomerId === c.id && (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-4 bg-blue-50 border-b border-blue-100">
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div><span className="font-bold text-slate-600">Mã KH: </span><span className="text-slate-800">{c.ma_kh || "—"}</span></div>
+                                <div><span className="font-bold text-slate-600">Tên: </span><span className="text-slate-800">{c.ten_kh_en || "—"}</span></div>
+                                <div><span className="font-bold text-slate-600">Email: </span><span className="text-slate-800">{c.email || "—"}</span></div>
+                                <div className="col-span-2"><span className="font-bold text-slate-600">Địa chỉ: </span><span className="text-slate-800">{c.dia_chi || "—"}</span></div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+          )}
         </div>
       )}
+
 
       {tab === "maintenance" && (
         <div className="space-y-4">
@@ -2221,7 +2388,8 @@ export default function SettingsPage() {
                     setMaintEditId(null); setMaintError("")
                     if (maintTab === "assets") { setAssetForm({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" }); setMaintModal("asset") }
                     else if (maintTab === "staff") { setStaffForm({ ten: "", chuc_vu: "", email: "", active: true }); setMaintModal("staff") }
-                    else { setExtMatForm({ ten_vat_tu: "", dvt: "" }); setMaintModal("ext-mat") }
+                    else if (maintTab === "vehicles") { setConfigEditId(null); setConfigError(""); setDispatchVehicleForm(emptyDispatchVehicleForm(String((dispatchVehicles.length > 0 ? Math.max(...dispatchVehicles.map(v => v.sort_order || 0)) + 1 : 1)))); setConfigModal("vehicle") }
+                    else { setExtMatForm({ ten_vat_tu: "", dvt: "", code: "", specification: "", category_id: "", is_active: true }); setMaintModal("ext-mat") }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
                 >
@@ -2231,14 +2399,14 @@ export default function SettingsPage() {
             </div>
 
             <div className="p-4">
-              <div className="flex gap-2 mb-4">
-                {(["assets", "staff", "ext-materials"] as const).map((key) => (
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {(["assets", "staff", "vehicles", "ext-materials"] as const).map((key) => (
                   <button
                     key={key}
                     onClick={() => setMaintTab(key)}
                     className={"flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all " + (maintTab === key ? "bg-orange-100 text-orange-700 border border-orange-200" : "text-slate-500 hover:bg-slate-50")}
                   >
-                    {key === "assets" ? <><Car size={13} /> Thiết bị</> : key === "staff" ? <><UserCog size={13} /> Nhân sự bảo trì</> : <><ShoppingBag size={13} /> Vật tư ngoài</>}
+                    {key === "assets" ? <><Car size={13} /> Thiết bị</> : key === "staff" ? <><UserCog size={13} /> Nhân sự bảo trì</> : key === "vehicles" ? <><Car size={13} /> Xe &amp; Tài xế</> : <><ShoppingBag size={13} /> Vật tư ngoài</>}
                   </button>
                 ))}
               </div>
@@ -2272,6 +2440,56 @@ export default function SettingsPage() {
                             <div className="flex items-center gap-1">
                               <button onClick={() => { setMaintEditId(a.id); setMaintError(""); setAssetForm({ ma_tb: a.ma_tb, ten_tb: a.ten_tb, bo_phan: a.bo_phan, loai: a.loai, nam_sd: a.nam_sd || "", bien_so: a.bien_so || "", mo_ta: a.mo_ta || "", trang_thai: a.trang_thai }); setMaintModal("asset") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "asset", id: a.id, label: a.ten_tb })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : maintTab === "vehicles" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã xe", "Tên xe", "Loại", "Biển số", "Tài xế chính", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {dispatchVehicles.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có xe nào</td></tr>
+                    ) : dispatchVehicles.map((v) => (
+                      <tr key={v.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-orange-700">{v.code}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">{v.name}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{v.vehicle_type || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{v.plate_number || "—"}</td>
+                        <td className="px-4 py-3 text-slate-600 text-sm">{v.current_driver_name || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (v.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{v.is_active ? "Hoạt động" : "Ngừng"}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setConfigEditId(v.id); setConfigError("")
+                                  const cur = dispatchVehicleAssignments.find(a => a.vehicle_id === v.id && a.is_current)
+                                  setDispatchVehicleForm({ code: v.code, name: v.name, vehicle_type: v.vehicle_type || "", plate_number: v.plate_number || "", sort_order: String(v.sort_order ?? 0), is_active: v.is_active, primary_driver_id: cur?.driver_id || "", effective_from: new Date().toISOString().slice(0, 10), note: "" })
+                                  setConfigModal("vehicle")
+                                }}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              ><Edit2 size={13} /></button>
+                              <button
+                                onClick={() => setConfigDelConfirm({ type: "vehicle", id: v.id, label: v.name })}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              ><Trash2 size={13} /></button>
+                              <button
+                                onClick={() => setAssignmentHistoryVehicleId(assignmentHistoryVehicleId === v.id ? null : v.id)}
+                                className="p-1.5 hover:bg-orange-50 text-orange-400 rounded-lg transition-colors text-xs font-bold"
+                                title="Lịch sử tài xế"
+                              ><UserCog size={13} /></button>
                             </div>
                           )}
                         </td>
@@ -2314,22 +2532,27 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Tên vật tư", "Đơn vị tính", ""].map((h) => (
+                      {["Mã", "Tên vật tư", "Đơn vị tính", "Quy cách", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {maintExtMats.length === 0 ? (
-                      <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
                     ) : maintExtMats.map((m) => (
                       <tr key={m.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.code || "—"}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">{m.ten_vat_tu}</td>
                         <td className="px-4 py-3 text-slate-500">{m.dvt || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{m.specification || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (m.is_active !== false ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{m.is_active !== false ? "Đang dùng" : "Ngừng"}</span>
+                        </td>
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "" }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "", code: m.code || "", specification: m.specification || "", category_id: m.category_id || "", is_active: m.is_active !== false }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "ext-mat", id: m.id, label: m.ten_vat_tu })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -2452,13 +2675,34 @@ export default function SettingsPage() {
             </div>
             <div className="p-6 space-y-4">
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
+                  <input value={extMatForm.code} onChange={e => setExtMatForm(p => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: BD22211" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
+                  <input value={extMatForm.dvt} onChange={e => setExtMatForm(p => ({ ...p, dvt: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: cái, kg" />
+                </div>
+              </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
                 <input value={extMatForm.ten_vat_tu} onChange={e => setExtMatForm(p => ({ ...p, ten_vat_tu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Bạc đạn 22211" />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
-                <input value={extMatForm.dvt} onChange={e => setExtMatForm(p => ({ ...p, dvt: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: cái, sợi, kg" />
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
+                <input value={extMatForm.specification} onChange={e => setExtMatForm(p => ({ ...p, specification: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: 110x50x40, 6204-2RS" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư</label>
+                <select value={extMatForm.category_id} onChange={e => setExtMatForm(p => ({ ...p, category_id: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  <option value="">— Không phân nhóm —</option>
+                  {invCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="extmat-active" checked={extMatForm.is_active} onChange={e => setExtMatForm(p => ({ ...p, is_active: e.target.checked }))} className="rounded" />
+                <label htmlFor="extmat-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
@@ -2502,7 +2746,7 @@ export default function SettingsPage() {
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ma hau to *</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã hậu tố *</label>
                 <input
                   value={form.code}
                   onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value.toLowerCase() }))}
@@ -2512,7 +2756,7 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ten hau to *</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên hậu tố *</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -2522,7 +2766,7 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguon goc</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguồn gốc</label>
                   <input
                     value={form.nguon}
                     onChange={(e) => setForm((prev) => ({ ...prev, nguon: e.target.value }))}
@@ -2530,7 +2774,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chung nhan</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chứng nhận</label>
                   <input
                     value={form.chung_nhan}
                     onChange={(e) => setForm((prev) => ({ ...prev, chung_nhan: e.target.value }))}
@@ -2542,7 +2786,7 @@ export default function SettingsPage() {
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Huy
+                Hủy
               </button>
               <button
                 onClick={handleSave}
@@ -2570,11 +2814,60 @@ export default function SettingsPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Huy
+                Hủy
               </button>
               <button onClick={() => handleDelete(delConfirm)} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">
                 Xóa
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {customerModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{customerModal === "add" ? "Thêm khách hàng" : "Sửa khách hàng"}</h2>
+              <button onClick={() => setCustomerModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {customerError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{customerError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã khách hàng</label>
+                  <input value={customerForm.ma_kh} onChange={e => setCustomerForm(p => ({ ...p, ma_kh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: OLAM" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Email</label>
+                  <input value={customerForm.email} onChange={e => setCustomerForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="email@company.com" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên khách hàng *</label>
+                <input value={customerForm.ten_kh_en} onChange={e => setCustomerForm(p => ({ ...p, ten_kh_en: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: OLAM International" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Địa chỉ</label>
+                <input value={customerForm.dia_chi} onChange={e => setCustomerForm(p => ({ ...p, dia_chi: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="Địa chỉ công ty" />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setCustomerModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={saveCustomer} disabled={customerSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{customerSaving ? "Đang lưu..." : "Lưu"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {customerDelConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
+            <p className="text-sm text-slate-600 mb-6">Xóa khách hàng <span className="font-bold text-red-600">&quot;{customerDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setCustomerDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={deleteCustomer} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
             </div>
           </div>
         </div>
@@ -2679,7 +2972,7 @@ export default function SettingsPage() {
 
       {configModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+          <div className={`bg-white rounded-2xl shadow-2xl w-full ${configModal === "forest-plot" ? "max-w-3xl max-h-[90vh] overflow-y-auto" : "max-w-lg"}`}>
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <h2 className="text-base font-extrabold text-slate-800">
                 {configModal === "warehouse"
@@ -2688,7 +2981,9 @@ export default function SettingsPage() {
                     ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư")
                     : configModal === "item"
                       ? (configEditId ? "Sửa vật tư" : "Thêm vật tư")
-                      : (configEditId ? "Sửa điểm giao nhận" : "Thêm điểm giao nhận")}
+                      : configModal === "forest-plot"
+                        ? (configEditId ? "Sửa lô vườn" : "Thêm lô vườn mới")
+                        : (configEditId ? "Sửa điểm giao nhận" : "Thêm điểm giao nhận")}
               </h2>
               <button onClick={() => setConfigModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
             </div>
@@ -2931,6 +3226,102 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+
+              {configModal === "forest-plot" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã ngắn (Ten) *</label>
+                      <input
+                        value={forestPlotForm.ten}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, ten: e.target.value.toUpperCase() }))}
+                        disabled={!!configEditId}
+                        placeholder="VD: J1T"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã đầy đủ</label>
+                      <input
+                        value={forestPlotForm.ma_lo_full}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, ma_lo_full: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Nông trường</label>
+                      <input
+                        value={forestPlotForm.nong_truong}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, nong_truong: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội</label>
+                      <input
+                        type="number"
+                        value={forestPlotForm.doi}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, doi: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Giống</label>
+                      <input
+                        value={forestPlotForm.giong}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, giong: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Diện tích (ha)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={forestPlotForm.dien_tich_ha}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, dien_tich_ha: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" checked={forestPlotForm.is_active} onChange={(e) => setForestPlotForm((p) => ({ ...p, is_active: e.target.checked }))} />
+                        Đang hoạt động
+                      </label>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Năm trồng</label>
+                      <input
+                        type="number"
+                        value={forestPlotForm.nam_trong}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, nam_trong: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Năm cạo UP</label>
+                      <input
+                        type="number"
+                        value={forestPlotForm.nam_cao_up}
+                        onChange={(e) => setForestPlotForm((p) => ({ ...p, nam_cao_up: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Vẽ vùng lô vườn trên bản đồ (tùy chọn)</label>
+                    <div className="rounded-xl overflow-hidden border border-slate-200">
+                      <PolygonDrawMap existingGeometry={forestPlotGeometry} onChange={setForestPlotGeometry} />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
@@ -2947,7 +3338,9 @@ export default function SettingsPage() {
                           ? saveDispatchDriver
                           : configModal === "vehicle"
                             ? saveDispatchVehicle
-                            : saveDeliveryPoint
+                            : configModal === "forest-plot"
+                              ? saveForestPlot
+                              : saveDeliveryPoint
                 }
                 disabled={configSaving}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"

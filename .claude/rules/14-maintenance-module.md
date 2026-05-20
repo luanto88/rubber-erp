@@ -165,12 +165,18 @@ const workerStaff = staffList.filter(s => {
 ### `maintenance_external_materials` — Vật tư ngoài (master list)
 
 ```sql
-id           UUID PK
-factory_id   UUID
-ten_vat_tu   TEXT  -- lưu lâu dài để tái sử dụng
-dvt          TEXT
-created_at
+id            UUID PK
+factory_id    UUID
+ten_vat_tu    TEXT  -- lưu lâu dài để tái sử dụng
+dvt           TEXT
+code          TEXT  -- mã vật tư (unique per factory khi không null)
+specification TEXT  -- quy cách / đặc tính
+category_id   UUID REFERENCES inventory_item_categories  -- nhóm vật tư
+is_active     BOOLEAN DEFAULT true
+created_at    TIMESTAMPTZ
 ```
+
+Index: `UNIQUE (factory_id, code) WHERE code IS NOT NULL`
 
 **Lưu ý**: Bảng này dùng làm gợi ý tên vật tư bên ngoài. UI hiện tại không còn dùng `<datalist>` — xem mục Vật tư trong Quy tắc UI.
 
@@ -661,11 +667,12 @@ Guard bắt buộc ở cả UI và logic thao tác.
 
 ## Settings (Cài đặt)
 
-Tab `Bảo trì` trong `/dashboard/settings` (tab riêng từ đầu vì module đủ lớn):
+Tab `Bảo trì` trong `/dashboard/settings` có 4 sub-tab:
 
 - `Thiết bị`: CRUD `maintenance_assets` (filter theo bộ phận, phân loại máy móc/xe)
 - `Nhân sự bảo trì`: CRUD `maintenance_staff`
-- `Vật tư ngoài`: CRUD `maintenance_external_materials`
+- `Xe & Tài xế`: CRUD `dispatch_vehicles` + `dispatch_vehicle_driver_assignments` — chuyển từ tab "Cấu hình nhà máy" (2026-05), dữ liệu và logic không thay đổi
+- `Vật tư ngoài`: CRUD `maintenance_external_materials` — fields: mã (`code`), tên, ĐVT, quy cách (`specification`), nhóm vật tư (`category_id` → `inventory_item_categories`), trạng thái (`is_active`)
 
 ---
 

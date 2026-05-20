@@ -21,6 +21,13 @@ type FactoryOption = {
   prefix: string
 }
 
+type DepartmentOption = {
+  id: string
+  code: string
+  name: string
+  sort_order: number
+}
+
 const REASON_MESSAGES: Record<string, string> = {
   pending: "Tài khoản đã đăng nhập nhưng đang chờ admin phê duyệt.",
   disabled: "Tài khoản đã bị khóa. Vui lòng liên hệ admin.",
@@ -32,6 +39,7 @@ function LoginPageContent() {
   const searchParams = useSearchParams()
 
   const [factories, setFactories] = useState<FactoryOption[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [factoryId, setFactoryId] = useState("")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -58,14 +66,15 @@ function LoginPageContent() {
     let alive = true
 
     const bootstrap = async () => {
-      const { data } = await supabase
-        .from("factories")
-        .select("id, code, name, prefix")
-        .order("name")
+      const [{ data: factoryData }, { data: deptData }] = await Promise.all([
+        supabase.from("factories").select("id, code, name, prefix").order("name"),
+        supabase.from("departments").select("id, code, name, sort_order").eq("is_active", true).order("sort_order"),
+      ])
 
       if (alive) {
-        const nextFactories = (data || []) as FactoryOption[]
+        const nextFactories = (factoryData || []) as FactoryOption[]
         setFactories(nextFactories)
+        setDepartments((deptData || []) as DepartmentOption[])
         if (nextFactories.length && !factoryId) {
           const preferred =
             nextFactories.find(
@@ -283,12 +292,16 @@ function LoginPageContent() {
                   placeholder="Họ tên *"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
-                <input
+                <select
                   value={dept}
                   onChange={(e) => setDept(e.target.value)}
-                  placeholder="Phòng ban"
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
-                />
+                  className={"w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 " + (dept ? "" : "text-slate-400")}
+                >
+                  <option value="">Phòng ban</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.name}>{d.name} ({d.code})</option>
+                  ))}
+                </select>
               </>
             )}
 

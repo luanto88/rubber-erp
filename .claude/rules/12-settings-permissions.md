@@ -1,141 +1,137 @@
 ---
-description: Module Cai dat, master data, duyet tai khoan va phan quyen
+description: Module Cài đặt, master data, duyệt tài khoản và phân quyền
 ---
 
-# Module Cai dat & Permissions
+# Module Cài đặt & Permissions
 
-## Vai tro cua module Cai dat
+## Vai trò của module Cài đặt
 
-`Cai dat` la noi quan tri tap trung cho tat ca:
+`Cài đặt` là nơi quản trị tập trung cho tất cả:
 
-- Master data dung chung
-- Cau hinh he thong theo nha may
-- Nguoi dung
-- Phan quyen
+- Master data dùng chung
+- Cấu hình hệ thống theo nhà máy
+- Người dùng
+- Phân quyền
 
-Bat ky danh muc dung chung nao phat sinh sau nay cung phai duoc dua ve `Cai dat`, du van co the giu thao tac them nhanh o module nghiep vu.
+Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được đưa về `Cài đặt`, dù vẫn có thể giữ thao tác thêm nhanh ở module nghiệp vụ.
 
-## To chuc giao dien
+## Tổ chức giao diện (cấu trúc hiện tại)
 
-`Cai dat` duoc to chuc theo nhieu tab de admin thao tac ro rang.
+`Cài đặt` có 4 tab chính:
 
-Khung tab mac dinh:
+| Tab | Icon | Sub-tab |
+|---|---|---|
+| **Hệ thống** | ShieldCheck | Người dùng, Phân quyền |
+| **Cấu hình nhà máy** | SlidersHorizontal | Kho, Nhóm vật tư, Vật tư, Điểm giao nhận, Tài xế, Tài xế chính, Lô vườn |
+| **Danh mục** | Database | Hậu tố lô, Thông tin công ty, Khách hàng |
+| **Bảo trì** | Wrench | Thiết bị, Nhân sự bảo trì, Xe & Tài xế, Vật tư ngoài |
 
-- `Cong ty`
-- `Nguoi dung`
-- `Phan quyen`
-- `Cau hinh nha may`
-- `Danh muc`
+### Nguyên tắc xếp chức năng
 
-Nguyen tac xep:
+- Cấu hình matrix theo nhà máy → `Cấu hình nhà máy`
+- Master data / danh mục dùng chung → `Danh mục`
+- Domain bảo trì (đủ lớn) → tab `Bảo trì` riêng
 
-- Cau hinh matrix theo nha may -> `Cau hinh nha may`
-- Master data / danh muc dung chung -> `Danh muc`
-- Neu mot domain lon len du nhieu bang con, co the tach thanh tab rieng sau
+### Chi tiết từng tab
 
-Vi du:
+**Tab Hệ thống:**
+- Sub-tab `Người dùng` — danh sách tài khoản (chờ duyệt / đang hoạt động / đã khóa)
+- Sub-tab `Phân quyền` — gán quyền theo module cho từng user
 
-- `Bao tri` o giai doan dau dua vao `Danh muc`
-- Sau nay neu mo rong du lon, co the tach tab rieng `Bao tri`
+**Tab Cấu hình nhà máy:**
+- Kho vật tư, Nhóm vật tư, Vật tư/Hóa chất (inventory)
+- Tài xế (dispatch_drivers)
+- Tài xế chính theo xe (dispatch_vehicle_driver_assignments)
+- Điểm giao nhận (dispatch_delivery_points)
+- Lô vườn (forest_plots) — thêm/sửa/xóa, import GeoJSON, vẽ polygon trên bản đồ
+- **Không còn sub-tab Xe** (đã chuyển sang tab Bảo trì)
 
-## Danh muc quan tri tap trung
+**Tab Danh mục:**
+- Sub-tab `Hậu tố lô` — bảng `suffixes` (đổi tên từ "Hậu tố mã lô")
+- Sub-tab `Thông tin công ty` — đọc/ghi bảng `factories` cho nhà máy hiện tại
+- Sub-tab `Khách hàng` — bảng `customers`, dạng danh sách dòng click-to-expand
 
-Toi thieu gom:
+**Tab Bảo trì:**
+- Sub-tab `Thiết bị` — bảng `maintenance_assets`
+- Sub-tab `Nhân sự bảo trì` — bảng `maintenance_staff`
+- Sub-tab `Xe & Tài xế` — bảng `dispatch_vehicles` + `dispatch_vehicle_driver_assignments` (chuyển từ Cấu hình nhà máy)
+- Sub-tab `Vật tư ngoài` — bảng `maintenance_external_materials` (fields: mã, tên, ĐVT, quy cách, nhóm, trạng thái)
 
-- Xe
-- Hau to
-- Khach hang
-- Cau hinh nha may / matrix san pham
-- Nguoi dung
-- Phan quyen
+## Danh mục quản trị tập trung
 
-## Quy tac thao tac nhanh
+Tối thiểu gồm:
 
-Mot so module nghiep vu duoc phep co nut them nhanh:
+- Xe & Tài xế (`dispatch_vehicles`, `dispatch_drivers`)
+- Hậu tố lô (`suffixes`)
+- Khách hàng (`customers`)
+- Cấu hình nhà máy / matrix sản phẩm
+- Người dùng và phân quyền
+- Thiết bị và nhân sự bảo trì (`maintenance_assets`, `maintenance_staff`)
+- Vật tư ngoài (`maintenance_external_materials`)
 
-- Them khach hang
-- Them hau to
-- Them `loai_pallet_sx`
-- Them `loai_pallet_xuat`
+## Quy tắc thao tác nhanh
 
-Nhung du lieu tao ra phai:
+Một số module nghiệp vụ được phép có nút thêm nhanh:
 
-- luu vao database
-- gan dung nha may lien quan neu la cau hinh theo nha may
-- xuat hien lai trong `Cai dat`
+- Thêm khách hàng (trong `Xuất hàng`)
+- Thêm hậu tố (trong `Thành phẩm`)
+- Thêm `loai_pallet_sx`, `loai_pallet_xuat` (trong các màn liên quan)
 
-## Xe va tai xe
+Nhưng dữ liệu tạo ra phải:
 
-- Tai xe nam trong danh muc xe, khong tach bang rieng o muc rule hien tai
-- `Cai dat` phai co trang quan tri day du de mua them xe, doi tai xe, cap nhat thong tin xe
+- lưu vào database
+- gán đúng nhà máy liên quan nếu là cấu hình theo nhà máy
+- xuất hiện lại trong `Cài đặt`
 
-## Hau to
+## Đăng ký và duyệt tài khoản
 
-- Co the them nhanh trong `Thanh pham`
-- Dong thoi phai co trang quan tri day du trong `Cai dat`
+### Đăng ký
 
-## Khach hang
+- User tự đăng ký bằng `Supabase Auth`
+- App tạo thêm hồ sơ trong bảng `profiles`
+- Trạng thái ban đầu → `pending`
+- Form đăng ký có dropdown `Phòng ban` load từ bảng `departments` (9 phòng ban chuẩn)
+- Khi đăng ký, `department` (TEXT) được lưu = tên phòng ban đã chọn (backward-compat)
 
-- Co the them nhanh trong `Xuat hang`
-- Dong thoi phai co trang quan tri day du trong `Cai dat`
+### Duyệt
 
-## Cau hinh nha may
+Admin hoặc người có quyền `users.approve` duyệt trong `Cài đặt → Hệ thống → Người dùng`.
 
-`Cai dat` phai cho phep chinh sua toan bo matrix cau hinh:
-
-- `loai_banh`
-- `loai_boc`
-- `loai_tham`
-- `loai_pallet_sx`
-- `loai_pallet_xuat`
-
-## Dang ky va duyet tai khoan
-
-### Dang ky
-
-- User tu dang ky bang `Supabase Auth`
-- App tao them ho so trong bang `profiles`
-- Trang thai ban dau -> `pending`
-
-### Duyet
-
-Admin hoac nguoi co quyen `users.approve` duyet trong `Cai dat`.
-
-Khi duyet tai khoan, can gan:
+Khi duyệt tài khoản, cần gán:
 
 - `factory_id`
 - `role`
-- bo permission chi tiet
+- bộ permission chi tiết
 
-Khi duyet:
+Khi duyệt:
 
-- bat buoc chon `role + permissions`
-- cap nhat `status = active`
-- luu `approved_by`, `approved_at`
+- bắt buộc chọn `role + permissions`
+- cập nhật `status = active`
+- lưu `approved_by`, `approved_at`
 
-### Khoa tai khoan
+### Khóa tài khoản
 
-- Admin co the khoa tai khoan `active`
-- Khi khoa:
+- Admin có thể khóa tài khoản `active`
+- Khi khóa:
   - `status = disabled`
-  - luu `disabled_by`
-  - luu `disabled_at`
-- Tai khoan `disabled` khong duoc vao ung dung
+  - lưu `disabled_by`
+  - lưu `disabled_at`
+- Tài khoản `disabled` không được vào ứng dụng
 
-## Phan quyen
+## Phân quyền
 
-Mo hinh quyen:
+Mô hình quyền:
 
-`module + action chuan`, them mot so action dac biet
+`module + action chuẩn`, thêm một số action đặc biệt
 
-### Action chuan
+### Action chuẩn
 
 - `view`
 - `create`
 - `edit`
 - `delete`
 
-### Action dac biet
+### Action đặc biệt
 
 - `import`
 - `export_file`
@@ -146,7 +142,7 @@ Mo hinh quyen:
 - `mark_completed`
 - `delete_order`
 
-### Vi du
+### Ví dụ
 
 - `dispatch.view`
 - `dispatch.import`
@@ -156,25 +152,15 @@ Mo hinh quyen:
 - `users.approve`
 - `users.edit_permission`
 
-## Rule ve UI va logic
+## Rule về UI và logic
 
-- User khong co quyen thi khong hien hoac disable nut lien quan
-- Nhung phai co guard o logic thao tac, khong chi an UI
-- Moi action nhay cam nhu xoa, import, duyet, sua config phai check quyen that
+- User không có quyền thì không hiện hoặc disable nút liên quan
+- Nhưng phải có guard ở logic thao tác, không chỉ ẩn UI
+- Mọi action nhạy cảm như xóa, import, duyệt, sửa config phải check quyền thật
 
-## Trang thai thuc te cua UI hien tai
+## Gợi ý role tổng quát
 
-Hien tai trong `Cai dat`:
-
-- Tab `Cong ty`: da co
-- Tab `Nguoi dung`: da co, gom `Cho duyet`, `Dang hoat dong`, khoa tai khoan
-- Tab `Phan quyen`: da co khung hien thi permission theo module
-- Tab `Cau hinh nha may`: da co khung cho buoc CRUD tiep theo
-- Tab `Danh muc`: hien dang chua `Hau to`
-
-## Goi y role tong quat
-
-- `admin`: toan quyen
-- `manager`: nghiep vu rong, khong mac dinh quan tri user/config neu khong duoc cap them
-- `user`: quyen theo cap phat
-- `customer`: xem khu vuc duoc mo, chu yeu la truy xuat
+- `admin`: toàn quyền
+- `manager`: nghiệp vụ rộng, không mặc định quản trị user/config nếu không được cấp thêm
+- `user`: quyền theo cấp phát
+- `customer`: xem khu vực được mở, chủ yếu là truy xuất

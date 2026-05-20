@@ -121,6 +121,20 @@ Rule chính thức:
 - Module `Điều xe` và `EUDR` phải đọc theo bảng này
 - Khi chỉnh cấu hình điểm giao nhận, các lần điều xe và truy xuất sau đó phải dùng logic mới
 
+## Lô vườn trong cấu hình nhà máy
+
+Danh mục lô vườn cao su thuộc nhóm cấu hình theo nhà máy, quản lý data địa lý cho EUDR.
+
+Rule chính thức:
+
+- Dữ liệu lưu trong bảng `forest_plots`
+- Quản trị tại `Cài đặt → Cấu hình nhà máy → Lô vườn`
+- `ten` là key khớp với `dispatch_delivery_points.phien_X[]` — không được đổi sau khi seed
+- `geometry` lưu GeoJSON Polygon JSONB — không select trong list, chỉ load khi sửa
+- Import hàng loạt: upload file `.geojson`, dedup theo `ten`, upsert `onConflict: factory_id,ten`
+- Vẽ polygon trực tiếp trên bản đồ trong modal form (leaflet + `@geoman-io/leaflet-geoman-free`)
+- Module EUDR query DB trước, fallback file GeoJSON tĩnh nếu bảng rỗng
+
 ## Nút thêm nhanh
 
 Trong module nghiệp vụ, `loai_pallet_sx` và `loai_pallet_xuat` có thể có nút `+`.

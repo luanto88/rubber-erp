@@ -125,10 +125,19 @@ ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`;
 EUDR đã được triển khai, không còn là ý tưởng tương lai.
 
 - Module: `/dashboard/eudr`
-- Chuỗi truy xuất chính: `export_orders -> lots -> ngans -> dispatch_entries`
-- Từ `dispatch_entries.rows[].diem_gn` và `phiên`, hệ thống phải tra bảng `dispatch_delivery_points` theo `factory_id` để suy ra `lô thu hoạch`
-- Không dùng một danh sách điểm giao nhận hard-code chung cho tất cả nhà máy làm source of truth
+- Chuỗi truy xuất chính: `export_orders -> lots -> ngans -> dispatch_entries -> dispatch_delivery_points -> forest_plots`
+- Từ `dispatch_entries.rows[].diem_gn` và `phiên`, hệ thống tra `dispatch_delivery_points` theo `factory_id` để suy ra tập mã lô vườn (`ten`)
+- Mã `ten` được dùng để lấy polygon từ bảng `forest_plots` (DB) và render bản đồ
 - Hỗ trợ QR code, zip file, file đính kèm
+
+### Nguồn dữ liệu lô vườn (forest_plots)
+
+- **Bảng DB**: `forest_plots` — source of truth runtime, filter theo `factory_id + is_active + ten IN [...]`
+- **Fallback**: `/public/geojson/Lo cao su - 2026_Full.geojson` — chỉ dùng khi DB chưa có dữ liệu
+- `EudrClient.tsx` thực hiện logic: query DB trước, fallback GeoJSON tĩnh nếu `plotRows` rỗng
+- `dispatch_delivery_points.phien_X[]` vẫn lưu mảng `ten` codes — không thay đổi
+- Seed dữ liệu ban đầu: `node --env-file=.env.local scripts/seed-forest-plots.mjs`
+- Không được hard-code danh sách lô vườn trong code; mọi mở rộng phải vào DB
 
 ## Ngôn ngữ giao diện
 

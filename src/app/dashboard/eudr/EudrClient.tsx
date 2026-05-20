@@ -244,15 +244,44 @@ export default function EudrClient() {
       }
       setExtractionDates(edMap)
 
-      // 4. Load full GeoJSON and filter
-      const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
-      const full: FeatureCollection = await res.json()
-      const filtered: FeatureCollection = {
-        type: "FeatureCollection",
-        features: full.features.filter(f =>
-          diemGn.has(f.properties?.Ten)
-        )
+      // 4. Lấy polygon lô vườn — ưu tiên DB (forest_plots), fallback file GeoJSON tĩnh
+      let filtered: FeatureCollection
+
+      const tenList = [...diemGn]
+      const { data: plotRows } = tenList.length
+        ? await supabase
+            .from("forest_plots")
+            .select("ten, geometry, nong_truong, doi, dien_tich_ha")
+            .eq("factory_id", ord.factory_id)
+            .eq("is_active", true)
+            .in("ten", tenList)
+        : { data: null }
+
+      if (plotRows && plotRows.length > 0) {
+        // DB có dữ liệu — dùng trực tiếp
+        filtered = {
+          type: "FeatureCollection",
+          features: (plotRows as { ten: string; geometry: unknown; nong_truong: string | null; doi: number | null; dien_tich_ha: number | null }[]).map(p => ({
+            type: "Feature" as const,
+            properties: {
+              Ten: p.ten,
+              Nong_truong: p.nong_truong ?? "",
+              Doi_2026: p.doi ?? null,
+              Dtich2026_ha: p.dien_tich_ha ?? null,
+            },
+            geometry: p.geometry as FeatureCollection["features"][0]["geometry"],
+          })),
+        }
+      } else {
+        // Fallback: file GeoJSON tĩnh (dùng khi chưa seed DB)
+        const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
+        const full: FeatureCollection = await res.json()
+        filtered = {
+          type: "FeatureCollection",
+          features: full.features.filter(f => diemGn.has(f.properties?.Ten)),
+        }
       }
+
       setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
       setGeoData(filtered)
     } catch (e) {
