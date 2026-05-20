@@ -808,6 +808,431 @@ function PrintSuCoNho({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: 
   )
 }
 
+// ─── Template F03: Giấy đề nghị bảo trì - sửa chữa ──────────────────────────
+
+function PrintF03({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+  const { dd, mm, yyyy } = fmtDateParts(record.ngay)
+  return (
+    <div className="print-page font-serif">
+      <CompanyHeader boPhan={record.bo_phan} />
+
+      <div className="flex items-start justify-between mt-2">
+        <div className="flex-1" />
+        {qrUrl && (
+          <div className="shrink-0 text-center ml-4">
+            <QRCodeSVG value={qrUrl} size={64} level="M" />
+            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="text-right text-xs mt-1 mb-2">
+        Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
+        <span className="px-1">{mm}</span> năm{" "}
+        <span className="px-1">{yyyy}</span>
+      </div>
+
+      <div className="text-center mb-4">
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Giấy đề nghị bảo trì - sửa chữa</h2>
+        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+      </div>
+
+      <div className="text-xs leading-5 space-y-1">
+        {record.lines.map((line) => (
+          <p key={line.id}>
+            Mã thiết bị: <span className="font-mono font-bold">{line.ma_tb}</span>
+            <span className="mx-4" />
+            Tên thiết bị: <span>{line.ten_tb}</span>
+          </p>
+        ))}
+
+        <p className="mt-2">
+          <strong>Kính gửi:</strong> Giám đốc nhà máy chế biến.
+        </p>
+        <p>
+          Kính đề nghị giám đốc nhà máy cho bảo dưỡng xe, máy móc, thiết bị như sau:
+        </p>
+
+        {record.lines.map((line, idx) => (
+          <div key={line.id} className="mt-2 pl-3">
+            {record.lines.length > 1 && (
+              <p className="font-bold">{idx + 1}. {line.ten_tb} ({line.ma_tb})</p>
+            )}
+            <div className="mt-1">
+              <span className="font-semibold">1/ Nội dung bảo dưỡng: </span>
+              {line.noi_dung ? <span>{line.noi_dung}</span> : <BlankLine count={3} />}
+            </div>
+            <div className="mt-1">
+              <span className="font-semibold">2/ Lý do bảo dưỡng: </span>
+              {line.nguyen_nhan ? <span>{line.nguyen_nhan}</span> : <BlankLine count={3} />}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <SignatureRow cols={[
+        { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+        { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+        { role: "Giám đốc nhà máy", name: record.giam_doc },
+        { role: "Tổ cơ điện", name: record.phu_trach_bao_tri },
+      ]} />
+
+      <DocumentFooter code="KHXD-QT02-F03" />
+    </div>
+  )
+}
+
+// ─── Template F15 variant cho Bảo dưỡng ──────────────────────────────────────
+
+function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
+  const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const firstTaiXe = isBoDoi ? (record.lines[0]?.ten_tai_xe || null) : null
+
+  const participants: { name: string; role: string }[] = []
+  if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc Nhà máy" })
+  if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (isBoDoi && firstTaiXe) participants.push({ name: firstTaiXe, role: "Lái xe" })
+  if (!isBoDoi && !record.nv_phu_trach && !record.phu_trach_bao_tri) {
+    participants.push({ name: "", role: "Tổ trưởng cơ điện" })
+  }
+
+  return (
+    <div className="print-page font-serif">
+      <CompanyHeader boPhan={record.bo_phan} />
+
+      <div className="flex items-start justify-between mt-2 mb-3">
+        <div className="flex-1 text-center">
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản nghiệm thu</h2>
+          <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho bảo dưỡng định kỳ)</div>
+          <div className="text-xs text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
+        </div>
+        {qrUrl && (
+          <div className="shrink-0 text-center ml-4">
+            <QRCodeSVG value={qrUrl} size={64} level="M" />
+            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+          </div>
+        )}
+      </div>
+
+      {record.lines.map((line, idx) => (
+        <div key={line.id} className="mb-2 text-xs leading-5">
+          {record.lines.length > 1 && (
+            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
+              {idx + 1}. {line.ten_tb} ({line.ma_tb})
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <p>Xe/máy/thiết bị: <span>{line.ten_tb}</span></p>
+            <p>Biển số/số hiệu: <span className="font-mono">{line.ma_tb}</span></p>
+            {isBoDoi && (
+              <p className="col-span-2">Lái xe: <span>{line.ten_tai_xe || "..."}</span></p>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <div className="text-xs leading-5 space-y-0.5">
+        <p>Đơn vị quản lý, sử dụng: <span>Nhà máy chế biến Phước Hòa Kampong Thom</span></p>
+        <p>Căn cứ: Giấy đề nghị bảo trì số <span className="font-bold">{record.ma_bb || "..."}</span></p>
+        <p>
+          Hôm nay, ngày <span className="px-1">{dd}</span> tháng{" "}
+          <span className="px-1">{mm}</span> năm{" "}
+          <span className="px-1">{yyyy}</span>
+        </p>
+        <p>Tại: <span>{record.bo_phan}</span></p>
+
+        <p className="font-semibold mt-2">Chúng tôi gồm:</p>
+        {participants.map((p, i) => (
+          <p key={i}>
+            Ông: <strong>{p.name || "................................."}</strong> – {p.role}
+          </p>
+        ))}
+
+        <p className="mt-2">Cùng tiến hành kiểm tra chất lượng bảo dưỡng. Kết quả như sau:</p>
+
+        <div className="mt-2">
+          {record.lines.map((line, idx) => {
+            const content = line.cac_khac_phuc || line.noi_dung || ""
+            return (
+              <div key={idx} className="mt-1">
+                {record.lines.length > 1 ? (
+                  <>
+                    <p className="font-bold">{idx + 1}. {line.ten_tb}:</p>
+                    <p className="pl-3">
+                      <span className="font-semibold">Khối lượng đã bảo dưỡng, thay thế phụ tùng: </span>
+                      {content}
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    <span className="font-semibold">Khối lượng đã bảo dưỡng, thay thế phụ tùng: </span>
+                    {content || ".............................."}
+                  </p>
+                )}
+                {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia={false} />}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-2 flex items-center gap-6">
+          <span className="font-semibold">Chất lượng:</span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Đạt yêu cầu
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Không đạt
+          </span>
+        </div>
+
+        <div className="mt-1">
+          <p className="font-semibold">Kết luận:</p>
+          {[0, 1].map(i => (
+            <div key={i} style={{ height: "2rem", borderBottom: "1px solid #cbd5e1", marginTop: "0.5rem" }} />
+          ))}
+        </div>
+      </div>
+
+      {isBoDoi ? (
+        <SignatureRow cols={[
+          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+          { role: "Tài xế", name: firstTaiXe },
+          { role: "Giám đốc nhà máy", name: record.giam_doc },
+        ]} />
+      ) : (
+        <SignatureRow cols={[
+          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+          { role: "Giám đốc nhà máy", name: record.giam_doc },
+        ]} />
+      )}
+
+      <DocumentFooter code="KHXD-QT02-F15" />
+    </div>
+  )
+}
+
+// ─── Template F06: Phiếu hoàn thành công việc bảo trì (xe) ───────────────────
+
+function PrintF06({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+  const { dd, mm, yyyy } = fmtDateParts(record.ngay)
+  return (
+    <div className="print-page font-serif">
+      <CompanyHeader boPhan={record.bo_phan} />
+
+      <div className="flex items-start justify-between mt-2">
+        <div className="flex-1" />
+        {qrUrl && (
+          <div className="shrink-0 text-center ml-4">
+            <QRCodeSVG value={qrUrl} size={64} level="M" />
+            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="text-right text-xs mt-1 mb-2">
+        Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
+        <span className="px-1">{mm}</span> năm{" "}
+        <span className="px-1">{yyyy}</span>
+      </div>
+
+      <div className="text-center mb-3">
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Phiếu hoàn thành công việc bảo trì</h2>
+        <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho xe ôtô vận chuyển mủ)</div>
+        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+      </div>
+
+      {record.lines.map((line, idx) => {
+        type F06Row = { stt: number; hang_muc: string; dvt: string; so_luong: string | number; thanh_tien: string; ghi_chu: string }
+        const rows: F06Row[] = []
+        let rowIdx = 1
+
+        rows.push({
+          stt: rowIdx++,
+          hang_muc: line.nhien_lieu_su_dung ? `Nhiên liệu bảo dưỡng: ${line.nhien_lieu_su_dung}` : "Nhiên liệu bảo dưỡng",
+          dvt: line.dvt_do || "",
+          so_luong: line.so_luong_do ?? "",
+          thanh_tien: "",
+          ghi_chu: "",
+        })
+
+        for (const mat of line.materials) {
+          rows.push({
+            stt: rowIdx++,
+            hang_muc: mat.ten_vat_tu,
+            dvt: mat.dvt || "",
+            so_luong: mat.so_luong,
+            thanh_tien: mat.thanh_tien ? `${currencySymbol(mat.loai_tien || "USD")}${mat.thanh_tien.toLocaleString()}` : "",
+            ghi_chu: mat.nguon === "ben_ngoai" ? "Mua ngoài" : "Kho",
+          })
+        }
+
+        rows.push({
+          stt: rowIdx++,
+          hang_muc: "Công thợ",
+          dvt: "",
+          so_luong: "",
+          thanh_tien: line.cong_tho > 0 ? fmtValue(line.cong_tho, line.loai_tien) : "",
+          ghi_chu: "",
+        })
+
+        const matTotal = line.materials.reduce((s, m) => s + (m.thanh_tien || 0), 0)
+        const grandTotal = matTotal + (line.cong_tho || 0)
+
+        return (
+          <div key={line.id} className="mb-6 text-xs leading-5">
+            {record.lines.length > 1 && (
+              <div className="bg-slate-100 px-3 py-1.5 font-bold text-xs uppercase mb-2 rounded">
+                {idx + 1}. {line.ten_tb} ({line.ma_tb})
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-x-8 gap-y-0.5 mb-2">
+              <p>Biển số: <span className="font-mono">{line.ma_tb}</span></p>
+              <p>Tên lái xe: <span>{line.ten_tai_xe || "..."}</span></p>
+            </div>
+
+            <p className="mb-2">
+              Căn cứ giấy đề nghị bảo trì số:{" "}
+              <span className="font-bold">{record.ma_bb || "..."}</span>,{" "}
+              ngày <span className="px-1">{dd}</span> tháng{" "}
+              <span className="px-1">{mm}</span> năm{" "}
+              <span className="px-1">{yyyy}</span>
+            </p>
+
+            <p className="font-semibold mb-1">Kết quả bảo dưỡng bao gồm:</p>
+
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="border border-slate-400 px-2 py-1 text-center w-8">STT</th>
+                  <th className="border border-slate-400 px-2 py-1 text-left">Hạng mục công việc đã thực hiện</th>
+                  <th className="border border-slate-400 px-2 py-1 text-center w-14">ĐVT</th>
+                  <th className="border border-slate-400 px-2 py-1 text-right w-16">Số lượng</th>
+                  <th className="border border-slate-400 px-2 py-1 text-right w-24">Thành tiền</th>
+                  <th className="border border-slate-400 px-2 py-1 text-center w-16">Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, ri) => (
+                  <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
+                    <td className="border border-slate-300 px-2 py-1 text-center">{row.stt}</td>
+                    <td className="border border-slate-300 px-2 py-1">{row.hang_muc}</td>
+                    <td className="border border-slate-300 px-2 py-1 text-center">{row.dvt}</td>
+                    <td className="border border-slate-300 px-2 py-1 text-right">{row.so_luong}</td>
+                    <td className="border border-slate-300 px-2 py-1 text-right">{row.thanh_tien}</td>
+                    <td className="border border-slate-300 px-2 py-1 text-center">{row.ghi_chu}</td>
+                  </tr>
+                ))}
+                <tr className="font-bold bg-slate-100">
+                  <td colSpan={4} className="border border-slate-400 px-2 py-1 text-right">Cộng:</td>
+                  <td className="border border-slate-400 px-2 py-1 text-right">
+                    {grandTotal > 0 ? fmtValue(grandTotal, line.loai_tien) : ""}
+                  </td>
+                  <td className="border border-slate-400 px-2 py-1" />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )
+      })}
+
+      <SignatureRow cols={[
+        { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+        { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+        { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
+        { role: "Giám đốc nhà máy", name: record.giam_doc },
+      ]} />
+
+      <DocumentFooter code="KHXD-QT02-F06" />
+    </div>
+  )
+}
+
+// ─── Trang ảnh cho Bảo dưỡng ─────────────────────────────────────────────────
+
+function PrintImagesPage({ record }: { record: RecordData }) {
+  const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
+  if (linesWithImages.length === 0) return null
+  const multiDevice = linesWithImages.length > 1
+
+  return (
+    <div className="print-page font-serif">
+      <CompanyHeader boPhan={record.bo_phan} />
+      <div className="text-center mt-2 mb-4">
+        <h2 className="text-sm font-extrabold uppercase tracking-wide">Hình ảnh bảo dưỡng</h2>
+        <div className="text-xs text-slate-600 mt-1">Số: {record.ma_bb || "..."}</div>
+      </div>
+
+      {linesWithImages.map((line) => {
+        const imgs = (line.image_urls || []).filter(Boolean)
+        const colClass = imgs.length <= 2 ? "grid-cols-2" : "grid-cols-3"
+        return (
+          <div key={line.id} className="mb-6">
+            {multiDevice && (
+              <div className="bg-slate-100 px-3 py-1.5 font-bold text-xs uppercase mb-2 rounded">
+                {line.ten_tb} ({line.ma_tb})
+              </div>
+            )}
+            <div className={`grid ${colClass} gap-2`}>
+              {imgs.map((url, i) => (
+                <div key={i} className="overflow-hidden rounded border border-slate-200" style={{ aspectRatio: "4/3" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-slate-400 text-right mt-1">{imgs.length} hình ảnh</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Wrapper: F03 + F15 + Ảnh (Bảo dưỡng thiết bị chế biến) ─────────────────
+
+function PrintBaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
+  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean))
+  return (
+    <div className="font-serif">
+      <PrintF03 record={record} qrUrl={qrUrl} />
+      <div className="print:page-break-before-always mt-6 pt-6" />
+      <PrintF15BaoDuong record={record} qrUrl={qrUrl} staffMap={staffMap} />
+      {hasImages && (
+        <>
+          <div className="print:page-break-before-always mt-6 pt-6" />
+          <PrintImagesPage record={record} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Wrapper: F03 + F15 + F06 + Ảnh (Bảo dưỡng Đội xe) ─────────────────────
+
+function PrintBaoDuongXe({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
+  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean))
+  return (
+    <div className="font-serif">
+      <PrintF03 record={record} qrUrl={qrUrl} />
+      <div className="print:page-break-before-always mt-6 pt-6" />
+      <PrintF15BaoDuong record={record} qrUrl={qrUrl} staffMap={staffMap} />
+      <div className="print:page-break-before-always mt-6 pt-6" />
+      <PrintF06 record={record} qrUrl={qrUrl} />
+      {hasImages && (
+        <>
+          <div className="print:page-break-before-always mt-6 pt-6" />
+          <PrintImagesPage record={record} />
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function MaintenancePrintPage() {
@@ -994,6 +1419,8 @@ export default function MaintenancePrintPage() {
           {printType === "de_nghi" && "Giấy đề nghị (F10) + Biên bản nghiệm thu (F15)"}
           {printType === "su_co_nho" && "In biên bản sửa chữa (F13 + F10 + F15 + Ảnh)"}
           {printType === "ly_lich" && "Lý lịch thiết bị (F01)"}
+          {printType === "bao_duong" && "Bảo dưỡng thiết bị (F03 + F15 + Ảnh)"}
+          {printType === "bao_duong_xe" && "Bảo dưỡng xe (F03 + F15 + F06 + Ảnh)"}
         </div>
         <button
           onClick={() => window.print()}
@@ -1012,6 +1439,8 @@ export default function MaintenancePrintPage() {
             {printType === "su_co" && <PrintSuCo record={record} qrUrl={qrUrl} staffMap={staffMap} />}
             {printType === "de_nghi" && <PrintDeNghi record={record} qrUrl={qrUrl} staffMap={staffMap} />}
             {printType === "su_co_nho" && <PrintSuCoNho record={record} qrUrl={qrUrl} staffMap={staffMap} />}
+            {printType === "bao_duong" && <PrintBaoDuong record={record} qrUrl={qrUrl} staffMap={staffMap} />}
+            {printType === "bao_duong_xe" && <PrintBaoDuongXe record={record} qrUrl={qrUrl} staffMap={staffMap} />}
           </>
         )}
 

@@ -378,6 +378,13 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
         "# Ghi chú: ma_kho hỗ trợ nhiều kho ngăn cách dấu chấm phẩy vd: KA;KB",
       ],
     },
+    vehicles: {
+      filename: "mau_xe_tai_xe.csv",
+      rows: [
+        "ma_xe,ten_xe,loai_xe,tai_xe_chinh,hieu_luc_tu,trang_thai",
+        "1B,Cozon nội bộ 1B,Cozon nội bộ,Sreng Seng Hoang,2000-01-01,true",
+      ],
+    },
     "delivery-points": {
       filename: "mau_diem_giao_nhan.csv",
       rows: [

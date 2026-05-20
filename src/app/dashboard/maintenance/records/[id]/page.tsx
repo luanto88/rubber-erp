@@ -811,11 +811,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {!isNew && (
+          {!isNew && record && (
             <>
-              {record?.trang_thai === "da_duyet" ? (
+              {record.trang_thai === "da_duyet" ? (
                 <>
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan !== "Đội xe" ? (
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan !== "Đội xe" && (
                     <Link
                       href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
                       target="_blank"
@@ -823,7 +823,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     >
                       <Printer size={12} /> In biên bản
                     </Link>
-                  ) : (
+                  )}
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && (
                     <>
                       <Link
                         href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
@@ -841,17 +842,28 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       </Link>
                     </>
                   )}
+                  {record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe" && (
+                    <Link
+                      href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
+                      target="_blank"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                    >
+                      <Printer size={12} /> In biên bản
+                    </Link>
+                  )}
+                  {record.hang_muc === "Bảo dưỡng" && record.bo_phan === "Đội xe" && (
+                    <Link
+                      href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${id}`}
+                      target="_blank"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                    >
+                      <Printer size={12} /> In biên bản
+                    </Link>
+                  )}
                 </>
               ) : (
                 <>
-                  {record?.hang_muc === "Sửa chữa" && record?.bo_phan !== "Đội xe" ? (
-                    <span
-                      title="Chỉ in được sau khi biên bản được phê duyệt"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                    >
-                      <Printer size={12} /> In biên bản
-                    </span>
-                  ) : (
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" ? (
                     <>
                       <span
                         title="Chỉ in được sau khi biên bản được phê duyệt"
@@ -866,6 +878,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         <Printer size={12} /> Đề nghị
                       </span>
                     </>
+                  ) : (
+                    <span
+                      title="Chỉ in được sau khi biên bản được phê duyệt"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
+                    >
+                      <Printer size={12} /> In biên bản
+                    </span>
                   )}
                 </>
               )}
