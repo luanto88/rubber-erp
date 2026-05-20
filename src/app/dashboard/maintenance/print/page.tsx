@@ -10,7 +10,7 @@ import { currencySymbol } from "../_components/maintenance-data"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PrintType = "su_co" | "de_nghi" | "ly_lich" | "su_co_nho"
+type PrintType = "su_co" | "de_nghi" | "ly_lich" | "su_co_nho" | "bao_duong" | "bao_duong_xe"
 
 type MaterialRow = {
   nguon: "trong_kho" | "ben_ngoai"
