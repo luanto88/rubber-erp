@@ -1,6 +1,6 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import type { FeatureCollection, Geometry } from "geojson"
+import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 
 const PDF_FONT_FILE = "Geist-Regular.ttf"
 const PDF_FONT_NAME = "GeistRegular"
@@ -115,8 +115,14 @@ async function ensurePdfFont(doc: jsPDF) {
 
 function polygonCentroid(geometry: Geometry): { lat: number; lon: number } {
   try {
-    const coords: number[][] =
-      geometry.type === "MultiPolygon" ? geometry.coordinates[0][0] : geometry.coordinates[0]
+    let coords: number[][]
+    if (geometry.type === "MultiPolygon") {
+      coords = (geometry as MultiPolygon).coordinates[0][0]
+    } else if (geometry.type === "Polygon") {
+      coords = (geometry as Polygon).coordinates[0]
+    } else {
+      return { lat: 0, lon: 0 }
+    }
     const lon = coords.reduce((sum: number, c: number[]) => sum + c[0], 0) / coords.length
     const lat = coords.reduce((sum: number, c: number[]) => sum + c[1], 0) / coords.length
     return { lat, lon }
