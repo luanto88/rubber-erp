@@ -281,14 +281,38 @@ Sau phê duyệt, biên bản và phiếu xuất kho đều không chỉnh sửa
 UX: Save / Phê duyệt / Hủy đều **ở lại trang hiện tại** và hiện success toast tự dismiss sau 4 giây.  
 Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau khi save lần đầu.
 
-### Phiếu xuất kho auto-tạo
+### Phiếu xuất kho auto-tạo khi phê duyệt
 
 - 1 phiếu duy nhất gom toàn bộ vật tư `trong_kho` của cả biên bản (tất cả lines)
-- `note` phiếu xuất: `"Sửa chữa/Bảo dưỡng thiết bị: [ten_tb line1], [ten_tb line2]..."`
+- Ghi chú phiếu xuất: `"Xuất kho cho biên bản sửa chữa/bảo trì số: {ma_bb}"`
 - `document_code`: `X-BT-{ma_bb}`
 - Kiểm tra tồn kho tại thời điểm phê duyệt, không tại thời điểm tạo biên bản
 - Nếu không đủ tồn: hiển thị lỗi, chặn phê duyệt
 - Tồn kho lấy từ cột `on_hand` trong bảng `inventory_stock_balances` (không phải `quantity_on_hand`)
+- Vật tư `ben_ngoai` **không** tạo phiếu xuất kho (mua ngoài, không qua kho)
+
+**Flow tạo phiếu xuất đúng** (thứ tự bắt buộc):
+```
+1. getFreshAuthSession() → lấy session.user.id (UUID Auth)
+2. Tạo inventory_documents { status: "draft", notes: "Xuất kho cho biên bản...số: {ma_bb}" }
+3. Insert inventory_document_lines (item_id, quantity, line_notes = ten_vat_tu)
+4. rpc("inventory_post_export_document", { p_factory_id, p_document_id, p_posted_by: session.user.id })
+   → phiếu chuyển "posted", on_hand bị trừ, tạo inventory_stock_movements
+5. Lưu inventory_issue_doc_id vào maintenance_records
+```
+
+**Retry-safe**: Nếu phiếu đã tồn tại (duplicate document_code), reset về draft, xóa dòng cũ, insert lại rồi post lại.
+
+**Hủy phê duyệt** (hoàn tồn kho):
+```
+1. getFreshAuthSession() → lấy session.user.id
+2. rpc("inventory_cancel_document", { p_factory_id, p_document_id: inventory_issue_doc_id,
+     p_cancelled_by: session.user.id, p_cancel_reason: "Hủy phê duyệt biên bản {ma_bb}" })
+   → phiếu chuyển "cancelled", on_hand hoàn nguyên, stock_movements đảo ngược
+3. Cập nhật maintenance_records: trang_thai = "cho_duyet", inventory_issue_doc_id = null
+```
+
+**Không** dùng `supabase.from("inventory_documents").update({ status: "cancelled" })` trực tiếp — phải dùng RPC để đảm bảo stock movements được đảo ngược đúng.
 
 ---
 

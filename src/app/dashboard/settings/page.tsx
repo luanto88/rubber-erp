@@ -295,6 +295,13 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
         "# Ghi chú: ma_kho hỗ trợ nhiều kho ngăn cách dấu chấm phẩy vd: KA;KB",
       ],
     },
+    "delivery-points": {
+      filename: "mau_diem_giao_nhan.csv",
+      rows: [
+        "ma_lo,doi,lat,lng,phien_a,phien_b,phien_c,phien_d,sort_order,is_active",
+        "B5,2,12.632736,105.495549,\"A3,A4,A5\",\"B4,C4,D4,E4\",\"E5,D5D,C5D,C5T\",\"A3,A4,A5\",1,true",
+      ],
+    },
   }
   const cfg = cfgs[tab]
   const blob = new Blob(["﻿" + cfg.rows.join("\r\n")], { type: "text/csv;charset=utf-8" })
@@ -2348,4 +2355,6 @@ export default function SettingsPage() {
     </div>
   )
 }
+
+
 
