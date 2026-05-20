@@ -55,6 +55,45 @@ CREATE TABLE dispatch_entries (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE dispatch_drivers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  factory_id UUID REFERENCES factories(id) ON DELETE CASCADE,
+  code TEXT,
+  name TEXT NOT NULL,
+  phone TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(factory_id, name)
+);
+
+CREATE TABLE dispatch_vehicles (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  factory_id UUID REFERENCES factories(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  vehicle_type TEXT,
+  plate_number TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(factory_id, code)
+);
+
+CREATE TABLE dispatch_vehicle_driver_assignments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  factory_id UUID REFERENCES factories(id) ON DELETE CASCADE,
+  vehicle_id UUID NOT NULL REFERENCES dispatch_vehicles(id) ON DELETE CASCADE,
+  driver_id UUID NOT NULL REFERENCES dispatch_drivers(id),
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_current BOOLEAN DEFAULT true,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- 5. Storage Tanks / Ngăn lưu
 CREATE TABLE ngans (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -192,6 +231,9 @@ CREATE INDEX idx_qc_lot ON qc_results(lot_id);
 CREATE INDEX idx_qc_ngay ON qc_results(ngay_kn);
 CREATE INDEX idx_ngans_factory ON ngans(factory_id);
 CREATE INDEX idx_dispatch_factory ON dispatch_entries(factory_id);
+CREATE INDEX idx_dispatch_drivers_factory ON dispatch_drivers(factory_id, is_active, name);
+CREATE INDEX idx_dispatch_vehicles_factory ON dispatch_vehicles(factory_id, is_active, sort_order, code);
+CREATE INDEX idx_dispatch_assignments_vehicle ON dispatch_vehicle_driver_assignments(factory_id, vehicle_id, effective_from DESC);
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS)
@@ -202,6 +244,9 @@ ALTER TABLE lots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ngans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE qc_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dispatch_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch_drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch_vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch_vehicle_driver_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE export_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suffixes ENABLE ROW LEVEL SECURITY;
@@ -214,6 +259,9 @@ CREATE POLICY "Allow all" ON lots FOR ALL USING (true);
 CREATE POLICY "Allow all" ON ngans FOR ALL USING (true);
 CREATE POLICY "Allow all" ON qc_results FOR ALL USING (true);
 CREATE POLICY "Allow all" ON dispatch_entries FOR ALL USING (true);
+CREATE POLICY "Allow all" ON dispatch_drivers FOR ALL USING (true);
+CREATE POLICY "Allow all" ON dispatch_vehicles FOR ALL USING (true);
+CREATE POLICY "Allow all" ON dispatch_vehicle_driver_assignments FOR ALL USING (true);
 CREATE POLICY "Allow all" ON customers FOR ALL USING (true);
 CREATE POLICY "Allow all" ON export_orders FOR ALL USING (true);
 CREATE POLICY "Allow all" ON suffixes FOR ALL USING (true);

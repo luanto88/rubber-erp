@@ -31,6 +31,7 @@ import {
   Upload,
   Wrench,
   Car,
+  Calendar,
   UserCog,
   ShoppingBag,
 } from "lucide-react"
@@ -97,7 +98,7 @@ type UserEditor = {
 
 type SettingsTab = "company" | "users" | "permissions" | "factory-config" | "master-data" | "maintenance"
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "vehicles"
 
 type MaintenanceTab = "assets" | "staff" | "ext-materials"
 
@@ -205,6 +206,59 @@ type DispatchDeliveryPointForm = {
   is_active: boolean
 }
 
+type DispatchDriverRow = {
+  id: string
+  factory_id: string
+  code: string | null
+  name: string
+  phone: string | null
+  is_active: boolean
+}
+
+type DispatchVehicleAssignmentRow = {
+  id: string
+  factory_id: string
+  vehicle_id: string
+  driver_id: string
+  effective_from: string
+  effective_to: string | null
+  is_current: boolean
+  note: string | null
+}
+
+type DispatchVehicleRow = {
+  id: string
+  factory_id: string
+  code: string
+  name: string
+  vehicle_type: string | null
+  plate_number: string | null
+  sort_order: number
+  is_active: boolean
+  current_driver_id: string | null
+  current_driver_name: string
+  current_assignment_from: string | null
+}
+
+type DispatchDriverForm = {
+  code: string
+  name: string
+  phone: string
+  is_active: boolean
+}
+
+type DispatchVehicleForm = {
+  code: string
+  name: string
+  vehicle_type: string
+  plate_number: string
+  sort_order: string
+  primary_driver_id: string
+  effective_from: string
+  note: string
+  is_active: boolean
+}
+
 const SYSTEM_CODES = ["cs", "m"]
 
 function emptyForm(): SuffixForm {
@@ -235,6 +289,35 @@ function emptyDeliveryPointForm(sortOrder = "0"): DispatchDeliveryPointForm {
     sort_order: sortOrder,
     is_active: true,
   }
+}
+
+function emptyDispatchDriverForm(): DispatchDriverForm {
+  return {
+    code: "",
+    name: "",
+    phone: "",
+    is_active: true,
+  }
+}
+
+function emptyDispatchVehicleForm(sortOrder = "0"): DispatchVehicleForm {
+  return {
+    code: "",
+    name: "",
+    vehicle_type: "",
+    plate_number: "",
+    sort_order: sortOrder,
+    primary_driver_id: "",
+    effective_from: new Date().toISOString().slice(0, 10),
+    note: "",
+    is_active: true,
+  }
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
 }
 
 function parsePointPhaseList(value: string) {
@@ -348,18 +431,24 @@ export default function SettingsPage() {
   const [invCategories, setInvCategories] = useState<InvCategoryRow[]>([])
   const [invItems, setInvItems] = useState<InvItemRow[]>([])
   const [deliveryPoints, setDeliveryPoints] = useState<DispatchDeliveryPointRow[]>([])
+  const [dispatchDrivers, setDispatchDrivers] = useState<DispatchDriverRow[]>([])
+  const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicleRow[]>([])
+  const [dispatchVehicleAssignments, setDispatchVehicleAssignments] = useState<DispatchVehicleAssignmentRow[]>([])
   const [configLoading, setConfigLoading] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
 
-  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | "delivery-point" | null>(null)
+  const [configModal, setConfigModal] = useState<"warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle" | null>(null)
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
   const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
   const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
+  const [dispatchDriverForm, setDispatchDriverForm] = useState<DispatchDriverForm>(emptyDispatchDriverForm())
+  const [dispatchVehicleForm, setDispatchVehicleForm] = useState<DispatchVehicleForm>(emptyDispatchVehicleForm())
+  const [assignmentHistoryVehicleId, setAssignmentHistoryVehicleId] = useState<string | null>(null)
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState("")
-  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point"; id: string; label: string } | null>(null)
+  const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle"; id: string; label: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -423,12 +512,20 @@ export default function SettingsPage() {
   const loadConfigData = useCallback(async (fid: string) => {
     setConfigLoading(true)
     try {
-      const [wRes, cRes, iItemsRes, iCatCountRes, dRes] = await Promise.all([
+      const [wRes, cRes, iItemsRes, iCatCountRes, dRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
         supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
         supabase.from("dispatch_delivery_points").select("id, factory_id, ma_lo, doi, lat, lng, phien_a, phien_b, phien_c, phien_d, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("ma_lo"),
+        supabase.from("dispatch_drivers").select("id, factory_id, code, name, phone, is_active").eq("factory_id", fid).order("name"),
+        supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
+        supabase
+          .from("dispatch_vehicle_driver_assignments")
+          .select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note")
+          .eq("factory_id", fid)
+          .order("is_current", { ascending: false })
+          .order("effective_from", { ascending: false }),
       ])
 
       const nextWarehouses = (wRes.data || []) as InvWarehouseRow[]
@@ -447,11 +544,41 @@ export default function SettingsPage() {
       }))
 
       const nextDeliveryPoints = (dRes.data || []) as DispatchDeliveryPointRow[]
+      const nextDrivers = (driverRes.data || []) as DispatchDriverRow[]
+      const nextAssignments = (assignmentRes.data || []) as DispatchVehicleAssignmentRow[]
+      const driverNameMap = new Map(nextDrivers.map((row) => [row.id, row.name]))
+      const currentAssignmentMap = new Map<string, DispatchVehicleAssignmentRow>()
+      for (const assignment of nextAssignments) {
+        const existing = currentAssignmentMap.get(assignment.vehicle_id)
+        if (!existing && assignment.is_current) {
+          currentAssignmentMap.set(assignment.vehicle_id, assignment)
+          continue
+        }
+        if (!existing) {
+          currentAssignmentMap.set(assignment.vehicle_id, assignment)
+          continue
+        }
+        if (!existing.is_current && assignment.is_current) {
+          currentAssignmentMap.set(assignment.vehicle_id, assignment)
+        }
+      }
+      const nextVehicles = ((vehicleRes.data || []) as Omit<DispatchVehicleRow, "current_driver_id" | "current_driver_name" | "current_assignment_from">[]).map((row) => {
+        const currentAssignment = currentAssignmentMap.get(row.id)
+        return {
+          ...row,
+          current_driver_id: currentAssignment?.driver_id || null,
+          current_driver_name: currentAssignment ? driverNameMap.get(currentAssignment.driver_id) || "Không xác định" : "",
+          current_assignment_from: currentAssignment?.effective_from || null,
+        }
+      })
 
       setInvWarehouses(nextWarehouses)
       setInvCategories(nextCategories)
       setInvItems(nextItems)
       setDeliveryPoints(nextDeliveryPoints)
+      setDispatchDrivers(nextDrivers)
+      setDispatchVehicles(nextVehicles)
+      setDispatchVehicleAssignments(nextAssignments)
       setConfigLoaded(true)
     } finally {
       setConfigLoading(false)
@@ -635,6 +762,102 @@ export default function SettingsPage() {
     }
   }
 
+  const saveDispatchDriver = async () => {
+    if (!factoryId) return
+    if (!dispatchDriverForm.name.trim()) { setConfigError("Tên tài xế không được để trống"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        code: dispatchDriverForm.code.trim().toUpperCase() || null,
+        name: dispatchDriverForm.name.trim(),
+        phone: dispatchDriverForm.phone.trim() || null,
+        is_active: dispatchDriverForm.is_active,
+      }
+      const result = configEditId
+        ? await supabase.from("dispatch_drivers").update(payload).eq("id", configEditId).eq("factory_id", factoryId)
+        : await supabase.from("dispatch_drivers").insert(payload)
+      if (result.error) { setConfigError(result.error.message); return }
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  const saveDispatchVehicle = async () => {
+    if (!factoryId) return
+    if (!dispatchVehicleForm.code.trim()) { setConfigError("Mã xe không được để trống"); return }
+    if (!dispatchVehicleForm.name.trim()) { setConfigError("Tên xe không được để trống"); return }
+    if (!dispatchVehicleForm.primary_driver_id) { setConfigError("Vui lòng chọn tài xế chính"); return }
+    if (!dispatchVehicleForm.effective_from) { setConfigError("Ngày hiệu lực không được để trống"); return }
+    setConfigSaving(true)
+    setConfigError("")
+    try {
+      const vehiclePayload = {
+        factory_id: factoryId,
+        code: dispatchVehicleForm.code.trim().toUpperCase(),
+        name: dispatchVehicleForm.name.trim(),
+        vehicle_type: dispatchVehicleForm.vehicle_type.trim() || null,
+        plate_number: dispatchVehicleForm.plate_number.trim() || null,
+        sort_order: Number(dispatchVehicleForm.sort_order) || 0,
+        is_active: dispatchVehicleForm.is_active,
+      }
+      const vehicleResult = configEditId
+        ? await supabase.from("dispatch_vehicles").update(vehiclePayload).eq("id", configEditId).eq("factory_id", factoryId).select("id").single()
+        : await supabase.from("dispatch_vehicles").insert(vehiclePayload).select("id").single()
+      if (vehicleResult.error || !vehicleResult.data?.id) {
+        setConfigError(vehicleResult.error?.message || "Không lưu được xe")
+        return
+      }
+
+      const vehicleId = vehicleResult.data.id as string
+      const currentAssignment = dispatchVehicleAssignments.find((row) => row.vehicle_id === vehicleId && row.is_current) || null
+      const driverChanged = currentAssignment?.driver_id !== dispatchVehicleForm.primary_driver_id
+
+      if (driverChanged && currentAssignment) {
+        const closeResult = await supabase
+          .from("dispatch_vehicle_driver_assignments")
+          .update({
+            effective_to: addDays(dispatchVehicleForm.effective_from, -1),
+            is_current: false,
+          })
+          .eq("id", currentAssignment.id)
+          .eq("factory_id", factoryId)
+        if (closeResult.error) {
+          setConfigError(closeResult.error.message)
+          return
+        }
+      }
+
+      if (driverChanged || !currentAssignment) {
+        const assignmentResult = await supabase.from("dispatch_vehicle_driver_assignments").insert({
+          factory_id: factoryId,
+          vehicle_id: vehicleId,
+          driver_id: dispatchVehicleForm.primary_driver_id,
+          effective_from: dispatchVehicleForm.effective_from,
+          effective_to: null,
+          is_current: true,
+          note: dispatchVehicleForm.note.trim() || null,
+        })
+        if (assignmentResult.error) {
+          setConfigError(assignmentResult.error.message)
+          return
+        }
+      }
+
+      setConfigModal(null)
+      void loadConfigData(factoryId)
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
   const deleteConfigItem = async () => {
     if (!configDelConfirm || !factoryId) return
     setConfigSaving(true)
@@ -646,7 +869,11 @@ export default function SettingsPage() {
             ? "inventory_item_categories"
             : configDelConfirm.type === "item"
               ? "inventory_items"
-              : "dispatch_delivery_points"
+              : configDelConfirm.type === "delivery-point"
+                ? "dispatch_delivery_points"
+                : configDelConfirm.type === "driver"
+                  ? "dispatch_drivers"
+                  : "dispatch_vehicles"
       await supabase.from(table).delete().eq("id", configDelConfirm.id).eq("factory_id", factoryId)
       setConfigDelConfirm(null)
       void loadConfigData(factoryId)
@@ -786,6 +1013,29 @@ export default function SettingsPage() {
       void loadMaintenanceData(factoryId)
     }
   }, [tab, factoryId, maintLoaded, maintLoading, loadMaintenanceData])
+
+  const selectedVehicleAssignmentHistory = useMemo(() => {
+    if (!assignmentHistoryVehicleId) return []
+    const driverNameMap = new Map(dispatchDrivers.map((row) => [row.id, row.name]))
+    return dispatchVehicleAssignments
+      .filter((row) => row.vehicle_id === assignmentHistoryVehicleId)
+      .map((row) => ({
+        ...row,
+        driver_name: driverNameMap.get(row.driver_id) || row.driver_id,
+      }))
+      .sort((a, b) => b.effective_from.localeCompare(a.effective_from))
+  }, [assignmentHistoryVehicleId, dispatchDrivers, dispatchVehicleAssignments])
+
+  const driverAssignedVehiclesMap = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const vehicle of dispatchVehicles) {
+      if (!vehicle.current_driver_id) continue
+      const items = map.get(vehicle.current_driver_id) || []
+      items.push(vehicle.code)
+      map.set(vehicle.current_driver_id, items)
+    }
+    return map
+  }, [dispatchVehicles])
 
   const groupedPermissions = useMemo(() => {
     return permissionOptions.reduce<Record<string, PermissionOption[]>>((acc, item) => {
@@ -1302,15 +1552,15 @@ export default function SettingsPage() {
               {canManageSettings && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { if (configTab !== "delivery-points") downloadConfigTemplate(configTab) }}
+                    onClick={() => { if (configTab !== "delivery-points" && configTab !== "vehicles") downloadConfigTemplate(configTab) }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
                     title="Tải file mẫu CSV để điền dữ liệu và import"
                   >
                     <Download size={13} /> Tải mẫu
                   </button>
                   <button
-                    onClick={() => { if (configTab === "delivery-points") return; setImportResult(null); importFileRef.current?.click() }}
-                    disabled={importing || configTab === "delivery-points"}
+                    onClick={() => { if (configTab === "delivery-points" || configTab === "vehicles") return; setImportResult(null); importFileRef.current?.click() }}
+                    disabled={importing || configTab === "delivery-points" || configTab === "vehicles"}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
                   >
                     <Upload size={13} /> {importing ? "Đang nhập..." : "Nhập CSV"}
@@ -1330,6 +1580,10 @@ export default function SettingsPage() {
                         setConfigEditId(null)
                         setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
                         setConfigModal("item")
+                      } else if (configTab === "vehicles") {
+                        setConfigEditId(null)
+                        setDispatchVehicleForm(emptyDispatchVehicleForm(String(dispatchVehicles.length + 1)))
+                        setConfigModal("vehicle")
                       } else {
                         setConfigEditId(null)
                         setDeliveryPointForm(emptyDeliveryPointForm(String(deliveryPoints.length + 1)))
@@ -1345,7 +1599,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="p-4">
-              <div className="flex gap-2 mb-4">
+              <div className="hidden">
                 {(["warehouses", "categories", "items"] as const).map((key) => (
                   <button
                     key={key}
@@ -1356,6 +1610,12 @@ export default function SettingsPage() {
                   </button>
                 ))}
                 <button
+                  onClick={() => { setConfigTab("vehicles"); setImportResult(null) }}
+                  className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === "vehicles" ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
+                >
+                  Xe &amp; tĂ i xáº¿
+                </button>
+                <button
                   onClick={() => { setConfigTab("delivery-points"); setImportResult(null) }}
                   className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === "delivery-points" ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
                 >
@@ -1363,7 +1623,25 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              {configTab !== "delivery-points" && (
+              <div className="flex gap-2 mb-4">
+                {[
+                  { key: "warehouses" as const, label: "Kho" },
+                  { key: "categories" as const, label: "Nhóm vật tư" },
+                  { key: "items" as const, label: "Vật tư / Hóa chất" },
+                  { key: "vehicles" as const, label: "Xe & tài xế" },
+                  { key: "delivery-points" as const, label: "Điểm giao nhận" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => { setConfigTab(item.key); setImportResult(null) }}
+                    className={"px-4 py-2 rounded-xl text-sm font-bold transition-all " + (configTab === item.key ? "bg-amber-100 text-amber-700 border border-amber-200" : "text-slate-500 hover:bg-slate-50")}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {configTab !== "delivery-points" && configTab !== "vehicles" && (
                 <input
                   ref={importFileRef}
                   type="file"
@@ -1513,6 +1791,260 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+              ) : configTab === "vehicles" ? (
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                      <div className="flex items-center gap-2">
+                        <UserCog size={15} className="text-amber-600" />
+                        <span className="font-bold text-slate-800">Tài xế</span>
+                      </div>
+                      {canManageSettings && (
+                        <button
+                          onClick={() => {
+                            setConfigError("")
+                            setConfigEditId(null)
+                            setDispatchDriverForm(emptyDispatchDriverForm())
+                            setConfigModal("driver")
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200"
+                        >
+                          <Plus size={13} /> Thêm tài xế
+                        </button>
+                      )}
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          {["Tài xế", "Xe đang phụ trách", "Trạng thái", ""].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dispatchDrivers.length === 0 ? (
+                          <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Chưa có tài xế nào</td></tr>
+                        ) : dispatchDrivers.map((row) => {
+                          const assignedVehicles = driverAssignedVehiclesMap.get(row.id) || []
+                          return (
+                            <tr key={row.id} className="row-hover">
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-800">{row.name}</div>
+                                {row.code && <div className="text-xs text-slate-400">Mã: {row.code}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-slate-500">
+                                {assignedVehicles.length > 0 ? assignedVehicles.join(", ") : "Chưa phụ trách xe nào"}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                                  {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {canManageSettings && (
+                                  <div className="flex items-center gap-1">
+                                    <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setDispatchDriverForm({ code: row.code || "", name: row.name, phone: row.phone || "", is_active: row.is_active }); setConfigModal("driver") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                                    <button onClick={() => setConfigDelConfirm({ type: "driver", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                      <div className="flex items-center gap-2">
+                        <Car size={15} className="text-emerald-600" />
+                        <span className="font-bold text-slate-800">Xe và tài xế chính</span>
+                      </div>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          {["Mã xe", "Tên xe", "Loại xe", "Tài xế chính", "Hiệu lực từ", "Trạng thái", ""].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dispatchVehicles.length === 0 ? (
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có xe nào</td></tr>
+                        ) : dispatchVehicles.map((row) => (
+                          <tr key={row.id} className="row-hover">
+                            <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
+                            <td className="px-4 py-3 text-slate-500">{row.vehicle_type || "—"}</td>
+                            <td className="px-4 py-3 text-slate-700">{row.current_driver_name || "Chưa gán"}</td>
+                            <td className="px-4 py-3 text-slate-500">{row.current_assignment_from || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                                {row.is_active ? "Đang dùng" : "Tạm dừng"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {canManageSettings && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      setConfigError("")
+                                      setConfigEditId(row.id)
+                                      setDispatchVehicleForm({
+                                        code: row.code,
+                                        name: row.name,
+                                        vehicle_type: row.vehicle_type || "",
+                                        plate_number: row.plate_number || "",
+                                        sort_order: String(row.sort_order),
+                                        primary_driver_id: row.current_driver_id || "",
+                                        effective_from: row.current_assignment_from || new Date().toISOString().slice(0, 10),
+                                        note: "",
+                                        is_active: row.is_active,
+                                      })
+                                      setConfigModal("vehicle")
+                                    }}
+                                    className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button onClick={() => setAssignmentHistoryVehicleId(row.id)} className="p-1.5 hover:bg-amber-50 text-amber-500 rounded-lg transition-colors"><Calendar size={13} /></button>
+                                  <button onClick={() => setConfigDelConfirm({ type: "vehicle", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : false ? (
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                      <div className="flex items-center gap-2">
+                        <UserCog size={15} className="text-amber-600" />
+                        <span className="font-bold text-slate-800">Tai xe</span>
+                      </div>
+                      {canManageSettings && (
+                        <button
+                          onClick={() => {
+                            setConfigError("")
+                            setConfigEditId(null)
+                            setDispatchDriverForm(emptyDispatchDriverForm())
+                            setConfigModal("driver")
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200"
+                        >
+                          <Plus size={13} /> Them tai xe
+                        </button>
+                      )}
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          {["Ma", "Ten tai xe", "So dien thoai", "Trang thai", ""].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dispatchDrivers.length === 0 ? (
+                          <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Chua co tai xe nao</td></tr>
+                        ) : dispatchDrivers.map((row) => (
+                          <tr key={row.id} className="row-hover">
+                            <td className="px-4 py-3 font-mono text-slate-600">{row.code || "—"}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
+                            <td className="px-4 py-3 text-slate-500">{row.phone || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                                {row.is_active ? "Dang dung" : "Tam dung"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {canManageSettings && (
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setDispatchDriverForm({ code: row.code || "", name: row.name, phone: row.phone || "", is_active: row.is_active }); setConfigModal("driver") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                                  <button onClick={() => setConfigDelConfirm({ type: "driver", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                      <div className="flex items-center gap-2">
+                        <Car size={15} className="text-emerald-600" />
+                        <span className="font-bold text-slate-800">Xe va tai xe chinh</span>
+                      </div>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          {["Ma xe", "Ten xe", "Loai xe", "Tai xe chinh", "Hieu luc tu", "Trang thai", ""].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {dispatchVehicles.length === 0 ? (
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chua co xe nao</td></tr>
+                        ) : dispatchVehicles.map((row) => (
+                          <tr key={row.id} className="row-hover">
+                            <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-slate-800">{row.name}</div>
+                              <div className="text-xs text-slate-400">{row.plate_number || "—"}</div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-500">{row.vehicle_type || "—"}</td>
+                            <td className="px-4 py-3 text-slate-700">{row.current_driver_name || "Chua gan"}</td>
+                            <td className="px-4 py-3 text-slate-500">{row.current_assignment_from || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                                {row.is_active ? "Dang dung" : "Tam dung"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {canManageSettings && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      setConfigError("")
+                                      setConfigEditId(row.id)
+                                      setDispatchVehicleForm({
+                                        code: row.code,
+                                        name: row.name,
+                                        vehicle_type: row.vehicle_type || "",
+                                        plate_number: row.plate_number || "",
+                                        sort_order: String(row.sort_order),
+                                        primary_driver_id: row.current_driver_id || "",
+                                        effective_from: row.current_assignment_from || new Date().toISOString().slice(0, 10),
+                                        note: "",
+                                        is_active: row.is_active,
+                                      })
+                                      setConfigModal("vehicle")
+                                    }}
+                                    className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button onClick={() => setAssignmentHistoryVehicleId(row.id)} className="p-1.5 hover:bg-amber-50 text-amber-500 rounded-lg transition-colors"><Calendar size={13} /></button>
+                                  <button onClick={() => setConfigDelConfirm({ type: "vehicle", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -2026,7 +2558,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className="font-extrabold text-slate-800">Xóa hậu tố &quot;{delConfirm}&quot;?</h3>
-                <p className="text-sm text-slate-500 mt-1">Hanh dong nay khong the hoan tac.</p>
+                <p className="text-sm text-slate-500 mt-1">Hành động này không thể hoàn tác.</p>
               </div>
             </div>
             <div className="mt-6 flex justify-end gap-3">
@@ -2262,6 +2794,81 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+              {configModal === "driver" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài xế</label>
+                      <input value={dispatchDriverForm.code} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Số điện thoại</label>
+                      <input value={dispatchDriverForm.phone} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, phone: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên tài xế *</label>
+                    <input value={dispatchDriverForm.name} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={dispatchDriverForm.is_active} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang dùng
+                  </label>
+                </>
+              )}
+              {configModal === "vehicle" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã xe *</label>
+                      <input value={dispatchVehicleForm.code} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                      <input value={dispatchVehicleForm.sort_order} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên xe *</label>
+                      <input value={dispatchVehicleForm.name} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại xe</label>
+                      <input value={dispatchVehicleForm.vehicle_type} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, vehicle_type: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Biển số</label>
+                      <input value={dispatchVehicleForm.plate_number} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, plate_number: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài xế chính *</label>
+                      <select value={dispatchVehicleForm.primary_driver_id} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, primary_driver_id: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                        <option value="">Chọn tài xế</option>
+                        {dispatchDrivers.filter((row) => row.is_active || row.id === dispatchVehicleForm.primary_driver_id).map((row) => (
+                          <option key={row.id} value={row.id}>{row.code ? `${row.code} - ${row.name}` : row.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Hiệu lực từ *</label>
+                      <input type="date" value={dispatchVehicleForm.effective_from} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, effective_from: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" checked={dispatchVehicleForm.is_active} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang dùng
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú thay đổi tài xế chính</label>
+                    <textarea value={dispatchVehicleForm.note} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, note: e.target.value }))} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none" />
+                  </div>
+                </>
+              )}
               {configModal === "delivery-point" && (
                 <>
                   <div className="grid grid-cols-2 gap-3">
@@ -2322,12 +2929,68 @@ export default function SettingsPage() {
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setConfigModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button
-                onClick={configModal === "warehouse" ? saveConfigWarehouse : configModal === "category" ? saveConfigCategory : configModal === "item" ? saveConfigItem : saveDeliveryPoint}
+                onClick={
+                  configModal === "warehouse"
+                    ? saveConfigWarehouse
+                    : configModal === "category"
+                      ? saveConfigCategory
+                      : configModal === "item"
+                        ? saveConfigItem
+                        : configModal === "driver"
+                          ? saveDispatchDriver
+                          : configModal === "vehicle"
+                            ? saveDispatchVehicle
+                            : saveDeliveryPoint
+                }
                 disabled={configSaving}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
               >
                 {configSaving ? "Đang lưu..." : "Lưu"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {assignmentHistoryVehicleId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <div>
+                <h2 className="text-base font-extrabold text-slate-800">Lịch sử tài xế chính</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  {dispatchVehicles.find((row) => row.id === assignmentHistoryVehicleId)?.name || ""}
+                </p>
+              </div>
+              <button onClick={() => setAssignmentHistoryVehicleId(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
+            </div>
+            <div className="p-6">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    {["Tài xế", "Hiệu lực từ", "Hiệu lực đến", "Trạng thái", "Ghi chú"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedVehicleAssignmentHistory.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Chưa có lịch sử thay đổi</td></tr>
+                  ) : selectedVehicleAssignmentHistory.map((row) => (
+                    <tr key={row.id}>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{row.driver_name}</td>
+                      <td className="px-4 py-3 text-slate-500">{row.effective_from}</td>
+                      <td className="px-4 py-3 text-slate-500">{row.effective_to || "Hiện tại"}</td>
+                      <td className="px-4 py-3">
+                        <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (row.is_current ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                          {row.is_current ? "Đang áp dụng" : "Đã đóng"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{row.note || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2355,6 +3018,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-
-

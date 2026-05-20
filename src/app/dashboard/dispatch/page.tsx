@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
+import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map, Lock, Unlock, Upload } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,6 +55,19 @@ type GeoJsonFeature = {
   type: string
   properties: Record<string, string>
   geometry: unknown
+}
+
+type DispatchDriver = {
+  id: string
+  name: string
+  code: string | null
+  is_active: boolean
+}
+
+type DispatchVehicleAssignment = {
+  vehicle_id: string
+  driver_id: string
+  is_current: boolean
 }
 
 // ─── Master Data ──────────────────────────────────────────────────────────────
@@ -311,6 +325,8 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
 export default function DispatchPage() {
   const [entries, setEntries]     = useState<DispatchEntry[]>([])
   const [deliveryPoints, setDeliveryPoints] = useState<DiemGN[]>(DIEM_GN)
+  const [vehicles, setVehicles] = useState<VehicleInfo[]>(FALLBACK_VEHICLES)
+  const [drivers, setDrivers] = useState<string[]>(DRIVERS)
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
   const [search, setSearch]       = useState("")
@@ -343,6 +359,8 @@ export default function DispatchPage() {
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+  const vehicleOptions = vehicles
+  const driverOptions = drivers
 
   const loadDeliveryPoints = useCallback(async (fid: string) => {
     const { data, error } = await supabase
@@ -360,6 +378,38 @@ export default function DispatchPage() {
     }
 
     setDeliveryPoints(normalizeDeliveryPoints(data))
+  }, [])
+
+  const loadVehicleMaster = useCallback(async (fid: string) => {
+    try {
+      const [vehicleRes, driverRes, assignmentRes] = await Promise.all([
+        supabase.from("dispatch_vehicles").select("id, code, name, vehicle_type, is_active").eq("factory_id", fid).eq("is_active", true).order("sort_order", { ascending: true }).order("code", { ascending: true }),
+        supabase.from("dispatch_drivers").select("id, code, name, is_active").eq("factory_id", fid).eq("is_active", true).order("name", { ascending: true }),
+        supabase.from("dispatch_vehicle_driver_assignments").select("vehicle_id, driver_id, is_current").eq("factory_id", fid).eq("is_current", true),
+      ])
+
+      if (vehicleRes.error || driverRes.error || assignmentRes.error) throw vehicleRes.error || driverRes.error || assignmentRes.error
+
+      const driverRows = (driverRes.data || []) as DispatchDriver[]
+      const currentAssignments = (assignmentRes.data || []) as DispatchVehicleAssignment[]
+      const driverMap = new Map(driverRows.map((row) => [row.id, row.name]))
+      const assignmentMap = new Map(currentAssignments.map((row) => [row.vehicle_id, row.driver_id]))
+
+      const nextVehicles: VehicleInfo[] = ((vehicleRes.data || []) as Array<{ id: string; code: string; name: string; vehicle_type: string | null }>).map((row) => ({
+        key: row.id,
+        ten: row.name,
+        loai: row.vehicle_type || "",
+        ma_hieu: row.code,
+        tai_xe: driverMap.get(assignmentMap.get(row.id) || "") || "",
+      }))
+
+      setVehicles(nextVehicles.length > 0 ? nextVehicles : FALLBACK_VEHICLES)
+      setDrivers(driverRows.length > 0 ? driverRows.map((row) => row.name).sort() : FALLBACK_DRIVERS)
+    } catch (error) {
+      console.error("Khong tai duoc master xe/tai xe:", error)
+      setVehicles(FALLBACK_VEHICLES)
+      setDrivers(FALLBACK_DRIVERS)
+    }
   }, [])
 
   const resolveLoThuHoach = useCallback((diemGn: string[], phien: string[], points = deliveryPoints) => {
@@ -450,6 +500,11 @@ export default function DispatchPage() {
     if (!factoryId) return
     void loadDeliveryPoints(factoryId)
   }, [factoryId, loadDeliveryPoints])
+
+  useEffect(() => {
+    if (!factoryId) return
+    void loadVehicleMaster(factoryId)
+  }, [factoryId, loadVehicleMaster])
 
   useEffect(() => {
     if (!factoryId) return
@@ -562,7 +617,7 @@ export default function DispatchPage() {
 
       // Auto-fill tài xế + auto-assign chuyến khi chọn xe
       if (field === "so_xe") {
-        const v = VEHICLES.find(x => x.ma_hieu === val)
+        const v = vehicleOptions.find(x => x.ma_hieu === val)
         if (v) next.tai_xe = v.tai_xe
         if (val) {
           const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val)
@@ -1062,7 +1117,7 @@ export default function DispatchPage() {
                     onChange={e => updateRow(idx,"so_xe",e.target.value)}
                     className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400">
                     <option value="">--</option>
-                    {VEHICLES.map(v => <option key={v.key} value={v.ma_hieu}>{v.ma_hieu}</option>)}
+                    {vehicleOptions.map(v => <option key={v.key} value={v.ma_hieu}>{v.ma_hieu}</option>)}
                   </select>
                 </td>
 
@@ -1081,7 +1136,7 @@ export default function DispatchPage() {
                     : <select value={row.tai_xe} onChange={e => updateRow(idx,"tai_xe",e.target.value)}
                         className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400">
                         <option value="">-- Chọn --</option>
-                        {DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                        {driverOptions.map(d => <option key={d} value={d}>{d}</option>)}
                       </select>
                   }
                 </td>

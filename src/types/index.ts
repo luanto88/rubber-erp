@@ -148,3 +148,40 @@ export interface Suffix {
   chung_nhan: string
   congty: string
 }
+
+export interface DispatchDriver {
+  id: string
+  factory_id: string
+  code: string | null
+  name: string
+  phone: string | null
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DispatchVehicle {
+  id: string
+  factory_id: string
+  code: string
+  name: string
+  vehicle_type: string | null
+  plate_number: string | null
+  sort_order: number
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DispatchVehicleDriverAssignment {
+  id: string
+  factory_id: string
+  vehicle_id: string
+  driver_id: string
+  effective_from: string
+  effective_to: string | null
+  is_current: boolean
+  note: string | null
+  created_at?: string
+  updated_at?: string
+}

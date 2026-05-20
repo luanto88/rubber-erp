@@ -30,7 +30,7 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 ### Rule quan trọng
 
 - `ma_dx` format: `DX-ddmmyy/N`
-- `chung_nhan`: chỉ được là `PEFC CS`, `PEFC FM`, `Không`
+- `chung_nhan` chỉ được là `PEFC CS`, `PEFC FM`, `Không`
 - KL khô phải auto-calc từ KL tươi và DRC
 - `chuyen` được auto-assign theo xe trong ngày
 - `lo_trinh` chỉ hiển thị các điểm cùng `đội` với `diem_gn` đã chọn
@@ -38,6 +38,30 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - `dispatch_entries.rows[].diem_gn` chỉ lưu các mã điểm được chọn cho từng chuyến, không thay thế bảng master
 - `dispatch_entries.rows[].lo_thu_hoach` phải được suy ra từ `diem_gn + phiên` dựa trên cấu hình phiên A/B/C/D của `dispatch_delivery_points`
 - Nếu nhà máy chưa có dữ liệu master mới, hệ thống chỉ được fallback tạm thời về dữ liệu mặc định trong code để tránh gãy màn hình; nguồn chuẩn vẫn là database
+
+### Master data xe và tài xế
+
+- Danh sách xe dùng bảng `dispatch_vehicles`
+- Danh sách tài xế dùng bảng `dispatch_drivers`
+- Quan hệ xe - tài xế chính dùng bảng `dispatch_vehicle_driver_assignments`
+- Dữ liệu seed hiện tại chỉ áp dụng cho nhà máy `Phước Hòa Kampong Thom` (`factories.code = 'phuochoa_kt'`)
+
+### Logic tài xế chính
+
+- Mỗi xe có thể có nhiều dòng lịch sử gán tài xế trong `dispatch_vehicle_driver_assignments`
+- Tại một thời điểm chỉ nên có 1 dòng hiện hành cho mỗi xe với `is_current = true`
+- Khi đổi tài xế chính:
+  - đóng dòng hiện hành bằng `effective_to`
+  - set dòng cũ `is_current = false`
+  - tạo dòng mới với `effective_from` mới và `is_current = true`
+- Không sửa đè lịch sử cũ nếu mục tiêu là lưu vết thay đổi tài xế chính
+
+### Logic trên màn Điều xe
+
+- Khi chọn xe, hệ thống phải tự điền `tài_xế` theo tài xế chính hiện hành của xe
+- Người dùng vẫn được phép đổi sang tài xế khác trên từng dòng điều xe
+- Việc đổi tài xế trên chứng từ chỉ thay đổi snapshot của chuyến đó, không được tự động thay master assignment
+- Chứng từ lịch sử phải tiếp tục giữ giá trị `so_xe` và `tai_xe` đã lưu, kể cả khi master data đổi sau này
 
 ## 3. Module Kho nguyên liệu (`ngans`)
 

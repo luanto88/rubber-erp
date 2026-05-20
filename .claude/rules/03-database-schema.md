@@ -16,6 +16,9 @@ description: Schema Supabase - tham chiếu khi viết query, migration hoặc l
 | `qc_results` | Kết quả kiểm nghiệm | `id` UUID |
 | `dispatch_entries` | Bảng điều xe / phân xe | `id` UUID |
 | `dispatch_delivery_points` | Danh mục điểm giao nhận theo nhà máy | `id` UUID |
+| `dispatch_drivers` | Danh mục tài xế điều xe | `id` UUID |
+| `dispatch_vehicles` | Danh mục xe điều xe | `id` UUID |
+| `dispatch_vehicle_driver_assignments` | Lịch sử gán tài xế chính theo xe | `id` UUID |
 | `export_orders` | Đơn xuất hàng | `id` UUID |
 | `customers` | Khách hàng | `id` UUID |
 | `suffixes` | Hậu tố mã lô | `code` TEXT |
@@ -25,16 +28,16 @@ description: Schema Supabase - tham chiếu khi viết query, migration hoặc l
 | `kv_store` | Key-value store (legacy) | `id` UUID |
 | `inventory_*` | Cụm bảng module quản lý kho vật tư / hóa chất | UUID / theo từng bảng |
 
-## Bảng mở rộng nên có / sẽ cần thêm
-
-Để hỗ trợ `Cài đặt`, cấu hình nhà máy, duyệt tài khoản và phân quyền, hệ thống nên có các bảng mở rộng sau:
+## Bảng mở rộng nên có / đã có
 
 | Bảng | Mục đích |
 |---|---|
 | `factory_product_configs` | Matrix cấu hình theo nhà máy: `loai_banh`, `loai_boc`, `loai_tham`, `loai_pallet_sx`, `loai_pallet_xuat` |
-| `vehicles` | Danh mục xe, kèm thông tin tài xế hiện hành |
-| `maintenance_assets` | Danh mục thiết bị cho module bảo trì tương lai |
-| `maintenance_areas` | Khu vực / vị trí thiết bị cho module bảo trì tương lai |
+| `dispatch_drivers` | Danh mục tài xế riêng cho module điều xe |
+| `dispatch_vehicles` | Danh mục xe riêng cho module điều xe |
+| `dispatch_vehicle_driver_assignments` | Lịch sử tài xế chính theo xe, có hiệu lực theo thời gian |
+| `maintenance_assets` | Danh mục thiết bị cho module bảo trì |
+| `maintenance_areas` | Khu vực / vị trí thiết bị cho module bảo trì |
 | `inventory_warehouses`, `inventory_items`, `inventory_documents`, ... | Module kho vật tư / hóa chất; tất cả bảng đều phải có `factory_id` |
 
 ## Quan hệ
@@ -49,6 +52,11 @@ factories
   │     └── lot_id → lots.id
   ├── dispatch_entries (factory_id)
   ├── dispatch_delivery_points (factory_id)
+  ├── dispatch_drivers (factory_id)
+  ├── dispatch_vehicles (factory_id)
+  ├── dispatch_vehicle_driver_assignments (factory_id)
+  │     ├── vehicle_id → dispatch_vehicles.id
+  │     └── driver_id → dispatch_drivers.id
   ├── export_orders (factory_id)
   │     └── customer_id → customers.id
   ├── customers (factory_id)
@@ -56,6 +64,99 @@ factories
 ```
 
 ## Schema chi tiết
+
+### `dispatch_entries`
+
+```sql
+id UUID PK, factory_id UUID,
+ngay TEXT, chung_nhan TEXT, rows JSONB,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- `rows` lưu danh sách chuyến điều xe trong ngày
+- `rows[].so_xe` và `rows[].tai_xe` là snapshot nghiệp vụ đã lưu trên chứng từ
+- `rows[].diem_gn` chỉ lưu các mã điểm giao nhận đã chọn của từng chuyến
+- Mọi metadata của điểm giao nhận như `đội`, tọa độ, phiên A/B/C/D, thứ tự hiển thị phải lấy từ `dispatch_delivery_points`
+
+### `dispatch_delivery_points`
+
+```sql
+id UUID PK, factory_id UUID,
+ma_lo TEXT, doi INTEGER, lat DOUBLE PRECISION, lng DOUBLE PRECISION,
+phien_a TEXT[], phien_b TEXT[], phien_c TEXT[], phien_d TEXT[],
+sort_order INTEGER, is_active BOOLEAN,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- Đây là bảng master data cho module `Điều xe` và `EUDR`
+- Dữ liệu phải tách theo `factory_id`
+- `ma_lo` là mã điểm giao nhận duy nhất trong phạm vi từng nhà máy
+- `is_active = false` nghĩa là tạm ngưng sử dụng trên UI nhưng vẫn giữ dữ liệu lịch sử
+
+### `dispatch_drivers`
+
+```sql
+id UUID PK, factory_id UUID,
+code TEXT, name TEXT, phone TEXT,
+is_active BOOLEAN,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- Là master data tài xế riêng cho module điều xe
+- `name` là tên hiển thị nghiệp vụ
+- `code` và `phone` là thông tin mở rộng, có thể để trống trong seed ban đầu
+- Unique theo `(factory_id, name)`
+
+### `dispatch_vehicles`
+
+```sql
+id UUID PK, factory_id UUID,
+code TEXT, name TEXT, vehicle_type TEXT, plate_number TEXT,
+sort_order INTEGER, is_active BOOLEAN,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- Là master data xe riêng cho module điều xe
+- `code` là mã xe nghiệp vụ như `1B`, `4A`, `X01`
+- `name` là tên xe hiển thị
+- `vehicle_type` là nhóm xe như `Cozon nội bộ`, `Isuzu vận chuyển`, `Xúc sản xuất`
+- Unique theo `(factory_id, code)`
+
+### `dispatch_vehicle_driver_assignments`
+
+```sql
+id UUID PK, factory_id UUID,
+vehicle_id UUID → dispatch_vehicles,
+driver_id UUID → dispatch_drivers,
+effective_from DATE, effective_to DATE,
+is_current BOOLEAN, note TEXT,
+created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
+```
+
+Ghi chú vận hành:
+
+- Lưu lịch sử gán tài xế chính theo xe
+- Một xe có thể có nhiều dòng lịch sử theo thời gian
+- Tại một thời điểm chỉ nên có 1 dòng hiện hành cho mỗi xe với `is_current = true`
+- Khi đổi tài xế chính phải:
+  - đóng dòng hiện hành bằng `effective_to`
+  - set `is_current = false`
+  - insert dòng mới với `effective_from` mới
+- Màn `Điều xe` chỉ dùng bảng này để gợi ý tài xế chính, không được ghi đè từ thao tác override trên chứng từ
+
+### Seed hiện tại cho xe và tài xế
+
+- Seed master data xe/tài xế hiện tại chỉ áp dụng cho nhà máy `Phước Hòa Kampong Thom`
+- Điều kiện seed: `factories.code = 'phuochoa_kt'`
+- Nếu cần mở rộng cho nhà máy khác thì phải seed riêng, không dùng chung mặc định
 
 ### `ngans`
 
@@ -106,37 +207,6 @@ Ghi chú vận hành:
 - `ngay_sx` trong `qc_results` phải là ngày thành phẩm hoàn tất của lô:
   - ưu tiên `lots.ngay_ht`
   - fallback `lots.ngay_sx`
-
-### `dispatch_entries`
-
-```sql
-id UUID PK, factory_id UUID,
-ngay TEXT, chung_nhan TEXT, rows JSONB,
-created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
-```
-
-Ghi chú vận hành:
-
-- `rows` lưu danh sách chuyến điều xe trong ngày
-- `rows[].diem_gn` chỉ lưu các mã điểm giao nhận đã chọn của từng chuyến
-- Mọi metadata của điểm giao nhận như `đội`, tọa độ, phiên A/B/C/D, thứ tự hiển thị phải lấy từ bảng `dispatch_delivery_points`
-
-### `dispatch_delivery_points`
-
-```sql
-id UUID PK, factory_id UUID,
-ma_lo TEXT, doi INTEGER, lat DOUBLE PRECISION, lng DOUBLE PRECISION,
-phien_a TEXT[], phien_b TEXT[], phien_c TEXT[], phien_d TEXT[],
-sort_order INTEGER, is_active BOOLEAN,
-created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
-```
-
-Ghi chú vận hành:
-
-- Đây là bảng master data cho module `Điều xe` và `EUDR`
-- Dữ liệu phải tách theo `factory_id`
-- `ma_lo` là mã điểm giao nhận duy nhất trong phạm vi từng nhà máy
-- `is_active = false` nghĩa là tạm ngưng sử dụng trên UI nhưng vẫn giữ dữ liệu lịch sử
 
 ### `export_orders`
 
