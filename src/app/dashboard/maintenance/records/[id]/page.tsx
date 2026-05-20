@@ -34,6 +34,15 @@ type InventoryItemOption = {
   currentStock: number
 }
 
+type DispatchVehicle = {
+  id: string
+  code: string
+  name: string
+  vehicle_type: string | null
+  plate_number: string | null
+  currentDriverName: string | null
+}
+
 type DraftMaterial = {
   id: string
   nguon: "trong_kho" | "ben_ngoai"
@@ -49,6 +58,7 @@ type DraftLine = {
   id: string // temp id for UI
   db_id?: string // real DB id if editing
   asset_id: string
+  dispatch_vehicle_id?: string
   ten_tb: string
   ma_tb: string
   ten_tai_xe: string
@@ -85,6 +95,31 @@ function emptyLine(asset?: MaintenanceAsset): DraftLine {
     ten_tb: asset?.ten_tb || "",
     ma_tb: asset?.ma_tb || "",
     ten_tai_xe: "",
+    dispatch_vehicle_id: undefined,
+    noi_dung: "",
+    nguyen_nhan: "",
+    cac_khac_phuc: "",
+    loai_sua_chua: "nho",
+    chi_phi_dk: "0",
+    loai_tien: "USD",
+    cong_tho: "0",
+    nhien_lieu_su_dung: "",
+    dvt_do: "",
+    so_luong_do: "",
+    image_urls: [],
+    materials: [],
+    expanded: true,
+  }
+}
+
+function emptyLineFromVehicle(v: DispatchVehicle): DraftLine {
+  return {
+    id: crypto.randomUUID(),
+    asset_id: "",
+    dispatch_vehicle_id: v.id,
+    ten_tb: v.name,
+    ma_tb: v.code,
+    ten_tai_xe: v.currentDriverName || "",
     noi_dung: "",
     nguyen_nhan: "",
     cac_khac_phuc: "",
@@ -150,15 +185,37 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [lines, setLines] = useState<DraftLine[]>([])
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
 
+  // Nội dung chung (Bảo dưỡng nhiều thiết bị) — 3 trường tương ứng từng thiết bị + 6 ảnh chung
+  const [noiDungChung, setNoiDungChung] = useState("")
+  const [nguyenNhanChung, setNguyenNhanChung] = useState("")
+  const [cacKhacPhucChung, setCacKhacPhucChung] = useState("")
+  const [imageUrlsChung, setImageUrlsChung] = useState<string[]>([])
+  const [showCommonContent, setShowCommonContent] = useState(false)
+  const [uploadingChungSlot, setUploadingChungSlot] = useState<number | null>(null)
+  const commonSlotInputRef = useRef<HTMLInputElement | null>(null)
+  const activeCommonSlotRef = useRef<number | null>(null)
+
+  // dispatch_vehicles (Đội xe mode)
+  const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([])
+
   // Asset picker state
   const [assetSearch, setAssetSearch] = useState("")
   const [assetDropdownOpen, setAssetDropdownOpen] = useState(false)
   const assetDropdownRef = useRef<HTMLDivElement | null>(null)
 
+  const isDoiXe = boPhan === "Đội xe"
+
   const filteredAssets = assets.filter((a) => {
     const matchBoPhan = a.bo_phan === boPhan
     const matchSearch = !assetSearch || a.ten_tb.toLowerCase().includes(assetSearch.toLowerCase()) || a.ma_tb.toLowerCase().includes(assetSearch.toLowerCase())
     return matchBoPhan && matchSearch
+  })
+
+  const filteredVehicles = dispatchVehicles.filter((v) => {
+    if (!assetSearch) return true
+    const q = assetSearch.toLowerCase()
+    return v.name.toLowerCase().includes(q) || v.code.toLowerCase().includes(q)
   })
 
   // Close dropdown on outside click
@@ -182,6 +239,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     } else {
       setSelectedAssetIds((prev) => [...prev, asset.id])
       setLines((prev) => [...prev, emptyLine(asset)])
+    }
+  }
+
+  const toggleVehicle = (v: DispatchVehicle) => {
+    const alreadySelected = selectedVehicleIds.includes(v.id)
+    if (alreadySelected) {
+      setSelectedVehicleIds((prev) => prev.filter((id) => id !== v.id))
+      setLines((prev) => prev.filter((l) => l.dispatch_vehicle_id !== v.id))
+    } else {
+      setSelectedVehicleIds((prev) => [...prev, v.id])
+      setLines((prev) => [...prev, emptyLineFromVehicle(v)])
     }
   }
 
@@ -241,6 +309,37 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     } finally {
       setUploadingSlot(null)
       activeSlotRef.current = null
+      e.target.value = ""
+    }
+  }
+
+  const handleCommonSlotClick = (slot: number) => {
+    if (!factoryId) return
+    activeCommonSlotRef.current = slot
+    commonSlotInputRef.current?.click()
+  }
+
+  const handleCommonSlotFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    const slot = activeCommonSlotRef.current
+    if (!file || slot === null || !factoryId) { e.target.value = ""; return }
+    setUploadingChungSlot(slot)
+    try {
+      const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
+      const { data: uploaded, error: upErr } = await supabase.storage
+        .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
+      if (upErr) throw upErr
+      const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
+      setImageUrlsChung((prev) => {
+        const urls = [...prev]
+        urls[slot] = urlData.publicUrl
+        return urls.filter(Boolean)
+      })
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không tải được ảnh")
+    } finally {
+      setUploadingChungSlot(null)
+      activeCommonSlotRef.current = null
       e.target.value = ""
     }
   }
@@ -319,6 +418,35 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     )
   }
 
+  const loadDispatchVehicles = async (fid: string) => {
+    const { data: vehicles } = await supabase
+      .from("dispatch_vehicles")
+      .select("id, code, name, vehicle_type, plate_number, sort_order")
+      .eq("factory_id", fid)
+      .eq("is_active", true)
+      .order("sort_order")
+
+    const { data: assignments } = await supabase
+      .from("dispatch_vehicle_driver_assignments")
+      .select("vehicle_id, dispatch_drivers(name)")
+      .eq("factory_id", fid)
+      .eq("is_current", true)
+
+    const driverMap = new Map<string, string>()
+    for (const a of (assignments || [])) {
+      const dd = a.dispatch_drivers as { name: string } | { name: string }[] | null
+      const driverName = (Array.isArray(dd) ? dd[0]?.name : dd?.name) || ""
+      if (driverName) driverMap.set(a.vehicle_id, driverName)
+    }
+
+    setDispatchVehicles(
+      ((vehicles || []) as { id: string; code: string; name: string; vehicle_type: string | null; plate_number: string | null }[]).map((v) => ({
+        ...v,
+        currentDriverName: driverMap.get(v.id) || null,
+      }))
+    )
+  }
+
   const loadRecord = useCallback(async (fid: string, recordId: string) => {
     const { data: rec } = await supabase
       .from("maintenance_records")
@@ -336,6 +464,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setDenGio(rec.den_gio || "")
     setBoPhan(rec.bo_phan)
     setGhiChu(rec.ghi_chu || "")
+    setNoiDungChung(rec.noi_dung_chung || "")
+    setNguyenNhanChung(rec.nguyen_nhan_chung || "")
+    setCacKhacPhucChung(rec.cac_khac_phuc_chung || "")
+    setImageUrlsChung(rec.image_urls_chung || [])
+    if (rec.noi_dung_chung || rec.nguyen_nhan_chung || rec.cac_khac_phuc_chung || (rec.image_urls_chung && rec.image_urls_chung.length > 0)) setShowCommonContent(true)
     setSelectedStaff(rec.nguoi_thuc_hien || [])
     setNvPhuTrach(rec.nv_phu_trach || "")
     setPhuTrachBaoTri(rec.phu_trach_bao_tri || "")
@@ -374,6 +507,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       id: crypto.randomUUID(),
       db_id: l.id,
       asset_id: l.asset_id || "",
+      dispatch_vehicle_id: l.dispatch_vehicle_id || undefined,
       ten_tb: l.ten_tb,
       ma_tb: l.ma_tb,
       ten_tai_xe: l.ten_tai_xe || "",
@@ -393,7 +527,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }))
 
     setLines(draftLines)
-    setSelectedAssetIds(draftLines.map((l) => l.asset_id).filter(Boolean))
+    setSelectedAssetIds(draftLines.filter((l) => l.asset_id).map((l) => l.asset_id))
+    setSelectedVehicleIds(draftLines.filter((l) => l.dispatch_vehicle_id).map((l) => l.dispatch_vehicle_id!))
   }, [])
 
   useEffect(() => {
@@ -413,7 +548,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setAssets(a)
       setStaffList(s)
       setExtMaterials(e)
-      await loadInventoryItems(fid)
+      await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
 
       if (!isNew) await loadRecord(fid, id)
     }
@@ -507,6 +642,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         bgd_phu_trach: bgdPhuTrach || null,
         giam_doc: giamDoc || null,
         ghi_chu: ghiChu || null,
+        noi_dung_chung: noiDungChung.trim() || null,
+        nguyen_nhan_chung: nguyenNhanChung.trim() || null,
+        cac_khac_phuc_chung: cacKhacPhucChung.trim() || null,
+        image_urls_chung: imageUrlsChung.filter(Boolean).length > 0 ? imageUrlsChung.filter(Boolean) : null,
         trang_thai: record?.trang_thai || "cho_duyet",
       }
 
@@ -545,6 +684,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           factory_id: factoryId,
           sort_order: i,
           asset_id: l.asset_id || null,
+          dispatch_vehicle_id: l.dispatch_vehicle_id || null,
           ten_tb: l.ten_tb,
           ma_tb: l.ma_tb,
           ten_tai_xe: l.ten_tai_xe || null,
@@ -1033,7 +1173,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Bộ phận *</label>
           <select
             value={boPhan}
-            onChange={(e) => { setBoPhan(e.target.value); setSelectedAssetIds([]); setLines([]) }}
+            onChange={(e) => { setBoPhan(e.target.value); setSelectedAssetIds([]); setSelectedVehicleIds([]); setLines([]) }}
             disabled={isReadOnly}
             className="w-full md:w-64 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
           >
@@ -1042,11 +1182,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       </div>
 
-      {/* Asset picker */}
+      {/* Asset / Vehicle picker */}
       {!isReadOnly && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
           <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-            <Wrench size={12} className="text-orange-500" /> Thiết bị *
+            <Wrench size={12} className="text-orange-500" />
+            {isDoiXe ? "Xe *" : "Thiết bị *"}
           </label>
 
           {/* Dropdown trigger */}
@@ -1056,47 +1197,59 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               onClick={() => setAssetDropdownOpen((o) => !o)}
               className="w-full flex items-center justify-between px-3 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-orange-400 focus:border-orange-400 outline-none transition-colors"
             >
-              <span className={selectedAssetIds.length > 0 ? "text-slate-700 font-semibold" : "text-slate-400"}>
-                {selectedAssetIds.length > 0
-                  ? `${selectedAssetIds.length} thiết bị đã chọn`
-                  : `Chọn thiết bị trong bộ phận "${boPhan}"...`}
+              <span className={(isDoiXe ? selectedVehicleIds.length > 0 : selectedAssetIds.length > 0) ? "text-slate-700 font-semibold" : "text-slate-400"}>
+                {isDoiXe
+                  ? (selectedVehicleIds.length > 0 ? `${selectedVehicleIds.length} xe đã chọn` : "Chọn xe từ danh sách Đội xe...")
+                  : (selectedAssetIds.length > 0 ? `${selectedAssetIds.length} thiết bị đã chọn` : `Chọn thiết bị trong bộ phận "${boPhan}"...`)}
               </span>
               <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${assetDropdownOpen ? "rotate-180" : ""}`} />
             </button>
 
             {assetDropdownOpen && (
               <div className="absolute z-[80] mt-2 w-full rounded-2xl border border-slate-200 bg-white shadow-xl p-3">
-                {/* Search inside dropdown */}
                 <input
                   autoFocus
                   value={assetSearch}
                   onChange={(e) => setAssetSearch(e.target.value)}
-                  placeholder="Tìm nhanh mã hoặc tên thiết bị..."
+                  placeholder={isDoiXe ? "Tìm nhanh mã hoặc tên xe..." : "Tìm nhanh mã hoặc tên thiết bị..."}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400 mb-2"
                 />
 
-                {/* Quick actions */}
                 <div className="flex items-center justify-between mb-2">
                   <button
                     type="button"
                     onClick={() => {
-                      const newIds = filteredAssets.map((a) => a.id)
-                      const addIds = newIds.filter((id) => !selectedAssetIds.includes(id))
-                      setSelectedAssetIds((prev) => [...prev, ...addIds])
-                      setLines((prev) => {
-                        const existing = new Set(prev.map((l) => l.asset_id))
-                        const toAdd = filteredAssets.filter((a) => !existing.has(a.id))
-                        return [...prev, ...toAdd.map((a) => emptyLine(a))]
-                      })
+                      if (isDoiXe) {
+                        const newIds = filteredVehicles.map((v) => v.id)
+                        const addIds = newIds.filter((id) => !selectedVehicleIds.includes(id))
+                        setSelectedVehicleIds((prev) => [...prev, ...addIds])
+                        setLines((prev) => {
+                          const existing = new Set(prev.map((l) => l.dispatch_vehicle_id))
+                          const toAdd = filteredVehicles.filter((v) => !existing.has(v.id))
+                          return [...prev, ...toAdd.map((v) => emptyLineFromVehicle(v))]
+                        })
+                      } else {
+                        const newIds = filteredAssets.map((a) => a.id)
+                        const addIds = newIds.filter((id) => !selectedAssetIds.includes(id))
+                        setSelectedAssetIds((prev) => [...prev, ...addIds])
+                        setLines((prev) => {
+                          const existing = new Set(prev.map((l) => l.asset_id))
+                          const toAdd = filteredAssets.filter((a) => !existing.has(a.id))
+                          return [...prev, ...toAdd.map((a) => emptyLine(a))]
+                        })
+                      }
                     }}
                     className="text-xs font-bold text-orange-600 hover:bg-orange-50 px-2.5 py-1 rounded-lg transition-colors"
                   >
                     Chọn tất cả
                   </button>
-                  {selectedAssetIds.length > 0 && (
+                  {(isDoiXe ? selectedVehicleIds.length > 0 : selectedAssetIds.length > 0) && (
                     <button
                       type="button"
-                      onClick={() => { setSelectedAssetIds([]); setLines([]) }}
+                      onClick={() => {
+                        if (isDoiXe) { setSelectedVehicleIds([]); setLines([]) }
+                        else { setSelectedAssetIds([]); setLines([]) }
+                      }}
                       className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors"
                     >
                       Bỏ chọn
@@ -1104,37 +1257,43 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   )}
                 </div>
 
-                {/* Asset list */}
                 <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
-                  {filteredAssets.length === 0 ? (
-                    <div className="text-sm text-slate-400 text-center py-4">
-                      {assetSearch ? "Không tìm thấy thiết bị phù hợp" : `Không có thiết bị trong bộ phận "${boPhan}"`}
-                    </div>
+                  {isDoiXe ? (
+                    filteredVehicles.length === 0 ? (
+                      <div className="text-sm text-slate-400 text-center py-4">
+                        {assetSearch ? "Không tìm thấy xe phù hợp" : "Không có xe trong danh sách"}
+                      </div>
+                    ) : filteredVehicles.map((v) => {
+                      const selected = selectedVehicleIds.includes(v.id)
+                      return (
+                        <label key={v.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
+                          <input type="checkbox" checked={selected} onChange={() => toggleVehicle(v)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold font-mono text-slate-800 truncate">{v.code} — {v.name}</span>
+                            <span className="block text-[11px] text-slate-500 truncate">
+                              {v.currentDriverName ? `Tài xế: ${v.currentDriverName}` : "Chưa có tài xế"}
+                              {v.plate_number && ` · ${v.plate_number}`}
+                            </span>
+                          </span>
+                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-emerald-600" : "text-slate-400"}`}>Xe</span>
+                        </label>
+                      )
+                    })
                   ) : (
-                    filteredAssets.map((a) => {
+                    filteredAssets.length === 0 ? (
+                      <div className="text-sm text-slate-400 text-center py-4">
+                        {assetSearch ? "Không tìm thấy thiết bị phù hợp" : `Không có thiết bị trong bộ phận "${boPhan}"`}
+                      </div>
+                    ) : filteredAssets.map((a) => {
                       const selected = selectedAssetIds.includes(a.id)
                       return (
-                        <label
-                          key={a.id}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
-                            selected
-                              ? "border-emerald-200 bg-emerald-50"
-                              : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleAsset(a)}
-                            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0"
-                          />
+                        <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
+                          <input type="checkbox" checked={selected} onChange={() => toggleAsset(a)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
                           <span className="min-w-0 flex-1">
                             <span className="block text-xs font-bold font-mono text-slate-800 truncate">{a.ma_tb}</span>
                             <span className="block text-[11px] text-slate-600 truncate">{a.ten_tb}</span>
                           </span>
-                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-emerald-600" : "text-slate-400"}`}>
-                            {a.loai === "xe" ? "Xe" : "Máy"}
-                          </span>
+                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-emerald-600" : "text-slate-400"}`}>{a.loai === "xe" ? "Xe" : "Máy"}</span>
                         </label>
                       )
                     })
@@ -1144,24 +1303,37 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             )}
           </div>
 
-          {/* Selected asset cards */}
-          {selectedAssetIds.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1">
-              {assets
-                .filter((a) => selectedAssetIds.includes(a.id))
-                .map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => toggleAsset(a)}
-                    title="Bấm để bỏ chọn"
+          {/* Selected cards */}
+          {isDoiXe ? (
+            selectedVehicleIds.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1">
+                {dispatchVehicles.filter((v) => selectedVehicleIds.includes(v.id)).map((v) => (
+                  <button key={v.id} type="button" onClick={() => toggleVehicle(v)} title="Bấm để bỏ chọn"
                     className="relative min-h-[84px] rounded-xl border border-emerald-400 bg-emerald-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
                   >
-                    {/* Check badge */}
                     <div className="absolute right-2 top-2 rounded-full p-1 bg-emerald-500 text-white group-hover:bg-red-400 transition-colors">
-                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                        <path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+                    <div className="pr-7">
+                      <div className="text-xs font-bold font-mono text-slate-800 truncate">{v.code}</div>
+                      <div className="mt-1 text-[11px] text-slate-600 line-clamp-2 leading-tight">{v.name}</div>
+                      <div className="mt-1.5 text-[10px] font-semibold text-emerald-600">
+                        {v.currentDriverName || "Chưa có tài xế"}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )
+          ) : (
+            selectedAssetIds.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1">
+                {assets.filter((a) => selectedAssetIds.includes(a.id)).map((a) => (
+                  <button key={a.id} type="button" onClick={() => toggleAsset(a)} title="Bấm để bỏ chọn"
+                    className="relative min-h-[84px] rounded-xl border border-emerald-400 bg-emerald-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
+                  >
+                    <div className="absolute right-2 top-2 rounded-full p-1 bg-emerald-500 text-white group-hover:bg-red-400 transition-colors">
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </div>
                     <div className="pr-7">
                       <div className="text-xs font-bold font-mono text-slate-800 truncate">{a.ma_tb}</div>
@@ -1172,7 +1344,119 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     </div>
                   </button>
                 ))}
+              </div>
+            )
+          )}
+        </div>
+      )}
+
+      {/* Nội dung chung (Bảo dưỡng, ≥ 2 thiết bị) */}
+      {hangMuc === "Bảo dưỡng" && lines.length > 1 && (
+        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-amber-700 flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-amber-400 text-white text-[10px] font-bold flex items-center justify-center">✎</span>
+              Nội dung bảo dưỡng chung (áp dụng cho tất cả thiết bị)
+            </label>
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setShowCommonContent((s) => !s)}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${showCommonContent ? "bg-amber-200 text-amber-800 hover:bg-amber-300" : "bg-amber-100 text-amber-700 hover:bg-amber-200"}`}
+              >
+                {showCommonContent ? "Ẩn" : "+ Nhập nội dung chung"}
+              </button>
+            )}
+          </div>
+          {showCommonContent && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-amber-700 block mb-1">1/ Nội dung bảo dưỡng chung (F03)</label>
+                <textarea
+                  value={noiDungChung}
+                  onChange={(e) => setNoiDungChung(e.target.value)}
+                  disabled={isReadOnly}
+                  rows={2}
+                  placeholder="Tháo vệ sinh, tra dầu mỡ, kiểm tra bulông... (kết hợp với nội dung riêng từng thiết bị)"
+                  className="w-full px-3 py-2 border border-amber-300 rounded-xl text-sm outline-none focus:border-amber-500 bg-white disabled:bg-amber-50 resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-amber-700 block mb-1">2/ Lý do bảo dưỡng chung (F03)</label>
+                <textarea
+                  value={nguyenNhanChung}
+                  onChange={(e) => setNguyenNhanChung(e.target.value)}
+                  disabled={isReadOnly}
+                  rows={2}
+                  placeholder="Bảo dưỡng định kỳ, đến hạn bảo trì... (kết hợp với lý do riêng từng thiết bị)"
+                  className="w-full px-3 py-2 border border-amber-300 rounded-xl text-sm outline-none focus:border-amber-500 bg-white disabled:bg-amber-50 resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-amber-700 block mb-1">3/ Cách khắc phục / Khối lượng đã bảo dưỡng chung (F15)</label>
+                <textarea
+                  value={cacKhacPhucChung}
+                  onChange={(e) => setCacKhacPhucChung(e.target.value)}
+                  disabled={isReadOnly}
+                  rows={2}
+                  placeholder="Đã hoàn thành bảo dưỡng theo đúng quy trình... (kết hợp với cách khắc phục riêng từng thiết bị)"
+                  className="w-full px-3 py-2 border border-amber-300 rounded-xl text-sm outline-none focus:border-amber-500 bg-white disabled:bg-amber-50 resize-none"
+                />
+              </div>
+
+              {/* 6 slot ảnh chung */}
+              <div>
+                <label className="text-[10px] font-bold text-amber-700 block mb-1.5">
+                  4/ Ảnh chung
+                  <span className="font-normal text-amber-500 ml-1">({imageUrlsChung.filter(Boolean).length}/6)</span>
+                </label>
+                <div className="grid grid-cols-6 gap-2">
+                  {Array.from({ length: 6 }).map((_, slotIdx) => {
+                    const url = imageUrlsChung[slotIdx]
+                    const isUploading = uploadingChungSlot === slotIdx
+                    return (
+                      <div key={slotIdx} className="relative aspect-square">
+                        {url ? (
+                          <>
+                            <img
+                              src={url}
+                              alt={`Ảnh chung ${slotIdx + 1}`}
+                              className="w-full h-full object-cover rounded-xl border border-amber-200 cursor-pointer hover:opacity-90"
+                              onClick={() => window.open(url, "_blank")}
+                            />
+                            {!isReadOnly && (
+                              <button
+                                onClick={() => setImageUrlsChung((prev) => prev.filter((_, i) => i !== slotIdx))}
+                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            disabled={isReadOnly || isUploading}
+                            onClick={() => handleCommonSlotClick(slotIdx)}
+                            className="w-full h-full rounded-xl border-2 border-dashed border-amber-200 hover:border-amber-400 hover:bg-amber-50 flex flex-col items-center justify-center gap-0.5 transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {isUploading
+                              ? <Loader2 size={16} className="animate-spin text-amber-400" />
+                              : <ImagePlus size={15} className="text-amber-300" />}
+                            <span className="text-[9px] text-amber-300">{slotIdx + 1}</span>
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
+          )}
+          {!showCommonContent && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim() || imageUrlsChung.filter(Boolean).length > 0) && (
+            <p className="text-xs text-amber-700 italic truncate">
+              {[noiDungChung, nguyenNhanChung, cacKhacPhucChung].filter(Boolean).join(" · ")}
+              {imageUrlsChung.filter(Boolean).length > 0 && ` · ${imageUrlsChung.filter(Boolean).length} ảnh chung`}
+            </p>
           )}
         </div>
       )}
@@ -1227,12 +1511,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung {hangMuc === "Sửa chữa" ? "sự cố" : "bảo dưỡng"}</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-600">Nội dung {hangMuc === "Sửa chữa" ? "sự cố" : "bảo dưỡng"} riêng</label>
+                  {hangMuc === "Bảo dưỡng" && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim()) && (
+                    <span className="text-[10px] text-amber-600 font-semibold">Để trống = dùng nội dung chung</span>
+                  )}
+                </div>
                 <textarea
                   value={line.noi_dung}
                   onChange={(e) => updateLine(line.id, { noi_dung: e.target.value })}
                   disabled={isReadOnly}
                   rows={2}
+                  placeholder={hangMuc === "Bảo dưỡng" && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim()) ? "Để trống = dùng nội dung chung; nhập thêm = kết hợp vào biên bản" : ""}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
                 />
               </div>
@@ -1566,13 +1856,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
-      {/* Hidden file input for image slot upload */}
+      {/* Hidden file inputs for image slot upload */}
       <input
         ref={slotInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
         className="hidden"
         onChange={handleSlotFileChange}
+      />
+      <input
+        ref={commonSlotInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={handleCommonSlotFileChange}
       />
 
       {/* Modal thêm vật tư mới vào inventory_items */}

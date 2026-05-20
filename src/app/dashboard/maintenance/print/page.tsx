@@ -60,6 +60,10 @@ type RecordData = {
   nguoi_duyet: string | null
   ngay_duyet: string | null
   ghi_chu: string | null
+  noi_dung_chung: string | null
+  nguyen_nhan_chung: string | null
+  cac_khac_phuc_chung: string | null
+  image_urls_chung: string[] | null
   lines: LineData[]
 }
 
@@ -810,6 +814,11 @@ function PrintSuCoNho({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: 
 
 // ─── Template F03: Giấy đề nghị bảo trì - sửa chữa ──────────────────────────
 
+// Kết hợp nội dung chung + nội dung riêng của từng thiết bị để in biên bản
+function mergeNoidung(common: string | null | undefined, own: string | null | undefined): string {
+  return [common, own].filter(Boolean).join("\n")
+}
+
 function PrintF03({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
   return (
@@ -860,11 +869,11 @@ function PrintF03({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
             )}
             <div className="mt-1">
               <span className="font-semibold">1/ Nội dung bảo dưỡng: </span>
-              {line.noi_dung ? <span>{line.noi_dung}</span> : <BlankLine count={3} />}
+              {(() => { const nd = mergeNoidung(record.noi_dung_chung, line.noi_dung); return nd ? <span style={{ whiteSpace: "pre-wrap" }}>{nd}</span> : <BlankLine count={3} /> })()}
             </div>
             <div className="mt-1">
               <span className="font-semibold">2/ Lý do bảo dưỡng: </span>
-              {line.nguyen_nhan ? <span>{line.nguyen_nhan}</span> : <BlankLine count={3} />}
+              {(() => { const nd = mergeNoidung(record.nguyen_nhan_chung, line.nguyen_nhan); return nd ? <span style={{ whiteSpace: "pre-wrap" }}>{nd}</span> : <BlankLine count={3} /> })()}
             </div>
           </div>
         ))}
@@ -954,7 +963,9 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
 
         <div className="mt-2">
           {record.lines.map((line, idx) => {
-            const content = line.cac_khac_phuc || line.noi_dung || ""
+            const content =
+              mergeNoidung(record.cac_khac_phuc_chung, line.cac_khac_phuc) ||
+              mergeNoidung(record.noi_dung_chung, line.noi_dung)
             return (
               <div key={idx} className="mt-1">
                 {record.lines.length > 1 ? (
@@ -962,13 +973,13 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
                     <p className="font-bold">{idx + 1}. {line.ten_tb}:</p>
                     <p className="pl-3">
                       <span className="font-semibold">Khối lượng đã bảo dưỡng, thay thế phụ tùng: </span>
-                      {content}
+                      {content ? <span style={{ whiteSpace: "pre-wrap" }}>{content}</span> : ".............................."}
                     </p>
                   </>
                 ) : (
                   <p>
                     <span className="font-semibold">Khối lượng đã bảo dưỡng, thay thế phụ tùng: </span>
-                    {content || ".............................."}
+                    {content ? <span style={{ whiteSpace: "pre-wrap" }}>{content}</span> : ".............................."}
                   </p>
                 )}
                 {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia={false} />}
@@ -1155,8 +1166,9 @@ function PrintF06({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 // ─── Trang ảnh cho Bảo dưỡng ─────────────────────────────────────────────────
 
 function PrintImagesPage({ record }: { record: RecordData }) {
+  const commonImgs = (record.image_urls_chung || []).filter(Boolean)
   const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
-  if (linesWithImages.length === 0) return null
+  if (linesWithImages.length === 0 && commonImgs.length === 0) return null
   const multiDevice = linesWithImages.length > 1
 
   return (
@@ -1167,12 +1179,30 @@ function PrintImagesPage({ record }: { record: RecordData }) {
         <div className="text-xs text-slate-600 mt-1">Số: {record.ma_bb || "..."}</div>
       </div>
 
+      {/* Ảnh chung — hiển thị đầu tiên */}
+      {commonImgs.length > 0 && (
+        <div className="mb-6">
+          <div className="bg-amber-50 border border-amber-200 px-3 py-1.5 font-bold text-xs uppercase mb-2 rounded">
+            Ảnh chung
+          </div>
+          <div className={`grid ${commonImgs.length <= 2 ? "grid-cols-2" : "grid-cols-3"} gap-2`}>
+            {commonImgs.map((url, i) => (
+              <div key={i} className="overflow-hidden rounded border border-slate-200" style={{ aspectRatio: "4/3" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`Ảnh chung ${i + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-slate-400 text-right mt-1">{commonImgs.length} hình ảnh</div>
+        </div>
+      )}
+
       {linesWithImages.map((line) => {
         const imgs = (line.image_urls || []).filter(Boolean)
         const colClass = imgs.length <= 2 ? "grid-cols-2" : "grid-cols-3"
         return (
           <div key={line.id} className="mb-6">
-            {multiDevice && (
+            {(multiDevice || commonImgs.length > 0) && (
               <div className="bg-slate-100 px-3 py-1.5 font-bold text-xs uppercase mb-2 rounded">
                 {line.ten_tb} ({line.ma_tb})
               </div>
@@ -1196,7 +1226,7 @@ function PrintImagesPage({ record }: { record: RecordData }) {
 // ─── Wrapper: F03 + F15 + Ảnh (Bảo dưỡng thiết bị chế biến) ─────────────────
 
 function PrintBaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
-  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean))
+  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean)) || (record.image_urls_chung || []).some(Boolean)
   return (
     <div className="font-serif">
       <PrintF03 record={record} qrUrl={qrUrl} />
@@ -1215,7 +1245,7 @@ function PrintBaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrUrl:
 // ─── Wrapper: F03 + F15 + F06 + Ảnh (Bảo dưỡng Đội xe) ─────────────────────
 
 function PrintBaoDuongXe({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
-  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean))
+  const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean)) || (record.image_urls_chung || []).some(Boolean)
   return (
     <div className="font-serif">
       <PrintF03 record={record} qrUrl={qrUrl} />

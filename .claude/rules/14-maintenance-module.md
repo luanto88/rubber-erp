@@ -54,6 +54,53 @@ Mủ tạp | Mủ nước | Nước thải | Biomass | Đội xe | Văn phòng |
 Bộ phận quyết định danh sách thiết bị khả dụng (filter `maintenance_assets.bo_phan`).  
 Bộ phận `Đội xe` hiển thị thêm trường `Tên tài xế` trên mỗi dòng thiết bị.
 
+### Asset picker theo bộ phận
+
+| Bộ phận | Nguồn danh sách | FK lưu vào line |
+|---|---|---|
+| Đội xe | `dispatch_vehicles` (active, theo factory) | `dispatch_vehicle_id` |
+| Còn lại | `maintenance_assets` (filter `bo_phan`) | `asset_id` |
+
+Khi bộ phận = `Đội xe`:
+- Dropdown picker load từ `dispatch_vehicles` thay vì `maintenance_assets`
+- Tự điền `ten_tai_xe` từ tài xế hiện hành (`dispatch_vehicle_driver_assignments.is_current = true`)
+- Dòng line lưu `dispatch_vehicle_id`, `asset_id = null`
+
+---
+
+## Nội dung chung cho Bảo dưỡng nhiều thiết bị
+
+Khi `hang_muc = Bảo dưỡng` và chọn ≥ 2 thiết bị, form hiển thị card nội dung chung với nút "+ Nhập nội dung chung".
+
+### 4 trường chung (mirror cấu trúc của từng dòng thiết bị)
+
+| Trường DB | Label UI | Dùng trong mẫu in |
+|---|---|---|
+| `noi_dung_chung` | 1/ Nội dung bảo dưỡng chung | F03 — "1/ Nội dung bảo dưỡng" |
+| `nguyen_nhan_chung` | 2/ Lý do bảo dưỡng chung | F03 — "2/ Lý do bảo dưỡng" |
+| `cac_khac_phuc_chung` | 3/ Cách khắc phục / Khối lượng đã bảo dưỡng chung | F15 — "Khối lượng đã bảo dưỡng" |
+| `image_urls_chung` | 4/ Ảnh chung (6 slot) | Trang ảnh — section "Ảnh chung" đứng đầu |
+
+### Rule kết hợp nội dung khi in
+
+```typescript
+function mergeNoidung(common: string | null, own: string | null): string {
+  return [common, own].filter(Boolean).join("\n")
+}
+```
+
+- **F03 — Nội dung bảo dưỡng**: `mergeNoidung(noi_dung_chung, line.noi_dung)`
+- **F03 — Lý do bảo dưỡng**: `mergeNoidung(nguyen_nhan_chung, line.nguyen_nhan)`
+- **F15 — Khối lượng đã bảo dưỡng**: `mergeNoidung(cac_khac_phuc_chung, line.cac_khac_phuc)` (fallback về noi_dung nếu trống)
+- **Ảnh chung** in trước ảnh riêng từng thiết bị trong `PrintImagesPage`
+
+### UX
+
+- Nút ẩn/hiện form nội dung chung; auto-hiện khi load biên bản có dữ liệu chung
+- Khi form ẩn, hiện dòng preview tóm tắt + số lượng ảnh chung
+- Mỗi dòng thiết bị hiển thị gợi ý "Để trống = dùng nội dung chung" khi có dữ liệu chung
+- Ảnh chung dùng màu amber để phân biệt với ảnh riêng (màu slate/orange)
+
 ---
 
 ## Bảng dữ liệu
@@ -154,6 +201,13 @@ ngay_duyet            TIMESTAMPTZ
 inventory_issue_doc_id UUID    -- link phiếu xuất kho auto-tạo khi duyệt
 
 ghi_chu               TEXT
+
+-- Nội dung chung (Bảo dưỡng nhiều thiết bị) — mirror 3 trường nội dung của từng dòng + ảnh chung
+noi_dung_chung        TEXT     -- F03: 1/ Nội dung bảo dưỡng chung
+nguyen_nhan_chung     TEXT     -- F03: 2/ Lý do bảo dưỡng chung
+cac_khac_phuc_chung   TEXT     -- F15: Khối lượng đã bảo dưỡng chung
+image_urls_chung      TEXT[]   -- 6 slot ảnh chung
+
 created_at, updated_at
 ```
 
@@ -168,7 +222,8 @@ factory_id            UUID
 sort_order            INTEGER
 
 -- Thiết bị (snapshot tại thời điểm tạo)
-asset_id              UUID → maintenance_assets
+asset_id              UUID → maintenance_assets    -- NULL khi Đội xe dùng dispatch_vehicle_id
+dispatch_vehicle_id   UUID → dispatch_vehicles     -- NULL khi không phải Đội xe
 ten_tb                TEXT
 ma_tb                 TEXT
 ten_tai_xe            TEXT     -- Đội xe only
