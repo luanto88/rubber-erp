@@ -156,13 +156,15 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 ### 4.9. Vật tư ngoài (bảo trì)
 
 - Bảng: `maintenance_external_materials`
-- Vai trò: gợi ý tên vật tư mua ngoài khi tạo biên bản bảo trì
+- Vai trò: danh mục quản trị vật tư mua ngoài trong `Cài đặt`; **không** dùng làm nguồn dropdown chọn vật tư trên form biên bản
 - Quản trị tại: `Cài đặt → Bảo trì → Vật tư ngoài`
 - Fields hiện tại: `ten_vat_tu`, `dvt`, `code`, `specification`, `category_id`, `is_active`
   - `code` — mã vật tư (optional, unique per factory)
   - `specification` — quy cách / đặc tính
   - `category_id` — nhóm vật tư (tái dùng `inventory_item_categories`)
   - `is_active` — trạng thái hiển thị
+
+**Lưu ý quan trọng**: Dropdown chọn vật tư trong form biên bản bảo trì — cả `trong_kho` lẫn `ben_ngoai` — đều lấy danh sách từ **`inventory_items`**, không phải `maintenance_external_materials`. Bảng này chỉ dùng để quản lý danh mục trong `Cài đặt`.
 
 ## 5. Quy định khi dùng trong Điều xe
 

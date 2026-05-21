@@ -116,7 +116,7 @@ function emptyLine(asset?: MaintenanceAsset): DraftLine {
     dvt_do: "",
     so_luong_do: "",
     km_dong_ho: "",
-    chat_luong: "",
+    chat_luong: "Đạt",
     image_urls: [],
     materials: [],
     expanded: true,
@@ -142,7 +142,7 @@ function emptyLineFromVehicle(v: DispatchVehicle): DraftLine {
     dvt_do: "",
     so_luong_do: "",
     km_dong_ho: "",
-    chat_luong: "",
+    chat_luong: "Đạt",
     image_urls: [],
     materials: [],
     expanded: true,
@@ -169,6 +169,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const activeSlotRef = useRef<{ lineId: string } | null>(null)
   const [activeMaterialDropdown, setActiveMaterialDropdown] = useState<string | null>(null)
   const matDropdownRef = useRef<HTMLDivElement | null>(null)
+  const [fuelManualModes, setFuelManualModes] = useState<Record<string, boolean>>({})
 
   // Master data
   const [assets, setAssets] = useState<MaintenanceAsset[]>([])
@@ -191,8 +192,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Header form
   const [hangMuc, setHangMuc] = useState<"Sửa chữa" | "Bảo dưỡng">("Sửa chữa")
   const [ngay, setNgay] = useState(new Date().toISOString().slice(0, 10))
-  const [tuGio, setTuGio] = useState("")
-  const [denGio, setDenGio] = useState("")
+  const [tuGio, setTuGio] = useState(() => {
+    if (!isNew) return ""
+    const now = new Date()
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+  })
+  const [denGio, setDenGio] = useState(() => {
+    if (!isNew) return ""
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+  })
   const [boPhan, setBoPhan] = useState<string>(BO_PHAN_LIST[0])
   const [ghiChu, setGhiChu] = useState("")
 
@@ -239,6 +248,25 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     const q = assetSearch.toLowerCase()
     return v.name.toLowerCase().includes(q) || v.code.toLowerCase().includes(q)
   })
+
+  const fuelCategoryIds = useMemo(() =>
+    inventoryCategories
+      .filter((c) => c.name.toLowerCase().includes("nhiên liệu"))
+      .map((c) => c.id),
+    [inventoryCategories]
+  )
+
+  const fuelItems = useMemo(() =>
+    inventoryItems.filter((item) => item.category_id && fuelCategoryIds.includes(item.category_id)),
+    [inventoryItems, fuelCategoryIds]
+  )
+
+  const timeWarning = useMemo(() => {
+    if (!tuGio || !denGio) return null
+    const startStr = `${ngay}T${tuGio}`
+    const endStr = denGio.includes("T") ? denGio : `${ngay}T${denGio.slice(0, 5)}`
+    return endStr < startStr ? "Giờ kết thúc đang sớm hơn giờ bắt đầu" : null
+  }, [ngay, tuGio, denGio])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -595,6 +623,21 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     return () => document.removeEventListener("pointerdown", handler)
   }, [activeMaterialDropdown])
 
+  // Auto-detect manual fuel mode for loaded lines (value doesn't match any fuel item)
+  useEffect(() => {
+    if (lines.length === 0 || fuelItems.length === 0) return
+    const fuelNames = new Set(fuelItems.map((f) => f.name))
+    setFuelManualModes((prev) => {
+      const next = { ...prev }
+      for (const l of lines) {
+        if (!(l.id in next) && l.nhien_lieu_su_dung && !fuelNames.has(l.nhien_lieu_su_dung)) {
+          next[l.id] = true
+        }
+      }
+      return next
+    })
+  }, [lines, fuelItems])
+
   // Auto-dismiss success toast after 4 seconds
   useEffect(() => {
     if (!saveSuccess) return
@@ -660,6 +703,22 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const handleSave = async () => {
     if (!factoryId || lines.length === 0) {
       setSaveError("Vui lòng chọn ít nhất một thiết bị")
+      return
+    }
+    // Validate tồn kho trước khi lưu
+    const stockViolations: string[] = []
+    for (const ln of lines) {
+      for (const mat of ln.materials) {
+        if (mat.nguon === "trong_kho" && mat.inventory_item_id) {
+          const item = inventoryItems.find((i) => i.id === mat.inventory_item_id)
+          if (item && parseFloat(mat.so_luong) > item.currentStock) {
+            stockViolations.push(`${mat.ten_vat_tu || "Vật tư"}: cần ${mat.so_luong} ${mat.dvt}, tồn ${item.currentStock}`)
+          }
+        }
+      }
+    }
+    if (stockViolations.length > 0) {
+      setSaveError(`Vượt tồn kho:\n${stockViolations.join("\n")}`)
       return
     }
     setSaving(true); setSaveError(null)
@@ -1190,7 +1249,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       {saveError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
           <AlertTriangle size={16} className="shrink-0" />
-          <span className="text-sm font-bold">{saveError}</span>
+          <span className="text-sm font-bold whitespace-pre-line">{saveError}</span>
           <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
         </div>
       )}
@@ -1269,8 +1328,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               value={denGio}
               onChange={(e) => setDenGio(e.target.value)}
               disabled={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+              className={`w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 ${timeWarning ? "border-amber-400" : "border-slate-300"}`}
             />
+            {timeWarning && (
+              <p className="text-[11px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
+                <AlertTriangle size={11} /> {timeWarning}
+              </p>
+            )}
           </div>
         </div>
         <div>
@@ -1567,10 +1631,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       {/* Equipment lines */}
       {lines.map((line, idx) => (
-        <div key={line.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div key={line.id} className="bg-white rounded-xl border border-slate-200 shadow-sm">
           {/* Line header */}
           <div
-            className="flex items-center justify-between px-5 py-3 bg-orange-50 border-b border-orange-100 cursor-pointer"
+            className="flex items-center justify-between px-5 py-3 bg-orange-50 border-b border-orange-100 cursor-pointer rounded-t-xl"
             onClick={() => updateLine(line.id, { expanded: !line.expanded })}
           >
             <div className="flex items-center gap-3">
@@ -1705,38 +1769,79 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               </div>
 
               {/* Fuel (Đội xe) */}
-              {boPhan === "Đội xe" && (
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhiên liệu sử dụng</label>
-                    <input
-                      value={line.nhien_lieu_su_dung}
-                      onChange={(e) => updateLine(line.id, { nhien_lieu_su_dung: e.target.value })}
-                      disabled={isReadOnly}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-                    />
+              {boPhan === "Đội xe" && (() => {
+                const isManual = !!fuelManualModes[line.id]
+                const selectedFuel = fuelItems.find((f) => f.name === line.nhien_lieu_su_dung)
+                return (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold text-slate-600">Nhiên liệu sử dụng</label>
+                        {!isReadOnly && (
+                          <button
+                            type="button"
+                            onClick={() => setFuelManualModes((prev) => ({ ...prev, [line.id]: !isManual }))}
+                            className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-orange-400 hover:text-orange-600"
+                          >
+                            {isManual ? "← Chọn danh sách" : "+ Nhập tên khác"}
+                          </button>
+                        )}
+                      </div>
+                      {isManual ? (
+                        <input
+                          value={line.nhien_lieu_su_dung}
+                          onChange={(e) => updateLine(line.id, { nhien_lieu_su_dung: e.target.value })}
+                          disabled={isReadOnly}
+                          placeholder="Nhập tên nhiên liệu..."
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                        />
+                      ) : (
+                        <select
+                          value={line.nhien_lieu_su_dung}
+                          onChange={(e) => {
+                            const name = e.target.value
+                            const fuel = fuelItems.find((f) => f.name === name)
+                            updateLine(line.id, {
+                              nhien_lieu_su_dung: name,
+                              dvt_do: fuel?.unit || line.dvt_do,
+                            })
+                          }}
+                          disabled={isReadOnly}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                        >
+                          <option value="">— Chọn nhiên liệu —</option>
+                          {fuelItems.map((f) => (
+                            <option key={f.id} value={f.name}>{f.name}</option>
+                          ))}
+                          {line.nhien_lieu_su_dung && !selectedFuel && (
+                            <option value={line.nhien_lieu_su_dung}>{line.nhien_lieu_su_dung}</option>
+                          )}
+                        </select>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị</label>
+                      <input
+                        value={line.dvt_do}
+                        onChange={(e) => updateLine(line.id, { dvt_do: e.target.value })}
+                        disabled={isReadOnly || (!isManual && !!selectedFuel)}
+                        placeholder={!isManual && selectedFuel ? selectedFuel.unit : ""}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Số lượng</label>
+                      <input
+                        type="number"
+                        value={line.so_luong_do}
+                        onChange={(e) => updateLine(line.id, { so_luong_do: e.target.value })}
+                        disabled={isReadOnly}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị</label>
-                    <input
-                      value={line.dvt_do}
-                      onChange={(e) => updateLine(line.id, { dvt_do: e.target.value })}
-                      disabled={isReadOnly}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Số lượng</label>
-                    <input
-                      type="number"
-                      value={line.so_luong_do}
-                      onChange={(e) => updateLine(line.id, { so_luong_do: e.target.value })}
-                      disabled={isReadOnly}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-                    />
-                  </div>
-                </div>
-              )}
+                )
+              })()}
 
               {/* Km/giờ + Chất lượng (Đội xe — Sửa chữa nhỏ) */}
               {boPhan === "Đội xe" && hangMuc === "Sửa chữa" && (
@@ -1754,13 +1859,32 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Chất lượng sau sửa chữa</label>
-                    <input
-                      value={line.chat_luong}
-                      onChange={(e) => updateLine(line.id, { chat_luong: e.target.value })}
-                      disabled={isReadOnly}
-                      placeholder="VD: Đạt, Không đạt..."
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-                    />
+                    <div className="flex items-center gap-4 h-[38px]">
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="radio"
+                          name={`chat_luong_${line.id}`}
+                          value="Đạt"
+                          checked={line.chat_luong !== "Không đạt"}
+                          onChange={() => updateLine(line.id, { chat_luong: "Đạt" })}
+                          disabled={isReadOnly}
+                          className="h-4 w-4 text-emerald-600"
+                        />
+                        <span className="text-sm font-semibold text-emerald-700">Đạt</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="radio"
+                          name={`chat_luong_${line.id}`}
+                          value="Không đạt"
+                          checked={line.chat_luong === "Không đạt"}
+                          onChange={() => updateLine(line.id, { chat_luong: "Không đạt" })}
+                          disabled={isReadOnly}
+                          className="h-4 w-4 text-red-500"
+                        />
+                        <span className="text-sm font-semibold text-red-600">Không đạt</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1858,7 +1982,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             <ChevronDown size={12} className="shrink-0 ml-1 text-slate-400" />
                           </button>
                           {activeMaterialDropdown === mat.id && (
-                            <div className="absolute z-50 top-full mt-1 left-0 w-full min-w-[280px] bg-white border border-slate-200 rounded-xl shadow-2xl">
+                            <div className="absolute z-50 bottom-full mb-1 left-0 w-full min-w-[280px] bg-white border border-slate-200 rounded-xl shadow-2xl">
                               <div className="p-2 border-b border-slate-100">
                                 <input
                                   type="text"

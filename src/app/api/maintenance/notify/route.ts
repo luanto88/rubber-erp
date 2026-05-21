@@ -82,10 +82,7 @@ export async function POST(req: NextRequest) {
     const gmailUser = process.env.GMAIL_USER
     const gmailPass = process.env.GMAIL_APP_PASSWORD
 
-    if (!gmailUser || !gmailPass) {
-      // Báo lỗi rõ để admin biết cần cấu hình env vars
-      errors.push("Email: Chưa cấu hình GMAIL_USER / GMAIL_APP_PASSWORD trong biến môi trường server.")
-    } else {
+    if (gmailUser && gmailPass) {
       // Tìm email của BGĐ phụ trách và Giám đốc
       const recipients = [rec.bgd_phu_trach, rec.giam_doc].filter(Boolean) as string[]
 
