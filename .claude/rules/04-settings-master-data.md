@@ -70,12 +70,19 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 ### 4.2. Tài xế
 
 - Bảng: `dispatch_drivers`
-- Vai trò: master data tài xế cho module `Điều xe`
+- Vai trò: master data tài xế cho module `Điều xe` và module `Bảo trì`
 - Quản trị tại: `Cài đặt → Cấu hình nhà máy → Tài xế`
 - Mỗi tài xế thuộc một `factory_id`
 - `name` là tên hiển thị nghiệp vụ
-- `code`, `phone` là metadata mở rộng, có thể bổ sung dần
+- Fields mở rộng (migration 2026-05):
+  - `code`, `phone` — metadata cơ bản
+  - `license_number` — số giấy phép lái xe
+  - `license_class` — hạng bằng lái (A1, B1, B2, C, D, E...)
+  - `license_expiry` — ngày hết hạn bằng lái (DATE)
+  - `id_number` — số CMND/CCCD
+  - `notes` — ghi chú tự do
 - Không dùng danh sách hard-code trong code làm nguồn chuẩn
+- Dropdown chọn tài xế phải có ô tìm kiếm nhanh (lọc theo tên)
 
 ### 4.3. Xe
 

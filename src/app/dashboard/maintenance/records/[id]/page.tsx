@@ -31,6 +31,7 @@ type InventoryItemOption = {
   code: string
   name: string
   unit: string
+  category_id: string | null
   currentStock: number
 }
 
@@ -72,9 +73,17 @@ type DraftLine = {
   nhien_lieu_su_dung: string
   dvt_do: string
   so_luong_do: string
+  km_dong_ho: string
+  chat_luong: string
   image_urls: string[]
   materials: DraftMaterial[]
   expanded: boolean
+}
+
+type InventoryCategory = {
+  id: string
+  code: string
+  name: string
 }
 
 const CURRENCIES = ["USD", "KHR", "VND"]
@@ -106,6 +115,8 @@ function emptyLine(asset?: MaintenanceAsset): DraftLine {
     nhien_lieu_su_dung: "",
     dvt_do: "",
     so_luong_do: "",
+    km_dong_ho: "",
+    chat_luong: "",
     image_urls: [],
     materials: [],
     expanded: true,
@@ -130,6 +141,8 @@ function emptyLineFromVehicle(v: DispatchVehicle): DraftLine {
     nhien_lieu_su_dung: "",
     dvt_do: "",
     so_luong_do: "",
+    km_dong_ho: "",
+    chat_luong: "",
     image_urls: [],
     materials: [],
     expanded: true,
@@ -151,20 +164,29 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
 
   // Image slot upload
-  const [uploadingSlot, setUploadingSlot] = useState<{ lineId: string; slot: number } | null>(null)
+  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null)
   const slotInputRef = useRef<HTMLInputElement | null>(null)
-  const activeSlotRef = useRef<{ lineId: string; slot: number } | null>(null)
+  const activeSlotRef = useRef<{ lineId: string } | null>(null)
+  const [activeMaterialDropdown, setActiveMaterialDropdown] = useState<string | null>(null)
+  const matDropdownRef = useRef<HTMLDivElement | null>(null)
 
   // Master data
   const [assets, setAssets] = useState<MaintenanceAsset[]>([])
   const [staffList, setStaffList] = useState<MaintenanceStaff[]>([])
   const [extMaterials, setExtMaterials] = useState<MaintenanceExtMaterial[]>([])
   const [inventoryItems, setInventoryItems] = useState<InventoryItemOption[]>([])
+  const [inventoryCategories, setInventoryCategories] = useState<InventoryCategory[]>([])
+  const [matSearches, setMatSearches] = useState<Record<string, string>>({})
+  const [matCategoryFilters, setMatCategoryFilters] = useState<Record<string, string>>({})
 
   type NewItemModalContext = { lineId: string; matId: string }
   const [newItemModal, setNewItemModal] = useState<NewItemModalContext | null>(null)
   const [newItemForm, setNewItemForm] = useState({ code: "", name: "", unit: "" })
   const [savingNewItem, setSavingNewItem] = useState(false)
+
+  const [newExtMatModal, setNewExtMatModal] = useState<NewItemModalContext | null>(null)
+  const [newExtMatForm, setNewExtMatForm] = useState({ code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "" })
+  const [savingNewExtMat, setSavingNewExtMat] = useState(false)
 
   // Header form
   const [hangMuc, setHangMuc] = useState<"Sửa chữa" | "Bảo dưỡng">("Sửa chữa")
@@ -281,28 +303,32 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setLines((prev) => prev.map((l) => l.id === lineId ? { ...l, materials: l.materials.filter((m) => m.id !== matId) } : l))
   }
 
-  const handleSlotClick = (lineId: string, slot: number) => {
+  const handleSlotClick = (lineId: string) => {
     if (!factoryId) return
-    activeSlotRef.current = { lineId, slot }
+    activeSlotRef.current = { lineId }
     slotInputRef.current?.click()
   }
 
   const handleSlotFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+    const files = Array.from(e.target.files || [])
     const active = activeSlotRef.current
-    if (!file || !active || !factoryId) { e.target.value = ""; return }
-    setUploadingSlot(active)
+    if (!files.length || !active || !factoryId) { e.target.value = ""; return }
+    setUploadingSlot(active.lineId)
     try {
-      const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
-      const { data: uploaded, error: upErr } = await supabase.storage
-        .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
-      if (upErr) throw upErr
-      const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
+      const uploadedUrls: string[] = []
+      for (const file of files) {
+        const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
+        const { data: uploaded, error: upErr } = await supabase.storage
+          .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
+        if (upErr) throw upErr
+        const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
+        uploadedUrls.push(urlData.publicUrl)
+      }
       setLines((prev) => prev.map((l) => {
         if (l.id !== active.lineId) return l
-        const urls = [...l.image_urls]
-        urls[active.slot] = urlData.publicUrl
-        return { ...l, image_urls: urls.filter(Boolean) }
+        const existing = l.image_urls.filter(Boolean)
+        const merged = [...existing, ...uploadedUrls].slice(0, 6)
+        return { ...l, image_urls: merged }
       }))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Không tải được ảnh")
@@ -393,17 +419,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   })
 
   const loadInventoryItems = async (fid: string) => {
-    const { data: items } = await supabase
-      .from("inventory_items")
-      .select("id, code, name, unit")
-      .eq("factory_id", fid)
-      .eq("is_active", true)
-      .order("code")
-
-    const { data: balances } = await supabase
-      .from("inventory_stock_balances")
-      .select("item_id, on_hand")
-      .eq("factory_id", fid)
+    const [{ data: items }, { data: balances }, { data: cats }] = await Promise.all([
+      supabase.from("inventory_items").select("id, code, name, unit, category_id").eq("factory_id", fid).eq("is_active", true).order("code"),
+      supabase.from("inventory_stock_balances").select("item_id, on_hand").eq("factory_id", fid),
+      supabase.from("inventory_item_categories").select("id, code, name").eq("factory_id", fid).order("sort_order").order("code"),
+    ])
 
     const balanceMap = new Map<string, number>()
     for (const b of (balances || [])) {
@@ -411,11 +431,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
 
     setInventoryItems(
-      ((items || []) as { id: string; code: string; name: string; unit: string }[]).map((item) => ({
+      ((items || []) as { id: string; code: string; name: string; unit: string; category_id: string | null }[]).map((item) => ({
         ...item,
         currentStock: balanceMap.get(item.id) || 0,
       }))
     )
+    setInventoryCategories((cats || []) as InventoryCategory[])
   }
 
   const loadDispatchVehicles = async (fid: string) => {
@@ -461,7 +482,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setHangMuc(rec.hang_muc)
     setNgay(rec.ngay)
     setTuGio(rec.tu_gio || "")
-    setDenGio(rec.den_gio || "")
+    // Backward compat: old TIME values "14:30:00" → convert to datetime-local format
+    const denGioRaw = rec.den_gio || ""
+    setDenGio(denGioRaw && !denGioRaw.includes("T") && denGioRaw.length <= 8
+      ? `${rec.ngay}T${denGioRaw.slice(0, 5)}`
+      : denGioRaw
+    )
     setBoPhan(rec.bo_phan)
     setGhiChu(rec.ghi_chu || "")
     setNoiDungChung(rec.noi_dung_chung || "")
@@ -521,6 +547,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       nhien_lieu_su_dung: l.nhien_lieu_su_dung || "",
       dvt_do: l.dvt_do || "",
       so_luong_do: String(l.so_luong_do || ""),
+      km_dong_ho: String(l.km_dong_ho || ""),
+      chat_luong: l.chat_luong || "",
       image_urls: l.image_urls || [],
       materials: matsMap.get(l.id) || [],
       expanded: true,
@@ -554,6 +582,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
     void bootstrap().finally(() => setLoading(false))
   }, [id, isNew, loadRecord])
+
+  // Close material dropdown when clicking outside
+  useEffect(() => {
+    if (!activeMaterialDropdown) return
+    const handler = (e: MouseEvent) => {
+      if (matDropdownRef.current && !matDropdownRef.current.contains(e.target as Node)) {
+        setActiveMaterialDropdown(null)
+      }
+    }
+    document.addEventListener("pointerdown", handler)
+    return () => document.removeEventListener("pointerdown", handler)
+  }, [activeMaterialDropdown])
 
   // Auto-dismiss success toast after 4 seconds
   useEffect(() => {
@@ -624,7 +664,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
     setSaving(true); setSaveError(null)
     try {
-      const maBB = isNew ? await generateMaBB(factoryId, ngay) : (record?.ma_bb || null)
+      const maBB = isNew ? await generateMaBB(factoryId, ngay, boPhan) : (record?.ma_bb || null)
       const nguoiTao = isNew ? (user?.full_name || user?.username || null) : record?.nguoi_tao
 
       const headerPayload = {
@@ -698,6 +738,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           nhien_lieu_su_dung: l.nhien_lieu_su_dung || null,
           dvt_do: l.dvt_do || null,
           so_luong_do: l.so_luong_do ? parseFloat(l.so_luong_do) : null,
+          km_dong_ho: l.km_dong_ho ? parseFloat(l.km_dong_ho) : null,
+          chat_luong: l.chat_luong || null,
           image_urls: l.image_urls,
         }
 
@@ -893,6 +935,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         code: inserted.code as string,
         name: inserted.name as string,
         unit: (inserted.unit as string | null) || "",
+        category_id: null,
         currentStock: 0,
       }
       setInventoryItems((prev) => [...prev, newItem])
@@ -907,6 +950,44 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư")
     } finally {
       setSavingNewItem(false)
+    }
+  }
+
+  const handleSaveNewExtMat = async () => {
+    if (!factoryId || !newExtMatModal) return
+    if (!newExtMatForm.ten_vat_tu.trim()) {
+      setSaveError("Vui lòng nhập tên vật tư")
+      return
+    }
+    setSavingNewExtMat(true)
+    try {
+      const { data: inserted, error } = await supabase
+        .from("maintenance_external_materials")
+        .insert({
+          factory_id: factoryId,
+          code: newExtMatForm.code.trim() || null,
+          ten_vat_tu: newExtMatForm.ten_vat_tu.trim(),
+          dvt: newExtMatForm.dvt.trim() || null,
+          specification: newExtMatForm.specification.trim() || null,
+          category_id: newExtMatForm.category_id || null,
+          is_active: true,
+        })
+        .select("id, factory_id, ten_vat_tu, dvt, code, specification, category_id, is_active")
+        .single()
+      if (error) { setSaveError(error.message); return }
+      const newExtMat: MaintenanceExtMaterial = inserted as MaintenanceExtMaterial
+      setExtMaterials((prev) => [...prev, newExtMat])
+      updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
+        inventory_item_id: inserted.id,
+        ten_vat_tu: inserted.ten_vat_tu as string,
+        dvt: (inserted.dvt as string | null) || "",
+      })
+      setNewExtMatModal(null)
+      setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "" })
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư ngoài")
+    } finally {
+      setSavingNewExtMat(false)
     }
   }
 
@@ -964,24 +1045,38 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       <Printer size={12} /> In biên bản
                     </Link>
                   )}
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && (
-                    <>
-                      <Link
-                        href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
-                        target="_blank"
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                      >
-                        <Printer size={12} /> Sự cố
-                      </Link>
-                      <Link
-                        href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
-                        target="_blank"
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                      >
-                        <Printer size={12} /> Đề nghị
-                      </Link>
-                    </>
-                  )}
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && (() => {
+                    const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
+                    if (loaiSuaChua === "nho") {
+                      return (
+                        <Link
+                          href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
+                          target="_blank"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Printer size={12} /> Sửa chữa nhỏ
+                        </Link>
+                      )
+                    }
+                    return (
+                      <>
+                        <Link
+                          href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
+                          target="_blank"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Printer size={12} /> Sự cố
+                        </Link>
+                        <Link
+                          href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
+                          target="_blank"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Printer size={12} /> Đề nghị
+                        </Link>
+                      </>
+                    )
+                  })()}
                   {record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe" && (
                     <Link
                       href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
@@ -1004,20 +1099,29 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ) : (
                 <>
                   {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" ? (
-                    <>
+                    lines[0]?.loai_sua_chua === "nho" ? (
                       <span
                         title="Chỉ in được sau khi biên bản được phê duyệt"
                         className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
                       >
-                        <Printer size={12} /> Sự cố
+                        <Printer size={12} /> Sửa chữa nhỏ
                       </span>
-                      <span
-                        title="Chỉ in được sau khi biên bản được phê duyệt"
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                      >
-                        <Printer size={12} /> Đề nghị
-                      </span>
-                    </>
+                    ) : (
+                      <>
+                        <span
+                          title="Chỉ in được sau khi biên bản được phê duyệt"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
+                        >
+                          <Printer size={12} /> Sự cố
+                        </span>
+                        <span
+                          title="Chỉ in được sau khi biên bản được phê duyệt"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
+                        >
+                          <Printer size={12} /> Đề nghị
+                        </span>
+                      </>
+                    )
                   ) : (
                     <span
                       title="Chỉ in được sau khi biên bản được phê duyệt"
@@ -1161,7 +1265,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Giờ kết thúc</label>
             <input
-              type="time"
+              type="datetime-local"
               value={denGio}
               onChange={(e) => setDenGio(e.target.value)}
               disabled={isReadOnly}
@@ -1634,6 +1738,33 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 </div>
               )}
 
+              {/* Km/giờ + Chất lượng (Đội xe — Sửa chữa nhỏ) */}
+              {boPhan === "Đội xe" && hangMuc === "Sửa chữa" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Chỉ số đồng hồ Km/giờ</label>
+                    <input
+                      type="number"
+                      value={line.km_dong_ho}
+                      onChange={(e) => updateLine(line.id, { km_dong_ho: e.target.value })}
+                      disabled={isReadOnly}
+                      placeholder="VD: 125000"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Chất lượng sau sửa chữa</label>
+                    <input
+                      value={line.chat_luong}
+                      onChange={(e) => updateLine(line.id, { chat_luong: e.target.value })}
+                      disabled={isReadOnly}
+                      placeholder="VD: Đạt, Không đạt..."
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Materials */}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -1647,202 +1778,234 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     </button>
                   )}
                 </div>
-                {line.materials.map((mat) => (
-                  <div key={mat.id} className="flex flex-wrap gap-2 items-end mb-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="min-w-[120px]">
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Nguồn</label>
-                      <select
-                        value={mat.nguon}
-                        onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as "trong_kho" | "ben_ngoai", inventory_item_id: "", ten_vat_tu: "" })}
-                        disabled={isReadOnly}
-                        className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                      >
-                        <option value="ben_ngoai">Bên ngoài</option>
-                        <option value="trong_kho">Trong kho</option>
-                      </select>
-                    </div>
-
-                    {mat.nguon === "trong_kho" ? (
-                      <div className="flex-1 min-w-[200px]">
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-bold text-slate-500">Vật tư kho</label>
-                          {!isReadOnly && (
-                            <button
-                              type="button"
-                              onClick={() => { setNewItemModal({ lineId: line.id, matId: mat.id }); setNewItemForm({ code: "", name: "", unit: mat.dvt }) }}
-                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
-                            >
-                              <Plus size={10} /> Thêm mới
-                            </button>
-                          )}
-                        </div>
-                        <select
-                          value={mat.inventory_item_id}
-                          onChange={(e) => {
-                            const item = inventoryItems.find((i) => i.id === e.target.value)
-                            updateMaterial(line.id, mat.id, { inventory_item_id: e.target.value, ten_vat_tu: item?.name || "", dvt: item?.unit || "" })
-                          }}
-                          disabled={isReadOnly}
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                        >
-                          <option value="">— Chọn vật tư —</option>
-                          {inventoryItems.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.code} - {item.name} (Tồn: {item.currentStock} {item.unit})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="flex-1 min-w-[200px]">
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-bold text-slate-500">Vật tư bên ngoài</label>
-                          {!isReadOnly && (
-                            <button
-                              type="button"
-                              onClick={() => { setNewItemModal({ lineId: line.id, matId: mat.id }); setNewItemForm({ code: "", name: "", unit: mat.dvt }) }}
-                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
-                            >
-                              <Plus size={10} /> Thêm mới
-                            </button>
-                          )}
-                        </div>
-                        <select
-                          value={mat.inventory_item_id}
-                          onChange={(e) => {
-                            const item = inventoryItems.find((i) => i.id === e.target.value)
-                            updateMaterial(line.id, mat.id, { inventory_item_id: e.target.value, ten_vat_tu: item?.name || "", dvt: item?.unit || mat.dvt })
-                          }}
-                          disabled={isReadOnly}
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                        >
-                          <option value="">— Chọn vật tư —</option>
-                          {inventoryItems.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.code} - {item.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="w-20">
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Đơn vị</label>
-                      <input
-                        value={mat.dvt}
-                        onChange={(e) => updateMaterial(line.id, mat.id, { dvt: e.target.value })}
-                        disabled={isReadOnly}
-                        className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                      />
-                    </div>
-
-                    <div className="w-20">
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Số lượng</label>
-                      <input
-                        type="number"
-                        value={mat.so_luong}
-                        onChange={(e) => updateMaterial(line.id, mat.id, { so_luong: e.target.value })}
-                        disabled={isReadOnly}
-                        className={`w-full px-2 py-1.5 border rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white ${
-                          mat.nguon === "trong_kho" && mat.inventory_item_id &&
-                          parseFloat(mat.so_luong) > (inventoryItems.find(i => i.id === mat.inventory_item_id)?.currentStock ?? Infinity)
-                            ? "border-red-400 bg-red-50"
-                            : "border-slate-300"
-                        }`}
-                      />
-                      {mat.nguon === "trong_kho" && mat.inventory_item_id && (() => {
-                        const item = inventoryItems.find(i => i.id === mat.inventory_item_id)
-                        if (item && parseFloat(mat.so_luong) > item.currentStock)
-                          return <p className="text-red-500 text-[10px] mt-0.5">Vượt tồn ({item.currentStock})</p>
-                      })()}
-                    </div>
-
-                    {mat.nguon === "ben_ngoai" && (
-                      <>
-                        <div className="w-24">
-                          <label className="text-[10px] font-bold text-slate-500 block mb-1">Đơn giá</label>
-                          <input
-                            type="number"
-                            value={mat.don_gia}
-                            onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
-                            disabled={isReadOnly}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                          />
-                        </div>
-                        <div className="w-20">
-                          <label className="text-[10px] font-bold text-slate-500 block mb-1">Loại tiền</label>
-                          <select
-                            value={mat.loai_tien}
-                            onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
-                            disabled={isReadOnly}
-                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                {line.materials.map((mat) => {
+                  const isKho = mat.nguon === "trong_kho"
+                  const searchKey = mat.id
+                  const search = matSearches[searchKey] || ""
+                  const catFilter = matCategoryFilters[searchKey] || ""
+                  // Both nguon types use inventory_items; display differs (stock shown for trong_kho only)
+                  const filteredItems = inventoryItems.filter((item) => {
+                    if (catFilter && item.category_id !== catFilter) return false
+                    if (!search) return true
+                    const q = search.toLowerCase()
+                    return item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
+                  })
+                  return (
+                    <div key={mat.id} className="mb-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                      {/* Label row */}
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : "Vật tư bên ngoài"}</label>
+                        {!isReadOnly && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isKho) {
+                                setNewItemModal({ lineId: line.id, matId: mat.id })
+                                setNewItemForm({ code: "", name: "", unit: mat.dvt })
+                              } else {
+                                setNewExtMatModal({ lineId: line.id, matId: mat.id })
+                                setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: mat.dvt || "", specification: "", category_id: "" })
+                              }
+                            }}
+                            className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
                           >
-                            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                            <Plus size={10} /> Thêm mới
+                          </button>
+                        )}
+                      </div>
+                      {/* Single compact row: all fields */}
+                      <div className="flex flex-wrap gap-1.5 items-end">
+                        {/* Nguồn */}
+                        <div className="w-[88px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Nguồn</label>
+                          <select
+                            value={mat.nguon}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as "trong_kho" | "ben_ngoai", inventory_item_id: "", ten_vat_tu: "" })}
+                            disabled={isReadOnly}
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                          >
+                            <option value="ben_ngoai">Bên ngoài</option>
+                            <option value="trong_kho">Trong kho</option>
                           </select>
                         </div>
-                      </>
-                    )}
-
-                    {!isReadOnly && (
-                      <button onClick={() => removeMaterial(line.id, mat.id)} className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg self-end">
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                        {/* Nhóm */}
+                        <div className="w-[180px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Nhóm</label>
+                          <select
+                            value={catFilter}
+                            onChange={(e) => setMatCategoryFilters((prev) => ({ ...prev, [searchKey]: e.target.value }))}
+                            disabled={isReadOnly}
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white bg-white"
+                          >
+                            <option value="">Tất cả nhóm</option>
+                            {inventoryCategories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {/* Custom dropdown: Tìm / Chọn vật tư */}
+                        <div className="flex-1 min-w-[180px] relative" ref={activeMaterialDropdown === mat.id ? matDropdownRef : null}>
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Tìm / Chọn vật tư</label>
+                          <button
+                            type="button"
+                            disabled={isReadOnly}
+                            onClick={() => setActiveMaterialDropdown(activeMaterialDropdown === mat.id ? null : mat.id)}
+                            className="w-full flex items-center justify-between px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white bg-white text-left"
+                          >
+                            <span className={mat.ten_vat_tu ? "text-slate-800 truncate" : "text-slate-400"}>
+                              {mat.ten_vat_tu || "— Chọn vật tư —"}
+                            </span>
+                            <ChevronDown size={12} className="shrink-0 ml-1 text-slate-400" />
+                          </button>
+                          {activeMaterialDropdown === mat.id && (
+                            <div className="absolute z-50 top-full mt-1 left-0 w-full min-w-[280px] bg-white border border-slate-200 rounded-xl shadow-2xl">
+                              <div className="p-2 border-b border-slate-100">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={search}
+                                  onChange={(e) => setMatSearches((prev) => ({ ...prev, [searchKey]: e.target.value }))}
+                                  placeholder="Tìm theo mã hoặc tên..."
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500"
+                                />
+                              </div>
+                              <div className="max-h-72 overflow-y-auto">
+                                {filteredItems.length === 0 ? (
+                                  <p className="text-xs text-slate-400 italic px-3 py-2">Không có vật tư</p>
+                                ) : filteredItems.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => {
+                                      updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "" })
+                                      setActiveMaterialDropdown(null)
+                                    }}
+                                    className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-50 flex justify-between gap-2 border-b border-slate-50 last:border-0 ${mat.inventory_item_id === item.id ? "bg-emerald-50 font-bold" : ""}`}
+                                  >
+                                    <span className="truncate">{item.code} — {item.name}</span>
+                                    {isKho && (
+                                      <span className="text-slate-400 shrink-0">Tồn: {item.currentStock}</span>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {/* Đơn vị */}
+                        <div className="w-[42px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">ĐVT</label>
+                          <input
+                            value={mat.dvt}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { dvt: e.target.value })}
+                            disabled={isReadOnly}
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                          />
+                        </div>
+                        {/* Số lượng */}
+                        <div className="w-[50px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Số lượng</label>
+                          <input
+                            type="number"
+                            value={mat.so_luong}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { so_luong: e.target.value })}
+                            disabled={isReadOnly}
+                            className={`w-full px-1.5 py-1.5 border rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white ${
+                              mat.nguon === "trong_kho" && mat.inventory_item_id &&
+                              parseFloat(mat.so_luong) > (inventoryItems.find(i => i.id === mat.inventory_item_id)?.currentStock ?? Infinity)
+                                ? "border-red-400 bg-red-50"
+                                : "border-slate-300"
+                            }`}
+                          />
+                          {mat.nguon === "trong_kho" && mat.inventory_item_id && (() => {
+                            const item = inventoryItems.find(i => i.id === mat.inventory_item_id)
+                            if (item && parseFloat(mat.so_luong) > item.currentStock)
+                              return <p className="text-red-500 text-[9px] mt-0.5">Vượt ({item.currentStock})</p>
+                          })()}
+                        </div>
+                        {/* Đơn giá + Loại tiền (chỉ ben_ngoai) */}
+                        {mat.nguon === "ben_ngoai" && (
+                          <>
+                            <div className="w-[72px]">
+                              <label className="text-xs font-bold text-slate-500 block mb-1">Đơn giá</label>
+                              <input
+                                type="number"
+                                value={mat.don_gia}
+                                onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
+                                disabled={isReadOnly}
+                                className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                              />
+                            </div>
+                            <div className="w-[74px]">
+                              <label className="text-xs font-bold text-slate-500 block mb-1">Tiền tệ</label>
+                              <select
+                                value={mat.loai_tien}
+                                onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
+                                disabled={isReadOnly}
+                                className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                              >
+                                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </div>
+                          </>
+                        )}
+                        {/* Xóa */}
+                        {!isReadOnly && (
+                          <button onClick={() => removeMaterial(line.id, mat.id)} className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg self-end">
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
                 {line.materials.length === 0 && (
                   <p className="text-xs text-slate-400 italic">Chưa có vật tư nào</p>
                 )}
               </div>
 
-              {/* Images — 6 fixed slots */}
+              {/* Images */}
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-2">
-                  Ảnh hiện trường
-                  <span className="font-normal text-slate-400 ml-1">({line.image_urls.filter(Boolean).length}/6)</span>
-                </label>
-                <div className="grid grid-cols-6 gap-2">
-                  {Array.from({ length: 6 }).map((_, slotIdx) => {
-                    const url = line.image_urls[slotIdx]
-                    const isUploading = uploadingSlot?.lineId === line.id && uploadingSlot.slot === slotIdx
-                    return (
-                      <div key={slotIdx} className="relative aspect-square">
-                        {url ? (
-                          <>
-                            <img
-                              src={url}
-                              alt={`Ảnh ${slotIdx + 1}`}
-                              className="w-full h-full object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90"
-                              onClick={() => window.open(url, "_blank")}
-                            />
-                            {!isReadOnly && (
-                              <button
-                                onClick={() => {
-                                  const newUrls = line.image_urls.filter((_, i) => i !== slotIdx)
-                                  updateLine(line.id, { image_urls: newUrls })
-                                }}
-                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
-                              >
-                                <X size={10} />
-                              </button>
-                            )}
-                          </>
-                        ) : (
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-xs font-bold text-slate-600">
+                    Ảnh hiện trường
+                    <span className="font-normal text-slate-400 ml-1">({line.image_urls.filter(Boolean).length}/6)</span>
+                  </label>
+                  {!isReadOnly && line.image_urls.filter(Boolean).length < 6 && (
+                    <button
+                      disabled={uploadingSlot === line.id}
+                      onClick={() => handleSlotClick(line.id)}
+                      className="flex items-center gap-1 px-2 py-1 bg-orange-50 hover:bg-orange-100 text-orange-600 text-xs font-bold rounded-lg disabled:opacity-40"
+                    >
+                      {uploadingSlot === line.id
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <ImagePlus size={11} />}
+                      Thêm ảnh
+                    </button>
+                  )}
+                </div>
+                {line.image_urls.filter(Boolean).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {line.image_urls.filter(Boolean).map((url, slotIdx) => (
+                      <div key={slotIdx} className="relative w-14 h-14">
+                        <img
+                          src={url}
+                          alt={`Ảnh ${slotIdx + 1}`}
+                          className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-80"
+                          onClick={() => window.open(url, "_blank")}
+                        />
+                        {!isReadOnly && (
                           <button
-                            disabled={isReadOnly || isUploading}
-                            onClick={() => handleSlotClick(line.id, slotIdx)}
-                            className="w-full h-full rounded-xl border-2 border-dashed border-slate-200 hover:border-orange-400 hover:bg-orange-50 flex flex-col items-center justify-center gap-0.5 transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={() => updateLine(line.id, { image_urls: line.image_urls.filter((_, i) => i !== slotIdx) })}
+                            className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
                           >
-                            {isUploading
-                              ? <Loader2 size={16} className="animate-spin text-orange-400" />
-                              : <ImagePlus size={15} className="text-slate-300" />}
-                            <span className="text-[9px] text-slate-300">{slotIdx + 1}</span>
+                            <X size={8} />
                           </button>
                         )}
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1856,11 +2019,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
-      {/* Hidden file inputs for image slot upload */}
+      {/* Hidden file inputs for image slot upload (multiple) */}
       <input
         ref={slotInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
+        multiple
         className="hidden"
         onChange={handleSlotFileChange}
       />
@@ -1923,6 +2087,87 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm disabled:opacity-50"
               >
                 {savingNewItem ? "Đang lưu..." : "Lưu vật tư"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newExtMatModal && (
+        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-base font-extrabold text-slate-800">Thêm vật tư bên ngoài</h2>
+              <button onClick={() => setNewExtMatModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
+                  <input
+                    value={newExtMatForm.code}
+                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
+                    placeholder="VD: BD22211"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư</label>
+                  <select
+                    value={newExtMatForm.category_id}
+                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
+                  >
+                    <option value="">— Không phân nhóm —</option>
+                    {inventoryCategories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
+                  <input
+                    value={newExtMatForm.ten_vat_tu}
+                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
+                    placeholder="Tên đầy đủ của vật tư"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
+                  <input
+                    value={newExtMatForm.dvt}
+                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
+                    placeholder="Cái, kg, lít..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
+                <input
+                  value={newExtMatForm.specification}
+                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
+                  placeholder="Quy cách, đặc tính kỹ thuật..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+              <button
+                onClick={() => setNewExtMatModal(null)}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleSaveNewExtMat()}
+                disabled={savingNewExtMat}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+              >
+                {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
               </button>
             </div>
           </div>

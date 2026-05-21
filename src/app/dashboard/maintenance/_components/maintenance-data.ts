@@ -39,6 +39,10 @@ export type MaintenanceExtMaterial = {
   factory_id: string
   ten_vat_tu: string
   dvt: string | null
+  code: string | null
+  specification: string | null
+  category_id: string | null
+  is_active: boolean
 }
 
 export type MaintenanceMaterial = {
@@ -151,15 +155,26 @@ export function currencySymbol(loaiTien: string): string {
   return "$"
 }
 
-// Generate biên bản code: MT-DDMMYY/XXX
-export async function generateMaBB(factoryId: string, ngay: string): Promise<string> {
+const BO_PHAN_PREFIX: Record<string, string> = {
+  "Mủ tạp": "MT",
+  "Mủ nước": "MN",
+  "Đội xe": "DX",
+  "Nước thải": "NT",
+  "Biomass": "BO",
+  "Văn phòng": "VP",
+  "Khác": "K",
+}
+
+// Generate biên bản code: XX-DDMMYY/XXX (XX = department prefix)
+export async function generateMaBB(factoryId: string, ngay: string, boPhan: string): Promise<string> {
   const d = new Date(ngay)
   const dd = String(d.getDate()).padStart(2, "0")
   const mm = String(d.getMonth() + 1).padStart(2, "0")
   const yy = String(d.getFullYear()).slice(-2)
-  const prefix = `MT-${dd}${mm}${yy}`
+  const deptCode = BO_PHAN_PREFIX[boPhan] || "MT"
+  const prefix = `${deptCode}-${dd}${mm}${yy}`
 
-  // Count existing records for this date
+  // Count existing records for this date + department
   const { data } = await supabase
     .from("maintenance_records")
     .select("ma_bb")

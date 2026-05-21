@@ -3,11 +3,12 @@
 ## Phạm vi
 
 Module quản lý toàn bộ vòng đời sự cố / bảo dưỡng thiết bị & xe tại nhà máy:
+
 - Biên bản kiểm tra sự cố (Sửa chữa) và biên bản bảo dưỡng (Bảo dưỡng)
 - Quản lý vật tư sử dụng: trong kho hoặc mua ngoài
 - Tự động tạo phiếu xuất kho khi biên bản được phê duyệt
 - Lý lịch thiết bị / xe (lịch sử bảo trì theo từng thiết bị)
-- In biên bản theo 6 type: F13, F10+F15, F13+F10+F15+Ảnh, F03+F15+Ảnh, F03+F15+F06+Ảnh, F01
+- In biên bản theo 8 type: F13, F10+F15, F13+F10+F15+Ảnh, F03+F15+Ảnh, F03+F15+F06+Ảnh, F08NB+F15SmallXe+F06, F01, F02
 
 Route riêng: `/dashboard/maintenance`  
 Tất cả bảng có `factory_id`, mọi query đều filter theo `factory_id`.
@@ -16,10 +17,10 @@ Tất cả bảng có `factory_id`, mọi query đều filter theo `factory_id`.
 
 ## Hai loại biên bản
 
-| Hạng mục | Mô tả | Chọn thiết bị |
-|---|---|---|
-| `Sửa chữa` | Sự cố xảy ra, cần sửa / thay thế | 1 hoặc nhiều |
-| `Bảo dưỡng` | Bảo trì định kỳ | Nhiều thiết bị (multi-select) |
+| Hạng mục    | Mô tả                            | Chọn thiết bị                 |
+| ----------- | -------------------------------- | ----------------------------- |
+| `Sửa chữa`  | Sự cố xảy ra, cần sửa / thay thế | 1 hoặc nhiều                  |
+| `Bảo dưỡng` | Bảo trì định kỳ                  | Nhiều thiết bị (multi-select) |
 
 **Bảo dưỡng**: Chọn nhiều thiết bị cùng lúc → mỗi thiết bị hiển thị 1 form nhập liệu riêng bên dưới,  
 giống pattern multi-item trong Nhập/Xuất kho (`inventory/receipts`, `inventory/issues`).
@@ -34,9 +35,13 @@ Ngưỡng: **200 USD** (quy đổi từ loại tiền thực tế).
 
 ```typescript
 const usdEquiv =
-  loai_tien === "USD" ? chi_phi_dk :
-  loai_tien === "KHR" ? chi_phi_dk / 4100 :
-  loai_tien === "VND" ? chi_phi_dk / 25000 : 0;
+  loai_tien === "USD"
+    ? chi_phi_dk
+    : loai_tien === "KHR"
+      ? chi_phi_dk / 4000
+      : loai_tien === "VND"
+        ? chi_phi_dk / 26500
+        : 0;
 const suggested = usdEquiv > 200 ? "lon" : "nho";
 ```
 
@@ -56,12 +61,13 @@ Bộ phận `Đội xe` hiển thị thêm trường `Tên tài xế` trên mỗ
 
 ### Asset picker theo bộ phận
 
-| Bộ phận | Nguồn danh sách | FK lưu vào line |
-|---|---|---|
-| Đội xe | `dispatch_vehicles` (active, theo factory) | `dispatch_vehicle_id` |
-| Còn lại | `maintenance_assets` (filter `bo_phan`) | `asset_id` |
+| Bộ phận | Nguồn danh sách                            | FK lưu vào line       |
+| ------- | ------------------------------------------ | --------------------- |
+| Đội xe  | `dispatch_vehicles` (active, theo factory) | `dispatch_vehicle_id` |
+| Còn lại | `maintenance_assets` (filter `bo_phan`)    | `asset_id`            |
 
 Khi bộ phận = `Đội xe`:
+
 - Dropdown picker load từ `dispatch_vehicles` thay vì `maintenance_assets`
 - Tự điền `ten_tai_xe` từ tài xế hiện hành (`dispatch_vehicle_driver_assignments.is_current = true`)
 - Dòng line lưu `dispatch_vehicle_id`, `asset_id = null`
@@ -74,18 +80,18 @@ Khi `hang_muc = Bảo dưỡng` và chọn ≥ 2 thiết bị, form hiển thị
 
 ### 4 trường chung (mirror cấu trúc của từng dòng thiết bị)
 
-| Trường DB | Label UI | Dùng trong mẫu in |
-|---|---|---|
-| `noi_dung_chung` | 1/ Nội dung bảo dưỡng chung | F03 — "1/ Nội dung bảo dưỡng" |
-| `nguyen_nhan_chung` | 2/ Lý do bảo dưỡng chung | F03 — "2/ Lý do bảo dưỡng" |
-| `cac_khac_phuc_chung` | 3/ Cách khắc phục / Khối lượng đã bảo dưỡng chung | F15 — "Khối lượng đã bảo dưỡng" |
-| `image_urls_chung` | 4/ Ảnh chung (6 slot) | Trang ảnh — section "Ảnh chung" đứng đầu |
+| Trường DB             | Label UI                                          | Dùng trong mẫu in                        |
+| --------------------- | ------------------------------------------------- | ---------------------------------------- |
+| `noi_dung_chung`      | 1/ Nội dung bảo dưỡng chung                       | F03 — "1/ Nội dung bảo dưỡng"            |
+| `nguyen_nhan_chung`   | 2/ Lý do bảo dưỡng chung                          | F03 — "2/ Lý do bảo dưỡng"               |
+| `cac_khac_phuc_chung` | 3/ Cách khắc phục / Khối lượng đã bảo dưỡng chung | F15 — "Khối lượng đã bảo dưỡng"          |
+| `image_urls_chung`    | 4/ Ảnh chung (6 slot)                             | Trang ảnh — section "Ảnh chung" đứng đầu |
 
 ### Rule kết hợp nội dung khi in
 
 ```typescript
 function mergeNoidung(common: string | null, own: string | null): string {
-  return [common, own].filter(Boolean).join("\n")
+  return [common, own].filter(Boolean).join("\n");
 }
 ```
 
@@ -137,6 +143,7 @@ created_at
 ```
 
 SQL migration (chạy trong Supabase SQL Editor):
+
 ```sql
 ALTER TABLE maintenance_staff ADD COLUMN IF NOT EXISTS email TEXT;
 ```
@@ -145,19 +152,23 @@ Seed từ `cung_cap_dl/kho_bao_tri/bao_tri/danh_sach_nm.xlsx` (14 người).
 
 Phân loại nhân sự theo `chuc_vu` (dùng trong UI):
 
-| Nhóm | Điều kiện | Dùng cho trường |
-|---|---|---|
-| `bgdStaff` | `chuc_vu` chứa `"giám đốc"` | BGĐ phụ trách, Giám đốc |
-| `nvStaff` | `chuc_vu` chứa `"nhân viên"` | Nhân viên phụ trách, Phụ trách bảo trì |
-| `workerStaff` | còn lại (Tổ trưởng, Công nhân, Bảo vệ) | Người thực hiện (chips) |
+| Nhóm          | Điều kiện                              | Dùng cho trường                        |
+| ------------- | -------------------------------------- | -------------------------------------- |
+| `bgdStaff`    | `chuc_vu` chứa `"giám đốc"`            | BGĐ phụ trách, Giám đốc                |
+| `nvStaff`     | `chuc_vu` chứa `"nhân viên"`           | Nhân viên phụ trách, Phụ trách bảo trì |
+| `workerStaff` | còn lại (Tổ trưởng, Công nhân, Bảo vệ) | Người thực hiện (chips)                |
 
 ```typescript
-const bgdStaff = staffList.filter(s => s.chuc_vu?.toLowerCase().includes("giám đốc"))
-const nvStaff = staffList.filter(s => s.chuc_vu?.toLowerCase().includes("nhân viên"))
-const workerStaff = staffList.filter(s => {
-  const cv = s.chuc_vu?.toLowerCase() || ""
-  return !cv.includes("giám đốc") && !cv.includes("nhân viên")
-})
+const bgdStaff = staffList.filter((s) =>
+  s.chuc_vu?.toLowerCase().includes("giám đốc"),
+);
+const nvStaff = staffList.filter((s) =>
+  s.chuc_vu?.toLowerCase().includes("nhân viên"),
+);
+const workerStaff = staffList.filter((s) => {
+  const cv = s.chuc_vu?.toLowerCase() || "";
+  return !cv.includes("giám đốc") && !cv.includes("nhân viên");
+});
 ```
 
 **Quy tắc loại trừ**: `bgd_phu_trach` và `giam_doc` không được chọn cùng một người — dropdown của field này lọc bỏ giá trị đã chọn ở field kia.
@@ -250,6 +261,10 @@ nhien_lieu_su_dung    TEXT
 dvt_do                TEXT
 so_luong_do           NUMERIC
 
+-- Xe nhỏ (Sửa chữa nhỏ Đội xe — dùng cho F08_NB và F15SmallVehicle)
+km_dong_ho            NUMERIC  -- chỉ số đồng hồ Km/giờ
+chat_luong            TEXT     -- chất lượng sau sửa chữa (Đạt / Không đạt / ghi chú)
+
 -- Ảnh per thiết bị (tối đa 6)
 image_urls            TEXT[]
 ```
@@ -289,19 +304,42 @@ maintenance_records (1 biên bản)
 
 ## Mã biên bản
 
-Format: `MT-DDMMYY/XXX`  
-Ví dụ: `MT-110426/001`
+Format: `XX-DDMMYY/XXX` — trong đó `XX` là ký hiệu viết tắt theo **bộ phận**.  
+Ví dụ: `DX-110426/001` (Đội xe), `MT-110426/002` (Mủ tạp)
+
+### Bảng ký hiệu bộ phận
+
+| Bộ phận   | Ký hiệu |
+| --------- | ------- |
+| Mủ tạp    | `MT`    |
+| Mủ nước   | `MN`    |
+| Đội xe    | `DX`    |
+| Nước thải | `NT`    |
+| Biomass   | `BO`    |
+| Văn phòng | `VP`    |
+| Khác      | `K`     |
 
 - Tự sinh khi save lần đầu, read-only sau đó
-- Đếm tuần tự trong ngày theo `factory_id`
+- Đếm tuần tự **trong ngày + bộ phận** theo `factory_id` (mỗi bộ phận đếm riêng)
+- Fallback về `MT` nếu bộ phận không khớp bảng trên
 - QR trỏ về URL đầy đủ của trang chi tiết: `{origin}/dashboard/maintenance/records/{uuid}`
 - QR hiển thị ở trang chi tiết (góc trên trái) và trong các mẫu in (góc trên phải)
+
+```typescript
+const BO_PHAN_PREFIX: Record<string, string> = {
+  "Mủ tạp": "MT", "Mủ nước": "MN", "Đội xe": "DX",
+  "Nước thải": "NT", "Biomass": "BO", "Văn phòng": "VP", "Khác": "K",
+}
+// prefix = `${BO_PHAN_PREFIX[boPhan] || "MT"}-${dd}${mm}${yy}`
+// like query: `${prefix}/%` để đếm tuần tự theo prefix
+```
 
 ---
 
 ## Quyền chỉnh sửa biên bản
 
 Biên bản `cho_duyet` chỉ được sửa bởi:
+
 - **Người tạo biên bản** (`nguoi_tao` khớp với `full_name` hoặc `username` của user hiện tại), **hoặc**
 - **User có quyền `maintenance.approve`**
 
@@ -309,15 +347,16 @@ Biên bản `da_duyet`: read-only với tất cả, **ngoại trừ Admin** (`us
 Biên bản `huy`: read-only hoàn toàn với mọi người.
 
 ```typescript
-const isAdmin = user?.role === "admin"
-const isCreator = isNew || (
-  record?.nguoi_tao != null &&
-  (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
-)
+const isAdmin = user?.role === "admin";
+const isCreator =
+  isNew ||
+  (record?.nguoi_tao != null &&
+    (record.nguoi_tao === user?.full_name ||
+      record.nguoi_tao === user?.username));
 const isReadOnly =
   record?.trang_thai === "huy" ||
   (record?.trang_thai === "da_duyet" && !isAdmin) ||
-  (!isNew && !isCreator && !isAdmin)
+  (!isNew && !isCreator && !isAdmin);
 ```
 
 **Quy tắc `isAdmin`**: Dùng `user?.role === "admin"` (không dùng permission code riêng). Admin có thể thêm/sửa/xóa vật tư và chỉnh sửa biên bản đã duyệt. Biên bản `huy` là trường hợp duy nhất admin cũng không sửa được.
@@ -353,6 +392,7 @@ Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau k
 - Vật tư `ben_ngoai` **không** tạo phiếu xuất kho (mua ngoài, không qua kho)
 
 **Flow tạo phiếu xuất đúng** (thứ tự bắt buộc):
+
 ```
 1. getFreshAuthSession() → lấy session.user.id (UUID Auth)
 2. Tạo inventory_documents { status: "draft", notes: "Xuất kho cho biên bản...số: {ma_bb}" }
@@ -365,6 +405,7 @@ Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau k
 **Retry-safe**: Nếu phiếu đã tồn tại (duplicate document_code), reset về draft, xóa dòng cũ, insert lại rồi post lại.
 
 **Hủy phê duyệt** (hoàn tồn kho):
+
 ```
 1. getFreshAuthSession() → lấy session.user.id
 2. rpc("inventory_cancel_document", { p_factory_id, p_document_id: inventory_issue_doc_id,
@@ -392,7 +433,7 @@ Chỉ khi tạo biên bản **mới** mới redirect sang trang chi tiết sau k
 Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu F01:
 
 | Thời gian | Nội dung sửa chữa, thay thế phụ tùng | Giá trị | Người thực hiện | Người theo dõi |
-|---|---|---|---|---|
+| --------- | ------------------------------------ | ------- | --------------- | -------------- |
 
 - `Người theo dõi` = `nv_phu_trach` của biên bản
 - `Giá trị` = `chi_phi_dk` + ký hiệu tiền (`$`, `៛`, `₫`)
@@ -402,6 +443,7 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 ### UI tab Lý lịch thiết bị (`history/page.tsx`)
 
 **Asset picker multi-select** (giống form tạo biên bản):
+
 - Button trigger hiển thị số lượng thiết bị đã chọn
 - Dropdown mở ra gồm: filter Bộ phận (select) + ô tìm kiếm nhanh (input) + danh sách checkbox
 - Danh sách checkbox: mỗi item hiện `ma_tb` (monospace) + `ten_tb` + bộ phận + loại (Xe/Máy)
@@ -410,6 +452,7 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 - Dropdown đóng khi click ngoài (`useRef` + `mousedown` listener)
 
 **Nút "In lý lịch"** luôn hiển thị (không ẩn/hiện điều kiện):
+
 - Chưa chọn thiết bị: xám `bg-slate-200 text-slate-400 cursor-not-allowed`, không navigate
 - Đã chọn thiết bị: đen đậm `bg-slate-700 hover:bg-slate-800 text-white`, click mở tab in
 - Luôn dùng một element `<Link>` duy nhất, chỉ thay className — **không toggle giữa `<span>` và `<Link>`** (gây mount mới → `bg-slate-700` mất CSS, chỉ thấy khi hover)
@@ -418,6 +461,7 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 - Mỗi thiết bị được in 1 trang F01 riêng với page break
 
 **Kỹ thuật query**: Do Supabase JS v2 không hỗ trợ `.order("related_table(col)")` cross-table, lịch sử phải dùng two-step query:
+
 1. Query `maintenance_records` với filter/order trước → lấy danh sách `id`
 2. Query `maintenance_record_lines` với `.in("record_id", ids)` và `.in("asset_id", selectedAssetIds)` nếu có chọn
 3. Client-side sort kết quả cuối
@@ -462,18 +506,55 @@ Sau khi chạy migration thêm cột `email`, vào **Cài đặt → Bảo trì 
 
 ---
 
-## In biên bản (6 type)
+## In biên bản (8 type)
 
-| `?type=` | Mẫu in | Áp dụng |
-|---|---|---|
-| `su_co` | F13 — Biên bản kiểm tra sự cố | Sửa chữa + Đội xe (nút "Sự cố") |
-| `de_nghi` | F10 + F15 — Giấy đề nghị + Nghiệm thu | Sửa chữa + Đội xe (nút "Đề nghị") |
-| `su_co_nho` | F13 + F10 + F15 + Ảnh gộp 1 PDF | Sửa chữa **ngoài** Đội xe |
-| `bao_duong` | F03 + F15 + Ảnh | Bảo dưỡng **ngoài** Đội xe |
-| `bao_duong_xe` | F03 + F15 + F06 + Ảnh | Bảo dưỡng + Đội xe |
-| `ly_lich` | F01 — Lý lịch máy móc / thiết bị | Từ tab Lý lịch |
+| `?type=`          | Mẫu in                                | Áp dụng                                                   |
+| ----------------- | ------------------------------------- | --------------------------------------------------------- |
+| `su_co`           | F13 — Biên bản kiểm tra sự cố         | Sửa chữa + Đội xe + `loai_sua_chua = lon` (nút "Sự cố")   |
+| `de_nghi`         | F10 + F15 — Giấy đề nghị + Nghiệm thu | Sửa chữa + Đội xe + `loai_sua_chua = lon` (nút "Đề nghị") |
+| `su_co_nho`       | F13 + F10 + F15 + Ảnh gộp 1 PDF       | Sửa chữa **ngoài** Đội xe                                 |
+| `bao_duong`       | F03 + F15 + Ảnh                       | Bảo dưỡng **ngoài** Đội xe                                |
+| `bao_duong_xe`    | F03 + F15 + F06 + Ảnh                 | Bảo dưỡng + Đội xe                                        |
+| `sua_chua_nho_xe` | F08_NB + F15SmallVehicle + F06 + Ảnh  | Sửa chữa + Đội xe + `loai_sua_chua = nho`                 |
+| `ly_lich`         | F01 — Lý lịch máy móc / thiết bị      | Thiết bị **ngoài** Đội xe, từ tab Lý lịch                 |
+| `ly_lich_xe`      | F02 — Lý lịch xe máy (3 section)      | Xe Đội xe (`dispatch_vehicles`), từ tab Lý lịch           |
 
-Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id` / `asset_ids` query param.
+Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id` / `asset_ids` / `vehicle_id` query param.
+
+### Nút in trên trang chi tiết — Sửa chữa + Đội xe (sau khi da_duyet)
+
+| `loai_sua_chua` | Nút hiển thị                                     |
+| --------------- | ------------------------------------------------ |
+| `nho`           | 1 nút "Sửa chữa nhỏ" → `sua_chua_nho_xe`         |
+| `lon`           | 2 nút "Sự cố" → `su_co` và "Đề nghị" → `de_nghi` |
+| chưa rõ (null)  | 2 nút "Sự cố" + "Đề nghị" (fallback về `lon`)    |
+
+### F08_NB — Giấy đề nghị sửa chữa nhỏ thường xuyên (KHXD-QT02-F08_NB)
+
+- Subtitle: "(Áp dụng cho sửa chữa nhỏ, thường xuyên)"
+- Fields per line: Xe/Thiết bị, Biển số, **Chỉ số đồng hồ Km/giờ** (`km_dong_ho`), Họ tên lái xe
+- Nội dung: 1/ Mức độ hư hỏng (`noi_dung`), 2/ Lý do hư hỏng (`nguyen_nhan`), 3/ Hướng sửa chữa + tạm tính (`cac_khac_phuc`)
+- Ký 3 cột: Giám đốc NM | Nhân viên phụ trách | Tài xế
+
+### F15SmallVehicle — Biên bản nghiệm thu sửa chữa nhỏ (KHXD-QT02-F15 variant nhỏ)
+
+- Subtitle: "(Áp dụng cho sửa chữa nhỏ, thường xuyên)"
+- Participants: GĐ NM, BGĐ phụ trách, Nhân viên phụ trách, **Đội trưởng đội xe** (`phu_trach_bao_tri`), **Tài xế** (`ten_tai_xe`)
+- Section "Chất lượng:" → `chat_luong`
+- Ký 4 cột: BGĐ | NV phụ trách | Tài xế | GĐ NM
+
+### F02 — Lý lịch xe máy (KHXD-QT02-F02)
+
+URL: `?type=ly_lich_xe&vehicle_id=<uuid>&from=<date>&to=<date>`
+
+- **Section I**: Lịch sử người vận hành — query từ `dispatch_vehicle_driver_assignments` JOIN `dispatch_drivers`
+  - Columns: STT | Họ tên | Từ ngày | Đến ngày | Ghi chú
+- **Section II**: Bảo trì-Bảo dưỡng — `maintenance_records` filter `hang_muc = Bảo dưỡng` + `dispatch_vehicle_id`
+  - Columns: Ngày | Cấp bảo dưỡng Km/giờ (`km_dong_ho`) | Nội dung | Giá trị | Người thực hiện | Người theo dõi
+- **Section III**: Sửa chữa — `maintenance_records` filter `hang_muc = Sửa chữa` + `dispatch_vehicle_id`
+  - Columns: Ngày | Chỉ số đồng hồ Km/giờ (`km_dong_ho`) | Nội dung | Giá trị | Người thực hiện | Người theo dõi
+- Ký 4 cột: Người lập | Tài xế | BGĐ phụ trách | GĐ NM
+- Footer: `KHXD-QT02-F02 (01-15/05/2026)`
 
 **Trang in bypass sidebar**: `dashboard/layout.tsx` kiểm tra `pathname.includes("/print")` và render `{children}` trực tiếp, không có sidebar.
 
@@ -481,18 +562,19 @@ Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id
 
 Logic điều kiện hiển thị nút in (`records/[id]/page.tsx`):
 
-| `hang_muc` | `bo_phan` | Khi `da_duyet` | Khi chưa duyệt |
-|---|---|---|---|
-| Sửa chữa | ngoài Đội xe | 1 nút "In biên bản" → `su_co_nho` | 1 nút disabled |
-| Sửa chữa | Đội xe | 2 nút "Sự cố" + "Đề nghị" → `su_co`, `de_nghi` | 2 nút disabled |
-| Bảo dưỡng | ngoài Đội xe | 1 nút "In biên bản" → `bao_duong` | 1 nút disabled |
-| Bảo dưỡng | Đội xe | 1 nút "In biên bản" → `bao_duong_xe` | 1 nút disabled |
+| `hang_muc` | `bo_phan`    | Khi `da_duyet`                                 | Khi chưa duyệt |
+| ---------- | ------------ | ---------------------------------------------- | -------------- |
+| Sửa chữa   | ngoài Đội xe | 1 nút "In biên bản" → `su_co_nho`              | 1 nút disabled |
+| Sửa chữa   | Đội xe       | 2 nút "Sự cố" + "Đề nghị" → `su_co`, `de_nghi` | 2 nút disabled |
+| Bảo dưỡng  | ngoài Đội xe | 1 nút "In biên bản" → `bao_duong`              | 1 nút disabled |
+| Bảo dưỡng  | Đội xe       | 1 nút "In biên bản" → `bao_duong_xe`           | 1 nút disabled |
 
 Nút in clickable (`<Link>`) khi `trang_thai === "da_duyet"`; trạng thái khác là `<span>` cursor-not-allowed có tooltip.
 
 ### Cấu trúc mẫu in
 
 **F13 (`PrintSuCo`)** — Biên bản kiểm tra sự cố (KHXD-QT02-F13):
+
 - Header: Tên NM (12px, màu #000000) + Bộ phận | QR code góc trên phải; tiêu đề 13pt
 - "Hôm nay vào lúc ... giờ, ngày ... tháng ... năm ..."
 - "Chúng tôi gồm:" — thứ tự cố định từ lớn đến nhỏ:
@@ -506,20 +588,40 @@ Nút in clickable (`<Link>`) khi `trang_thai === "da_duyet"`; trạng thái khá
   - Placeholder name="" hiển thị dòng gạch để ký tay
 
 ```typescript
-const toTruongCoDien = record.nguoi_thuc_hien.filter(name => {
-  const role = staffMap.get(name)?.toLowerCase() || ""
-  return role.includes("tổ trưởng") && role.includes("cơ điện")
-})
-const participants: { name: string; role: string }[] = []
-if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
-if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
-if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
-if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+const toTruongCoDien = record.nguoi_thuc_hien.filter((name) => {
+  const role = staffMap.get(name)?.toLowerCase() || "";
+  return role.includes("tổ trưởng") && role.includes("cơ điện");
+});
+const participants: { name: string; role: string }[] = [];
+if (record.giam_doc)
+  participants.push({
+    name: record.giam_doc,
+    role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy",
+  });
+if (record.bgd_phu_trach)
+  participants.push({
+    name: record.bgd_phu_trach,
+    role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách",
+  });
+if (record.nv_phu_trach)
+  participants.push({
+    name: record.nv_phu_trach,
+    role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách",
+  });
+if (record.phu_trach_bao_tri)
+  participants.push({
+    name: record.phu_trach_bao_tri,
+    role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì",
+  });
 for (const name of toTruongCoDien) {
-  participants.push({ name, role: staffMap.get(name) || "Tổ trưởng cơ điện" })
+  participants.push({ name, role: staffMap.get(name) || "Tổ trưởng cơ điện" });
 }
-if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length === 0)
-  participants.push({ name: "", role: "Tổ trưởng cơ điện" })
+if (
+  !record.nv_phu_trach &&
+  !record.phu_trach_bao_tri &&
+  toTruongCoDien.length === 0
+)
+  participants.push({ name: "", role: "Tổ trưởng cơ điện" });
 ```
 
 - Per thiết bị: Tên máy, số hiệu, Tình trạng sự cố, Nguyên nhân, Cách khắc phục, vật tư
@@ -536,6 +638,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F13 (01-15/05/2026)`
 
 **Kỹ thuật `staffMap` (dùng cho F13, F15, F15BaoDuong)**:
+
 - Sau khi load record, fetch `maintenance_staff` theo `factory_id` của record
 - Build `Map<string, string>` với key = `ten`, value = `chuc_vu`
 - Truyền vào `PrintSuCo`, `PrintF15`, `PrintF15BaoDuong` qua prop `staffMap`
@@ -544,6 +647,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - **Lọc Tổ trưởng cơ điện**: `staffMap.get(name)?.toLowerCase()` chứa `"tổ trưởng"` **VÀ** `"cơ điện"` → người thật; không phụ thuộc string so sánh cứng
 
 **F10 (`PrintF10`)** — Giấy đề nghị sửa chữa (KHXD-QT02-F10):
+
 - "Kampong Thom, ngày ... tháng ... năm ..." (căn phải)
 - "Kính gửi: Giám đốc Nhà máy..."
 - Đề nghị cho sửa chữa: tên máy, đính kèm biên bản số
@@ -556,6 +660,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F10 (01-15/05/2026)`
 
 **F15 (`PrintF15`)** — Biên bản nghiệm thu (KHXD-QT02-F15):
+
 - "Xe/máy/thiết bị: ... Biển số/số hiệu: ..."
 - "Căn cứ: Giấy đề nghị sửa chữa số ..."
 - "Hôm nay, ngày ... Tại ..."
@@ -577,6 +682,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F15 (01-15/05/2026)`
 
 **F03 (`PrintF03`)** — Giấy đề nghị bảo trì - sửa chữa (KHXD-QT02-F03):
+
 - Dùng cho **cả 2 type bảo dưỡng** (`bao_duong` và `bao_duong_xe`)
 - "Kampong Thom, ngày ... tháng ... năm ..." (căn phải)
 - Tiêu đề: "GIẤY ĐỀ NGHỊ BẢO TRÌ - SỬA CHỮA" (13pt, uppercase, căn giữa)
@@ -590,6 +696,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F03 (01-15/05/2026)`
 
 **F15BaoDuong (`PrintF15BaoDuong`)** — Biên bản nghiệm thu cho Bảo dưỡng (KHXD-QT02-F15):
+
 - Dùng thay cho `PrintF15` trong 2 type bảo dưỡng; **không dùng cho Sửa chữa**
 - Sub-title: "(Áp dụng cho bảo dưỡng định kỳ)"
 - Căn cứ: Giấy đề nghị bảo trì số …
@@ -603,6 +710,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F15 (01-15/05/2026)`
 
 **F06 (`PrintF06`)** — Phiếu hoàn thành công việc bảo trì (KHXD-QT02-F06):
+
 - Chỉ dùng cho type `bao_duong_xe` (Bảo dưỡng Đội xe)
 - Sub-title: "(Áp dụng cho xe ôtô vận chuyển mủ)"
 - Biển số / Tên lái xe per dòng xe
@@ -616,6 +724,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 - Footer: `KHXD-QT02-F06 (01-15/05/2026)`
 
 **F01 (`PrintLyLich`)** — Lý lịch máy móc / thiết bị (KHXD-QT02-F01):
+
 - **Section I**: Thông tin thiết bị (Tên, Mã, Bộ phận, Năm sử dụng, Biển số nếu là xe)
 - **Section II**: "BẢO TRÌ, SỬA CHỮA, THAY THẾ PHỤ TÙNG" — bảng 6 cột: STT | Thời gian | Nội dung | Giá trị | Người thực hiện | Người theo dõi
 - Ký tên 4 cột: Người lập | Tổ cơ điện | BGĐ phụ trách | Giám đốc nhà máy
@@ -628,6 +737,7 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 **`CompanyHeader`**: font `12px`, màu `#000000`, không có `tracking-wide`. Tên công ty in đậm uppercase, dòng bộ phận bên dưới cùng cỡ chữ.
 
 **Typography toàn mẫu**:
+
 - Body text: `font-size: 12pt` (CSS `@page`), `leading-5`, `space-y-0.5`
 - Tiêu đề h2: `font-size: 13pt` (inline style)
 - Khoảng cách giữa section: `mt-2` (giảm từ `mt-4`)
@@ -636,16 +746,19 @@ if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length =
 
 ### Print URL params
 
-| Param | Mô tả |
-|---|---|
-| `type` | `su_co` \| `de_nghi` \| `su_co_nho` \| `bao_duong` \| `bao_duong_xe` \| `ly_lich` |
-| `record_id` | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho / bao_duong / bao_duong_xe) |
-| `asset_id` | UUID 1 thiết bị (ly_lich đơn) |
-| `asset_ids` | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich** |
-| `from` | Ngày bắt đầu lọc (ly_lich) |
-| `to` | Ngày kết thúc lọc (ly_lich) |
+| Param        | Mô tả                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `type`       | `su_co` \| `de_nghi` \| `su_co_nho` \| `bao_duong` \| `bao_duong_xe` \| `sua_chua_nho_xe` \| `ly_lich` \| `ly_lich_xe` |
+| `record_id`  | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho / bao_duong / bao_duong_xe / sua_chua_nho_xe)                      |
+| `asset_id`   | UUID 1 thiết bị (ly_lich đơn)                                                                                          |
+| `asset_ids`  | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich**                                                           |
+| `vehicle_id` | UUID xe từ `dispatch_vehicles` (ly_lich_xe)                                                                            |
+| `from`       | Ngày bắt đầu lọc (ly_lich / ly_lich_xe)                                                                                |
+| `to`         | Ngày kết thúc lọc (ly_lich / ly_lich_xe)                                                                               |
 
 Multi-device ly_lich: `?type=ly_lich&asset_ids=uuid1,uuid2,uuid3&from=...&to=...` → mỗi thiết bị 1 trang F01, ngăn cách bằng `page-break-before-always`.
+
+Xe ly_lich_xe: `?type=ly_lich_xe&vehicle_id=uuid&from=...&to=...` → 1 trang F02 per xe.
 
 ---
 
@@ -697,6 +810,7 @@ src/app/dashboard/maintenance/
 ## Quy tắc UI
 
 ### Asset picker
+
 - Dùng card picker inline (không tách component riêng) theo kiểu `CompactItemSelectorCard` của inventory
 - Mỗi card: `ma_tb` (monospace), `ten_tb` (2-line clamp), loại (Xe / Máy + biển số nếu có)
 - Viền cam + dấu check cam khi đã chọn; badge đếm số đã chọn ở tiêu đề; nút "Bỏ chọn tất cả"
@@ -704,11 +818,13 @@ src/app/dashboard/maintenance/
 - Grid: `grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5`
 
 ### Dòng thiết bị
+
 - Mỗi dòng là 1 block expand/collapse với header cam
 - Header hiển thị tên + mã + badge Lớn/Nhỏ (Sửa chữa)
 - 6 slot ảnh cố định per dòng — upload qua shared hidden `<input type="file">` + `activeSlotRef` track slot đang upload
 
 ### Vật tư
+
 - **Cả hai loại** `trong_kho` và `ben_ngoai` đều dùng `<select>` dropdown chọn từ `inventory_items`
 - Mỗi loại có nút **"+ Thêm mới"** (text-[10px], emerald-600) mở modal tạo vật tư mới trực tiếp vào `inventory_items`
 - Modal tạo vật tư mới có 3 trường: Mã vật tư (required), Tên vật tư (required), Đơn vị tính; sau khi lưu tự động chọn vào dòng vật tư đang mở, đóng modal
@@ -719,12 +835,14 @@ src/app/dashboard/maintenance/
 - `ben_ngoai` vẫn có trường Đơn giá và Loại tiền; `trong_kho` chỉ có Số lượng (không có Đơn giá)
 
 ### Nhân sự
+
 - `nguoi_thuc_hien`: chip multi-select, chỉ hiển thị `workerStaff`
 - `nv_phu_trach` / `phu_trach_bao_tri`: `<select>` từ `nvStaff`
 - `bgd_phu_trach`: `<select>` từ `bgdStaff`, loại trừ giá trị đã chọn ở `giam_doc`
 - `giam_doc`: `<select>` từ `bgdStaff`, loại trừ giá trị đã chọn ở `bgd_phu_trach`
 
 ### QR code
+
 - Dùng `QRCodeSVG` từ package `qrcode.react` (đã có trong project)
 - Trang chi tiết: QR compact (size=56) hiện ngay sau khi biên bản có `ma_bb`
 - Trang in: QR (size=64) ở góc trên phải mỗi mẫu, cạnh tiêu đề + số biên bản

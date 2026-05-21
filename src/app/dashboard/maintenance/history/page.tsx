@@ -30,10 +30,14 @@ type HistoryRow = {
 
 type AssetOption = Pick<MaintenanceAsset, "id" | "ma_tb" | "ten_tb" | "bo_phan" | "loai">
 
+type DispatchVehicleOption = { id: string; code: string; name: string; vehicle_type: string | null; plate_number: string | null }
+
 export default function MaintenanceHistoryPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [assets, setAssets] = useState<AssetOption[]>([])
+  const [vehicles, setVehicles] = useState<DispatchVehicleOption[]>([])
+  const [selectedVehicleId, setSelectedVehicleId] = useState("")
   const [rows, setRows] = useState<HistoryRow[]>([])
 
   // Multi-select asset picker state (like record form)
@@ -76,14 +80,23 @@ export default function MaintenanceHistoryPage() {
   }
 
   const loadAssets = useCallback(async (fid: string) => {
-    const { data } = await supabase
-      .from("maintenance_assets")
-      .select("id, ma_tb, ten_tb, bo_phan, loai")
-      .eq("factory_id", fid)
-      .eq("trang_thai", "active")
-      .order("bo_phan")
-      .order("ten_tb")
-    setAssets((data || []) as AssetOption[])
+    const [{ data: assetsData }, { data: vehiclesData }] = await Promise.all([
+      supabase
+        .from("maintenance_assets")
+        .select("id, ma_tb, ten_tb, bo_phan, loai")
+        .eq("factory_id", fid)
+        .eq("trang_thai", "active")
+        .order("bo_phan")
+        .order("ten_tb"),
+      supabase
+        .from("dispatch_vehicles")
+        .select("id, code, name, vehicle_type, plate_number")
+        .eq("factory_id", fid)
+        .eq("is_active", true)
+        .order("code"),
+    ])
+    setAssets((assetsData || []) as AssetOption[])
+    setVehicles((vehiclesData || []) as DispatchVehicleOption[])
   }, [])
 
   const loadHistory = useCallback(async (fid: string) => {
@@ -187,6 +200,10 @@ export default function MaintenanceHistoryPage() {
     ? `/dashboard/maintenance/print?type=ly_lich&asset_ids=${selectedAssetIds.join(",")}${filterFrom ? `&from=${filterFrom}` : ""}${filterTo ? `&to=${filterTo}` : ""}`
     : null
 
+  const vehiclePrintUrl = selectedVehicleId
+    ? `/dashboard/maintenance/print?type=ly_lich_xe&vehicle_id=${selectedVehicleId}${filterFrom ? `&from=${filterFrom}` : ""}${filterTo ? `&to=${filterTo}` : ""}`
+    : null
+
   const selectedAssets = assets.filter((a) => selectedAssetIds.includes(a.id))
 
   return (
@@ -196,21 +213,35 @@ export default function MaintenanceHistoryPage() {
           <h1 className="text-2xl font-extrabold text-slate-800">Lý lịch thiết bị</h1>
           <p className="text-sm text-slate-500 mt-0.5">Lịch sử sửa chữa và bảo dưỡng theo thiết bị / xe</p>
         </div>
-        <Link
-          href={printUrl ?? "#"}
-          target={printUrl ? "_blank" : undefined}
-          onClick={!printUrl ? (e) => e.preventDefault() : undefined}
-          className={`flex items-center gap-2 px-5 py-2.5 font-bold rounded-xl shadow-md ${
-            printUrl
-              ? "bg-slate-700 hover:bg-slate-800 text-white"
-              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-          }`}
-        >
-          <Printer size={15} />
-          {selectedAssetIds.length > 0
-            ? `In lý lịch (${selectedAssetIds.length} thiết bị)`
-            : "In lý lịch"}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={printUrl ?? "#"}
+            target={printUrl ? "_blank" : undefined}
+            onClick={!printUrl ? (e) => e.preventDefault() : undefined}
+            className={`flex items-center gap-2 px-4 py-2.5 font-bold rounded-xl shadow-md ${
+              printUrl
+                ? "bg-slate-700 hover:bg-slate-800 text-white"
+                : "bg-slate-200 text-slate-400 cursor-not-allowed"
+            }`}
+          >
+            <Printer size={15} />
+            {selectedAssetIds.length > 0
+              ? `In lý lịch (${selectedAssetIds.length} thiết bị)`
+              : "In lý lịch"}
+          </Link>
+          <Link
+            href={vehiclePrintUrl ?? "#"}
+            target={vehiclePrintUrl ? "_blank" : undefined}
+            onClick={!vehiclePrintUrl ? (e) => e.preventDefault() : undefined}
+            className={`flex items-center gap-2 px-4 py-2.5 font-bold rounded-xl shadow-md ${
+              vehiclePrintUrl
+                ? "bg-orange-600 hover:bg-orange-700 text-white"
+                : "bg-slate-200 text-slate-400 cursor-not-allowed"
+            }`}
+          >
+            <Printer size={15} /> In lý lịch xe
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -344,6 +375,23 @@ export default function MaintenanceHistoryPage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Xe — cho lý lịch xe (F02) */}
+        <div className="flex flex-col gap-1 min-w-[200px]">
+          <label className="text-xs font-bold text-slate-500">Xe (lý lịch F02)</label>
+          <select
+            value={selectedVehicleId}
+            onChange={(e) => setSelectedVehicleId(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400 bg-white"
+          >
+            <option value="">— Chọn xe —</option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.code} - {v.name}{v.plate_number ? ` (${v.plate_number})` : ""}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Date range */}
