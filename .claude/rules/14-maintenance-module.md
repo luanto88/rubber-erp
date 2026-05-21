@@ -199,8 +199,9 @@ factory_id            UUID
 ma_bb                 TEXT     -- MT-DDMMYY/XXX (auto, read-only sau khi tạo)
 hang_muc              TEXT     -- Sửa chữa | Bảo dưỡng
 ngay                  DATE
-tu_gio                TIME
+tu_gio                TIME     -- khi tạo mới mặc định giờ hiện tại "HH:mm"
 den_gio               TEXT     -- datetime-local "YYYY-MM-DDTHH:mm"; TEXT thay TIME để hỗ trợ sửa nhiều ngày
+                               -- khi tạo mới mặc định thời điểm hiện tại; cảnh báo "Giờ kết thúc đang sớm hơn giờ bắt đầu" khi den_gio < tu_gio
 bo_phan               TEXT
 
 -- Nhân sự chung (snapshot tên tại thời điểm tạo)
@@ -263,7 +264,7 @@ so_luong_do           NUMERIC
 
 -- Xe nhỏ (Sửa chữa nhỏ Đội xe — dùng cho F08 và F15SmallVehicle)
 km_dong_ho            NUMERIC  -- chỉ số đồng hồ Km/giờ
-chat_luong            TEXT     -- chất lượng sau sửa chữa (Đạt / Không đạt / ghi chú)
+chat_luong            TEXT     -- "Đạt" | "Không đạt" — lưu bằng radio button, mặc định "Đạt"
 
 -- Ảnh per thiết bị (tối đa 6)
 image_urls            TEXT[]
@@ -367,8 +368,9 @@ const isReadOnly =
 
 ```
 Tạo → cho_duyet
+  └─ handleSave kiểm tra tồn kho vật tư trong_kho TRƯỚC khi gọi API (chặn nếu không đủ)
 Phê duyệt (maintenance.approve) → da_duyet
-  └─ Kiểm tra tồn kho vật tư trong_kho (chặn nếu không đủ)
+  └─ handleApprove kiểm tra lại tồn kho (tồn có thể thay đổi giữa lúc save và approve)
   └─ Nếu có vật tư trong_kho:
       → Tạo inventory_documents (loại Xuất kho, status = posted)
       → Ghi sổ inventory stock movements
@@ -821,6 +823,7 @@ src/app/dashboard/maintenance/
 
 - Mỗi dòng là 1 block expand/collapse với header cam
 - Header hiển thị tên + mã + badge Lớn/Nhỏ (Sửa chữa)
+- **Không dùng `overflow-hidden` trên wrapper của dòng thiết bị** — để dropdown vật tư (`position: absolute, bottom-full`) có thể nổi lên phía trên mà không bị cắt; thay bằng `rounded-t-xl` trực tiếp trên header
 
 #### Ảnh hiện trường per dòng (tối đa 6)
 
@@ -849,8 +852,10 @@ src/app/dashboard/maintenance/
   - `ben_ngoai`: không hiện tồn
 - `inventory_item_id` được lưu cho **cả** `trong_kho` và `ben_ngoai` — payload save không phân biệt loại nguồn
 - Tồn kho lấy từ `inventory_stock_balances.on_hand` (không phải `quantity_on_hand`)
-- **Cảnh báo inline**: Khi `so_luong > currentStock`, ô nhập chuyển viền đỏ và hiện text đỏ bên dưới: `"Vượt tồn (X)"`
-- **Chặn phê duyệt**: `handleApprove` validate toàn bộ vật tư `trong_kho` trước khi tạo phiếu xuất; hiện `saveError` và return sớm nếu bất kỳ vật tư nào vượt tồn
+- **Cảnh báo inline**: Khi `so_luong > currentStock`, ô nhập chuyển viền đỏ và hiện text đỏ bên dưới: `"Vượt (X)"`
+- **Chặn SAVE**: `handleSave` validate toàn bộ vật tư `trong_kho` trước khi gọi API; nếu có vật tư vượt tồn → hiện `saveError` đa dòng liệt kê từng vi phạm, không gọi Supabase
+- **Chặn phê duyệt**: `handleApprove` validate lại lần nữa (tồn kho có thể thay đổi giữa lúc save và approve); hiện `saveError` và return sớm nếu bất kỳ vật tư nào vượt tồn
+- Dropdown vật tư mở **lên trên** (`bottom-full mb-1`) — không dùng `top-full`; bắt buộc vì wrapper dòng thiết bị không có `overflow-hidden`
 - `ben_ngoai` vẫn có trường Đơn giá và Loại tiền; `trong_kho` chỉ có Số lượng (không có Đơn giá)
 - Mỗi loại có nút **"+ Thêm mới"** mở modal tạo vật tư mới trực tiếp vào `inventory_items`; sau khi lưu tự động chọn vào dòng và đóng modal
 
@@ -867,6 +872,21 @@ src/app/dashboard/maintenance/
 | Tiền tệ    | `w-[74px]`  | chỉ `ben_ngoai`                |
 
 Font tất cả labels và inputs vật tư: `text-xs` (không dùng `text-[10px]`).
+
+### Nhiên liệu sử dụng (Đội xe only)
+
+- Trường `nhien_lieu_su_dung` hiển thị `<select>` load từ `inventory_items` thuộc nhóm danh mục có tên chứa `"nhiên liệu"` (so sánh case-insensitive)
+- Khi chọn từ dropdown: `dvt_do` tự điền theo `unit` của item đã chọn và bị disabled (không chỉnh tay)
+- Nút **"+ Nhập tên khác"** (styled border, hover cam) cho phép nhập text tự do; khi ở mode nhập tay nút đổi thành "← Chọn danh sách" để quay lại
+- Khi load biên bản cũ: nếu `nhien_lieu_su_dung` không khớp với tên bất kỳ item nào trong danh sách → tự chuyển sang mode nhập tay (`fuelManualModes[lineId] = true`)
+- Khi ở mode nhập tay: `dvt_do` có thể nhập tay; không ảnh hưởng tồn kho (chỉ lưu tên để đồng bộ tên gọi)
+
+### Chất lượng sau sửa chữa (Đội xe — Sửa chữa only)
+
+- Trường `chat_luong` dùng 2 radio button inline: **"Đạt"** và **"Không đạt"**
+- Mặc định "Đạt" khi tạo mới (emptyLine/emptyLineFromVehicle khởi tạo `chat_luong = "Đạt"`)
+- Logic `checked`: `line.chat_luong !== "Không đạt"` → Đạt; `line.chat_luong === "Không đạt"` → Không đạt
+- Màu emerald cho "Đạt", màu đỏ cho "Không đạt"
 
 ### Nhân sự
 

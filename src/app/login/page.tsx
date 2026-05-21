@@ -1,8 +1,9 @@
 "use client"
 
 import Image from "next/image"
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { ChevronDown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import {
   authBlockReason,
@@ -48,6 +49,8 @@ function LoginPageContent() {
   const [tab, setTab] = useState<"login" | "register">("login")
   const [fullName, setFullName] = useState("")
   const [dept, setDept] = useState("")
+  const [deptOpen, setDeptOpen] = useState(false)
+  const deptRef = useRef<HTMLDivElement>(null)
   const [booting, setBooting] = useState(true)
   const [notice, setNotice] = useState("")
 
@@ -117,6 +120,16 @@ function LoginPageContent() {
   useEffect(() => {
     if (reason) setNotice(REASON_MESSAGES[reason] || "")
   }, [reason])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (deptRef.current && !deptRef.current.contains(e.target as Node)) {
+        setDeptOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [])
 
   const handleLogin = async () => {
     setError("")
@@ -292,16 +305,43 @@ function LoginPageContent() {
                   placeholder="Họ tên *"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
-                <select
-                  value={dept}
-                  onChange={(e) => setDept(e.target.value)}
-                  className={"w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 " + (dept ? "" : "text-slate-400")}
-                >
-                  <option value="">Phòng ban</option>
-                  {departments.map(d => (
-                    <option key={d.id} value={d.name}>{d.name} ({d.code})</option>
-                  ))}
-                </select>
+                <div ref={deptRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setDeptOpen(o => !o)}
+                    className={"w-full flex items-center justify-between rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 " + (dept ? "text-slate-800" : "text-slate-400")}
+                  >
+                    <span>
+                      {dept
+                        ? departments.find(d => d.name === dept)
+                            ? `${dept} (${departments.find(d => d.name === dept)!.code})`
+                            : dept
+                        : "Phòng ban"}
+                    </span>
+                    <ChevronDown size={16} className={"transition-transform " + (deptOpen ? "rotate-180" : "")} />
+                  </button>
+                  {deptOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+                      <button
+                        type="button"
+                        onClick={() => { setDept(""); setDeptOpen(false) }}
+                        className={"w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " + (!dept ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-400")}
+                      >
+                        Phòng ban
+                      </button>
+                      {departments.map(d => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => { setDept(d.name); setDeptOpen(false) }}
+                          className={"w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " + (dept === d.name ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700")}
+                        >
+                          {d.name} ({d.code})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
