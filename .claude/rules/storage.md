@@ -23,6 +23,7 @@ Khong co trang thai `Hoan thanh` cho ngan.
 - Cho phep nhap tay ten ngan, toi da 10 ky tu
 - `ma_ngan` la field tu sinh, khong cho sua tay
 - `KL tuoi` va `KL kho` la field read-only, tu tinh tu danh sach xe da chon
+- Sau khi tao / sua ngan, `tong_tuoi` va `tong_kho` co the duoc cap nhat lai tu dong boi `writeBackToDispatch` trong module San luong khi san luong thay doi (xem muc 9)
 
 ## 3. Tinh khoi luong theo loai nguyen lieu
 
@@ -106,3 +107,28 @@ Muc tieu UI:
 - UI thanh pham: `src/app/dashboard/product/page.tsx`
 - Rule sync trang thai ngan khi sua lo: `handleEditSave`
 - Rule chi tiet ngan theo nhom / ngay / lo: `openView`, `groupedViewLots`
+- KL mapping dispatch → ngan: `getKLFromTrip(...)` tai `storage/page.tsx` — phai dong bo voi `getNganKL(...)` trong `output-types.ts`
+
+## 9. Tu dong dong bo KL ngan tu module San luong
+
+`tong_tuoi` va `tong_kho` cua ngan khong chi duoc tinh khi tao / sua ngan.
+Chung con duoc **cap nhat lai tu dong** moi khi san luong thay doi, thong qua ham `writeBackToDispatch` trong module San luong.
+
+### Chuoi xu ly
+
+```
+production_records thay doi (import / save / delete)
+  → writeBackToDispatch(factoryId, ngay, supabase)
+    → cap nhat dispatch_entries.rows[] (kl_* / drc_*)
+    → tim ngan co trips[] chua bat ky uid nao thuoc ngay do
+    → load lai toan bo dispatch (moi ngay) de build uid→KL map chinh xac
+    → tinh lai tong_tuoi / tong_kho cho tung ngan bi anh huong
+    → UPDATE ngans
+```
+
+### Quy tac quan trong
+
+- Ngan tich luy KL tu nhieu ngay. Buoc tinh lai phai dung **toan bo trips cua ngan** (khong chi ngay hien tai) — vi vay `writeBackToDispatch` load lai toan bo dispatch sau khi da update xong ngay do.
+- Neu ngay do khong co uid nao thuoc ngan → ngan khong bi anh huong → khong co UPDATE.
+- Nguoi dung **khong can mo lai form ngan** de cap nhat KL — he thong tu dong xu ly.
+- Ham `getNganKL` trong `output-types.ts` phai mirror chinh xac `getKLFromTrip` trong `storage/page.tsx`. Neu sua mot ham, phai sua ca hai.

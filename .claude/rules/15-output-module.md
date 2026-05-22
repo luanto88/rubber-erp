@@ -183,6 +183,10 @@ export async function writeBackToDispatch(
    - Normalize `row.so_xe` qua `parseVehicleCode()` để lấy `base_xe`
    - Lookup group `"${base_xe}:${chuyen}"` → nếu có, ghi các trường KL; nếu không có, giữ nguyên dòng
 5. Chỉ `UPDATE` nếu có ít nhất 1 dòng thay đổi (`changed = true`)
+6. Tập hợp tất cả `uid` của các dispatch rows thuộc ngày đó → tìm ngăn lưu có `trips[]` chứa bất kỳ uid nào
+7. Tải lại toàn bộ dispatch (mọi ngày) để build `uid → KL map` chính xác → tính lại `tong_tuoi/tong_kho` cho từng ngăn bị ảnh hưởng và `UPDATE ngans`
+
+**Lý do load toàn bộ dispatch ở bước 7**: ngăn lưu tích lũy KL từ nhiều ngày. Cần tổng KL qua tất cả trips của ngăn (không chỉ ngày hiện tại). Load sau bước 5 đảm bảo DB đã có giá trị mới nhất cho ngày vừa cập nhật.
 
 ### Mapping trường
 
@@ -220,12 +224,49 @@ Tất cả giá trị ghi vào dispatch dưới dạng **string** (dispatch lưu
 
 ```typescript
 // Fire-and-forget — lỗi không chặn UI
-void writeBackToDispatch(factoryId, ngay, supabase)
+void writeBackToDispatch(factoryId, ngay, supabase).catch(() => {})
 
 // Import: nhiều ngày song song
 void Promise.all(
   uniqueNgays.map(ngay => writeBackToDispatch(factoryId, ngay, supabase).catch(() => {}))
 )
+```
+
+### Helper `getNganKL` (trong output-types.ts)
+
+Hàm nội bộ ánh xạ `dispatch_entries.rows[]` sang `{tuoi, kho}` theo `loai_nl` — mirror chính xác `getKLFromTrip()` trong `storage/page.tsx`:
+
+```typescript
+function getNganKL(row: Record<string, number>, loai_nl: string): { tuoi: number; kho: number } {
+  switch (loai_nl) {
+    case "Mủ chén":      return { tuoi: row.kl_ct,  kho: row.kl_ck }
+    case "Mủ đông chén": return { tuoi: row.kl_dct, kho: row.kl_dck }
+    case "Mủ đông khối": return { tuoi: row.kl_dkt, kho: row.kl_dkk }
+    case "Mủ dây":       return { tuoi: row.kl_dt,  kho: row.kl_dk }
+    case "Mủ nước":      return { tuoi: row.kl_mn,  kho: row.kl_mnk }
+    default:             return { tuoi: 0, kho: 0 }
+  }
+}
+```
+
+Hai hàm phải giữ đồng bộ nhau — nếu sửa mapping ở `storage/page.tsx` phải sửa tương tự ở đây.
+
+### loadDispatches trong page.tsx
+
+`loadDispatches` **không được** dùng `.gte/.lte` để lọc theo ngày vì `dispatch_entries.ngay` có thể lưu dạng `dd/mm/yyyy` — so sánh chuỗi lexicographic sẽ cho kết quả sai với format này.
+
+```typescript
+// Đúng — load toàn bộ, không lọc ngày
+const loadDispatches = useCallback(async (fid: string) => {
+  const { data } = await supabase
+    .from("dispatch_entries")
+    .select("id, ngay, rows")
+    .eq("factory_id", fid)
+  setDispatches((data as DispatchEntry[]) || [])
+}, [])
+
+// SAI — lọc ngày bằng gte/lte không hoạt động đúng cho dd/mm/yyyy
+// .gte("ngay", from).lte("ngay", to) → bỏ sót entries lưu dạng "22/05/2026"
 ```
 
 ---

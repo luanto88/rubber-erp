@@ -444,28 +444,33 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 
 ### UI tab Lý lịch thiết bị (`history/page.tsx`)
 
-**Asset picker multi-select** (giống form tạo biên bản):
+**Picker tích hợp Thiết bị / Xe** (unified, không tách riêng):
 
-- Button trigger hiển thị số lượng thiết bị đã chọn
-- Dropdown mở ra gồm: filter Bộ phận (select) + ô tìm kiếm nhanh (input) + danh sách checkbox
-- Danh sách checkbox: mỗi item hiện `ma_tb` (monospace) + `ten_tb` + bộ phận + loại (Xe/Máy)
-- Thiết bị đã chọn hiển thị dưới dạng chip tags với nút × bỏ chọn riêng lẻ
-- Nút "Chọn tất cả (N)" và "Bỏ chọn tất cả" trong dropdown
+- 1 button trigger duy nhất — label thay đổi theo mode: "N xe đã chọn" hoặc "N thiết bị đã chọn"
+- Dropdown mở ra gồm: filter **Bộ phận** (select) + ô tìm kiếm nhanh (input) + danh sách checkbox
+- **Khi bộ phận = "Đội xe"** (`isVehicleMode = true`): danh sách hiện xe từ `dispatch_vehicles` — mỗi item hiện `code` (monospace) + `name` + biển số / loại xe
+- **Khi bộ phận ≠ "Đội xe"** (kể cả "Tất cả"): danh sách hiện thiết bị từ `maintenance_assets` — mỗi item hiện `ma_tb` (monospace) + `ten_tb` + bộ phận
+- Đổi bộ phận → xóa selection của mode vừa rời (tránh trộn xe và thiết bị)
+- State: `selectedAssetIds: string[]` cho thiết bị, `selectedVehicleIds: string[]` cho xe — chỉ 1 mảng active tại một thời điểm
+- Chip tags bên dưới trigger hiện riêng từng loại (`ma_tb` + `ten_tb` cho thiết bị; `code` + `name` cho xe)
+- Nút "Chọn tất cả (N)" và "Bỏ chọn tất cả" hoạt động trên mode đang active
 - Dropdown đóng khi click ngoài (`useRef` + `mousedown` listener)
 
-**Nút "In lý lịch"** luôn hiển thị (không ẩn/hiện điều kiện):
+**Nút "In lý lịch"** — 1 nút duy nhất, phân nhánh F01/F02 theo loại đang chọn:
 
-- Chưa chọn thiết bị: xám `bg-slate-200 text-slate-400 cursor-not-allowed`, không navigate
-- Đã chọn thiết bị: đen đậm `bg-slate-700 hover:bg-slate-800 text-white`, click mở tab in
-- Luôn dùng một element `<Link>` duy nhất, chỉ thay className — **không toggle giữa `<span>` và `<Link>`** (gây mount mới → `bg-slate-700` mất CSS, chỉ thấy khi hover)
-- URL khi active: `?type=ly_lich&asset_ids=id1,id2,...&from=...&to=...`
-- Label: "In lý lịch (N thiết bị)"
-- Mỗi thiết bị được in 1 trang F01 riêng với page break
+- Chưa chọn: xám `bg-slate-200 text-slate-400 cursor-not-allowed`, không navigate
+- Xe được chọn: URL `?type=ly_lich_xe&vehicle_ids=id1,id2,...` → mẫu F02 (1 trang/xe)
+- Thiết bị được chọn: URL `?type=ly_lich&asset_ids=id1,id2,...` → mẫu F01 (1 trang/thiết bị)
+- Có selection: đen đậm `bg-slate-700 hover:bg-slate-800 text-white`, click mở tab in
+- Luôn dùng `<Link>` duy nhất, chỉ thay className — **không toggle giữa `<span>` và `<Link>`**
+- Label: "In lý lịch (N xe)" hoặc "In lý lịch (N thiết bị)" tuỳ mode
 
 **Kỹ thuật query**: Do Supabase JS v2 không hỗ trợ `.order("related_table(col)")` cross-table, lịch sử phải dùng two-step query:
 
 1. Query `maintenance_records` với filter/order trước → lấy danh sách `id`
-2. Query `maintenance_record_lines` với `.in("record_id", ids)` và `.in("asset_id", selectedAssetIds)` nếu có chọn
+2. Query `maintenance_record_lines` với `.in("record_id", ids)` rồi filter thêm:
+   - Nếu có `selectedVehicleIds` → `.in("dispatch_vehicle_id", selectedVehicleIds)`
+   - Nếu có `selectedAssetIds` → `.in("asset_id", selectedAssetIds)`
 3. Client-side sort kết quả cuối
 
 ---
@@ -547,7 +552,8 @@ Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id
 
 ### F02 — Lý lịch xe máy (KHXD-QT02-F02)
 
-URL: `?type=ly_lich_xe&vehicle_id=<uuid>&from=<date>&to=<date>`
+URL (multi): `?type=ly_lich_xe&vehicle_ids=<uuid1>,<uuid2>,...&from=<date>&to=<date>` — từ tab Lý lịch (ưu tiên)  
+URL (legacy/single): `?type=ly_lich_xe&vehicle_id=<uuid>&from=<date>&to=<date>` — từ trang chi tiết biên bản (backward-compat)
 
 - **Section I**: Lịch sử người vận hành — query từ `dispatch_vehicle_driver_assignments` JOIN `dispatch_drivers`
   - Columns: STT | Họ tên | Từ ngày | Đến ngày | Ghi chú
@@ -754,13 +760,15 @@ if (
 | `record_id`  | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho / bao_duong / bao_duong_xe / sua_chua_nho_xe)                      |
 | `asset_id`   | UUID 1 thiết bị (ly_lich đơn)                                                                                          |
 | `asset_ids`  | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich**                                                           |
-| `vehicle_id` | UUID xe từ `dispatch_vehicles` (ly_lich_xe)                                                                            |
-| `from`       | Ngày bắt đầu lọc (ly_lich / ly_lich_xe)                                                                                |
-| `to`         | Ngày kết thúc lọc (ly_lich / ly_lich_xe)                                                                               |
+| `vehicle_id`  | UUID xe từ `dispatch_vehicles` (ly_lich_xe đơn — legacy/backward-compat từ trang chi tiết biên bản)                    |
+| `vehicle_ids` | Danh sách UUID cách nhau dấu phẩy — **multi-vehicle ly_lich_xe** (từ tab Lý lịch, ưu tiên hơn `vehicle_id`)            |
+| `from`        | Ngày bắt đầu lọc (ly_lich / ly_lich_xe)                                                                                |
+| `to`          | Ngày kết thúc lọc (ly_lich / ly_lich_xe)                                                                               |
 
 Multi-device ly_lich: `?type=ly_lich&asset_ids=uuid1,uuid2,uuid3&from=...&to=...` → mỗi thiết bị 1 trang F01, ngăn cách bằng `page-break-before-always`.
 
-Xe ly_lich_xe: `?type=ly_lich_xe&vehicle_id=uuid&from=...&to=...` → 1 trang F02 per xe.
+Multi-vehicle ly_lich_xe: `?type=ly_lich_xe&vehicle_ids=uuid1,uuid2&from=...&to=...` → mỗi xe 1 trang F02, ngăn cách bằng `page-break-before-always`.  
+Legacy single: `?type=ly_lich_xe&vehicle_id=uuid&from=...&to=...` → 1 trang F02 (backward-compat).
 
 ---
 

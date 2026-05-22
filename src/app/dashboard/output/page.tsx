@@ -133,15 +133,13 @@ export default function OutputPage() {
   }, [])
 
   const loadDispatches = useCallback(async (fid: string) => {
-    // load dispatch entries for the filter period (for matching)
+    // Load toàn bộ dispatch — không lọc theo ngày vì ngay có thể lưu dạng dd/mm/yyyy hoặc YYYY-MM-DD
     const { data } = await supabase
       .from("dispatch_entries")
       .select("id, ngay, rows")
       .eq("factory_id", fid)
-      .gte("ngay", filterFrom)
-      .lte("ngay", filterTo)
     setDispatches((data as DispatchEntry[]) || [])
-  }, [filterFrom, filterTo])
+  }, [])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -234,7 +232,7 @@ export default function OutputPage() {
     setShowForm(false)
     setEditRecord(null)
     void loadRecords(factoryId)
-    void writeBackToDispatch(factoryId, form.ngay, supabase)
+    void writeBackToDispatch(factoryId, form.ngay, supabase).catch(() => {})
   }
 
   const handleDelete = async (id: string) => {
@@ -243,7 +241,7 @@ export default function OutputPage() {
     await supabase.from("production_records").delete().eq("id", id)
     setDelConfirm(null)
     void loadRecords(factoryId)
-    if (rec) void writeBackToDispatch(factoryId, rec.ngay, supabase)
+    if (rec) void writeBackToDispatch(factoryId, rec.ngay, supabase).catch(() => {})
   }
 
   const SortIcon = ({ col }: { col: typeof sortCol }) =>

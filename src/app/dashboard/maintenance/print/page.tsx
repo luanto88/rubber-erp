@@ -1685,6 +1685,7 @@ export default function MaintenancePrintPage() {
   const assetId = params.get("asset_id") || ""
   const assetIdsParam = params.get("asset_ids") || ""   // comma-separated for multi-device ly_lich
   const vehicleId = params.get("vehicle_id") || ""
+  const vehicleIdsParam = params.get("vehicle_ids") || ""  // comma-separated for multi-vehicle ly_lich_xe
   const filterFrom = params.get("from") || ""
   const filterTo = params.get("to") || ""
 
@@ -1699,6 +1700,12 @@ export default function MaintenancePrintPage() {
   const [vehicleDrivers, setVehicleDrivers] = useState<DriverAssignmentRow[]>([])
   const [vehicleMaintRows, setVehicleMaintRows] = useState<VehicleHistoryRow[]>([])
   const [vehicleRepairRows, setVehicleRepairRows] = useState<VehicleHistoryRow[]>([])
+  const [multiVehicles, setMultiVehicles] = useState<{
+    vehicle: VehicleInfo
+    drivers: DriverAssignmentRow[]
+    maintRows: VehicleHistoryRow[]
+    repairRows: VehicleHistoryRow[]
+  }[]>([])
 
   const qrUrl = useMemo(() => {
     if (!recordId || typeof window === "undefined") return ""
@@ -1778,93 +1785,113 @@ export default function MaintenancePrintPage() {
             setHistoryRows(rows)
           }
         } else if (printType === "ly_lich_xe") {
-          if (!vehicleId) { setError("Thiếu vehicle_id"); return }
+          const vehicleIdList = vehicleIdsParam
+            ? vehicleIdsParam.split(",").filter(Boolean)
+            : vehicleId
+              ? [vehicleId]
+              : []
+          if (vehicleIdList.length === 0) { setError("Thiếu thông tin xe"); return }
 
-          // Load vehicle info
-          const { data: veh } = await supabase
-            .from("dispatch_vehicles")
-            .select("id, code, name, vehicle_type, plate_number, factory_id")
-            .eq("id", vehicleId)
-            .single()
-          if (!veh) { setError("Không tìm thấy xe"); return }
-          setVehicleInfo(veh as VehicleInfo)
+          // Helper: load full F02 data for one vehicle
+          const loadOneVehicle = async (vid: string) => {
+            const { data: veh } = await supabase
+              .from("dispatch_vehicles")
+              .select("id, code, name, vehicle_type, plate_number, factory_id")
+              .eq("id", vid)
+              .single()
+            if (!veh) return null
+            const v = veh as VehicleInfo
 
-          // Section I: Driver assignments
-          const { data: assignments } = await supabase
-            .from("dispatch_vehicle_driver_assignments")
-            .select("effective_from, effective_to, note, driver_id")
-            .eq("vehicle_id", vehicleId)
-            .order("effective_from", { ascending: true })
-          const driverIds = ((assignments || []) as { driver_id: string }[]).map((a) => a.driver_id)
-          let driverMap = new Map<string, { name: string; code: string | null }>()
-          if (driverIds.length > 0) {
-            const { data: driversData } = await supabase
-              .from("dispatch_drivers")
-              .select("id, name, code")
-              .in("id", driverIds)
-            for (const d of (driversData || []) as { id: string; name: string; code: string | null }[]) {
-              driverMap.set(d.id, { name: d.name, code: d.code })
-            }
-          }
-          setVehicleDrivers(((assignments || []) as {
-            effective_from: string | null; effective_to: string | null; note: string | null; driver_id: string
-          }[]).map((a) => {
-            const drv = driverMap.get(a.driver_id)
-            return {
-              driver_name: drv?.name || "—",
-              driver_code: drv?.code || null,
-              effective_from: a.effective_from,
-              effective_to: a.effective_to,
-              note: a.note,
-            }
-          }))
-
-          // Section II + III: Maintenance history (two-step query by dispatch_vehicle_id)
-          const fetchVehicleHistory = async (hangMuc: string): Promise<VehicleHistoryRow[]> => {
-            let recQ = supabase
-              .from("maintenance_records")
-              .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, factory_id")
-              .eq("hang_muc", hangMuc)
-              .eq("trang_thai", "da_duyet")
-              .eq("factory_id", (veh as VehicleInfo).factory_id)
-              .order("ngay", { ascending: true })
-            if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
-            if (filterTo) recQ = recQ.lte("ngay", filterTo)
-            const { data: recs } = await recQ
-            const recList = (recs || []) as {
-              id: string; ma_bb: string | null; hang_muc: string; ngay: string
-              nguoi_thuc_hien: string[]; nv_phu_trach: string | null; factory_id: string
-            }[]
-            if (recList.length === 0) return []
-            const recIds = recList.map((r) => r.id)
-            const { data: linesData } = await supabase
-              .from("maintenance_record_lines")
-              .select("id, record_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho, km_dong_ho")
-              .in("record_id", recIds)
-              .eq("dispatch_vehicle_id", vehicleId)
-            const recMap = new Map(recList.map((r) => [r.id, r]))
-            return ((linesData || []) as {
-              id: string; record_id: string; dispatch_vehicle_id: string | null
-              ten_tb: string; ma_tb: string; noi_dung: string | null; cac_khac_phuc: string | null
-              chi_phi_dk: number; loai_tien: string; cong_tho: number; km_dong_ho: number | null
-            }[]).map((d) => {
-              const rec = recMap.get(d.record_id)!
-              return {
-                ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
-                km_dong_ho: d.km_dong_ho,
-                ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
-                chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
-                nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach,
+            const { data: assignments } = await supabase
+              .from("dispatch_vehicle_driver_assignments")
+              .select("effective_from, effective_to, note, driver_id")
+              .eq("vehicle_id", vid)
+              .order("effective_from", { ascending: true })
+            const driverIds = ((assignments || []) as { driver_id: string }[]).map((a) => a.driver_id)
+            const driverMap = new Map<string, { name: string; code: string | null }>()
+            if (driverIds.length > 0) {
+              const { data: driversData } = await supabase
+                .from("dispatch_drivers")
+                .select("id, name, code")
+                .in("id", driverIds)
+              for (const d of (driversData || []) as { id: string; name: string; code: string | null }[]) {
+                driverMap.set(d.id, { name: d.name, code: d.code })
               }
-            }).sort((a, b) => a.ngay.localeCompare(b.ngay))
+            }
+            const drivers: DriverAssignmentRow[] = ((assignments || []) as {
+              effective_from: string | null; effective_to: string | null; note: string | null; driver_id: string
+            }[]).map((a) => {
+              const drv = driverMap.get(a.driver_id)
+              return {
+                driver_name: drv?.name || "—",
+                driver_code: drv?.code || null,
+                effective_from: a.effective_from,
+                effective_to: a.effective_to,
+                note: a.note,
+              }
+            })
+
+            const fetchVehicleHistory = async (hangMuc: string): Promise<VehicleHistoryRow[]> => {
+              let recQ = supabase
+                .from("maintenance_records")
+                .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, factory_id")
+                .eq("hang_muc", hangMuc)
+                .eq("trang_thai", "da_duyet")
+                .eq("factory_id", v.factory_id)
+                .order("ngay", { ascending: true })
+              if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
+              if (filterTo) recQ = recQ.lte("ngay", filterTo)
+              const { data: recs } = await recQ
+              const recList = (recs || []) as {
+                id: string; ma_bb: string | null; hang_muc: string; ngay: string
+                nguoi_thuc_hien: string[]; nv_phu_trach: string | null; factory_id: string
+              }[]
+              if (recList.length === 0) return []
+              const recIds = recList.map((r) => r.id)
+              const { data: linesData } = await supabase
+                .from("maintenance_record_lines")
+                .select("id, record_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho, km_dong_ho")
+                .in("record_id", recIds)
+                .eq("dispatch_vehicle_id", vid)
+              const recMap = new Map(recList.map((r) => [r.id, r]))
+              return ((linesData || []) as {
+                id: string; record_id: string; dispatch_vehicle_id: string | null
+                ten_tb: string; ma_tb: string; noi_dung: string | null; cac_khac_phuc: string | null
+                chi_phi_dk: number; loai_tien: string; cong_tho: number; km_dong_ho: number | null
+              }[]).map((d) => {
+                const rec = recMap.get(d.record_id)!
+                return {
+                  ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
+                  km_dong_ho: d.km_dong_ho,
+                  ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
+                  chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
+                  nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach,
+                }
+              }).sort((a, b) => a.ngay.localeCompare(b.ngay))
+            }
+
+            const [maintRows, repairRows] = await Promise.all([
+              fetchVehicleHistory("Bảo dưỡng"),
+              fetchVehicleHistory("Sửa chữa"),
+            ])
+            return { vehicle: v, drivers, maintRows, repairRows }
           }
 
-          const [mRows, rRows] = await Promise.all([
-            fetchVehicleHistory("Bảo dưỡng"),
-            fetchVehicleHistory("Sửa chữa"),
-          ])
-          setVehicleMaintRows(mRows)
-          setVehicleRepairRows(rRows)
+          if (vehicleIdList.length === 1) {
+            const result = await loadOneVehicle(vehicleIdList[0])
+            if (!result) { setError("Không tìm thấy xe"); return }
+            setVehicleInfo(result.vehicle)
+            setVehicleDrivers(result.drivers)
+            setVehicleMaintRows(result.maintRows)
+            setVehicleRepairRows(result.repairRows)
+          } else {
+            const results: typeof multiVehicles = []
+            for (const vid of vehicleIdList) {
+              const result = await loadOneVehicle(vid)
+              if (result) results.push(result)
+            }
+            setMultiVehicles(results)
+          }
         } else {
           if (!recordId) { setError("Thiếu record_id"); return }
           const { data: rec } = await supabase
@@ -1911,7 +1938,7 @@ export default function MaintenancePrintPage() {
       }
     }
     void load()
-  }, [printType, recordId, assetId, assetIdsParam, vehicleId, filterFrom, filterTo])
+  }, [printType, recordId, assetId, assetIdsParam, vehicleId, vehicleIdsParam, filterFrom, filterTo])
 
   useEffect(() => {
     if (!loading && !error) {
@@ -2004,15 +2031,33 @@ export default function MaintenancePrintPage() {
           </>
         )}
 
-        {!loading && !error && printType === "ly_lich_xe" && vehicleInfo && (
-          <PrintF02LyLich
-            vehicle={vehicleInfo}
-            drivers={vehicleDrivers}
-            maintRows={vehicleMaintRows}
-            repairRows={vehicleRepairRows}
-            filterFrom={filterFrom}
-            filterTo={filterTo}
-          />
+        {!loading && !error && printType === "ly_lich_xe" && (
+          <>
+            {multiVehicles.length > 0 ? (
+              multiVehicles.map((item, idx) => (
+                <div key={item.vehicle.id}>
+                  {idx > 0 && <div className="print:page-break-before-always mt-4 pt-4" />}
+                  <PrintF02LyLich
+                    vehicle={item.vehicle}
+                    drivers={item.drivers}
+                    maintRows={item.maintRows}
+                    repairRows={item.repairRows}
+                    filterFrom={filterFrom}
+                    filterTo={filterTo}
+                  />
+                </div>
+              ))
+            ) : vehicleInfo ? (
+              <PrintF02LyLich
+                vehicle={vehicleInfo}
+                drivers={vehicleDrivers}
+                maintRows={vehicleMaintRows}
+                repairRows={vehicleRepairRows}
+                filterFrom={filterFrom}
+                filterTo={filterTo}
+              />
+            ) : null}
+          </>
         )}
       </div>
     </>

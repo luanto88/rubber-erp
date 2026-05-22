@@ -56,14 +56,18 @@ export default function MaintenanceRecordsPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const fid = await getActiveFactoryId()
-      if (!fid) { setLoading(false); return }
-      const session = await getFreshAuthSession()
-      if (session?.user) {
-        const { data: profile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
-        if (profile) setUser(profile as SessionUser)
+      try {
+        const fid = await getActiveFactoryId()
+        if (!fid) { setLoading(false); return }
+        const session = await getFreshAuthSession()
+        if (session?.user) {
+          const { data: profile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+          if (profile) setUser(profile as SessionUser)
+        }
+        setFactoryId(fid)
+      } catch {
+        setLoading(false)
       }
-      setFactoryId(fid)
     }
     void bootstrap()
   }, [])

@@ -130,6 +130,18 @@ export const WARN_SEVERITY: Record<WarnCode, "red" | "amber" | "slate"> = {
   DUPLICATE_IN_FILE: "amber",
 }
 
+// Ánh xạ kl_* của dispatch row sang tươi/khô theo loại nguyên liệu (đồng bộ với storage page)
+function getNganKL(row: Record<string, number>, loai_nl: string): { tuoi: number; kho: number } {
+  switch (loai_nl) {
+    case "Mủ chén":      return { tuoi: row.kl_ct,  kho: row.kl_ck }
+    case "Mủ đông chén": return { tuoi: row.kl_dct, kho: row.kl_dck }
+    case "Mủ đông khối": return { tuoi: row.kl_dkt, kho: row.kl_dkk }
+    case "Mủ dây":       return { tuoi: row.kl_dt,  kho: row.kl_dk }
+    case "Mủ nước":      return { tuoi: row.kl_mn,  kho: row.kl_mnk }
+    default:             return { tuoi: 0, kho: 0 }
+  }
+}
+
 // ── Write-back tổng hợp KL từ production_records → dispatch_entries.rows[] ──
 // Gọi sau khi import hoặc lưu/xóa thủ công để dispatch luôn phản ánh sản lượng thực tế.
 export async function writeBackToDispatch(
@@ -193,4 +205,64 @@ export async function writeBackToDispatch(
       await supabase.from("dispatch_entries").update({ rows: newRows }).eq("id", entry.id)
     }
   }
+
+  // 4. Đồng bộ KL ngăn lưu — cập nhật tong_tuoi/tong_kho cho ngăn có chuyến từ ngày này
+  const uidsThisDate = new Set<string>()
+  for (const entry of entries as Array<{ rows: Array<Record<string, unknown>> }>) {
+    for (const row of entry.rows ?? []) {
+      const uid = String(row.uid ?? "")
+      if (uid) uidsThisDate.add(uid)
+    }
+  }
+  if (!uidsThisDate.size) return
+
+  const { data: ngans } = await supabase
+    .from("ngans")
+    .select("id, loai_nl, trips")
+    .eq("factory_id", factoryId)
+
+  const affected = (ngans ?? []).filter((n: { trips?: string[] }) =>
+    (n.trips ?? []).some((uid: string) => uidsThisDate.has(uid))
+  )
+  if (!affected.length) return
+
+  // Gom tất cả uid của các ngăn bị ảnh hưởng (bao gồm cả ngày khác trong cùng ngăn)
+  const allUids = new Set<string>()
+  for (const n of affected) for (const uid of (n as { trips?: string[] }).trips ?? []) allUids.add(uid)
+
+  // Load toàn bộ dispatch để build uid→KL map (sau khi đã update ở bước 3, DB đã có giá trị mới)
+  const { data: allDx } = await supabase
+    .from("dispatch_entries")
+    .select("rows")
+    .eq("factory_id", factoryId)
+
+  const uidKL = new Map<string, Record<string, number>>()
+  for (const d of allDx ?? []) {
+    for (const row of (d.rows ?? []) as Array<Record<string, string | number>>) {
+      const uid = String(row.uid ?? "")
+      if (allUids.has(uid)) {
+        uidKL.set(uid, {
+          kl_mn:  +row.kl_mn  || 0, kl_mnk: +row.kl_mnk || 0,
+          kl_ct:  +row.kl_ct  || 0, kl_ck:  +row.kl_ck  || 0,
+          kl_dct: +row.kl_dct || 0, kl_dck: +row.kl_dck || 0,
+          kl_dkt: +row.kl_dkt || 0, kl_dkk: +row.kl_dkk || 0,
+          kl_dt:  +row.kl_dt  || 0, kl_dk:  +row.kl_dk  || 0,
+        })
+      }
+    }
+  }
+
+  await Promise.all(
+    (affected as Array<{ id: string; loai_nl: string; trips?: string[] }>).map(async ngan => {
+      let tong_tuoi = 0, tong_kho = 0
+      for (const uid of ngan.trips ?? []) {
+        const kl = uidKL.get(uid)
+        if (!kl) continue
+        const { tuoi, kho } = getNganKL(kl, ngan.loai_nl)
+        tong_tuoi += tuoi
+        tong_kho += kho
+      }
+      await supabase.from("ngans").update({ tong_tuoi, tong_kho }).eq("id", ngan.id)
+    })
+  )
 }
