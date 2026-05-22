@@ -4,6 +4,7 @@ import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
+  BarChart3,
   ChevronRight,
   ClipboardCheck,
   Factory,
@@ -60,6 +61,7 @@ const NAV: NavItem[] = [
     icon: Factory,
     children: [
       { key: "/dashboard/dispatch", label: "Điều xe", icon: Truck, permission: "dispatch.view" },
+      { key: "/dashboard/output", label: "Sản lượng", icon: BarChart3, permission: "output.view" },
       {
         key: "/dashboard/storage",
         label: "Kho nguyên liệu",

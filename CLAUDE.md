@@ -200,6 +200,7 @@ Vi du:
 - Settings + permissions: `.claude/rules/12-settings-permissions.md`
 - Inventory: `.claude/rules/13-inventory-module.md`
 - Bao tri: `.claude/rules/14-maintenance-module.md`
+- San luong: `.claude/rules/15-output-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
 
 ## Ghi chu cap nhat module kho (2026-05-09)
