@@ -6,12 +6,9 @@ import { supabase } from "@/lib/supabase"
 import type { ProductionRecord, OutputFormState } from "./output-types"
 import { emptyOutputForm, parseVehicleCode } from "./output-types"
 
-interface Vehicle { id: string; code: string; name: string }
-
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
   factoryId: string
-  vehicles: Vehicle[]               // fallback khi không có điều xe
   onSave: (form: OutputFormState) => Promise<void>
   onClose: () => void
 }
@@ -38,7 +35,7 @@ interface DispatchVehicle {
   tai_xe: string
 }
 
-export function OutputForm({ record, factoryId, vehicles, onSave, onClose }: OutputFormProps) {
+export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormProps) {
   const [form, setForm] = useState<OutputFormState>(emptyOutputForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -155,13 +152,14 @@ export function OutputForm({ record, factoryId, vehicles, onSave, onClose }: Out
     }
   }
 
-  // Danh sách xe: ưu tiên từ dispatch, fallback sang vehicles prop
-  const uniqueXeFromDispatch = dispatchVehicles.length > 0
-    ? [...new Map(dispatchVehicles.map(d => [d.so_xe, d])).values()]
-    : []
+  // Danh sách xe: chỉ từ dispatch. Chế độ sửa không có dispatch → giữ xe hiện tại để xem được.
+  const uniqueXeFromDispatch = [...new Map(dispatchVehicles.map(d => [d.so_xe, d])).values()]
+  const noDispatch = !dispatchLoading && dispatchVehicles.length === 0
   const vehicleOptions = uniqueXeFromDispatch.length > 0
     ? uniqueXeFromDispatch
-    : vehicles.map(v => ({ so_xe: v.code, chuyen: 1, tai_xe: "" }))
+    : record
+      ? [{ so_xe: record.so_xe, chuyen: record.chuyen, tai_xe: record.tai_xe ?? "" }]
+      : []
 
   // Chuyến available cho xe đã chọn (từ dispatch)
   const chuyenOptions = dispatchVehicles
@@ -221,16 +219,18 @@ export function OutputForm({ record, factoryId, vehicles, onSave, onClose }: Out
             <div className={`p-3 rounded-xl text-sm flex items-center gap-2 ${
               dispatchLoading
                 ? "bg-slate-50"
-                : dispatchVehicles.length === 0
-                  ? "bg-slate-50"
+                : noDispatch
+                  ? !record ? "bg-red-50 border border-red-200" : "bg-slate-50"
                   : chuaNhap > 0
                     ? "bg-amber-50 border border-amber-200"
                     : "bg-emerald-50 border border-emerald-200"
             }`}>
               {dispatchLoading
                 ? <span className="text-slate-400">Đang tải điều xe...</span>
-                : dispatchVehicles.length === 0
-                  ? <span className="text-slate-400">Không có bảng điều xe ngày {fmtDate(form.ngay)}</span>
+                : noDispatch
+                  ? !record
+                    ? <><AlertTriangle size={14} className="text-red-600 shrink-0" /><span className="font-bold text-red-700">Ngày {fmtDate(form.ngay)} chưa có bảng điều xe — không thể thêm sản lượng</span></>
+                    : <span className="text-slate-400">Không có bảng điều xe ngày {fmtDate(form.ngay)}</span>
                   : <>
                       {chuaNhap > 0
                         ? <AlertTriangle size={14} className="text-amber-600 shrink-0" />
@@ -255,14 +255,14 @@ export function OutputForm({ record, factoryId, vehicles, onSave, onClose }: Out
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Số xe *</label>
               <select
                 value={form.so_xe}
+                disabled={dispatchLoading || (noDispatch && !record)}
                 onChange={e => {
                   setField("so_xe", e.target.value)
-                  // Reset chuyến khi đổi xe nếu dùng dispatch
                   if (dispatchVehicles.length > 0) setField("chuyen", 1)
                 }}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                className={`w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 ${dispatchLoading || (noDispatch && !record) ? "bg-slate-100 text-slate-400 cursor-not-allowed" : ""}`}
               >
-                <option value="">-- Chọn xe --</option>
+                <option value="">{noDispatch && !record ? "-- Chưa có điều xe --" : "-- Chọn xe --"}</option>
                 {vehicleOptions.map(v => (
                   <option key={v.so_xe} value={v.so_xe}>{v.so_xe}</option>
                 ))}
@@ -389,7 +389,7 @@ export function OutputForm({ record, factoryId, vehicles, onSave, onClose }: Out
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
           <button
             onClick={handleSubmit}
-            disabled={saving}
+            disabled={saving || (!record && noDispatch)}
             className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
           >
             {saving ? "Đang lưu..." : record ? "Cập nhật" : "Thêm mới"}

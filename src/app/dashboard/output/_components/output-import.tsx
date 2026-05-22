@@ -105,7 +105,8 @@ export function matchRows(
     if (!dispIdx.has(dateKey)) dispIdx.set(dateKey, new Map())
     const dayMap = dispIdx.get(dateKey)!
     for (const row of entry.rows ?? []) {
-      const { base_xe, chuyen } = parseVehicleCode(row.so_xe ?? "")
+      const { base_xe } = parseVehicleCode(row.so_xe ?? "")
+      const chuyen = typeof row.chuyen === "number" ? row.chuyen : 1
       const k = `${base_xe}:${chuyen}`
       dayMap.set(k, { entryId: entry.id, tai_xe: row.tai_xe ?? "", diem_gn: row.diem_gn ?? [] })
     }

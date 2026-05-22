@@ -113,6 +113,20 @@ Bản ghi có cảnh báo vẫn được lưu — `warn_codes` là metadata đ�
 3. Với mỗi dòng Excel: lookup dispatch → assign `dispatch_entry_id`, `tai_xe`, `warn_codes`
 4. Duplicate detection: key = `ngay:base_xe:chuyen:doi`
 
+**Quan trọng khi build dispatchIndex**: Dispatch lưu `so_xe` (mã xe cơ sở, ví dụ `"16A"`) và `chuyen` (số nguyên) ở hai field **riêng biệt**. Khi build index phải dùng `row.chuyen` trực tiếp — **không** dùng `parseVehicleCode(row.so_xe)` để suy ra chuyến vì sẽ luôn trả về `chuyen = 1`:
+
+```typescript
+// Đúng
+const { base_xe } = parseVehicleCode(row.so_xe ?? "")
+const chuyen = typeof row.chuyen === "number" ? row.chuyen : 1
+const k = `${base_xe}:${chuyen}`
+
+// SAI — xe 16A chuyến 2 sẽ bị lưu nhầm key "16A:1", ghi đè chuyến 1
+const { base_xe, chuyen } = parseVehicleCode(row.so_xe ?? "")
+```
+
+Lỗi này gây ra DOI_MISMATCH sai (chuyến 2 ghi đè chuyến 1 trong Map, diem_gn bị nhầm) và CHUYEN_NOT_FOUND sai (key "16A:2" không tồn tại, hasVehicle lại tìm thấy "16A:1").
+
 ### Upsert
 
 ```typescript
@@ -128,15 +142,20 @@ Upsert idempotent — upload cùng file 2 lần không tạo duplicate.
 ## Form thêm mới thủ công
 
 - Chọn ngày → form tự fetch `dispatch_entries` cho ngày đó (xử lý cả format "YYYY-MM-DD" và "dd/mm/yyyy")
-- Dropdown **Số xe** chỉ hiển thị xe từ điều xe của ngày đã chọn; fallback sang `dispatch_vehicles` nếu không có điều xe
+- Dropdown **Số xe** chỉ hiển thị xe từ điều xe của ngày đã chọn — **không fallback** sang `dispatch_vehicles` hay master data nào khác
+  - Khi tạo mới mà ngày chưa có điều xe: dropdown bị disabled, placeholder `"-- Chưa có điều xe --"`, nút Lưu bị disabled
+  - Khi sửa record đã tồn tại mà ngày không có dispatch: hiển thị xe đã lưu của record đó (read-only về danh sách, vẫn cho lưu)
 - **Tài xế** tự điền từ dispatch khi chọn xe + chuyến (readonly, override được)
 - **Chuyến**: select nếu xe có nhiều chuyến trong dispatch; text input nếu 1 chuyến
 - **Banner tiến độ**: hiển thị ngay sau phần ngày/đội
+  - Đỏ + block: ngày chưa có điều xe (chỉ khi tạo mới)
   - Amber + cảnh báo: còn xe chưa nhập
   - Emerald: tất cả xe từ điều xe đã nhập
-  - Slate: không có điều xe ngày đó
+  - Slate: không có điều xe ngày đó (chỉ khi sửa record cũ)
 
 Banner đếm đúng theo dispatch: so sánh `dispatch_entries.rows` với `production_records` ngày đó theo key `so_xe:chuyen`.
+
+**Nguyên tắc**: Sản lượng chỉ được nhập cho xe đã có trong bảng điều xe ngày đó. `page.tsx` không cần load `dispatch_vehicles` master data vì form không dùng nữa.
 
 ---
 

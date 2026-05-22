@@ -25,8 +25,6 @@ interface DispatchEntry {
   rows: Array<{ uid: string; so_xe: string; chuyen: number; tai_xe: string; diem_gn: string[] }>
 }
 interface DeliveryPoint { ma_lo: string; doi: number }
-interface Vehicle { id: string; code: string; name: string }
-
 // ────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────
@@ -80,8 +78,6 @@ export default function OutputPage() {
   const [records, setRecords] = useState<ProductionRecord[]>([])
   const [dispatches, setDispatches] = useState<DispatchEntry[]>([])
   const [deliveryPoints, setDeliveryPoints] = useState<DeliveryPoint[]>([])
-  const [vehicles, setVehicles] = useState<Vehicle[]>([])
-
   // UI state
   const [tab, setTab] = useState<"stats" | "list" | "import">("list")
   const [showImport, setShowImport] = useState(false)
@@ -124,12 +120,12 @@ export default function OutputPage() {
   }, [filterFrom, filterTo])
 
   const loadSupportData = useCallback(async (fid: string) => {
-    const [{ data: dp }, { data: ve }] = await Promise.all([
-      supabase.from("dispatch_delivery_points").select("ma_lo, doi").eq("factory_id", fid).eq("is_active", true),
-      supabase.from("dispatch_vehicles").select("id, code, name").eq("factory_id", fid).eq("is_active", true).order("sort_order"),
-    ])
+    const { data: dp } = await supabase
+      .from("dispatch_delivery_points")
+      .select("ma_lo, doi")
+      .eq("factory_id", fid)
+      .eq("is_active", true)
     setDeliveryPoints((dp as DeliveryPoint[]) || [])
-    setVehicles((ve as Vehicle[]) || [])
   }, [])
 
   const loadDispatches = useCallback(async (fid: string) => {
@@ -580,7 +576,6 @@ export default function OutputPage() {
         <OutputForm
           record={editRecord}
           factoryId={factoryId}
-          vehicles={vehicles}
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditRecord(null) }}
         />

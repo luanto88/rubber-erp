@@ -28,9 +28,11 @@ import {
   Warehouse,
   ChevronDown,
   ChevronRight,
+  ArrowLeftRight,
+  MoveRight,
 } from "lucide-react";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Types â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 type Lot = {
   id: string;
   factory_id?: string;
@@ -192,7 +194,15 @@ type LotSeries = {
   year: string;
 };
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+type SkPendingLot = {
+  lot: Lot;
+  kien_a: number;
+  kien_b: number;
+  kien_c: number;
+  kien_d: number;
+};
+
+// â"€â"€â"€ Constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const CA_OPTS = ["A", "B", "C"];
 const THAM_OPTS = ["c\u0169", "M\u1edbi"];
 const TRANG_THAI_OPTS = ["Ho\u00e0n th\u00e0nh", "D\u1edf dang", "Xu\u1ea5t h\u00e0ng"];
@@ -232,7 +242,7 @@ function getLotStatusBadgeClass(status?: string | null) {
   }
 }
 
-// â”€â”€â”€ Business Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Business Logic â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) {
     const b = selected_banh || 35;
@@ -588,7 +598,7 @@ function emptyEditForm(): EditForm {
   };
 }
 
-// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Main Component â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
@@ -632,12 +642,27 @@ export default function ProductPage() {
   );
   const [maxNumFromDB, setMaxNumFromDB] = useState(0);
 
+  // ── Sang kiện / Thay bọc ─────────────────────────────────────────
+  const [skOpen, setSkOpen] = useState(false);
+  const [skTab, setSkTab] = useState<"sang_kien" | "thay_boc">("sang_kien");
+  const [skFilterDC, setSkFilterDC] = useState("");
+  const [skFilterLoai, setSkFilterLoai] = useState("");
+  const [skFilterBoc, setSkFilterBoc] = useState("");
+  const [skFilterPallet, setSkFilterPallet] = useState("");
+  const [skToBoc, setSkToBoc] = useState("");
+  const [skToPallet, setSkToPallet] = useState<string[]>([]);
+  const [skPending, setSkPending] = useState<SkPendingLot[]>([]);
+  const [skConfirm, setSkConfirm] = useState(false);
+  const [skSaving, setSkSaving] = useState(false);
+  const [skError, setSkError] = useState<string | null>(null);
+  const [skDone, setSkDone] = useState<Set<string>>(new Set());
+
   const [session, setSession] = useState<SessionHeader>(defaultSession());
   const [caSections, setCaSections] = useState<CaSection[]>([
     defaultCaSection("A"),
   ]);
 
-  // â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Load data â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const loadData = useCallback(async (fid: string) => {
     setLoading(true);
     try {
@@ -717,7 +742,7 @@ export default function ProductPage() {
     void bootstrap();
   }, [loadData]);
 
-  // â”€â”€ Computed BĂ³c tĂ¡ch sáº£n lÆ°á»£ng (Contributions) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Computed BĂ³c tĂ¡ch sáº£n lÆ°á»£ng (Contributions) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const contributions = useMemo(() => {
     const arr: LotContribution[] = [];
     lots.forEach((lot) => {
@@ -823,7 +848,34 @@ export default function ProductPage() {
     tongKg: filteredContribs.reduce((s, c) => s + (c.tong_kg_cua_ca || 0), 0),
   };
 
-  // â”€â”€ Create view computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Sang kiện / Thay bọc computed ────────────────────────────────
+  const skEligibleLots = useMemo(() => {
+    const pendingIds = new Set(skPending.map((p) => p.lot.id));
+    return lots.filter((l) => {
+      if (normalizeLotStatus(l.trang_thai) !== "Hoàn thành") return false;
+      if (pendingIds.has(l.id)) return false;
+      if (skFilterDC && normalizeDayChuyen(l.day_chuyen) !== normalizeDayChuyen(skFilterDC)) return false;
+      if (skFilterLoai && l.loai_csr !== skFilterLoai) return false;
+      if (skFilterBoc && l.boc !== skFilterBoc) return false;
+      if (skFilterPallet && !l.pallet?.includes(skFilterPallet)) return false;
+      return true;
+    });
+  }, [lots, skPending, skFilterDC, skFilterLoai, skFilterBoc, skFilterPallet]);
+
+  const skLoaiOptions = useMemo(
+    () => [...new Set(lots.filter((l) => normalizeLotStatus(l.trang_thai) === "Hoàn thành").map((l) => l.loai_csr))],
+    [lots],
+  );
+  const skBocOptions = useMemo(
+    () => [...new Set(skEligibleLots.map((l) => l.boc).filter(Boolean))] as string[],
+    [skEligibleLots],
+  );
+  const skPalletOptions = useMemo(
+    () => [...new Set(skEligibleLots.flatMap((l) => l.pallet || []).filter(Boolean))] as string[],
+    [skEligibleLots],
+  );
+
+  //â"€â"€ Create view computed â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const nganKgMap = useMemo(() => {
     const map: Record<string, number> = {};
     contributions.forEach((c) => {
@@ -997,7 +1049,7 @@ export default function ProductPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, session.loai_csr, session.loai_banh, sessionYear, lots]);
 
-  // â”€â”€ Session handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Session handlers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const autoSelectNganId = (dayChuyenVal: string): string => {
     const validNl =
       normalizeDayChuyen(dayChuyenVal) === DAY_CHUYEN_TAP
@@ -1159,7 +1211,7 @@ export default function ProductPage() {
     });
   };
 
-  // â”€â”€ Ca section handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Ca section handler â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const updateCaSection = (idx: number, patch: Partial<CaSection>) => {
     // Náº¿u chá»‰ Ä‘á»•i ca letter (khĂ´ng Ä‘á»•i from_num/to_num), giá»¯ nguyĂªn kien values
     if ("ca" in patch && !("from_num" in patch) && !("to_num" in patch)) {
@@ -1223,7 +1275,7 @@ export default function ProductPage() {
     });
   };
 
-  // â”€â”€ Lot draft handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Lot draft handler â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const updateLotDraft = (
     caIdx: number,
     lotIdx: number,
@@ -1290,7 +1342,153 @@ export default function ProductPage() {
     );
   };
 
-  // â”€â”€ Open create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Sang kiện / Thay bọc handlers ────────────────────────────────
+  const openSk = () => {
+    setSkDone(new Set());
+    setSkPending([]);
+    setSkTab("sang_kien");
+    setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet("");
+    setSkToBoc(""); setSkToPallet([]);
+    setSkConfirm(false); setSkError(null);
+    setSkOpen(true);
+  };
+  const closeSk = () => {
+    setSkOpen(false);
+    setSkConfirm(false); setSkError(null);
+  };
+  const skAddLot = (lot: Lot) => {
+    setSkPending((prev) => [
+      ...prev,
+      { lot, kien_a: lot.kien_a, kien_b: lot.kien_b, kien_c: lot.kien_c, kien_d: lot.kien_d },
+    ]);
+  };
+  const skRemoveLot = (lotId: string) => {
+    setSkPending((prev) => prev.filter((p) => p.lot.id !== lotId));
+  };
+  const skUpdateKien = (
+    lotId: string,
+    field: "kien_a" | "kien_b" | "kien_c" | "kien_d",
+    value: number,
+  ) => {
+    setSkPending((prev) =>
+      prev.map((p) => {
+        if (p.lot.id !== lotId) return p;
+        const max = p.lot[field];
+        return { ...p, [field]: Math.min(Math.max(0, value), max) };
+      }),
+    );
+  };
+  const skSetAll = (lotId: string) => {
+    setSkPending((prev) =>
+      prev.map((p) =>
+        p.lot.id !== lotId
+          ? p
+          : { ...p, kien_a: p.lot.kien_a, kien_b: p.lot.kien_b, kien_c: p.lot.kien_c, kien_d: p.lot.kien_d },
+      ),
+    );
+  };
+
+  const handleSkSave = async () => {
+    if (!factoryId || skPending.length === 0) return;
+    if (skTab === "thay_boc" && !skToBoc) { setSkError("Chưa chọn bọc mới"); return; }
+    if (skTab === "sang_kien" && skToPallet.length === 0) { setSkError("Chưa chọn pallet mới"); return; }
+
+    setSkSaving(true); setSkError(null);
+    try {
+      const convertedIds: string[] = [];
+
+      for (const p of skPending) {
+        const { lot, kien_a, kien_b, kien_c, kien_d } = p;
+        const isFullConvert =
+          kien_a === lot.kien_a && kien_b === lot.kien_b &&
+          kien_c === lot.kien_c && kien_d === lot.kien_d;
+
+        const tong_banh = kien_a + kien_b + kien_c + kien_d;
+        const tong_kg = Math.round(tong_banh * lot.loai_banh * 100) / 100;
+        const newBoc = skTab === "thay_boc" ? skToBoc : lot.boc;
+        const newPallet = skTab === "sang_kien" ? skToPallet : lot.pallet;
+
+        const { error: e1 } = await supabase.from("lots").update({
+          kien_a, kien_b, kien_c, kien_d,
+          tong_banh, tong_kg,
+          boc: newBoc,
+          pallet: newPallet,
+          updated_at: new Date().toISOString(),
+        }).eq("id", lot.id);
+        if (e1) { setSkError(e1.message); return; }
+        convertedIds.push(lot.id);
+
+        if (!isFullConvert) {
+          const rem_a = lot.kien_a - kien_a;
+          const rem_b = lot.kien_b - kien_b;
+          const rem_c = lot.kien_c - kien_c;
+          const rem_d = lot.kien_d - kien_d;
+          const rem_banh = rem_a + rem_b + rem_c + rem_d;
+          const rem_kg = Math.round(rem_banh * lot.loai_banh * 100) / 100;
+          const residualSuffix = lot.suffix + "r";
+          const residualMaLo = buildMaLo(lot.num, residualSuffix, lot.year);
+
+          const { data: existing } = await supabase
+            .from("lots").select("id").eq("factory_id", factoryId).eq("ma_lo", residualMaLo).single();
+
+          if (!existing) {
+            const { error: e2 } = await supabase.from("lots").insert({
+              factory_id: factoryId,
+              ma_lo: residualMaLo,
+              num: lot.num,
+              suffix: residualSuffix,
+              year: lot.year,
+              ngay_sx: lot.ngay_sx,
+              ngay_ht: lot.ngay_ht,
+              ca: lot.ca,
+              ngan_id: lot.ngan_id,
+              day_chuyen: lot.day_chuyen,
+              loai_csr: lot.loai_csr,
+              loai_banh: lot.loai_banh,
+              boc: lot.boc,
+              tham: lot.tham,
+              pallet: lot.pallet,
+              chi_thi: lot.chi_thi,
+              kien_a: rem_a, kien_b: rem_b, kien_c: rem_c, kien_d: rem_d,
+              tong_banh: rem_banh,
+              tong_kg: rem_kg,
+              trang_thai: "Hoàn thành",
+              ghi_chu: `Tồn dư từ ${lot.ma_lo}`,
+            });
+            if (e2) { setSkError(e2.message); return; }
+          }
+        }
+      }
+
+      const { error: eH } = await supabase.from("sk_history").insert({
+        factory_id: factoryId,
+        ngay: new Date().toISOString().slice(0, 10),
+        loai: skTab === "sang_kien" ? "Sang kiện" : "Thay bọc",
+        chung_loai: skFilterLoai || skPending[0]?.lot.loai_csr || "",
+        from_boc: skTab === "thay_boc" ? (skFilterBoc || skPending[0]?.lot.boc || null) : null,
+        to_boc: skTab === "thay_boc" ? skToBoc : null,
+        from_pallet: skTab === "sang_kien" ? (skFilterPallet || null) : null,
+        to_pallet: skTab === "sang_kien" ? skToPallet.join(", ") : null,
+        lots: skPending.map((p) => ({
+          id: p.lot.id,
+          ma_lo: p.lot.ma_lo,
+          converted: { a: p.kien_a, b: p.kien_b, c: p.kien_c, d: p.kien_d },
+        })),
+      });
+      if (eH) { setSkError(eH.message); return; }
+
+      setSkDone((prev) => new Set([...prev, ...convertedIds]));
+      setSkPending([]);
+      setSkConfirm(false);
+      void loadData(factoryId);
+    } catch (e) {
+      setSkError(e instanceof Error ? e.message : "Lỗi không xác định");
+    } finally {
+      setSkSaving(false);
+    }
+  };
+
+  // ── Open create ──────────────────────────────────────────────────
   const openCreate = async (presetDate?: string) => {
     if (!factoryId) return;
     const maxDate =
@@ -1369,7 +1567,7 @@ export default function ProductPage() {
     setView("create");
   };
 
-  // â”€â”€ Save create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Save create â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const handleCreateSave = async (markNganDone: boolean) => {
     if (!factoryId || !session.ngan_id) return;
     const lotYear = normalizeLotYear(session.year, session.ngay_sx);
@@ -2964,12 +3162,20 @@ export default function ProductPage() {
             Quản lý lô và phân tách sản lượng theo ca
           </p>
         </div>
-        <button
-          onClick={() => openCreate()}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
-        >
-          <Plus size={16} /> Thêm lô
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openSk}
+            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+          >
+            <ArrowLeftRight size={16} /> Sang kiện / Thay bọc
+          </button>
+          <button
+            onClick={() => openCreate()}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+          >
+            <Plus size={16} /> Thêm lô
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-5 gap-3 mb-6">
@@ -3972,6 +4178,406 @@ export default function ProductPage() {
           </div>
         </div>
       )}
+
+      {/* ════════════════════════════════════════════════════════════
+          OVERLAY: Sang kiện / Thay bọc
+          ════════════════════════════════════════════════════════════ */}
+      {skOpen && (() => {
+        // Tính boc options cho "Bọc mới" dropdown
+        const inferred_dc = skFilterLoai
+          ? (["L","3L","CV50","CV60"].some((s) => skFilterLoai.includes(s)) ? DAY_CHUYEN_NUOC : DAY_CHUYEN_TAP)
+          : "";
+        const newBocOpts = skFilterLoai
+          ? getBocsForLoaiCSR(inferred_dc, skFilterLoai)
+          : skBocOptions;
+
+        const totalConvertBanh = skPending.reduce(
+          (s, p) => s + p.kien_a + p.kien_b + p.kien_c + p.kien_d,
+          0,
+        );
+        const hasPartial = skPending.some(
+          (p) =>
+            p.kien_a !== p.lot.kien_a ||
+            p.kien_b !== p.lot.kien_b ||
+            p.kien_c !== p.lot.kien_c ||
+            p.kien_d !== p.lot.kien_d,
+        );
+
+        const canConfirm =
+          skPending.length > 0 &&
+          (skTab === "thay_boc" ? !!skToBoc : skToPallet.length > 0);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex justify-end">
+            <div className="w-full max-w-5xl bg-white flex flex-col shadow-2xl overflow-hidden relative">
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+                <div className="flex items-center gap-3">
+                  <ArrowLeftRight size={18} className="text-violet-600" />
+                  <h2 className="text-lg font-extrabold text-slate-800">Sang kiện / Thay bọc</h2>
+                  {skPending.length > 0 && (
+                    <span className="px-2 py-0.5 bg-violet-100 text-violet-700 text-xs font-bold rounded-full">
+                      {skPending.length} lô đang xử lý
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={closeSk}
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  <X size={18} className="text-slate-500" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="flex flex-1 overflow-hidden">
+
+                {/* ── PANEL TRÁI ─────────────────────────────────── */}
+                <div className="flex flex-col border-r border-slate-200 overflow-hidden" style={{ width: "60%" }}>
+
+                  {/* Filter bar */}
+                  <div className="p-3 border-b border-slate-100 flex flex-wrap gap-2 items-center shrink-0">
+                    <select
+                      value={skFilterDC}
+                      onChange={(e) => setSkFilterDC(e.target.value)}
+                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                    >
+                      <option value="">Tất cả dây chuyền</option>
+                      <option value={DAY_CHUYEN_TAP}>{DAY_CHUYEN_TAP}</option>
+                      <option value={DAY_CHUYEN_NUOC}>{DAY_CHUYEN_NUOC}</option>
+                    </select>
+                    <select
+                      value={skFilterLoai}
+                      onChange={(e) => setSkFilterLoai(e.target.value)}
+                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                    >
+                      <option value="">Tất cả chủng loại</option>
+                      {skLoaiOptions.map((l) => <option key={l}>{l}</option>)}
+                    </select>
+                    <select
+                      value={skFilterBoc}
+                      onChange={(e) => setSkFilterBoc(e.target.value)}
+                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                    >
+                      <option value="">Bọc hiện tại</option>
+                      {skBocOptions.map((b) => <option key={b}>{b}</option>)}
+                    </select>
+                    <select
+                      value={skFilterPallet}
+                      onChange={(e) => setSkFilterPallet(e.target.value)}
+                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                    >
+                      <option value="">Pallet hiện tại</option>
+                      {skPalletOptions.map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                    {(skFilterDC || skFilterLoai || skFilterBoc || skFilterPallet) && (
+                      <button
+                        onClick={() => { setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet(""); }}
+                        className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500"
+                      >
+                        <X size={12} /> Xóa lọc
+                      </button>
+                    )}
+                    <span className="ml-auto text-xs text-slate-400 font-bold">
+                      {skEligibleLots.length} lô
+                    </span>
+                  </div>
+
+                  {/* Lot list */}
+                  <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                    {skEligibleLots.length === 0 ? (
+                      <div className="py-12 text-center text-slate-400">
+                        <Package size={32} className="mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">Không có lô phù hợp với bộ lọc</p>
+                      </div>
+                    ) : (
+                      skEligibleLots.map((lot) => {
+                        const isDone = skDone.has(lot.id);
+                        return (
+                          <button
+                            key={lot.id}
+                            onClick={() => skAddLot(lot)}
+                            className={`w-full text-left p-3 rounded-xl border transition-all ${
+                              isDone
+                                ? "border-violet-200 bg-violet-50 cursor-default"
+                                : "border-slate-200 bg-white hover:border-violet-400 hover:bg-violet-50 cursor-pointer"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-extrabold text-slate-800 text-sm">
+                                {lot.ma_lo}
+                              </span>
+                              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded">
+                                {lot.loai_csr}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {lot.loai_banh}kg · {lot.tong_banh} bành
+                              </span>
+                              {isDone && (
+                                <span className="ml-auto px-1.5 py-0.5 bg-violet-100 text-violet-600 text-[10px] font-bold rounded">
+                                  Đã chuyển
+                                </span>
+                              )}
+                              {!isDone && (
+                                <MoveRight size={14} className="ml-auto text-violet-400 shrink-0" />
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 text-[11px] text-slate-400">
+                              <span>A={lot.kien_a} B={lot.kien_b} C={lot.kien_c} D={lot.kien_d}</span>
+                              {lot.boc && <span className="truncate max-w-[160px]">{lot.boc}</span>}
+                              {lot.pallet?.length > 0 && <span>{lot.pallet.join(" · ")}</span>}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* ── PANEL PHẢI ────────────────────────────────── */}
+                <div className="flex flex-col overflow-hidden" style={{ width: "40%" }}>
+
+                  {/* Tab selector */}
+                  <div className="flex gap-1 px-5 pt-4 pb-3 border-b border-slate-100 shrink-0">
+                    {(["sang_kien", "thay_boc"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setSkTab(tab)}
+                        className={`px-4 py-1.5 rounded-xl text-sm font-bold transition-all ${
+                          skTab === tab
+                            ? "bg-violet-600 text-white shadow-sm"
+                            : "text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        {tab === "sang_kien" ? "Sang kiện" : "Thay bọc"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* New boc/pallet selector */}
+                  <div className="px-5 py-3 border-b border-slate-100 shrink-0">
+                    {skTab === "thay_boc" ? (
+                      <div>
+                        <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                          Bọc mới
+                        </label>
+                        <select
+                          value={skToBoc}
+                          onChange={(e) => setSkToBoc(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                        >
+                          <option value="">— Chọn bọc mới —</option>
+                          {newBocOpts.map((b) => <option key={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                          Pallet mới
+                        </label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {PALLET_OPTS.map((p) => {
+                            const checked = skToPallet.includes(p);
+                            return (
+                              <button
+                                key={p}
+                                onClick={() =>
+                                  setSkToPallet(
+                                    checked
+                                      ? skToPallet.filter((x) => x !== p)
+                                      : [...skToPallet, p],
+                                  )
+                                }
+                                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
+                                  checked
+                                    ? "border-violet-500 bg-violet-50 text-violet-700"
+                                    : "border-slate-200 text-slate-500 hover:border-slate-300"
+                                }`}
+                              >
+                                {checked ? "✓ " : ""}{p}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pending lot list */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {skPending.length === 0 ? (
+                      <div className="py-10 text-center text-slate-400">
+                        <MoveRight size={28} className="mx-auto mb-2 opacity-30 rotate-180" />
+                        <p className="text-sm">Nhấn lô bên trái để thêm vào</p>
+                      </div>
+                    ) : (
+                      skPending.map((p) => {
+                        const rem_a = p.lot.kien_a - p.kien_a;
+                        const rem_b = p.lot.kien_b - p.kien_b;
+                        const rem_c = p.lot.kien_c - p.kien_c;
+                        const rem_d = p.lot.kien_d - p.kien_d;
+                        const isPartial = rem_a > 0 || rem_b > 0 || rem_c > 0 || rem_d > 0;
+                        const convertBanh = p.kien_a + p.kien_b + p.kien_c + p.kien_d;
+                        return (
+                          <div
+                            key={p.lot.id}
+                            className="bg-white border border-violet-200 rounded-xl p-3 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-slate-800 text-sm">
+                                  {p.lot.ma_lo}
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {p.lot.loai_csr} · {p.lot.loai_banh}kg
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => skSetAll(p.lot.id)}
+                                  className="px-2 py-0.5 text-[10px] font-bold bg-violet-50 hover:bg-violet-100 text-violet-600 rounded border border-violet-200 transition-colors"
+                                >
+                                  Sang hết
+                                </button>
+                                <button
+                                  onClick={() => skRemoveLot(p.lot.id)}
+                                  className="p-1 text-slate-300 hover:text-red-400 rounded transition-colors"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Kien inputs */}
+                            <div className="grid grid-cols-2 gap-1.5 mb-2">
+                              {(["kien_a","kien_b","kien_c","kien_d"] as const).map((k) => {
+                                const label = k.replace("kien_","").toUpperCase();
+                                const max = p.lot[k];
+                                const val = p[k];
+                                return (
+                                  <div key={k} className="flex items-center gap-1.5 bg-slate-50 rounded-lg px-2 py-1.5">
+                                    <span className="text-xs font-extrabold text-violet-600 w-4 shrink-0">{label}</span>
+                                    <input
+                                      type="number"
+                                      value={val}
+                                      min={0}
+                                      max={max}
+                                      onChange={(e) => skUpdateKien(p.lot.id, k, +e.target.value)}
+                                      className="w-full text-sm font-bold text-center outline-none bg-transparent text-slate-700"
+                                    />
+                                    <span className="text-[10px] text-slate-400 shrink-0">/{max}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-violet-600 font-bold">
+                                Chuyển: {convertBanh} bành
+                              </span>
+                              {isPartial && (
+                                <span className="text-amber-600 font-bold">
+                                  Còn lại: A={rem_a} B={rem_b} C={rem_c} D={rem_d}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Bottom action bar */}
+                  <div className="border-t border-slate-200 px-5 py-3 bg-slate-50 shrink-0">
+                    {skError && (
+                      <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-bold">
+                        <AlertTriangle size={13} className="shrink-0" />
+                        {skError}
+                        <button onClick={() => setSkError(null)} className="ml-auto hover:opacity-70">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500 font-bold">
+                        {skPending.length > 0
+                          ? `${skPending.length} lô · ${totalConvertBanh} bành`
+                          : "Chưa có lô nào"}
+                      </span>
+                      <button
+                        onClick={() => { if (canConfirm) setSkConfirm(true); }}
+                        disabled={!canConfirm}
+                        className={`flex items-center gap-2 px-5 py-2 text-sm font-bold rounded-xl shadow-sm transition-all ${
+                          canConfirm
+                            ? "bg-violet-600 hover:bg-violet-700 text-white"
+                            : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        }`}
+                      >
+                        Xác nhận chuyển <MoveRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Confirm dialog ─────────────────────────────── */}
+              {skConfirm && (
+                <div className="absolute inset-0 bg-white/90 z-10 flex items-center justify-center p-8 backdrop-blur-sm">
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 max-w-sm w-full">
+                    <h3 className="font-extrabold text-slate-800 mb-3 text-base">
+                      Xác nhận chuyển?
+                    </h3>
+                    <div className="space-y-1 mb-3 text-sm text-slate-600">
+                      <p>
+                        <span className="font-bold">{skPending.length} lô</span>
+                        {" · "}
+                        {skTab === "sang_kien" ? "Sang kiện" : "Thay bọc"}
+                        {" · "}
+                        <span className="font-bold">{totalConvertBanh} bành</span>
+                      </p>
+                      {skTab === "thay_boc" && skToBoc && (
+                        <p className="text-xs text-slate-400">
+                          Bọc mới: <span className="font-bold text-violet-600">{skToBoc}</span>
+                        </p>
+                      )}
+                      {skTab === "sang_kien" && skToPallet.length > 0 && (
+                        <p className="text-xs text-slate-400">
+                          Pallet mới: <span className="font-bold text-violet-600">{skToPallet.join(", ")}</span>
+                        </p>
+                      )}
+                    </div>
+                    {hasPartial && (
+                      <div className="flex items-start gap-2 mb-4 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                        <AlertTriangle size={13} className="text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-700 font-bold">
+                          Một số lô sang một phần — sẽ tách thành 2 lô riêng (phần đã chuyển + phần tồn dư).
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => setSkConfirm(false)}
+                        disabled={skSaving}
+                        className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        onClick={() => void handleSkSave()}
+                        disabled={skSaving}
+                        className="px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                      >
+                        {skSaving ? "Đang lưu..." : "Xác nhận"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
