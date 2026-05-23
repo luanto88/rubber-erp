@@ -17,7 +17,7 @@ Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được
 
 ## Tổ chức giao diện (cấu trúc hiện tại)
 
-`Cài đặt` có 4 tab chính:
+`Cài đặt` có 5 tab chính:
 
 | Tab | Icon | Sub-tab |
 |---|---|---|
@@ -25,6 +25,7 @@ Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được
 | **Cấu hình nhà máy** | SlidersHorizontal | Kho, Nhóm vật tư, Vật tư, Điểm giao nhận, Tài xế, Tài xế chính, Lô vườn |
 | **Danh mục** | Database | Hậu tố lô, Thông tin công ty, Khách hàng |
 | **Bảo trì** | Wrench | Thiết bị, Nhân sự bảo trì, Xe & Tài xế, Vật tư ngoài |
+| **ISO & Văn bản** | FileText | Chữ ký cá nhân |
 
 ### Nguyên tắc xếp chức năng
 
@@ -56,6 +57,14 @@ Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được
 - Sub-tab `Nhân sự bảo trì` — bảng `maintenance_staff`
 - Sub-tab `Xe & Tài xế` — bảng `dispatch_vehicles` + `dispatch_vehicle_driver_assignments` (chuyển từ Cấu hình nhà máy)
 - Sub-tab `Vật tư ngoài` — bảng `maintenance_external_materials` (fields: mã, tên, ĐVT, quy cách, nhóm, trạng thái)
+
+**Tab ISO & Văn bản:**
+- Sub-tab `Chữ ký cá nhân` — upload ảnh chữ ký (`signatures/{factory_id}/{user_id}/chu_ky.png` trong bucket `iso-documents`) + đặt/đổi PIN (4–6 số, lưu bcrypt hash vào `sign_pins`)
+- Mỗi user chỉ upload/xem được chữ ký của chính mình; Admin có thể xem của người khác
+- State key trong `settings/page.tsx`: `isoVanBanTab` (sub-tab), `signatureUrl`, `signatureUploading`, `hasPinSet`, `pinForm`
+- Upload gọi Supabase Storage trực tiếp với `upsert: true` — overwrite file cũ
+- Đặt PIN gọi `POST /api/sign/set-pin` — không bao giờ lưu PIN gốc, chỉ lưu bcrypt hash
+- Hiển thị trạng thái "Đã đặt PIN" hay "Chưa đặt PIN" bằng cách query `sign_pins` xem có bản ghi không
 
 ## Danh mục quản trị tập trung
 
@@ -142,6 +151,12 @@ Mô hình quyền:
 - `mark_completed`
 - `delete_order`
 
+### Action đặc biệt ISO & Văn bản
+
+- `xem_xet` — ký xem xét tài liệu ISO
+- `phe_duyet` — phê duyệt tài liệu ISO hoặc văn bản
+- `ky_phong_ban` — ký vòng phòng ban (văn bản Cấp 1)
+
 ### Ví dụ
 
 - `dispatch.view`
@@ -151,6 +166,10 @@ Mô hình quyền:
 - `settings.manage_config`
 - `users.approve`
 - `users.edit_permission`
+- `iso.view` / `iso.create` / `iso.edit` / `iso.delete`
+- `iso.xem_xet` / `iso.phe_duyet` / `iso.print`
+- `documents.view` / `documents.create` / `documents.edit` / `documents.delete`
+- `documents.ky_phong_ban` / `documents.phe_duyet` / `documents.print`
 
 ## Rule về UI và logic
 

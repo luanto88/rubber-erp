@@ -32,12 +32,51 @@ description: Roadmap phát triển
 - Biểu đồ tỷ lệ đạt kiểm nghiệm
 - Báo cáo tổng hợp / PDF / in ấn
 
-## Phase D - Tiếp tục mở rộng
+## Phase D - Tiếp tục mở rộng ✅ Hoàn thành
 
-- EUDR
-- Bảo trì máy móc
-- Quản lý kho vật tư
-- Nâng cấp responsive và browser compatibility
+- EUDR ✅
+- Bảo trì máy móc ✅
+- Quản lý kho vật tư ✅
+- Module Sản lượng ✅
+- Nâng cấp responsive và browser compatibility (đang tiếp tục)
+
+## Phase E - ISO & Văn bản nội bộ
+
+Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
+
+### Giai đoạn 1 ✅ Hoàn thành (2026-05-22)
+
+- Migration SQL: 5 bảng (`sign_pins`, `iso_documents`, `van_ban_documents`, `doc_approval_log`, `notifications`)
+- API routes: `/api/sign/set-pin`, `/api/sign/verify`, `/api/sign/generate-pdf`
+- Settings tab "ISO & Văn bản" — chữ ký cá nhân (upload ảnh + đặt PIN)
+- Packages: `pdf-lib`, `pdfjs-dist`, `@react-pdf/renderer`, `bcryptjs`, `jose`, `react-draggable`, `re-resizable`
+
+### Giai đoạn 2 ✅ Hoàn thành (2026-05-22)
+
+- Module ISO shell (`iso-shell.tsx`), KPI overview page, danh sách + bộ lọc
+- Form tạo/xem/ký duyệt (`/documents/[id]/page.tsx`) — workflow Cấp 1/Cấp 2, PIN modal, Soát xét auto-invalidate
+- My-tasks page
+- Sidebar navigation group "ISO & Văn bản"
+
+### Giai đoạn 2 (phần 2) ⏳ Pending
+
+- Drag-and-drop signature placement UI (pdfjs-dist canvas + react-draggable + re-resizable)
+
+### Giai đoạn 3 ⏳ Pending
+
+- Module Văn bản (`/dashboard/documents/`): shell, CRUD, upload
+- Vòng ký phòng ban Cấp 1 (tuần tự) + Cấp 2 (trực tiếp)
+- Logic "Không ký" / trả về với lý do
+- Mật vs Thường email routing
+- Thông báo Email + Telegram
+
+### Giai đoạn 4 ⏳ Pending
+
+- Trang in (bypass sidebar)
+- In-app notification bell (Supabase Realtime subscribe `notifications` table)
+- QR public view cho PDF đã ký
+
+Tham chiếu chi tiết: `.claude/rules/16-iso-vanban-module.md`
 
 ## Tham chiếu rule trung tâm
 

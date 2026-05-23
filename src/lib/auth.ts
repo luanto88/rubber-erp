@@ -340,10 +340,20 @@ export const DEFAULT_PERMISSION_CODES = [
   "export.quick_add_customer",
   "settings.view",
   "settings.manage_config",
+  "settings.master_data",
+  "settings.maintenance_config",
   "users.view",
   "users.approve",
   "users.edit_permission",
   "suffixes.quick_add",
+  "iso.view",
+  "iso.create",
+  "iso.edit",
+  "iso.delete",
+  "iso.xem_xet",
+  "iso.phe_duyet",
+  "iso.print",
+  "iso.signature",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -373,7 +383,13 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "export.create",
     "export.edit",
     "settings.view",
+    "settings.master_data",
+    "settings.maintenance_config",
     "users.view",
+    "iso.view",
+    "iso.create",
+    "iso.edit",
+    "iso.signature",
   ],
   user: [
     "dispatch.view",
@@ -383,6 +399,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "product.view",
     "quality.view",
     "export.view",
+    "iso.view",
+    "iso.signature",
   ],
   customer: [],
 }

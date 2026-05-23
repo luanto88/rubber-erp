@@ -87,3 +87,72 @@ xem tại:
 - `tong_banh = kien_a + kien_b + kien_c + kien_d`
 - `tong_kg = tong_banh * loai_banh`
 - `ma_lo = ${num}${suffix}/${year}`
+
+## 4.1 Sang kiện / Thay bọc
+
+Tính năng cho phép chuyển pallet hoặc đổi bọc cho nhiều lô `Hoàn thành` cùng lúc từ overlay panel trong module Thành phẩm.
+
+### Hai loại thao tác
+
+| Loại | Trường thay đổi | Bảng lịch sử |
+|------|----------------|--------------|
+| **Sang kiện** | `lots.pallet[]` | `sk_history` |
+| **Thay bọc** | `lots.boc` | `sk_history` |
+
+### Flow xử lý
+
+1. Người dùng mở overlay → chọn lô từ panel trái (chỉ lô `Hoàn thành`)
+2. Click lô → lô xuất hiện ở panel phải với số bành từng kiện (A/B/C/D) điền sẵn bằng max
+3. Người dùng chỉnh số bành từng kiện nếu cần sang một phần
+4. Xác nhận → `handleSkSave` chạy cho từng lô trong hàng chờ
+
+### Rule sang một phần (partial conversion)
+
+Khi số bành chuyển < số bành hiện có của lô gốc:
+
+- **Lô gốc**: cập nhật `kien_a/b/c/d`, `tong_banh`, `tong_kg`, `boc`/`pallet` sang giá trị mới
+- **Lô tồn dư**: tạo mới với:
+  - `suffix = lot.suffix + "r"` (VD: `05cs` → `05csr`)
+  - `ma_lo = buildMaLo(num, suffix + "r", year)` (VD: `05csr/26`)
+  - `kien_*` = phần còn lại (`lot.kien_* - converted_kien_*`)
+  - `boc`, `pallet` = giá trị **cũ** của lô gốc
+  - `trang_thai = "Hoàn thành"`
+- Trước khi insert lô tồn dư: kiểm tra uniqueness qua Supabase query — nếu `ma_lo` đã tồn tại thì bỏ qua insert (edge case)
+
+### Rule sang toàn bộ (full conversion)
+
+Khi tất cả `kien_*` chuyển bằng `lot.kien_*`:
+- Chỉ UPDATE lô gốc — không tạo lô tồn dư
+
+### Lịch sử (`sk_history`)
+
+Sau khi xử lý xong tất cả lô trong một phiên, insert 1 bản ghi vào `sk_history`:
+
+```ts
+{
+  factory_id,
+  ngay: "YYYY-MM-DD",
+  loai: "Sang kiện" | "Thay bọc",
+  chung_loai: skFilterLoai || skPending[0].lot.loai_csr,
+  from_boc: null | string,       // Thay bọc: bọc cũ (từ filter hoặc lot đầu tiên)
+  to_boc:   null | string,       // Thay bọc: bọc mới
+  from_pallet: null | string,    // Sang kiện: pallet cũ (từ filter hoặc null)
+  to_pallet:   null | string,    // Sang kiện: pallet mới (join ", ")
+  lots: [{ id, ma_lo, converted: { a, b, c, d } }],  // JSONB
+}
+```
+
+### Quan hệ với Xuất hàng
+
+- Sang kiện / Thay bọc xảy ra **trước** khi xuất hàng
+- Sau khi sang kiện, `lots.pallet` đã được cập nhật → Xuất hàng đọc giá trị mới trực tiếp
+- Lô tồn dư tự động xuất hiện trong danh sách Thành phẩm với `trang_thai = "Hoàn thành"`
+- Không cần sync thêm — chỉ cần `loadData(factoryId)` sau khi lưu
+
+### Ràng buộc kỹ thuật
+
+- Chỉ thao tác trên lô có `trang_thai = "Hoàn thành"` (qua `normalizeLotStatus`)
+- Lô đang xử lý (trong hàng chờ panel phải) bị ẩn khỏi panel trái trong cùng phiên
+- `skToPallet` là `string[]` — pallet mới có thể chọn nhiều giá trị từ `PALLET_OPTS`
+- `getBocsForLoaiCSR(dc, loai_csr)` dùng để lấy danh sách bọc hợp lệ cho tab Thay bọc
+- Toàn bộ logic nằm trong `src/app/dashboard/product/page.tsx` — không thêm file hay package mới

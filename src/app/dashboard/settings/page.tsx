@@ -47,6 +47,11 @@ import {
   Calendar,
   UserCog,
   ShoppingBag,
+  FileText,
+  KeyRound,
+  ImagePlus,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 
 type Suffix = {
@@ -109,7 +114,7 @@ type UserEditor = {
   mode: "approve" | "edit"
 }
 
-type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance"
+type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban"
 
 type SystemTab = "users" | "permissions"
 
@@ -513,10 +518,14 @@ export default function SettingsPage() {
   const [savingUser, setSavingUser] = useState(false)
   const [userError, setUserError] = useState("")
 
-  const canManageSettings = hasPermission(user, "settings.manage_config")
+  const isAdmin = user?.role === "admin"
+  const canManageSettings = isAdmin || hasPermission(user, "settings.manage_config")
   const canViewUsers = hasPermission(user, "users.view")
   const canApproveUsers = hasPermission(user, "users.approve")
   const canEditPermissions = hasPermission(user, "users.edit_permission")
+  const canViewMasterData = isAdmin || hasPermission(user, "settings.master_data")
+  const canViewMaintenanceConfig = isAdmin || hasPermission(user, "settings.maintenance_config")
+  const canViewIsoSignature = isAdmin || hasPermission(user, "iso.signature")
 
   const [configTab, setConfigTab] = useState<FactoryConfigTab>("warehouses")
   const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
@@ -582,6 +591,17 @@ export default function SettingsPage() {
   const [customerError, setCustomerError] = useState("")
   const [customerDelConfirm, setCustomerDelConfirm] = useState<{ id: string; label: string } | null>(null)
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
+
+  // ISO & Văn bản tab state
+  const [isoVanBanTab, setIsoVanBanTab] = useState<"chu-ky">("chu-ky")
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
+  const [signatureUploading, setSignatureUploading] = useState(false)
+  const [pinForm, setPinForm] = useState({ pin: "", pinConfirm: "", showPin: false })
+  const [pinSaving, setPinSaving] = useState(false)
+  const [pinMsg, setPinMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [sigMsg, setSigMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [hasPinSet, setHasPinSet] = useState(false)
+  const signatureInputRef = useRef<HTMLInputElement>(null)
 
   const loadSuffixes = useCallback(async (fid: string) => {
     const { data } = await supabase.from("suffixes").select("*").eq("factory_id", fid).order("code")
@@ -1261,6 +1281,30 @@ export default function SettingsPage() {
     }
   }, [tab, masterDataTab, factoryId, customerLoaded, customerLoading, loadCustomers])
 
+  useEffect(() => {
+    if (tab === "iso-vanban" && user && factoryId) {
+      const loadSignInfo = async () => {
+        // Kiểm tra đã có ảnh chữ ký chưa
+        const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
+        const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
+        // Thử fetch HEAD để check tồn tại
+        try {
+          const res = await fetch(data.publicUrl, { method: "HEAD" })
+          if (res.ok) setSignatureUrl(data.publicUrl + "?t=" + Date.now())
+        } catch { /* bỏ qua */ }
+
+        // Kiểm tra đã thiết lập PIN chưa
+        const { data: pinRow } = await supabase
+          .from("sign_pins")
+          .select("user_id")
+          .eq("user_id", user.id)
+          .single()
+        setHasPinSet(!!pinRow)
+      }
+      void loadSignInfo()
+    }
+  }, [tab, user, factoryId])
+
   const selectedVehicleAssignmentHistory = useMemo(() => {
     if (!assignmentHistoryVehicleId) return []
     const driverNameMap = new Map(dispatchDrivers.map((row) => [row.id, row.name]))
@@ -1544,6 +1588,56 @@ export default function SettingsPage() {
     void loadCustomers(factoryId)
   }
 
+  const handleSignatureUpload = async (file: File) => {
+    if (!user || !factoryId) return
+    if (!file.type.startsWith("image/")) {
+      setSigMsg({ ok: false, text: "Vui lòng chọn file ảnh (PNG, JPG, ...)" })
+      return
+    }
+    setSignatureUploading(true)
+    setSigMsg(null)
+    try {
+      const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
+      const { error } = await supabase.storage
+        .from("iso-documents")
+        .upload(sigPath, file, { contentType: "image/png", upsert: true })
+      if (error) { setSigMsg({ ok: false, text: error.message }); return }
+      const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
+      setSignatureUrl(data.publicUrl + "?t=" + Date.now())
+      setSigMsg({ ok: true, text: "Tải lên thành công!" })
+    } finally {
+      setSignatureUploading(false)
+    }
+  }
+
+  const handleSetPin = async () => {
+    if (!user) return
+    if (pinForm.pin !== pinForm.pinConfirm) {
+      setPinMsg({ ok: false, text: "Xác nhận PIN không khớp" })
+      return
+    }
+    if (!/^\d{4,6}$/.test(pinForm.pin)) {
+      setPinMsg({ ok: false, text: "PIN phải là 4–6 chữ số" })
+      return
+    }
+    setPinSaving(true)
+    setPinMsg(null)
+    try {
+      const res = await fetch("/api/sign/set-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, pin: pinForm.pin }),
+      })
+      const json = await res.json()
+      if (!res.ok) { setPinMsg({ ok: false, text: json.error || "Lỗi" }); return }
+      setPinMsg({ ok: true, text: "Đã lưu PIN ký duyệt!" })
+      setHasPinSet(true)
+      setPinForm({ pin: "", pinConfirm: "", showPin: false })
+    } finally {
+      setPinSaving(false)
+    }
+  }
+
   const pendingUsers = profiles.filter((item) => item.status === "pending")
   const activeUsers = profiles.filter((item) => item.status === "active")
   const disabledUsers = profiles.filter((item) => item.status === "disabled")
@@ -1551,8 +1645,9 @@ export default function SettingsPage() {
   const tabs = [
     { key: "system" as const, label: "Hệ thống", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
     { key: "factory-config" as const, label: "Cấu hình nhà máy", icon: SlidersHorizontal, show: canManageSettings },
-    { key: "master-data" as const, label: "Danh mục", icon: Database, show: true },
-    { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: true },
+    { key: "master-data" as const, label: "Danh mục", icon: Database, show: canViewMasterData },
+    { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: canViewMaintenanceConfig },
+    { key: "iso-vanban" as const, label: "ISO & Văn bản", icon: FileText, show: canViewIsoSignature },
   ].filter((item) => item.show)
 
   return (
@@ -3702,6 +3797,177 @@ export default function SettingsPage() {
                 {configSaving ? "Đang xóa..." : "Xóa"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab ISO & Văn bản ── */}
+      {tab === "iso-vanban" && (
+        <div className="space-y-4">
+          {/* Tab header */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-violet-50 to-indigo-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <FileText size={16} className="text-violet-600" />
+              <span className="font-extrabold text-slate-700">ISO & Văn bản nội bộ</span>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="px-6 pt-4 flex gap-2 border-b border-slate-100">
+              {([{ key: "chu-ky" as const, label: "Chữ ký cá nhân", icon: KeyRound }]).map((st) => (
+                <button
+                  key={st.key}
+                  onClick={() => setIsoVanBanTab(st.key)}
+                  className={
+                    "flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-t-xl border-b-2 transition-all " +
+                    (isoVanBanTab === st.key
+                      ? "text-violet-700 border-violet-500 bg-violet-50"
+                      : "text-slate-500 border-transparent hover:bg-slate-50")
+                  }
+                >
+                  <st.icon size={14} />
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sub-tab: Chữ ký cá nhân */}
+            {isoVanBanTab === "chu-ky" && (
+              <div className="p-6 space-y-8">
+                {/* Ảnh chữ ký */}
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
+                    <ImagePlus size={15} className="text-violet-500" />
+                    Ảnh chữ ký
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-4">
+                    Tải lên ảnh chữ ký tay của bạn (PNG/JPG, nền trắng hoặc trong suốt). Ảnh này sẽ được nhúng vào tài liệu khi bạn ký duyệt.
+                  </p>
+
+                  <div className="flex items-start gap-6">
+                    {/* Preview */}
+                    <div className="w-48 h-24 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
+                      {signatureUrl ? (
+                        <img
+                          src={signatureUrl}
+                          alt="Chữ ký"
+                          className="max-w-full max-h-full object-contain p-2"
+                        />
+                      ) : (
+                        <div className="text-center">
+                          <ImagePlus size={24} className="mx-auto mb-1 text-slate-300" />
+                          <p className="text-xs text-slate-400">Chưa có ảnh</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Upload button */}
+                    <div className="space-y-2">
+                      <input
+                        ref={signatureInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void handleSignatureUpload(file)
+                          e.target.value = ""
+                        }}
+                      />
+                      <button
+                        onClick={() => signatureInputRef.current?.click()}
+                        disabled={signatureUploading}
+                        className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
+                      >
+                        <ImagePlus size={14} />
+                        {signatureUploading ? "Đang tải lên..." : signatureUrl ? "Thay đổi ảnh chữ ký" : "Tải lên ảnh chữ ký"}
+                      </button>
+                      <p className="text-xs text-slate-400">Định dạng: PNG, JPG · Nên dùng nền trắng</p>
+                    </div>
+                  </div>
+
+                  {sigMsg && (
+                    <div className={`mt-3 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 ${sigMsg.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                      {sigMsg.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                      {sigMsg.text}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100" />
+
+                {/* PIN ký duyệt */}
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
+                    <KeyRound size={15} className="text-violet-500" />
+                    PIN ký duyệt
+                    {hasPinSet && (
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">Đã thiết lập</span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-4">
+                    PIN 4–6 chữ số dùng để xác nhận danh tính khi ký duyệt tài liệu. Giữ bí mật, không chia sẻ cho người khác.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                        {hasPinSet ? "PIN mới" : "Tạo PIN"}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={pinForm.showPin ? "text" : "password"}
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
+                          placeholder="4–6 chữ số"
+                          value={pinForm.pin}
+                          onChange={(e) => setPinForm((p) => ({ ...p, pin: e.target.value.replace(/\D/g, "") }))}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 pr-9 font-mono tracking-widest"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPinForm((p) => ({ ...p, showPin: !p.showPin }))}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {pinForm.showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Xác nhận PIN</label>
+                      <input
+                        type={pinForm.showPin ? "text" : "password"}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        placeholder="Nhập lại PIN"
+                        value={pinForm.pinConfirm}
+                        onChange={(e) => setPinForm((p) => ({ ...p, pinConfirm: e.target.value.replace(/\D/g, "") }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 font-mono tracking-widest"
+                      />
+                    </div>
+                  </div>
+
+                  {pinMsg && (
+                    <div className={`mt-3 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 max-w-lg ${pinMsg.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                      {pinMsg.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                      {pinMsg.text}
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                    <button
+                      onClick={() => void handleSetPin()}
+                      disabled={pinSaving || !pinForm.pin || !pinForm.pinConfirm}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
+                    >
+                      <KeyRound size={14} />
+                      {pinSaving ? "Đang lưu..." : hasPinSet ? "Đổi PIN" : "Thiết lập PIN"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -103,6 +103,7 @@ export type MaintenanceRecord = {
   nguoi_duyet: string | null
   ngay_duyet: string | null
   inventory_issue_doc_id: string | null
+  inventory_issue_doc_ids?: string[] | null
   ghi_chu: string | null
   created_at: string
   updated_at: string

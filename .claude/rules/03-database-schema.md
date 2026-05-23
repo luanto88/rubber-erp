@@ -26,6 +26,12 @@ description: Schema Supabase - tham chiếu khi viết query, migration hoặc l
 | `maintenance_staff` | Nhân sự bảo trì | `id` UUID |
 | `maintenance_external_materials` | Vật tư mua ngoài (master list gợi ý) | `id` UUID |
 | `inventory_*` | Cụm bảng module kho vật tư / hóa chất | UUID / theo từng bảng |
+| `sk_history` | Lịch sử thao tác Sang kiện / Thay bọc | `id` UUID |
+| `sign_pins` | PIN chữ ký số (bcrypt hash) theo user | `user_id` UUID |
+| `iso_documents` | Tài liệu ISO (quy trình, hướng dẫn, biểu mẫu) | `id` UUID |
+| `van_ban_documents` | Văn bản nội bộ (công văn, thông báo, quyết định) | `id` UUID |
+| `doc_approval_log` | Audit trail mọi thao tác ký duyệt | `id` UUID |
+| `notifications` | Thông báo in-app (ISO & Văn bản) | `id` UUID |
 
 ## Quan hệ chính
 
@@ -50,7 +56,21 @@ factories
   ├── forest_plots (factory_id)
   ├── maintenance_assets (factory_id)
   ├── maintenance_staff (factory_id)
-  └── maintenance_external_materials (factory_id)
+  ├── maintenance_external_materials (factory_id)
+  ├── sk_history (factory_id)
+  ├── iso_documents (factory_id)
+  │     ├── soan_thao_user_id → auth.users
+  │     ├── xem_xet_user_id → auth.users
+  │     └── phe_duyet_user_id → auth.users
+  ├── van_ban_documents (factory_id)
+  │     └── soan_thao_user_id / phe_duyet_user_id → auth.users
+  ├── doc_approval_log (factory_id)
+  │     └── user_id → auth.users
+  └── notifications (factory_id)
+        └── user_id → auth.users
+
+sign_pins (không có factory_id — theo auth.users)
+  └── user_id PK → auth.users
 ```
 
 ## Schema auth / profile
@@ -148,6 +168,30 @@ Ghi chú:
 - một xe có thể có nhiều dòng lịch sử theo thời gian
 - tại một thời điểm chỉ nên có 1 dòng hiện hành với `is_current = true`
 
+## Schema Thành phẩm
+
+### `sk_history`
+
+```sql
+id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+factory_id   UUID,
+ngay         DATE,
+loai         TEXT,            -- "Sang kiện" | "Thay bọc"
+chung_loai   TEXT,            -- chủng loại SP liên quan
+from_boc     TEXT,            -- Thay bọc: bọc cũ; null với Sang kiện
+to_boc       TEXT,            -- Thay bọc: bọc mới; null với Sang kiện
+from_pallet  TEXT,            -- Sang kiện: pallet cũ (từ filter); null với Thay bọc
+to_pallet    TEXT,            -- Sang kiện: pallet mới (join ", "); null với Thay bọc
+lots         JSONB,           -- [{ id, ma_lo, converted: { a, b, c, d } }]
+created_at   TIMESTAMPTZ DEFAULT now()
+```
+
+Ghi chú:
+
+- Mỗi phiên Sang kiện / Thay bọc tạo 1 bản ghi duy nhất, bất kể xử lý bao nhiêu lô
+- `lots` JSONB lưu snapshot số bành đã chuyển của từng lô tại thời điểm thao tác
+- Không có FK trỏ vào `lots.id` — đây là lịch sử audit, không dùng để tính toán nghiệp vụ
+
 ## Schema bảo trì
 
 ### `maintenance_external_materials`
@@ -190,12 +234,28 @@ Ghi chú:
 - `dispatch_delivery_points.phien_X[]` lưu mảng giá trị `ten` — không thay đổi
 - Không có FK từ bảng nào khác trỏ vào `forest_plots`
 
+## Schema ISO & Văn bản
+
+Chi tiết đầy đủ các bảng ISO & Văn bản xem tại:
+
+- `.claude/rules/16-iso-vanban-module.md`
+
+Tóm tắt schema:
+
+- `sign_pins`: `user_id UUID PK`, `pin_hash TEXT`, `updated_at TIMESTAMPTZ`
+- `iso_documents`: `id UUID PK`, `factory_id`, `ma_tai_lieu`, `ten_tai_lieu`, `loai_tai_lieu`, `cap_tl`, `chon_quy_trinh`, `trang_thai DEFAULT 'draft'`, `soan_thao/xem_xet/phe_duyet` (text snapshot + `_user_id` UUID), `ky_*_at` (timestamps), `file_goc_url`, `file_signed_pdf_url`, `ngay_hieu_luc`, `ghi_chu`
+- `van_ban_documents`: `id UUID PK`, `factory_id`, `ma_van_ban`, `ten_van_ban`, `cap_tl`, `ky_phong_ban TEXT[]`, `count_pb INTEGER`, `pb_ky_hien_tai TEXT`, `ky_phong_ban_at JSONB`, `trang_thai DEFAULT 'draft'`, `file_goc_url`, `file_signed_pdf_url`
+- `doc_approval_log`: `id UUID PK`, `doc_id UUID`, `doc_type TEXT`, `factory_id`, `user_id`, `action TEXT`, `phong_ban TEXT`, `buoc_ky INTEGER`, `ly_do TEXT`, `ip_address TEXT`, `created_at`
+- `notifications`: `id UUID PK`, `factory_id`, `user_id`, `type TEXT`, `doc_id UUID`, `doc_type TEXT`, `title TEXT`, `body TEXT`, `is_read BOOLEAN DEFAULT false`, `link TEXT`, `created_at`
+
 ## Migrations đã chạy
 
 | File | Nội dung |
 |---|---|
 | `20260520_departments_and_ext_materials.sql` | Tạo bảng `departments` + seed; thêm `profiles.department_id`; mở rộng `maintenance_external_materials` |
 | `20260520_forest_plots.sql` | Tạo bảng `forest_plots` |
+| `20260522_sk_history.sql` | Tạo bảng `sk_history` (lịch sử Sang kiện / Thay bọc) |
+| `20260522_iso_vanban_module.sql` | Tạo bảng `sign_pins`, `iso_documents`, `van_ban_documents`, `doc_approval_log`, `notifications`; triggers `updated_at`; RLS; 14 permissions ISO & Văn bản |
 
 ## Tham chiếu rule trung tâm
 

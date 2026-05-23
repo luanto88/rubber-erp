@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Factory,
   FileOutput,
+  FileText,
   Home,
   LogOut,
   Map,
@@ -83,6 +84,15 @@ const NAV: NavItem[] = [
       },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
       { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
+    ],
+  },
+  {
+    key: "iso-vanban",
+    label: "ISO & Văn bản",
+    icon: FileText,
+    children: [
+      { key: "/dashboard/iso", label: "Quản lý ISO", icon: FileText, permission: "iso.view" },
+      { key: "/dashboard/documents", label: "Văn bản nội bộ", icon: FileOutput, permission: "documents.view" },
     ],
   },
   { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, permission: "settings.view" },

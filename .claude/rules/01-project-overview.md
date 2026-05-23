@@ -103,8 +103,13 @@ Module nghiệp vụ có thể giữ nút thêm nhanh, nhưng dữ liệu tạo 
 
 - `dispatch`: Điều xe
 - `storage`: Kho nguyên liệu / Ngăn lưu / Hồ chứa
+- `output`: Sản lượng mủ cao su
 - `product`: Thành phẩm
 - `quality`: Kiểm nghiệm
 - `export`: Xuất hàng
 - `eudr`: Truy xuất chuỗi cung ứng
+- `maintenance`: Bảo trì máy móc & xe
+- `inventory`: Kho vật tư / hóa chất
+- `iso`: Quản lý tài liệu ISO (workflow ký duyệt kỹ thuật số)
+- `documents`: Văn bản nội bộ (vòng ký phòng ban)
 - `settings`: Quản trị danh mục, cấu hình, user, phân quyền
