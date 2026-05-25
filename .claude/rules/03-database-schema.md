@@ -243,7 +243,7 @@ Chi tiết đầy đủ các bảng ISO & Văn bản xem tại:
 Tóm tắt schema:
 
 - `sign_pins`: `user_id UUID PK`, `pin_hash TEXT`, `updated_at TIMESTAMPTZ`
-- `iso_documents`: `id UUID PK`, `factory_id`, `ma_tai_lieu`, `ten_tai_lieu`, `loai_tai_lieu`, `cap_tl`, `chon_quy_trinh`, `trang_thai DEFAULT 'draft'`, `soan_thao/xem_xet/phe_duyet` (text snapshot + `_user_id` UUID), `ky_*_at` (timestamps), `file_goc_url`, `file_signed_pdf_url`, `ngay_hieu_luc`, `ghi_chu`
+- `iso_documents`: `id UUID PK`, `factory_id`, `ma_tai_lieu`, `ten_tai_lieu`, `loai_tai_lieu` (CS|OB|ST|QC|TC|QT|HD|MT|QĐ|PL|F), `phan_loai_tl TEXT DEFAULT 'cha'` (cha|con — F luôn là con; PL và HD có thể cha hoặc con), `cap_tl`, `chon_quy_trinh`, `trang_thai DEFAULT 'draft'` (thêm `bi_tu_choi_phe_duyet`), `soan_thao/xem_xet/phe_duyet` (text snapshot + `_user_id` UUID), `ky_*_at` (timestamps), `soan_thao_placement/xem_xet_placement/phe_duyet_placement` (JSONB — migration 20260524), `file_goc_url`, `file_signed_pdf_url`, `ma_tai_lieu_moi TEXT`, `ngay_hieu_luc`, `ghi_chu`
 - `van_ban_documents`: `id UUID PK`, `factory_id`, `ma_van_ban`, `ten_van_ban`, `cap_tl`, `ky_phong_ban TEXT[]`, `count_pb INTEGER`, `pb_ky_hien_tai TEXT`, `ky_phong_ban_at JSONB`, `trang_thai DEFAULT 'draft'`, `file_goc_url`, `file_signed_pdf_url`
 - `doc_approval_log`: `id UUID PK`, `doc_id UUID`, `doc_type TEXT`, `factory_id`, `user_id`, `action TEXT`, `phong_ban TEXT`, `buoc_ky INTEGER`, `ly_do TEXT`, `ip_address TEXT`, `created_at`
 - `notifications`: `id UUID PK`, `factory_id`, `user_id`, `type TEXT`, `doc_id UUID`, `doc_type TEXT`, `title TEXT`, `body TEXT`, `is_read BOOLEAN DEFAULT false`, `link TEXT`, `created_at`
@@ -256,6 +256,8 @@ Tóm tắt schema:
 | `20260520_forest_plots.sql` | Tạo bảng `forest_plots` |
 | `20260522_sk_history.sql` | Tạo bảng `sk_history` (lịch sử Sang kiện / Thay bọc) |
 | `20260522_iso_vanban_module.sql` | Tạo bảng `sign_pins`, `iso_documents`, `van_ban_documents`, `doc_approval_log`, `notifications`; triggers `updated_at`; RLS; 14 permissions ISO & Văn bản |
+| `20260523_iso_phan_loai_tl.sql` | Thêm `iso_documents.phan_loai_tl TEXT DEFAULT 'cha'`; seed permissions `iso.signature`, `settings.master_data`, `settings.maintenance_config` cho role_permissions |
+| `20260524_iso_signature_placement.sql` (**chạy thủ công**) | Thêm `iso_documents.soan_thao_placement`, `xem_xet_placement`, `phe_duyet_placement` (JSONB) — lưu placement chữ ký từng bước |
 
 ## Tham chiếu rule trung tâm
 

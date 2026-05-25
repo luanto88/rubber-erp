@@ -7,6 +7,7 @@ export type IsoTrangThai =
   | "co_hieu_luc"
   | "het_hieu_luc"
   | "tra_ve"
+  | "bi_tu_choi_phe_duyet"
 
 export type IsoDocument = {
   id: string
@@ -29,6 +30,9 @@ export type IsoDocument = {
   file_goc_url: string | null
   file_soat_xet_url: string | null
   file_signed_pdf_url: string | null
+  soan_thao_placement: Record<string, number> | null
+  xem_xet_placement: Record<string, number> | null
+  phe_duyet_placement: Record<string, number> | null
   ky_soan_thao_at: string | null
   ky_xem_xet_at: string | null
   ky_phe_duyet_at: string | null
@@ -44,10 +48,15 @@ export type IsoDocument = {
 }
 
 export type IsoDocumentForm = {
-  ma_tai_lieu: string
-  so_hieu: string            // 2 chữ số, dùng để auto-generate ma_tai_lieu
+  ma_tai_lieu: string          // auto-generated (readonly)
+  // Tài liệu Cha: phong_ban + loai_tai_lieu + so_hieu → ma_tai_lieu
+  so_hieu: string              // số hiệu của TL (Cha: serial của TL; Con: serial con)
+  // Hồ sơ Con: phong_ban + loai_tai_lieu_cha + so_hieu_cha → ma_tai_lieu_cha
+  loai_tai_lieu_cha: string    // loại TL của tài liệu cha (Con mode, e.g. "QT")
+  so_hieu_cha: string          // số hiệu cha (Con mode, e.g. "02")
+  ma_tai_lieu_cha: string      // mã cha auto-derived (e.g. "NMCB-QT01")
   ten_tai_lieu: string
-  loai_tai_lieu: string
+  loai_tai_lieu: string        // loại TL của chính tài liệu này
   phong_ban: string
   cap_tl: string
   chon_quy_trinh: string
@@ -60,7 +69,7 @@ export type IsoDocumentForm = {
   phe_duyet_user_id: string
   ghi_chu: string
   ma_tai_lieu_moi: string
-  phan_loai_tl: string
+  phan_loai_tl: string         // "cha" | "con"
 }
 
 // Danh sách loại tài liệu theo bảng chuẩn ISO của công ty
@@ -82,6 +91,27 @@ export const LOAI_TAI_LIEU_LABEL: Record<string, string> = {
   F: "Biểu mẫu",
 }
 
+// Loại tài liệu Cha (không bao gồm F là luôn Con)
+export const LOAI_CHA_OPTIONS = ["CS", "OB", "ST", "QC", "TC", "QT", "HD", "MT", "QĐ", "PL"] as const
+
+// Loại hồ sơ Con (PL, HD có thể Cha hoặc Con; F luôn Con)
+export const LOAI_CON_OPTIONS = ["PL", "HD", "F"] as const
+
+// Mapping loai_tai_lieu → phòng ban được phép
+export const LOAI_PHONG_BAN_MAP: Record<string, string[]> = {
+  CS:   ["PHK"],
+  OB:   ["PHK"],
+  ST:   ["PHK"],
+  QC:   ["PHK"],
+  TC:   ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  QT:   ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  HD:   ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  MT:   ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  PL:   ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  "QĐ": ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+  F:    ["PHK", "KHXD", "NMCB", "QLCL", "KTNN", "TCKT", "TCHC", "TTBV"],
+}
+
 export const PHONG_BAN_OPTIONS = [
   "PHK", "KTNN", "QLCL", "KHXD", "TCKT", "TCHC", "TTBV", "NMCB", "CS"
 ] as const
@@ -93,6 +123,7 @@ export const TRANG_THAI_LABEL: Record<IsoTrangThai, string> = {
   co_hieu_luc: "Có hiệu lực",
   het_hieu_luc: "Hết hiệu lực",
   tra_ve: "Trả về",
+  bi_tu_choi_phe_duyet: "Phê duyệt từ chối",
 }
 
 export const TRANG_THAI_COLOR: Record<IsoTrangThai, string> = {
@@ -102,20 +133,53 @@ export const TRANG_THAI_COLOR: Record<IsoTrangThai, string> = {
   co_hieu_luc: "bg-emerald-100 text-emerald-700",
   het_hieu_luc: "bg-red-100 text-red-600",
   tra_ve: "bg-rose-100 text-rose-700",
+  bi_tu_choi_phe_duyet: "bg-red-100 text-red-700",
 }
 
-// Auto-generate mã tài liệu từ phòng ban + loại + số hiệu
+// Auto-generate mã tài liệu Cha: PB-LOAISOSO (VD: NMCB-QT01)
 export function buildMaTaiLieu(pb: string, loai: string, so: string): string {
   if (!pb || !loai || !so) return ""
   const num = parseInt(so)
   if (isNaN(num) || num < 1) return ""
-  return `${pb}-${loai}-${String(num).padStart(2, "0")}`
+  return `${pb}-${loai}${String(num).padStart(2, "0")}`
+}
+
+// Auto-generate mã tài liệu Con: MACHA-LOAICON+SOSOCON (VD: NMCB-QT01-PL01)
+export function buildMaTaiLieuCon(maCha: string, loai: string, so: string): string {
+  if (!maCha || !loai || !so) return ""
+  const num = parseInt(so)
+  if (isNaN(num) || num < 1) return ""
+  return `${maCha}-${loai}${String(num).padStart(2, "0")}`
+}
+
+// Parse mã tài liệu Con để lấy maCha và soHieu con
+// VD: "NMCB-QT01-PL01" với loai="PL" → { maCha: "NMCB-QT01", soHieu: "1" }
+export function parseMaTaiLieuCon(ma: string, loai: string): { maCha: string; soHieu: string } {
+  if (!ma || !loai) return { maCha: "", soHieu: "" }
+  const re = new RegExp(`-${loai}(\\d+)$`, "i")
+  const m = ma.match(re)
+  if (!m) return { maCha: "", soHieu: "" }
+  return { maCha: ma.slice(0, ma.length - m[0].length), soHieu: String(parseInt(m[1])) }
+}
+
+// Parse mã cha để lấy pb, loai, so
+// VD: "NMCB-QT01" → { pb: "NMCB", loai: "QT", so: "1" }
+// VD: "PHK-QĐ02" → { pb: "PHK", loai: "QĐ", so: "2" }
+export function parseParentCode(code: string): { pb: string; loai: string; so: string } | null {
+  if (!code) return null
+  // Match: LETTERS-LETTERS+DIGITS (supports QĐ with unicode Đ)
+  const m = code.match(/^([A-Z]+)-([A-ZĐđ]+)(\d+)$/i)
+  if (!m) return null
+  return { pb: m[1].toUpperCase(), loai: m[2].toUpperCase(), so: String(parseInt(m[3])) }
 }
 
 export function emptyIsoForm(): IsoDocumentForm {
   return {
     ma_tai_lieu: "",
     so_hieu: "",
+    loai_tai_lieu_cha: "QT",
+    so_hieu_cha: "",
+    ma_tai_lieu_cha: "",
     ten_tai_lieu: "",
     loai_tai_lieu: "QT",
     phong_ban: "",

@@ -72,6 +72,7 @@ export default function IsoDocumentsPage() {
     { value: "co_hieu_luc", label: "Có hiệu lực" },
     { value: "het_hieu_luc", label: "Hết hiệu lực" },
     { value: "tra_ve", label: "Trả về" },
+    { value: "bi_tu_choi_phe_duyet", label: "Phê duyệt từ chối" },
   ]
 
   return (
@@ -84,7 +85,7 @@ export default function IsoDocumentsPage() {
             <p className="text-sm text-slate-500 mt-0.5">Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn</p>
           </div>
           <Link
-            href="/dashboard/iso/documents/new"
+            href="/dashboard/iso/documents/new-doc"
             className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
           >
             <Plus size={16} /> Tạo tài liệu

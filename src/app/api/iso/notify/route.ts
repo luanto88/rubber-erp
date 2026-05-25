@@ -32,6 +32,18 @@ const ACTION_LABELS: Record<string, ActionLabel> = {
     title: "Tài liệu bị từ chối xem xét",
     body: (maTl, tenTl, actor, lyDo) => `Tài liệu ${maTl} — "${tenTl}" đã bị ${actor} từ chối xem xét.${lyDo ? ` Lý do: ${lyDo}` : ""}`,
   },
+  tu_choi_phe_duyet: {
+    title: "Tài liệu bị từ chối phê duyệt",
+    body: (maTl, tenTl, actor, lyDo) => `Tài liệu ${maTl} — "${tenTl}" đã bị ${actor} từ chối phê duyệt.${lyDo ? ` Lý do: ${lyDo}` : ""}`,
+  },
+  gui_lai_phe_duyet: {
+    title: "Tài liệu gửi phê duyệt lại",
+    body: (maTl, tenTl, actor) => `Tài liệu ${maTl} — "${tenTl}" đã được ${actor} gửi phê duyệt lại sau khi chỉnh sửa.`,
+  },
+  tra_ve_nhap: {
+    title: "Tài liệu trả về Nháp",
+    body: (maTl, tenTl, actor) => `Tài liệu ${maTl} — "${tenTl}" đã được ${actor} trả về trạng thái Nháp.`,
+  },
 }
 
 export async function POST(req: NextRequest) {
@@ -113,8 +125,8 @@ export async function POST(req: NextRequest) {
       .in("id", recipientUserIds)
 
     // ── 2. Telegram ────────────────────────────────────────────────────────────
-    const botToken = process.env.TELEGRAM_BOT_TOKEN
-    const chatId = process.env.TELEGRAM_CHAT_ID
+    const botToken = process.env.ISO_TELEGRAM_BOT_TOKEN
+    const chatId = process.env.ISO_TELEGRAM_CHAT_ID
 
     if (botToken && chatId) {
       const recipientNames = (recipientProfiles || [])
@@ -168,7 +180,7 @@ export async function POST(req: NextRequest) {
           .filter((e): e is string => !!e && e.includes("@"))
 
         if (emails.length > 0) {
-          const isWarning = action === "tra_ve" || action === "khong_xem_xet"
+          const isWarning = action === "tra_ve" || action === "khong_xem_xet" || action === "tu_choi_phe_duyet" || action === "tra_ve_nhap"
           const headerColor = isWarning ? "#e11d48" : "#7c3aed"
           const subject = `[ISO] ${labelInfo.title} — ${maTl}`
 

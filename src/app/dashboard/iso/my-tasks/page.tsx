@@ -23,7 +23,7 @@ export default function IsoMyTasksPage() {
         .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, cap_tl, soan_thao, xem_xet, phe_duyet, xem_xet_user_id, phe_duyet_user_id, updated_at")
         .eq("factory_id", fid)
         .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
-        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet"])
+        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet"])
         .order("updated_at", { ascending: false })
       setTasks((data || []) as IsoDocument[])
     } finally {
@@ -50,6 +50,7 @@ export default function IsoMyTasksPage() {
   const getMyRole = (doc: IsoDocument): string => {
     if (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === userId) return "Cần xem xét"
     if (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === userId) return "Cần phê duyệt"
+    if (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === userId) return "Phê duyệt từ chối — cần xử lý"
     return "Cần xử lý"
   }
 

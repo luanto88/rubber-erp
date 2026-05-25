@@ -3,6 +3,9 @@ import { createClient } from "@supabase/supabase-js"
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
 import { jwtVerify } from "jose"
 import QRCode from "qrcode"
+import fontkit from "@pdf-lib/fontkit"
+import fs from "fs"
+import path from "path"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,6 +28,18 @@ type SignPlacement = {
   y: number
   width: number
   height: number
+}
+
+type MetaMismatch = { found: string; expected: string }
+
+const TRANG_THAI_LABEL_SERVER: Record<string, string> = {
+  draft: "Nháp",
+  cho_xem_xet: "Chờ xem xét",
+  cho_phe_duyet: "Chờ phê duyệt",
+  co_hieu_luc: "Có hiệu lực",
+  het_hieu_luc: "Hết hiệu lực",
+  tra_ve: "Trả về",
+  bi_tu_choi_phe_duyet: "Phê duyệt từ chối",
 }
 
 // Con types: F always; PL and HD when phan_loai_tl === "con"
@@ -52,6 +67,150 @@ function fmtDate(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
+}
+
+function loadViFont(): Buffer | null {
+  try {
+    return fs.readFileSync(path.join(process.cwd(), "public/fonts/NotoSans-Regular.ttf"))
+  } catch {
+    return null
+  }
+}
+
+// Scan PDF header area (top 25% of each page) and fill blank metadata placeholders
+async function fillMetadataPlaceholders(
+  pdfDoc: PDFDocument,
+  pdfBytes: ArrayBuffer,
+  doc: Record<string, unknown>,
+  fallbackFont: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  viFont: Buffer | null,
+): Promise<{ filled: string[]; notFound: string[]; mismatched: MetaMismatch[] }> {
+  const filledSet = new Set<string>()
+  const notFound: string[] = []
+  const mismatched: MetaMismatch[] = []
+  try {
+    // Embed Vietnamese-capable font if available; fall back to Helvetica for ASCII
+    let drawFont = fallbackFont
+    if (viFont) {
+      pdfDoc.registerFontkit(fontkit)
+      drawFont = await pdfDoc.embedFont(viFont)
+    }
+
+    // Labels that should exist in the header info box (correct names)
+    const FILL_MAP = [
+      { label: "Mã tài liệu", pattern: /m[aã]\s*t[àa]i\s*li[eệ]u\s*:/i, value: (doc.ma_tai_lieu as string) || "" },
+      { label: "Lần ban hành / Lần sửa đổi", pattern: /l[aầ]n\s+(ban\s*h[àa]nh|s[uửa]+a?\s*đ[oổ]i)\s*:/i, value: String((doc.lan_ban_hanh as number) ?? 1) },
+      { label: "Tình trạng", pattern: /t[iì]nh\s*tr[aạ]ng\s*:/i, value: TRANG_THAI_LABEL_SERVER[doc.trang_thai as string] || "" },
+      { label: "Ngày hiệu lực", pattern: /ng[aà]y\s*hi[eệ]u\s*l[uực]*\s*:/i, value: doc.ngay_hieu_luc ? fmtDate(doc.ngay_hieu_luc as string) : "" },
+    ]
+
+    // Similar-but-wrong labels → warn user to fix the template file
+    const MISMATCH_MAP: Array<{ pattern: RegExp; expected: string }> = [
+      { pattern: /tr[aạ]ng\s*th[aá]i\s*:/i,                      expected: "Tình trạng" },
+      { pattern: /m[aã]\s*h[oồ]\s*s[oơ]\s*:/i,                   expected: "Mã tài liệu" },
+      { pattern: /s[oố]\s*hi[eệ]u\s*(t[aà]i\s*li[eệ]u\s*)?:/i,  expected: "Mã tài liệu" },
+      { pattern: /phi[eê]n\s*b[aả]n\s*:/i,                        expected: "Lần ban hành / Lần sửa đổi" },
+      { pattern: /ng[aà]y\s*ban\s*h[aà]nh\s*:/i,                  expected: "Ngày hiệu lực" },
+      { pattern: /ng[aà]y\s*[aá]p\s*d[uụ]ng\s*:/i,               expected: "Ngày hiệu lực" },
+    ]
+
+    const pdfjsLib = await import("pdfjs-dist")
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ""
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdfjsDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(pdfBytes),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any).promise
+
+    const pdfLibPages = pdfDoc.getPages()
+
+    // Local shape for pdfjs text items (to avoid clash with pdfjs-dist's exported TextItem)
+    type PdfTextItem = { str: string; transform: number[]; width: number; height: number }
+
+    // Track found/filled across ALL pages so labels on page 1 don't show up in notFound from page 2+
+    const foundLabels = new Set<string>()
+
+    for (let pageIdx = 0; pageIdx < Math.min(pdfjsDoc.numPages, pdfLibPages.length); pageIdx++) {
+      const pdfjsPage = await pdfjsDoc.getPage(pageIdx + 1)
+      const viewport = pdfjsPage.getViewport({ scale: 1.0 })
+      const textContent = await pdfjsPage.getTextContent()
+      const pdfLibPage = pdfLibPages[pageIdx]
+
+      // Only consider items in the top 40% of the page (header info box area)
+      // pdfjs uses bottom-left origin, so y > 60% of height = top 40%
+      const headerThreshold = viewport.height * 0.60
+      const items = (textContent.items as unknown[]).filter((item): item is PdfTextItem =>
+        typeof item === "object" && item !== null &&
+        "str" in item && typeof (item as { str?: unknown }).str === "string" &&
+        "transform" in item && Array.isArray((item as { transform?: unknown }).transform) &&
+        ((item as { transform: number[] }).transform[5]) > headerThreshold
+      )
+
+      // Sort top-to-bottom then left-to-right
+      items.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4])
+
+      // Group items into lines (within 3pt on y-axis)
+      const lines: PdfTextItem[][] = []
+      for (const item of items) {
+        const y = item.transform[5]
+        const existing = lines.find((l) => Math.abs(l[0].transform[5] - y) < 3)
+        if (existing) {
+          existing.push(item)
+          existing.sort((a, b) => a.transform[4] - b.transform[4])
+        } else {
+          lines.push([item])
+        }
+      }
+
+      for (const line of lines) {
+        const lineText = line.map((i) => i.str).join(" ")
+
+        // Check for similar-but-wrong labels before checking correct ones
+        for (const { pattern, expected } of MISMATCH_MAP) {
+          if (pattern.test(lineText)) {
+            const foundStr = line.map((i) => i.str).join("").trim()
+            if (!mismatched.some((m) => m.expected === expected)) {
+              mismatched.push({ found: foundStr, expected })
+            }
+          }
+        }
+
+        // Fill correct labels
+        for (const { label, pattern, value } of FILL_MAP) {
+          if (!pattern.test(lineText) || !value) continue
+          foundLabels.add(label)
+
+          const colonIdx = line.findIndex((item) => item.str.includes(":"))
+          if (colonIdx === -1) continue
+
+          const afterColon = line.slice(colonIdx + 1)
+          const existingText = afterColon.map((i) => i.str).join("").trim()
+          // Skip if field already has real content (not just dashes/underscores/spaces)
+          if (existingText && !/^[_\-\.\s]+$/.test(existingText)) continue
+
+          const colonItem = line[colonIdx]
+          const x = colonItem.transform[4] + (colonItem.width ?? 0) + 3
+          const y = colonItem.transform[5]
+          const fontSize = Math.max(Math.round((colonItem.height ?? 10) * 0.85), 7)
+          try {
+            pdfLibPage.drawText(value, { x, y, size: fontSize, font: drawFont, color: rgb(0, 0, 0) })
+            filledSet.add(label)
+          } catch { /* skip this field if font/encoding fails; continue with others */ }
+          break
+        }
+      }
+
+      // Track labels not found in header of this page
+      for (const { label } of FILL_MAP) {
+        if (!foundLabels.has(label) && !notFound.includes(label)) notFound.push(label)
+      }
+    }
+  } catch (err) {
+    console.warn("[generate-pdf] fillMetadataPlaceholders:", err instanceof Error ? err.message : err)
+  }
+  return { filled: [...filledSet], notFound, mismatched }
 }
 
 // Footer stamp on each page
@@ -208,6 +367,48 @@ export async function POST(req: NextRequest) {
     const phanLoaiTl = doc.phan_loai_tl as string | null
     const isCon = isConDoc(loaiTaiLieu, phanLoaiTl)
 
+    // ─── Signature persistence: save current user's placement ───────────────
+    let currentSignerKey: string | null = null
+    if (userId === (doc.soan_thao_user_id as string)) currentSignerKey = "soan_thao_placement"
+    else if (userId === (doc.xem_xet_user_id as string)) currentSignerKey = "xem_xet_placement"
+    else if (userId === (doc.phe_duyet_user_id as string)) currentSignerKey = "phe_duyet_placement"
+
+    if (currentSignerKey && signaturePlacement) {
+      const { error: placementSaveErr } = await supabaseAdmin
+        .from("iso_documents")
+        .update({ [currentSignerKey]: signaturePlacement })
+        .eq("id", docId)
+        .eq("factory_id", factoryId)
+      if (placementSaveErr) {
+        console.warn("[generate-pdf] placement save error (migration 20260524 chưa chạy?):", placementSaveErr.message)
+      }
+    }
+
+    // Reload doc placements after save so we have all accumulated placements
+    const { data: docPlacements, error: placementLoadErr } = await supabaseAdmin
+      .from("iso_documents")
+      .select("soan_thao_placement, xem_xet_placement, phe_duyet_placement, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id")
+      .eq("id", docId)
+      .single()
+    if (placementLoadErr) {
+      console.warn("[generate-pdf] placement load error (migration 20260524 chưa chạy?):", placementLoadErr.message)
+    }
+
+    const allPlacements: Array<{ signerUserId: string | null; placement: SignPlacement | null }> = [
+      {
+        signerUserId: (docPlacements?.soan_thao_user_id ?? null) as string | null,
+        placement: (docPlacements?.soan_thao_placement ?? null) as SignPlacement | null,
+      },
+      {
+        signerUserId: (docPlacements?.xem_xet_user_id ?? null) as string | null,
+        placement: (docPlacements?.xem_xet_placement ?? null) as SignPlacement | null,
+      },
+      {
+        signerUserId: (docPlacements?.phe_duyet_user_id ?? null) as string | null,
+        placement: (docPlacements?.phe_duyet_placement ?? null) as SignPlacement | null,
+      },
+    ]
+
     // Lấy tên công ty
     const { data: factoryData } = await supabaseAdmin
       .from("factories")
@@ -223,7 +424,7 @@ export async function POST(req: NextRequest) {
       getProfile(doc.phe_duyet_user_id as string | null),
     ])
 
-    // Lấy ảnh chữ ký (chỉ người đã ký)
+    // Lấy ảnh chữ ký cho phiếu ký duyệt (chỉ người đã ký chính thức)
     const [sigSoan, sigXem, sigPhe] = await Promise.all([
       doc.ky_soan_thao_at && doc.soan_thao_user_id
         ? getSigImage(factoryId, doc.soan_thao_user_id as string)
@@ -236,15 +437,13 @@ export async function POST(req: NextRequest) {
         : Promise.resolve(null),
     ])
 
-    // Lấy ảnh chữ ký của người đang thực hiện (cho signaturePlacement)
-    const currentUserSig = await getSigImage(factoryId, userId)
-
     // Tạo QR code PNG
     const qrUrl = `${APP_URL}/dashboard/iso/documents/${docId}`
     const qrBuffer = await QRCode.toBuffer(qrUrl, { width: 120, margin: 1 })
 
     // ─── Load và stamp file gốc ───
     let originalPages: PDFDocument | null = null
+    let metaResult: { filled: string[]; notFound: string[]; mismatched: MetaMismatch[] } = { filled: [], notFound: [], mismatched: [] }
     const fileGocUrl = doc.file_goc_url as string | null
     if (fileGocUrl) {
       const urlParts = fileGocUrl.split("/storage/v1/object/public/iso-documents/")
@@ -255,36 +454,49 @@ export async function POST(req: NextRequest) {
           .download(decodeURIComponent(storagePath))
         if (!pdfErr && pdfData) {
           const pdfBytes = await pdfData.arrayBuffer()
+
+          // Only PDFDocument.load failure resets originalPages — remaining steps run independently
           try {
             originalPages = await PDFDocument.load(pdfBytes)
+          } catch (loadErr) {
+            console.warn("[generate-pdf] PDFDocument.load failed:", loadErr instanceof Error ? loadErr.message : loadErr)
+            originalPages = null
+          }
+
+          if (originalPages) {
             const origFont = await originalPages.embedFont(StandardFonts.Helvetica)
             const origFontBold = await originalPages.embedFont(StandardFonts.HelveticaBold)
 
+            // Fill metadata placeholders in header area (before header/footer stamps)
+            const viFont = loadViFont()
+            metaResult = await fillMetadataPlaceholders(originalPages, pdfBytes, doc, origFont, viFont)
+
+            // Stamp header/footer on all pages — each page guarded independently
             for (const page of originalPages.getPages()) {
-              // Stamp footer on all pages
-              await stampFooter(page, origFont, maTl, lsStr, dateStr, statusText, isActive)
-              // Stamp header (QR + info box for Cha; QR-only for Con)
-              await stampHeader(page, originalPages, origFont, origFontBold, qrBuffer, maTl, lsStr, dateStr, statusText, !isCon)
+              try { await stampFooter(page, origFont, maTl, lsStr, dateStr, statusText, isActive) } catch { }
+              try { await stampHeader(page, originalPages, origFont, origFontBold, qrBuffer, maTl, lsStr, dateStr, statusText, !isCon) } catch { }
             }
 
-            // Embed current user's signature at the placement position (if provided)
-            if (signaturePlacement && currentUserSig) {
-              const targetPage = originalPages.getPage(signaturePlacement.page - 1)
-              if (targetPage) {
-                try {
-                  const sigImg = await originalPages.embedPng(currentUserSig)
-                    .catch(() => originalPages!.embedJpg(currentUserSig!))
-                  targetPage.drawImage(sigImg, {
-                    x: signaturePlacement.x,
-                    y: signaturePlacement.y,
-                    width: signaturePlacement.width,
-                    height: signaturePlacement.height,
-                    opacity: 0.92,
-                  })
-                } catch { /* skip if image fails */ }
-              }
+            // Embed ALL accumulated body signatures — each guarded independently
+            for (const { signerUserId, placement } of allPlacements) {
+              if (!signerUserId || !placement) continue
+              const pageIdx = placement.page - 1
+              if (pageIdx < 0 || pageIdx >= originalPages.getPageCount()) continue
+              const sigImg = await getSigImage(factoryId, signerUserId)
+              if (!sigImg) continue
+              try {
+                const embedded = await originalPages.embedPng(sigImg)
+                  .catch(() => originalPages!.embedJpg(sigImg!))
+                originalPages.getPage(pageIdx).drawImage(embedded, {
+                  x: placement.x,
+                  y: placement.y,
+                  width: placement.width,
+                  height: placement.height,
+                  opacity: 0.92,
+                })
+              } catch { /* skip this signature if image embed fails */ }
             }
-          } catch { originalPages = null }
+          }
         }
       }
     }
@@ -429,7 +641,7 @@ export async function POST(req: NextRequest) {
       phieuPages.forEach((p) => finalDoc.addPage(p))
     }
 
-    // Append original pages (with stamps)
+    // Append original pages (with stamps + signatures)
     if (originalPages) {
       const origCopied = await finalDoc.copyPages(originalPages, originalPages.getPageIndices())
       origCopied.forEach((p) => finalDoc.addPage(p))
@@ -471,7 +683,25 @@ export async function POST(req: NextRequest) {
       user_agent: req.headers.get("user-agent") || "",
     })
 
-    return NextResponse.json({ ok: true, signedPdfUrl: urlData.publicUrl, storagePath: outputPath })
+    const bodySignaturesEmbedded = allPlacements.filter((p) => p.signerUserId && p.placement).length
+    return NextResponse.json({
+      ok: true,
+      signedPdfUrl: urlData.publicUrl,
+      storagePath: outputPath,
+      metaFilled: metaResult.filled,
+      metaNotFound: metaResult.notFound,
+      metaMismatched: metaResult.mismatched,
+      diagnostics: {
+        fileGocLoaded: !!originalPages,
+        placementSaved: !!(currentSignerKey && signaturePlacement),
+        placementColumnsExist: !placementLoadErr,
+        bodySignaturesEmbedded,
+        allPlacementsRaw: allPlacements.map((p) => ({
+          userId: p.signerUserId,
+          hasPlacement: !!p.placement,
+        })),
+      },
+    })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },
