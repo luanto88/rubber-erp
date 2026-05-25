@@ -207,12 +207,7 @@ function findNearbyText(
 
 async function extractTextLinesByPage(pdfBytes: ArrayBuffer): Promise<PdfTextItem[][][]> {
   try {
-    const pdfjsLib = await loadPdfjs()
-    const pdfjsDoc = await pdfjsLib.getDocument({
-      data: new Uint8Array(pdfBytes),
-      useWorkerFetch: false,
-      isEvalSupported: false,
-    } as never).promise
+    const pdfjsDoc = await openPdfjsDocument(pdfBytes)
     const result: PdfTextItem[][][] = []
 
     for (let pageIdx = 0; pageIdx < pdfjsDoc.numPages; pageIdx++) {
@@ -292,9 +287,17 @@ function getMismatchPatterns() {
 }
 
 async function loadPdfjs() {
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs")
-  pdfjsLib.GlobalWorkerOptions.workerSrc = ""
-  return pdfjsLib
+  return await import("pdfjs-dist/legacy/build/pdf.mjs")
+}
+
+async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
+  const pdfjsLib = await loadPdfjs()
+  return await pdfjsLib.getDocument({
+    data: new Uint8Array(pdfBytes),
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  } as never).promise
 }
 
 async function fillMetadataPlaceholders(
@@ -317,12 +320,7 @@ async function fillMetadataPlaceholders(
   const footerValue = buildFooterValue(maTl, lsStr, dateStr, statusText)
 
   try {
-    const pdfjsLib = await loadPdfjs()
-    const pdfjsDoc = await pdfjsLib.getDocument({
-      data: new Uint8Array(pdfBytes),
-      useWorkerFetch: false,
-      isEvalSupported: false,
-    } as never).promise
+    const pdfjsDoc = await openPdfjsDocument(pdfBytes)
     const pages = pdfDoc.getPages()
 
     for (let pageIdx = 0; pageIdx < Math.min(pdfjsDoc.numPages, pages.length); pageIdx++) {
@@ -401,7 +399,7 @@ async function fillMetadataPlaceholders(
           if (hasRealHeaderValue(existingValue)) break
 
           const hasColon = item.str.includes(":")
-          const fontSize = Math.max(Math.round((item.height ?? 10) * 0.85), 7)
+          const fontSize = 13
           page.drawText(`${hasColon ? "" : ":"} ${String(header.value)}`, {
             x: item.transform[4] + (item.width ?? 0) + 4,
             y: item.transform[5],
@@ -452,7 +450,7 @@ async function fillMetadataPlaceholders(
               color: rgb(1, 1, 1),
             })
 
-            const fontSize = Math.max(Math.round((line[0].height ?? 10) * 0.9), 7)
+            const fontSize = 13
             page.drawText(footerValue, {
               x: bounds.minX,
               y: line[0].transform[5],
@@ -663,10 +661,13 @@ export async function POST(req: NextRequest) {
             let stampFont: PDFFont
             let signerNameFont: PDFFont
             try {
-              stampFont = await embedViFont(originalPages, viFontBytes)
-              signerNameFont = signerNameFontBytes
-                ? await embedViFont(originalPages, signerNameFontBytes)
-                : stampFont
+              if (signerNameFontBytes) {
+                stampFont = await embedViFont(originalPages, signerNameFontBytes)
+                signerNameFont = stampFont
+              } else {
+                stampFont = await embedViFont(originalPages, viFontBytes)
+                signerNameFont = stampFont
+              }
             } catch (fontErr) {
               return NextResponse.json(
                 { error: "Font tiếng Việt không hợp lệ: " + (fontErr instanceof Error ? fontErr.message : String(fontErr)) },
@@ -758,7 +759,7 @@ export async function POST(req: NextRequest) {
     }
 
     const signedPdfBytes = await finalDoc.save()
-    const outputPath = `${factoryId}/iso/signed/${docId}_signed.pdf`
+    const outputPath = `${factoryId}/iso/signed/${docId}_signed_${Date.now()}.pdf`
     const { error: uploadErr } = await supabaseAdmin.storage
       .from("iso-documents")
       .upload(outputPath, signedPdfBytes, { contentType: "application/pdf", upsert: true })

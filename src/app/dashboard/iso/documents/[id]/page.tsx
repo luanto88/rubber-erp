@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
@@ -93,7 +93,7 @@ export default function IsoDocumentDetailPage() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Users for selectors — all active, xem_xet-filtered, phe_duyet-filtered
+  // Users for selectors â€” all active, xem_xet-filtered, phe_duyet-filtered
   const [profilesAll, setProfilesAll] = useState<ProfileOption[]>([])
   const [profilesXemXet, setProfilesXemXet] = useState<ProfileOption[]>([])
   const [profilesPheDuyet, setProfilesPheDuyet] = useState<ProfileOption[]>([])
@@ -142,14 +142,14 @@ export default function IsoDocumentDetailPage() {
 
   // Header mismatch warnings from generate-pdf
   const [headerMismatchWarnings, setHeaderMismatchWarnings] = useState<Array<{ found: string; expected: string }>>([])
-  // Labels user confirmed are intentional (not errors) — skip in future generate-pdf calls
+  // Labels user confirmed are intentional (not errors) â€” skip in future generate-pdf calls
   const [confirmedSkipTags, setConfirmedSkipTags] = useState<string[]>([])
 
 
   const appUrl = typeof window !== "undefined" ? window.location.origin : ""
   const recordUrl = `${appUrl}/dashboard/iso/documents/${docId}`
 
-  // Load profiles filtered by permission code — dùng API server-side để bypass RLS trên user_permissions
+  // Load profiles filtered by permission code â€” dĂ¹ng API server-side Ä‘á»ƒ bypass RLS trĂªn user_permissions
   const loadProfilesByPermission = useCallback(async (fid: string, permCode: string): Promise<ProfileOption[]> => {
     try {
       const res = await fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=${encodeURIComponent(permCode)}`)
@@ -196,7 +196,7 @@ export default function IsoDocumentDetailPage() {
     let soHieuCha = ""
 
     if (isCon && d.ma_tai_lieu && d.loai_tai_lieu) {
-      // Parse mã Con: "NMCB-QT01-PL01" → { maCha: "NMCB-QT01", soHieu: "1" }
+      // Parse mĂ£ Con: "NMCB-QT01-PL01" â†’ { maCha: "NMCB-QT01", soHieu: "1" }
       const parsed = parseMaTaiLieuCon(d.ma_tai_lieu, d.loai_tai_lieu)
       if (parsed.maCha) {
         maTaiLieuCha = parsed.maCha
@@ -211,7 +211,7 @@ export default function IsoDocumentDetailPage() {
         soHieu = last ? String(parseInt(last[1])) : ""
       }
     } else {
-      // Cha: mã dạng NMCB-QT01 → tách số cuối
+      // Cha: mĂ£ dáº¡ng NMCB-QT01 â†’ tĂ¡ch sá»‘ cuá»‘i
       const last = (d.ma_tai_lieu || "").match(/(\d+)$/)
       soHieu = last ? String(parseInt(last[1])) : ""
     }
@@ -225,8 +225,8 @@ export default function IsoDocumentDetailPage() {
       ten_tai_lieu: d.ten_tai_lieu,
       loai_tai_lieu: d.loai_tai_lieu || "QT",
       phong_ban: d.phong_ban || "",
-      cap_tl: d.cap_tl || "Cấp 1",
-      chon_quy_trinh: d.chon_quy_trinh || "Soạn thảo",
+      cap_tl: d.cap_tl || "Cáº¥p 1",
+      chon_quy_trinh: d.chon_quy_trinh || "Soáº¡n tháº£o",
       lan_ban_hanh: String(d.lan_ban_hanh ?? 0),
       soan_thao: d.soan_thao || "",
       soan_thao_user_id: d.soan_thao_user_id || "",
@@ -263,7 +263,7 @@ export default function IsoDocumentDetailPage() {
     void bootstrap()
   }, [isNew, docId, loadDoc, loadProfiles])
 
-  // Auto-set soạn thảo = user hiện tại khi tạo mới
+  // Auto-set soáº¡n tháº£o = user hiá»‡n táº¡i khi táº¡o má»›i
   useEffect(() => {
     if (isNew && user && !form.soan_thao_user_id) {
       setForm((f) => ({
@@ -274,13 +274,13 @@ export default function IsoDocumentDetailPage() {
     }
   }, [isNew, user, form.soan_thao_user_id])
 
-  // Load PDF khi mở placement modal — pdfjs v5+
+  // Load PDF khi má»Ÿ placement modal â€” pdfjs v5+
   useEffect(() => {
     if (!placementModal?.show || !doc?.file_goc_url) return
     const loadPdf = async () => {
       try {
         const pdfjsLib = await import("pdfjs-dist")
-        // Dùng version từ package để khớp với CDN worker (tránh version mismatch crash)
+        // DĂ¹ng version tá»« package Ä‘á»ƒ khá»›p vá»›i CDN worker (trĂ¡nh version mismatch crash)
         const ver = pdfjsLib.version
         pdfjsLib.GlobalWorkerOptions.workerSrc =
           `https://cdn.jsdelivr.net/npm/pdfjs-dist@${ver}/build/pdf.worker.min.mjs`
@@ -290,8 +290,8 @@ export default function IsoDocumentDetailPage() {
         await renderPdfPage(pdfDoc, 1)
       } catch (err) {
         console.error("PDF load failed:", err)
-        showToast(false, "Không tải được file PDF để đặt chữ ký. Chữ ký sẽ chỉ hiện trên Phiếu Ký Duyệt.")
-        // Đóng modal trước, rồi gọi doTransition bên ngoài setState (tránh side-effect trong setter)
+        showToast(false, "KhĂ´ng táº£i Ä‘Æ°á»£c file PDF Ä‘á»ƒ Ä‘áº·t chá»¯ kĂ½. Chá»¯ kĂ½ sáº½ chá»‰ hiá»‡n trĂªn Phiáº¿u KĂ½ Duyá»‡t.")
+        // ÄĂ³ng modal trÆ°á»›c, rá»“i gá»i doTransition bĂªn ngoĂ i setState (trĂ¡nh side-effect trong setter)
         const snapshot = placementModal
         setPlacementModal(null)
         if (snapshot) void doTransition(snapshot.action, snapshot.token, null, snapshot.lyDo)
@@ -323,7 +323,7 @@ export default function IsoDocumentDetailPage() {
 
   const trangThai = doc?.trang_thai || "draft"
   const userId = user?.id ?? ""
-  // Phải là đúng người được chỉ định VÀ có quyền
+  // Pháº£i lĂ  Ä‘Ăºng ngÆ°á»i Ä‘Æ°á»£c chá»‰ Ä‘á»‹nh VĂ€ cĂ³ quyá»n
   const canXemXet = hasPermission(user, "iso.xem_xet") && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
   const isEditable = isNew || trangThai === "draft" || trangThai === "tra_ve" || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
@@ -337,7 +337,7 @@ export default function IsoDocumentDetailPage() {
     if (!factoryId) return
     const allowed = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
     if (!allowed.some((t) => file.type.includes(t.split("/")[1])) && !file.name.match(/\.(pdf|docx|xlsx)$/i)) {
-      setSaveError("Chỉ hỗ trợ file PDF, DOCX, XLSX")
+      setSaveError("Chá»‰ há»— trá»£ file PDF, DOCX, XLSX")
       return
     }
     setFileUploading(true)
@@ -358,7 +358,7 @@ export default function IsoDocumentDetailPage() {
 
   const handleSave = async () => {
     if (!factoryId) return
-    if (!form.ten_tai_lieu.trim()) { setSaveError("Vui lòng nhập tên tài liệu"); return }
+    if (!form.ten_tai_lieu.trim()) { setSaveError("Vui lĂ²ng nháº­p tĂªn tĂ i liá»‡u"); return }
     setSaving(true)
     setSaveError(null)
     try {
@@ -392,7 +392,7 @@ export default function IsoDocumentDetailPage() {
           .select("id")
           .single()
         if (error) { setSaveError(error.message); return }
-        showToast(true, "Đã tạo tài liệu")
+        showToast(true, "ÄĂ£ táº¡o tĂ i liá»‡u")
         router.replace(`/dashboard/iso/documents/${data.id}`)
       } else {
         const { error } = await supabase
@@ -401,7 +401,7 @@ export default function IsoDocumentDetailPage() {
           .eq("id", docId)
           .eq("factory_id", factoryId)
         if (error) { setSaveError(error.message); return }
-        showToast(true, "Đã lưu thay đổi")
+        showToast(true, "ÄĂ£ lÆ°u thay Ä‘á»•i")
         void loadDoc(docId, factoryId)
       }
     } finally {
@@ -409,18 +409,18 @@ export default function IsoDocumentDetailPage() {
     }
   }
 
-  // Helper: danh sách user nhận thông báo theo action
+  // Helper: danh sĂ¡ch user nháº­n thĂ´ng bĂ¡o theo action
   const getNotifyRecipients = (action: PinModalAction, d: IsoDocument): string[] => {
     switch (action) {
       case "gui_xem_xet":
-        if (d.cap_tl === "Cấp 2") return [d.phe_duyet_user_id].filter(Boolean) as string[]
+        if (d.cap_tl === "Cáº¥p 2") return [d.phe_duyet_user_id].filter(Boolean) as string[]
         return [d.xem_xet_user_id].filter(Boolean) as string[]
       case "gui_phe_duyet": return [d.phe_duyet_user_id].filter(Boolean) as string[]
       case "phe_duyet": return [d.soan_thao_user_id, d.xem_xet_user_id].filter(Boolean) as string[]
       case "tra_ve":
       case "khong_xem_xet": return [d.soan_thao_user_id].filter(Boolean) as string[]
       case "tu_choi_phe_duyet":
-        if (d.cap_tl === "Cấp 2") return [d.soan_thao_user_id].filter(Boolean) as string[]
+        if (d.cap_tl === "Cáº¥p 2") return [d.soan_thao_user_id].filter(Boolean) as string[]
         return [d.xem_xet_user_id, d.soan_thao_user_id].filter(Boolean) as string[]
       case "gui_lai_phe_duyet": return [d.phe_duyet_user_id].filter(Boolean) as string[]
       case "tra_ve_nhap": return [d.soan_thao_user_id].filter(Boolean) as string[]
@@ -428,7 +428,7 @@ export default function IsoDocumentDetailPage() {
     }
   }
 
-  // Thực hiện chuyển trạng thái sau khi PIN đã được xác minh
+  // Thá»±c hiá»‡n chuyá»ƒn tráº¡ng thĂ¡i sau khi PIN Ä‘Ă£ Ä‘Æ°á»£c xĂ¡c minh
   const doTransition = async (
     action: PinModalAction,
     token: string | null,
@@ -441,8 +441,8 @@ export default function IsoDocumentDetailPage() {
 
     try {
       if (action === "gui_xem_xet") {
-        // Cấp 2 đi thẳng vào cho_phe_duyet; Cấp 1 qua cho_xem_xet
-        const newStatus = doc.cap_tl === "Cấp 2" ? "cho_phe_duyet" : "cho_xem_xet"
+        // Cáº¥p 2 Ä‘i tháº³ng vĂ o cho_phe_duyet; Cáº¥p 1 qua cho_xem_xet
+        const newStatus = doc.cap_tl === "Cáº¥p 2" ? "cho_phe_duyet" : "cho_xem_xet"
         const { error } = await supabase
           .from("iso_documents")
           .update({ trang_thai: newStatus, ky_soan_thao_at: now })
@@ -457,8 +457,8 @@ export default function IsoDocumentDetailPage() {
         if (error) { showToast(false, error.message); return }
 
       } else if (action === "phe_duyet") {
-        // Thu thập ID tài liệu cũ TRƯỚC khi đổi mã (dùng mã HIỆN TẠI của doc)
-        if (doc.chon_quy_trinh === "Soát xét" && doc.ma_tai_lieu) {
+        // Thu tháº­p ID tĂ i liá»‡u cÅ© TRÆ¯á»C khi Ä‘á»•i mĂ£ (dĂ¹ng mĂ£ HIá»†N Táº I cá»§a doc)
+        if (doc.chon_quy_trinh === "SoĂ¡t xĂ©t" && doc.ma_tai_lieu) {
           const { data: toInvalidate } = await supabase
             .from("iso_documents")
             .select("id")
@@ -473,8 +473,8 @@ export default function IsoDocumentDetailPage() {
           ky_phe_duyet_at: now,
           ngay_hieu_luc: now,
         }
-        // Soát xét đổi mã: gán mã mới từ ma_tai_lieu_moi
-        if (doc.chon_quy_trinh === "Soát xét" && doc.ma_tai_lieu_moi) {
+        // SoĂ¡t xĂ©t Ä‘á»•i mĂ£: gĂ¡n mĂ£ má»›i tá»« ma_tai_lieu_moi
+        if (doc.chon_quy_trinh === "SoĂ¡t xĂ©t" && doc.ma_tai_lieu_moi) {
           updatePayload.ma_tai_lieu = doc.ma_tai_lieu_moi
         }
         const { error } = await supabase
@@ -482,7 +482,7 @@ export default function IsoDocumentDetailPage() {
           .update(updatePayload)
           .eq("id", docId).eq("factory_id", factoryId)
         if (error) { showToast(false, error.message); return }
-        // Đánh dấu hết hiệu lực các doc cũ
+        // ÄĂ¡nh dáº¥u háº¿t hiá»‡u lá»±c cĂ¡c doc cÅ©
         if (invalidatedIds.length > 0) {
           await supabase
             .from("iso_documents")
@@ -499,9 +499,9 @@ export default function IsoDocumentDetailPage() {
         if (error) { showToast(false, error.message); return }
 
       } else if (action === "tu_choi_phe_duyet") {
-        // Cấp 1 → bi_tu_choi_phe_duyet (xem xét quyết định tiếp theo)
-        // Cấp 2 → tra_ve trực tiếp (không có xem xét)
-        const newStatus = doc.cap_tl === "Cấp 2" ? "tra_ve" : "bi_tu_choi_phe_duyet"
+        // Cáº¥p 1 â†’ bi_tu_choi_phe_duyet (xem xĂ©t quyáº¿t Ä‘á»‹nh tiáº¿p theo)
+        // Cáº¥p 2 â†’ tra_ve trá»±c tiáº¿p (khĂ´ng cĂ³ xem xĂ©t)
+        const newStatus = doc.cap_tl === "Cáº¥p 2" ? "tra_ve" : "bi_tu_choi_phe_duyet"
         const { error } = await supabase
           .from("iso_documents")
           .update({ trang_thai: newStatus, ghi_chu: lyDo || null })
@@ -509,7 +509,7 @@ export default function IsoDocumentDetailPage() {
         if (error) { showToast(false, error.message); return }
 
       } else if (action === "gui_lai_phe_duyet") {
-        // Xem xét ký lại và gửi phê duyệt lại
+        // Xem xĂ©t kĂ½ láº¡i vĂ  gá»­i phĂª duyá»‡t láº¡i
         const { error } = await supabase
           .from("iso_documents")
           .update({ trang_thai: "cho_phe_duyet", ky_xem_xet_at: now })
@@ -517,7 +517,7 @@ export default function IsoDocumentDetailPage() {
         if (error) { showToast(false, error.message); return }
 
       } else if (action === "tra_ve_nhap") {
-        // Xem xét trả tài liệu về nháp
+        // Xem xĂ©t tráº£ tĂ i liá»‡u vá» nhĂ¡p
         const { error } = await supabase
           .from("iso_documents")
           .update({ trang_thai: "draft", ghi_chu: lyDo || null })
@@ -535,7 +535,7 @@ export default function IsoDocumentDetailPage() {
         ly_do: lyDo || null,
       })
 
-      // Tạo PDF ký duyệt (không block UI nếu lỗi)
+      // Táº¡o PDF kĂ½ duyá»‡t (khĂ´ng block UI náº¿u lá»—i)
       const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
       let pdfError: string | null = null
       if (token && !noSignActions.includes(action) && doc.file_goc_url) {
@@ -548,7 +548,7 @@ export default function IsoDocumentDetailPage() {
           const pdfJson = await pdfRes.json()
           console.log("[generate-pdf] status:", pdfRes.status, "response:", pdfJson)
           if (pdfJson.ok) {
-            // Cập nhật state ngay để UI hiển thị link PDF mà không cần chờ loadDoc
+            // Cáº­p nháº­t state ngay Ä‘á»ƒ UI hiá»ƒn thá»‹ link PDF mĂ  khĂ´ng cáº§n chá» loadDoc
             if (pdfJson.signedPdfUrl) {
               setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : prev)
             }
@@ -557,17 +557,17 @@ export default function IsoDocumentDetailPage() {
             }
             const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
             if (failedSigs && failedSigs.length > 0) {
-              pdfError = `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`
+              pdfError = `${failedSigs.length} ngÆ°á»i kĂ½ chÆ°a cĂ³ áº£nh chá»¯ kĂ½. VĂ o CĂ i Ä‘áº·t â†’ Chá»¯ kĂ½ cĂ¡ nhĂ¢n Ä‘á»ƒ upload.`
             }
           } else {
-            pdfError = (pdfJson.error as string) ?? "Không rõ lỗi"
+            pdfError = (pdfJson.error as string) ?? "KhĂ´ng rĂµ lá»—i"
           }
         } catch (pdfErr) {
           pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
         }
       }
 
-      // Restamp PDF tài liệu cũ bị hủy hiệu lực
+      // Restamp PDF tĂ i liá»‡u cÅ© bá»‹ há»§y hiá»‡u lá»±c
       if (invalidatedIds.length > 0) {
         void fetch("/api/sign/restamp-pdf", {
           method: "POST",
@@ -576,7 +576,7 @@ export default function IsoDocumentDetailPage() {
         })
       }
 
-      // Gửi thông báo
+      // Gá»­i thĂ´ng bĂ¡o
       const recipients = getNotifyRecipients(action, doc)
       if (recipients.length > 0) {
         void fetch("/api/iso/notify", {
@@ -594,20 +594,20 @@ export default function IsoDocumentDetailPage() {
       }
 
       if (pdfError) {
-        showToast(false, "Đã ký duyệt nhưng tạo PDF thất bại: " + pdfError)
+        showToast(false, "ÄĂ£ kĂ½ duyá»‡t nhÆ°ng táº¡o PDF tháº¥t báº¡i: " + pdfError)
       } else {
-        showToast(true, "Đã cập nhật trạng thái")
+        showToast(true, "ÄĂ£ cáº­p nháº­t tráº¡ng thĂ¡i")
       }
       void loadDoc(docId, factoryId)
     } catch (err) {
-      showToast(false, err instanceof Error ? err.message : "Lỗi xử lý")
+      showToast(false, err instanceof Error ? err.message : "Lá»—i xá»­ lĂ½")
     }
   }
 
-  // Xác nhận PIN → mở placement modal hoặc transition trực tiếp
+  // XĂ¡c nháº­n PIN â†’ má»Ÿ placement modal hoáº·c transition trá»±c tiáº¿p
   const handlePinConfirm = async () => {
     if (!pinModal || !factoryId || !user) return
-    if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
+    if (!pin.trim()) { setPinError("Vui lĂ²ng nháº­p PIN"); return }
     setPinLoading(true)
     setPinError("")
     try {
@@ -617,24 +617,24 @@ export default function IsoDocumentDetailPage() {
         body: JSON.stringify({ userId: user.id, pin, docId, docType: "iso" }),
       })
       const verifyJson = await verifyRes.json()
-      if (!verifyRes.ok) { setPinError(verifyJson.error || "PIN không đúng"); return }
+      if (!verifyRes.ok) { setPinError(verifyJson.error || "PIN khĂ´ng Ä‘Ăºng"); return }
 
       const action = pinModal.action
       const currentLyDo = lyDoTraVe
 
-      // Đóng PIN modal
+      // ÄĂ³ng PIN modal
       setPinModal(null)
       setPin("")
       setLyDoTraVe("")
 
-      // Các action không cần đặt chữ ký
+      // CĂ¡c action khĂ´ng cáº§n Ä‘áº·t chá»¯ kĂ½
       const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
       if (noSignActions.includes(action)) {
         await doTransition(action, verifyJson.token, null, currentLyDo)
         return
       }
 
-      // Có file gốc → mở placement modal để đặt chữ ký
+      // CĂ³ file gá»‘c â†’ má»Ÿ placement modal Ä‘á»ƒ Ä‘áº·t chá»¯ kĂ½
       if (doc?.file_goc_url) {
         const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
         const { data: sigUrlData } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
@@ -663,14 +663,14 @@ export default function IsoDocumentDetailPage() {
         return
       }
 
-      // Không có file → transition trực tiếp
+      // KhĂ´ng cĂ³ file â†’ transition trá»±c tiáº¿p
       await doTransition(action, verifyJson.token, null)
     } finally {
       setPinLoading(false)
     }
   }
 
-  // Xác nhận vị trí chữ ký → convert tọa độ canvas → PDF rồi transition
+  // XĂ¡c nháº­n vá»‹ trĂ­ chá»¯ kĂ½ â†’ convert tá»a Ä‘á»™ canvas â†’ PDF rá»“i transition
   const handlePlacementConfirm = async () => {
     if (!placementModal) return
     const { token, action, lyDo, sigX, sigY, sigW, sigH, canvasScale, pdfPageHeight, currentPage } = placementModal
@@ -741,7 +741,7 @@ export default function IsoDocumentDetailPage() {
   if (loading) {
     return (
       <IsoShell>
-        <div className="p-10 text-center text-slate-400">Đang tải...</div>
+        <div className="p-10 text-center text-slate-400">Äang táº£i...</div>
       </IsoShell>
     )
   }
@@ -749,7 +749,7 @@ export default function IsoDocumentDetailPage() {
   if (!isNew && !doc) {
     return (
       <IsoShell>
-        <div className="p-10 text-center text-slate-400">Không tìm thấy tài liệu</div>
+        <div className="p-10 text-center text-slate-400">KhĂ´ng tĂ¬m tháº¥y tĂ i liá»‡u</div>
       </IsoShell>
     )
   }
@@ -781,26 +781,26 @@ export default function IsoDocumentDetailPage() {
             <div className="flex items-start gap-2">
               <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
               <div className="flex-1">
-                <p className="text-sm font-bold text-amber-800">Phát hiện tag không khớp trong tài liệu</p>
+                <p className="text-sm font-bold text-amber-800">PhĂ¡t hiá»‡n tag khĂ´ng khá»›p trong tĂ i liá»‡u</p>
                 <ul className="mt-1 text-xs text-amber-700 space-y-0.5">
                   {headerMismatchWarnings.map((w, i) => (
                     <li key={i}>
-                      {w.expected === "Footer mẫu"
+                      {w.expected === "Footer máº«u"
                         ? (
                           <>
-                            &quot;<span className="font-mono">{w.found}</span>&quot; — có thể là footer mẫu chưa đúng cấu trúc chuẩn
+                            &quot;<span className="font-mono">{w.found}</span>&quot; â€” cĂ³ thá»ƒ lĂ  footer máº«u chÆ°a Ä‘Ăºng cáº¥u trĂºc chuáº©n
                           </>
                         )
                         : (
                           <>
-                            &quot;<span className="font-mono">{w.found}</span>&quot; — có thể đã nhập sai thay vì &quot;<span className="font-mono">{w.expected}:</span>&quot;
+                            &quot;<span className="font-mono">{w.found}</span>&quot; â€” cĂ³ thá»ƒ Ä‘Ă£ nháº­p sai thay vĂ¬ &quot;<span className="font-mono">{w.expected}:</span>&quot;
                           </>
                         )}
                     </li>
                   ))}
                 </ul>
                 <p className="mt-2 text-xs text-amber-600">
-                  Nếu đây là lỗi: tải lại file đã sửa và ký lại. Nếu không phải lỗi, bấm &quot;Bỏ qua&quot; để hệ thống không cố điền tag này.
+                  Náº¿u Ä‘Ă¢y lĂ  lá»—i: táº£i láº¡i file Ä‘Ă£ sá»­a vĂ  kĂ½ láº¡i. Náº¿u khĂ´ng pháº£i lá»—i, báº¥m &quot;Bá» qua&quot; Ä‘á»ƒ há»‡ thá»‘ng khĂ´ng cá»‘ Ä‘iá»n tag nĂ y.
                 </p>
                 <div className="flex gap-2 mt-2">
                   <button
@@ -813,13 +813,13 @@ export default function IsoDocumentDetailPage() {
                     }}
                     className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
                   >
-                    Bỏ qua, không điền tag này
+                    Bá» qua, khĂ´ng Ä‘iá»n tag nĂ y
                   </button>
                   <button
                     onClick={() => setHeaderMismatchWarnings([])}
                     className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg"
                   >
-                    Đóng
+                    ÄĂ³ng
                   </button>
                 </div>
               </div>
@@ -835,11 +835,11 @@ export default function IsoDocumentDetailPage() {
             </Link>
             <div>
               <h1 className="text-xl font-extrabold text-slate-800">
-                {isNew ? "Tạo tài liệu ISO mới" : (doc?.ten_tai_lieu || "Chi tiết tài liệu")}
+                {isNew ? "Táº¡o tĂ i liá»‡u ISO má»›i" : (doc?.ten_tai_lieu || "Chi tiáº¿t tĂ i liá»‡u")}
               </h1>
               {!isNew && doc && (
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="font-mono text-xs text-violet-700">{doc.ma_tai_lieu || "(chưa có mã)"}</span>
+                  <span className="font-mono text-xs text-violet-700">{doc.ma_tai_lieu || "(chÆ°a cĂ³ mĂ£)"}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[trangThai]}`}>
                     {TRANG_THAI_LABEL[trangThai]}
                   </span>
@@ -849,94 +849,94 @@ export default function IsoDocumentDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* QR code khi đã có mã */}
+            {/* QR code khi Ä‘Ă£ cĂ³ mĂ£ */}
             {!isNew && doc?.ma_tai_lieu && (
               <QRCodeSVG value={recordUrl} size={48} className="rounded-lg border border-slate-200 p-1" />
             )}
 
-            {/* Nút workflow — dùng inline style để tránh Tailwind purge */}
+            {/* NĂºt workflow â€” dĂ¹ng inline style Ä‘á»ƒ trĂ¡nh Tailwind purge */}
             {!isNew && trangThai === "draft" && (
               <button
                 onClick={() => {
-                  const label = form.cap_tl === "Cấp 2" ? "Xác nhận gửi phê duyệt" : "Xác nhận gửi xem xét"
+                  const label = form.cap_tl === "Cáº¥p 2" ? "XĂ¡c nháº­n gá»­i phĂª duyá»‡t" : "XĂ¡c nháº­n gá»­i xem xĂ©t"
                   setPinModal({ action: "gui_xem_xet", label })
                   setPin("")
                   setPinError("")
                 }}
-                disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
+                disabled={form.cap_tl === "Cáº¥p 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
                 style={{ background: "#d97706" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
               >
                 <Send size={14} />
-                {form.cap_tl === "Cấp 2" ? "Gửi phê duyệt" : "Gửi xem xét"}
+                {form.cap_tl === "Cáº¥p 2" ? "Gá»­i phĂª duyá»‡t" : "Gá»­i xem xĂ©t"}
               </button>
             )}
 
-            {/* Xem xét → gửi phê duyệt */}
+            {/* Xem xĂ©t â†’ gá»­i phĂª duyá»‡t */}
             {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
               <button
-                onClick={() => { setPinModal({ action: "gui_phe_duyet", label: "Ký xem xét & gửi phê duyệt" }); setPin(""); setPinError("") }}
+                onClick={() => { setPinModal({ action: "gui_phe_duyet", label: "KĂ½ xem xĂ©t & gá»­i phĂª duyá»‡t" }); setPin(""); setPinError("") }}
                 style={{ background: "#ea580c" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <Send size={14} /> Gửi phê duyệt
+                <Send size={14} /> Gá»­i phĂª duyá»‡t
               </button>
             )}
 
-            {/* Từ chối xem xét */}
+            {/* Tá»« chá»‘i xem xĂ©t */}
             {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
               <button
-                onClick={() => { setPinModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setPin(""); setPinError("") }}
+                onClick={() => { setPinModal({ action: "khong_xem_xet", label: "Tá»« chá»‘i xem xĂ©t" }); setPin(""); setPinError("") }}
                 style={{ background: "#e11d48" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <X size={14} /> Từ chối
+                <X size={14} /> Tá»« chá»‘i
               </button>
             )}
 
-            {/* Phê duyệt */}
+            {/* PhĂª duyá»‡t */}
             {!isNew && (trangThai === "cho_phe_duyet") && canApprove && (
               <button
-                onClick={() => { setPinModal({ action: "phe_duyet", label: "Phê duyệt tài liệu" }); setPin(""); setPinError("") }}
+                onClick={() => { setPinModal({ action: "phe_duyet", label: "PhĂª duyá»‡t tĂ i liá»‡u" }); setPin(""); setPinError("") }}
                 style={{ background: "#16a34a" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <CheckCircle2 size={14} /> Phê duyệt
+                <CheckCircle2 size={14} /> PhĂª duyá»‡t
               </button>
             )}
 
-            {/* Không phê duyệt (từ cho_phe_duyet — chỉ canApprove, không dùng cho cho_xem_xet) */}
+            {/* KhĂ´ng phĂª duyá»‡t (tá»« cho_phe_duyet â€” chá»‰ canApprove, khĂ´ng dĂ¹ng cho cho_xem_xet) */}
             {!isNew && trangThai === "cho_phe_duyet" && canApprove && (
               <button
-                onClick={() => { setPinModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
+                onClick={() => { setPinModal({ action: "tu_choi_phe_duyet", label: "KhĂ´ng phĂª duyá»‡t" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
                 style={{ background: "#e11d48" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <X size={14} /> Không phê duyệt
+                <X size={14} /> KhĂ´ng phĂª duyá»‡t
               </button>
             )}
 
-            {/* Xem xét xử lý sau khi phê duyệt từ chối */}
+            {/* Xem xĂ©t xá»­ lĂ½ sau khi phĂª duyá»‡t tá»« chá»‘i */}
             {!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet && (
               <>
                 <button
-                  onClick={() => { setPinModal({ action: "gui_lai_phe_duyet", label: "Ký xem xét & gửi phê duyệt lại" }); setPin(""); setPinError("") }}
+                  onClick={() => { setPinModal({ action: "gui_lai_phe_duyet", label: "KĂ½ xem xĂ©t & gá»­i phĂª duyá»‡t láº¡i" }); setPin(""); setPinError("") }}
                   style={{ background: "#ea580c" }}
                   className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
                 >
-                  <Send size={14} /> Gửi phê duyệt lại
+                  <Send size={14} /> Gá»­i phĂª duyá»‡t láº¡i
                 </button>
                 <button
-                  onClick={() => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
+                  onClick={() => { setPinModal({ action: "tra_ve_nhap", label: "Tráº£ vá» NhĂ¡p" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
                   style={{ background: "#64748b" }}
                   className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
                 >
-                  <RotateCcw size={14} /> Trả về Nháp
+                  <RotateCcw size={14} /> Tráº£ vá» NhĂ¡p
                 </button>
               </>
             )}
 
-            {/* Nút lưu */}
+            {/* NĂºt lÆ°u */}
             {isEditable && (
               <button
                 onClick={() => void handleSave()}
@@ -944,19 +944,19 @@ export default function IsoDocumentDetailPage() {
                 className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50 transition-all"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                {saving ? "Đang lưu..." : "Lưu"}
+                {saving ? "Äang lÆ°u..." : "LÆ°u"}
               </button>
             )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Form chính */}
+          {/* Form chĂ­nh */}
           <div className="lg:col-span-2 space-y-4">
-            {/* Thông tin cơ bản */}
+            {/* ThĂ´ng tin cÆ¡ báº£n */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-4">Thông tin tài liệu</h2>
-              {/* Helper: isCon dùng cho logic sinh mã */}
+              <h2 className="text-sm font-extrabold text-slate-700 mb-4">ThĂ´ng tin tĂ i liá»‡u</h2>
+              {/* Helper: isCon dĂ¹ng cho logic sinh mĂ£ */}
               {(() => {
                 const isCon = form.phan_loai_tl === "con"
 
@@ -983,7 +983,7 @@ export default function IsoDocumentDetailPage() {
 
                 return (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Toggle Tài liệu / Hồ sơ */}
+                {/* Toggle TĂ i liá»‡u / Há»“ sÆ¡ */}
                 <div className="sm:col-span-2">
                   <div className="flex rounded-xl border border-slate-200 overflow-hidden">
                     <button
@@ -995,7 +995,7 @@ export default function IsoDocumentDetailPage() {
                       }}
                       className={`flex-1 py-2 text-sm font-bold transition-all ${!isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
-                      Tài liệu (Cha)
+                      TĂ i liá»‡u (Cha)
                     </button>
                     <button
                       type="button"
@@ -1006,36 +1006,36 @@ export default function IsoDocumentDetailPage() {
                       }}
                       className={`flex-1 py-2 text-sm font-bold transition-all ${isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
-                      Hồ sơ (Con)
+                      Há»“ sÆ¡ (Con)
                     </button>
                   </div>
                 </div>
 
-                {/* Mã tài liệu (auto, nổi bật, đầu form) */}
+                {/* MĂ£ tĂ i liá»‡u (auto, ná»•i báº­t, Ä‘áº§u form) */}
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài liệu</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">MĂ£ tĂ i liá»‡u</label>
                   <div className="px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl font-mono text-lg font-bold text-violet-700 min-h-[52px] flex items-center">
-                    {form.ma_tai_lieu || <span className="text-violet-300 font-normal text-sm">(tự tạo)</span>}
+                    {form.ma_tai_lieu || <span className="text-violet-300 font-normal text-sm">(tá»± táº¡o)</span>}
                   </div>
                 </div>
 
-                {/* Phòng ban */}
+                {/* PhĂ²ng ban */}
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">PhĂ²ng ban</label>
                   <select
                     value={form.phong_ban}
                     onChange={(e) => rebuildMa({ phong_ban: e.target.value })}
                     disabled={!isEditable}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                   >
-                    <option value="">— Chọn phòng ban —</option>
+                    <option value="">â€” Chá»n phĂ²ng ban â€”</option>
                     {pbAllowed.map((p) => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
 
-                {/* Lần sửa đổi */}
+                {/* Láº§n sá»­a Ä‘á»•i */}
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Lần sửa đổi</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Láº§n sá»­a Ä‘á»•i</label>
                   <input
                     type="number"
                     min="0"
@@ -1047,11 +1047,11 @@ export default function IsoDocumentDetailPage() {
                   />
                 </div>
 
-                {/* Tài liệu (Cha) mode */}
+                {/* TĂ i liá»‡u (Cha) mode */}
                 {!isCon && (
                   <>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tài liệu</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loáº¡i tĂ i liá»‡u</label>
                       <select
                         value={form.loai_tai_lieu}
                         onChange={(e) => rebuildMa({ loai_tai_lieu: e.target.value })}
@@ -1059,12 +1059,12 @@ export default function IsoDocumentDetailPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                       >
                         {LOAI_CHA_OPTIONS.map((l) => (
-                          <option key={l} value={l}>{l} — {LOAI_TAI_LIEU_LABEL[l]}</option>
+                          <option key={l} value={l}>{l} â€” {LOAI_TAI_LIEU_LABEL[l]}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Sá»‘ hiá»‡u</label>
                       <input
                         type="number"
                         min="1"
@@ -1079,11 +1079,11 @@ export default function IsoDocumentDetailPage() {
                   </>
                 )}
 
-                {/* Hồ sơ (Con) mode */}
+                {/* Há»“ sÆ¡ (Con) mode */}
                 {isCon && (
                   <>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tài liệu cha</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loáº¡i tĂ i liá»‡u cha</label>
                       <select
                         value={form.loai_tai_lieu_cha}
                         onChange={(e) => rebuildMa({ loai_tai_lieu_cha: e.target.value })}
@@ -1091,12 +1091,12 @@ export default function IsoDocumentDetailPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                       >
                         {LOAI_CHA_OPTIONS.map((l) => (
-                          <option key={l} value={l}>{l} — {LOAI_TAI_LIEU_LABEL[l]}</option>
+                          <option key={l} value={l}>{l} â€” {LOAI_TAI_LIEU_LABEL[l]}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu cha</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Sá»‘ hiá»‡u cha</label>
                       <input
                         type="number"
                         min="1"
@@ -1110,12 +1110,12 @@ export default function IsoDocumentDetailPage() {
                     </div>
                     {form.ma_tai_lieu_cha && (
                       <div className="sm:col-span-2 flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
-                        <span className="text-xs text-slate-500">Mã tài liệu cha:</span>
+                        <span className="text-xs text-slate-500">MĂ£ tĂ i liá»‡u cha:</span>
                         <span className="font-mono text-sm text-slate-700">{form.ma_tai_lieu_cha}</span>
                       </div>
                     )}
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại hồ sơ</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loáº¡i há»“ sÆ¡</label>
                       <select
                         value={form.loai_tai_lieu}
                         onChange={(e) => rebuildMa({ loai_tai_lieu: e.target.value })}
@@ -1123,12 +1123,12 @@ export default function IsoDocumentDetailPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                       >
                         {LOAI_CON_OPTIONS.map((l) => (
-                          <option key={l} value={l}>{l} — {LOAI_TAI_LIEU_LABEL[l]}</option>
+                          <option key={l} value={l}>{l} â€” {LOAI_TAI_LIEU_LABEL[l]}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu con</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Sá»‘ hiá»‡u con</label>
                       <input
                         type="number"
                         min="1"
@@ -1143,63 +1143,63 @@ export default function IsoDocumentDetailPage() {
                   </>
                 )}
 
-                {/* Tên tài liệu */}
+                {/* TĂªn tĂ i liá»‡u */}
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên tài liệu <span className="text-red-500">*</span></label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">TĂªn tĂ i liá»‡u <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     value={form.ten_tai_lieu}
                     onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))}
                     disabled={!isEditable}
-                    placeholder="Nhập tên tài liệu..."
+                    placeholder="Nháº­p tĂªn tĂ i liá»‡u..."
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                   />
                 </div>
 
-                {/* Cấp tài liệu */}
+                {/* Cáº¥p tĂ i liá»‡u */}
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp tài liệu</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cáº¥p tĂ i liá»‡u</label>
                   <select
                     value={form.cap_tl}
                     onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
                     disabled={!isEditable}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                   >
-                    <option value="Cấp 1">Cấp 1 (3 bước: Soạn thảo → Xem xét → Phê duyệt)</option>
-                    <option value="Cấp 2">Cấp 2 (2 bước: Soạn thảo → Phê duyệt)</option>
+                    <option value="Cáº¥p 1">Cáº¥p 1 (3 bÆ°á»›c: Soáº¡n tháº£o â†’ Xem xĂ©t â†’ PhĂª duyá»‡t)</option>
+                    <option value="Cáº¥p 2">Cáº¥p 2 (2 bÆ°á»›c: Soáº¡n tháº£o â†’ PhĂª duyá»‡t)</option>
                   </select>
                 </div>
 
-                {/* Quy trình */}
+                {/* Quy trĂ¬nh */}
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy trình</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy trĂ¬nh</label>
                   <select
                     value={form.chon_quy_trinh}
                     onChange={(e) => setForm((f) => ({ ...f, chon_quy_trinh: e.target.value }))}
                     disabled={!isEditable}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                   >
-                    <option value="Soạn thảo">Soạn thảo mới</option>
-                    <option value="Soát xét">Soát xét (thay thế tài liệu cũ)</option>
+                    <option value="Soáº¡n tháº£o">Soáº¡n tháº£o má»›i</option>
+                    <option value="SoĂ¡t xĂ©t">SoĂ¡t xĂ©t (thay tháº¿ tĂ i liá»‡u cÅ©)</option>
                   </select>
                 </div>
 
-                {form.chon_quy_trinh === "Soát xét" && (
+                {form.chon_quy_trinh === "SoĂ¡t xĂ©t" && (
                   <div className="sm:col-span-2">
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài liệu mới (sau soát xét)</label>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">MĂ£ tĂ i liá»‡u má»›i (sau soĂ¡t xĂ©t)</label>
                     <input
                       type="text"
                       value={form.ma_tai_lieu_moi}
                       onChange={(e) => setForm((f) => ({ ...f, ma_tai_lieu_moi: e.target.value }))}
                       disabled={!isEditable}
-                      placeholder="Để trống = giữ nguyên mã cũ"
+                      placeholder="Äá»ƒ trá»‘ng = giá»¯ nguyĂªn mĂ£ cÅ©"
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono"
                     />
                   </div>
                 )}
 
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chĂº</label>
                   <textarea
                     value={form.ghi_chu}
                     onChange={(e) => setForm((f) => ({ ...f, ghi_chu: e.target.value }))}
@@ -1213,14 +1213,14 @@ export default function IsoDocumentDetailPage() {
               })()}
             </div>
 
-            {/* Nhân sự */}
+            {/* NhĂ¢n sá»± */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-4">Nhân sự ký duyệt</h2>
+              <h2 className="text-sm font-extrabold text-slate-700 mb-4">NhĂ¢n sá»± kĂ½ duyá»‡t</h2>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Soạn thảo — auto-set, read-only */}
+                {/* Soáº¡n tháº£o â€” auto-set, read-only */}
                 <div>
                   <label className="text-xs font-bold text-slate-600 flex items-center gap-1 mb-1.5">
-                    Người soạn thảo
+                    NgÆ°á»i soáº¡n tháº£o
                     {isNew && <Lock size={10} className="text-slate-400" />}
                   </label>
                   <div className="relative">
@@ -1235,7 +1235,7 @@ export default function IsoDocumentDetailPage() {
                       disabled={!isEditable || isNew}
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                     >
-                      <option value="">— Chọn người —</option>
+                      <option value="">â€” Chá»n ngÆ°á»i â€”</option>
                       {profilesAll.map((p) => (
                         <option key={p.id} value={p.id}>{p.full_name || p.username}</option>
                       ))}
@@ -1243,15 +1243,15 @@ export default function IsoDocumentDetailPage() {
                   </div>
                   {doc?.ky_soan_thao_at && (
                     <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                      <CheckCircle2 size={10} /> Đã ký {fmtDate(doc.ky_soan_thao_at)}
+                      <CheckCircle2 size={10} /> ÄĂ£ kĂ½ {fmtDate(doc.ky_soan_thao_at)}
                     </p>
                   )}
                 </div>
 
-                {/* Xem xét (chỉ Cấp 1) — chỉ liệt kê user có iso.xem_xet */}
-                {form.cap_tl === "Cấp 1" && (
+                {/* Xem xĂ©t (chá»‰ Cáº¥p 1) â€” chá»‰ liá»‡t kĂª user cĂ³ iso.xem_xet */}
+                {form.cap_tl === "Cáº¥p 1" && (
                   <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Người xem xét</label>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">NgÆ°á»i xem xĂ©t</label>
                     <select
                       value={form.xem_xet_user_id}
                       onChange={(e) => {
@@ -1267,7 +1267,7 @@ export default function IsoDocumentDetailPage() {
                       disabled={!isEditable}
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                     >
-                      <option value="">— Chọn người —</option>
+                      <option value="">â€” Chá»n ngÆ°á»i â€”</option>
                       {profilesXemXet
                         .filter((p) => p.id !== form.soan_thao_user_id)
                         .map((p) => (
@@ -1276,15 +1276,15 @@ export default function IsoDocumentDetailPage() {
                     </select>
                     {doc?.ky_xem_xet_at && (
                       <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                        <CheckCircle2 size={10} /> Đã ký {fmtDate(doc.ky_xem_xet_at)}
+                        <CheckCircle2 size={10} /> ÄĂ£ kĂ½ {fmtDate(doc.ky_xem_xet_at)}
                       </p>
                     )}
                   </div>
                 )}
 
-                {/* Phê duyệt — chỉ liệt kê user có iso.phe_duyet */}
+                {/* PhĂª duyá»‡t â€” chá»‰ liá»‡t kĂª user cĂ³ iso.phe_duyet */}
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Người phê duyệt</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">NgÆ°á»i phĂª duyá»‡t</label>
                   <select
                     value={form.phe_duyet_user_id}
                     onChange={(e) => {
@@ -1294,7 +1294,7 @@ export default function IsoDocumentDetailPage() {
                     disabled={!isEditable}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                   >
-                    <option value="">— Chọn người —</option>
+                    <option value="">â€” Chá»n ngÆ°á»i â€”</option>
                     {profilesPheDuyet
                       .filter((p) => p.id !== form.soan_thao_user_id && p.id !== form.xem_xet_user_id)
                       .map((p) => (
@@ -1303,7 +1303,7 @@ export default function IsoDocumentDetailPage() {
                   </select>
                   {doc?.ky_phe_duyet_at && (
                     <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                      <CheckCircle2 size={10} /> Đã duyệt {fmtDate(doc.ky_phe_duyet_at)}
+                      <CheckCircle2 size={10} /> ÄĂ£ duyá»‡t {fmtDate(doc.ky_phe_duyet_at)}
                     </p>
                   )}
                 </div>
@@ -1311,24 +1311,24 @@ export default function IsoDocumentDetailPage() {
             </div>
           </div>
 
-          {/* Sidebar: File & thông tin */}
+          {/* Sidebar: File & thĂ´ng tin */}
           <div className="space-y-4">
-            {/* File đính kèm */}
+            {/* File Ä‘Ă­nh kĂ¨m */}
             <div id="file-goc-upload" className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-3">File tài liệu</h2>
-              <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoặc XLSX</p>
+              <h2 className="text-sm font-extrabold text-slate-700 mb-3">File tĂ i liá»‡u</h2>
+              <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoáº·c XLSX</p>
 
-              {/* Hướng dẫn nhãn header */}
+              {/* HÆ°á»›ng dáº«n nhĂ£n header */}
               <div className="mb-3 p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-700">
-                <p className="font-bold mb-1">Nhãn hệ thống tự nhận diện trong phần header tài liệu:</p>
+                <p className="font-bold mb-1">NhĂ£n há»‡ thá»‘ng tá»± nháº­n diá»‡n trong pháº§n header tĂ i liá»‡u:</p>
                 <ul className="list-disc list-inside space-y-0.5">
-                  <li><code className="bg-blue-100 px-1 rounded">Mã tài liệu:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Lần ban hành:</code> hoặc <code className="bg-blue-100 px-1 rounded">Lần sửa đổi:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Tình trạng:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Ngày hiệu lực:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">QR:</code> hoặc <code className="bg-blue-100 px-1 rounded">QR</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">MĂ£ tĂ i liá»‡u:</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">Láº§n ban hĂ nh:</code> hoáº·c <code className="bg-blue-100 px-1 rounded">Láº§n sá»­a Ä‘á»•i:</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">TĂ¬nh tráº¡ng:</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">NgĂ y hiá»‡u lá»±c:</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">QR:</code> hoáº·c <code className="bg-blue-100 px-1 rounded">QR</code></li>
                 </ul>
-                <p className="mt-1 text-blue-600">Nếu dùng nhãn khác (VD: &quot;Trạng thái:&quot;, &quot;Mã hồ sơ:&quot;), hệ thống sẽ cảnh báo và không điền vào đó.</p>
+                <p className="mt-1 text-blue-600">Náº¿u dĂ¹ng nhĂ£n khĂ¡c (VD: &quot;Tráº¡ng thĂ¡i:&quot;, &quot;MĂ£ há»“ sÆ¡:&quot;), há»‡ thá»‘ng sáº½ cáº£nh bĂ¡o vĂ  khĂ´ng Ä‘iá»n vĂ o Ä‘Ă³.</p>
               </div>
 
               <input
@@ -1361,7 +1361,7 @@ export default function IsoDocumentDetailPage() {
                       disabled={fileUploading}
                       className="w-full px-3 py-2 border border-dashed border-slate-300 hover:border-violet-400 text-slate-500 hover:text-violet-600 text-xs font-medium rounded-xl transition-all"
                     >
-                      {fileUploading ? "Đang tải..." : "Thay file"}
+                      {fileUploading ? "Äang táº£i..." : "Thay file"}
                     </button>
                   )}
                 </div>
@@ -1374,18 +1374,18 @@ export default function IsoDocumentDetailPage() {
                   >
                     <Upload size={20} />
                     <span className="text-xs font-medium">
-                      {fileUploading ? "Đang tải lên..." : "Nhấn để chọn file"}
+                      {fileUploading ? "Äang táº£i lĂªn..." : "Nháº¥n Ä‘á»ƒ chá»n file"}
                     </span>
                   </button>
                 )
               ) : null}
 
 
-              {/* PDF đã ký */}
+              {/* PDF Ä‘Ă£ kĂ½ */}
               {doc?.file_signed_pdf_url && (
                 <div className="mt-3 flex items-center gap-2 p-3 bg-emerald-50 rounded-xl">
                   <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
-                  <span className="text-xs text-emerald-700 flex-1">PDF có chữ ký</span>
+                  <span className="text-xs text-emerald-700 flex-1">PDF cĂ³ chá»¯ kĂ½</span>
                   <a href={doc.file_signed_pdf_url} target="_blank" rel="noreferrer" className="shrink-0">
                     <Eye size={13} className="text-emerald-600" />
                   </a>
@@ -1396,33 +1396,33 @@ export default function IsoDocumentDetailPage() {
               )}
             </div>
 
-            {/* Thông tin hiệu lực */}
+            {/* ThĂ´ng tin hiá»‡u lá»±c */}
             {!isNew && doc && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
-                <h2 className="text-sm font-extrabold text-slate-700">Thông tin hiệu lực</h2>
+                <h2 className="text-sm font-extrabold text-slate-700">ThĂ´ng tin hiá»‡u lá»±c</h2>
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Ngày hiệu lực</span>
-                    <span className="font-medium text-slate-700">{fmtDate(doc.ngay_hieu_luc) || "—"}</span>
+                    <span className="text-slate-500">NgĂ y hiá»‡u lá»±c</span>
+                    <span className="font-medium text-slate-700">{fmtDate(doc.ngay_hieu_luc) || "â€”"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Ngày hết hiệu lực</span>
-                    <span className="font-medium text-slate-700">{fmtDate(doc.ngay_het_hieu_luc) || "—"}</span>
+                    <span className="text-slate-500">NgĂ y háº¿t hiá»‡u lá»±c</span>
+                    <span className="font-medium text-slate-700">{fmtDate(doc.ngay_het_hieu_luc) || "â€”"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Cấp tài liệu</span>
-                    <span className="font-medium text-slate-700">{doc.cap_tl || "—"}</span>
+                    <span className="text-slate-500">Cáº¥p tĂ i liá»‡u</span>
+                    <span className="font-medium text-slate-700">{doc.cap_tl || "â€”"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Lần ban hành</span>
+                    <span className="text-slate-500">Láº§n ban hĂ nh</span>
                     <span className="font-mono font-bold text-slate-700">{doc.lan_ban_hanh}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Phân loại</span>
+                    <span className="text-slate-500">PhĂ¢n loáº¡i</span>
                     <span className="font-medium text-slate-700">{doc.phan_loai_tl === "con" ? "Con" : "Cha"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Tạo lúc</span>
+                    <span className="text-slate-500">Táº¡o lĂºc</span>
                     <span className="font-medium text-slate-700">{fmtDate(doc.created_at)}</span>
                   </div>
                 </div>
@@ -1436,7 +1436,7 @@ export default function IsoDocumentDetailPage() {
           <div className="fixed inset-0 bg-black/70 z-50 flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200 shrink-0 flex-wrap gap-2">
-              <h3 className="font-bold text-slate-800 text-sm">Đặt chữ ký trên tài liệu</h3>
+              <h3 className="font-bold text-slate-800 text-sm">Äáº·t chá»¯ kĂ½ trĂªn tĂ i liá»‡u</h3>
               <div className="flex items-center gap-1">
                 <span className="text-xs text-slate-500 mr-1">
                   Trang {placementModal.currentPage} / {placementModal.totalPages}
@@ -1458,13 +1458,13 @@ export default function IsoDocumentDetailPage() {
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-600">
                 <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700 border border-amber-200">
-                  Không đặt tràn chữ ký ra ngoài ô chứa
+                  Không đặt ảnh chữ ký hoặc tên tràn ra ngoài ô chứa
                 </span>
                 <button
                   onClick={() => setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)}
                   className="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 transition-all"
                 >
-                  {placementModal.showSignerName ? "Ẩn tên (X)" : "Hiện tên"}
+                  {placementModal.showSignerName ? "áº¨n tĂªn (X)" : "Hiá»‡n tĂªn"}
                 </button>
               </div>
               <div className="flex gap-2">
@@ -1476,14 +1476,14 @@ export default function IsoDocumentDetailPage() {
                   }}
                   className="px-3 py-1.5 text-sm text-slate-600 border border-slate-300 rounded-xl hover:bg-slate-50 transition-all"
                 >
-                  Bỏ qua chữ ký
+                  Bá» qua chá»¯ kĂ½
                 </button>
                 <button
                   onClick={() => void handlePlacementConfirm()}
                   style={{ background: "#7c3aed" }}
                   className="px-4 py-1.5 text-sm text-white font-bold rounded-xl hover:opacity-90 transition-all"
                 >
-                  Xác nhận vị trí
+                  XĂ¡c nháº­n vá»‹ trĂ­
                 </button>
               </div>
             </div>
@@ -1535,7 +1535,7 @@ export default function IsoDocumentDetailPage() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={placementModal.sigImgUrl}
-                          alt="chữ ký"
+                          alt="chá»¯ kĂ½"
                           style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: "block" }}
                           draggable={false}
                         />
@@ -1551,7 +1551,7 @@ export default function IsoDocumentDetailPage() {
                           whiteSpace: "nowrap",
                           pointerEvents: "none",
                         }}>
-                          Kéo ảnh chữ ký để đặt vị trí
+                          KĂ©o áº£nh chá»¯ kĂ½ Ä‘á»ƒ Ä‘áº·t vá»‹ trĂ­
                         </span>
                       </Resizable>
                     </div>
@@ -1623,7 +1623,7 @@ export default function IsoDocumentDetailPage() {
                           whiteSpace: "nowrap",
                           pointerEvents: "none",
                         }}>
-                          Kéo tên để đặt vị trí
+                          KĂ©o tĂªn Ä‘á»ƒ Ä‘áº·t vá»‹ trĂ­
                         </span>
                       </Resizable>
                     </div>
@@ -1644,27 +1644,27 @@ export default function IsoDocumentDetailPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-800">{pinModal.label}</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Nhập PIN ký duyệt để xác nhận</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Nháº­p PIN kĂ½ duyá»‡t Ä‘á»ƒ xĂ¡c nháº­n</p>
                 </div>
               </div>
 
               {(pinModal.action === "tra_ve" || pinModal.action === "khong_xem_xet" || pinModal.action === "tu_choi_phe_duyet" || pinModal.action === "tra_ve_nhap") && (
                 <div className="mb-4">
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    {pinModal.action === "khong_xem_xet" ? "Lý do từ chối xem xét" : pinModal.action === "tu_choi_phe_duyet" ? "Lý do không phê duyệt" : "Lý do trả về"}
+                    {pinModal.action === "khong_xem_xet" ? "LĂ½ do tá»« chá»‘i xem xĂ©t" : pinModal.action === "tu_choi_phe_duyet" ? "LĂ½ do khĂ´ng phĂª duyá»‡t" : "LĂ½ do tráº£ vá»"}
                   </label>
                   <textarea
                     value={lyDoTraVe}
                     onChange={(e) => setLyDoTraVe(e.target.value)}
                     rows={3}
-                    placeholder="Nhập lý do..."
+                    placeholder="Nháº­p lĂ½ do..."
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 resize-none"
                   />
                 </div>
               )}
 
               <div className="mb-4">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN ký duyệt</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN kĂ½ duyá»‡t</label>
                 <div className="relative">
                   <input
                     type={showPin ? "text" : "password"}
@@ -1674,7 +1674,7 @@ export default function IsoDocumentDetailPage() {
                     autoFocus
                     value={pin}
                     onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
-                    placeholder="4–6 chữ số"
+                    placeholder="4â€“6 chá»¯ sá»‘"
                     className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 pr-9 font-mono tracking-widest text-center text-lg"
                     onKeyDown={(e) => { if (e.key === "Enter") void handlePinConfirm() }}
                   />
@@ -1698,7 +1698,7 @@ export default function IsoDocumentDetailPage() {
                   onClick={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
                   className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
-                  Hủy
+                  Há»§y
                 </button>
                 <button
                   onClick={() => void handlePinConfirm()}
@@ -1706,7 +1706,7 @@ export default function IsoDocumentDetailPage() {
                   className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
                 >
                   {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-                  {pinLoading ? "Đang xử lý..." : "Xác nhận"}
+                  {pinLoading ? "Äang xá»­ lĂ½..." : "XĂ¡c nháº­n"}
                 </button>
               </div>
             </div>
