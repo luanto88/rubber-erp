@@ -61,6 +61,16 @@ type SignPlacement = {
   y: number
   width: number
   height: number
+  showSignerName?: boolean
+  nameX?: number
+  nameY?: number
+  nameWidth?: number
+  nameHeight?: number
+}
+
+type PreviewSignature = SignPlacement & {
+  signerUserId: string
+  url: string
 }
 
 export default function IsoDocumentDetailPage() {
@@ -109,14 +119,22 @@ export default function IsoDocumentDetailPage() {
     sigY: number
     sigW: number
     sigH: number
+    nameX: number
+    nameY: number
+    nameW: number
+    nameH: number
     currentPage: number
     totalPages: number
     canvasScale: number
     pdfPageHeight: number
     sigImgUrl: string | null
+    previewSignatures: PreviewSignature[]
+    signerName: string
+    showSignerName: boolean
   } | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const draggableNodeRef = useRef<HTMLDivElement>(null)
+  const nameNodeRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<unknown>(null)
 
   // Success toast
@@ -272,11 +290,11 @@ export default function IsoDocumentDetailPage() {
         await renderPdfPage(pdfDoc, 1)
       } catch (err) {
         console.error("PDF load failed:", err)
-        // Nếu load PDF thất bại → bỏ qua placement, thực hiện transition trực tiếp
-        setPlacementModal((prev) => {
-          if (prev) void doTransition(prev.action, prev.token, null, prev.lyDo)
-          return null
-        })
+        showToast(false, "Không tải được file PDF để đặt chữ ký. Chữ ký sẽ chỉ hiện trên Phiếu Ký Duyệt.")
+        // Đóng modal trước, rồi gọi doTransition bên ngoài setState (tránh side-effect trong setter)
+        const snapshot = placementModal
+        setPlacementModal(null)
+        if (snapshot) void doTransition(snapshot.action, snapshot.token, null, snapshot.lyDo)
       }
     }
     void loadPdf()
@@ -519,6 +537,7 @@ export default function IsoDocumentDetailPage() {
 
       // Tạo PDF ký duyệt (không block UI nếu lỗi)
       const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
+      let pdfError: string | null = null
       if (token && !noSignActions.includes(action) && doc.file_goc_url) {
         try {
           const pdfRes = await fetch("/api/sign/generate-pdf", {
@@ -527,20 +546,25 @@ export default function IsoDocumentDetailPage() {
             body: JSON.stringify({ token, docId, docType: "iso", signaturePlacement: placement, skipTagLabels: confirmedSkipTags }),
           })
           const pdfJson = await pdfRes.json()
-          if (pdfJson.ok && pdfJson.signedPdfUrl) {
-            await supabase
-              .from("iso_documents")
-              .update({ file_signed_pdf_url: pdfJson.signedPdfUrl })
-              .eq("id", docId).eq("factory_id", factoryId)
+          console.log("[generate-pdf] status:", pdfRes.status, "response:", pdfJson)
+          if (pdfJson.ok) {
+            // Cập nhật state ngay để UI hiển thị link PDF mà không cần chờ loadDoc
+            if (pdfJson.signedPdfUrl) {
+              setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : prev)
+            }
             if (pdfJson.metaMismatched?.length > 0) {
               setHeaderMismatchWarnings(pdfJson.metaMismatched as Array<{ found: string; expected: string }>)
             }
             const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
             if (failedSigs && failedSigs.length > 0) {
-              showToast(false, `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`)
+              pdfError = `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`
             }
+          } else {
+            pdfError = (pdfJson.error as string) ?? "Không rõ lỗi"
           }
-        } catch { /* PDF fail không chặn UI */ }
+        } catch (pdfErr) {
+          pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
+        }
       }
 
       // Restamp PDF tài liệu cũ bị hủy hiệu lực
@@ -569,7 +593,11 @@ export default function IsoDocumentDetailPage() {
         })
       }
 
-      showToast(true, "Đã cập nhật trạng thái")
+      if (pdfError) {
+        showToast(false, "Đã ký duyệt nhưng tạo PDF thất bại: " + pdfError)
+      } else {
+        showToast(true, "Đã cập nhật trạng thái")
+      }
       void loadDoc(docId, factoryId)
     } catch (err) {
       showToast(false, err instanceof Error ? err.message : "Lỗi xử lý")
@@ -619,11 +647,18 @@ export default function IsoDocumentDetailPage() {
           sigY: 100,
           sigW: 120,
           sigH: 60,
+          nameX: 90,
+          nameY: 168,
+          nameW: 140,
+          nameH: 26,
           currentPage: 1,
           totalPages: 1,
           canvasScale: 1,
           pdfPageHeight: 842,
           sigImgUrl: sigUrlData.publicUrl,
+          previewSignatures: buildPreviewSignatures(),
+          signerName: user.full_name || user.username || "",
+          showSignerName: true,
         })
         return
       }
@@ -645,6 +680,11 @@ export default function IsoDocumentDetailPage() {
       y: pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale),
       width: sigW / canvasScale,
       height: sigH / canvasScale,
+      showSignerName: placementModal.showSignerName,
+      nameX: placementModal.nameX / canvasScale,
+      nameY: pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale),
+      nameWidth: placementModal.nameW / canvasScale,
+      nameHeight: placementModal.nameH / canvasScale,
     }
     setPlacementModal(null)
     await doTransition(action, token, placement, lyDo)
@@ -659,6 +699,43 @@ export default function IsoDocumentDetailPage() {
   const profileName = (uid: string) => {
     const p = profilesAll.find((p) => p.id === uid)
     return p ? (p.full_name || p.username) : ""
+  }
+
+  const buildPreviewSignatures = () => {
+    if (!doc || !factoryId || !user) return [] as PreviewSignature[]
+
+    const candidates = [
+      {
+        signerUserId: doc.soan_thao_user_id,
+        placement: doc.soan_thao_placement,
+        signedAt: doc.ky_soan_thao_at,
+      },
+      {
+        signerUserId: doc.xem_xet_user_id,
+        placement: doc.xem_xet_placement,
+        signedAt: doc.ky_xem_xet_at,
+      },
+      {
+        signerUserId: doc.phe_duyet_user_id,
+        placement: doc.phe_duyet_placement,
+        signedAt: doc.ky_phe_duyet_at,
+      },
+    ]
+
+    return candidates.flatMap((entry) => {
+      if (!entry.signerUserId || !entry.placement || !entry.signedAt || entry.signerUserId === user.id) return []
+      const sigPath = `signatures/${factoryId}/${entry.signerUserId}/chu_ky.png`
+      const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
+      return [{
+        signerUserId: entry.signerUserId,
+        url: data.publicUrl,
+        page: Number(entry.placement.page ?? 0),
+        x: Number(entry.placement.x ?? 0),
+        y: Number(entry.placement.y ?? 0),
+        width: Number(entry.placement.width ?? 0),
+        height: Number(entry.placement.height ?? 0),
+      }]
+    }).filter((entry) => entry.page > 0 && entry.width > 0 && entry.height > 0)
   }
 
   if (loading) {
@@ -708,7 +785,17 @@ export default function IsoDocumentDetailPage() {
                 <ul className="mt-1 text-xs text-amber-700 space-y-0.5">
                   {headerMismatchWarnings.map((w, i) => (
                     <li key={i}>
-                      "<span className="font-mono">{w.found}</span>" — có thể đã nhập sai thay vì "<span className="font-mono">{w.expected}:</span>"
+                      {w.expected === "Footer mẫu"
+                        ? (
+                          <>
+                            &quot;<span className="font-mono">{w.found}</span>&quot; — có thể là footer mẫu chưa đúng cấu trúc chuẩn
+                          </>
+                        )
+                        : (
+                          <>
+                            &quot;<span className="font-mono">{w.found}</span>&quot; — có thể đã nhập sai thay vì &quot;<span className="font-mono">{w.expected}:</span>&quot;
+                          </>
+                        )}
                     </li>
                   ))}
                 </ul>
@@ -1237,8 +1324,9 @@ export default function IsoDocumentDetailPage() {
                 <ul className="list-disc list-inside space-y-0.5">
                   <li><code className="bg-blue-100 px-1 rounded">Mã tài liệu:</code></li>
                   <li><code className="bg-blue-100 px-1 rounded">Lần ban hành:</code> hoặc <code className="bg-blue-100 px-1 rounded">Lần sửa đổi:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Tình trạng</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">Tình trạng:</code></li>
                   <li><code className="bg-blue-100 px-1 rounded">Ngày hiệu lực:</code></li>
+                  <li><code className="bg-blue-100 px-1 rounded">QR:</code> hoặc <code className="bg-blue-100 px-1 rounded">QR</code></li>
                 </ul>
                 <p className="mt-1 text-blue-600">Nếu dùng nhãn khác (VD: &quot;Trạng thái:&quot;, &quot;Mã hồ sơ:&quot;), hệ thống sẽ cảnh báo và không điền vào đó.</p>
               </div>
@@ -1255,7 +1343,7 @@ export default function IsoDocumentDetailPage() {
                 }}
               />
 
-              {uploadedFileUrl ? (
+              {uploadedFileUrl && !doc?.file_signed_pdf_url ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 p-3 bg-violet-50 rounded-xl">
                     <FileText size={16} className="text-violet-600 shrink-0" />
@@ -1277,7 +1365,7 @@ export default function IsoDocumentDetailPage() {
                     </button>
                   )}
                 </div>
-              ) : (
+              ) : !doc?.file_signed_pdf_url ? (
                 isEditable && (
                   <button
                     onClick={() => fileInputRef.current?.click()}
@@ -1290,7 +1378,7 @@ export default function IsoDocumentDetailPage() {
                     </span>
                   </button>
                 )
-              )}
+              ) : null}
 
 
               {/* PDF đã ký */}
@@ -1368,6 +1456,17 @@ export default function IsoDocumentDetailPage() {
                   <ChevronRight size={16} className="text-slate-600" />
                 </button>
               </div>
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700 border border-amber-200">
+                  Không đặt tràn chữ ký ra ngoài ô chứa
+                </span>
+                <button
+                  onClick={() => setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)}
+                  className="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 transition-all"
+                >
+                  {placementModal.showSignerName ? "Ẩn tên (X)" : "Hiện tên"}
+                </button>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => {
@@ -1392,6 +1491,28 @@ export default function IsoDocumentDetailPage() {
             <div className="flex-1 overflow-auto flex items-start justify-center p-4 bg-slate-100">
               <div className="relative inline-block shadow-2xl bg-white select-none">
                 <canvas ref={pdfCanvasRef} className="block" />
+                {placementModal.previewSignatures
+                  .filter((entry) => entry.page === placementModal.currentPage)
+                  .map((entry) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={`${entry.signerUserId}-${entry.page}`}
+                      src={entry.url}
+                      alt=""
+                      draggable={false}
+                      style={{
+                        position: "absolute",
+                        left: entry.x * placementModal.canvasScale,
+                        top: (placementModal.pdfPageHeight - entry.y - entry.height) * placementModal.canvasScale,
+                        width: entry.width * placementModal.canvasScale,
+                        height: entry.height * placementModal.canvasScale,
+                        objectFit: "contain",
+                        opacity: 0.45,
+                        pointerEvents: "none",
+                        zIndex: 5,
+                      }}
+                    />
+                  ))}
                 {placementModal.sigImgUrl && (
                   <Draggable
                     nodeRef={draggableNodeRef as RefObject<HTMLElement>}
@@ -1411,6 +1532,7 @@ export default function IsoDocumentDetailPage() {
                         minHeight={20}
                         style={{ border: "2px dashed #7c3aed", position: "relative" }}
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={placementModal.sigImgUrl}
                           alt="chữ ký"
@@ -1429,7 +1551,79 @@ export default function IsoDocumentDetailPage() {
                           whiteSpace: "nowrap",
                           pointerEvents: "none",
                         }}>
-                          Kéo để đặt vị trí
+                          Kéo ảnh chữ ký để đặt vị trí
+                        </span>
+                      </Resizable>
+                    </div>
+                  </Draggable>
+                )}
+                {placementModal.showSignerName && placementModal.signerName && (
+                  <Draggable
+                    nodeRef={nameNodeRef as RefObject<HTMLElement>}
+                    position={{ x: placementModal.nameX, y: placementModal.nameY }}
+                    onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
+                    bounds="parent"
+                  >
+                    <div
+                      ref={nameNodeRef}
+                      style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}
+                    >
+                      <Resizable
+                        size={{ width: placementModal.nameW, height: placementModal.nameH }}
+                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
+                          ...p,
+                          nameW: parseInt(ref.style.width) || p.nameW,
+                          nameH: parseInt(ref.style.height) || p.nameH,
+                        } : null)}
+                        minWidth={90}
+                        minHeight={22}
+                        style={{
+                          border: "2px dashed #0f766e",
+                          position: "relative",
+                          background: "rgba(255,255,255,0.95)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "2px 8px",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={() => setPlacementModal((p) => p ? { ...p, showSignerName: false } : null)}
+                          className="absolute -left-2 -top-2 shrink-0 rounded-full border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-500 shadow-sm hover:bg-slate-50"
+                        >
+                          (X)
+                        </button>
+                        <span
+                          style={{
+                            fontFamily: "\"Times New Roman\", serif",
+                            fontSize: 13,
+                            lineHeight: 1.1,
+                            color: "#111827",
+                            maxWidth: "100%",
+                            textAlign: "center",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {placementModal.signerName}
+                        </span>
+                        <span style={{
+                          position: "absolute",
+                          top: -20,
+                          left: 0,
+                          fontSize: 10,
+                          color: "#0f766e",
+                          background: "rgba(255,255,255,0.92)",
+                          padding: "1px 5px",
+                          borderRadius: 4,
+                          whiteSpace: "nowrap",
+                          pointerEvents: "none",
+                        }}>
+                          Kéo tên để đặt vị trí
                         </span>
                       </Resizable>
                     </div>

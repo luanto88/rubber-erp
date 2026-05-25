@@ -49,7 +49,7 @@ Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
 - Migration SQL: 5 bảng (`sign_pins`, `iso_documents`, `van_ban_documents`, `doc_approval_log`, `notifications`)
 - API routes: `/api/sign/set-pin`, `/api/sign/verify`, `/api/sign/generate-pdf`
 - Settings tab "ISO & Văn bản" — chữ ký cá nhân (upload ảnh + đặt PIN)
-- Packages: `pdf-lib`, `pdfjs-dist`, `@react-pdf/renderer`, `bcryptjs`, `jose`, `react-draggable`, `re-resizable`
+- Packages: `pdf-lib`, `pdfjs-dist`, `bcryptjs`, `jose`, `react-draggable`, `re-resizable`
 
 ### Giai đoạn 2 ✅ Hoàn thành (2026-05-22)
 
@@ -58,9 +58,11 @@ Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
 - My-tasks page
 - Sidebar navigation group "ISO & Văn bản"
 
-### Giai đoạn 2 (phần 2) ⏳ Pending
+### Giai đoạn 2 (phần 2) ✅ Hoàn thành
 
 - Drag-and-drop signature placement UI (pdfjs-dist canvas + react-draggable + re-resizable)
+- Preview chữ ký và tên người ký thành 2 lớp độc lập
+- Fill tag header/footer trực tiếp trên file PDF gốc, không tạo trang phiếu ký duyệt riêng
 
 ### Giai đoạn 3 ⏳ Pending
 

@@ -356,7 +356,7 @@ doTransition:
   2. INSERT doc_approval_log
   3. Nếu có token + file_goc_url:
      POST /api/sign/generate-pdf { token, docId, docType, signaturePlacement, skipTagLabels }
-     → Server: verify JWT → fill metadata (trang 1) → stamp header/footer (mọi trang) → embed chữ ký body → build phiếu ký duyệt → upload PDF
+     → Server: verify JWT → đọc `file_goc_url` → quét tag header/footer → điền tag tìm thấy → nhúng chữ ký body + tên người ký nếu bật → upload PDF
      → Cập nhật file_signed_pdf_url
      → Nếu response.metaMismatched.length > 0: hiển thị warning banner (headerMismatchWarnings)
      → Nếu diagnostics.sigImgLoadFailed.length > 0: toast cảnh báo người ký chưa upload ảnh chữ ký
@@ -377,7 +377,7 @@ process.env.SIGN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
 |-------|--------|--------|
 | `/api/sign/set-pin` | POST | `{userId, pin}` → bcrypt.hash → upsert `sign_pins` |
 | `/api/sign/verify` | POST | `{userId, pin, docId, docType}` → verify bcrypt → JWT 5 phút |
-| `/api/sign/generate-pdf` | POST | `{token, docId, docType, signaturePlacement?, skipTagLabels?}` → verify JWT → fill metadata → stamp → embed chữ ký → upload PDF |
+| `/api/sign/generate-pdf` | POST | `{token, docId, docType, signaturePlacement?, skipTagLabels?}` → verify JWT → fill tag header/footer tìm thấy → embed chữ ký/tên → upload PDF |
 | `/api/sign/restamp-pdf` | POST | `{docIds, factoryId}` → load PDF cũ → stamp footer "Hết hiệu lực" → re-upload |
 | `/api/iso/notify` | POST | `{docId, factoryId, action, recipientUserIds, lyDo?}` → in-app + Telegram + Email |
 | `/api/iso/profiles-by-permission` | GET | `?factoryId=...&permCode=...` → danh sách user có quyền (service role, bypass RLS) |
@@ -398,6 +398,11 @@ type SignPlacement = {
   y: number       // tọa độ từ đáy (pt)
   width: number
   height: number
+  showSignerName?: boolean
+  nameX?: number
+  nameY?: number
+  nameWidth?: number
+  nameHeight?: number
 }
 ```
 
@@ -419,7 +424,7 @@ File gốc không bao giờ bị modify — chỉ đọc để preview.
 
 ---
 
-## PDF Generation — Logic Cha/Con
+## PDF Generation — Logic chung
 
 `generate-pdf/route.ts` phân nhánh theo `isCon`:
 
@@ -431,28 +436,14 @@ function isConDoc(loaiTaiLieu: string | null, phanLoaiTl: string | null): boolea
 }
 ```
 
-| Loại | Phiếu ký duyệt | QR + header mỗi trang | Footer |
-|------|----------------|----------------------|--------|
-| **Cha** (QT, HD Cha, PL Cha, v.v.) | ✅ Có | ✅ Có (info box + QR) | ✅ Có |
-| **Con** (F, HD Con, PL Con) | ❌ Không | ✅ Chỉ QR | ✅ Có |
+| Loại | Tạo trang riêng | Header tag | Footer tag | Chữ ký body |
+|------|------------------|------------|------------|-------------|
+| **Cha** (QT, HD Cha, PL Cha, v.v.) | ❌ Không | Điền nếu tìm thấy tag | Thay nếu tìm thấy footer mẫu | ✅ Có |
+| **Con** (F, HD Con, PL Con) | ❌ Không | Điền nếu tìm thấy tag | Thay nếu tìm thấy footer mẫu | ✅ Có |
 
-**Phiếu ký duyệt (Cha)**:
-```
-┌─────────────────────────────────────────────┐
-│  [Tên công ty]    [Mã TL: NMCB-QT01]        │
-│  PHIẾU XÁC NHẬN KÝ DUYỆT  [Lần BH: 01]    │
-├──────────────┬───────────────┬──────────────┤
-│  Soạn thảo  │   Xem xét    │  Phê duyệt   │
-│  [img chữký]│  [img chữký] │  [img chữký] │
-│  Nguyễn A   │  Trần B      │  Lê C        │
-│  dd/mm/yyyy │  dd/mm/yyyy  │  dd/mm/yyyy  │
-└─────────────┴──────────────┴──────────────┘
-│  [QR code → link ERP]                       │
-└─────────────────────────────────────────────┘
-```
-
-- Mỗi bước ký: re-generate trang phiếu + ghép lại với `pdf-lib`
-- `file_signed_pdf_url` cập nhật sau mỗi bước ký
+- Không tạo “phiếu ký duyệt” riêng cho cả tài liệu cha lẫn tài liệu con.
+- PDF đầu ra phải giữ nguyên số trang của `file_goc_url`.
+- Mọi thay đổi đều được vẽ trực tiếp lên các trang của tài liệu gốc.
 
 ---
 
@@ -465,6 +456,8 @@ function isConDoc(loaiTaiLieu: string | null, phanLoaiTl: string | null): boolea
 const [placementModal, setPlacementModal] = useState<{
   show: boolean; token: string; action: PinModalAction; lyDo?: string
   sigX: number; sigY: number; sigW: number; sigH: number
+  nameX: number; nameY: number; nameW: number; nameH: number
+  showSignerName: boolean
   currentPage: number; totalPages: number
   canvasScale: number; pdfPageHeight: number
   sigImgUrl: string | null
@@ -474,6 +467,10 @@ const [placementModal, setPlacementModal] = useState<{
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 ```
+
+- Ảnh chữ ký và tên người ký là hai lớp preview độc lập.
+- Người dùng kéo/resize ảnh chữ ký riêng, kéo/resize box tên riêng.
+- Nếu template đã có sẵn tên, người dùng có thể tắt box tên bằng toggle `(X)`.
 
 **Lưu ý pdfjs**: Package đang dùng `pdfjs-dist@^5.x`. Worker URL phải lấy `pdfjsLib.version` động — KHÔNG hardcode URL với version 3.x.
 
@@ -502,9 +499,8 @@ const draggableNodeRef = useRef<HTMLDivElement>(null)
 
 | Package | Mục đích |
 |---------|----------|
-| `pdf-lib` | Nhúng ảnh chữ ký vào PDF, stamp header/footer, build phiếu ký duyệt, ghép trang |
+| `pdf-lib` | Nhúng ảnh chữ ký/tên vào PDF, điền tag header/footer, lưu PDF kết quả |
 | `pdfjs-dist` (v5.x) | Render PDF thành canvas để preview (client) + scan text metadata (server, Node.js mode) |
-| `@react-pdf/renderer` | Không còn dùng cho phiếu ký duyệt (đã chuyển sang pdf-lib thuần) |
 | `bcryptjs` + `@types/bcryptjs` | Hash/verify PIN |
 | `react-draggable` | Drag chữ ký trên canvas |
 | `re-resizable` | Resize ảnh chữ ký |
@@ -535,7 +531,7 @@ src/app/dashboard/documents/    -- (chưa triển khai — Giai đoạn 3)
 src/app/api/sign/
   set-pin/route.ts
   verify/route.ts
-  generate-pdf/route.ts         -- Con/Cha logic + signaturePlacement embed + metadata fill + NotoSans stamps
+  generate-pdf/route.ts         -- signaturePlacement embed + quét tag header/footer + nhúng tên người ký
   restamp-pdf/route.ts          -- Re-stamp "Hết hiệu lực" lên PDF cũ
 
 src/app/api/iso/
@@ -711,6 +707,51 @@ await supabase
 // 3. Gọi restamp-pdf với invalidatedIds
 ```
 
+### Font dùng trong generate-pdf
+
+- `loadViFont()` đọc `public/fonts/NotoSans-Regular.ttf` để vẽ text tiếng Việt trong PDF.
+- `loadSignerNameFont()` đọc `public/fonts/TimesNewRoman.ttf` để vẽ tên người ký.
+- Nếu không load được font tiếng Việt hợp lệ thì route phải trả lỗi `500`, không được fallback sang `Helvetica` cho text có dấu.
+- Tên người ký dùng `Times New Roman`, cỡ chuẩn `13`, nhưng có thể co nhỏ nhẹ nếu tên dài hơn bề rộng ô tên.
+
+### Mismatch warning UI ([id]/page.tsx)
+
+#### State
+
+```typescript
+// Warnings từ generate-pdf khi phát hiện tag tương tự nhưng sai tên
+const [headerMismatchWarnings, setHeaderMismatchWarnings] = useState<Array<{ found: string; expected: string }>>([])
+// Labels user đã xác nhận là không phải lỗi — truyền vào generate-pdf lần tiếp theo
+const [confirmedSkipTags, setConfirmedSkipTags] = useState<string[]>([])
+```
+
+#### Luồng hoạt động
+
+1. Sau `generate-pdf` thành công, nếu `pdfJson.metaMismatched?.length > 0` → `setHeaderMismatchWarnings(pdfJson.metaMismatched)`
+2. Banner amber hiển thị danh sách tag tìm thấy và gợi ý đúng
+3. Nút **"Bỏ qua, không điền tag này"**: thêm `expected` vào `confirmedSkipTags`, xóa warnings
+4. Nút **"Đóng"**: chỉ xóa warnings (không thêm vào skipTags — sẽ warn lại lần sau)
+5. `confirmedSkipTags` được truyền vào mỗi lần gọi generate-pdf:
+
+```typescript
+body: JSON.stringify({
+  token, docId, docType: "iso",
+  signaturePlacement: placement,
+  skipTagLabels: confirmedSkipTags,  // tích lũy từ các lần bỏ qua trước
+})
+```
+
+#### Diagnostics toast
+
+Nếu `pdfJson.diagnostics?.sigImgLoadFailed?.length > 0` → toast cảnh báo:
+
+```typescript
+const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
+if (failedSigs && failedSigs.length > 0) {
+  showToast(false, `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`)
+}
+```
+
 ### doc_approval_log insert
 
 ```typescript
@@ -730,10 +771,10 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 2. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
 3. **Reload tất cả 3 placements** từ DB
 4. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
-5. **Fill metadata placeholders** (`fillMetadataPlaceholders` — trang đầu tiên)
-6. **Stamp header/footer** trên mỗi trang (dùng NotoSans nếu có)
+5. **Bắt đầu từ `file_goc_url`** và scan text layer bằng `pdfjs-dist`
+6. **Chỉ điền tag nếu tag thực sự tồn tại** ở header/footer; không thấy thì bỏ qua
 7. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
-8. **Build phiếu ký duyệt** (Cha only) — trang riêng với NotoSans, ghép trước nội dung
+8. **Vẽ tên người ký** nếu `showSignerName !== false`, dùng box tên độc lập nếu user đã đặt
 9. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
 
 **Kết quả:**
@@ -741,81 +782,98 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 - Xem xét ký → PDF body có 2 chữ ký (soạn thảo + xem xét)
 - Phê duyệt ký → PDF body có 3 chữ ký (soạn thảo + xem xét + phê duyệt)
 
-### Metadata auto-fill (generate-pdf/route.ts)
+### Quy tắc cố định header/footer + tên người ký (cập nhật 2026-05-25)
 
-#### Signature hàm
+#### Phạm vi quét tag
 
-```typescript
-async function fillMetadataPlaceholders(
-  pdfDoc: PDFDocument,
-  pdfBytes: ArrayBuffer,
-  doc: Record<string, unknown>,
-  fallbackFont: PDFFont,    // font đã embed sẵn vào pdfDoc — không embed lại (tránh double-embed)
-  viFont: Buffer | null,    // truyền null nếu font đã được embed qua fallbackFont
-  skipLabels: string[] = [], // label user xác nhận không phải lỗi — bỏ qua
-): Promise<{ filled: string[]; notFound: string[]; mismatched: MetaMismatch[] }>
+- Chỉ quét phần `header` và `footer` của tài liệu.
+- Không thay thế bất kỳ tag nào trong `body`.
+- Phần `body` chỉ được:
+  - nhúng ảnh chữ ký,
+  - nhúng tên người ký theo bước ký nếu người dùng bật hiển thị tên.
+
+#### Quy tắc tag header
+
+- Các tag hệ thống hợp lệ trong header:
+  - `Mã tài liệu:`
+  - `Ngày hiệu lực:`
+  - `Tình trạng:`
+  - `Lần ban hành:` hoặc `Lần sửa đổi:` hoặc `Lần soát xét:`
+  - `QR:` hoặc `QR`
+- Quy tắc điền:
+  - Nếu tag đã có dấu `:`: code chèn sau dấu `:`, thêm ` ` rồi mới thêm giá trị thực.
+  - Nếu phát hiện đúng nhãn nhưng không có dấu `:`: code phải điền thêm `:`, rồi thêm dấu cách và giá trị thực.
+  - Nếu người dùng đã điền giá trị thật sau tag: code bỏ qua, không ghi đè.
+  - Nếu tài liệu không có tag nào ngoài `QR:` hoặc `QR`, code chỉ điền QR và bỏ qua các tag header khác.
+  - Font giá trị hệ thống trong header: `Times New Roman`, size `13`.
+
+#### Quy tắc tag footer
+
+- Footer mẫu hệ thống có cấu trúc:
+  - `Mã tài liệu (Lần ban hành-Ngày hiệu lực) Tình trạng`
+- Quy tắc điền:
+  - Footer được thay thế hoàn toàn bằng giá trị thực.
+  - Ví dụ: `NMCB-QT01 (01-25/05/2026) Có hiệu lực`
+  - Nếu người dùng đã điền footer thật rồi: code bỏ qua, không ghi đè.
+  - Nếu không tìm thấy footer mẫu/tag footer thì bỏ qua, không tự vẽ footer mới ở vị trí đoán.
+  - Font footer hệ thống: `Times New Roman`, size `13`.
+
+#### Tag tương tự phải cảnh báo bắt buộc
+
+- Các tag có thể nhầm lẫn:
+  - `Mã hồ sơ`, `Mã hiệu` → nhầm với `Mã tài liệu`
+  - `Trạng thái` → nhầm với `Tình trạng`
+  - `Lần sửa đổi`, `Lần soát xét` → nhầm trong nhóm `Lần ban hành / Lần sửa đổi`
+- Nếu phát hiện tag tương tự:
+  - không tự điền,
+  - hiển thị cảnh báo,
+  - bắt buộc người dùng sửa template rồi upload lại.
+
+#### Hướng dẫn bắt buộc trong UI upload template
+
+- Khu vực hướng dẫn phải có dòng:
+
+```text
+Nhãn hệ thống tự nhận diện trong phần header tài liệu:
 ```
 
-#### Cách hoạt động
+- Bên dưới liệt kê đúng các nhãn hệ thống hợp lệ để người dùng đặt trong template.
 
-Gọi sau `PDFDocument.load(pdfBytes)`, trước `stampHeader/stampFooter`. Dùng `pdfjs-dist` (Node.js mode, không Worker):
+#### Tên người ký trong bước đặt chữ ký
 
-```typescript
-pdfjsLib.GlobalWorkerOptions.workerSrc = ""
-const pdfjsDoc = await pdfjsLib.getDocument({
-  data: new Uint8Array(pdfBytes),
-  useWorkerFetch: false,
-  isEvalSupported: false,
-}).promise
+- Trong modal placement, mỗi bước ký phải hiển thị:
+  - ảnh chữ ký,
+  - tên người ký ở một box độc lập với chữ ký để người dùng kéo riêng.
+- Tên hiển thị mặc định là `ON`.
+- Phải có nút/toggle gốc dạng `(X)` để người dùng tắt hiển thị tên nếu template đã có sẵn tên.
+- Tên người ký khi nhúng PDF:
+  - căn giữa trong ô tên,
+  - font `Times New Roman`, size `13`,
+  - nếu tên dài thì được phép co nhỏ vừa ô nhưng phải ưu tiên giữ cân giữa.
+
+#### Cảnh báo placement
+
+- Trong modal đặt chữ ký phải hiển thị cảnh báo cố định:
+
+```text
+Không đặt ảnh chữ ký hoặc tên tràn ra ngoài ô chứa
 ```
 
-- **Chỉ fill trang đầu tiên** (`shouldFill = pageIdx === 0`) — tránh modify body các trang sau có pattern tương tự
-- Mismatch detection vẫn chạy trên tất cả trang
-- Scan vùng **top 40%** của trang (`transform[5] > height * 0.60` theo bottom-left origin của pdfjs)
-- Wrap toàn bộ trong `try/catch` — không ảnh hưởng phần còn lại nếu pdfjs-dist lỗi
+- Cảnh báo này hiển thị cùng lúc với preview chữ ký/tên.
 
-#### FILL_MAP — 4 tag hợp lệ
+#### Cách nhận diện tag trong `fillMetadataPlaceholders`
 
-| Label | Pattern | Giá trị điền |
-|-------|---------|-------------|
-| `Mã tài liệu` | `/m[aã]\s*t[àa]i\s*li[eệ]u\s*:/i` | `doc.ma_tai_lieu` |
-| `Lần ban hành / Lần sửa đổi` | `/l[aầ]n\s+(ban\s*h[àa]nh\|s[uửa]+a?\s*đ[oổ]i)\s*:/i` | `doc.lan_ban_hanh` |
-| `Tình trạng` | `/t[iì]nh\s*tr[aạ]ng\s*:/i` | label tiếng Việt từ `TRANG_THAI_LABEL_SERVER` |
-| `Ngày hiệu lực` | `/ng[aà]y\s*hi[eệ]u\s*l[uực]*\s*:/i` | `fmtDate(doc.ngay_hieu_luc)` |
-
-**Skip nếu** sau `:` đã có nội dung thật (không phải `___ ...` hay khoảng trắng). Không bao giờ overwrite nội dung hiện có.
-
-#### MISMATCH_MAP — tag sai nhưng tương tự
-
-Khi tìm thấy tag sai (ví dụ `Mã hồ sơ:` thay vì `Mã tài liệu:`), không fill — thay vào đó trả về trong `mismatched`:
-
-| Pattern sai | Gợi ý đúng |
-|-------------|-----------|
-| `Trạng thái:` | `Tình trạng` |
-| `Mã hồ sơ:` | `Mã tài liệu` |
-| `Số hiệu tài liệu:` | `Mã tài liệu` |
-| `Phiên bản:` | `Lần ban hành / Lần sửa đổi` |
-| `Ngày ban hành:` | `Ngày hiệu lực` |
-| `Ngày áp dụng:` | `Ngày hiệu lực` |
-
-Nếu `expected` nằm trong `skipLabels` → bỏ qua, không push vào `mismatched`.
-
-#### QR tag
-
-Khi gặp `/\bqr\s*:/i` → thêm vào `foundLabels.add("QR")` nhưng **không** fill — `stampHeader` đặt QR ở vị trí cố định, tránh double-stamp.
-
-#### `foundLabels` scope
-
-Set `foundLabels` phải khai báo **bên ngoài** vòng lặp `for (pageIdx)`. Nếu khai báo bên trong, label tìm thấy ở trang 1 sẽ xuất hiện trong `notFound` từ trang 2 trở đi (Set bị reset mỗi trang), gây cùng label xuất hiện trong cả `filled` lẫn `notFound`.
-
-#### Response fields liên quan
-
-```typescript
-// Trong NextResponse.json(...)
-metaFilled: metaResult.filled,        // label đã điền thành công
-metaNotFound: metaResult.notFound,    // label trong FILL_MAP không tìm thấy trong PDF
-metaMismatched: metaResult.mismatched, // tag sai được phát hiện → hiển thị warning UI
-```
+- Dùng `pdfjs-dist` để đọc text layer của tất cả trang.
+- Chuỗi tìm kiếm phải được chuẩn hóa tiếng Việt về dạng **không dấu**, chữ thường, bỏ khoảng trắng thừa trước khi match.
+- Header/footer chỉ được xử lý trong vùng header/footer của trang; body không được thay tag.
+- Với header:
+  - match theo nhãn chuẩn hóa như `ma tai lieu`, `ngay hieu luc`, `tinh trang`, `lan ban hanh / sua doi / soat xet`, `qr`
+  - giá trị hiện có chỉ được đọc từ phần text nằm **bên phải label**
+  - nếu phần bên phải đã có dữ liệu thật thì bỏ qua
+- Với footer:
+  - chỉ thay khi dòng footer match đúng mẫu footer chuẩn hóa
+  - nếu footer đã là giá trị thật hoặc không match mẫu thì bỏ qua
+- `metaFilled`, `metaNotFound`, `metaMismatched` tiếp tục được trả về cho UI.
 
 ---
 
@@ -886,7 +944,7 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | npm packages | ✅ Hoàn thành |
 | API `/api/sign/set-pin` | ✅ Hoàn thành |
 | API `/api/sign/verify` | ✅ Hoàn thành |
-| API `/api/sign/generate-pdf` — signature persistence + metadata auto-fill | ✅ Hoàn thành |
+| API `/api/sign/generate-pdf` — signature persistence + metadata auto-fill + NotoSans + skipTagLabels + diagnostics | ✅ Hoàn thành |
 | API `/api/sign/restamp-pdf` | ✅ Hoàn thành |
 | API `/api/iso/notify` — 3 action mới | ✅ Hoàn thành |
 | Settings tab ISO & Văn bản + Chữ ký cá nhân | ✅ Hoàn thành |
@@ -898,6 +956,9 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | Module ISO: mã tài liệu Cha/Con format | ✅ Hoàn thành |
 | Module ISO: `phan_loai_tl` cho PL/HD | ✅ Hoàn thành |
 | Module ISO: my-tasks page | ✅ Hoàn thành |
+| Module ISO: mismatch warning UI + confirmedSkipTags + diagnostics toast | ✅ Hoàn thành |
+| Module ISO: NotoSans + Times New Roman cho fill tag và tên người ký | ✅ Hoàn thành |
+| Module ISO: preview chữ ký/tên độc lập + fill trực tiếp trên file PDF gốc | ✅ Hoàn thành |
 | Module Văn bản (Giai đoạn 3) | ⏳ Pending |
 | In-app notification bell (Realtime) | ⏳ Pending |
 | Trang in (bypass sidebar) | ⏳ Pending |
