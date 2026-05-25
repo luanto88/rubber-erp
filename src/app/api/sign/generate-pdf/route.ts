@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
+import { PDFDocument, PDFFont, rgb, StandardFonts } from "pdf-lib"
 import { jwtVerify } from "jose"
 import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
@@ -77,13 +77,14 @@ function loadViFont(): Buffer | null {
   }
 }
 
-// Scan PDF header area (top 25% of each page) and fill blank metadata placeholders
+// Scan PDF header area (top 40% of first page) and fill blank metadata placeholders
 async function fillMetadataPlaceholders(
   pdfDoc: PDFDocument,
   pdfBytes: ArrayBuffer,
   doc: Record<string, unknown>,
-  fallbackFont: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  fallbackFont: PDFFont,
   viFont: Buffer | null,
+  skipLabels: string[] = [],
 ): Promise<{ filled: string[]; notFound: string[]; mismatched: MetaMismatch[] }> {
   const filledSet = new Set<string>()
   const notFound: string[] = []
@@ -133,6 +134,9 @@ async function fillMetadataPlaceholders(
     const foundLabels = new Set<string>()
 
     for (let pageIdx = 0; pageIdx < Math.min(pdfjsDoc.numPages, pdfLibPages.length); pageIdx++) {
+      // Only fill labels on the first page to avoid modifying body content on subsequent pages
+      const shouldFill = pageIdx === 0
+
       const pdfjsPage = await pdfjsDoc.getPage(pageIdx + 1)
       const viewport = pdfjsPage.getViewport({ scale: 1.0 })
       const textContent = await pdfjsPage.getTextContent()
@@ -167,8 +171,14 @@ async function fillMetadataPlaceholders(
       for (const line of lines) {
         const lineText = line.map((i) => i.str).join(" ")
 
+        // Detect QR: label — stampHeader handles the actual QR placement
+        if (/\bqr\s*:/i.test(lineText)) {
+          foundLabels.add("QR")
+        }
+
         // Check for similar-but-wrong labels before checking correct ones
         for (const { pattern, expected } of MISMATCH_MAP) {
+          if (skipLabels.includes(expected)) continue
           if (pattern.test(lineText)) {
             const foundStr = line.map((i) => i.str).join("").trim()
             if (!mismatched.some((m) => m.expected === expected)) {
@@ -177,9 +187,10 @@ async function fillMetadataPlaceholders(
           }
         }
 
-        // Fill correct labels
+        // Fill correct labels (only on first page)
         for (const { label, pattern, value } of FILL_MAP) {
-          if (!pattern.test(lineText) || !value) continue
+          if (skipLabels.includes(label)) continue
+          if (!pattern.test(lineText) || !value || !shouldFill) continue
           foundLabels.add(label)
 
           const colonIdx = line.findIndex((item) => item.str.includes(":"))
@@ -202,9 +213,11 @@ async function fillMetadataPlaceholders(
         }
       }
 
-      // Track labels not found in header of this page
-      for (const { label } of FILL_MAP) {
-        if (!foundLabels.has(label) && !notFound.includes(label)) notFound.push(label)
+      // Track labels not found in header of first page only
+      if (shouldFill) {
+        for (const { label } of FILL_MAP) {
+          if (!foundLabels.has(label) && !notFound.includes(label)) notFound.push(label)
+        }
       }
     }
   } catch (err) {
@@ -265,6 +278,7 @@ async function stampHeader(
   dateStr: string,
   statusText: string,
   isCha: boolean,
+  isActive: boolean,
 ) {
   const { width, height } = page.getSize()
   const qrImage = await pdfDoc.embedPng(qrBuffer)
@@ -294,7 +308,7 @@ async function stampHeader(
         size: 7,
         font: isStatus ? fontBold : font,
         color: isStatus
-          ? statusText === "Co hieu luc" ? rgb(0.1, 0.72, 0.36) : rgb(0.85, 0.2, 0.2)
+          ? isActive ? rgb(0.1, 0.72, 0.36) : rgb(0.85, 0.2, 0.2)
           : rgb(0.3, 0.3, 0.3),
       })
     })
@@ -309,11 +323,13 @@ export async function POST(req: NextRequest) {
       docId,
       docType,
       signaturePlacement,
+      skipTagLabels,
     }: {
       token: string
       docId: string
       docType: string
       signaturePlacement?: SignPlacement
+      skipTagLabels?: string[]
     } = body
 
     if (!token || !docId || !docType) {
@@ -357,7 +373,7 @@ export async function POST(req: NextRequest) {
     const lsStr = String(lanSuaDoi).padStart(2, "0")
     const trangThai = doc.trang_thai as string
     const isActive = trangThai === "co_hieu_luc"
-    const statusText = isActive ? "Co hieu luc" : trangThai === "het_hieu_luc" ? "Het hieu luc" : "Cho phe duyet"
+    const statusText = isActive ? "Có hiệu lực" : trangThai === "het_hieu_luc" ? "Hết hiệu lực" : "Chờ phê duyệt"
 
     const effectiveDate = (doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string)
     const dateStr = fmtDate(effectiveDate)
@@ -442,6 +458,9 @@ export async function POST(req: NextRequest) {
     const qrBuffer = await QRCode.toBuffer(qrUrl, { width: 120, margin: 1 })
 
     // ─── Load và stamp file gốc ───
+    const viFont = loadViFont()
+    const sigImgNullFor: string[] = []
+    const sigEmbedErrors: Array<{ userId: string; error: string }> = []
     let originalPages: PDFDocument | null = null
     let metaResult: { filled: string[]; notFound: string[]; mismatched: MetaMismatch[] } = { filled: [], notFound: [], mismatched: [] }
     const fileGocUrl = doc.file_goc_url as string | null
@@ -467,14 +486,25 @@ export async function POST(req: NextRequest) {
             const origFont = await originalPages.embedFont(StandardFonts.Helvetica)
             const origFontBold = await originalPages.embedFont(StandardFonts.HelveticaBold)
 
-            // Fill metadata placeholders in header area (before header/footer stamps)
-            const viFont = loadViFont()
-            metaResult = await fillMetadataPlaceholders(originalPages, pdfBytes, doc, origFont, viFont)
+            // Embed Vietnamese font for stamps if available; fall back to Helvetica
+            let stampFont = origFont as PDFFont
+            let stampFontBold = origFontBold as PDFFont
+            if (viFont) {
+              try {
+                originalPages.registerFontkit(fontkit)
+                const origViFont = await originalPages.embedFont(viFont)
+                stampFont = origViFont
+                stampFontBold = origViFont
+              } catch { /* fall back to Helvetica */ }
+            }
+
+            // Fill metadata placeholders — pass already-embedded font so no double-embed
+            metaResult = await fillMetadataPlaceholders(originalPages, pdfBytes, doc, stampFont, null, skipTagLabels ?? [])
 
             // Stamp header/footer on all pages — each page guarded independently
             for (const page of originalPages.getPages()) {
-              try { await stampFooter(page, origFont, maTl, lsStr, dateStr, statusText, isActive) } catch { }
-              try { await stampHeader(page, originalPages, origFont, origFontBold, qrBuffer, maTl, lsStr, dateStr, statusText, !isCon) } catch { }
+              try { await stampFooter(page, stampFont, maTl, lsStr, dateStr, statusText, isActive) } catch { }
+              try { await stampHeader(page, originalPages, stampFont, stampFontBold, qrBuffer, maTl, lsStr, dateStr, statusText, !isCon, isActive) } catch { }
             }
 
             // Embed ALL accumulated body signatures — each guarded independently
@@ -483,7 +513,10 @@ export async function POST(req: NextRequest) {
               const pageIdx = placement.page - 1
               if (pageIdx < 0 || pageIdx >= originalPages.getPageCount()) continue
               const sigImg = await getSigImage(factoryId, signerUserId)
-              if (!sigImg) continue
+              if (!sigImg) {
+                sigImgNullFor.push(signerUserId)
+                continue
+              }
               try {
                 const embedded = await originalPages.embedPng(sigImg)
                   .catch(() => originalPages!.embedJpg(sigImg!))
@@ -494,7 +527,9 @@ export async function POST(req: NextRequest) {
                   height: placement.height,
                   opacity: 0.92,
                 })
-              } catch { /* skip this signature if image embed fails */ }
+              } catch (e) {
+                sigEmbedErrors.push({ userId: signerUserId, error: e instanceof Error ? e.message : String(e) })
+              }
             }
           }
         }
@@ -508,8 +543,24 @@ export async function POST(req: NextRequest) {
       // ── Cha: build phiếu ký duyệt ──
       const phieuDoc = await PDFDocument.create()
       const phieuPage = phieuDoc.addPage([595, 842])
-      const font = await phieuDoc.embedFont(StandardFonts.Helvetica)
-      const fontBold = await phieuDoc.embedFont(StandardFonts.HelveticaBold)
+
+      // Embed Vietnamese font (NotoSans) if available for person names + Vietnamese labels
+      let phieuFont: PDFFont
+      let phieuFontBold: PDFFont
+      if (viFont) {
+        try {
+          phieuDoc.registerFontkit(fontkit)
+          const embeddedVi = await phieuDoc.embedFont(viFont)
+          phieuFont = embeddedVi
+          phieuFontBold = embeddedVi
+        } catch {
+          phieuFont = await phieuDoc.embedFont(StandardFonts.Helvetica)
+          phieuFontBold = await phieuDoc.embedFont(StandardFonts.HelveticaBold)
+        }
+      } else {
+        phieuFont = await phieuDoc.embedFont(StandardFonts.Helvetica)
+        phieuFontBold = await phieuDoc.embedFont(StandardFonts.HelveticaBold)
+      }
 
       const { height: pH } = phieuPage.getSize()
       const margin = 40
@@ -518,21 +569,21 @@ export async function POST(req: NextRequest) {
       // Header: tên công ty + info box
       phieuPage.drawText(companyName.toUpperCase(), {
         x: margin, y: pH - 50,
-        size: 9, font: fontBold, color: rgb(0, 0, 0),
+        size: 9, font: phieuFontBold, color: rgb(0, 0, 0),
       })
 
       const infoX = 595 - margin - 180
       const infoStartY = pH - 38
       const infoLines = [
-        `Ma tai lieu: ${maTl}`,
-        `Ngay hieu luc: ${dateStr || "---"}`,
-        `Tinh trang: ${statusText}`,
-        `Lan sua doi: ${lsStr}`,
+        `Mã tài liệu: ${maTl}`,
+        `Ngày hiệu lực: ${dateStr || "---"}`,
+        `Tình trạng: ${statusText}`,
+        `Lần sửa đổi: ${lsStr}`,
       ]
       infoLines.forEach((line, i) => {
         phieuPage.drawText(line, {
           x: infoX, y: infoStartY - i * 13,
-          size: 8, font, color: rgb(0.2, 0.2, 0.2),
+          size: 8, font: phieuFont, color: rgb(0.2, 0.2, 0.2),
         })
       })
 
@@ -545,11 +596,11 @@ export async function POST(req: NextRequest) {
 
       // Tiêu đề
       const titleY = pH - 120
-      const titleText = "PHIEU XAC NHAN KY DUYET"
-      const titleWidth = fontBold.widthOfTextAtSize(titleText, 13)
+      const titleText = "PHIẾU XÁC NHẬN KÝ DUYỆT"
+      const titleWidth = phieuFontBold.widthOfTextAtSize(titleText, 13)
       phieuPage.drawText(titleText, {
         x: (595 - titleWidth) / 2, y: titleY,
-        size: 13, font: fontBold, color: rgb(0, 0, 0),
+        size: 13, font: phieuFontBold, color: rgb(0, 0, 0),
       })
 
       phieuPage.drawLine({
@@ -558,14 +609,14 @@ export async function POST(req: NextRequest) {
         thickness: 0.8, color: rgb(0.6, 0.6, 0.6),
       })
 
-      const colHeaders = ["Soan thao", "Xem xet", "Phe duyet"]
+      const colHeaders = ["Soạn thảo", "Xem xét", "Phê duyệt"]
       const colStartY = titleY - 22
       colHeaders.forEach((label, i) => {
         const cx = margin + i * colW + colW / 2
-        const lw = fontBold.widthOfTextAtSize(label, 9)
+        const lw = phieuFontBold.widthOfTextAtSize(label, 9)
         phieuPage.drawText(label, {
           x: cx - lw / 2, y: colStartY,
-          size: 9, font: fontBold, color: rgb(0.2, 0.25, 0.35),
+          size: 9, font: phieuFontBold, color: rgb(0.2, 0.25, 0.35),
         })
       })
 
@@ -609,32 +660,32 @@ export async function POST(req: NextRequest) {
         }
 
         const name = (profile?.full_name || profile?.username || "—")
-        const nw = font.widthOfTextAtSize(name, 8.5)
+        const nw = phieuFont.widthOfTextAtSize(name, 8.5)
         phieuPage.drawText(name, {
           x: cx + (colW - nw) / 2, y: sigAreaY - sigAreaH - 4,
-          size: 8.5, font: fontBold, color: rgb(0.15, 0.15, 0.15),
+          size: 8.5, font: phieuFontBold, color: rgb(0.15, 0.15, 0.15),
         })
 
         const role = profile?.role || ""
         if (role) {
-          const rw = font.widthOfTextAtSize(role, 7.5)
+          const rw = phieuFont.widthOfTextAtSize(role, 7.5)
           phieuPage.drawText(role, {
             x: cx + (colW - rw) / 2, y: sigAreaY - sigAreaH - 16,
-            size: 7.5, font, color: rgb(0.4, 0.4, 0.4),
+            size: 7.5, font: phieuFont, color: rgb(0.4, 0.4, 0.4),
           })
         }
 
         const dateSigned = at ? fmtDate(at) : ""
         if (dateSigned) {
-          const dw = font.widthOfTextAtSize(dateSigned, 7.5)
+          const dw = phieuFont.widthOfTextAtSize(dateSigned, 7.5)
           phieuPage.drawText(dateSigned, {
             x: cx + (colW - dw) / 2, y: sigAreaY - sigAreaH - (role ? 28 : 16),
-            size: 7.5, font, color: rgb(0.35, 0.35, 0.35),
+            size: 7.5, font: phieuFont, color: rgb(0.35, 0.35, 0.35),
           })
         }
       }
 
-      await stampFooter(phieuPage, font, maTl, lsStr, dateStr, statusText, isActive)
+      await stampFooter(phieuPage, phieuFont, maTl, lsStr, dateStr, statusText, isActive)
 
       // Merge: phiếu ký + trang gốc
       const phieuPages = await finalDoc.copyPages(phieuDoc, phieuDoc.getPageIndices())
@@ -700,6 +751,8 @@ export async function POST(req: NextRequest) {
           userId: p.signerUserId,
           hasPlacement: !!p.placement,
         })),
+        sigImgLoadFailed: sigImgNullFor,
+        sigEmbedErrors,
       },
     })
   } catch (err) {

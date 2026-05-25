@@ -355,9 +355,11 @@ doTransition:
   1. Cập nhật trang_thai (Supabase)
   2. INSERT doc_approval_log
   3. Nếu có token + file_goc_url:
-     POST /api/sign/generate-pdf { token, docId, docType, signaturePlacement }
-     → Server: verify JWT → embed chữ ký → upload PDF
+     POST /api/sign/generate-pdf { token, docId, docType, signaturePlacement, skipTagLabels }
+     → Server: verify JWT → fill metadata (trang 1) → stamp header/footer (mọi trang) → embed chữ ký body → build phiếu ký duyệt → upload PDF
      → Cập nhật file_signed_pdf_url
+     → Nếu response.metaMismatched.length > 0: hiển thị warning banner (headerMismatchWarnings)
+     → Nếu diagnostics.sigImgLoadFailed.length > 0: toast cảnh báo người ký chưa upload ảnh chữ ký
   4. Nếu soát xét invalidate tài liệu cũ:
      POST /api/sign/restamp-pdf { docIds, factoryId }
   5. POST /api/iso/notify { docId, factoryId, action, recipientUserIds }
@@ -375,7 +377,7 @@ process.env.SIGN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
 |-------|--------|--------|
 | `/api/sign/set-pin` | POST | `{userId, pin}` → bcrypt.hash → upsert `sign_pins` |
 | `/api/sign/verify` | POST | `{userId, pin, docId, docType}` → verify bcrypt → JWT 5 phút |
-| `/api/sign/generate-pdf` | POST | `{token, docId, docType, signaturePlacement?}` → verify JWT → embed chữ ký → upload PDF |
+| `/api/sign/generate-pdf` | POST | `{token, docId, docType, signaturePlacement?, skipTagLabels?}` → verify JWT → fill metadata → stamp → embed chữ ký → upload PDF |
 | `/api/sign/restamp-pdf` | POST | `{docIds, factoryId}` → load PDF cũ → stamp footer "Hết hiệu lực" → re-upload |
 | `/api/iso/notify` | POST | `{docId, factoryId, action, recipientUserIds, lyDo?}` → in-app + Telegram + Email |
 | `/api/iso/profiles-by-permission` | GET | `?factoryId=...&permCode=...` → danh sách user có quyền (service role, bypass RLS) |
@@ -500,9 +502,9 @@ const draggableNodeRef = useRef<HTMLDivElement>(null)
 
 | Package | Mục đích |
 |---------|----------|
-| `pdf-lib` | Nhúng ảnh chữ ký vào PDF + ghép trang |
-| `pdfjs-dist` (v5.x) | Render PDF thành canvas để preview |
-| `@react-pdf/renderer` | Tạo trang Phiếu ký duyệt |
+| `pdf-lib` | Nhúng ảnh chữ ký vào PDF, stamp header/footer, build phiếu ký duyệt, ghép trang |
+| `pdfjs-dist` (v5.x) | Render PDF thành canvas để preview (client) + scan text metadata (server, Node.js mode) |
+| `@react-pdf/renderer` | Không còn dùng cho phiếu ký duyệt (đã chuyển sang pdf-lib thuần) |
 | `bcryptjs` + `@types/bcryptjs` | Hash/verify PIN |
 | `react-draggable` | Drag chữ ký trên canvas |
 | `re-resizable` | Resize ảnh chữ ký |
@@ -533,7 +535,7 @@ src/app/dashboard/documents/    -- (chưa triển khai — Giai đoạn 3)
 src/app/api/sign/
   set-pin/route.ts
   verify/route.ts
-  generate-pdf/route.ts         -- Con/Cha logic + signaturePlacement embed
+  generate-pdf/route.ts         -- Con/Cha logic + signaturePlacement embed + metadata fill + NotoSans stamps
   restamp-pdf/route.ts          -- Re-stamp "Hết hiệu lực" lên PDF cũ
 
 src/app/api/iso/
@@ -728,9 +730,11 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 2. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
 3. **Reload tất cả 3 placements** từ DB
 4. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
-5. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
-6. Stamp header/footer/phiếu ký duyệt (phần cố định)
-7. Upload PDF kết quả → cập nhật `file_signed_pdf_url`
+5. **Fill metadata placeholders** (`fillMetadataPlaceholders` — trang đầu tiên)
+6. **Stamp header/footer** trên mỗi trang (dùng NotoSans nếu có)
+7. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
+8. **Build phiếu ký duyệt** (Cha only) — trang riêng với NotoSans, ghép trước nội dung
+9. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
 
 **Kết quả:**
 - Soạn thảo ký → PDF body có 1 chữ ký soạn thảo
@@ -739,22 +743,78 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 
 ### Metadata auto-fill (generate-pdf/route.ts)
 
-Trước khi stamp header/footer, `fillMetadataPlaceholders()` dùng `pdfjs-dist` (Node.js mode) để:
-- Scan text từng trang tìm các pattern: `Mã tài liệu:`, `Lần ban hành:` / `Lần sửa đổi:`, `Tình trạng:`, `Ngày hiệu lực:`
-- **Skip** nếu sau dấu `:` đã có nội dung thật (không phải `___ ...` hay khoảng trắng)
-- **Overlay** giá trị thực của tài liệu tại vị trí ngay sau `:` bằng pdf-lib
-- Wrap trong `try/catch` — không ảnh hưởng phần còn lại nếu pdfjs-dist lỗi
-
-**Quy tắc scope `foundLabels` (bắt buộc)**: Set `foundLabels` phải khai báo **bên ngoài** vòng lặp `for (pageIdx)`, không được khai báo bên trong. Nếu khai báo bên trong, label tìm thấy ở trang 1 sẽ xuất hiện trong `notFound` từ trang 2 trở đi (vì Set bị reset mỗi trang), gây diagnostic sai (cùng label có thể xuất hiện trong cả `filled` lẫn `notFound`).
+#### Signature hàm
 
 ```typescript
-// pdfjs-dist Node.js mode (không có Worker)
+async function fillMetadataPlaceholders(
+  pdfDoc: PDFDocument,
+  pdfBytes: ArrayBuffer,
+  doc: Record<string, unknown>,
+  fallbackFont: PDFFont,    // font đã embed sẵn vào pdfDoc — không embed lại (tránh double-embed)
+  viFont: Buffer | null,    // truyền null nếu font đã được embed qua fallbackFont
+  skipLabels: string[] = [], // label user xác nhận không phải lỗi — bỏ qua
+): Promise<{ filled: string[]; notFound: string[]; mismatched: MetaMismatch[] }>
+```
+
+#### Cách hoạt động
+
+Gọi sau `PDFDocument.load(pdfBytes)`, trước `stampHeader/stampFooter`. Dùng `pdfjs-dist` (Node.js mode, không Worker):
+
+```typescript
 pdfjsLib.GlobalWorkerOptions.workerSrc = ""
 const pdfjsDoc = await pdfjsLib.getDocument({
   data: new Uint8Array(pdfBytes),
   useWorkerFetch: false,
   isEvalSupported: false,
 }).promise
+```
+
+- **Chỉ fill trang đầu tiên** (`shouldFill = pageIdx === 0`) — tránh modify body các trang sau có pattern tương tự
+- Mismatch detection vẫn chạy trên tất cả trang
+- Scan vùng **top 40%** của trang (`transform[5] > height * 0.60` theo bottom-left origin của pdfjs)
+- Wrap toàn bộ trong `try/catch` — không ảnh hưởng phần còn lại nếu pdfjs-dist lỗi
+
+#### FILL_MAP — 4 tag hợp lệ
+
+| Label | Pattern | Giá trị điền |
+|-------|---------|-------------|
+| `Mã tài liệu` | `/m[aã]\s*t[àa]i\s*li[eệ]u\s*:/i` | `doc.ma_tai_lieu` |
+| `Lần ban hành / Lần sửa đổi` | `/l[aầ]n\s+(ban\s*h[àa]nh\|s[uửa]+a?\s*đ[oổ]i)\s*:/i` | `doc.lan_ban_hanh` |
+| `Tình trạng` | `/t[iì]nh\s*tr[aạ]ng\s*:/i` | label tiếng Việt từ `TRANG_THAI_LABEL_SERVER` |
+| `Ngày hiệu lực` | `/ng[aà]y\s*hi[eệ]u\s*l[uực]*\s*:/i` | `fmtDate(doc.ngay_hieu_luc)` |
+
+**Skip nếu** sau `:` đã có nội dung thật (không phải `___ ...` hay khoảng trắng). Không bao giờ overwrite nội dung hiện có.
+
+#### MISMATCH_MAP — tag sai nhưng tương tự
+
+Khi tìm thấy tag sai (ví dụ `Mã hồ sơ:` thay vì `Mã tài liệu:`), không fill — thay vào đó trả về trong `mismatched`:
+
+| Pattern sai | Gợi ý đúng |
+|-------------|-----------|
+| `Trạng thái:` | `Tình trạng` |
+| `Mã hồ sơ:` | `Mã tài liệu` |
+| `Số hiệu tài liệu:` | `Mã tài liệu` |
+| `Phiên bản:` | `Lần ban hành / Lần sửa đổi` |
+| `Ngày ban hành:` | `Ngày hiệu lực` |
+| `Ngày áp dụng:` | `Ngày hiệu lực` |
+
+Nếu `expected` nằm trong `skipLabels` → bỏ qua, không push vào `mismatched`.
+
+#### QR tag
+
+Khi gặp `/\bqr\s*:/i` → thêm vào `foundLabels.add("QR")` nhưng **không** fill — `stampHeader` đặt QR ở vị trí cố định, tránh double-stamp.
+
+#### `foundLabels` scope
+
+Set `foundLabels` phải khai báo **bên ngoài** vòng lặp `for (pageIdx)`. Nếu khai báo bên trong, label tìm thấy ở trang 1 sẽ xuất hiện trong `notFound` từ trang 2 trở đi (Set bị reset mỗi trang), gây cùng label xuất hiện trong cả `filled` lẫn `notFound`.
+
+#### Response fields liên quan
+
+```typescript
+// Trong NextResponse.json(...)
+metaFilled: metaResult.filled,        // label đã điền thành công
+metaNotFound: metaResult.notFound,    // label trong FILL_MAP không tìm thấy trong PDF
+metaMismatched: metaResult.mismatched, // tag sai được phát hiện → hiển thị warning UI
 ```
 
 ---

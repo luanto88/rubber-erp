@@ -124,6 +124,8 @@ export default function IsoDocumentDetailPage() {
 
   // Header mismatch warnings from generate-pdf
   const [headerMismatchWarnings, setHeaderMismatchWarnings] = useState<Array<{ found: string; expected: string }>>([])
+  // Labels user confirmed are intentional (not errors) — skip in future generate-pdf calls
+  const [confirmedSkipTags, setConfirmedSkipTags] = useState<string[]>([])
 
 
   const appUrl = typeof window !== "undefined" ? window.location.origin : ""
@@ -522,7 +524,7 @@ export default function IsoDocumentDetailPage() {
           const pdfRes = await fetch("/api/sign/generate-pdf", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, docId, docType: "iso", signaturePlacement: placement }),
+            body: JSON.stringify({ token, docId, docType: "iso", signaturePlacement: placement, skipTagLabels: confirmedSkipTags }),
           })
           const pdfJson = await pdfRes.json()
           if (pdfJson.ok && pdfJson.signedPdfUrl) {
@@ -532,6 +534,10 @@ export default function IsoDocumentDetailPage() {
               .eq("id", docId).eq("factory_id", factoryId)
             if (pdfJson.metaMismatched?.length > 0) {
               setHeaderMismatchWarnings(pdfJson.metaMismatched as Array<{ found: string; expected: string }>)
+            }
+            const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
+            if (failedSigs && failedSigs.length > 0) {
+              showToast(false, `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`)
             }
           }
         } catch { /* PDF fail không chặn UI */ }
@@ -689,6 +695,48 @@ export default function IsoDocumentDetailPage() {
             <AlertTriangle size={16} className="shrink-0" />
             <span className="text-sm">{saveError}</span>
             <button onClick={() => setSaveError(null)} className="ml-auto hover:opacity-70"><X size={14} /></button>
+          </div>
+        )}
+
+        {/* Header mismatch warning */}
+        {headerMismatchWarnings.length > 0 && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-amber-800">Phát hiện tag không khớp trong tài liệu</p>
+                <ul className="mt-1 text-xs text-amber-700 space-y-0.5">
+                  {headerMismatchWarnings.map((w, i) => (
+                    <li key={i}>
+                      "<span className="font-mono">{w.found}</span>" — có thể đã nhập sai thay vì "<span className="font-mono">{w.expected}:</span>"
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-amber-600">
+                  Nếu đây là lỗi: tải lại file đã sửa và ký lại. Nếu không phải lỗi, bấm &quot;Bỏ qua&quot; để hệ thống không cố điền tag này.
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => {
+                      setConfirmedSkipTags((prev) => [
+                        ...prev,
+                        ...headerMismatchWarnings.map((w) => w.expected).filter((e) => !prev.includes(e)),
+                      ])
+                      setHeaderMismatchWarnings([])
+                    }}
+                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
+                  >
+                    Bỏ qua, không điền tag này
+                  </button>
+                  <button
+                    onClick={() => setHeaderMismatchWarnings([])}
+                    className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1244,31 +1292,6 @@ export default function IsoDocumentDetailPage() {
                 )
               )}
 
-              {/* Cảnh báo nhãn header không đúng */}
-              {headerMismatchWarnings.length > 0 && (
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-800">
-                  <p className="font-bold mb-1 text-xs">Cảnh báo: Nhãn trong phần header có thể không đúng</p>
-                  {headerMismatchWarnings.map((w, i) => (
-                    <p key={i} className="text-xs mb-0.5">
-                      · Tìm thấy nhãn <code className="bg-amber-100 px-1 rounded">{w.found}</code> — có thể bạn nhầm với <code className="bg-green-100 px-1 rounded">{w.expected}</code>. Hệ thống đã bỏ qua.
-                    </p>
-                  ))}
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      onClick={() => document.getElementById("file-goc-upload")?.scrollIntoView({ behavior: "smooth" })}
-                      className="px-3 py-1 text-xs bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700"
-                    >
-                      Sửa file
-                    </button>
-                    <button
-                      onClick={() => setHeaderMismatchWarnings([])}
-                      className="px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200"
-                    >
-                      Hiểu rồi, bỏ qua
-                    </button>
-                  </div>
-                </div>
-              )}
 
               {/* PDF đã ký */}
               {doc?.file_signed_pdf_url && (
