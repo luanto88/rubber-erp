@@ -29,26 +29,57 @@ export type IsoDocument = {
   phe_duyet_user_id: string | null
   file_goc_url: string | null
   file_soat_xet_url: string | null
+  file_phieu_yeu_cau_thay_doi_url: string | null
+  file_de_nghi_soat_xet_url: string | null
   file_signed_pdf_url: string | null
+  file_signed_office_url?: string | null
+  file_signed_office_type?: string | null
+  file_phieu_yeu_cau_thay_doi_signed_url?: string | null
+  file_de_nghi_soat_xet_signed_url?: string | null
   soan_thao_placement: Record<string, number> | null
   xem_xet_placement: Record<string, number> | null
   phe_duyet_placement: Record<string, number> | null
   ky_soan_thao_at: string | null
   ky_xem_xet_at: string | null
   ky_phe_duyet_at: string | null
+  doi_ma_tai_lieu: boolean | null
+  ma_tai_lieu_cu: string | null
+  ly_do_soat_xet: string | null
+  noi_dung_soat_xet: string | null
   ma_tai_lieu_moi: string | null
   ngay_hieu_luc: string | null
   ngay_het_hieu_luc: string | null
   qr_url: string | null
   ghi_chu: string | null
   phan_loai_tl: string | null
+  standards?: IsoStandard[]
   created_by: string | null
   created_at: string
   updated_at: string
 }
 
+export type IsoStandard = {
+  id: number
+  tieu_chuan: string
+  ten_tieu_chuan: string
+  is_active?: boolean
+  sort_order?: number
+}
+
+export type IsoDocumentTypeMaster = {
+  code: string
+  name: string
+  can_parent: boolean
+  can_child: boolean
+  force_child: boolean
+  allowed_departments: string[]
+  is_active?: boolean
+  sort_order?: number
+}
+
 export type IsoDocumentForm = {
   ma_tai_lieu: string          // auto-generated (readonly)
+  ma_tai_lieu_cu: string       // review source code
   // Tài liệu Cha: phong_ban + loai_tai_lieu + so_hieu → ma_tai_lieu
   so_hieu: string              // số hiệu của TL (Cha: serial của TL; Con: serial con)
   // Hồ sơ Con: phong_ban + loai_tai_lieu_cha + so_hieu_cha → ma_tai_lieu_cha
@@ -56,6 +87,7 @@ export type IsoDocumentForm = {
   so_hieu_cha: string          // số hiệu cha (Con mode, e.g. "02")
   ma_tai_lieu_cha: string      // mã cha auto-derived (e.g. "NMCB-QT01")
   ten_tai_lieu: string
+  ten_tai_lieu_cu: string      // review source title
   loai_tai_lieu: string        // loại TL của chính tài liệu này
   phong_ban: string
   cap_tl: string
@@ -68,9 +100,21 @@ export type IsoDocumentForm = {
   phe_duyet: string
   phe_duyet_user_id: string
   ghi_chu: string
+  standard_ids: number[]
+  doi_ma_tai_lieu: boolean
+  ly_do_soat_xet: string
+  noi_dung_soat_xet: string
   ma_tai_lieu_moi: string
   phan_loai_tl: string         // "cha" | "con"
 }
+
+export const ISO_STANDARD_FALLBACK: IsoStandard[] = [
+  { id: 1, tieu_chuan: "ISO 9001:2015", ten_tieu_chuan: "He thong quan ly chat luong", sort_order: 1 },
+  { id: 2, tieu_chuan: "ISO 14001:2015", ten_tieu_chuan: "He thong quan ly moi truong", sort_order: 2 },
+  { id: 3, tieu_chuan: "PEFC ST 2002-1:2024", ten_tieu_chuan: "Cac yeu cau doi voi viec trien khai He thong tham dinh chi tiet PEFC EUDR (PEFC EUDR DDS)", sort_order: 3 },
+  { id: 4, tieu_chuan: "ISO/IEC 17025:2017", ten_tieu_chuan: "Tieu chuan phong thi nghiem", sort_order: 4 },
+  { id: 5, tieu_chuan: "ISO 14067:2018", ten_tieu_chuan: "Truy van dau vet cacbon", sort_order: 5 },
+]
 
 // Danh sách loại tài liệu theo bảng chuẩn ISO của công ty
 export const LOAI_TAI_LIEU_OPTIONS = [
@@ -115,6 +159,18 @@ export const LOAI_PHONG_BAN_MAP: Record<string, string[]> = {
 export const PHONG_BAN_OPTIONS = [
   "PHK", "KTNN", "QLCL", "KHXD", "TCKT", "TCHC", "TTBV", "NMCB", "CS"
 ] as const
+
+export function isoDocumentTypeFallback(): IsoDocumentTypeMaster[] {
+  return LOAI_TAI_LIEU_OPTIONS.map((code, index) => ({
+    code,
+    name: LOAI_TAI_LIEU_LABEL[code],
+    can_parent: (LOAI_CHA_OPTIONS as readonly string[]).includes(code),
+    can_child: (LOAI_CON_OPTIONS as readonly string[]).includes(code),
+    force_child: code === "F",
+    allowed_departments: LOAI_PHONG_BAN_MAP[code] || [...PHONG_BAN_OPTIONS],
+    sort_order: index + 1,
+  }))
+}
 
 export const TRANG_THAI_LABEL: Record<IsoTrangThai, string> = {
   draft: "Nháp",
@@ -176,11 +232,13 @@ export function parseParentCode(code: string): { pb: string; loai: string; so: s
 export function emptyIsoForm(): IsoDocumentForm {
   return {
     ma_tai_lieu: "",
+    ma_tai_lieu_cu: "",
     so_hieu: "",
     loai_tai_lieu_cha: "QT",
     so_hieu_cha: "",
     ma_tai_lieu_cha: "",
     ten_tai_lieu: "",
+    ten_tai_lieu_cu: "",
     loai_tai_lieu: "QT",
     phong_ban: "",
     cap_tl: "Cấp 1",
@@ -193,6 +251,10 @@ export function emptyIsoForm(): IsoDocumentForm {
     phe_duyet: "",
     phe_duyet_user_id: "",
     ghi_chu: "",
+    standard_ids: [],
+    doi_ma_tai_lieu: false,
+    ly_do_soat_xet: "",
+    noi_dung_soat_xet: "",
     ma_tai_lieu_moi: "",
     phan_loai_tl: "cha",
   }

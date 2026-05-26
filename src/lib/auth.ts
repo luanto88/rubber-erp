@@ -351,6 +351,7 @@ export const DEFAULT_PERMISSION_CODES = [
   "iso.edit",
   "iso.delete",
   "iso.xem_xet",
+  "iso.soat_xet",
   "iso.phe_duyet",
   "iso.print",
   "iso.signature",
@@ -389,6 +390,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "iso.view",
     "iso.create",
     "iso.edit",
+    "iso.soat_xet",
     "iso.signature",
   ],
   user: [

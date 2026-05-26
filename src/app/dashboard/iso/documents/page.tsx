@@ -8,35 +8,62 @@ import {
   TRANG_THAI_LABEL,
   TRANG_THAI_COLOR,
   LOAI_TAI_LIEU_OPTIONS,
+  ISO_STANDARD_FALLBACK,
+  isoDocumentTypeFallback,
   fmtDate,
   type IsoDocument,
+  type IsoDocumentTypeMaster,
+  type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, Filter } from "lucide-react"
+import { Plus, Search, FileText, Eye } from "lucide-react"
 import Link from "next/link"
 
 export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<IsoDocument[]>([])
+  const [standards, setStandards] = useState<IsoStandard[]>(ISO_STANDARD_FALLBACK)
+  const [docTypes, setDocTypes] = useState<IsoDocumentTypeMaster[]>(isoDocumentTypeFallback())
 
   // Bộ lọc
   const [search, setSearch] = useState("")
   const [filterLoai, setFilterLoai] = useState("")
   const [filterTrangThai, setFilterTrangThai] = useState<IsoTrangThai | "">("")
   const [filterCap, setFilterCap] = useState("")
+  const [filterStandard, setFilterStandard] = useState("")
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
     try {
-      const { data } = await supabase
+      const [docRes, standardRes, typeRes] = await Promise.all([
+        supabase
         .from("iso_documents")
         .select(
           "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, phe_duyet, ngay_hieu_luc, updated_at, created_at",
         )
         .eq("factory_id", fid)
-        .order("updated_at", { ascending: false })
-      setDocs((data || []) as IsoDocument[])
+        .order("updated_at", { ascending: false }),
+        supabase.from("iso_standards").select("id, tieu_chuan, ten_tieu_chuan, is_active, sort_order").eq("is_active", true).order("sort_order"),
+        supabase.from("iso_document_types").select("code, name, can_parent, can_child, force_child, allowed_departments, is_active, sort_order").eq("is_active", true).order("sort_order"),
+      ])
+      const rows = (docRes.data || []) as IsoDocument[]
+      const standardList = !standardRes.error && standardRes.data?.length ? standardRes.data as IsoStandard[] : ISO_STANDARD_FALLBACK
+      if (!standardRes.error && standardRes.data?.length) setStandards(standardList)
+      if (!typeRes.error && typeRes.data?.length) setDocTypes(typeRes.data as IsoDocumentTypeMaster[])
+
+      const ids = rows.map((d) => d.id)
+      const { data: links } = ids.length > 0
+        ? await supabase.from("iso_document_standards").select("doc_id, standard_id").in("doc_id", ids).eq("factory_id", fid)
+        : { data: [] as { doc_id: string; standard_id: number }[] }
+      const standardById = new Map(standardList.map((s) => [s.id, s]))
+      const standardsByDoc = new Map<string, IsoStandard[]>()
+      for (const link of (links || []) as { doc_id: string; standard_id: number }[]) {
+        const standard = standardById.get(link.standard_id)
+        if (!standard) continue
+        standardsByDoc.set(link.doc_id, [...(standardsByDoc.get(link.doc_id) || []), standard])
+      }
+      setDocs(rows.map((row) => ({ ...row, standards: standardsByDoc.get(row.id) || [] })))
     } finally {
       setLoading(false)
     }
@@ -58,6 +85,7 @@ export default function IsoDocumentsPage() {
   const filtered = docs.filter((d) => {
     const q = search.toLowerCase()
     if (q && !d.ma_tai_lieu?.toLowerCase().includes(q) && !d.ten_tai_lieu.toLowerCase().includes(q)) return false
+    if (filterStandard && !(d.standards || []).some((s) => String(s.id) === filterStandard)) return false
     if (filterLoai && d.loai_tai_lieu !== filterLoai) return false
     if (filterTrangThai && d.trang_thai !== filterTrangThai) return false
     if (filterCap && d.cap_tl !== filterCap) return false
@@ -74,6 +102,7 @@ export default function IsoDocumentsPage() {
     { value: "tra_ve", label: "Trả về" },
     { value: "bi_tu_choi_phe_duyet", label: "Phê duyệt từ chối" },
   ]
+  const typeOptions = docTypes.length > 0 ? docTypes.map((type) => type.code) : [...LOAI_TAI_LIEU_OPTIONS]
 
   return (
     <IsoShell>
@@ -105,12 +134,22 @@ export default function IsoDocumentsPage() {
             />
           </div>
           <select
+            value={filterStandard}
+            onChange={(e) => setFilterStandard(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">Tất cả tiêu chuẩn</option>
+            {standards.map((standard) => (
+              <option key={standard.id} value={standard.id}>{standard.tieu_chuan}</option>
+            ))}
+          </select>
+          <select
             value={filterLoai}
             onChange={(e) => setFilterLoai(e.target.value)}
             className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
           >
             <option value="">Tất cả loại</option>
-            {LOAI_TAI_LIEU_OPTIONS.map((l) => (
+            {typeOptions.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>
@@ -174,6 +213,15 @@ export default function IsoDocumentsPage() {
                       <div className="font-medium text-slate-700 line-clamp-1">{doc.ten_tai_lieu}</div>
                       {doc.soan_thao && (
                         <div className="text-xs text-slate-400 mt-0.5">ST: {doc.soan_thao}</div>
+                      )}
+                      {(doc.standards || []).length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(doc.standards || []).map((standard) => (
+                            <span key={standard.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                              {standard.tieu_chuan}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">

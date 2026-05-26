@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
+import { PDFDocument, rgb } from "pdf-lib"
+import fontkit from "@pdf-lib/fontkit"
+import { readFile } from "fs/promises"
+import path from "path"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,31 +26,33 @@ async function stampFooterHetHieuLuc(
 ) {
   const { width } = page.getSize()
   const text = `${maTl} (${lsStr}-${dateStr})`
-  const fontSize = 7.5
-  const boxSize = 7
+  const status = "Hết hiệu lực"
+  const fontSize = 9
 
   page.drawText(text, {
     x: 28, y: 16,
-    size: fontSize, font, color: rgb(0.45, 0.5, 0.55),
+    size: fontSize, font, color: rgb(0.35, 0.38, 0.42),
   })
 
   const textWidth = font.widthOfTextAtSize(text, fontSize)
-  const boxX = 28 + textWidth + 5
-  page.drawRectangle({
-    x: boxX, y: 14,
-    width: boxSize, height: boxSize,
-    color: rgb(0.85, 0.2, 0.2),
-  })
-
-  page.drawText(" Het hieu luc", {
-    x: boxX + boxSize + 2, y: 16,
-    size: fontSize, font, color: rgb(0.45, 0.5, 0.55),
+  page.drawText(` ${status}`, {
+    x: 28 + textWidth + 5, y: 16,
+    size: fontSize, font, color: rgb(0.85, 0, 0),
   })
 
   page.drawLine({
     start: { x: 28, y: 26 },
     end: { x: width - 28, y: 26 },
     thickness: 0.4, color: rgb(0.75, 0.8, 0.85),
+  })
+
+  const statusWidth = font.widthOfTextAtSize(status, fontSize + 1)
+  page.drawText(status, {
+    x: Math.max(28, width - statusWidth - 36),
+    y: page.getSize().height - 34,
+    size: fontSize + 1,
+    font,
+    color: rgb(0.85, 0, 0),
   })
 }
 
@@ -97,6 +102,10 @@ export async function POST(req: NextRequest) {
           results.push({ id: doc.id, ok: false, error: "Không có file PDF" })
           continue
         }
+        if (!sourceUrl.split("?")[0].toLowerCase().endsWith(".pdf")) {
+          results.push({ id: doc.id, ok: true })
+          continue
+        }
 
         // Extract storage path
         const urlParts = sourceUrl.split("/storage/v1/object/public/iso-documents/")
@@ -116,7 +125,9 @@ export async function POST(req: NextRequest) {
 
         const pdfBytes = await pdfData.arrayBuffer()
         const pdfDoc = await PDFDocument.load(pdfBytes)
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+        pdfDoc.registerFontkit(fontkit)
+        const fontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "TimesNewRoman.ttf"))
+        const font = await pdfDoc.embedFont(fontBytes)
 
         for (const page of pdfDoc.getPages()) {
           await stampFooterHetHieuLuc(page, font, maTl, lsStr, dateStr)

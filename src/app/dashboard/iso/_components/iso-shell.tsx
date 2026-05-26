@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FileText, LayoutDashboard, ListChecks, ClipboardCheck, type LucideIcon } from "lucide-react"
+import { FileText, LayoutDashboard, ClipboardCheck, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 type NavTab = {

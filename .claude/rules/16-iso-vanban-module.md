@@ -23,6 +23,7 @@ Mọi dữ liệu phải có `factory_id`, filter theo nhà máy đang đăng nh
 | `20260522_iso_vanban_module.sql` | Tạo 5 bảng + triggers + RLS + 14 permissions |
 | `20260523_iso_phan_loai_tl.sql` | Thêm `phan_loai_tl` vào `iso_documents`; seed `settings.master_data`, `settings.maintenance_config`, `iso.signature` vào `permissions` + `role_permissions` |
 | `20260524_iso_signature_placement.sql` (**đã chạy thủ công — 2026-05-25**) | Thêm 3 cột JSONB lưu placement chữ ký từng bước |
+| `20260526_iso_standards_review.sql` | Thêm danh mục tiêu chuẩn, bảng nối `iso_document_standards`, danh mục `iso_document_types`, các cột soát xét/đổi mã/file đính kèm và permission `iso.soat_xet` |
 
 ```sql
 -- 20260524_iso_signature_placement.sql
@@ -72,8 +73,14 @@ phe_duyet_placement JSONB,    -- placement bước phê duyệt
 
 file_goc_url TEXT,            -- Supabase Storage: file gốc do user upload
 file_signed_pdf_url TEXT,     -- PDF cuối với chữ ký nhúng
+file_phieu_yeu_cau_thay_doi_url TEXT, -- file đính kèm soát xét
+file_de_nghi_soat_xet_url TEXT,       -- file đính kèm soát xét
 
+doi_ma_tai_lieu BOOLEAN DEFAULT false,
+ma_tai_lieu_cu TEXT,          -- mã tài liệu/hồ sơ cũ được chọn để soát xét
 ma_tai_lieu_moi TEXT,         -- khi Soát xét đổi mã
+ly_do_soat_xet TEXT,
+noi_dung_soat_xet TEXT,
 ngay_hieu_luc TIMESTAMPTZ,
 ngay_het_hieu_luc TIMESTAMPTZ,
 ghi_chu TEXT,                 -- lý do trả về (khi tra_ve)
@@ -243,7 +250,7 @@ RLS:
 
 ```
 iso.view / iso.create / iso.edit / iso.delete
-iso.xem_xet / iso.phe_duyet / iso.print
+iso.soat_xet / iso.xem_xet / iso.phe_duyet / iso.print
 iso.signature               -- tab Chữ ký cá nhân trong Cài đặt (mọi user active)
 documents.view / documents.create / documents.edit / documents.delete
 documents.ky_phong_ban / documents.phe_duyet / documents.print
@@ -253,9 +260,11 @@ settings.maintenance_config -- tab Bảo trì trong Cài đặt
 
 Guard bắt buộc ở cả UI và logic thao tác.
 
+`iso.soat_xet` là permission chính cho bước soát xét/xem xét ISO. Hệ thống có thể fallback `iso.xem_xet` để tương thích dữ liệu cũ, nhưng phân quyền mới phải cấp `iso.soat_xet`.
+
 **Phân quyền mặc định:**
 - `admin`: toàn bộ
-- `manager`: `iso.view/create/edit`, `iso.signature`, `settings.master_data`, `settings.maintenance_config`
+- `manager`: `iso.view/create/edit`, `iso.soat_xet`, `iso.signature`, `settings.master_data`, `settings.maintenance_config`
 - `user`: `iso.view`, `iso.signature`
 
 ---
@@ -304,10 +313,16 @@ Mọi action đều INSERT vào `doc_approval_log`.
 ### Quy trình Soát xét
 
 Khi tạo tài liệu với `chon_quy_trinh = "Soát xét"`:
-- Sau khi `phe_duyet`, auto-UPDATE tất cả tài liệu cùng `ma_tai_lieu` (mã cũ) + `trang_thai = 'co_hieu_luc'` → `het_hieu_luc` + `ngay_het_hieu_luc = now()`
-- Trừ tài liệu hiện tại
-- Nếu `ma_tai_lieu_moi` có giá trị: cập nhật `ma_tai_lieu = ma_tai_lieu_moi` sau phê duyệt
-- Restamp PDF các tài liệu cũ bị invalidate: gọi `POST /api/sign/restamp-pdf { docIds, factoryId }`
+- Người dùng chỉ được chọn tài liệu/hồ sơ cũ có `trang_thai = 'co_hieu_luc'` và cùng `factory_id`.
+- Bộ lọc theo tầng: `Tiêu chuẩn` (multi-select) → `Phòng ban` → `Loại tài liệu/Loại hồ sơ` → `Mã tài liệu/Mã hồ sơ`.
+- Khi chọn mã cũ, form lưu `ma_tai_lieu_cu`, hiển thị tên cũ read-only, gợi ý tên mới bằng tên cũ và cho phép sửa.
+- Bắt buộc nhập `ly_do_soat_xet`, `noi_dung_soat_xet`; nếu `doi_ma_tai_lieu = true` thì bắt buộc nhập `ma_tai_lieu_moi`.
+- Sau khi `phe_duyet`, nếu đổi mã thì cập nhật tài liệu mới sang `ma_tai_lieu_moi`; nếu không đổi mã thì giữ mã hiện tại.
+- Sau phê duyệt, chỉ invalidate **1 tài liệu/hồ sơ cũ có hiệu lực gần nhất** theo `ma_tai_lieu_cu`, cùng `factory_id`, `trang_thai = 'co_hieu_luc'`, `id <> docId`, ưu tiên `ngay_hieu_luc DESC NULLS LAST`, rồi `updated_at DESC`.
+- Tài liệu/hồ sơ cũ bị invalidate được cập nhật `trang_thai = 'het_hieu_luc'`, `ngay_het_hieu_luc = now()`, sau đó gọi `POST /api/sign/restamp-pdf { docIds, factoryId }`.
+- Restamp PDF cũ phải thể hiện `Hết hiệu lực` màu đỏ ở footer và có dấu hiệu ở header; non-PDF được bỏ qua an toàn.
+
+Chi tiết layout form 4 trường hợp nằm trong `.claude/rules/17-iso-soat-xet.md` và phải là nguồn tham chiếu chính khi sửa UI soát xét.
 
 ---
 
@@ -342,28 +357,48 @@ User bấm nút ký duyệt
       Nếu đúng: SignJWT { userId, docId, docType } exp=5m
       ← token
 
-  Nếu doc có file_goc_url VÀ action không phải tra_ve/khong_xem_xet:
-    → Mở SignaturePlacementModal (pdfjs canvas + react-draggable)
-    → User kéo/resize vị trí chữ ký
-    → Click "Xác nhận vị trí"
-      → doTransition(action, token, placement)
+  Trong handlePinConfirm:
+    const fileExt = doc?.file_goc_url?.split("?")[0].split(".").pop()?.toLowerCase()
 
-  Nếu không có file hoặc action trong noSignActions ["tra_ve","khong_xem_xet","tu_choi_phe_duyet","tra_ve_nhap"]:
-    → doTransition(action, token, null)  -- bỏ qua placement
+    Nếu doc có file_goc_url VÀ fileExt === "pdf" VÀ action không phải noSignActions:
+      → Mở SignaturePlacementModal (pdfjs canvas + react-draggable)
+      → User kéo/resize vị trí chữ ký và tên (2 box độc lập)
+      → Click "Xác nhận vị trí" → doTransition(action, token, placement)
+
+    Nếu file_goc_url tồn tại nhưng KHÔNG phải PDF (DOCX, XLSX, v.v.):
+      → Bỏ qua placement modal
+      → Gọi doTransition(action, token, null) trực tiếp
+
+    Nếu không có file hoặc action thuộc noSignActions
+      ["tra_ve","khong_xem_xet","tu_choi_phe_duyet","tra_ve_nhap"]:
+      → doTransition(action, token, null)
 
 doTransition:
   1. Cập nhật trang_thai (Supabase)
   2. INSERT doc_approval_log
   3. Nếu có token + file_goc_url:
      POST /api/sign/generate-pdf { token, docId, docType, signaturePlacement, skipTagLabels }
-     → Server: verify JWT → đọc `file_goc_url` → quét tag header/footer → điền tag tìm thấy → nhúng chữ ký body + tên người ký nếu bật → upload PDF
-     → Cập nhật file_signed_pdf_url
-     → Nếu response.metaMismatched.length > 0: hiển thị warning banner (headerMismatchWarnings)
-     → Nếu diagnostics.sigImgLoadFailed.length > 0: toast cảnh báo người ký chưa upload ảnh chữ ký
+
+     Server (generate-pdf):
+       — Phát hiện non-PDF (ext ≠ "pdf") → trả về { ok: true, skipped: true, reason: "non-pdf" }
+       — File PDF: verify JWT → lưu placement → quét tag header/footer → điền tag tìm thấy
+          → nhúng chữ ký body lũy kế (tất cả bước đã ký) + tên người ký nếu bật → upload PDF
+
+     UI xử lý response:
+       Nếu response.skipped === true:
+         → toast "File không phải PDF — chữ ký số không được nhúng, đã lưu workflow"
+         → KHÔNG cập nhật file_signed_pdf_url
+       Nếu response.ok (PDF):
+         → Cập nhật file_signed_pdf_url
+         → Nếu response.metaMismatched.length > 0: hiển thị warning banner
+         → Nếu diagnostics.sigImgLoadFailed.length > 0: toast cảnh báo chưa có ảnh chữ ký
+
   4. Nếu soát xét invalidate tài liệu cũ:
      POST /api/sign/restamp-pdf { docIds, factoryId }
   5. POST /api/iso/notify { docId, factoryId, action, recipientUserIds }
 ```
+
+**Chữ ký là bắt buộc — không có nút "Bỏ qua chữ ký"**. Placement modal luôn phải được xác nhận trước khi gọi `doTransition` (trừ non-PDF và noSignActions).
 
 ### JWT Secret
 
@@ -452,7 +487,7 @@ function isConDoc(loaiTaiLieu: string | null, phanLoaiTl: string | null): boolea
 Đã triển khai trong `documents/[id]/page.tsx`:
 
 ```typescript
-// State
+// State placement modal
 const [placementModal, setPlacementModal] = useState<{
   show: boolean; token: string; action: PinModalAction; lyDo?: string
   sigX: number; sigY: number; sigW: number; sigH: number
@@ -461,6 +496,7 @@ const [placementModal, setPlacementModal] = useState<{
   currentPage: number; totalPages: number
   canvasScale: number; pdfPageHeight: number
   sigImgUrl: string | null
+  previewSignatures: PreviewSignature[]  // chữ ký/tên các bước trước đó
 } | null>(null)
 
 // pdfjs worker — version-matched từ jsdelivr CDN
@@ -468,9 +504,54 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
   `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 ```
 
+### PreviewSignature — preview chữ ký và tên của các bước trước
+
+```typescript
+type PreviewSignature = SignPlacement & {
+  signerUserId: string
+  url: string            // URL ảnh chữ ký
+  signerName?: string    // Tên người ký (snapshot từ doc.soan_thao / xem_xet / phe_duyet)
+}
+```
+
+`buildPreviewSignatures()` tạo danh sách chữ ký của tất cả người ký KHÁC user hiện tại đã có `ky_*_at` (đã ký):
+
+```typescript
+const buildPreviewSignatures = () => {
+  const nameByUserId: Record<string, string> = {}
+  if (doc.soan_thao_user_id) nameByUserId[doc.soan_thao_user_id] = doc.soan_thao ?? ""
+  if (doc.xem_xet_user_id)   nameByUserId[doc.xem_xet_user_id]   = doc.xem_xet ?? ""
+  if (doc.phe_duyet_user_id) nameByUserId[doc.phe_duyet_user_id] = doc.phe_duyet ?? ""
+
+  return candidates
+    .filter(e => e.signerUserId && e.placement && e.signedAt && e.signerUserId !== user.id)
+    .map(e => ({
+      ...e.placement,
+      signerUserId: e.signerUserId,
+      url: supabase.storage.from("iso-documents").getPublicUrl(`signatures/${factoryId}/${e.signerUserId}/chu_ky.png`).data.publicUrl,
+      // Bao gồm đủ name fields từ placement
+      showSignerName: (e.placement.showSignerName as unknown as boolean | undefined),
+      nameX: Number(e.placement.nameX ?? 0),
+      nameY: Number(e.placement.nameY ?? 0),
+      nameWidth: Number(e.placement.nameWidth ?? 80),
+      nameHeight: Number(e.placement.nameHeight ?? 20),
+      signerName: nameByUserId[e.signerUserId] ?? "",
+    }))
+}
+```
+
+**Lưu ý TypeScript**: `entry.placement.showSignerName` từ Supabase JSONB có runtime type `number`, nhưng TypeScript typed `boolean | undefined`. Cast qua `unknown`: `(entry.placement.showSignerName as unknown as boolean | undefined)`.
+
+**UI render preview canvas**: Mỗi `PreviewSignature` render 2 lớp độc lập trên canvas:
+1. `<img>` ảnh chữ ký tại vị trí đã đặt (opacity 0.45)
+2. `<div>` text tên người ký tại vị trí box tên (nếu `showSignerName !== false && signerName`)
+
+Tên hiển thị dạng italic, font Times New Roman, viền dashed mờ để phân biệt với chữ ký đang đặt của bước hiện tại.
+
 - Ảnh chữ ký và tên người ký là hai lớp preview độc lập.
 - Người dùng kéo/resize ảnh chữ ký riêng, kéo/resize box tên riêng.
-- Nếu template đã có sẵn tên, người dùng có thể tắt box tên bằng toggle `(X)`.
+- Nếu template đã có sẵn tên, người dùng có thể tắt box tên bằng toggle `(X)` — tên là tùy chọn.
+- Chữ ký là **bắt buộc** — không có nút bỏ qua chữ ký.
 
 **Lưu ý pdfjs**: Package đang dùng `pdfjs-dist@^5.x`. Worker URL phải lấy `pdfjsLib.version` động — KHÔNG hardcode URL với version 3.x.
 
@@ -547,7 +628,7 @@ src/app/api/iso/
 ```typescript
 const isNew = docId === "new-doc"
 // canXemXet phải được định nghĩa TRƯỚC isEditable
-const canXemXet = hasPermission(user, "iso.xem_xet") && !!userId && userId === doc?.xem_xet_user_id
+const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
 const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
 // bi_tu_choi_phe_duyet cho phép người xem xét sửa để gửi lại
 const isEditable = isNew || trangThai === "draft" || trangThai === "tra_ve"
@@ -562,7 +643,7 @@ Link "Tạo tài liệu" trong `documents/page.tsx` trỏ thẳng vào `/dashboa
 ### canXemXet / canApprove
 
 ```typescript
-const canXemXet = hasPermission(user, "iso.xem_xet") && !!userId && userId === doc?.xem_xet_user_id
+const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
 const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
 ```
 
@@ -694,17 +775,21 @@ disabled={
 
 ```typescript
 // Sau phe_duyet, nếu chon_quy_trinh === "Soát xét":
-// 1. Nếu ma_tai_lieu_moi có giá trị → cập nhật ma_tai_lieu = ma_tai_lieu_moi
-// 2. Invalidate tài liệu cũ cùng mã (mã CŨ, trước khi đổi):
-await supabase
+// 1. oldDocumentCode = doc.ma_tai_lieu_cu || doc.ma_tai_lieu
+// 2. Nếu doi_ma_tai_lieu && ma_tai_lieu_moi → cập nhật tài liệu mới sang mã mới
+// 3. Tìm đúng 1 tài liệu/hồ sơ cũ còn hiệu lực gần nhất theo mã cũ:
+const { data: toInvalidate } = await supabase
   .from("iso_documents")
-  .update({ trang_thai: "het_hieu_luc", ngay_het_hieu_luc: now })
+  .select("id")
   .eq("factory_id", factoryId)
-  .eq("ma_tai_lieu", doc.ma_tai_lieu)   // mã cũ
+  .eq("ma_tai_lieu", oldDocumentCode)
   .eq("trang_thai", "co_hieu_luc")
   .neq("id", docId)
-  .select("id")
-// 3. Gọi restamp-pdf với invalidatedIds
+  .order("ngay_hieu_luc", { ascending: false, nullsFirst: false })
+  .order("updated_at", { ascending: false })
+  .limit(1)
+
+// 4. Update bản ghi tìm được sang het_hieu_luc + restamp-pdf
 ```
 
 ### Font dùng trong generate-pdf
@@ -767,12 +852,12 @@ await supabase.from("doc_approval_log").insert({
 
 Mỗi lần generate PDF, server thực hiện theo thứ tự:
 
-1. **Xác định signer hiện tại** theo `userId` so với `soan_thao_user_id / xem_xet_user_id / phe_duyet_user_id`
-2. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
-3. **Reload tất cả 3 placements** từ DB
-4. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
-5. **Bắt đầu từ `file_goc_url`** và scan text layer bằng `pdfjs-dist`
-6. **Chỉ điền tag nếu tag thực sự tồn tại** ở header/footer; không thấy thì bỏ qua
+1. **Detect non-PDF**: nếu `file_goc_url` có extension khác `pdf` → trả về `{ ok: true, skipped: true, reason: "non-pdf" }` ngay lập tức (sau khi đã lưu placement nếu có)
+2. **Xác định signer hiện tại** theo `userId` so với `soan_thao_user_id / xem_xet_user_id / phe_duyet_user_id`
+3. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
+4. **Reload tất cả 3 placements** từ DB
+5. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
+6. **Scan text layer** bằng `pdfjs-dist` → điền tag header/footer hợp lệ; bỏ qua tag mismatch (trả về `metaMismatched`)
 7. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
 8. **Vẽ tên người ký** nếu `showSignerName !== false`, dùng box tên độc lập nếu user đã đặt
 9. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
@@ -798,7 +883,8 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
   - `Mã tài liệu:`
   - `Ngày hiệu lực:`
   - `Tình trạng:`
-  - `Lần ban hành:` hoặc `Lần sửa đổi:` hoặc `Lần soát xét:`
+  - `Lần ban hành:` (quy trình Soạn thảo)
+  - `Lần sửa đổi:` hoặc `Lần soát xét:` (chỉ hợp lệ khi `chon_quy_trinh === "Soát xét"`)
   - `QR:` hoặc `QR`
 - Quy tắc điền:
   - Nếu tag đã có dấu `:`: code chèn sau dấu `:`, thêm ` ` rồi mới thêm giá trị thực.
@@ -818,16 +904,19 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
   - Nếu không tìm thấy footer mẫu/tag footer thì bỏ qua, không tự vẽ footer mới ở vị trí đoán.
   - Font footer hệ thống: `Times New Roman`, size `13`.
 
-#### Tag tương tự phải cảnh báo bắt buộc
+#### Tag tương tự phải cảnh báo và bỏ qua fill
 
 - Các tag có thể nhầm lẫn:
-  - `Mã hồ sơ`, `Mã hiệu` → nhầm với `Mã tài liệu`
+  - `Mã hồ sơ`, `Mã hiệu`, `Số hiệu` → nhầm với `Mã tài liệu`
+  - `Ngày ban hành`, `Ngày áp dụng` → nhầm với `Ngày hiệu lực`
   - `Trạng thái` → nhầm với `Tình trạng`
-  - `Lần sửa đổi`, `Lần soát xét` → nhầm trong nhóm `Lần ban hành / Lần sửa đổi`
+  - `Phiên bản` → nhầm với `Lần ban hành / Lần sửa đổi`
+  - `Lần sửa đổi`, `Lần soát xét` → nhầm với `Lần ban hành` **khi `chon_quy_trinh !== "Soát xét"`**
 - Nếu phát hiện tag tương tự:
-  - không tự điền,
-  - hiển thị cảnh báo,
-  - bắt buộc người dùng sửa template rồi upload lại.
+  - **KHÔNG tự điền** — tag bị skip hoàn toàn (không điền giá trị thực vào vị trí đó)
+  - trả về trong `metaMismatched[]` để UI hiển thị warning banner
+  - người dùng có thể bấm "Bỏ qua, không điền tag này" để thêm vào `confirmedSkipTags` — lần sau sẽ không cảnh báo nữa
+- `Lần sửa đổi` / `Lần soát xét` **KHÔNG bị flagged** khi `chon_quy_trinh === "Soát xét"` — đây là tag hợp lệ cho quy trình soát xét.
 
 #### Hướng dẫn bắt buộc trong UI upload template
 
@@ -856,23 +945,66 @@ Nhãn hệ thống tự nhận diện trong phần header tài liệu:
 - Trong modal đặt chữ ký phải hiển thị cảnh báo cố định:
 
 ```text
-Không đặt ảnh chữ ký hoặc tên tràn ra ngoài ô chứa
+Không đặt ra ngoài ô chứa
 ```
 
 - Cảnh báo này hiển thị cùng lúc với preview chữ ký/tên.
 
 #### Cách nhận diện tag trong `fillMetadataPlaceholders`
 
+Hàm nhận thêm param `chonQuyTrinh: string | null` để quyết định pattern mismatch theo ngữ cảnh.
+
+```typescript
+async function fillMetadataPlaceholders(
+  pdfDoc, pdfBytes, doc, font, qrBuffer,
+  maTl, lsStr, dateStr, statusText,
+  skipLabels: string[] = [],
+  chonQuyTrinh: string | null = null,  // "Soát xét" | "Soạn thảo" | null
+): Promise<MetaFillResult>
+```
+
+**`getMismatchPatterns(chonQuyTrinh)`** — context-aware:
+
+```typescript
+function getMismatchPatterns(chonQuyTrinh: string | null) {
+  const base = [
+    { pattern: /^ma\s*ho\s*so\b/i,             expected: "Mã tài liệu" },
+    { pattern: /^ma\s*hieu\b/i,                expected: "Mã tài liệu" },
+    { pattern: /^so\s*hieu(\s*tai\s*lieu)?\b/i, expected: "Mã tài liệu" },
+    { pattern: /^ngay\s*ban\s*hanh\b/i,        expected: "Ngày hiệu lực" },
+    { pattern: /^ngay\s*ap\s*dung\b/i,         expected: "Ngày hiệu lực" },
+    { pattern: /^phien\s*ban\b/i,              expected: "Lần ban hành / Lần sửa đổi" },
+    { pattern: /^trang\s*thai\b/i,             expected: "Tình trạng" },
+  ]
+  // Khi KHÔNG phải Soát xét: "Lần sửa đổi" / "Lần soát xét" là tag sai
+  if (chonQuyTrinh !== "Soát xét") {
+    base.push({ pattern: /^lan\s*sua\s*doi\b/i,  expected: "Lần ban hành" })
+    base.push({ pattern: /^lan\s*soat\s*xet\b/i, expected: "Lần ban hành" })
+  }
+  return base
+}
+```
+
+**Logic trong vòng lặp fill**: Nếu item match một mismatch pattern → đánh dấu `isMismatched = true` → **KHÔNG fill** (continue sang item tiếp theo) → thêm vào `mismatched[]` để trả về UI.
+
+```typescript
+let isMismatched = false
+for (const { pattern, expected } of mismatchPatterns) {
+  if (skipLabels.includes(expected)) continue
+  if (pattern.test(normalizedItem)) {
+    mismatched.push({ found: item.str, expected })
+    isMismatched = true
+  }
+}
+if (isMismatched) continue  // bỏ qua fill — yêu cầu người dùng sửa template
+```
+
+**Quy tắc chung**:
 - Dùng `pdfjs-dist` để đọc text layer của tất cả trang.
 - Chuỗi tìm kiếm phải được chuẩn hóa tiếng Việt về dạng **không dấu**, chữ thường, bỏ khoảng trắng thừa trước khi match.
 - Header/footer chỉ được xử lý trong vùng header/footer của trang; body không được thay tag.
-- Với header:
-  - match theo nhãn chuẩn hóa như `ma tai lieu`, `ngay hieu luc`, `tinh trang`, `lan ban hanh / sua doi / soat xet`, `qr`
-  - giá trị hiện có chỉ được đọc từ phần text nằm **bên phải label**
-  - nếu phần bên phải đã có dữ liệu thật thì bỏ qua
-- Với footer:
-  - chỉ thay khi dòng footer match đúng mẫu footer chuẩn hóa
-  - nếu footer đã là giá trị thật hoặc không match mẫu thì bỏ qua
+- Với header: giá trị hiện có chỉ được đọc từ phần text nằm **bên phải label**; nếu đã có dữ liệu thật thì bỏ qua.
+- Với footer: chỉ thay khi match đúng mẫu footer chuẩn hóa; bỏ qua nếu đã là giá trị thật.
 - `metaFilled`, `metaNotFound`, `metaMismatched` tiếp tục được trả về cho UI.
 
 ---
@@ -934,7 +1066,7 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 
 ---
 
-## Trạng thái triển khai (2026-05-25)
+## Trạng thái triển khai (2026-05-26)
 
 | Hạng mục | Trạng thái |
 |----------|-----------|
@@ -945,6 +1077,8 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | API `/api/sign/set-pin` | ✅ Hoàn thành |
 | API `/api/sign/verify` | ✅ Hoàn thành |
 | API `/api/sign/generate-pdf` — signature persistence + metadata auto-fill + NotoSans + skipTagLabels + diagnostics | ✅ Hoàn thành |
+| API `/api/sign/generate-pdf` — mismatch detection + skip fill cho tag mismatch (revision aliases hợp lệ không cảnh báo) | ✅ Hoàn thành (2026-05-26) |
+| API `/api/sign/generate-pdf` — non-PDF graceful skip (DOCX/XLSX → skipped: true) | ✅ Hoàn thành (2026-05-26) |
 | API `/api/sign/restamp-pdf` | ✅ Hoàn thành |
 | API `/api/iso/notify` — 3 action mới | ✅ Hoàn thành |
 | Settings tab ISO & Văn bản + Chữ ký cá nhân | ✅ Hoàn thành |
@@ -952,6 +1086,10 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | Module ISO: shell, KPI, danh sách, form detail | ✅ Hoàn thành |
 | Module ISO: workflow `bi_tu_choi_phe_duyet` + 3 actions mới | ✅ Hoàn thành |
 | Module ISO: drag-and-drop signature placement | ✅ Hoàn thành |
+| Module ISO: preview lũy kế tên người ký các bước trước (`PreviewSignature.signerName`) | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: bypass placement modal cho non-PDF + toast thông báo | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: bỏ nút "Bỏ qua chữ ký" (chữ ký bắt buộc) | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: đổi nhãn cảnh báo → "Không đặt ra ngoài ô chứa" | ✅ Hoàn thành (2026-05-26) |
 | Module ISO: lọc nhân sự theo quyền | ✅ Hoàn thành |
 | Module ISO: mã tài liệu Cha/Con format | ✅ Hoàn thành |
 | Module ISO: `phan_loai_tl` cho PL/HD | ✅ Hoàn thành |
@@ -959,7 +1097,74 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | Module ISO: mismatch warning UI + confirmedSkipTags + diagnostics toast | ✅ Hoàn thành |
 | Module ISO: NotoSans + Times New Roman cho fill tag và tên người ký | ✅ Hoàn thành |
 | Module ISO: preview chữ ký/tên độc lập + fill trực tiếp trên file PDF gốc | ✅ Hoàn thành |
+| Module ISO: tiêu chuẩn áp dụng nhiều-nhiều (`iso_standards`, `iso_document_standards`) | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: permission `iso.soat_xet` + fallback `iso.xem_xet` | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: form soạn thảo/soát xét theo 4 trường hợp TH1-TH4 | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: soát xét lọc tài liệu/hồ sơ `Có hiệu lực` theo Tiêu chuẩn → Phòng ban → Loại → Mã | ✅ Hoàn thành (2026-05-26) |
+| Module ISO: soát xét lưu `ma_tai_lieu_cu`, lý do/nội dung soát xét, đổi mã mới, file đính kèm | ✅ Hoàn thành (2026-05-26) |
 | Module Văn bản (Giai đoạn 3) | ⏳ Pending |
 | In-app notification bell (Realtime) | ⏳ Pending |
 | Trang in (bypass sidebar) | ⏳ Pending |
 | Supabase Storage bucket `iso-documents` | ⏳ Cần tạo thủ công |
+
+---
+
+## Cập nhật nóng (2026-05-26, phiên fix mới)
+
+### 1) Sửa lỗi chồng 2 dòng tên ở placement modal
+- Nguyên nhân: modal ký dùng nền `file_signed_pdf_url` (đã có chữ ký/tên lũy kế), nhưng frontend vẫn render thêm lớp `previewSignatures` nên bị đè 2 lần.
+- Fix:
+  - Thêm `sourcePdfUrl` vào state `placementModal`.
+  - Khi mở modal ký:
+    - dùng `sourcePdfUrl = doc.file_signed_pdf_url || doc.file_goc_url`.
+    - nếu đang dùng `file_signed_pdf_url` thì **không render** `previewSignatures`.
+- Kết quả: không còn 2 dòng tên ở bước Xem xét/Phê duyệt.
+
+### 2) Chuẩn hóa logic mismatch cho tag revision
+- Trước đây có cảnh báo sai với `Lần sửa đổi` trong một số trường hợp.
+- Hiện tại coi các nhãn sau là **alias hợp lệ** của cùng nhóm revision:
+  - `Lần ban hành`
+  - `Lần sửa đổi`
+  - `Lần soát xét`
+  - `Lần ban hành / Lần sửa đổi`
+- `getMismatchPatterns()` không còn đẩy `Lần sửa đổi`/`Lần soát xét` vào nhóm mismatch.
+- Kết quả: không còn warning giả kiểu “đã nhập sai thay vì Lần ban hành / Lần sửa đổi”.
+
+### 3) Quy tắc vận hành để debug nhanh
+- `bodySignaturesEmbedded` phản ánh đúng số signer có placement tại thời điểm gọi API.
+- Nếu `allPlacementsRaw` cho thấy `xem_xet/phe_duyet` đang `hasPlacement=false` thì đó là lý do kỹ thuật khiến PDF chỉ embed được 1 chữ ký ở lần gọi đó.
+
+---
+
+## Cập nhật nóng (2026-05-27, ký DOCX/XLSX theo tag)
+
+### 1) API ký Office
+- Thêm route `POST /api/sign/generate-office`.
+- Route nhận `{ token, docId, docType, fileKind }`, xác thực JWT giống luồng PDF.
+- `fileKind` hỗ trợ:
+  - `main`: file tài liệu/hồ sơ chính.
+  - `change_request`: phiếu yêu cầu thay đổi.
+  - `review_request`: đề nghị soát xét.
+- DOCX được xử lý bằng `jszip`; XLSX được xử lý bằng `exceljs`.
+- Route quét toàn bộ file, thay tất cả tag trùng khớp chính xác, chèn QR và ảnh chữ ký tại vị trí tag.
+
+### 2) Migration lưu file Office đã ký
+- Thêm migration `supabase/migrations/20260527_iso_office_signing.sql`.
+- Các cột mới:
+  - `file_signed_office_url`
+  - `file_signed_office_type`
+  - `file_phieu_yeu_cau_thay_doi_signed_url`
+  - `file_de_nghi_soat_xet_signed_url`
+- Cần chạy migration này trên Supabase trước khi ký DOCX/XLSX thật.
+
+### 3) Quy tắc ký DOCX/XLSX
+- Không chuyển DOCX/XLSX thành PDF để ký thay file gốc.
+- File chính là template có hiệu lực, dùng lại nhiều lần; khi dùng mẫu phải tạo bản sao đã điền tag/ký.
+- Phiếu yêu cầu thay đổi và đề nghị soát xét chỉ dùng để hợp thức hóa hồ sơ soát xét, không dùng làm mẫu báo cáo lặp lại.
+- Office template không có nút "Bỏ qua tag".
+- Nếu thiếu tag bắt buộc của bước ký hoặc phát hiện tag gần giống/sai, hệ thống báo lỗi để sửa template và không chuyển trạng thái workflow.
+
+### 4) UI
+- Khu vực upload file đã có hướng dẫn tag cho DOCX/XLSX.
+- Cảnh báo upload DOCX/XLSX đã đổi thành: file sẽ được ký theo tag, người dùng phải đặt đúng tag chữ ký, tên người ký và QR.
+- Sidebar hiển thị link tải file DOCX/XLSX đã ký khi có `file_signed_office_url`.
