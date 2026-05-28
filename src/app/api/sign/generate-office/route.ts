@@ -18,6 +18,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
 type FileKind = "main" | "change_request" | "review_request"
 type SignStep = "soan_thao" | "xem_xet" | "phe_duyet"
+type WorkflowAction = "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "tra_ve" | "khong_xem_xet" | "tu_choi_phe_duyet" | "gui_lai_phe_duyet" | "tra_ve_nhap"
 
 type OfficeDiagnostics = {
   tagsFound: string[]
@@ -52,6 +53,14 @@ const IMAGE_TAGS = [
 ] as const
 
 const ALL_TAGS = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
+const CHILD_OFFICE_TAGS = [
+  "{{QR}}",
+  "{{MA_TAI_LIEU}}",
+  "{{LAN_BAN_HANH}}",
+  "{{NGAY_HIEU_LUC}}",
+  "{{TINH_TRANG}}",
+] as const
+const CHILD_OFFICE_TAG_SET = new Set<string>(CHILD_OFFICE_TAGS)
 
 function fmtDate(d: unknown): string {
   if (!d || typeof d !== "string") return ""
@@ -144,6 +153,26 @@ function getStepTags(step: SignStep): { signatureTag: string; nameTag: string; n
   return { signatureTag: "{{CHU_KY_PHE_DUYET}}", nameTag: "{{TEN_PHE_DUYET}}", nameValue: "" }
 }
 
+function isChildOfficeDoc(doc: Record<string, unknown>): boolean {
+  const loaiTaiLieu = String(doc.loai_tai_lieu || "")
+  const phanLoaiTl = String(doc.phan_loai_tl || "")
+  return loaiTaiLieu === "F" || ((loaiTaiLieu === "PL" || loaiTaiLieu === "HD") && phanLoaiTl === "con")
+}
+
+function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string): string {
+  if (action === "gui_xem_xet") return "Chờ xem xét"
+  if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
+  if (action === "phe_duyet") return "Có hiệu lực"
+  if (action === "tra_ve" || action === "khong_xem_xet" || action === "tra_ve_nhap") return "Trả về"
+  if (action === "tu_choi_phe_duyet") return "Phê duyệt từ chối"
+  if (currentStatus === "co_hieu_luc") return "Có hiệu lực"
+  if (currentStatus === "cho_xem_xet") return "Chờ xem xét"
+  if (currentStatus === "cho_phe_duyet") return "Chờ phê duyệt"
+  if (currentStatus === "tra_ve") return "Trả về"
+  if (currentStatus === "bi_tu_choi_phe_duyet") return "Phê duyệt từ chối"
+  return "Chờ phê duyệt"
+}
+
 function buildTextValues(doc: Record<string, unknown>, statusText: string): Record<string, string> {
   return {
     "{{MA_TAI_LIEU}}": String(doc.ma_tai_lieu || ""),
@@ -164,20 +193,48 @@ function buildTextValues(doc: Record<string, unknown>, statusText: string): Reco
   }
 }
 
-function collectSimilarTags(text: string): string[] {
+function collectSimilarTags(text: string, allowedTags: Set<string> = ALL_TAGS): string[] {
   const found = new Set<string>()
   for (const match of text.matchAll(/\{\{[^}]+\}\}/g)) {
     const tag = match[0]
-    if (!ALL_TAGS.has(tag)) found.add(tag)
+    if (!allowedTags.has(tag)) found.add(tag)
   }
   return [...found]
+}
+
+function xmlTextDecode(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+}
+
+function docxVisibleText(xml: string): string {
+  return [...xml.matchAll(/<(?:w|a):t\b[^>]*>([\s\S]*?)<\/(?:w|a):t>/g)]
+    .map((match) => xmlTextDecode(match[1]))
+    .join("")
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function flexibleDocxTagPattern(tag: string): RegExp {
+  const betweenChars = "(?:<[^>]+>|\\s)*"
+  return new RegExp(tag.split("").map(escapeRegExp).join(betweenChars), "g")
 }
 
 function replaceAllTextTags(text: string, values: Record<string, string>, diagnostics: OfficeDiagnostics): string {
   let next = text
   for (const [tag, value] of Object.entries(values)) {
-    if (next.includes(tag)) diagnostics.tagsFound.push(tag)
+    const directFound = next.includes(tag)
+    const flexiblePattern = flexibleDocxTagPattern(tag)
+    const flexibleFound = flexiblePattern.test(next)
+    if (directFound || flexibleFound) diagnostics.tagsFound.push(tag)
     next = next.split(tag).join(xmlEscape(value))
+    next = next.replace(flexibleDocxTagPattern(tag), xmlEscape(value))
   }
   return next
 }
@@ -196,6 +253,34 @@ function drawingXml(relId: string, cx: number, cy: number): string {
   return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${Date.now() % 100000}" name="ISO signature"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="signature.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
 }
 
+function textRunXml(text: string, runProperties = ""): string {
+  return text ? `<w:r>${runProperties}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>` : ""
+}
+
+function replaceDocxImageTag(xml: string, tag: string, drawing: string): { xml: string; replaced: boolean } {
+  let replaced = false
+  let next = xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    const textMatch = run.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/)
+    if (!textMatch) return run
+    const rawText = xmlTextDecode(textMatch[1])
+    if (!rawText.includes(tag)) return run
+    replaced = true
+    const [before, after] = rawText.split(tag)
+    const runProperties = run.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] || ""
+    return `${textRunXml(before, runProperties)}${drawing}${textRunXml(after, runProperties)}`
+  })
+  if (!replaced && next.includes(tag)) {
+    replaced = true
+    next = next.split(tag).join(drawing)
+  }
+  return { xml: next, replaced }
+}
+
+function anchoredDrawingXml(relId: string, cx: number, cy: number): string {
+  const offset = 228600
+  return `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:align>right</wp:align></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>${offset}</wp:posOffset></wp:positionV><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/><wp:docPr id="${Date.now() % 100000}" name="ISO QR"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="qr.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`
+}
+
 async function ensureRel(zip: JSZip, partPath: string, imagePath: string): Promise<string> {
   const dir = partPath.split("/").slice(0, -1).join("/")
   const file = partPath.split("/").pop() || "document.xml"
@@ -211,11 +296,29 @@ async function ensureRel(zip: JSZip, partPath: string, imagePath: string): Promi
   return relId
 }
 
+async function insertDefaultDocxQr(zip: JSZip, imagePath: string, diagnostics: OfficeDiagnostics): Promise<void> {
+  const partPath = "word/document.xml"
+  const file = zip.file(partPath)
+  if (!file) return
+
+  const relId = await ensureRel(zip, partPath, imagePath)
+  const qrDrawing = anchoredDrawingXml(relId, 432000, 432000)
+  const paragraph = `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>${qrDrawing}</w:p>`
+  const xml = await file.async("string")
+  if (!xml.includes("<w:body>")) return
+
+  zip.file(partPath, xml.replace("<w:body>", `<w:body>${paragraph}`))
+  diagnostics.tagsFound.push("{{QR}}")
+  diagnostics.imagesInserted.push("{{QR}}:default-top-right")
+}
+
 async function renderDocx(
   bytes: ArrayBuffer,
   values: Record<string, string>,
   imageByTag: Record<string, Buffer>,
   requiredTags: string[],
+  defaultQrWhenMissing: boolean,
+  allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const zip = await JSZip.loadAsync(bytes)
   const diagnostics: OfficeDiagnostics = { tagsFound: [], tagsMissing: [], tagsSimilar: [], imagesInserted: [] }
@@ -231,7 +334,7 @@ async function renderDocx(
   }
 
   const xmlFiles = Object.keys(zip.files).filter((name) =>
-    /^word\/(document|header\d+|footer\d+)\.xml$/.test(name)
+    /^word\/.+\.xml$/.test(name)
   )
 
   const allTextParts: string[] = []
@@ -239,23 +342,33 @@ async function renderDocx(
     const file = zip.file(partPath)
     if (!file) continue
     let xml = await file.async("string")
-    allTextParts.push(xml)
+    allTextParts.push(docxVisibleText(xml))
     xml = replaceAllTextTags(xml, values, diagnostics)
     for (const [tag, imagePath] of mediaEntries) {
-      if (!xml.includes(tag)) continue
+      const directImageTagFound = xml.includes(tag)
+      const flexibleImageTagFound = flexibleDocxTagPattern(tag).test(xml)
+      if (!directImageTagFound && !flexibleImageTagFound) continue
       diagnostics.tagsFound.push(tag)
       diagnostics.imagesInserted.push(tag)
       const relId = await ensureRel(zip, partPath, imagePath)
-      const size = tag === "{{QR}}" ? { cx: 914400, cy: 914400 } : { cx: 1600200, cy: 685800 }
+      const size = tag === "{{QR}}" ? { cx: 432000, cy: 432000 } : { cx: 1600200, cy: 685800 }
       const drawing = drawingXml(relId, size.cx, size.cy)
       const tagRe = new RegExp(`<w:r[^>]*>\\s*<w:t[^>]*>${tag.replace(/[{}]/g, "\\$&")}<\\/w:t>\\s*<\\/w:r>`, "g")
-      xml = xml.replace(tagRe, drawing).split(tag).join("")
+      xml = xml.replace(tagRe, drawing)
+      const replaced = replaceDocxImageTag(xml, tag, drawing)
+      xml = replaced.xml
+      if (!replaced.replaced) xml = xml.replace(flexibleDocxTagPattern(tag), drawing)
     }
     zip.file(partPath, xml)
   }
 
+  if (defaultQrWhenMissing && !diagnostics.tagsFound.includes("{{QR}}")) {
+    const qrImagePath = mediaEntries.get("{{QR}}")
+    if (qrImagePath) await insertDefaultDocxQr(zip, qrImagePath, diagnostics)
+  }
+
   const combined = allTextParts.join("\n")
-  diagnostics.tagsSimilar = collectSimilarTags(combined)
+  diagnostics.tagsSimilar = collectSimilarTags(combined, allowedTags)
   diagnostics.tagsMissing = requiredTags.filter((tag) => !diagnostics.tagsFound.includes(tag))
   if (diagnostics.tagsSimilar.length > 0 || diagnostics.tagsMissing.length > 0) {
     throw new Error(`Template DOCX chưa đúng tag. Thiếu: ${diagnostics.tagsMissing.join(", ") || "không"}. Tag gần giống/sai: ${diagnostics.tagsSimilar.join(", ") || "không"}.`)
@@ -269,6 +382,8 @@ async function renderXlsx(
   values: Record<string, string>,
   imageByTag: Record<string, Buffer>,
   requiredTags: string[],
+  defaultQrWhenMissing: boolean,
+  allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const diagnostics: OfficeDiagnostics = { tagsFound: [], tagsMissing: [], tagsSimilar: [], imagesInserted: [] }
   const workbook = new ExcelJS.Workbook()
@@ -279,7 +394,7 @@ async function renderXlsx(
       row.eachCell((cell) => {
         const text = typeof cell.value === "string" ? cell.value : null
         if (!text) return
-        for (const similar of collectSimilarTags(text)) diagnostics.tagsSimilar.push(similar)
+        for (const similar of collectSimilarTags(text, allowedTags)) diagnostics.tagsSimilar.push(similar)
         if (imageByTag[text]) {
           diagnostics.tagsFound.push(text)
           diagnostics.imagesInserted.push(text)
@@ -301,6 +416,20 @@ async function renderXlsx(
     })
   })
 
+  if (defaultQrWhenMissing && !diagnostics.tagsFound.includes("{{QR}}")) {
+    const qrBuffer = imageByTag["{{QR}}"]
+    const firstSheet = workbook.worksheets[0]
+    if (qrBuffer && firstSheet) {
+      const imageId = workbook.addImage({ base64: qrBuffer.toString("base64"), extension: "png" })
+      firstSheet.addImage(imageId, {
+        tl: { col: 7, row: 0 },
+        ext: { width: 45, height: 45 },
+      })
+      diagnostics.tagsFound.push("{{QR}}")
+      diagnostics.imagesInserted.push("{{QR}}:default-top-right")
+    }
+  }
+
   diagnostics.tagsSimilar = [...new Set(diagnostics.tagsSimilar)]
   diagnostics.tagsMissing = requiredTags.filter((tag) => !diagnostics.tagsFound.includes(tag))
   if (diagnostics.tagsSimilar.length > 0 || diagnostics.tagsMissing.length > 0) {
@@ -310,13 +439,14 @@ async function renderXlsx(
   return { buffer: Buffer.from(await workbook.xlsx.writeBuffer()), diagnostics }
 }
 
-function getFileUrl(doc: Record<string, unknown>, fileKind: FileKind): string | null {
+function getFileUrl(doc: Record<string, unknown>, fileKind: FileKind, preferOriginal = false): string | null {
   if (fileKind === "change_request") {
     return (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url) as string | null
   }
   if (fileKind === "review_request") {
     return (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null
   }
+  if (preferOriginal) return doc.file_goc_url as string | null
   return (doc.file_signed_office_url || doc.file_goc_url) as string | null
 }
 
@@ -329,17 +459,25 @@ function updatePayload(fileKind: FileKind, publicUrl: string, ext: string): Reco
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { token, docId, docType, fileKind = "main" }: {
+    const { token, docId, docType, fileKind = "main", action }: {
       token: string
       docId: string
       docType: string
       fileKind?: FileKind
+      action?: WorkflowAction
     } = body
     if (!token || !docId || !docType) return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
 
-    const { payload } = await jwtVerify(token, JWT_SECRET)
+    let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"]
+    try {
+      const verified = await jwtVerify(token, JWT_SECRET)
+      payload = verified.payload
+    } catch {
+      return NextResponse.json({ error: "Token không hợp lệ hoặc đã hết hạn. Vui lòng ký lại." }, { status: 401 })
+    }
     const userId = String(payload.userId || "")
-    if (!userId || payload.docId !== docId || payload.docType !== docType) {
+    const tokenDocId = String(payload.docId || "")
+    if (!userId || !tokenDocId || payload.docType !== docType) {
       return NextResponse.json({ error: "Token không hợp lệ" }, { status: 401 })
     }
 
@@ -354,31 +492,41 @@ export async function POST(req: NextRequest) {
       .eq("factory_id", factoryId)
       .single()
     if (docErr || !doc) return NextResponse.json({ error: "Không tìm thấy tài liệu" }, { status: 404 })
+    if (tokenDocId !== docId && doc.parent_doc_id !== tokenDocId) {
+      return NextResponse.json({ error: "Token không hợp lệ" }, { status: 401 })
+    }
 
     const step = getStep(doc, userId)
     if (!step) return NextResponse.json({ error: "Người dùng không thuộc luồng ký tài liệu này" }, { status: 403 })
 
-    const sourceUrl = getFileUrl(doc, fileKind)
+    const isChildOffice = isChildOfficeDoc(doc)
+    const sourceUrl = getFileUrl(doc, fileKind, isChildOffice && fileKind === "main")
     const ext = sourceUrl?.split("?")[0].split(".").pop()?.toLowerCase()
     if (ext !== "docx" && ext !== "xlsx") {
       return NextResponse.json({ error: "File không phải DOCX/XLSX" }, { status: 400 })
     }
 
-    const statusText = doc.trang_thai === "co_hieu_luc" ? "Có hiệu lực" : "Chờ phê duyệt"
+    const statusText = getTargetStatusText(action, String(doc.trang_thai || ""))
     const values = buildTextValues(doc, statusText)
     const stepTags = getStepTags(step)
     const qrBuffer = await QRCode.toBuffer(`${APP_URL}/dashboard/iso/documents/${docId}`, { width: 160, margin: 1 })
-    const sigBuffer = await getSigImage(factoryId, userId)
     const imageByTag: Record<string, Buffer> = {
       "{{QR}}": qrBuffer,
-      [stepTags.signatureTag]: sigBuffer,
     }
-    const requiredTags = [stepTags.signatureTag, stepTags.nameTag]
+    if (!isChildOffice) {
+      const sigBuffer = await getSigImage(factoryId, userId)
+      imageByTag[stepTags.signatureTag] = sigBuffer
+    }
+    const requiredTags = isChildOffice
+      ? ["{{QR}}"]
+      : [stepTags.signatureTag, stepTags.nameTag]
+    const defaultQrWhenMissing = isChildOffice
+    const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 
     const result = ext === "docx"
-      ? await renderDocx(bytes, values, imageByTag, requiredTags)
-      : await renderXlsx(bytes, values, imageByTag, requiredTags)
+      ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
+      : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
 
     const outputPath = `${factoryId}/iso/office-signed/${docId}_${fileKind}_${Date.now()}.${ext}`
     const { error: uploadErr } = await supabaseAdmin.storage

@@ -1168,3 +1168,120 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 - Khu vực upload file đã có hướng dẫn tag cho DOCX/XLSX.
 - Cảnh báo upload DOCX/XLSX đã đổi thành: file sẽ được ký theo tag, người dùng phải đặt đúng tag chữ ký, tên người ký và QR.
 - Sidebar hiển thị link tải file DOCX/XLSX đã ký khi có `file_signed_office_url`.
+---
+
+## Cập nhật nóng (2026-05-28, footer, QR và hồ sơ con)
+
+### 1) Quy tắc mã hồ sơ con
+- Khi soạn thảo hồ sơ con từ một tài liệu cha, mã hồ sơ con phải tự sinh theo mã cha.
+- Ví dụ tài liệu cha `NMCB-QT01`, chọn loại hồ sơ con là `F`/Biểu mẫu:
+  - Khi chưa nhập số hiệu hồ sơ con: hiển thị tiền tố `NMCB-QT01-F`.
+  - Khi nhập số hiệu `01`: mã đầy đủ là `NMCB-QT01-F01`.
+- `F` luôn là hồ sơ con. `PL` và `HD` là hồ sơ con khi `phan_loai_tl = "con"`.
+- Người dùng không nhập tay mã tài liệu/hồ sơ; form chỉ cho nhập các thành phần như phòng ban, loại, số hiệu cha và số hiệu con.
+
+### 2) Quy tắc điền header/footer PDF
+- Header và footer chỉ được điền phần còn thiếu. Nếu người dùng đã điền sẵn một tag bằng giá trị thật thì code phải bỏ qua tag đó, không ghi đè và không nối thêm giá trị mới.
+- Ví dụ header đã có `Ngày hiệu lực: 03/04/2026` thì không được điền thêm ngày hiện tại thành `Ngày hiệu lực: 03/04/2026 28/05/2026`.
+- Footer mẫu chuẩn:
+
+```text
+Mã tài liệu (Lần ban hành-Ngày hiệu lực) Tình trạng
+```
+
+- Nếu footer đã điền sẵn một phần, ví dụ:
+
+```text
+Mã tài liệu (Lần ban hành-03/04/2026) Tình trạng
+```
+
+  thì hệ thống phải giữ ngày `03/04/2026`, chỉ thay các phần còn lại để ra dạng:
+
+```text
+NMCB-QT01 (01-03/04/2026) Chờ phê duyệt
+```
+
+- Tình trạng trong footer phải thay đổi theo từng bước workflow: Nháp, Chờ xem xét, Chờ phê duyệt, Có hiệu lực, Hết hiệu lực, Trả về, Phê duyệt từ chối.
+- Cảnh báo tag không khớp ở footer chỉ nên phát sinh khi footer có nhãn sai thật sự như `Mã hồ sơ`, `Mã hiệu`, `Phiên bản`, `Ngày ban hành`, `Ngày áp dụng`, `Trạng thái` trong ngữ cảnh footer. Không cảnh báo sai với footer mẫu có ngày hiệu lực đã điền sẵn.
+
+### 3) Quy tắc QR cho hồ sơ con
+- Với PDF hồ sơ con, nếu template không có tag `QR`/`QR:` và không có vị trí QR thủ công từ bước ký, hệ thống tự chèn QR ở góc trên bên trái trang đầu.
+- Nếu template có tag `QR`/`QR:` hoặc người dùng đã đặt vị trí QR thủ công trong modal ký, hệ thống ưu tiên vị trí đó và không chèn thêm QR mặc định.
+- Với DOCX/XLSX hồ sơ con, engine ưu tiên tag `{{QR}}`; nếu thiếu tag này thì tự chèn QR mặc định góc trên trái nội dung trang/sheet đầu.
+
+### 4) UI file tài liệu và thông báo
+- Trong khối `File tài liệu`, phần upload/thay file phải nằm phía trên các hướng dẫn tag.
+- Khi đã có `PDF có chữ ký`, khối này phải hiển thị nổi bật phía trên phần upload, nút Xem dùng biểu tượng con mắt và nút Tải dùng biểu tượng mũi tên tải xuống, kích thước lớn hơn nút thường.
+- Sidebar ISO phải hiển thị số lượng việc cần xử lý của người đang đăng nhập bằng badge màu đỏ.
+- Khi đang soạn thảo tài liệu cha, khối `Hồ sơ con của tài liệu này` cho phép chọn loại hồ sơ con (`F`, `PL`, `HD`) và upload nhiều file cùng lúc.
+- Khối hồ sơ con dùng nút `Thêm hồ sơ`; mỗi dòng có `Mã hồ sơ`, `Tên hồ sơ`, `Loại hồ sơ`, `Số hiệu`, `Lần ban hành`, `Ghi chú`, `File hồ sơ`.
+- Mỗi dòng hồ sơ con upload đúng một file riêng. Khi lưu tài liệu cha, mỗi dòng tạo một bản ghi hồ sơ con riêng và gắn `parent_doc_id` về tài liệu cha.
+
+### 5) Token ký
+- Token ký phải đủ thời gian cho thao tác đặt vị trí/ký thực tế. Nếu token hết hạn, UI/API phải báo rõ: `Token không hợp lệ hoặc đã hết hạn. Vui lòng ký lại.`
+
+## Cập nhật mới nhất (2026-05-28) - logic hồ sơ con, PDF, DOCX/XLSX và danh sách hồ sơ
+
+Mục này thay thế các quy tắc cũ nếu có mâu thuẫn.
+
+### Hồ sơ con là một phần của bộ tài liệu
+- Tài liệu cha và các hồ sơ con có `parent_doc_id` trỏ về cha được xử lý như một bộ tài liệu khi gửi xem xét, gửi phê duyệt và phê duyệt.
+- Trên `Việc của tôi` và badge sidebar ISO, một tài liệu cha kèm nhiều hồ sơ con chỉ được tính là một đầu việc. Không hiển thị 21 dòng riêng nếu có một tài liệu cha và 20 hồ sơ con.
+- Dòng việc phải phân biệt rõ:
+  - `Bộ tài liệu + N hồ sơ` nếu có hồ sơ con.
+  - `Tài liệu riêng` nếu không có hồ sơ con.
+- Trong trang chi tiết tài liệu cha, phải có thông tin cho người xem xét/phê duyệt biết họ đang xử lý một bộ tài liệu và hệ thống sẽ mở lần lượt file chính rồi từng hồ sơ con cần ký/xem.
+
+### UI danh sách hồ sơ con
+- Danh sách hồ sơ con đã lưu nằm ở panel bên phải, trong khối `File tài liệu`, ngay dưới phần `PDF có chữ ký`.
+- Mỗi dòng hồ sơ con có nút xem, tải và `Thay file` khi được phép sửa.
+- Nút xem phải ưu tiên file đã xử lý mới nhất:
+  1. `file_signed_pdf_url`
+  2. `file_signed_office_url`
+  3. `file_goc_url`
+- Khi thay file hồ sơ con đã lưu, phải reset các URL bản đã xử lý cũ (`file_signed_pdf_url`, `file_signed_office_url`, `file_signed_office_type`) để các bước sau dùng file mới.
+
+### Flow ký/xem xét theo từng bước
+- Mỗi bước phải tạo được artifact mới cho từng hồ sơ con để người ở bước sau mở bằng nút mắt và thấy nội dung đã thay đổi.
+- Khi gửi xem xét:
+  - File chính xử lý trước.
+  - Sau đó xử lý lần lượt từng hồ sơ con.
+  - Trạng thái hiển thị trong file là `Chờ xem xét`.
+- Khi gửi phê duyệt hoặc gửi phê duyệt lại: trạng thái hiển thị trong file là `Chờ phê duyệt`.
+- Khi phê duyệt: trạng thái hiển thị trong file là `Có hiệu lực`.
+- Khi trả về/từ chối: trạng thái hiển thị trong file tương ứng là `Trả về` hoặc `Phê duyệt từ chối`.
+- API `/api/sign/generate-pdf` và `/api/sign/generate-office` nhận thêm `action` để tính trạng thái mục tiêu, không chỉ dựa vào trạng thái hiện tại trong DB.
+
+### PDF hồ sơ con
+- PDF hồ sơ con mở modal để người dùng đặt QR/chữ ký/vị trí cần thiết.
+- Footer phải được đóng trên tất cả các trang, không chỉ trang đầu.
+- Footer chuẩn:
+
+```text
+MÃ_TÀI_LIỆU (LẦN_BAN_HÀNH-NGÀY_HIỆU_LỰC) TÌNH_TRẠNG
+```
+
+- Ví dụ:
+
+```text
+NMCB-QT01-F01 (03-28/05/2026) Chờ xem xét
+```
+
+- Nếu footer cũ đã có, hệ thống có thể phủ vùng footer và ghi lại footer mới để đảm bảo trạng thái theo bước luôn đúng.
+
+### DOCX/XLSX hồ sơ con
+- Hồ sơ con DOCX/XLSX dùng bộ tag cố định:
+  - `{{QR}}`
+  - `{{MA_TAI_LIEU}}`
+  - `{{LAN_BAN_HANH}}`
+  - `{{NGAY_HIEU_LUC}}`
+  - `{{TINH_TRANG}}`
+- Tag đúng và có trong file thì điền.
+- Tag đúng nhưng không có trong file thì bỏ qua, không chặn workflow.
+- Người dùng tự điền nội dung thường thay vì tag thì bỏ qua, không ghi đè.
+- Tag gần giống hoặc sai trong dạng `{{...}}` thì cảnh báo và chặn, yêu cầu sửa template hoặc dùng nút `Thay file`.
+- Không có nút bỏ qua tag sai cho Office. Office template có tag sai phải được sửa.
+- DOCX phải trích text hiển thị từ các node text như `w:t`/`a:t` để kiểm tra tag gần giống, không được quét regex trực tiếp trên XML thô vì dễ bắt nhầm đoạn XML.
+- DOCX phải quét toàn bộ `word/**/*.xml`, gồm body, table, header, footer, textbox/drawing text nếu nằm trong XML của Word.
+- Tag `{{QR}}` trong DOCX có thể đứng độc lập hoặc nằm chung run/dòng với tiêu đề. Khi tag nằm chung run, engine phải tách run thành `text trước QR` + ảnh QR + `text sau QR`, không được chỉ xóa tag.
+- QR trong DOCX của hồ sơ con có kích thước khoảng `12mm x 12mm` (`432000 x 432000` EMU), cả khi chèn theo tag và khi chèn mặc định.

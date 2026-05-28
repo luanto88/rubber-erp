@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
@@ -16,7 +16,7 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle } from "lucide-react"
 import Link from "next/link"
 
 export default function IsoDocumentsPage() {
@@ -25,6 +25,7 @@ export default function IsoDocumentsPage() {
   const [docs, setDocs] = useState<IsoDocument[]>([])
   const [standards, setStandards] = useState<IsoStandard[]>(ISO_STANDARD_FALLBACK)
   const [docTypes, setDocTypes] = useState<IsoDocumentTypeMaster[]>(isoDocumentTypeFallback())
+  const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
 
   // Bộ lọc
   const [search, setSearch] = useState("")
@@ -40,7 +41,7 @@ export default function IsoDocumentsPage() {
         supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, phe_duyet, ngay_hieu_luc, updated_at, created_at",
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false }),
@@ -91,6 +92,36 @@ export default function IsoDocumentsPage() {
     if (filterCap && d.cap_tl !== filterCap) return false
     return true
   })
+  const isChildDoc = (item: IsoDocument) => item.phan_loai_tl === "con" || !!item.parent_doc_id
+  const parentRows = filtered.filter((item) => !isChildDoc(item))
+  const childrenByParent = filtered
+    .filter((item) => isChildDoc(item) && item.parent_doc_id)
+    .reduce<Record<string, IsoDocument[]>>((acc, item) => {
+      const parentId = item.parent_doc_id as string
+      acc[parentId] = [...(acc[parentId] || []), item]
+      return acc
+    }, {})
+  const renderStatusBadge = (status: IsoTrangThai) => {
+    if (status === "co_hieu_luc") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 shadow-sm">
+          <CheckCircle2 size={12} /> Có hiệu lực
+        </span>
+      )
+    }
+    if (status === "het_hieu_luc") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-700 shadow-sm">
+          <XCircle size={12} /> Hết hiệu lực
+        </span>
+      )
+    }
+    return (
+      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[status]}`}>
+        {TRANG_THAI_LABEL[status]}
+      </span>
+    )
+  }
 
   const trangThaiOptions: { value: IsoTrangThai | ""; label: string }[] = [
     { value: "", label: "Tất cả trạng thái" },
@@ -191,7 +222,8 @@ export default function IsoDocumentsPage() {
                   <th className="px-4 py-3 text-left font-semibold">Mã tài liệu</th>
                   <th className="px-4 py-3 text-left font-semibold">Tên tài liệu</th>
                   <th className="px-4 py-3 text-left font-semibold hidden sm:table-cell">Loại</th>
-                  <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">Lần BH</th>
+                  <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">Phòng ban</th>
+                  <th className="px-4 py-3 text-left font-semibold hidden lg:table-cell">Lần BH</th>
                   <th className="px-4 py-3 text-left font-semibold hidden lg:table-cell">Cấp</th>
                   <th className="px-4 py-3 text-left font-semibold">Trạng thái</th>
                   <th className="px-4 py-3 text-left font-semibold hidden xl:table-cell">Ngày HLực</th>
@@ -199,12 +231,30 @@ export default function IsoDocumentsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((doc) => (
+                {parentRows.map((doc) => {
+                  const childRows = childrenByParent[doc.id] || []
+                  const isExpanded = !!expandedParents[doc.id]
+                  return (
+                  <Fragment key={doc.id}>
                   <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
-                      <span className="font-mono text-xs text-violet-700 font-bold">
-                        {doc.ma_tai_lieu || "—"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {childRows.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedParents((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))}
+                            className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-violet-700"
+                            title="Xem hồ sơ con"
+                          >
+                            <ChevronDown size={14} className={`transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                          </button>
+                        ) : (
+                          <span className="w-6" />
+                        )}
+                        <span className="font-mono text-xs text-violet-700 font-bold">
+                          {doc.ma_tai_lieu || "—"}
+                        </span>
+                      </div>
                       {doc.loai_vb === "Mật" && (
                         <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded">Mật</span>
                       )}
@@ -229,16 +279,17 @@ export default function IsoDocumentsPage() {
                         {doc.loai_tai_lieu || "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 hidden md:table-cell text-center text-slate-600 text-xs font-mono">
+                    <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-500">
+                      {doc.phong_ban || "—"}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell text-center text-slate-600 text-xs font-mono">
                       {doc.lan_ban_hanh}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                       {doc.cap_tl || "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
-                        {TRANG_THAI_LABEL[doc.trang_thai]}
-                      </span>
+                      {renderStatusBadge(doc.trang_thai)}
                     </td>
                     <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">
                       {fmtDate(doc.ngay_hieu_luc)}
@@ -252,7 +303,38 @@ export default function IsoDocumentsPage() {
                       </Link>
                     </td>
                   </tr>
-                ))}
+                  {isExpanded && childRows.map((child) => (
+                    <tr key={child.id} className="bg-slate-50/70 hover:bg-slate-100 transition-colors">
+                      <td className="px-4 py-3 pl-12">
+                        <span className="font-mono text-xs font-bold text-sky-700">{child.ma_tai_lieu || "—"}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-700 line-clamp-1">{child.ten_tai_lieu}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">Hồ sơ con</div>
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <span className="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-md text-xs font-bold">
+                          {child.loai_tai_lieu || "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-500">{child.phong_ban || doc.phong_ban || "—"}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-center text-slate-600 text-xs font-mono">{child.lan_ban_hanh}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">{child.cap_tl || doc.cap_tl || "—"}</td>
+                      <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
+                      <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={`/dashboard/iso/documents/${child.id}`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-violet-100 text-slate-600 hover:text-violet-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Eye size={12} /> Chi tiết
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                  </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           )}

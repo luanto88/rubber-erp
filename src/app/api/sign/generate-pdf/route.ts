@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { PDFDocument, PDFFont, rgb } from "pdf-lib"
+import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib"
 import { jwtVerify } from "jose"
 import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
@@ -36,6 +36,7 @@ type SignPlacement = {
 }
 
 type SignFileKind = "main" | "change_request" | "review_request"
+type WorkflowAction = "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "tra_ve" | "khong_xem_xet" | "tu_choi_phe_duyet" | "gui_lai_phe_duyet" | "tra_ve_nhap"
 
 type MetaMismatch = { found: string; expected: string }
 
@@ -72,7 +73,15 @@ const HEADER_VALUE_PLACEHOLDER_RE = /^[_\-\.\s/|:]*$/
 const FOOTER_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*(ngay\s*hieu\s*luc|ngay\s*ban\s*hanh|ngay\s*ap\s*dung).*(tinh\s*trang|trang\s*thai)/i
 const FOOTER_FILLED_RE = /\b[A-Z]{2,}(?:-[A-Z0-9Đ]{2,})+\s*\(\d{2}-\d{2}\/\d{2}\/\d{4}\)\s*.+/i
 const FOOTER_LABEL = "Footer mẫu"
+const FOOTER_PARTIAL_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*\d{1,2}\/\d{1,2}\/\d{4}.*(tinh\s*trang|trang\s*thai)/i
 const HEADER_FOOTER_FONT_SIZE = 11
+
+function isLikelyFooterMismatchText(searchText: string): boolean {
+  const hasDocumentCodeLabel = /ma\s*(tai\s*lieu|ho\s*so|hieu)\b/i.test(searchText)
+  const hasFooterContext = /(lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet)|ngay\s*(hieu\s*luc|ban\s*hanh|ap\s*dung)|tinh\s*trang|trang\s*thai|phien\s*ban)/i.test(searchText)
+  const hasWrongFooterLabel = /(ma\s*ho\s*so|ma\s*hieu|phien\s*ban|ngay\s*ban\s*hanh|ngay\s*ap\s*dung|trang\s*thai)/i.test(searchText)
+  return hasDocumentCodeLabel && hasFooterContext && hasWrongFooterLabel
+}
 
 function safeDecodeUri(value: string): string {
   try {
@@ -263,12 +272,94 @@ function hasRealHeaderValue(value: string): boolean {
   return !HEADER_VALUE_PLACEHOLDER_RE.test(normalized)
 }
 
+function extractHeaderValueFromAnchorText(anchorText: string, expected: string): string {
+  const text = normalizeText(anchorText)
+  const colonIndex = text.indexOf(":")
+  if (colonIndex >= 0) return normalizeText(text.slice(colonIndex + 1))
+
+  const normalizedAnchor = normalizeTagText(anchorText)
+  const labelCandidatesByExpected: Record<string, string[]> = {
+    "Mã tài liệu": ["ma tai lieu"],
+    "Ngày hiệu lực": ["ngay hieu luc"],
+    "Lần ban hành / Lần sửa đổi": ["lan ban hanh / lan sua doi", "lan ban hanh", "lan sua doi", "lan soat xet"],
+    "Tình trạng": ["tinh trang"],
+    QR: ["qr"],
+  }
+  const labelCandidates = labelCandidatesByExpected[expected] ?? [normalizeTagText(expected)]
+  for (const label of labelCandidates) {
+    if (normalizedAnchor === label) return ""
+    if (normalizedAnchor.startsWith(`${label} `)) return normalizeText(normalizedAnchor.slice(label.length))
+  }
+  return ""
+}
+
 function inferRevisionLabel(doc: Record<string, unknown>): string {
   return doc.chon_quy_trinh === "Soát xét" ? "Lần sửa đổi" : "Lần ban hành"
 }
 
 function buildFooterValue(maTl: string, lsStr: string, dateStr: string, statusText: string): string {
   return `${maTl} (${lsStr}-${dateStr}) ${statusText}`.trim()
+}
+
+function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string): string {
+  if (action === "gui_xem_xet") return "Chờ xem xét"
+  if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
+  if (action === "phe_duyet") return "Có hiệu lực"
+  if (action === "tra_ve" || action === "khong_xem_xet" || action === "tra_ve_nhap") return "Trả về"
+  if (action === "tu_choi_phe_duyet") return "Phê duyệt từ chối"
+  return TRANG_THAI_LABEL_SERVER[currentStatus] || "Chờ phê duyệt"
+}
+
+function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string) {
+  for (const page of pdfDoc.getPages()) {
+    const fontSize = HEADER_FOOTER_FONT_SIZE
+    const marginX = 30
+    const y = 18
+    const maxWidth = page.getWidth() - marginX * 2
+    let size = fontSize
+    while (size > 8 && font.widthOfTextAtSize(footerText, size) > maxWidth) size -= 0.5
+    const textWidth = font.widthOfTextAtSize(footerText, size)
+    page.drawRectangle({
+      x: marginX - 2,
+      y: y - 3,
+      width: maxWidth + 4,
+      height: size + 8,
+      color: rgb(1, 1, 1),
+    })
+    page.drawText(footerText, {
+      x: marginX + Math.max((maxWidth - textWidth) / 2, 0),
+      y,
+      size,
+      font,
+      color: rgb(0, 0, 0),
+    })
+  }
+}
+
+function extractDateFromText(value: string): string | null {
+  const match = value.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/)
+  if (!match) return null
+  return `${match[1].padStart(2, "0")}/${match[2].padStart(2, "0")}/${match[3]}`
+}
+
+function buildFooterValueForLine(lineText: string, maTl: string, lsStr: string, dateStr: string, statusText: string): string {
+  return buildFooterValue(maTl, lsStr, extractDateFromText(lineText) || dateStr, statusText)
+}
+
+function isFooterFillCandidate(lineText: string, searchText: string): boolean {
+  return FOOTER_FILLED_RE.test(lineText) || FOOTER_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_TEMPLATE_RE.test(searchText)
+}
+
+async function drawDefaultChildQr(pdfDoc: PDFDocument, page: PDFPage, qrBuffer: Buffer) {
+  const qrSize = 34
+  const qrMargin = 18
+  const qrImage = await pdfDoc.embedPng(qrBuffer)
+  page.drawImage(qrImage, {
+    x: page.getWidth() - qrMargin - qrSize,
+    y: page.getHeight() - qrMargin - qrSize,
+    width: qrSize,
+    height: qrSize,
+  })
 }
 
 function buildSignerNamePlacement(placement: SignPlacement) {
@@ -431,7 +522,10 @@ async function fillMetadataPlaceholders(
   const mismatched: MetaMismatch[] = []
   const headerPatterns = getHeaderPatterns(doc, maTl, lsStr, dateStr, statusText)
   const mismatchPatterns = getMismatchPatterns(chonQuyTrinh)
-  const footerValue = buildFooterValue(maTl, lsStr, dateStr, statusText)
+  const shouldDrawDefaultChildQr = isConDoc(
+    (doc.loai_tai_lieu as string | null) ?? null,
+    (doc.phan_loai_tl as string | null) ?? null,
+  )
 
   try {
     const pdfjsDoc = await openPdfjsDocument(pdfBytes)
@@ -495,6 +589,12 @@ async function fillMetadataPlaceholders(
           found.add(header.expected)
           pageFound.add(header.expected)
 
+          const existingValue = normalizeText([
+            extractHeaderValueFromAnchorText(item.str, header.expected),
+            extractHeaderValueFromPageItems(headerItems, item),
+          ].filter(Boolean).join(" "))
+          if (hasRealHeaderValue(existingValue)) break
+
           if (header.label === "QR") {
             const qrImage = await pdfDoc.embedPng(qrBuffer)
             if (manualQrPlacement) {
@@ -523,9 +623,6 @@ async function fillMetadataPlaceholders(
             break
           }
 
-          const existingValue = extractHeaderValueFromPageItems(headerItems, item)
-          if (hasRealHeaderValue(existingValue)) break
-
           const hasColon = item.str.includes(":")
           const fontSize = HEADER_FOOTER_FONT_SIZE
           page.drawText(`${hasColon ? "" : ":"} ${String(header.value)}`, {
@@ -553,6 +650,12 @@ async function fillMetadataPlaceholders(
         found.add("QR")
       }
 
+      if (pageIdx === 0 && shouldDrawDefaultChildQr && !manualQrPlacement && !found.has("QR") && !filled.has("QR")) {
+        await drawDefaultChildQr(pdfDoc, page, qrBuffer)
+        filled.add("QR")
+        found.add("QR")
+      }
+
       for (const line of lines) {
         const lineText = textOfLine(line)
         if (!lineText) continue
@@ -572,13 +675,7 @@ async function fillMetadataPlaceholders(
         }
 
         if (isFooter) {
-          if (FOOTER_FILLED_RE.test(lineText)) {
-            found.add(FOOTER_LABEL)
-            pageFound.add(FOOTER_LABEL)
-            continue
-          }
-
-          if (FOOTER_TEMPLATE_RE.test(searchText)) {
+          if (isFooterFillCandidate(lineText, searchText)) {
             found.add(FOOTER_LABEL)
             pageFound.add(FOOTER_LABEL)
             if (isSkippedLabel(skipLabels, FOOTER_LABEL)) continue
@@ -592,7 +689,7 @@ async function fillMetadataPlaceholders(
             })
 
             const fontSize = HEADER_FOOTER_FONT_SIZE
-            page.drawText(footerValue, {
+            page.drawText(buildFooterValueForLine(lineText, maTl, lsStr, dateStr, statusText), {
               x: bounds.minX,
               y: line[0].transform[5],
               size: fontSize,
@@ -605,7 +702,7 @@ async function fillMetadataPlaceholders(
 
           if (
             !isSkippedLabel(skipLabels, FOOTER_LABEL) &&
-            /(ma\s*ho\s*so|ma\s*hieu|phien\s*ban|ngay\s*ban\s*hanh|ngay\s*ap\s*dung|trang\s*thai)/i.test(searchText) &&
+            isLikelyFooterMismatchText(searchText) &&
             !mismatched.some((entry) => entry.expected === FOOTER_LABEL && entry.found === lineText)
           ) {
             mismatched.push({ found: lineText, expected: FOOTER_LABEL })
@@ -643,6 +740,7 @@ export async function POST(req: NextRequest) {
       docId,
       docType,
       fileKind,
+      action,
       signaturePlacement,
       skipTagLabels,
     }: {
@@ -650,6 +748,7 @@ export async function POST(req: NextRequest) {
       docId: string
       docType: string
       fileKind?: SignFileKind
+      action?: WorkflowAction
       signaturePlacement?: SignPlacement
       skipTagLabels?: string[]
     } = body
@@ -695,13 +794,11 @@ export async function POST(req: NextRequest) {
     const lanBanHanh = (doc.lan_ban_hanh as number) ?? 0
     const lsStr = String(lanBanHanh).padStart(2, "0")
     const trangThai = doc.trang_thai as string
-    const statusText = TRANG_THAI_LABEL_SERVER[trangThai] || "Chờ phê duyệt"
-    const effectiveDate = (doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string)
+    const statusText = getTargetStatusText(action, trangThai)
+    const effectiveDate = action
+      ? new Date().toISOString()
+      : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string))
     const dateStr = fmtDate(effectiveDate)
-    const loaiTaiLieu = doc.loai_tai_lieu as string | null
-    const phanLoaiTl = doc.phan_loai_tl as string | null
-    void isConDoc(loaiTaiLieu, phanLoaiTl)
-
     let currentSignerKey: string | null = null
     if (userId === (doc.soan_thao_user_id as string)) currentSignerKey = "soan_thao_placement"
     else if (userId === (doc.xem_xet_user_id as string)) currentSignerKey = "xem_xet_placement"
@@ -905,6 +1002,7 @@ export async function POST(req: NextRequest) {
               skipTagLabels ?? [],
               (doc.chon_quy_trinh as string | null) ?? null,
             )
+            drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
 
             for (const { signerUserId, placement } of allPlacements) {
               if (!signerUserId || !placement) continue
@@ -1018,6 +1116,7 @@ export async function POST(req: NextRequest) {
         skipTagLabels ?? [],
         (doc.chon_quy_trinh as string | null) ?? null,
       )
+      drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
 
       for (const { signerUserId, placement } of allPlacements) {
         if (!signerUserId || !placement) continue

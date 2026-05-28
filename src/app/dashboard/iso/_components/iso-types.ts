@@ -52,6 +52,7 @@ export type IsoDocument = {
   qr_url: string | null
   ghi_chu: string | null
   phan_loai_tl: string | null
+  parent_doc_id?: string | null
   standards?: IsoStandard[]
   created_by: string | null
   created_at: string

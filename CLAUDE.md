@@ -1,3 +1,110 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+## Lenh phat trien
+
+```bash
+# Chay dev server (Next.js App Router, port 3000)
+npm run dev
+
+# Build san pham
+npm run build
+
+# Lint (ESLint v9)
+npm run lint
+
+# Kiem tra TypeScript (khong emit)
+npx tsc --noEmit
+```
+
+Khong co test suite. De kiem tra thay doi, su dung `npm run build` + `npx tsc --noEmit`.
+
+### Scripts seed / migration
+
+Scripts yeu cau bien moi truong trong `.env.local`:
+
+```bash
+# Seed lo vuon (forest_plots) tu file GeoJSON
+node --env-file=.env.local scripts/seed-forest-plots.mjs
+
+# Import vat tu kho tu file Excel
+node --env-file=.env.local scripts/import-inventory-items.mjs
+
+# Migration user cu (bang users cu -> profiles + auth)
+node --env-file=.env.local scripts/migrate-legacy-users.mjs
+```
+
+Migration SQL chay tay trong Supabase SQL Editor (`supabase/migrations/`). Khong co Supabase CLI trong project.
+
+### Bien moi truong bat buoc
+
+File `.env.local` can:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=        # chi API routes server-side
+SIGN_JWT_SECRET=                  # module ISO ky chu ky so
+TELEGRAM_BOT_TOKEN=               # thong bao bao tri
+TELEGRAM_CHAT_ID=
+ISO_TELEGRAM_BOT_TOKEN=           # thong bao ISO (nhom rieng)
+ISO_TELEGRAM_CHAT_ID=
+GMAIL_USER=                       # email thong bao
+GMAIL_APP_PASSWORD=
+NEXT_PUBLIC_APP_URL=
+```
+
+---
+
+## Kien truc he thong
+
+### Routing va trang
+
+- **Next.js App Router** — tat ca trang la Server Component mac dinh, trang client dung `"use client"`.
+- Dashboard layout (`src/app/dashboard/layout.tsx`): Client component, xu ly toan bo session sync (bootstrap, SIGNED_IN, interval 60s, focus/visibility). Day la noi duy nhat cai dat `onAuthStateChange`.
+- Trang in bao tri (`/dashboard/maintenance/print/`) bypass sidebar — layout kiem tra `pathname.includes("/print")` va render `{children}` thang.
+- Route API (`src/app/api/`): Server-side, dung `getSupabaseAdmin()` tu `src/lib/supabase-admin.ts` de bypass RLS khi can.
+
+### Hai Supabase client
+
+| Client | File | Dung o dau |
+|--------|------|-----------|
+| Anon (browser) | `src/lib/supabase.ts` | Moi page/component client |
+| Service role | `src/lib/supabase-admin.ts` | Chi API routes (`/api/*`) |
+
+**Khong dung `supabase-admin` trong component** — chi server-side.
+
+### Auth va session
+
+- `src/lib/auth.ts` la noi tap trung toan bo logic auth: `getActiveFactoryId()`, `hydrateActiveSession()`, `getFreshAuthSession()`, `hasPermission()`.
+- `localStorage.erp_user` va `localStorage.erp_factory` la cache UI — khong phai source of truth.
+- Uu tien `getActiveFactoryId()` trong moi page, khong doc `localStorage` truc tiep.
+- Supabase JS v2 **khong throw exception** khi loi DB — luon check `error` object sau moi query.
+
+### Pattern page chuan (Client Component)
+
+1. `useEffect([], [])` — bootstrap: chi goi `getActiveFactoryId()`, khong goi `loadData`.
+2. `useEffect([factoryId, loadData])` — xu ly load dau va reload khi filter thay doi.
+3. `loadData` dung `useCallback` voi `try/finally` de ha loading.
+4. `setSaving(false)` luon nam trong `finally` cua ham save.
+
+### Module ISO & Chu ky so
+
+- PDF generation: `src/app/api/sign/generate-pdf/route.ts` — dung `pdf-lib` + `pdfjs-dist` + font `public/fonts/`.
+- Ky DOCX/XLSX: `src/app/api/sign/generate-office/route.ts` — dung `jszip` (DOCX) + `exceljs` (XLSX).
+- Placement chu ky (drag-and-drop): `react-draggable` + `re-resizable`, yeu cau `nodeRef` vi React 19 da xoa `findDOMNode`.
+- Storage bucket `iso-documents` (public): path `{factory_id}/iso/...`, `signatures/{factory_id}/{user_id}/chu_ky.png`.
+
+### Kho vat tu (Inventory)
+
+- RPC Supabase (`inventory_post_*_document`, `inventory_cancel_document`) de dam bao toan ven ton kho — khong UPDATE `on_hand` truc tiep.
+- Dau dung chung bon: vat tu co `uses_shared_oil_stock = true` dung pool ton theo kho, khong theo ma vat tu.
+
+---
+
 # CLAUDE.md - Rubber ERP · PTCS Phuoc Hoa
 
 ## Tong quan
@@ -202,6 +309,7 @@ Vi du:
 - Bao tri: `.claude/rules/14-maintenance-module.md`
 - San luong: `.claude/rules/15-output-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
+- ISO và hồ sơ con: đọc `.claude/rules/16-iso-vanban-module.md` và `.claude/rules/17-iso-soat-xet.md`; ưu tiên các mục "Cập nhật mới nhất (2026-05-28)" nếu có mâu thuẫn với logic cũ.
 
 ## Ghi chu cap nhat module kho (2026-05-09)
 
@@ -225,6 +333,9 @@ Vi du:
 - Mac dinh giao dien va noi dung trong app phai viet bang tieng Viet co dau
 - Tren web, luon dam bao tieng Viet co dau, dung chinh ta, ngoai tru khi nguoi dung yeu cau khac
 - Chi thay doi ngon ngu hien thi khi nguoi dung yeu cau ro rang
+- Với module ISO, tài liệu cha và hồ sơ con `parent_doc_id` là một bộ tài liệu khi xem xét/phê duyệt; không tách thành nhiều đầu việc riêng lẻ trong `Việc của tôi`.
+- Hồ sơ con PDF phải có footer trạng thái trên tất cả trang; hồ sơ con DOCX/XLSX chỉ chặn khi có tag `{{...}}` sai/gần giống, còn tag đúng nhưng thiếu thì bỏ qua.
+- QR DOCX hồ sơ con dùng khoảng 12mm x 12mm và phải thay được cả khi `{{QR}}` đứng độc lập hoặc nằm chung dòng với tiêu đề trong header.
 - Trong `/dashboard/product`, canh bao `lo do dang` dang hien thi theo tat ca lo do dang cung day chuyen, khong phu thuoc nam thanh pham
 - Neu doi rule loc `lo do dang`, phai cap nhat dong bo ca canh bao ngoai list va canh bao trong form tao moi
 - Trong `/dashboard/export`, bo loc lo va cac query theo `trang_thai` phai dung chuoi tieng Viet chuan (`Hoan thanh`, `Xuat hang` theo gia tri nghiep vu), tranh mojibake lam mat lo kha dung
