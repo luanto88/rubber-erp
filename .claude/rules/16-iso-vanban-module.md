@@ -933,7 +933,9 @@ await supabase.from("doc_approval_log").insert({
 
 Mỗi lần generate PDF, server thực hiện theo thứ tự:
 
-1. **Detect non-PDF**: nếu `file_goc_url` có extension khác `pdf` → trả về `{ ok: true, skipped: true, reason: "non-pdf" }` ngay lập tức (sau khi đã lưu placement nếu có)
+1. **Detect non-PDF**: nếu `file_goc_url` có extension khác `pdf`:
+   - Nếu `action === "phe_duyet"` VÀ `signFileKind === "main"`: **convert sang PDF qua CloudConvert** (`convertOfficeUrlToPdfDocumentWithRetry`) rồi tiếp tục flow bình thường — không trả về `skipped`
+   - Tất cả trường hợp khác: trả về `{ ok: true, skipped: true, reason: "non-pdf" }` ngay lập tức (sau khi đã lưu placement nếu có)
 2. **Xác định signer hiện tại** theo `userId` so với `soan_thao_user_id / xem_xet_user_id / phe_duyet_user_id`
 3. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
 4. **Reload tất cả 3 placements** từ DB
@@ -1168,7 +1170,7 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | API `/api/sign/verify`                                                                                                  | ✅ Hoàn thành                    |
 | API `/api/sign/generate-pdf` — signature persistence + metadata auto-fill + NotoSans + skipTagLabels + diagnostics      | ✅ Hoàn thành                    |
 | API `/api/sign/generate-pdf` — mismatch detection + skip fill cho tag mismatch (revision aliases hợp lệ không cảnh báo) | ✅ Hoàn thành (2026-05-26)       |
-| API `/api/sign/generate-pdf` — non-PDF graceful skip (DOCX/XLSX → skipped: true)                                        | ✅ Hoàn thành (2026-05-26)       |
+| API `/api/sign/generate-pdf` — non-PDF: `phe_duyet` main → CloudConvert polling; các bước khác → skipped: true           | ✅ Cập nhật (2026-05-29)         |
 | API `/api/sign/restamp-pdf`                                                                                             | ✅ Hoàn thành                    |
 | API `/api/iso/notify` — 3 action mới                                                                                    | ✅ Hoàn thành                    |
 | Settings tab ISO & Văn bản + Chữ ký cá nhân                                                                             | ✅ Hoàn thành                    |
@@ -1453,3 +1455,34 @@ Mục này thay thế mọi quy tắc cũ trong file này nếu có mâu thuẫn
 
 - PDF hồ sơ con phải đóng footer trạng thái trên tất cả trang.
 - Footer phải phản ánh trạng thái theo action hiện tại, không giữ trạng thái cũ trong file gốc.
+
+---
+
+## Cập nhật nóng (2026-05-29) — CloudConvert + UI hồ sơ con
+
+### 1) CloudConvert cho convert DOCX/XLSX → PDF tại bước Phê duyệt
+
+Thay thế `LibreOffice` bằng **CloudConvert API** trong `generate-pdf/route.ts`.
+
+**Flow hiện tại (`convertOfficeUrlToPdfDocumentWithRetry`)**:
+1. POST `https://api.cloudconvert.com/v2/jobs` — tạo job `import/url → convert → export/url`
+2. Polling `https://api.cloudconvert.com/v2/jobs/{jobId}` mỗi 2s, timeout 90s — **KHÔNG dùng** `sync.api.cloudconvert.com` (gây 403)
+3. Nếu `status === "finished"`: lấy URL PDF → download → trả về `PDFDocument`
+4. Nếu `status === "error"`: throw ngay lập tức
+5. Retry tự động 1 lần sau 3s nếu gặp lỗi 429 (rate limit)
+
+**Điều kiện kích hoạt convert**:
+- File non-PDF (`ext === "docx"` hoặc `"xlsx"`)
+- **Và** `action === "phe_duyet"` **và** `signFileKind === "main"`
+- Các bước khác (gửi xem xét, gửi phê duyệt) với non-PDF vẫn trả về `{ skipped: true, reason: "non-pdf" }`
+
+**Env var bắt buộc**:
+```
+CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
+```
+
+### 2) Xóa duplicate "Hồ sơ con" khỏi right panel
+
+- Section "Hồ sơ con của tài liệu này" trong right panel của form cha đã bị disable (`false &&`).
+- Khu quản lý hồ sơ con chỉ còn ở **left form** (col-span-2), bên dưới form thông tin tài liệu.
+- Right panel (`[id]/page.tsx`) không còn render `childDraftRows` cho tài liệu cha.

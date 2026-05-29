@@ -2518,7 +2518,7 @@ export default function IsoDocumentDetailPage() {
         {!isNew && doc && childDocs.length > 0 && (
           <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-extrabold text-white">{form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}</span>
+              <span className="rounded-full !bg-sky-600 px-2.5 py-1 text-xs font-extrabold !text-white">{form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}</span>
               <span className="font-bold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình cha") : (doc.ma_tai_lieu || "Tài liệu cha")}</span>
               <span>{form.phan_loai_tl === "con" ? `có ${childDocs.length + 1} hồ sơ cùng cấp đang xử lý.` : `đang được xử lý cùng ${childDocs.length} hồ sơ kèm theo.`}</span>
             </div>
@@ -2754,89 +2754,27 @@ export default function IsoDocumentDetailPage() {
                 ) : null}
               </div>
 
-              {false && isEditable && form.phan_loai_tl !== "con" && form.chon_quy_trinh !== "Soát xét" && (
+              {form.phan_loai_tl !== "con" && form.chon_quy_trinh !== "Soát xét" && (isEditable || (!isNew && childDocs.length > 0)) && (
                 <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
                       <p className="text-xs font-extrabold text-sky-800">Hồ sơ con của tài liệu này</p>
-                      <p className="text-[11px] text-sky-700">Mỗi file sẽ tạo một bản ghi hồ sơ con riêng khi bấm Lưu.</p>
+                      <p className="text-[11px] text-sky-700">
+                        {isEditable ? "Bấm Thêm hồ sơ, nhập từng dòng và upload một file riêng cho mỗi hồ sơ." : "Danh sách hồ sơ đã lưu."}
+                      </p>
                     </div>
-                    <span className="font-mono text-[11px] font-bold text-sky-700">{form.ma_tai_lieu || "..."}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Loại hồ sơ
-                      <select
-                        value={childUploadType}
-                        onChange={(e) => setChildUploadType(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500"
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={addChildDraftRow}
+                        className="rounded-lg border border-sky-500 !bg-sky-600 px-3 py-1.5 text-xs font-bold !text-white shadow-sm hover:!bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                       >
-                        {childTypeOptions.map((type) => (
-                          <option key={type} value={type}>{type} - {docTypeLabelMap[type]}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Số bắt đầu
-                      <input
-                        type="number"
-                        min="1"
-                        value={childUploadStartNo}
-                        onChange={(e) => setChildUploadStartNo(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500"
-                      />
-                    </label>
+                        Thêm hồ sơ
+                      </button>
+                    )}
                   </div>
-                  {childUploadFiles.length > 0 && (
-                    <div className="mt-2 max-h-32 space-y-1 overflow-auto rounded-lg bg-white/80 p-2">
-                      {childUploadFiles.map((file, index) => {
-                        const start = parseInt(childUploadStartNo)
-                        const code = Number.isFinite(start)
-                          ? buildMaTaiLieuCon(form.ma_tai_lieu, childUploadType, String(start + index))
-                          : ""
-                        return (
-                          <div key={`${file.url}-${index}`} className="flex items-center gap-2 text-[11px] text-slate-600">
-                            <span className="font-mono font-bold text-sky-700">{code || `#${index + 1}`}</span>
-                            <span className="flex-1 truncate">{file.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setChildUploadFiles((files) => files.filter((_, i) => i !== index))}
-                              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                              title="Bỏ file khỏi danh sách"
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => childFilesInputRef.current?.click()}
-                    disabled={fileUploading || !form.ma_tai_lieu}
-                    className="mt-2 w-full rounded-xl border border-dashed border-sky-300 bg-white/70 px-3 py-2 text-xs font-bold text-sky-700 transition-all hover:border-sky-500 disabled:opacity-50"
-                  >
-                    {fileUploading ? "Đang tải..." : "Upload nhiều file hồ sơ con"}
-                  </button>
-                </div>
-              )}
-
-              {isEditable && form.phan_loai_tl !== "con" && form.chon_quy_trinh !== "Soát xét" && (
-                <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-extrabold text-sky-800">Hồ sơ con của tài liệu này</p>
-                      <p className="text-[11px] text-sky-700">Bấm Thêm hồ sơ, nhập từng dòng và upload một file riêng cho mỗi hồ sơ.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={addChildDraftRow}
-                      className="rounded-lg border border-sky-500 !bg-sky-600 px-3 py-1.5 text-xs font-bold !text-white shadow-sm hover:!bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-                    >
-                      Thêm hồ sơ
-                    </button>
-                  </div>
+                  {renderSavedChildDocs()}
+                  {isEditable && (
                   <div className="space-y-2">
                     {childDraftRows.map((row) => (
                       <div key={row.id} className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100">
@@ -2893,10 +2831,11 @@ export default function IsoDocumentDetailPage() {
                         </button>
                       </div>
                     ))}
-                    {childDraftRows.length === 0 && (
-                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con nào trong lần lưu này.</p>
+                    {childDraftRows.length === 0 && childDocs.length === 0 && (
+                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con nào. Bấm "Thêm hồ sơ" để bắt đầu.</p>
                     )}
                   </div>
+                  )}
                 </div>
               )}
 
