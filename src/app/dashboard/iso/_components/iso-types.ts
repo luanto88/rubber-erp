@@ -28,6 +28,7 @@ export type IsoDocument = {
   xem_xet_user_id: string | null
   phe_duyet_user_id: string | null
   file_goc_url: string | null
+  file_template_url?: string | null
   file_soat_xet_url: string | null
   file_phieu_yeu_cau_thay_doi_url: string | null
   file_de_nghi_soat_xet_url: string | null

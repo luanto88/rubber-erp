@@ -65,6 +65,13 @@ export default function IsoMyTasksPage() {
     (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === userId) ||
     (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === userId)
 
+  const parentCodeFromChild = (doc: IsoDocument) => {
+    const code = doc.ma_tai_lieu || ""
+    const type = doc.loai_tai_lieu || ""
+    const suffix = new RegExp(`-${type}\\d+$`, "i")
+    return code.replace(suffix, "") || "quy tr\u00ecnh cha"
+  }
+
   const taskGroups = tasks.filter(isMyPendingDoc).reduce<IsoTaskGroup[]>((groups, item) => {
     const groupKey = item.parent_doc_id || item.id
     const existing = groups.find((group) => (group.doc.parent_doc_id || group.doc.id) === groupKey || group.doc.id === groupKey)
@@ -114,7 +121,13 @@ export default function IsoMyTasksPage() {
                 <tbody className="divide-y divide-slate-100">
                   {taskGroups.map((group) => {
                     const doc = group.doc
-                    const isBundle = group.childCount > 0
+                    const isStandaloneChild = !!doc.parent_doc_id
+                    const isBundle = !isStandaloneChild && group.childCount > 0
+                    const taskLabel = isStandaloneChild
+                      ? `${getMyRole(doc)} ${group.childCount} h\u1ed3 s\u01a1 c\u1ee7a quy tr\u00ecnh ${parentCodeFromChild(doc)}`
+                      : isBundle
+                        ? `B\u1ed9 t\u00e0i li\u1ec7u + ${group.childCount} h\u1ed3 s\u01a1`
+                        : "T\u00e0i li\u1ec7u ri\u00eang"
                     return (
                     <tr key={doc.parent_doc_id || doc.id} className="hover:bg-amber-50/50 transition-colors">
                       <td className="px-4 py-3">
@@ -124,9 +137,9 @@ export default function IsoMyTasksPage() {
                         <div className="font-medium text-slate-700 line-clamp-1">{doc.ten_tai_lieu}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] text-slate-400">{doc.loai_tai_lieu || "ISO"} · {doc.cap_tl}</span>
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${isBundle ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-600"}`}>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${isBundle || isStandaloneChild ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-600"}`}>
                             <FileText size={10} />
-                            {isBundle ? `Bộ tài liệu + ${group.childCount} hồ sơ` : "Tài liệu riêng"}
+                            {taskLabel}
                           </span>
                         </div>
                       </td>
@@ -148,7 +161,7 @@ export default function IsoMyTasksPage() {
                           href={`/dashboard/iso/documents/${doc.id}`}
                           className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-lg transition-all"
                         >
-                          <Eye size={12} /> {isBundle ? "Xử lý bộ" : "Xử lý"}
+                          <Eye size={12} /> {isBundle ? "X\u1eed l\u00fd b\u1ed9" : isStandaloneChild ? "X\u1eed l\u00fd h\u1ed3 s\u01a1" : "X\u1eed l\u00fd"}
                         </Link>
                       </td>
                     </tr>

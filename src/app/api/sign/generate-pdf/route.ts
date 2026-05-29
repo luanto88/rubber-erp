@@ -44,6 +44,7 @@ type MetaFillResult = {
   filled: string[]
   notFound: string[]
   mismatched: MetaMismatch[]
+  footerFilledPages: number[]
 }
 
 type PdfTextItem = {
@@ -310,8 +311,10 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
   return TRANG_THAI_LABEL_SERVER[currentStatus] || "Chờ phê duyệt"
 }
 
-function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string) {
-  for (const page of pdfDoc.getPages()) {
+function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string, skipPageIndexes: number[] = []) {
+  const skip = new Set(skipPageIndexes)
+  for (const [pageIndex, page] of pdfDoc.getPages().entries()) {
+    if (skip.has(pageIndex)) continue
     const fontSize = HEADER_FOOTER_FONT_SIZE
     const marginX = 30
     const y = 18
@@ -334,6 +337,18 @@ function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: st
       color: rgb(0, 0, 0),
     })
   }
+}
+
+function sanitizeOutputName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 140) || "ISO"
 }
 
 function extractDateFromText(value: string): string | null {
@@ -519,6 +534,7 @@ async function fillMetadataPlaceholders(
 ): Promise<MetaFillResult> {
   const filled = new Set<string>()
   const found = new Set<string>()
+  const footerFilledPages = new Set<number>()
   const mismatched: MetaMismatch[] = []
   const headerPatterns = getHeaderPatterns(doc, maTl, lsStr, dateStr, statusText)
   const mismatchPatterns = getMismatchPatterns(chonQuyTrinh)
@@ -697,6 +713,7 @@ async function fillMetadataPlaceholders(
               color: rgb(0, 0, 0),
             })
             filled.add(FOOTER_LABEL)
+            footerFilledPages.add(pageIdx)
             continue
           }
 
@@ -724,12 +741,77 @@ async function fillMetadataPlaceholders(
     ...(found.has(FOOTER_LABEL) || isSkippedLabel(skipLabels, FOOTER_LABEL) ? [] : [FOOTER_LABEL]),
   ]
 
-  return { filled: [...filled], notFound, mismatched }
+  return { filled: [...filled], notFound, mismatched, footerFilledPages: [...footerFilledPages] }
 }
 
 async function embedViFont(pdfDoc: PDFDocument, fontBytes: Buffer): Promise<PDFFont> {
   pdfDoc.registerFontkit(fontkit)
   return await pdfDoc.embedFont(fontBytes)
+}
+
+async function convertOfficeUrlToPdfDocument(fileUrl: string | null): Promise<PDFDocument> {
+  const cleanUrl = fileUrl?.split("?")[0] || ""
+  const ext = cleanUrl.split(".").pop()?.toLowerCase()
+  if (ext !== "docx" && ext !== "xlsx") {
+    throw new Error("File Office da xu ly khong phai DOCX/XLSX")
+  }
+  if (!fileUrl) throw new Error("Thieu URL file Office da xu ly")
+  const apiKey = process.env.CLOUDCONVERT_API_KEY
+  if (!apiKey) throw new Error("Thieu CLOUDCONVERT_API_KEY de convert DOCX/XLSX sang PDF")
+
+  const createRes = await fetch("https://api.cloudconvert.com/v2/jobs", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      tasks: {
+        "import-office": {
+          operation: "import/url",
+          url: fileUrl,
+        },
+        "convert-office": {
+          operation: "convert",
+          input: "import-office",
+          input_format: ext,
+          output_format: "pdf",
+          engine: "office",
+        },
+        "export-pdf": {
+          operation: "export/url",
+          input: "convert-office",
+        },
+      },
+    }),
+  })
+  const createJson = await createRes.json().catch(() => ({}))
+  if (!createRes.ok) {
+    throw new Error(`CloudConvert tao job that bai: ${createJson.message || createRes.status}`)
+  }
+  const jobId = createJson.data?.id as string | undefined
+  if (!jobId) throw new Error("CloudConvert khong tra ve job id")
+
+  const waitRes = await fetch(`https://sync.api.cloudconvert.com/v2/jobs/${jobId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  const waitJson = await waitRes.json().catch(() => ({}))
+  if (!waitRes.ok || waitJson.data?.status !== "finished") {
+    const errorTask = (waitJson.data?.tasks as Array<{ status?: string; message?: string; code?: string }> | undefined)
+      ?.find((task) => task.status === "error")
+    throw new Error(`CloudConvert convert that bai: ${errorTask?.message || waitJson.message || waitRes.status}`)
+  }
+  const exportTask = (waitJson.data.tasks as Array<{
+    name?: string
+    operation?: string
+    result?: { files?: Array<{ url?: string }> }
+  }>).find((task) => task.name === "export-pdf" || task.operation === "export/url")
+  const pdfUrl = exportTask?.result?.files?.[0]?.url
+  if (!pdfUrl) throw new Error("CloudConvert khong tra ve URL PDF")
+
+  const pdfRes = await fetch(pdfUrl, { cache: "no-store" })
+  if (!pdfRes.ok) throw new Error(`Khong tai duoc PDF tu CloudConvert: HTTP ${pdfRes.status}`)
+  return await PDFDocument.load(await pdfRes.arrayBuffer())
 }
 
 export async function POST(req: NextRequest) {
@@ -900,7 +982,7 @@ export async function POST(req: NextRequest) {
     const sigImgNullFor: string[] = []
     const sigEmbedErrors: Array<{ userId: string; error: string }> = []
     let originalPages: PDFDocument | null = null
-    let metaResult: MetaFillResult = { filled: [], notFound: [], mismatched: [] }
+    let metaResult: MetaFillResult = { filled: [], notFound: [], mismatched: [], footerFilledPages: [] }
     let linesByPage: PdfTextItem[][][] = []
     let didApplyStamping = false
     let originalPdfBytesForTextScan: ArrayBuffer | null = null
@@ -915,12 +997,16 @@ export async function POST(req: NextRequest) {
     console.log("[generate-pdf] file_goc_url:", fileGocUrl)
 
     // Non-PDF files: placement already saved above; skip PDF generation gracefully
-    if (fileGocUrl) {
+    if (fileGocUrl && !originalPages) {
       const cleanUrl = fileGocUrl.split("?")[0]
       const ext = cleanUrl.split(".").pop()?.toLowerCase()
       if (ext !== "pdf") {
         console.log("[generate-pdf] non-PDF file (ext:", ext, ") â€” skipping PDF generation")
-        return NextResponse.json({ ok: true, skipped: true, reason: "non-pdf" })
+        if (action !== "phe_duyet" || signFileKind !== "main") {
+          return NextResponse.json({ ok: true, skipped: true, reason: "non-pdf" })
+        }
+        originalPages = await convertOfficeUrlToPdfDocument((doc.file_signed_office_url as string | null) || fileGocUrl)
+        didApplyStamping = true
       }
     }
 
@@ -929,7 +1015,7 @@ export async function POST(req: NextRequest) {
     let downloadedByteLength = 0
     let pdfLoadError = ""
 
-    if (fileGocUrl) {
+    if (fileGocUrl && !originalPages) {
       const storagePathCandidates = getStoragePathCandidatesFromUrl(fileGocUrl, "iso-documents")
       console.log("[generate-pdf] storagePath candidates:", storagePathCandidates)
       if (storagePathCandidates.length > 0) {
@@ -1002,7 +1088,7 @@ export async function POST(req: NextRequest) {
               skipTagLabels ?? [],
               (doc.chon_quy_trinh as string | null) ?? null,
             )
-            drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
+            drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
 
             for (const { signerUserId, placement } of allPlacements) {
               if (!signerUserId || !placement) continue
@@ -1116,7 +1202,7 @@ export async function POST(req: NextRequest) {
         skipTagLabels ?? [],
         (doc.chon_quy_trinh as string | null) ?? null,
       )
-      drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
+      drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
 
       for (const { signerUserId, placement } of allPlacements) {
         if (!signerUserId || !placement) continue
@@ -1194,7 +1280,8 @@ export async function POST(req: NextRequest) {
     copiedOriginalPages.forEach((copiedPage) => finalDoc.addPage(copiedPage))
 
     const signedPdfBytes = await finalDoc.save()
-    const outputPath = `${factoryId}/iso/signed/${docId}_${signFileKind}_signed_${Date.now()}.pdf`
+    const namePrefix = sanitizeOutputName(`${maTl} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
+    const outputPath = `${factoryId}/iso/signed/${namePrefix}_${signFileKind}_signed_${Date.now()}.pdf`
     const { error: uploadErr } = await supabaseAdmin.storage
       .from("iso-documents")
       .upload(outputPath, signedPdfBytes, { contentType: "application/pdf", upsert: true })

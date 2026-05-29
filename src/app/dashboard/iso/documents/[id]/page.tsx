@@ -201,6 +201,7 @@ export default function IsoDocumentDetailPage() {
   const [reviewRequestFileName, setReviewRequestFileName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const childFilesInputRef = useRef<HTMLInputElement>(null)
+  const activeChildUploadRowIdRef = useRef<string | null>(null)
   const reviewChangeFileInputRef = useRef<HTMLInputElement>(null)
   const reviewRequestFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -385,13 +386,40 @@ export default function IsoDocumentDetailPage() {
     const isCon = d.phan_loai_tl === "con" || d.loai_tai_lieu === "F"
     setSelectedParentDocId(d.parent_doc_id || "")
     if (!isCon) {
-      const { data: children } = await supabase
+      let childrenQuery = supabase
         .from("iso_documents")
         .select("*")
         .eq("factory_id", fid)
         .eq("parent_doc_id", id)
         .order("ma_tai_lieu")
+      if (d.trang_thai === "co_hieu_luc") {
+        childrenQuery = childrenQuery.eq("trang_thai", "co_hieu_luc")
+      }
+      const { data: children } = await childrenQuery
       setChildDocs((children || []) as IsoDocument[])
+    } else if (d.parent_doc_id) {
+      let siblingsQuery = supabase
+        .from("iso_documents")
+        .select("*")
+        .eq("factory_id", fid)
+        .eq("parent_doc_id", d.parent_doc_id)
+        .eq("trang_thai", d.trang_thai)
+        .neq("id", id)
+        .order("ma_tai_lieu")
+      siblingsQuery = d.soan_thao_user_id
+        ? siblingsQuery.eq("soan_thao_user_id", d.soan_thao_user_id)
+        : siblingsQuery.is("soan_thao_user_id", null)
+      siblingsQuery = d.xem_xet_user_id
+        ? siblingsQuery.eq("xem_xet_user_id", d.xem_xet_user_id)
+        : siblingsQuery.is("xem_xet_user_id", null)
+      siblingsQuery = d.phe_duyet_user_id
+        ? siblingsQuery.eq("phe_duyet_user_id", d.phe_duyet_user_id)
+        : siblingsQuery.is("phe_duyet_user_id", null)
+      siblingsQuery = d.created_by
+        ? siblingsQuery.eq("created_by", d.created_by)
+        : siblingsQuery
+      const { data: siblings } = await siblingsQuery
+      setChildDocs((siblings || []) as IsoDocument[])
     } else {
       setChildDocs([])
     }
@@ -681,12 +709,16 @@ export default function IsoDocumentDetailPage() {
       if (isDraftRow) {
         setChildDraftRows((rows) => rows.map((row) =>
           row.id === rowId
-            ? {
-                ...row,
-                file_url: urlData.publicUrl,
-                file_name: file.name,
-                ten_tai_lieu: row.ten_tai_lieu || stripFileExtension(file.name),
-              }
+            ? (() => {
+                const inferredNo = inferChildNumberFromFileName(file.name, row.loai_tai_lieu)
+                return {
+                  ...row,
+                  so_hieu: inferredNo || row.so_hieu,
+                  file_url: urlData.publicUrl,
+                  file_name: file.name,
+                  ten_tai_lieu: row.ten_tai_lieu || stripFileExtension(file.name),
+                }
+              })()
             : row
         ))
       } else {
@@ -694,6 +726,7 @@ export default function IsoDocumentDetailPage() {
           .from("iso_documents")
           .update({
             file_goc_url: urlData.publicUrl,
+            file_template_url: urlData.publicUrl,
             file_signed_pdf_url: null,
             file_signed_office_url: null,
             file_signed_office_type: null,
@@ -706,6 +739,7 @@ export default function IsoDocumentDetailPage() {
             ? {
                 ...child,
                 file_goc_url: urlData.publicUrl,
+                file_template_url: urlData.publicUrl,
                 file_signed_pdf_url: null,
                 file_signed_office_url: null,
                 file_signed_office_type: null,
@@ -718,6 +752,45 @@ export default function IsoDocumentDetailPage() {
     } finally {
       setFileUploading(false)
     }
+  }
+
+  const openChildFilePicker = (rowId: string) => {
+    activeChildUploadRowIdRef.current = rowId
+    setActiveChildUploadRowId(rowId)
+    childFilesInputRef.current?.click()
+  }
+
+  const validateUniqueDocumentCodes = async () => {
+    const isReviewForm = form.chon_quy_trinh === "So\u00e1t x\u00e9t"
+    if (isReviewForm) return null
+
+    const codesToCheck: string[] = []
+    if (form.phan_loai_tl !== "con" && form.ma_tai_lieu) {
+      codesToCheck.push(form.ma_tai_lieu)
+    }
+    for (const row of childDraftRows) {
+      const code = childRecordCode(row)
+      if (code) codesToCheck.push(code)
+    }
+    const normalizedCodes = codesToCheck.map((code) => code.trim().toUpperCase()).filter(Boolean)
+    const duplicateInDraft = normalizedCodes.find((code, index) => normalizedCodes.indexOf(code) !== index)
+    if (duplicateInDraft) return `M\u00e3 ${duplicateInDraft} b\u1ecb tr\u00f9ng trong danh s\u00e1ch \u0111ang so\u1ea1n th\u1ea3o.`
+    if (normalizedCodes.length === 0) return null
+
+    const { data, error } = await supabase
+      .from("iso_documents")
+      .select("id, ma_tai_lieu, ten_tai_lieu")
+      .eq("factory_id", factoryId)
+      .in("ma_tai_lieu", normalizedCodes)
+    if (error) return error.message
+
+    const existing = ((data || []) as Pick<IsoDocument, "id" | "ma_tai_lieu" | "ten_tai_lieu">[]).find((item) => {
+      if (!item.ma_tai_lieu) return false
+      if (!isNew && item.id === docId) return false
+      return normalizedCodes.includes(item.ma_tai_lieu.trim().toUpperCase())
+    })
+    if (!existing) return null
+    return `M\u00e3 ${existing.ma_tai_lieu} \u0111\u00e3 t\u1ed3n t\u1ea1i${existing.ten_tai_lieu ? ` (${existing.ten_tai_lieu})` : ""}. Kh\u00f4ng th\u1ec3 so\u1ea1n th\u1ea3o m\u00e3 tr\u00f9ng.`
   }
 
   const validateForm = () => {
@@ -773,6 +846,9 @@ export default function IsoDocumentDetailPage() {
     setSaving(true)
     setSaveError(null)
     try {
+      const duplicateCodeError = await validateUniqueDocumentCodes()
+      if (duplicateCodeError) { setSaveError(duplicateCodeError); return }
+
       const session = await getFreshAuthSession()
       const payload = {
         factory_id: factoryId,
@@ -798,6 +874,7 @@ export default function IsoDocumentDetailPage() {
         phan_loai_tl: form.phan_loai_tl || "cha",
         parent_doc_id: form.phan_loai_tl === "con" ? (selectedParentDocId || null) : null,
         file_goc_url: uploadedFileUrl || null,
+        file_template_url: uploadedFileUrl || null,
         file_soat_xet_url: reviewRequestFileUrl || null,
         file_phieu_yeu_cau_thay_doi_url: reviewChangeFileUrl || null,
         file_de_nghi_soat_xet_url: reviewRequestFileUrl || null,
@@ -815,13 +892,13 @@ export default function IsoDocumentDetailPage() {
       }
 
       const saveChildDraftRecords = async (parentId: string) => {
-        if (childDraftRows.length === 0) return true
+        if (childDraftRows.length === 0) return []
         const invalidRow = childDraftRows.find((row) =>
           !row.loai_tai_lieu || !row.so_hieu || !row.ten_tai_lieu.trim() || !row.lan_ban_hanh || !row.file_url
         )
         if (invalidRow) {
           setSaveError("Vui lòng nhập đủ Loại hồ sơ, Tên hồ sơ, Số hiệu, Lần ban hành và File hồ sơ cho từng dòng.")
-          return false
+          return null
         }
         const parentCode = form.phan_loai_tl === "con" ? form.ma_tai_lieu_cha : form.ma_tai_lieu
         const childPayloads = childDraftRows.map((row) => {
@@ -837,6 +914,7 @@ export default function IsoDocumentDetailPage() {
             parent_doc_id: parentId,
             ma_tai_lieu_cu: childCode,
             file_goc_url: row.file_url,
+            file_template_url: row.file_url,
             file_soat_xet_url: null,
             file_phieu_yeu_cau_thay_doi_url: null,
             file_de_nghi_soat_xet_url: null,
@@ -846,12 +924,12 @@ export default function IsoDocumentDetailPage() {
           .from("iso_documents")
           .insert(childPayloads)
           .select("id")
-        if (error) { setSaveError(error.message); return false }
+        if (error) { setSaveError(error.message); return null }
         const createdIds = (data || []).map((row) => row.id)
         await Promise.all(createdIds.map((id) => saveStandards(id)))
         setChildDraftRows([])
         showToast(true, `Đã tạo ${createdIds.length} hồ sơ con cho ${form.ma_tai_lieu}`)
-        return true
+        return createdIds
       }
 
       const saveChildRecords = async () => {
@@ -871,6 +949,7 @@ export default function IsoDocumentDetailPage() {
             phan_loai_tl: "con",
             ma_tai_lieu_cu: childCode,
             file_goc_url: file.url,
+            file_template_url: file.url,
             file_soat_xet_url: null,
             file_phieu_yeu_cau_thay_doi_url: null,
             file_de_nghi_soat_xet_url: null,
@@ -890,10 +969,10 @@ export default function IsoDocumentDetailPage() {
       void saveChildRecords
 
       if (form.phan_loai_tl === "con" && isNew) {
-        const childSaved = await saveChildDraftRecords(selectedParentDocId)
-        if (!childSaved) return
+        const createdIds = await saveChildDraftRecords(selectedParentDocId)
+        if (!createdIds) return
         showToast(true, "Đã tạo hồ sơ con")
-        router.replace(`/dashboard/iso/documents/${selectedParentDocId}`)
+        router.replace(`/dashboard/iso/documents/${createdIds[0] || selectedParentDocId}`)
         return
       }
 
@@ -905,8 +984,8 @@ export default function IsoDocumentDetailPage() {
           .single()
         if (error) { setSaveError(error.message); return }
         await saveStandards(data.id)
-        const childSaved = await saveChildDraftRecords(data.id)
-        if (!childSaved) return
+        const createdIds = await saveChildDraftRecords(data.id)
+        if (!createdIds) return
         showToast(true, "Đã tạo tài liệu")
         router.replace(`/dashboard/iso/documents/${data.id}`)
       } else {
@@ -917,8 +996,8 @@ export default function IsoDocumentDetailPage() {
           .eq("factory_id", factoryId)
         if (error) { setSaveError(error.message); return }
         await saveStandards(docId)
-        const childSaved = await saveChildDraftRecords(docId)
-        if (!childSaved) return
+        const createdIds = await saveChildDraftRecords(docId)
+        if (!createdIds) return
         showToast(true, "Đã lưu thay đổi")
         void loadDoc(docId, factoryId)
       }
@@ -1158,6 +1237,44 @@ export default function IsoDocumentDetailPage() {
         }
       }
 
+      if (token && action === "phe_duyet") {
+        const officePdfTasks = buildOfficeFileQueue().filter((task) => {
+          if (task.kind !== "main") return false
+          const item = task.docId === docId ? doc : childDocs.find((child) => child.id === task.docId)
+          return !item || isActionAssignee(item, action)
+        })
+        for (const task of officePdfTasks) {
+          try {
+            const pdfRes = await fetch("/api/sign/generate-pdf", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token,
+                docId: task.docId,
+                docType: "iso",
+                fileKind: task.kind,
+                action,
+              }),
+            })
+            const pdfJson = await pdfRes.json()
+            if (!pdfJson.ok || !pdfJson.signedPdfUrl) {
+              pdfError = `${task.label}: ${pdfJson.error || "Kh\u00f4ng t\u1ea1o \u0111\u01b0\u1ee3c PDF ph\u00ea duy\u1ec7t"}`
+              break
+            }
+            if (task.docId === docId) {
+              setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : prev)
+            } else {
+              setChildDocs((rows) => rows.map((child) =>
+                child.id === task.docId ? { ...child, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : child
+              ))
+            }
+          } catch (pdfErr) {
+            pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
+            break
+          }
+        }
+      }
+
       // Restamp PDF tài liệu cũ bị hủy hiệu lực
       if (invalidatedIds.length > 0) {
         void fetch("/api/sign/restamp-pdf", {
@@ -1202,6 +1319,14 @@ export default function IsoDocumentDetailPage() {
   const isOfficeUrl = (url: string | null | undefined) => {
     const clean = url?.split("?")[0].toLowerCase()
     return !!clean && (clean.endsWith(".docx") || clean.endsWith(".xlsx"))
+  }
+
+  const isActionAssignee = (item: IsoDocument, action: PinModalAction) => {
+    if (!userId) return false
+    if (action === "gui_xem_xet") return item.soan_thao_user_id === userId
+    if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return item.xem_xet_user_id === userId
+    if (action === "phe_duyet") return item.phe_duyet_user_id === userId
+    return true
   }
 
   const buildSignFileQueue = (): SignFileTask[] => {
@@ -1263,7 +1388,10 @@ export default function IsoDocumentDetailPage() {
   const generateOfficeFiles = async (token: string | null, action: PinModalAction): Promise<string | null> => {
     const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
     if (!token || noSignActions.includes(action)) return null
-    const queue = buildOfficeFileQueue()
+    const queue = buildOfficeFileQueue().filter((task) => {
+      const item = task.docId === docId ? doc : childDocs.find((child) => child.id === task.docId)
+      return !item || isActionAssignee(item, action)
+    })
     if (queue.length === 0) return null
     for (const task of queue) {
       const officeRes = await fetch("/api/sign/generate-office", {
@@ -1280,7 +1408,12 @@ export default function IsoDocumentDetailPage() {
           setDoc((prev) => prev
             ? {
                 ...prev,
-                ...(task.kind === "main" ? { file_signed_office_url: officeJson.signedOfficeUrl as string, file_signed_office_type: officeJson.outputType as string } : {}),
+                ...(task.kind === "main" && (prev.phan_loai_tl === "con" || prev.loai_tai_lieu === "F")
+                  ? { file_goc_url: officeJson.signedOfficeUrl as string, file_signed_office_url: null, file_signed_office_type: null }
+                  : {}),
+                ...(task.kind === "main" && !(prev.phan_loai_tl === "con" || prev.loai_tai_lieu === "F")
+                  ? { file_signed_office_url: officeJson.signedOfficeUrl as string, file_signed_office_type: officeJson.outputType as string }
+                  : {}),
                 ...(task.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_signed_url: officeJson.signedOfficeUrl as string } : {}),
                 ...(task.kind === "review_request" ? { file_de_nghi_soat_xet_signed_url: officeJson.signedOfficeUrl as string } : {}),
               }
@@ -1290,8 +1423,9 @@ export default function IsoDocumentDetailPage() {
             child.id === task.docId
               ? {
                   ...child,
-                  file_signed_office_url: officeJson.signedOfficeUrl as string,
-                  file_signed_office_type: officeJson.outputType as string,
+                  file_goc_url: officeJson.signedOfficeUrl as string,
+                  file_signed_office_url: null,
+                  file_signed_office_type: null,
                 }
               : child
           ))
@@ -1588,6 +1722,16 @@ export default function IsoDocumentDetailPage() {
     ])
   }
 
+  const inferChildNumberFromFileName = (fileName: string, loaiTaiLieu: string) => {
+    const base = stripFileExtension(fileName).toUpperCase()
+    const escapedType = loaiTaiLieu.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").toUpperCase()
+    const byType = base.match(new RegExp(`(?:^|[-_\\s])${escapedType}0*(\\d{1,4})(?:\\D|$)`))
+    if (byType?.[1]) return String(parseInt(byType[1], 10))
+    const anyChildCode = base.match(/(?:^|[-_\s])(?:F|PL|HD)0*(\d{1,4})(?:\D|$)/)
+    if (anyChildCode?.[1]) return String(parseInt(anyChildCode[1], 10))
+    return null
+  }
+
   const updateChildDraftRow = (rowId: string, patch: Partial<ChildDraftRow>) => {
     setChildDraftRows((rows) => rows.map((row) => row.id === rowId ? { ...row, ...patch } : row))
   }
@@ -1595,6 +1739,12 @@ export default function IsoDocumentDetailPage() {
   const childRecordCode = (row: ChildDraftRow) => {
     const parentCode = form.phan_loai_tl === "con" ? form.ma_tai_lieu_cha : form.ma_tai_lieu
     return buildMaTaiLieuCon(parentCode, row.loai_tai_lieu, row.so_hieu)
+  }
+
+  const isDuplicateChildDraftCode = (row: ChildDraftRow) => {
+    const code = childRecordCode(row).trim().toUpperCase()
+    if (!code) return false
+    return childDraftRows.filter((item) => childRecordCode(item).trim().toUpperCase() === code).length > 1
   }
 
   const getFileNameFromUrl = (url: string | null | undefined) => {
@@ -1606,6 +1756,11 @@ export default function IsoDocumentDetailPage() {
 
   const childFileUrl = (child: IsoDocument) =>
     child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
+
+  const mainFileUrl = doc?.file_signed_pdf_url || doc?.file_signed_office_url || uploadedFileUrl
+  const mainFileName = doc?.file_signed_office_url
+    ? `DOCX/XLSX \u0111\u00e3 c\u1eadp nh\u1eadt tag`
+    : (uploadedFileName || "File t\u00e0i li\u1ec7u")
 
   const renderSavedChildDocs = () => {
     if (childDocs.length === 0) return null
@@ -1641,7 +1796,7 @@ export default function IsoDocumentDetailPage() {
                 {isEditable && (
                   <button
                     type="button"
-                    onClick={() => { setActiveChildUploadRowId(child.id); childFilesInputRef.current?.click() }}
+                    onClick={() => openChildFilePicker(child.id)}
                     disabled={fileUploading}
                     className="shrink-0 rounded-lg border border-dashed border-sky-300 px-2 py-1 text-[10px] font-bold text-sky-700 hover:border-sky-500 hover:bg-sky-50 disabled:opacity-50"
                     title="Thay thế file hồ sơ"
@@ -1889,7 +2044,7 @@ export default function IsoDocumentDetailPage() {
 
         {renderStandardsSelect()}
 
-        {!isReviewForm && (
+        {!isReviewForm && !isCon && (
           <div className="sm:col-span-2">
             <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel}: Tự sinh <span className="text-red-500">*</span></label>
             <input
@@ -2082,6 +2237,9 @@ export default function IsoDocumentDetailPage() {
                     <label className="text-[11px] font-bold text-slate-600">
                       Mã hồ sơ
                       <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
+                      {isDuplicateChildDraftCode(row) && (
+                        <span className="mt-1 block text-[10px] font-bold text-red-600">{"M\u00e3 n\u00e0y \u0111ang tr\u00f9ng trong danh s\u00e1ch"}</span>
+                      )}
                     </label>
                     <label className="text-[11px] font-bold text-slate-600">
                       Loại hồ sơ
@@ -2103,15 +2261,21 @@ export default function IsoDocumentDetailPage() {
                     </label>
                     <div className="text-[11px] font-bold text-slate-600">
                       File hồ sơ
-                      <button
-                        type="button"
-                        onClick={() => { setActiveChildUploadRowId(row.id); childFilesInputRef.current?.click() }}
-                        disabled={!isEditable || fileUploading}
-                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 bg-white px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500 disabled:opacity-50"
-                      >
+                      <label className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 bg-white px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500 ${!isEditable || fileUploading ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
                         <span className="truncate">{row.file_name || "Chọn file"}</span>
                         <Upload size={13} />
-                      </button>
+                        <input
+                          type="file"
+                          accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          disabled={!isEditable || fileUploading}
+                          className="sr-only"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) void handleChildRowFileUpload(f, row.id)
+                            e.target.value = ""
+                          }}
+                        />
+                      </label>
                     </div>
                     <label className="sm:col-span-2 text-[11px] font-bold text-slate-600">
                       Ghi chú
@@ -2354,19 +2518,19 @@ export default function IsoDocumentDetailPage() {
         {!isNew && doc && childDocs.length > 0 && (
           <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-extrabold text-white">Bộ tài liệu</span>
-              <span className="font-bold">{doc.ma_tai_lieu || "Tài liệu cha"}</span>
-              <span>đang được xử lý cùng {childDocs.length} hồ sơ kèm theo.</span>
+              <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-extrabold text-white">{form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}</span>
+              <span className="font-bold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình cha") : (doc.ma_tai_lieu || "Tài liệu cha")}</span>
+              <span>{form.phan_loai_tl === "con" ? `có ${childDocs.length + 1} hồ sơ cùng cấp đang xử lý.` : `đang được xử lý cùng ${childDocs.length} hồ sơ kèm theo.`}</span>
             </div>
             <p className="mt-1 text-xs text-sky-700">
-              Người xem xét/phê duyệt xử lý một bộ duy nhất; khi ký, hệ thống sẽ mở lần lượt file chính và từng hồ sơ con cần ký.
+              {form.phan_loai_tl === "con" ? "Khi ký, hệ thống xử lý lần lượt các hồ sơ trong lô cùng người soạn/xem xét/phê duyệt." : "Người xem xét/phê duyệt xử lý một bộ duy nhất; khi ký, hệ thống sẽ mở lần lượt file chính và từng hồ sơ con cần ký."}
             </p>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 gap-4 ${isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "So\u00e1t x\u00e9t" ? "" : "lg:grid-cols-3"}`}>
           {/* Form chính */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className={`${isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "So\u00e1t x\u00e9t" ? "" : "lg:col-span-2"} space-y-4`}>
             {/* Thông tin cơ bản */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-4">Thông tin tài liệu</h2>
@@ -2472,6 +2636,54 @@ export default function IsoDocumentDetailPage() {
           </div>
 
           {/* Sidebar: File & thông tin */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleFileUpload(f)
+              e.target.value = ""
+            }}
+          />
+          <input
+            ref={childFilesInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              const rowId = activeChildUploadRowIdRef.current || activeChildUploadRowId
+              if (f && rowId) void handleChildRowFileUpload(f, rowId)
+              activeChildUploadRowIdRef.current = null
+              setActiveChildUploadRowId(null)
+              e.target.value = ""
+            }}
+          />
+          <input
+            ref={reviewChangeFileInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleFileUpload(f, "change")
+              e.target.value = ""
+            }}
+          />
+          <input
+            ref={reviewRequestFileInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleFileUpload(f, "review")
+              e.target.value = ""
+            }}
+          />
+
           <div className="space-y-4">
             {/* File đính kèm */}
             {!(isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "Soát xét") && (
@@ -2503,22 +2715,16 @@ export default function IsoDocumentDetailPage() {
                 </div>
               )}
 
-              {!isNew && form.phan_loai_tl !== "con" && childDocs.length > 0 && (
-                <div className="mb-3">
-                  {renderSavedChildDocs()}
-                </div>
-              )}
-
               <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
-                {uploadedFileUrl && !doc?.file_signed_pdf_url ? (
+                {mainFileUrl && !doc?.file_signed_pdf_url ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 rounded-xl bg-white/80 p-3">
                       <FileText size={16} className="text-violet-600 shrink-0" />
-                      <span className="text-xs text-slate-700 flex-1 truncate">{uploadedFileName}</span>
-                      <a href={uploadedFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg">
+                      <span className="text-xs text-slate-700 flex-1 truncate">{mainFileName}</span>
+                      <a href={mainFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Xem file hiện tại">
                         <Eye size={13} className="text-violet-600" />
                       </a>
-                      <a href={uploadedFileUrl} download className="shrink-0 p-1 hover:bg-violet-100 rounded-lg">
+                      <a href={mainFileUrl} download className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Tải file hiện tại">
                         <Download size={13} className="text-violet-600" />
                       </a>
                     </div>
@@ -2638,6 +2844,9 @@ export default function IsoDocumentDetailPage() {
                           <label className="text-[11px] font-bold text-slate-600">
                             Mã hồ sơ
                             <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
+                            {isDuplicateChildDraftCode(row) && (
+                              <span className="mt-1 block text-[10px] font-bold text-red-600">{"M\u00e3 n\u00e0y \u0111ang tr\u00f9ng trong danh s\u00e1ch"}</span>
+                            )}
                           </label>
                           <label className="text-[11px] font-bold text-slate-600">
                             Loại hồ sơ
@@ -2659,14 +2868,20 @@ export default function IsoDocumentDetailPage() {
                           </label>
                           <div className="text-[11px] font-bold text-slate-600">
                             File hồ sơ
-                            <button
-                              type="button"
-                              onClick={() => { setActiveChildUploadRowId(row.id); childFilesInputRef.current?.click() }}
-                              className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500"
-                            >
+                            <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500">
                               <span className="truncate">{row.file_name || "Chọn file"}</span>
                               <Upload size={13} />
-                            </button>
+                              <input
+                                type="file"
+                                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                className="sr-only"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0]
+                                  if (f) void handleChildRowFileUpload(f, row.id)
+                                  e.target.value = ""
+                                }}
+                              />
+                            </label>
                           </div>
                           <label className="col-span-2 text-[11px] font-bold text-slate-600">
                             Ghi chú
@@ -2718,7 +2933,10 @@ export default function IsoDocumentDetailPage() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
-                  if (f && activeChildUploadRowId) void handleChildRowFileUpload(f, activeChildUploadRowId)
+                  const rowId = activeChildUploadRowIdRef.current || activeChildUploadRowId
+                  if (f && rowId) void handleChildRowFileUpload(f, rowId)
+                  activeChildUploadRowIdRef.current = null
+                  setActiveChildUploadRowId(null)
                   e.target.value = ""
                 }}
               />
@@ -2792,18 +3010,6 @@ export default function IsoDocumentDetailPage() {
                 </div>
               )}
 
-              {doc?.file_signed_office_url && (
-                <div className="mt-3 flex items-center gap-2 p-3 bg-indigo-50 rounded-xl">
-                  <CheckCircle2 size={14} className="text-indigo-600 shrink-0" />
-                  <span className="text-xs text-indigo-700 flex-1">DOCX/XLSX có chữ ký</span>
-                  <a href={doc.file_signed_office_url} target="_blank" rel="noreferrer" className="shrink-0">
-                    <Eye size={13} className="text-indigo-600" />
-                  </a>
-                  <a href={doc.file_signed_office_url} download className="shrink-0">
-                    <Download size={13} className="text-indigo-600" />
-                  </a>
-                </div>
-              )}
             </div>
             )}
 

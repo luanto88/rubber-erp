@@ -53,14 +53,7 @@ const IMAGE_TAGS = [
 ] as const
 
 const ALL_TAGS = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
-const CHILD_OFFICE_TAGS = [
-  "{{QR}}",
-  "{{MA_TAI_LIEU}}",
-  "{{LAN_BAN_HANH}}",
-  "{{NGAY_HIEU_LUC}}",
-  "{{TINH_TRANG}}",
-] as const
-const CHILD_OFFICE_TAG_SET = new Set<string>(CHILD_OFFICE_TAGS)
+const CHILD_OFFICE_TAG_SET = new Set<string>([...TEXT_TAGS, "{{QR}}"])
 
 function fmtDate(d: unknown): string {
   if (!d || typeof d !== "string") return ""
@@ -80,6 +73,18 @@ function xmlEscape(value: string): string {
 
 function safeDecodeUri(value: string): string {
   try { return decodeURIComponent(value) } catch { return value }
+}
+
+function sanitizeOutputName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 140) || "ISO"
 }
 
 function getStoragePathCandidatesFromUrl(fileUrl: string | null, bucket: string): string[] {
@@ -159,8 +164,8 @@ function isChildOfficeDoc(doc: Record<string, unknown>): boolean {
   return loaiTaiLieu === "F" || ((loaiTaiLieu === "PL" || loaiTaiLieu === "HD") && phanLoaiTl === "con")
 }
 
-function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string): string {
-  if (action === "gui_xem_xet") return "Chờ xem xét"
+function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string, capTl?: string): string {
+  if (action === "gui_xem_xet") return capTl === "Cấp 2" ? "Chờ phê duyệt" : "Chờ xem xét"
   if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
   if (action === "phe_duyet") return "Có hiệu lực"
   if (action === "tra_ve" || action === "khong_xem_xet" || action === "tra_ve_nhap") return "Trả về"
@@ -174,13 +179,14 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
 }
 
 function buildTextValues(doc: Record<string, unknown>, statusText: string): Record<string, string> {
+  const revision = String(doc.lan_ban_hanh ?? "").padStart(2, "0")
   return {
     "{{MA_TAI_LIEU}}": String(doc.ma_tai_lieu || ""),
     "{{TEN_TAI_LIEU}}": String(doc.ten_tai_lieu || ""),
     "{{PHONG_BAN}}": String(doc.phong_ban || ""),
     "{{LOAI_TAI_LIEU}}": String(doc.loai_tai_lieu || ""),
-    "{{LAN_BAN_HANH}}": String(doc.lan_ban_hanh ?? ""),
-    "{{LAN_SUA_DOI}}": String(doc.lan_ban_hanh ?? ""),
+    "{{LAN_BAN_HANH}}": revision,
+    "{{LAN_SUA_DOI}}": revision,
     "{{NGAY_HIEU_LUC}}": fmtDate(doc.ngay_hieu_luc || doc.ky_phe_duyet_at || doc.updated_at),
     "{{TINH_TRANG}}": statusText,
     "{{MA_TAI_LIEU_CU}}": String(doc.ma_tai_lieu_cu || ""),
@@ -446,13 +452,16 @@ function getFileUrl(doc: Record<string, unknown>, fileKind: FileKind, preferOrig
   if (fileKind === "review_request") {
     return (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null
   }
-  if (preferOriginal) return doc.file_goc_url as string | null
+  if (preferOriginal) return (doc.file_template_url || doc.file_goc_url) as string | null
   return (doc.file_signed_office_url || doc.file_goc_url) as string | null
 }
 
-function updatePayload(fileKind: FileKind, publicUrl: string, ext: string): Record<string, string> {
+function updatePayload(fileKind: FileKind, publicUrl: string, ext: string, replaceOriginal = false): Record<string, string | null> {
   if (fileKind === "change_request") return { file_phieu_yeu_cau_thay_doi_signed_url: publicUrl }
   if (fileKind === "review_request") return { file_de_nghi_soat_xet_signed_url: publicUrl }
+  if (replaceOriginal) {
+    return { file_goc_url: publicUrl, file_signed_office_url: null, file_signed_office_type: null }
+  }
   return { file_signed_office_url: publicUrl, file_signed_office_type: ext }
 }
 
@@ -493,7 +502,14 @@ export async function POST(req: NextRequest) {
       .single()
     if (docErr || !doc) return NextResponse.json({ error: "Không tìm thấy tài liệu" }, { status: 404 })
     if (tokenDocId !== docId && doc.parent_doc_id !== tokenDocId) {
-      return NextResponse.json({ error: "Token không hợp lệ" }, { status: 401 })
+      const { data: tokenDoc } = await supabaseAdmin
+        .from("iso_documents")
+        .select("id, parent_doc_id")
+        .eq("id", tokenDocId)
+        .eq("factory_id", factoryId)
+        .single()
+      const sameChildBatch = !!tokenDoc?.parent_doc_id && tokenDoc.parent_doc_id === doc.parent_doc_id
+      if (!sameChildBatch) return NextResponse.json({ error: "Token khong hop le" }, { status: 401 })
     }
 
     const step = getStep(doc, userId)
@@ -506,7 +522,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File không phải DOCX/XLSX" }, { status: 400 })
     }
 
-    const statusText = getTargetStatusText(action, String(doc.trang_thai || ""))
+    const statusText = getTargetStatusText(action, String(doc.trang_thai || ""), String(doc.cap_tl || ""))
     const values = buildTextValues(doc, statusText)
     const stepTags = getStepTags(step)
     const qrBuffer = await QRCode.toBuffer(`${APP_URL}/dashboard/iso/documents/${docId}`, { width: 160, margin: 1 })
@@ -518,9 +534,9 @@ export async function POST(req: NextRequest) {
       imageByTag[stepTags.signatureTag] = sigBuffer
     }
     const requiredTags = isChildOffice
-      ? ["{{QR}}"]
+      ? []
       : [stepTags.signatureTag, stepTags.nameTag]
-    const defaultQrWhenMissing = isChildOffice
+    const defaultQrWhenMissing = false
     const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 
@@ -528,7 +544,8 @@ export async function POST(req: NextRequest) {
       ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
       : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
 
-    const outputPath = `${factoryId}/iso/office-signed/${docId}_${fileKind}_${Date.now()}.${ext}`
+    const namePrefix = sanitizeOutputName(`${String(doc.ma_tai_lieu || "ISO")} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
+    const outputPath = `${factoryId}/iso/office-signed/${namePrefix}_${Date.now()}.${ext}`
     const { error: uploadErr } = await supabaseAdmin.storage
       .from("iso-documents")
       .upload(outputPath, result.buffer, {
@@ -542,7 +559,7 @@ export async function POST(req: NextRequest) {
     const { data: urlData } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(outputPath)
     const { error: updateErr } = await supabaseAdmin
       .from("iso_documents")
-      .update(updatePayload(fileKind, urlData.publicUrl, ext))
+      .update(updatePayload(fileKind, urlData.publicUrl, ext, isChildOffice && fileKind === "main"))
       .eq("id", docId)
       .eq("factory_id", factoryId)
     if (updateErr) return NextResponse.json({ error: "Lưu URL Office đã ký thất bại: " + updateErr.message }, { status: 500 })

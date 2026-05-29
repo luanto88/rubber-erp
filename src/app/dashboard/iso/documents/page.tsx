@@ -93,9 +93,19 @@ export default function IsoDocumentsPage() {
     return true
   })
   const isChildDoc = (item: IsoDocument) => item.phan_loai_tl === "con" || !!item.parent_doc_id
-  const parentRows = filtered.filter((item) => !isChildDoc(item))
+  const docById = filtered.reduce<Record<string, IsoDocument>>((acc, item) => {
+    acc[item.id] = item
+    return acc
+  }, {})
+  const shouldNestChild = (item: IsoDocument) => {
+    if (!isChildDoc(item) || !item.parent_doc_id) return false
+    const parent = docById[item.parent_doc_id]
+    if (parent?.trang_thai === "co_hieu_luc" && item.trang_thai !== "co_hieu_luc") return false
+    return true
+  }
+  const parentRows = filtered.filter((item) => !isChildDoc(item) || !shouldNestChild(item))
   const childrenByParent = filtered
-    .filter((item) => isChildDoc(item) && item.parent_doc_id)
+    .filter((item) => shouldNestChild(item))
     .reduce<Record<string, IsoDocument[]>>((acc, item) => {
       const parentId = item.parent_doc_id as string
       acc[parentId] = [...(acc[parentId] || []), item]

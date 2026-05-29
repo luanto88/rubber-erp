@@ -556,3 +556,19 @@ NMCB-QT01-F01 (03-28/05/2026) Chờ xem xét
   - PDF: `file_signed_pdf_url`.
   - DOCX/XLSX: `file_signed_office_url`, kèm `file_signed_office_type`.
 - Frontend phải cập nhật state `childDocs` ngay sau khi generate thành công để nút con mắt mở bản mới, không chờ reload và không mở nhầm file upload gốc.
+
+---
+
+## Cập nhật mới nhất (2026-05-28, phiên chốt) - soạn thảo hồ sơ con
+
+Mục này thay thế mọi quy tắc cũ trong file này nếu có mâu thuẫn với logic hồ sơ con.
+
+- Hồ sơ con luôn là bản ghi riêng trong `iso_documents`, liên kết cha bằng `parent_doc_id`.
+- Hồ sơ con tạo cùng lúc với tài liệu cha mới là một phần của bộ tài liệu cha khi xem xét/phê duyệt. Badge sidebar và `Việc của tôi` gom bộ này thành một đầu việc.
+- Hồ sơ con soạn thảo mới cho một quy trình/tài liệu cha đã có hiệu lực là đầu việc độc lập cho tới khi hồ sơ đó được phê duyệt. Sau khi lưu hồ sơ mới phải điều hướng tới trang chi tiết hồ sơ, không điều hướng về trang cha.
+- Trang tài liệu cha đang có hiệu lực chỉ hiển thị hồ sơ con đã có hiệu lực. Hồ sơ con nháp/chờ xem xét/chờ phê duyệt không được tự nhảy vào panel file của tài liệu cha.
+- Trong `Việc của tôi`, hồ sơ con độc lập phải ghi rõ `Cần xem xét N hồ sơ của quy trình {MA_CHA}` hoặc `Cần phê duyệt N hồ sơ của quy trình {MA_CHA}`, không ghi nhầm là `Bộ tài liệu + N hồ sơ`.
+- Mã tài liệu/hồ sơ (`ma_tai_lieu`) phải duy nhất trong cùng `factory_id` cho cả tài liệu cha và hồ sơ con. Form phải chặn trùng mã trong các dòng nháp và chặn trùng với dữ liệu đã có trong `iso_documents`.
+- Với hồ sơ DOCX/XLSX, engine dùng toàn bộ bộ tag chữ chuẩn của ISO cộng `{{QR}}`; tag đúng có thì điền, tag đúng thiếu thì bỏ qua, tag sai/gần giống dạng `{{...}}` thì chặn và yêu cầu thay file.
+- Với hồ sơ cấp 2 gửi thẳng phê duyệt, artifact DOCX/XLSX phải ghi trạng thái `Chờ phê duyệt`, không ghi `Chờ xem xét`.
+- Nút xem file ưu tiên `file_signed_pdf_url`, rồi `file_signed_office_url`, rồi `file_goc_url`; UI không hiển thị trùng hai dòng Office có cùng nội dung.
