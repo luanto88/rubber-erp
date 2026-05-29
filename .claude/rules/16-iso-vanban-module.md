@@ -382,14 +382,16 @@ doTransition:
      POST /api/sign/generate-pdf { token, docId, docType, signaturePlacement, skipTagLabels }
 
      Server (generate-pdf):
-       — Phát hiện non-PDF (ext ≠ "pdf") → trả về { ok: true, skipped: true, reason: "non-pdf" }
+       — Phát hiện non-PDF (ext ≠ "pdf"):
+           • action=phe_duyet + signFileKind=main → convert qua CloudConvert; nếu CloudConvert lỗi (hết credit v.v.) → trả về { ok: true, skipped: true, reason: "office-convert-failed" }
+           • Các bước khác → trả về { ok: true, skipped: true, reason: "non-pdf" }
        — File PDF: verify JWT → lưu placement → quét tag header/footer → điền tag tìm thấy
           → nhúng chữ ký body lũy kế (tất cả bước đã ký) + tên người ký nếu bật → upload PDF
 
      UI xử lý response:
        Nếu response.skipped === true:
-         → toast "File không phải PDF — chữ ký số không được nhúng, đã lưu workflow"
-         → KHÔNG cập nhật file_signed_pdf_url
+         → toast tương ứng lý do (non-pdf hoặc office-convert-failed)
+         → KHÔNG cập nhật file_signed_pdf_url; workflow vẫn được lưu bình thường
        Nếu response.ok (PDF):
          → Cập nhật file_signed_pdf_url
          → Nếu response.metaMismatched.length > 0: hiển thị warning banner
@@ -934,7 +936,7 @@ await supabase.from("doc_approval_log").insert({
 Mỗi lần generate PDF, server thực hiện theo thứ tự:
 
 1. **Detect non-PDF**: nếu `file_goc_url` có extension khác `pdf`:
-   - Nếu `action === "phe_duyet"` VÀ `signFileKind === "main"`: **convert sang PDF qua CloudConvert** (`convertOfficeUrlToPdfDocumentWithRetry`) rồi tiếp tục flow bình thường — không trả về `skipped`
+   - Nếu `action === "phe_duyet"` VÀ `signFileKind === "main"`: **convert sang PDF qua CloudConvert** (`convertOfficeUrlToPdfDocumentWithRetry`) rồi tiếp tục flow bình thường — nếu CloudConvert lỗi (hết credit v.v.) → trả về `{ ok: true, skipped: true, reason: "office-convert-failed" }`, workflow vẫn được chuyển trạng thái
    - Tất cả trường hợp khác: trả về `{ ok: true, skipped: true, reason: "non-pdf" }` ngay lập tức (sau khi đã lưu placement nếu có)
 2. **Xác định signer hiện tại** theo `userId` so với `soan_thao_user_id / xem_xet_user_id / phe_duyet_user_id`
 3. **Lưu placement** của bước hiện tại vào DB (`soan_thao_placement / xem_xet_placement / phe_duyet_placement`)
@@ -1194,6 +1196,8 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | Module ISO: form soạn thảo/soát xét theo 4 trường hợp TH1-TH4                                                           | ✅ Hoàn thành (2026-05-26)       |
 | Module ISO: soát xét lọc tài liệu/hồ sơ `Có hiệu lực` theo Tiêu chuẩn → Phòng ban → Loại → Mã                           | ✅ Hoàn thành (2026-05-26)       |
 | Module ISO: soát xét lưu `ma_tai_lieu_cu`, lý do/nội dung soát xét, đổi mã mới, file đính kèm                           | ✅ Hoàn thành (2026-05-26)       |
+| CloudConvert graceful fallback — `office-convert-failed` skipped thay vì 500 khi hết credit                              | ✅ Hoàn thành (2026-05-29)       |
+| Module ISO: khu hồ sơ con hiển thị đúng sau `gui_xem_xet` (`isEditable \|\| childDocs.length > 0`)                      | ✅ Hoàn thành (2026-05-29)       |
 | Module Văn bản (Giai đoạn 3)                                                                                            | ⏳ Pending                       |
 | In-app notification bell (Realtime)                                                                                     | ⏳ Pending                       |
 | Trang in (bypass sidebar)                                                                                               | ⏳ Pending                       |
@@ -1481,8 +1485,10 @@ Thay thế `LibreOffice` bằng **CloudConvert API** trong `generate-pdf/route.t
 CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
 ```
 
-### 2) Xóa duplicate "Hồ sơ con" khỏi right panel
+### 2) Khu hồ sơ con — logic hiển thị mới (2026-05-29)
 
-- Section "Hồ sơ con của tài liệu này" trong right panel của form cha đã bị disable (`false &&`).
-- Khu quản lý hồ sơ con chỉ còn ở **left form** (col-span-2), bên dưới form thông tin tài liệu.
-- Right panel (`[id]/page.tsx`) không còn render `childDraftRows` cho tài liệu cha.
+- Dead `false &&` block đã bị xóa hoàn toàn.
+- Section "Hồ sơ con của tài liệu này" hiển thị khi: `(isEditable || (!isNew && childDocs.length > 0)) && phan_loai_tl !== "con" && chon_quy_trinh !== "Soát xét"` — tức là tiếp tục hiển thị ngay cả sau khi gửi xem xét/phê duyệt nếu đã có hồ sơ lưu.
+- `renderSavedChildDocs()` được gọi luôn (không bị guard bởi `isEditable`) — hồ sơ đã lưu hiển thị ở mọi trạng thái.
+- Nút "Thêm hồ sơ" và draft rows chỉ hiển thị khi `isEditable`.
+- Empty state chỉ hiển thị khi `childDraftRows.length === 0 && childDocs.length === 0`.
