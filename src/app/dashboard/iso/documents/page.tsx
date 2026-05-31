@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
@@ -33,6 +33,7 @@ export default function IsoDocumentsPage() {
   const [filterTrangThai, setFilterTrangThai] = useState<IsoTrangThai | "">("")
   const [filterCap, setFilterCap] = useState("")
   const [filterStandard, setFilterStandard] = useState("")
+  const [filterPhongBan, setFilterPhongBan] = useState("")
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -90,8 +91,13 @@ export default function IsoDocumentsPage() {
     if (filterLoai && d.loai_tai_lieu !== filterLoai) return false
     if (filterTrangThai && d.trang_thai !== filterTrangThai) return false
     if (filterCap && d.cap_tl !== filterCap) return false
+    if (filterPhongBan && d.phong_ban !== filterPhongBan) return false
     return true
   })
+  const phongBanOptions = useMemo(
+    () => [...new Set(docs.map((d) => d.phong_ban).filter((pb): pb is string => !!pb))].sort(),
+    [docs],
+  )
   const isChildDoc = (item: IsoDocument) => item.phan_loai_tl === "con" || !!item.parent_doc_id
   const docById = filtered.reduce<Record<string, IsoDocument>>((acc, item) => {
     acc[item.id] = item
@@ -211,6 +217,16 @@ export default function IsoDocumentsPage() {
             <option value="">Tất cả cấp</option>
             <option value="Cấp 1">Cấp 1</option>
             <option value="Cấp 2">Cấp 2</option>
+          </select>
+          <select
+            value={filterPhongBan}
+            onChange={(e) => setFilterPhongBan(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">Tất cả phòng ban</option>
+            {phongBanOptions.map((pb) => (
+              <option key={pb} value={pb}>{pb}</option>
+            ))}
           </select>
         </div>
 

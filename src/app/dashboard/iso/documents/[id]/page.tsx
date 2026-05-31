@@ -81,6 +81,7 @@ type SignPlacement = {
   y: number
   width: number
   height: number
+  showSignature?: boolean
   showSignerName?: boolean
   nameX?: number
   nameY?: number
@@ -190,6 +191,7 @@ export default function IsoDocumentDetailPage() {
   const [fileUploading, setFileUploading] = useState(false)
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null)
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
+  const [convertingToPdf, setConvertingToPdf] = useState(false)
   const [childUploadType, setChildUploadType] = useState("F")
   const [childUploadStartNo, setChildUploadStartNo] = useState("1")
   const [childUploadFiles, setChildUploadFiles] = useState<ChildUploadFile[]>([])
@@ -263,6 +265,7 @@ export default function IsoDocumentDetailPage() {
     sigImgUrl: string | null
     previewSignatures: PreviewSignature[]
     signerName: string
+    showSignature: boolean
     showSignerName: boolean
   } | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -589,6 +592,7 @@ export default function IsoDocumentDetailPage() {
 
   const trangThai = doc?.trang_thai || "draft"
   const userId = user?.id ?? ""
+  const isCon = doc ? (doc.phan_loai_tl === "con" || doc.loai_tai_lieu === "F") : false
   // Phải là đúng người được chỉ định VÀ có quyền
   const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
@@ -1257,20 +1261,72 @@ export default function IsoDocumentDetailPage() {
               }),
             })
             const pdfJson = await pdfRes.json()
-            if (!pdfJson.ok || !pdfJson.signedPdfUrl) {
+            if (pdfJson.skipped) {
+              // File chua duoc convert sang PDF - bo qua an toan, workflow van tiep tuc
+            } else if (!pdfJson.ok || !pdfJson.signedPdfUrl) {
               pdfError = `${task.label}: ${pdfJson.error || "Kh\u00f4ng t\u1ea1o \u0111\u01b0\u1ee3c PDF ph\u00ea duy\u1ec7t"}`
               break
-            }
-            if (task.docId === docId) {
-              setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : prev)
             } else {
-              setChildDocs((rows) => rows.map((child) =>
-                child.id === task.docId ? { ...child, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : child
-              ))
+              if (task.docId === docId) {
+                setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : prev)
+              } else {
+                setChildDocs((rows) => rows.map((child) =>
+                  child.id === task.docId ? { ...child, file_signed_pdf_url: pdfJson.signedPdfUrl as string } : child
+                ))
+              }
             }
           } catch (pdfErr) {
             pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
             break
+          }
+        }
+      }
+
+      // Auto-convert Office → PDF sau phê duyệt nếu được bật
+      if (action === "phe_duyet") {
+        const docsToAutoConvert: Array<{ id: string; file_goc_url: string | null; auto_convert_pdf?: boolean | null }> = []
+        if (doc.auto_convert_pdf && isOfficeUrl(doc.file_goc_url)) {
+          docsToAutoConvert.push({ id: docId, file_goc_url: doc.file_goc_url, auto_convert_pdf: true })
+        }
+        for (const child of childDocs) {
+          if (child.auto_convert_pdf && isOfficeUrl(child.file_goc_url)) {
+            docsToAutoConvert.push({ id: child.id, file_goc_url: child.file_goc_url, auto_convert_pdf: true })
+          }
+        }
+        if (docsToAutoConvert.length > 0) {
+          showToast(true, "Đang chuyển file Office sang PDF...")
+          let convertOk = 0
+          let convertFail = 0
+          for (const target of docsToAutoConvert) {
+            try {
+              const res = await fetch("/api/sign/convert-office", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ docId: target.id, factoryId, fileKind: "main" }),
+              })
+              const json = await res.json()
+              if (json.ok && json.pdfUrl) {
+                convertOk++
+                if (target.id === docId) {
+                  setDoc((prev) => prev ? { ...prev, file_goc_url: json.pdfUrl as string } : prev)
+                } else {
+                  setChildDocs((rows) => rows.map((child) =>
+                    child.id === target.id ? { ...child, file_goc_url: json.pdfUrl as string } : child
+                  ))
+                }
+              } else {
+                convertFail++
+              }
+            } catch {
+              convertFail++
+            }
+          }
+          if (convertFail === 0) {
+            showToast(true, `Đã chuyển ${convertOk} file sang PDF thành công!`)
+          } else if (convertOk > 0) {
+            showToast(false, `Chuyển PDF: ${convertOk} thành công, ${convertFail} thất bại`)
+          } else {
+            showToast(false, "Không thể chuyển sang PDF — vui lòng chuyển thủ công")
           }
         }
       }
@@ -1319,6 +1375,35 @@ export default function IsoDocumentDetailPage() {
   const isOfficeUrl = (url: string | null | undefined) => {
     const clean = url?.split("?")[0].toLowerCase()
     return !!clean && (clean.endsWith(".docx") || clean.endsWith(".xlsx"))
+  }
+
+  const handleConvertToPdf = async (targetDocId: string, isChild: boolean) => {
+    if (!factoryId || !targetDocId || targetDocId === "new-doc") return
+    setConvertingToPdf(true)
+    setSaveError(null)
+    try {
+      const res = await fetch("/api/sign/convert-office", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: targetDocId, factoryId }),
+      })
+      const json = await res.json()
+      if (json.skipped) return // da la PDF
+      if (!res.ok || !json.ok) throw new Error(json.error || "Chuyen doi that bai")
+      if (isChild) {
+        setChildDocs((rows) => rows.map((child) =>
+          child.id === targetDocId ? { ...child, file_goc_url: json.pdfUrl as string } : child
+        ))
+      } else {
+        setUploadedFileUrl(json.pdfUrl as string)
+        setUploadedFileName((json.pdfUrl as string).split("/").pop()?.split("?")[0] || "converted.pdf")
+        setDoc((prev) => prev ? { ...prev, file_goc_url: json.pdfUrl as string } : prev)
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Loi chuyen doi sang PDF")
+    } finally {
+      setConvertingToPdf(false)
+    }
   }
 
   const isActionAssignee = (item: IsoDocument, action: PinModalAction) => {
@@ -1483,6 +1568,7 @@ export default function IsoDocumentDetailPage() {
       sigImgUrl: sigUrlData.publicUrl,
       previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(),
       signerName: user.full_name || user.username || "",
+      showSignature: true,
       showSignerName: true,
     })
   }
@@ -1566,6 +1652,7 @@ export default function IsoDocumentDetailPage() {
           // Không render lớp preview nữa để tránh đè 2 lần.
           previewSignatures: useSignedPdfAsBackground ? [] : buildPreviewSignatures(),
           signerName: user.full_name || user.username || "",
+          showSignature: true,
           showSignerName: true,
         })
         return
@@ -1588,6 +1675,7 @@ export default function IsoDocumentDetailPage() {
       y: pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale),
       width: sigW / canvasScale,
       height: sigH / canvasScale,
+      showSignature: placementModal.showSignature,
       showSignerName: placementModal.showSignerName,
       nameX: placementModal.nameX / canvasScale,
       nameY: pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale),
@@ -1802,6 +1890,17 @@ export default function IsoDocumentDetailPage() {
                     title="Thay thế file hồ sơ"
                   >
                     Thay file
+                  </button>
+                )}
+                {isEditable && isOfficeUrl(child.file_goc_url) && (
+                  <button
+                    type="button"
+                    onClick={() => void handleConvertToPdf(child.id, true)}
+                    disabled={convertingToPdf}
+                    className="shrink-0 rounded-lg bg-violet-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                    title="Chuyển file Office sang PDF để ký số"
+                  >
+                    {convertingToPdf ? "..." : "PDF"}
                   </button>
                 )}
               </div>
@@ -2213,86 +2312,6 @@ export default function IsoDocumentDetailPage() {
           </select>
         </div>
 
-        {!isReviewForm && isCon && (
-          <div className="sm:col-span-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-extrabold text-sky-800">Thêm hồ sơ</p>
-                <p className="text-[11px] text-sky-700">Mỗi dòng là một hồ sơ riêng của tài liệu cha đã chọn.</p>
-              </div>
-              <button
-                type="button"
-                onClick={addChildDraftRow}
-                disabled={!isEditable || !selectedParentDocId}
-                className="rounded-lg border border-sky-500 !bg-sky-600 px-3 py-1.5 text-xs font-bold !text-white shadow-sm hover:!bg-sky-700 disabled:cursor-not-allowed disabled:!border-slate-200 disabled:!bg-slate-100 disabled:!text-slate-400"
-              >
-                Thêm hồ sơ
-              </button>
-            </div>
-            <div className="space-y-3">
-              {renderSavedChildDocs()}
-              {childDraftRows.map((row) => (
-                <div key={row.id} className="rounded-xl bg-white p-3 ring-1 ring-sky-100">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Mã hồ sơ
-                      <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
-                      {isDuplicateChildDraftCode(row) && (
-                        <span className="mt-1 block text-[10px] font-bold text-red-600">{"M\u00e3 n\u00e0y \u0111ang tr\u00f9ng trong danh s\u00e1ch"}</span>
-                      )}
-                    </label>
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Loại hồ sơ
-                      <select value={row.loai_tai_lieu} onChange={(e) => updateChildDraftRow(row.id, { loai_tai_lieu: e.target.value })} disabled={!isEditable} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs disabled:bg-slate-50">
-                        {childTypeOptions.map((type) => <option key={type} value={type}>{type} - {childTypeLabelMap[type]}</option>)}
-                      </select>
-                    </label>
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Tên hồ sơ
-                      <input value={row.ten_tai_lieu} onChange={(e) => updateChildDraftRow(row.id, { ten_tai_lieu: e.target.value })} disabled={!isEditable} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs disabled:bg-slate-50" />
-                    </label>
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Số hiệu
-                      <input type="number" min="1" value={row.so_hieu} onChange={(e) => updateChildDraftRow(row.id, { so_hieu: e.target.value })} disabled={!isEditable} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs disabled:bg-slate-50" />
-                    </label>
-                    <label className="text-[11px] font-bold text-slate-600">
-                      Lần ban hành
-                      <input type="number" min="0" value={row.lan_ban_hanh} onChange={(e) => updateChildDraftRow(row.id, { lan_ban_hanh: e.target.value })} disabled={!isEditable} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs disabled:bg-slate-50" />
-                    </label>
-                    <div className="text-[11px] font-bold text-slate-600">
-                      File hồ sơ
-                      <label className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 bg-white px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500 ${!isEditable || fileUploading ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
-                        <span className="truncate">{row.file_name || "Chọn file"}</span>
-                        <Upload size={13} />
-                        <input
-                          type="file"
-                          accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                          disabled={!isEditable || fileUploading}
-                          className="sr-only"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0]
-                            if (f) void handleChildRowFileUpload(f, row.id)
-                            e.target.value = ""
-                          }}
-                        />
-                      </label>
-                    </div>
-                    <label className="sm:col-span-2 text-[11px] font-bold text-slate-600">
-                      Ghi chú
-                      <input value={row.ghi_chu} onChange={(e) => updateChildDraftRow(row.id, { ghi_chu: e.target.value })} disabled={!isEditable} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs disabled:bg-slate-50" />
-                    </label>
-                  </div>
-                  <button type="button" onClick={() => setChildDraftRows((rows) => rows.filter((item) => item.id !== row.id))} disabled={!isEditable} className="mt-2 text-[11px] font-bold text-red-600 hover:text-red-700 disabled:opacity-50">
-                    Xóa dòng
-                  </button>
-                </div>
-              ))}
-              {childDraftRows.length === 0 && (
-                <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ nào. Chọn tài liệu cha rồi bấm Thêm hồ sơ.</p>
-              )}
-            </div>
-          </div>
-        )}
 
         {!isCon && (
           <div className="sm:col-span-2">
@@ -2737,6 +2756,32 @@ export default function IsoDocumentDetailPage() {
                         {fileUploading ? "Đang tải..." : "Thay file"}
                       </button>
                     )}
+                    {isEditable && isOfficeUrl(uploadedFileUrl || doc?.file_goc_url) && (
+                      <button
+                        onClick={() => void handleConvertToPdf(docId, false)}
+                        disabled={convertingToPdf || isNew}
+                        title={isNew ? "Lưu tài liệu trước khi chuyển đổi" : "Chuyển file Office sang PDF để ký số"}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl disabled:opacity-50 transition-all"
+                      >
+                        <FileText size={13} />
+                        {convertingToPdf ? "Đang chuyển..." : "Chuyển sang PDF"}
+                      </button>
+                    )}
+                    {!isNew && isOfficeUrl(doc?.file_goc_url) && (
+                      <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition-all">
+                        <input
+                          type="checkbox"
+                          checked={!!doc?.auto_convert_pdf}
+                          onChange={async (e) => {
+                            const val = e.target.checked
+                            setDoc((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
+                            await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", docId)
+                          }}
+                          className="rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                        />
+                        <span className="text-[11px] font-medium text-slate-700">Tự động chuyển sang PDF sau phê duyệt</span>
+                      </label>
+                    )}
                   </div>
                 ) : !doc?.file_signed_pdf_url ? (
                   isEditable && (
@@ -3015,10 +3060,18 @@ export default function IsoDocumentDetailPage() {
                   <ChevronRight size={16} className="text-slate-600" />
                 </button>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-600">
+              <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                 <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700 border border-amber-200">
                   Không đặt ra ngoài ô chứa
                 </span>
+                {isCon && (
+                  <button
+                    onClick={() => setPlacementModal((p) => p ? { ...p, showSignature: !p.showSignature } : null)}
+                    className="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 transition-all"
+                  >
+                    {placementModal.showSignature ? "Ẩn chữ ký (X)" : "Hiện chữ ký"}
+                  </button>
+                )}
                 <button
                   onClick={() => setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)}
                   className="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 transition-all"
@@ -3109,9 +3162,24 @@ export default function IsoDocumentDetailPage() {
                         <img
                           src={placementModal.sigImgUrl}
                           alt="chữ ký"
-                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: "block" }}
+                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: placementModal.showSignature ? "block" : "none" }}
                           draggable={false}
                         />
+                        {!placementModal.showSignature && (
+                          <div style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: "rgba(124,58,237,0.08)",
+                            fontSize: 11,
+                            color: "#7c3aed",
+                            fontWeight: 600,
+                          }}>
+                            Chữ ký đã ẩn
+                          </div>
+                        )}
                         <span style={{
                           position: "absolute",
                           top: -20,

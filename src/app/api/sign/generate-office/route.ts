@@ -408,7 +408,7 @@ async function renderXlsx(
           const imageId = workbook.addImage({ base64: imageByTag[text].toString("base64"), extension: "png" })
           sheet.addImage(imageId, {
             tl: { col: Number(cell.col) - 1, row: Number(cell.row) - 1 },
-            ext: text === "{{QR}}" ? { width: 96, height: 96 } : { width: 160, height: 72 },
+            ext: text === "{{QR}}" ? { width: 46, height: 46 } : { width: 160, height: 72 },
           })
           return
         }
@@ -429,7 +429,7 @@ async function renderXlsx(
       const imageId = workbook.addImage({ base64: qrBuffer.toString("base64"), extension: "png" })
       firstSheet.addImage(imageId, {
         tl: { col: 7, row: 0 },
-        ext: { width: 45, height: 45 },
+        ext: { width: 46, height: 46 },
       })
       diagnostics.tagsFound.push("{{QR}}")
       diagnostics.imagesInserted.push("{{QR}}:default-top-right")

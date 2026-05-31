@@ -55,6 +55,7 @@ export type IsoDocument = {
   phan_loai_tl: string | null
   parent_doc_id?: string | null
   standards?: IsoStandard[]
+  auto_convert_pdf?: boolean | null
   created_by: string | null
   created_at: string
   updated_at: string

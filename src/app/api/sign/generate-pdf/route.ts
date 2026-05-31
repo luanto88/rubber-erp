@@ -24,6 +24,7 @@ type SignPlacement = {
   y: number
   width: number
   height: number
+  showSignature?: boolean
   showSignerName?: boolean
   nameX?: number
   nameY?: number
@@ -589,7 +590,7 @@ async function fillMetadataPlaceholders(
             isMismatched = true
           }
         }
-        // Không fill tag bị phát hiện là mismatch — yêu cầu người dùng sửa template
+        // Không fill tag bị phát hiện là mismatch - yêu cầu người dùng sửa template
         if (isMismatched) continue
 
         for (const header of headerPatterns) {
@@ -813,7 +814,7 @@ async function convertOfficeUrlToPdfDocument(fileUrl: string | null): Promise<PD
     }
   }
   if (waitJson.data?.status !== "finished") {
-    throw new Error(`CloudConvert timeout sau ${MAX_WAIT_MS / 1000}s — job ${jobId} chua hoan thanh`)
+    throw new Error(`CloudConvert timeout sau ${MAX_WAIT_MS / 1000}s - job ${jobId} chua hoan thanh`)
   }
   const exportTask = waitJson.data.tasks?.find((task) => task.name === "export-pdf" || task.operation === "export/url")
   const pdfUrl = exportTask?.result?.files?.[0]?.url
@@ -858,10 +859,10 @@ export async function POST(req: NextRequest) {
       skipTagLabels?: string[]
     } = body
 
-    console.log("[generate-pdf] called â€” docId:", docId, "docType:", docType, "hasPlacement:", !!signaturePlacement)
+    console.log("[generate-pdf] called - docId:", docId, "docType:", docType, "hasPlacement:", !!signaturePlacement)
 
     if (!token || !docId || !docType) {
-      console.error("[generate-pdf] missing params â€” token:", !!token, "docId:", !!docId, "docType:", !!docType)
+      console.error("[generate-pdf] missing params - token:", !!token, "docId:", !!docId, "docType:", !!docType)
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
@@ -895,7 +896,7 @@ export async function POST(req: NextRequest) {
     }
 
     const doc = docData as Record<string, unknown>
-    const maTl = (doc.ma_tai_lieu as string) || "â€”"
+    const maTl = (doc.ma_tai_lieu as string) || "-"
     const lanBanHanh = (doc.lan_ban_hanh as number) ?? 0
     const lsStr = String(lanBanHanh).padStart(2, "0")
     const trangThai = doc.trang_thai as string
@@ -927,7 +928,7 @@ export async function POST(req: NextRequest) {
       .single()
     if (placementLoadErr) {
       return NextResponse.json(
-        { error: "Không load được placements — migration 20260524_iso_signature_placement.sql chưa chạy: " + placementLoadErr.message },
+        { error: "Không load được placements - migration 20260524_iso_signature_placement.sql chưa chạy: " + placementLoadErr.message },
         { status: 500 },
       )
     }
@@ -1019,23 +1020,13 @@ export async function POST(req: NextRequest) {
     ) as string | null
     console.log("[generate-pdf] file_goc_url:", fileGocUrl)
 
-    // Non-PDF files: placement already saved above; skip PDF generation gracefully
+    // Non-PDF files: always skip - user must pre-convert via /api/sign/convert-office
     if (fileGocUrl && !originalPages) {
       const cleanUrl = fileGocUrl.split("?")[0]
       const ext = cleanUrl.split(".").pop()?.toLowerCase()
       if (ext !== "pdf") {
-        console.log("[generate-pdf] non-PDF file (ext:", ext, ") â€” skipping PDF generation")
-        if (action !== "phe_duyet" || signFileKind !== "main") {
-          return NextResponse.json({ ok: true, skipped: true, reason: "non-pdf" })
-        }
-        try {
-          originalPages = await convertOfficeUrlToPdfDocumentWithRetry((doc.file_signed_office_url as string | null) || fileGocUrl)
-          didApplyStamping = true
-        } catch (convErr) {
-          const convMsg = convErr instanceof Error ? convErr.message : String(convErr)
-          console.error("[generate-pdf] Office→PDF convert failed:", convMsg)
-          return NextResponse.json({ ok: true, skipped: true, reason: "office-convert-failed", errorMessage: convMsg })
-        }
+        console.log("[generate-pdf] non-PDF file, ext:", ext, "- skipping")
+        return NextResponse.json({ ok: true, skipped: true, reason: "non-pdf" })
       }
     }
 
@@ -1131,14 +1122,16 @@ export async function POST(req: NextRequest) {
               }
 
               try {
-                const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
-                originalPages.getPage(pageIndex).drawImage(embedded, {
-                  x: placement.x,
-                  y: placement.y,
-                  width: placement.width,
-                  height: placement.height,
-                  opacity: 0.92,
-                })
+                if (placement.showSignature !== false) {
+                  const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
+                  originalPages.getPage(pageIndex).drawImage(embedded, {
+                    x: placement.x,
+                    y: placement.y,
+                    width: placement.width,
+                    height: placement.height,
+                    opacity: 0.92,
+                  })
+                }
 
                 const signerName = signerNames.get(signerUserId)?.trim()
                 if (signerName && placement.showSignerName !== false) {
@@ -1245,14 +1238,16 @@ export async function POST(req: NextRequest) {
         }
 
         try {
-          const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
-          originalPages.getPage(pageIndex).drawImage(embedded, {
-            x: placement.x,
-            y: placement.y,
-            width: placement.width,
-            height: placement.height,
-            opacity: 0.92,
-          })
+          if (placement.showSignature !== false) {
+            const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
+            originalPages.getPage(pageIndex).drawImage(embedded, {
+              x: placement.x,
+              y: placement.y,
+              width: placement.width,
+              height: placement.height,
+              opacity: 0.92,
+            })
+          }
 
           const signerName = signerNames.get(signerUserId)?.trim()
           if (signerName && placement.showSignerName !== false) {
@@ -1324,7 +1319,7 @@ export async function POST(req: NextRequest) {
       .from("iso-documents")
       .getPublicUrl(outputPath)
 
-    console.log("[generate-pdf] upload OK â€” public URL:", urlData.publicUrl)
+    console.log("[generate-pdf] upload OK - public URL:", urlData.publicUrl)
 
     const updateUrlPayload =
       signFileKind === "change_request"
@@ -1341,7 +1336,7 @@ export async function POST(req: NextRequest) {
       console.error("[generate-pdf] DB update file_signed_pdf_url failed:", updateUrlErr.message)
       return NextResponse.json({ error: "Lưu URL PDF thất bại: " + updateUrlErr.message }, { status: 500 })
     }
-    console.log("[generate-pdf] DB update OK â€” docId:", docId)
+    console.log("[generate-pdf] DB update OK - docId:", docId)
 
     await supabaseAdmin.from("doc_approval_log").insert({
       factory_id: factoryId,

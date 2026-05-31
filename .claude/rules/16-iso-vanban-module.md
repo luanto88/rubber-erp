@@ -22,6 +22,8 @@ Mọi dữ liệu phải có `factory_id`, filter theo nhà máy đang đăng nh
 | `20260523_iso_phan_loai_tl.sql`                                            | Thêm `phan_loai_tl` vào `iso_documents`; seed `settings.master_data`, `settings.maintenance_config`, `iso.signature` vào `permissions` + `role_permissions`    |
 | `20260524_iso_signature_placement.sql` (**đã chạy thủ công — 2026-05-25**) | Thêm 3 cột JSONB lưu placement chữ ký từng bước                                                                                                                |
 | `20260526_iso_standards_review.sql`                                        | Thêm danh mục tiêu chuẩn, bảng nối `iso_document_standards`, danh mục `iso_document_types`, các cột soát xét/đổi mã/file đính kèm và permission `iso.soat_xet` |
+| `20260527_iso_office_signing.sql`                                          | Thêm `file_signed_office_url`, `file_signed_office_type`, `file_phieu_yeu_cau_thay_doi_signed_url`, `file_de_nghi_soat_xet_signed_url` vào `iso_documents`      |
+| `20260530_iso_auto_convert_pdf.sql`                                        | Thêm `auto_convert_pdf BOOLEAN DEFAULT false` vào `iso_documents`                                                                                              |
 
 ```sql
 -- 20260524_iso_signature_placement.sql
@@ -73,6 +75,8 @@ file_goc_url TEXT,            -- Supabase Storage: file gốc do user upload
 file_signed_pdf_url TEXT,     -- PDF cuối với chữ ký nhúng
 file_phieu_yeu_cau_thay_doi_url TEXT, -- file đính kèm soát xét
 file_de_nghi_soat_xet_url TEXT,       -- file đính kèm soát xét
+
+auto_convert_pdf BOOLEAN DEFAULT false, -- khi true: sau phê duyệt file Office tự convert sang PDF qua CloudConvert
 
 doi_ma_tai_lieu BOOLEAN DEFAULT false,
 ma_tai_lieu_cu TEXT,          -- mã tài liệu/hồ sơ cũ được chọn để soát xét
@@ -383,14 +387,14 @@ doTransition:
 
      Server (generate-pdf):
        — Phát hiện non-PDF (ext ≠ "pdf"):
-           • action=phe_duyet + signFileKind=main → convert qua CloudConvert; nếu CloudConvert lỗi (hết credit v.v.) → trả về { ok: true, skipped: true, reason: "office-convert-failed" }
-           • Các bước khác → trả về { ok: true, skipped: true, reason: "non-pdf" }
+           • Mọi trường hợp → trả về { ok: true, skipped: true, reason: "non-pdf" }
+           • KHÔNG tự động convert — người dùng phải chủ động dùng nút "Chuyển sang PDF" trước khi ký
        — File PDF: verify JWT → lưu placement → quét tag header/footer → điền tag tìm thấy
           → nhúng chữ ký body lũy kế (tất cả bước đã ký) + tên người ký nếu bật → upload PDF
 
      UI xử lý response:
        Nếu response.skipped === true:
-         → toast tương ứng lý do (non-pdf hoặc office-convert-failed)
+         → toast thông báo file chưa được chuyển sang PDF
          → KHÔNG cập nhật file_signed_pdf_url; workflow vẫn được lưu bình thường
        Nếu response.ok (PDF):
          → Cập nhật file_signed_pdf_url
@@ -417,6 +421,7 @@ process.env.SIGN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
 | `/api/sign/set-pin`               | POST   | `{userId, pin}` → bcrypt.hash → upsert `sign_pins`                                                                                            |
 | `/api/sign/verify`                | POST   | `{userId, pin, docId, docType}` → verify bcrypt → JWT 5 phút                                                                                  |
 | `/api/sign/generate-pdf`          | POST   | `{token, docId, docType, signaturePlacement?, skipTagLabels?}` → verify JWT → fill tag header/footer tìm thấy → embed chữ ký/tên → upload PDF |
+| `/api/sign/convert-office`        | POST   | `{docId, factoryId, fileKind?}` → convert DOCX/XLSX sang PDF qua CloudConvert → upload Storage → cập nhật DB → trả về `{ok, pdfUrl}`          |
 | `/api/sign/restamp-pdf`           | POST   | `{docIds, factoryId}` → load PDF cũ → stamp footer "Hết hiệu lực" → re-upload                                                                 |
 | `/api/iso/notify`                 | POST   | `{docId, factoryId, action, recipientUserIds, lyDo?}` → in-app + Telegram + Email                                                             |
 | `/api/iso/profiles-by-permission` | GET    | `?factoryId=...&permCode=...` → danh sách user có quyền (service role, bypass RLS)                                                            |
@@ -437,6 +442,7 @@ type SignPlacement = {
   y: number; // tọa độ từ đáy (pt)
   width: number;
   height: number;
+  showSignature?: boolean;  // default true; false = không nhúng ảnh chữ ký vào PDF (chỉ cho isCon)
   showSignerName?: boolean;
   nameX?: number;
   nameY?: number;
@@ -453,11 +459,12 @@ Canvas coords → PDF coords: `y_pdf = pdfPageHeight - (y_canvas / scale) - (h_c
 
 Bucket **public**, tạo thủ công trong Supabase Dashboard.
 
-| Mục đích        | Path                                           |
-| --------------- | ---------------------------------------------- |
-| File gốc upload | `{factory_id}/iso/{timestamp}_{filename}`      |
-| Ảnh chữ ký      | `signatures/{factory_id}/{user_id}/chu_ky.png` |
-| PDF đã ký       | `{factory_id}/iso/signed/{docId}_signed.pdf`   |
+| Mục đích           | Path                                                  |
+| ------------------ | ----------------------------------------------------- |
+| File gốc upload    | `{factory_id}/iso/{timestamp}_{filename}`             |
+| Ảnh chữ ký         | `signatures/{factory_id}/{user_id}/chu_ky.png`        |
+| PDF đã ký          | `{factory_id}/iso/signed/{docId}_signed.pdf`          |
+| PDF convert (opt-in) | `{factory_id}/iso/converted/{docId}_{timestamp}.pdf` |
 
 File gốc không bao giờ bị modify — chỉ đọc để preview.
 
@@ -1198,6 +1205,11 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | Module ISO: soát xét lưu `ma_tai_lieu_cu`, lý do/nội dung soát xét, đổi mã mới, file đính kèm                           | ✅ Hoàn thành (2026-05-26)       |
 | CloudConvert graceful fallback — `office-convert-failed` skipped thay vì 500 khi hết credit                              | ✅ Hoàn thành (2026-05-29)       |
 | Module ISO: khu hồ sơ con hiển thị đúng sau `gui_xem_xet` (`isEditable \|\| childDocs.length > 0`)                      | ✅ Hoàn thành (2026-05-29)       |
+| Migration `auto_convert_pdf` + toggle UI trong right panel file section                                                 | ✅ Hoàn thành (2026-05-30)       |
+| Module ISO: xóa panel trái thừa hồ sơ con — draft rows chỉ còn 1 nơi ở right panel                                      | ✅ Hoàn thành (2026-05-30)       |
+| XLSX QR size: 96×96px → 46×46px (~12mm tại 96 DPI) trong `generate-office/route.ts`                                     | ✅ Hoàn thành (2026-05-30)       |
+| `showSignature` trong `SignPlacement`: hồ sơ con có thể ẩn cả chữ ký lẫn tên; tài liệu cha chỉ ẩn tên                  | ✅ Hoàn thành (2026-05-30)       |
+| Modal placement: hiển thị visual feedback khi ẩn chữ ký ("Chữ ký đã ẩn" overlay)                                       | ✅ Hoàn thành (2026-05-30)       |
 | Module Văn bản (Giai đoạn 3)                                                                                            | ⏳ Pending                       |
 | In-app notification bell (Realtime)                                                                                     | ⏳ Pending                       |
 | Trang in (bypass sidebar)                                                                                               | ⏳ Pending                       |
@@ -1492,3 +1504,47 @@ CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
 - `renderSavedChildDocs()` được gọi luôn (không bị guard bởi `isEditable`) — hồ sơ đã lưu hiển thị ở mọi trạng thái.
 - Nút "Thêm hồ sơ" và draft rows chỉ hiển thị khi `isEditable`.
 - Empty state chỉ hiển thị khi `childDraftRows.length === 0 && childDocs.length === 0`.
+
+---
+
+## Cập nhật nóng (2026-05-30) — auto_convert, ẩn chữ ký, QR XLSX, panel hồ sơ con
+
+### 1) Toggle `auto_convert_pdf` — tự động convert Office → PDF sau phê duyệt
+
+- Cột mới: `iso_documents.auto_convert_pdf BOOLEAN DEFAULT false`.
+- Migration: `20260530_iso_auto_convert_pdf.sql`.
+- **Khi nào hiện toggle**: file gốc là Office (`.docx` / `.xlsx`) VÀ `isEditable`.
+- **Vị trí UI**: trong right panel, section "File tài liệu", ngay dưới phần upload file.
+- **Lưu**: khi toggle thay đổi → gọi Supabase `UPDATE` ngay nếu doc đã lưu; nếu đang tạo mới thì lưu vào `form` state.
+- **Logic trong `doTransition`** (sau khi `action === "phe_duyet"` thành công):
+  ```typescript
+  if (doc.auto_convert_pdf && isOfficeUrl(doc.file_goc_url)) {
+    // gọi POST /api/sign/convert-office { docId, factoryId, fileKind: "main" }
+    // toast "Đang chuyển..." → sau khi xong toast "Thành công" + loadDoc()
+  }
+  ```
+- Lỗi CloudConvert (hết credit, timeout) → toast lỗi, **không** block workflow; tài liệu vẫn chuyển trạng thái.
+
+### 2) Xóa panel trái thừa hồ sơ con
+
+- **Nguyên nhân lỗi cũ**: block `{!isReviewForm && isCon && <div ...>draft rows</div>}` trong `renderInfoForm()` render draft rows ở form bên trái; đồng thời right panel cũng render draft rows → hiển thị 2 nơi.
+- **Fix**: xóa hoàn toàn block đó (80 dòng). Draft rows chỉ còn 1 nơi duy nhất trong right panel.
+- **Lưu ý**: block `{!isReviewForm && isCon && ...}` còn lại ở dòng ~2210 là selector chọn tài liệu cha (đúng chức năng, giữ nguyên).
+
+### 3) XLSX QR size: 46×46px (~12mm tại 96 DPI)
+
+- File: `src/app/api/sign/generate-office/route.ts`
+- Trước: tag `{{QR}}` dùng `{ width: 96, height: 96 }`, QR mặc định `{ width: 45, height: 45 }`.
+- Sau: cả hai dùng `{ width: 46, height: 46 }` (~12mm × 12mm tại 96 DPI).
+- DOCX QR vẫn dùng EMU: `432000 × 432000` (~12mm) — không đổi.
+
+### 4) `showSignature` trong placement modal
+
+- **Type**: thêm `showSignature?: boolean` vào `SignPlacement` ở cả client (`[id]/page.tsx`) và server (`generate-pdf/route.ts`).
+- **Server**: `if (placement.showSignature !== false) { await drawSignatureImage(...) }` — bỏ qua nhúng ảnh nếu `showSignature === false`.
+- **UI toggle**:
+  - Hồ sơ con (`isCon = true`): hiện nút **"Ẩn chữ ký (X)"** (tắt/bật ảnh chữ ký) VÀ toggle ẩn/hiện tên.
+  - Tài liệu cha (`isCon = false`): chỉ có toggle ẩn/hiện tên; chữ ký luôn hiển thị.
+- **Visual feedback**: khi `showSignature === false`, ảnh chữ ký trong modal có `display: none` và hiện overlay "Chữ ký đã ẩn" (màu violet, nền nhạt) thay thế.
+- **Khởi tạo**: `showSignature: true` khi mở modal (default hiện chữ ký).
+- `showSignature` được truyền vào object placement gửi lên server cùng với `nameX/Y/W/H`, `showSignerName`.
