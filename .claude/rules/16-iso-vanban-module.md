@@ -1210,6 +1210,8 @@ Hai nhóm hoàn toàn độc lập — thông báo ISO không gửi vào nhóm b
 | XLSX QR size: 96×96px → 46×46px (~12mm tại 96 DPI) trong `generate-office/route.ts`                                     | ✅ Hoàn thành (2026-05-30)       |
 | `showSignature` trong `SignPlacement`: hồ sơ con có thể ẩn cả chữ ký lẫn tên; tài liệu cha chỉ ẩn tên                  | ✅ Hoàn thành (2026-05-30)       |
 | Modal placement: hiển thị visual feedback khi ẩn chữ ký ("Chữ ký đã ẩn" overlay)                                       | ✅ Hoàn thành (2026-05-30)       |
+| Module ISO: `handleFileUpload` dùng `rebuildDraftCode` — mã tự sinh ngay sau upload file                                | ✅ Hoàn thành (2026-05-31)       |
+| Module ISO: form hồ sơ riêng lẻ redesign — multi-row table thay single file upload                                     | ✅ Hoàn thành (2026-05-31)       |
 | Module Văn bản (Giai đoạn 3)                                                                                            | ⏳ Pending                       |
 | In-app notification bell (Realtime)                                                                                     | ⏳ Pending                       |
 | Trang in (bypass sidebar)                                                                                               | ⏳ Pending                       |
@@ -1548,3 +1550,22 @@ CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
 - **Visual feedback**: khi `showSignature === false`, ảnh chữ ký trong modal có `display: none` và hiện overlay "Chữ ký đã ẩn" (màu violet, nền nhạt) thay thế.
 - **Khởi tạo**: `showSignature: true` khi mở modal (default hiện chữ ký).
 - `showSignature` được truyền vào object placement gửi lên server cùng với `nameX/Y/W/H`, `showSignerName`.
+
+---
+
+## Cập nhật nóng (2026-05-31) — Mã tự sinh, form hồ sơ riêng lẻ multi-row
+
+### 1) `handleFileUpload` dùng `rebuildDraftCode`
+
+- **Trước**: sau upload file và `parseDocNameFromFileName` điền `phong_ban/loai_tai_lieu/so_hieu/ten_tai_lieu`, `ma_tai_lieu` không được tính lại vì dùng raw `setForm(f => ({...f, ...fields}))`.
+- **Sau**: `setForm((f) => rebuildDraftCode({...f, ...fields}))` — mã tự sinh ngay sau upload.
+- Với hồ sơ con (`phan_loai_tl === "con"`): `parseDocNameFromFileName` trả về `ten_tai_lieu` (không trả `loai_tai_lieu_cha`/`so_hieu_cha`) nên `rebuildDraftCode` giữ nguyên logic mã cha/con.
+
+### 2) Form hồ sơ riêng lẻ — multi-row table thay single file upload
+
+- **Trước**: khi tạo hồ sơ riêng lẻ (`isNew && phan_loai_tl === "con"`), hiển thị section đơn "File hồ sơ" kích hoạt bằng `fileInputRef.current?.click()` — hay bị treo file picker, hiển thị sai tên file.
+- **Sau**: xóa section đơn, thay bằng multi-row table dùng lại `childDraftRows.map(...)` — cùng pattern như phần "Hồ sơ con" của tài liệu cha. Mỗi dòng có inline `<label>+<input type="file" className="sr-only">`, file picker mở đúng, `row.file_name` cập nhật sau upload.
+- Nút "Thêm hồ sơ" ở góc phải header section. Mỗi dòng: Mã hồ sơ (auto), Loại hồ sơ, Tên hồ sơ, Số hiệu, Lần ban hành, File hồ sơ, Ghi chú, Xóa dòng.
+- Lưu: `handleSave` đã có branch `isNew && phan_loai_tl === "con"` → `saveChildDraftRecords(selectedParentDocId)` → tạo N `iso_documents` riêng biệt, navigate tới doc đầu tiên.
+- Validation: `validateForm()` đã check `selectedParentDocId`, `ma_tai_lieu_cha`, `loai_tai_lieu_cha`, `so_hieu_cha`, `childDraftRows.length > 0`.
+- `childRecordCode(row)` dùng `form.ma_tai_lieu_cha` khi `phan_loai_tl === "con"` — mã hồ sơ con hiển thị đúng.

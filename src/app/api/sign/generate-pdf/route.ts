@@ -901,6 +901,10 @@ export async function POST(req: NextRequest) {
     const lsStr = String(lanBanHanh).padStart(2, "0")
     const trangThai = doc.trang_thai as string
     const statusText = getTargetStatusText(action, trangThai)
+    const docIsConVal = isConDoc(
+      (doc.loai_tai_lieu as string | null) ?? null,
+      (doc.phan_loai_tl as string | null) ?? null,
+    )
     const effectiveDate = action
       ? new Date().toISOString()
       : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string))
@@ -1108,7 +1112,22 @@ export async function POST(req: NextRequest) {
               skipTagLabels ?? [],
               (doc.chon_quy_trinh as string | null) ?? null,
             )
-            drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+            if (docIsConVal || metaResult.footerFilledPages.length > 0) {
+              drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+            }
+            // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
+            // vẽ QR tại vị trí manual placement trên trang đầu tiên.
+            if (manualQrPlacement && !metaResult.filled.includes("QR")) {
+              try {
+                const qrImgFallback = await originalPages.embedPng(qrBuffer)
+                originalPages.getPage(0).drawImage(qrImgFallback, {
+                  x: manualQrPlacement.x,
+                  y: manualQrPlacement.y,
+                  width: manualQrPlacement.width,
+                  height: manualQrPlacement.height,
+                })
+              } catch { /* bỏ qua nếu embed thất bại */ }
+            }
 
             for (const { signerUserId, placement } of allPlacements) {
               if (!signerUserId || !placement) continue
@@ -1224,7 +1243,20 @@ export async function POST(req: NextRequest) {
         skipTagLabels ?? [],
         (doc.chon_quy_trinh as string | null) ?? null,
       )
-      drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+      if (docIsConVal || metaResult.footerFilledPages.length > 0) {
+        drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+      }
+      if (manualQrPlacement && !metaResult.filled.includes("QR")) {
+        try {
+          const qrImgFallback = await originalPages.embedPng(qrBuffer)
+          originalPages.getPage(0).drawImage(qrImgFallback, {
+            x: manualQrPlacement.x,
+            y: manualQrPlacement.y,
+            width: manualQrPlacement.width,
+            height: manualQrPlacement.height,
+          })
+        } catch { /* bỏ qua nếu embed thất bại */ }
+      }
 
       for (const { signerUserId, placement } of allPlacements) {
         if (!signerUserId || !placement) continue

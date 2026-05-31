@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
@@ -144,6 +144,32 @@ function makeChildDraftId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+type InferredDocFields = {
+  phong_ban?: string
+  loai_tai_lieu?: string
+  so_hieu?: string
+  ten_tai_lieu?: string
+}
+
+// Parse tên file kiểu "PHK-QT02 Quy trình kiểm soát sự thay đổi.pdf"
+// → { phong_ban: "PHK", loai_tai_lieu: "QT", so_hieu: "2", ten_tai_lieu: "Quy trình kiểm soát sự thay đổi" }
+function parseDocNameFromFileName(fileName: string): InferredDocFields {
+  const base = stripFileExtension(fileName).trim()
+  // Pattern: PHONGBAN-LOAI+SO TENTAILIEU (e.g. "PHK-QT02 Quy trình...")
+  const m = base.match(/^([A-Z]{2,6})-([A-ZĐ]{1,3})0*(\d{1,4})\s+(.+)$/i)
+  if (m) {
+    return {
+      phong_ban: m[1].toUpperCase(),
+      loai_tai_lieu: m[2].toUpperCase(),
+      so_hieu: String(parseInt(m[3], 10)),
+      ten_tai_lieu: m[4].trim(),
+    }
+  }
+  // Không match pattern mã → chỉ lấy tên file làm tên tài liệu
+  if (base) return { ten_tai_lieu: base }
+  return {}
+}
+
 const ISO_OFFICE_MAIN_TAGS = [
   "{{MA_TAI_LIEU}}",
   "{{TEN_TAI_LIEU}}",
@@ -183,6 +209,7 @@ export default function IsoDocumentDetailPage() {
   const [loading, setLoading] = useState(true)
   const [doc, setDoc] = useState<IsoDocument | null>(null)
   const [childDocs, setChildDocs] = useState<IsoDocument[]>([])
+  const [siblingDocs, setSiblingDocs] = useState<Pick<IsoDocument, "id" | "ma_tai_lieu" | "ten_tai_lieu" | "trang_thai" | "loai_tai_lieu" | "file_signed_pdf_url" | "file_signed_office_url" | "file_goc_url" | "auto_convert_pdf">[]>([])
   const [form, setForm] = useState<IsoDocumentForm>(emptyIsoForm())
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -423,8 +450,17 @@ export default function IsoDocumentDetailPage() {
         : siblingsQuery
       const { data: siblings } = await siblingsQuery
       setChildDocs((siblings || []) as IsoDocument[])
+      // Load ALL siblings for display (no filter by trang_thai/users)
+      const { data: allSiblings } = await supabase
+        .from("iso_documents")
+        .select("id, ma_tai_lieu, ten_tai_lieu, trang_thai, loai_tai_lieu, file_signed_pdf_url, file_signed_office_url, file_goc_url, auto_convert_pdf")
+        .eq("factory_id", fid)
+        .eq("parent_doc_id", d.parent_doc_id)
+        .order("ma_tai_lieu", { ascending: true })
+      setSiblingDocs(allSiblings || [])
     } else {
       setChildDocs([])
+      setSiblingDocs([])
     }
 
     let soHieu = ""
@@ -593,10 +629,18 @@ export default function IsoDocumentDetailPage() {
   const trangThai = doc?.trang_thai || "draft"
   const userId = user?.id ?? ""
   const isCon = doc ? (doc.phan_loai_tl === "con" || doc.loai_tai_lieu === "F") : false
+  // isCon của doc đang hiển thị trong placement modal (có thể là hồ sơ con, không phải main doc)
+  const placementDocIsCon = placementModal
+    ? placementModal.docId === docId
+      ? isCon
+      : childDocs.some((c) => c.id === placementModal.docId && (c.phan_loai_tl === "con" || c.loai_tai_lieu === "F"))
+    : false
   // Phải là đúng người được chỉ định VÀ có quyền
   const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
   const isEditable = isNew || trangThai === "draft" || trangThai === "tra_ve" || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
+  const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && !!userId && userId === doc?.soan_thao_user_id
+  const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
 
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text })
@@ -640,6 +684,17 @@ export default function IsoDocumentDetailPage() {
       } else {
         setUploadedFileUrl(urlData.publicUrl)
         setUploadedFileName(file.name)
+        // Gợi ý điền các trường form từ tên file (chỉ điền khi trường đang trống)
+        const inferred = parseDocNameFromFileName(file.name)
+        if (Object.keys(inferred).length > 0) {
+          setForm((f) => rebuildDraftCode({
+            ...f,
+            phong_ban: f.phong_ban || inferred.phong_ban || f.phong_ban,
+            loai_tai_lieu: f.loai_tai_lieu || inferred.loai_tai_lieu || f.loai_tai_lieu,
+            so_hieu: f.so_hieu || inferred.so_hieu || f.so_hieu,
+            ten_tai_lieu: f.ten_tai_lieu || inferred.ten_tai_lieu || f.ten_tai_lieu,
+          }))
+        }
       }
     } finally {
       setFileUploading(false)
@@ -750,6 +805,14 @@ export default function IsoDocumentDetailPage() {
               }
             : child
         ))
+        setSiblingDocs((rows) => rows.map((sib) =>
+          sib.id === rowId
+            ? { ...sib, file_goc_url: urlData.publicUrl, file_signed_pdf_url: null, file_signed_office_url: null }
+            : sib
+        ))
+        if (rowId === docId) {
+          setDoc((prev) => prev ? { ...prev, file_goc_url: urlData.publicUrl, file_signed_pdf_url: null, file_signed_office_url: null } : prev)
+        }
       }
       if (hasVietnameseOrNonAsciiName(file.name)) showToast(false, `Đã chuẩn hoá tên file lưu trữ: ${safeName}`)
       if (!isDraftRow) showToast(true, "Đã thay thế file hồ sơ")
@@ -975,7 +1038,7 @@ export default function IsoDocumentDetailPage() {
       if (form.phan_loai_tl === "con" && isNew) {
         const createdIds = await saveChildDraftRecords(selectedParentDocId)
         if (!createdIds) return
-        showToast(true, "Đã tạo hồ sơ con")
+        if (createdIds.length > 1) showToast(true, `Đã tạo ${createdIds.length} hồ sơ thành công. Đang mở hồ sơ đầu tiên...`)
         router.replace(`/dashboard/iso/documents/${createdIds[0] || selectedParentDocId}`)
         return
       }
@@ -1308,10 +1371,10 @@ export default function IsoDocumentDetailPage() {
               if (json.ok && json.pdfUrl) {
                 convertOk++
                 if (target.id === docId) {
-                  setDoc((prev) => prev ? { ...prev, file_goc_url: json.pdfUrl as string } : prev)
+                  setDoc((prev) => prev ? { ...prev, file_signed_pdf_url: json.pdfUrl as string } : prev)
                 } else {
                   setChildDocs((rows) => rows.map((child) =>
-                    child.id === target.id ? { ...child, file_goc_url: json.pdfUrl as string } : child
+                    child.id === target.id ? { ...child, file_signed_pdf_url: json.pdfUrl as string } : child
                   ))
                 }
               } else {
@@ -1862,46 +1925,57 @@ export default function IsoDocumentDetailPage() {
           {childDocs.map((child) => {
             const url = childFileUrl(child)
             return (
-              <div key={child.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                <FileText size={14} className="shrink-0 text-sky-600" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-[11px] font-bold text-slate-800">{child.ma_tai_lieu}</p>
-                  <p className="truncate text-[11px] text-slate-600">{child.ten_tai_lieu || getFileNameFromUrl(url)}</p>
+              <div key={child.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <FileText size={14} className="shrink-0 text-sky-600" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-[11px] font-bold text-slate-800">{child.ma_tai_lieu}</p>
+                    <p className="truncate text-[11px] text-slate-600">{child.ten_tai_lieu || getFileNameFromUrl(url)}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                    {childTypeLabelMap[child.loai_tai_lieu || ""] || child.loai_tai_lieu || "Hồ sơ"}
+                  </span>
+                  {url && (
+                    <>
+                      <a href={url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem hồ sơ">
+                        <Eye size={14} />
+                      </a>
+                      <a href={url} download className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200" title="Tải hồ sơ">
+                        <Download size={14} />
+                      </a>
+                    </>
+                  )}
+                  {isEditable && (
+                    <button
+                      type="button"
+                      onClick={() => openChildFilePicker(child.id)}
+                      disabled={fileUploading}
+                      className="shrink-0 rounded-lg border border-dashed border-sky-300 px-2 py-1 text-[10px] font-bold text-sky-700 hover:border-sky-500 hover:bg-sky-50 disabled:opacity-50"
+                      title="Thay thế file hồ sơ"
+                    >
+                      Thay file
+                    </button>
+                  )}
                 </div>
-                <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">
-                  {childTypeLabelMap[child.loai_tai_lieu || ""] || child.loai_tai_lieu || "Hồ sơ"}
-                </span>
-                {url && (
-                  <>
-                    <a href={url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem hồ sơ">
-                      <Eye size={14} />
-                    </a>
-                    <a href={url} download className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200" title="Tải hồ sơ">
-                      <Download size={14} />
-                    </a>
-                  </>
-                )}
-                {isEditable && (
-                  <button
-                    type="button"
-                    onClick={() => openChildFilePicker(child.id)}
-                    disabled={fileUploading}
-                    className="shrink-0 rounded-lg border border-dashed border-sky-300 px-2 py-1 text-[10px] font-bold text-sky-700 hover:border-sky-500 hover:bg-sky-50 disabled:opacity-50"
-                    title="Thay thế file hồ sơ"
-                  >
-                    Thay file
-                  </button>
-                )}
-                {isEditable && isOfficeUrl(child.file_goc_url) && (
-                  <button
-                    type="button"
-                    onClick={() => void handleConvertToPdf(child.id, true)}
-                    disabled={convertingToPdf}
-                    className="shrink-0 rounded-lg bg-violet-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-violet-700 disabled:opacity-50"
-                    title="Chuyển file Office sang PDF để ký số"
-                  >
-                    {convertingToPdf ? "..." : "PDF"}
-                  </button>
+                {isOfficeUrl(child.file_goc_url) && (
+                  <label className={`flex items-center gap-1.5 pl-5 ${canToggleAutoConvert ? "cursor-pointer" : "cursor-default opacity-70"}`}>
+                    <input
+                      type="checkbox"
+                      checked={!!child.auto_convert_pdf}
+                      disabled={!canToggleAutoConvert}
+                      className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                      onChange={async (e) => {
+                        if (!canToggleAutoConvert) return
+                        const val = e.target.checked
+                        setChildDocs((rows) => rows.map((c) => c.id === child.id ? { ...c, auto_convert_pdf: val } : c))
+                        await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", child.id).eq("factory_id", factoryId)
+                      }}
+                    />
+                    <span className="text-[10px] text-slate-600">Tự động chuyển sang PDF sau phê duyệt</span>
+                    {!canToggleAutoConvert && child.auto_convert_pdf && (
+                      <span className="text-[10px] font-bold text-violet-600">Đã bật</span>
+                    )}
+                  </label>
                 )}
               </div>
             )
@@ -2547,9 +2621,9 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
-        <div className={`grid grid-cols-1 gap-4 ${isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "So\u00e1t x\u00e9t" ? "" : "lg:grid-cols-3"}`}>
+        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3`}>
           {/* Form chính */}
-          <div className={`${isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "So\u00e1t x\u00e9t" ? "" : "lg:col-span-2"} space-y-4`}>
+          <div className={`lg:col-span-2 space-y-4`}>
             {/* Thông tin cơ bản */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-4">Thông tin tài liệu</h2>
@@ -2572,7 +2646,15 @@ export default function IsoDocumentDetailPage() {
                       onChange={(e) => {
                         if (!isNew) {
                           const uid = e.target.value
-                          setForm((f) => ({ ...f, soan_thao_user_id: uid, soan_thao: profileName(uid) }))
+                          setForm((f) => ({
+                            ...f,
+                            soan_thao_user_id: uid,
+                            soan_thao: profileName(uid),
+                            xem_xet_user_id: f.xem_xet_user_id === uid ? "" : f.xem_xet_user_id,
+                            xem_xet: f.xem_xet_user_id === uid ? "" : f.xem_xet,
+                            phe_duyet_user_id: f.phe_duyet_user_id === uid ? "" : f.phe_duyet_user_id,
+                            phe_duyet: f.phe_duyet_user_id === uid ? "" : f.phe_duyet,
+                          }))
                         }
                       }}
                       disabled={!isEditable || isNew}
@@ -2652,6 +2734,7 @@ export default function IsoDocumentDetailPage() {
                 </div>
               </div>
             </div>
+
           </div>
 
           {/* Sidebar: File & thông tin */}
@@ -2704,8 +2787,161 @@ export default function IsoDocumentDetailPage() {
           />
 
           <div className="space-y-4">
+            {/* Hồ sơ cần soạn thảo — chỉ dành cho hồ sơ riêng lẻ mới (right panel) */}
+            {isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "Soát xét" && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-extrabold text-slate-700">Hồ sơ cần soạn thảo</p>
+                    <p className="text-[11px] text-slate-500">Mỗi dòng là một hồ sơ riêng. Upload file riêng cho mỗi dòng.</p>
+                    {!canAddChildRow && (
+                      <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha và nhập số hiệu trước khi thêm hồ sơ.</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addChildDraftRow}
+                    disabled={!canAddChildRow}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${canAddChildRow ? "border-sky-500 !bg-sky-600 !text-white hover:!bg-sky-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
+                  >
+                    Thêm hồ sơ
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {childDraftRows.map((row) => (
+                    <div key={row.id} className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100">
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Mã hồ sơ
+                          <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
+                          {isDuplicateChildDraftCode(row) && (
+                            <span className="mt-1 block text-[10px] font-bold text-red-600">Mã này đang trùng trong danh sách</span>
+                          )}
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Loại hồ sơ
+                          <select value={row.loai_tai_lieu} onChange={(e) => updateChildDraftRow(row.id, { loai_tai_lieu: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs">
+                            {childTypeOptions.map((type) => <option key={type} value={type}>{type} - {childTypeLabelMap[type]}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Tên hồ sơ
+                          <input value={row.ten_tai_lieu} onChange={(e) => updateChildDraftRow(row.id, { ten_tai_lieu: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Số hiệu
+                          <input type="number" min="1" value={row.so_hieu} onChange={(e) => updateChildDraftRow(row.id, { so_hieu: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] font-bold text-slate-600">
+                          Lần ban hành
+                          <input type="number" min="0" value={row.lan_ban_hanh} onChange={(e) => updateChildDraftRow(row.id, { lan_ban_hanh: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                        </label>
+                        <div className="text-[11px] font-bold text-slate-600">
+                          File hồ sơ
+                          <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500">
+                            <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
+                            <Upload size={13} />
+                            <input
+                              type="file"
+                              accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) void handleChildRowFileUpload(f, row.id)
+                                e.target.value = ""
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <label className="col-span-2 text-[11px] font-bold text-slate-600">
+                          Ghi chú
+                          <input value={row.ghi_chu} onChange={(e) => updateChildDraftRow(row.id, { ghi_chu: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                        </label>
+                      </div>
+                      <button type="button" onClick={() => setChildDraftRows((rows) => rows.filter((item) => item.id !== row.id))} className="mt-2 text-[11px] font-bold text-red-600 hover:text-red-700">
+                        Xóa dòng
+                      </button>
+                    </div>
+                  ))}
+                  {childDraftRows.length === 0 && (
+                    <p className="rounded-lg bg-sky-50 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* Các hồ sơ trong bộ — hiển thị trên trang hồ sơ con đã lưu */}
+            {!isNew && isCon && form.chon_quy_trinh !== "Soát xét" && siblingDocs.length > 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <p className="text-sm font-extrabold text-sky-800 mb-2">Các hồ sơ trong bộ này</p>
+                <div className="space-y-2">
+                  {siblingDocs.map((sib) => {
+                    const sibUrl = sib.file_signed_pdf_url || sib.file_signed_office_url || sib.file_goc_url
+                    const isSelf = sib.id === docId
+                    const statusColor = (TRANG_THAI_COLOR as Record<string, string>)[sib.trang_thai] || "bg-slate-100 text-slate-600"
+                    return (
+                      <div key={sib.id} className={`rounded-lg border px-3 py-2 space-y-1.5 ${isSelf ? "border-sky-300 bg-sky-50" : "border-slate-100 bg-slate-50"}`}>
+                        <div className="flex items-center gap-2">
+                          <FileText size={14} className="shrink-0 text-sky-600" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-mono text-[11px] font-bold text-slate-800">{sib.ma_tai_lieu}</p>
+                            <p className="truncate text-[11px] text-slate-500">{sib.ten_tai_lieu}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                            {childTypeLabelMap[sib.loai_tai_lieu || ""] || sib.loai_tai_lieu || "Hồ sơ"}
+                          </span>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${statusColor}`}>
+                            {(TRANG_THAI_LABEL as Record<string, string>)[sib.trang_thai] || sib.trang_thai}
+                          </span>
+                          {sibUrl && (
+                            <>
+                              <a href={sibUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem file">
+                                <Eye size={13} />
+                              </a>
+                              <a href={sibUrl} download className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200" title="Tải file">
+                                <Download size={13} />
+                              </a>
+                            </>
+                          )}
+                          {isEditable && (
+                            <button
+                              type="button"
+                              onClick={() => isSelf ? fileInputRef.current?.click() : openChildFilePicker(sib.id)}
+                              disabled={fileUploading}
+                              className="shrink-0 rounded-lg border border-dashed border-sky-300 px-2 py-1 text-[10px] font-bold text-sky-700 hover:border-sky-500 hover:bg-sky-50 disabled:opacity-50"
+                            >
+                              Thay file
+                            </button>
+                          )}
+                        </div>
+                        {isOfficeUrl(sib.file_goc_url) && (
+                          <label className={`flex items-center gap-1.5 pl-5 ${canToggleAutoConvert ? "cursor-pointer" : "cursor-default opacity-70"}`}>
+                            <input
+                              type="checkbox"
+                              checked={!!sib.auto_convert_pdf}
+                              disabled={!canToggleAutoConvert}
+                              className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                              onChange={async (e) => {
+                                if (!canToggleAutoConvert) return
+                                const val = e.target.checked
+                                setSiblingDocs((rows) => rows.map((s) => s.id === sib.id ? { ...s, auto_convert_pdf: val } : s))
+                                if (isSelf) setDoc((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
+                                await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", sib.id).eq("factory_id", factoryId)
+                              }}
+                            />
+                            <span className="text-[10px] text-slate-600">Tự động chuyển sang PDF sau phê duyệt</span>
+                            {!canToggleAutoConvert && sib.auto_convert_pdf && (
+                              <span className="text-[10px] font-bold text-violet-600">Đã bật</span>
+                            )}
+                          </label>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {/* File đính kèm */}
-            {!(isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "Soát xét") && (
+            {!(isCon && form.chon_quy_trinh !== "Soát xét") && (
             <div id="file-goc-upload" className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-3">File tài liệu</h2>
               <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoặc XLSX</p>
@@ -2756,30 +2992,29 @@ export default function IsoDocumentDetailPage() {
                         {fileUploading ? "Đang tải..." : "Thay file"}
                       </button>
                     )}
-                    {isEditable && isOfficeUrl(uploadedFileUrl || doc?.file_goc_url) && (
-                      <button
-                        onClick={() => void handleConvertToPdf(docId, false)}
-                        disabled={convertingToPdf || isNew}
-                        title={isNew ? "Lưu tài liệu trước khi chuyển đổi" : "Chuyển file Office sang PDF để ký số"}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl disabled:opacity-50 transition-all"
-                      >
-                        <FileText size={13} />
-                        {convertingToPdf ? "Đang chuyển..." : "Chuyển sang PDF"}
-                      </button>
-                    )}
-                    {!isNew && isOfficeUrl(doc?.file_goc_url) && (
-                      <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50 transition-all">
+                    {isOfficeUrl(uploadedFileUrl || doc?.file_goc_url) && (
+                      <label className={`flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 transition-all ${canToggleAutoConvert ? "cursor-pointer hover:bg-slate-50" : "cursor-default opacity-70"}`}>
                         <input
                           type="checkbox"
                           checked={!!doc?.auto_convert_pdf}
+                          disabled={!canToggleAutoConvert}
                           onChange={async (e) => {
+                            if (!canToggleAutoConvert) return
                             const val = e.target.checked
                             setDoc((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
-                            await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", docId)
+                            if (!isNew) await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", docId)
                           }}
-                          className="rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                          className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
                         />
-                        <span className="text-[11px] font-medium text-slate-700">Tự động chuyển sang PDF sau phê duyệt</span>
+                        <div>
+                          <span className="text-[11px] font-medium text-slate-700">Tự động chuyển sang PDF sau phê duyệt</span>
+                          {canToggleAutoConvert
+                            ? <p className="text-[10px] text-slate-500 mt-0.5">Chỉ người soạn thảo chọn được, trước khi gửi xem xét.</p>
+                            : doc?.auto_convert_pdf
+                              ? <p className="text-[10px] font-bold text-violet-600 mt-0.5">Đã bật — sẽ tự động chuyển sau phê duyệt</p>
+                              : <p className="text-[10px] text-slate-400 mt-0.5">Không bật</p>
+                          }
+                        </div>
                       </label>
                     )}
                   </div>
@@ -2852,12 +3087,12 @@ export default function IsoDocumentDetailPage() {
                           <div className="text-[11px] font-bold text-slate-600">
                             File hồ sơ
                             <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 hover:border-sky-500">
-                              <span className="truncate">{row.file_name || "Chọn file"}</span>
+                              <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
                               <Upload size={13} />
                               <input
                                 type="file"
                                 accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                className="sr-only"
+                                className="hidden"
                                 onChange={(e) => {
                                   const f = e.target.files?.[0]
                                   if (f) void handleChildRowFileUpload(f, row.id)
@@ -2883,6 +3118,7 @@ export default function IsoDocumentDetailPage() {
                   )}
                 </div>
               )}
+
 
               {/* Hướng dẫn nhãn header */}
               <div className="mb-3 p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-700">
@@ -3064,7 +3300,7 @@ export default function IsoDocumentDetailPage() {
                 <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700 border border-amber-200">
                   Không đặt ra ngoài ô chứa
                 </span>
-                {isCon && (
+                {placementDocIsCon && (
                   <button
                     onClick={() => setPlacementModal((p) => p ? { ...p, showSignature: !p.showSignature } : null)}
                     className="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-50 transition-all"
