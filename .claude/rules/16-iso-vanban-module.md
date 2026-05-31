@@ -1569,3 +1569,45 @@ CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
 - Lưu: `handleSave` đã có branch `isNew && phan_loai_tl === "con"` → `saveChildDraftRecords(selectedParentDocId)` → tạo N `iso_documents` riêng biệt, navigate tới doc đầu tiên.
 - Validation: `validateForm()` đã check `selectedParentDocId`, `ma_tai_lieu_cha`, `loai_tai_lieu_cha`, `so_hieu_cha`, `childDraftRows.length > 0`.
 - `childRecordCode(row)` dùng `form.ma_tai_lieu_cha` khi `phan_loai_tl === "con"` — mã hồ sơ con hiển thị đúng.
+
+---
+
+## Cập nhật mới nhất (2026-05-31) — Label tài liệu/hồ sơ + Soát xét hồ sơ con + File phụ
+
+### Nguyên tắc label tài liệu / hồ sơ
+
+Khi `phan_loai_tl === "con"` hoặc `loai_tai_lieu === "F"` (`isCon = true`), tất cả label hiển thị đến người dùng phải dùng từ **"hồ sơ"** thay vì "tài liệu". Tên trường DB/API không đổi.
+
+Biến động đã có trong `[id]/page.tsx`:
+```typescript
+const titleLabel = isCon ? "Tên hồ sơ" : "Tên tài liệu"
+const codeLabel  = isCon ? "Mã hồ sơ"  : "Mã tài liệu"
+const levelLabel = isCon ? "Cấp hồ sơ" : "Cấp tài liệu"
+const typeLabel  = isCon ? "Loại hồ sơ" : "Loại tài liệu"          // trong renderInfoForm()
+const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"    // outer scope, dùng ở right panel
+```
+
+### Soát xét hồ sơ con (TH4) — các fix quan trọng
+
+1. **reviewParentOptions lọc theo phòng ban**: dropdown "Tài liệu cha (bộ quy trình)" trong TH4 chỉ hiển thị tài liệu cha của đúng `form.phong_ban` đang chọn.
+
+2. **handleSave TH4**: Branch `isNew && phan_loai_tl === "con"` phải thêm điều kiện `&& form.chon_quy_trinh !== "Soát xét"`. Khi soát xét hồ sơ con, fall-through sang luồng save thông thường (upsert 1 bản ghi) và navigate tới doc mới tạo.
+
+3. **parent_doc_id cho TH4**: payload dùng `selectedParentDocId || reviewParentDocId` — vì TH4 chỉ set `reviewParentDocId`, không set `selectedParentDocId`.
+
+### Ký file phụ soát xét (Approach B — tự động)
+
+2 file đính kèm soát xét (`file_phieu_yeu_cau_thay_doi_url`, `file_de_nghi_soat_xet_url`) được xử lý **tự động sau khi ký file chính**, không yêu cầu placement modal thêm.
+
+**Trigger**: Tất cả actions có ký (gui_xem_xet, gui_phe_duyet, gui_lai_phe_duyet, phe_duyet, tra_ve, tu_choi_phe_duyet...) khi `doc.chon_quy_trinh === "Soát xét"`.
+
+**Xử lý**:
+- File phụ là PDF: gọi `POST /api/sign/generate-pdf` với `signaturePlacement: null` → chỉ fill metadata tags (TINH_TRANG, footer), không nhúng chữ ký. `generate-pdf` khi `signFileKind !== "main"` và không có placement sẽ clear `allPlacements` → bỏ qua re-apply placements của main doc.
+- File phụ là DOCX/XLSX: đã được xử lý bởi `generateOfficeFiles()` trong `buildOfficeFileQueue()`.
+- Lỗi file phụ: fire-and-forget, không block workflow.
+
+**Khi hủy hiệu lực (restamp)**: `restamp-pdf` cũng stamp "Hết hiệu lực" lên 2 file phụ nếu chúng là PDF.
+
+### Vị trí card "Tài liệu soát xét"
+
+2 upload fields (Phiếu yêu cầu thay đổi + Đề nghị soát xét) nằm trong **card riêng** "Tài liệu soát xét" ở right panel, sau card "File tài liệu/hồ sơ". Không còn nằm lồng trong div `file-goc-upload` nữa.

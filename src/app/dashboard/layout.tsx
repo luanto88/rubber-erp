@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   BarChart3,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Factory,
@@ -105,7 +106,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [collapsed, setCollapsed] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ production: true })
   const [loading, setLoading] = useState(true)
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false)
   const isLoggingOutRef = useRef(false)
+  const userDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -253,6 +256,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
+        setUserDropdownOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
   // Khi bootstrap xong nhưng không có user (lỗi mạng tạm thời / session hết hạn không phải auth error)
   // → redirect về login thay vì để spinner treo vô hạn
   useEffect(() => {
@@ -392,28 +405,55 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        <div className="border-t border-slate-700 p-4">
-          <div className={"flex items-center gap-3 " + (collapsed ? "justify-center" : "")}>
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold">
-              {user.full_name?.[0] || "U"}
-            </div>
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold">{user.full_name}</div>
-                <div className="truncate text-[10px] text-slate-400">
-                  {user.role} - {user.username}
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex items-center justify-end border-b border-slate-200 bg-white/95 px-6 py-2.5 shadow-sm backdrop-blur-sm">
+          <div ref={userDropdownRef} className="relative">
+            <button
+              onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+              className="flex items-center gap-2.5 rounded-xl px-3 py-1.5 transition-all duration-200 hover:bg-slate-100 active:scale-95"
+            >
+              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+                {user.full_name?.[0] || "U"}
+              </div>
+              <span className="text-sm font-semibold text-slate-700">{user.full_name}</span>
+              <ChevronDown
+                size={14}
+                className={
+                  "text-slate-400 transition-transform duration-200 " +
+                  (userDropdownOpen ? "rotate-180" : "")
+                }
+              />
+            </button>
+
+            {userDropdownOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-slate-200 bg-white py-2 shadow-xl ring-1 ring-black/5">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">
+                      {user.full_name?.[0] || "U"}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-slate-800">{user.full_name}</div>
+                      <div className="truncate text-xs capitalize text-slate-500">{user.role}</div>
+                    </div>
+                  </div>
                 </div>
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
+                >
+                  <LogOut size={15} />
+                  Đăng xuất
+                </button>
               </div>
             )}
-            <button onClick={handleLogout} className="text-slate-400 hover:text-red-400" title="Đăng xuất">
-              <LogOut size={16} />
-            </button>
           </div>
-        </div>
-      </aside>
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-6">{children}</div>
-      </main>
+        </header>
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-6">{children}</div>
+        </main>
+      </div>
     </div>
   )
 }

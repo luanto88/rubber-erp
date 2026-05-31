@@ -73,6 +73,20 @@ type ChildDraftRow = {
   file_name: string | null
 }
 
+type ChildReviewRow = {
+  id: string
+  old_doc_id: string
+  ma_tai_lieu_cu: string
+  ten_tai_lieu_cu: string
+  loai_tai_lieu: string
+  lan_sua_doi: string
+  doi_ma: boolean
+  ma_tai_lieu_moi: string
+  ten_tai_lieu_moi: string
+  file_url: string | null
+  file_name: string | null
+}
+
 type PinModalAction = "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "tra_ve" | "khong_xem_xet" | "tu_choi_phe_duyet" | "gui_lai_phe_duyet" | "tra_ve_nhap"
 
 type SignPlacement = {
@@ -223,6 +237,7 @@ export default function IsoDocumentDetailPage() {
   const [childUploadStartNo, setChildUploadStartNo] = useState("1")
   const [childUploadFiles, setChildUploadFiles] = useState<ChildUploadFile[]>([])
   const [childDraftRows, setChildDraftRows] = useState<ChildDraftRow[]>([])
+  const [childReviewRows, setChildReviewRows] = useState<ChildReviewRow[]>([])
   const [activeChildUploadRowId, setActiveChildUploadRowId] = useState<string | null>(null)
   const [reviewChangeFileUrl, setReviewChangeFileUrl] = useState<string | null>(null)
   const [reviewChangeFileName, setReviewChangeFileName] = useState<string | null>(null)
@@ -245,6 +260,7 @@ export default function IsoDocumentDetailPage() {
   const [selectedParentDocId, setSelectedParentDocId] = useState("")
   const [standardsOpen, setStandardsOpen] = useState(false)
   const [reviewDocId, setReviewDocId] = useState("")
+  const [reviewParentDocId, setReviewParentDocId] = useState("")
   const standardsSelectRef = useRef<HTMLDivElement>(null)
 
   // PIN modal
@@ -629,6 +645,7 @@ export default function IsoDocumentDetailPage() {
   const trangThai = doc?.trang_thai || "draft"
   const userId = user?.id ?? ""
   const isCon = doc ? (doc.phan_loai_tl === "con" || doc.loai_tai_lieu === "F") : false
+  const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"
   // isCon của doc đang hiển thị trong placement modal (có thể là hồ sơ con, không phải main doc)
   const placementDocIsCon = placementModal
     ? placementModal.docId === docId
@@ -651,7 +668,10 @@ export default function IsoDocumentDetailPage() {
     file: File,
     target: "main" | "change" | "review" = "main",
   ) => {
-    if (!factoryId) return
+    if (!factoryId) {
+      if (target !== "main") showToast(false, "Chưa tải xong thông tin nhà máy, vui lòng thử lại")
+      return
+    }
     const allowed = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
     if (!allowed.some((t) => file.type.includes(t.split("/")[1])) && !file.name.match(/\.(pdf|docx|xlsx)$/i)) {
       setSaveError("Chỉ hỗ trợ file PDF, DOCX, XLSX")
@@ -678,9 +698,11 @@ export default function IsoDocumentDetailPage() {
       if (target === "change") {
         setReviewChangeFileUrl(urlData.publicUrl)
         setReviewChangeFileName(file.name)
+        showToast(true, "Đã upload phiếu yêu cầu thay đổi")
       } else if (target === "review") {
         setReviewRequestFileUrl(urlData.publicUrl)
         setReviewRequestFileName(file.name)
+        showToast(true, "Đã upload đề nghị soát xét")
       } else {
         setUploadedFileUrl(urlData.publicUrl)
         setUploadedFileName(file.name)
@@ -870,9 +892,9 @@ export default function IsoDocumentDetailPage() {
     const commonErrors = [
       form.standard_ids.length === 0 ? "Vui lòng chọn tiêu chuẩn" : null,
       requireValue(form.phong_ban, "phòng ban"),
-      !isConForm || isReviewForm ? requireValue(form.loai_tai_lieu, isConForm && isReviewForm ? "loại hồ sơ" : "loại tài liệu") : null,
-      !isConForm || isReviewForm ? requireValue(form.ten_tai_lieu, isConForm ? "tên hồ sơ" : "tên tài liệu") : null,
-      !isConForm || isReviewForm ? requireValue(form.lan_ban_hanh, isReviewForm ? "lần sửa đổi" : "lần ban hành") : null,
+      !isConForm ? requireValue(form.loai_tai_lieu, "loại tài liệu") : null,
+      !isConForm ? requireValue(form.ten_tai_lieu, "tên tài liệu") : null,
+      !isConForm ? requireValue(form.lan_ban_hanh, isReviewForm ? "lần sửa đổi" : "lần ban hành") : null,
       requireValue(form.cap_tl, isConForm ? "cấp hồ sơ" : "cấp tài liệu"),
       requireValue(form.soan_thao_user_id, "người soạn thảo"),
       form.cap_tl === "Cấp 1" ? requireValue(form.xem_xet_user_id, "người xem xét") : null,
@@ -881,14 +903,33 @@ export default function IsoDocumentDetailPage() {
     if (commonErrors.length > 0) return commonErrors[0] as string
 
     if (isReviewForm) {
-      const reviewErrors = [
-        requireValue(form.ma_tai_lieu_cu || form.ma_tai_lieu, isConForm ? "mã hồ sơ" : "mã tài liệu"),
-        requireValue(form.ten_tai_lieu_cu, isConForm ? "tên hồ sơ cũ" : "tên tài liệu cũ"),
-        form.doi_ma_tai_lieu ? requireValue(form.ma_tai_lieu_moi, isConForm ? "mã hồ sơ mới" : "mã tài liệu mới") : null,
+      // TH4: soát xét nhiều hồ sơ con — validate childReviewRows
+      if (isConForm) {
+        if (!reviewParentDocId) return "Vui lòng chọn tài liệu cha"
+        if (childReviewRows.length === 0) return "Vui lòng thêm ít nhất một hồ sơ cần soát xét"
+        const invalidRow = childReviewRows.find((row) => !row.old_doc_id || !row.lan_sua_doi || !row.ten_tai_lieu_moi.trim() || !row.file_url)
+        if (invalidRow) return "Vui lòng điền đủ mã hồ sơ, lần sửa đổi, tên mới và file cho từng dòng"
+        const dupMa = childReviewRows.filter((row) => row.doi_ma && !row.ma_tai_lieu_moi.trim())
+        if (dupMa.length > 0) return "Vui lòng nhập mã hồ sơ mới cho các dòng có đổi mã"
+        const newCodes = childReviewRows.map((row) => (row.doi_ma ? row.ma_tai_lieu_moi.trim().toUpperCase() : row.ma_tai_lieu_cu.trim().toUpperCase()))
+        const hasDupNewCode = new Set(newCodes).size !== newCodes.length
+        if (hasDupNewCode) return "Có mã hồ sơ mới bị trùng nhau trong danh sách"
+      } else {
+        // TH3: soát xét tài liệu cha — validate single-row fields
+        const reviewErrors = [
+          requireValue(form.ma_tai_lieu_cu || form.ma_tai_lieu, "mã tài liệu"),
+          requireValue(form.ten_tai_lieu_cu, "tên tài liệu cũ"),
+          form.doi_ma_tai_lieu ? requireValue(form.ma_tai_lieu_moi, "mã tài liệu mới") : null,
+          requireValue(form.ly_do_soat_xet, "lý do soát xét"),
+          requireValue(form.noi_dung_soat_xet, "nội dung soát xét"),
+        ].filter(Boolean)
+        if (reviewErrors.length > 0) return reviewErrors[0] as string
+      }
+      const sharedReviewErrors = [
         requireValue(form.ly_do_soat_xet, "lý do soát xét"),
         requireValue(form.noi_dung_soat_xet, "nội dung soát xét"),
       ].filter(Boolean)
-      return reviewErrors[0] as string | undefined
+      return sharedReviewErrors[0] as string | undefined
     }
 
     const draftErrors = isConForm
@@ -908,11 +949,11 @@ export default function IsoDocumentDetailPage() {
 
   const handleSave = async () => {
     if (!factoryId) return
-    const validationError = validateForm()
-    if (validationError) { setSaveError(validationError); return }
     setSaving(true)
     setSaveError(null)
     try {
+      const validationError = validateForm()
+      if (validationError) { setSaveError(validationError); return }
       const duplicateCodeError = await validateUniqueDocumentCodes()
       if (duplicateCodeError) { setSaveError(duplicateCodeError); return }
 
@@ -939,7 +980,7 @@ export default function IsoDocumentDetailPage() {
         noi_dung_soat_xet: form.noi_dung_soat_xet || null,
         ma_tai_lieu_moi: form.doi_ma_tai_lieu ? (form.ma_tai_lieu_moi || null) : null,
         phan_loai_tl: form.phan_loai_tl || "cha",
-        parent_doc_id: form.phan_loai_tl === "con" ? (selectedParentDocId || null) : null,
+        parent_doc_id: form.phan_loai_tl === "con" ? (selectedParentDocId || reviewParentDocId || null) : null,
         file_goc_url: uploadedFileUrl || null,
         file_template_url: uploadedFileUrl || null,
         file_soat_xet_url: reviewRequestFileUrl || null,
@@ -1035,11 +1076,61 @@ export default function IsoDocumentDetailPage() {
       }
       void saveChildRecords
 
-      if (form.phan_loai_tl === "con" && isNew) {
+      if (form.phan_loai_tl === "con" && isNew && form.chon_quy_trinh !== "Soát xét") {
         const createdIds = await saveChildDraftRecords(selectedParentDocId)
         if (!createdIds) return
         if (createdIds.length > 1) showToast(true, `Đã tạo ${createdIds.length} hồ sơ thành công. Đang mở hồ sơ đầu tiên...`)
         router.replace(`/dashboard/iso/documents/${createdIds[0] || selectedParentDocId}`)
+        return
+      }
+
+      // TH4: soát xét nhiều hồ sơ con cùng lúc
+      if (form.phan_loai_tl === "con" && isNew && form.chon_quy_trinh === "Soát xét") {
+        const basePayload = {
+          factory_id: factoryId,
+          chon_quy_trinh: "Soát xét",
+          phan_loai_tl: "con",
+          parent_doc_id: reviewParentDocId || null,
+          cap_tl: form.cap_tl || null,
+          phong_ban: form.phong_ban || null,
+          ly_do_soat_xet: form.ly_do_soat_xet || null,
+          noi_dung_soat_xet: form.noi_dung_soat_xet || null,
+          ghi_chu: form.ghi_chu || null,
+          soan_thao: form.soan_thao || null,
+          soan_thao_user_id: form.soan_thao_user_id || null,
+          xem_xet: form.xem_xet || null,
+          xem_xet_user_id: form.xem_xet_user_id || null,
+          phe_duyet: form.phe_duyet || null,
+          phe_duyet_user_id: form.phe_duyet_user_id || null,
+          file_phieu_yeu_cau_thay_doi_url: reviewChangeFileUrl || null,
+          file_de_nghi_soat_xet_url: reviewRequestFileUrl || null,
+          file_soat_xet_url: reviewRequestFileUrl || null,
+          created_by: (await getFreshAuthSession())?.user?.id,
+        }
+        const childReviewPayloads = childReviewRows.map((row) => ({
+          ...basePayload,
+          ma_tai_lieu: row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi.trim().toUpperCase() : row.ma_tai_lieu_cu,
+          ten_tai_lieu: row.ten_tai_lieu_moi,
+          loai_tai_lieu: row.loai_tai_lieu || null,
+          lan_ban_hanh: parseInt(row.lan_sua_doi) || 1,
+          doi_ma_tai_lieu: row.doi_ma,
+          ma_tai_lieu_cu: row.ma_tai_lieu_cu,
+          ma_tai_lieu_moi: row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi.trim().toUpperCase() : null,
+          file_goc_url: row.file_url,
+          file_template_url: row.file_url,
+          standard_ids: form.standard_ids,
+        }))
+        const { data: insertedRows, error: insertErr } = await supabase
+          .from("iso_documents")
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .insert(childReviewPayloads.map(({ standard_ids: _sid, ...rest }) => rest))
+          .select("id")
+        if (insertErr) { setSaveError(insertErr.message); return }
+        const insertedIds = (insertedRows || []).map((r) => r.id)
+        await Promise.all(insertedIds.map((id) => saveStandards(id)))
+        setChildReviewRows([])
+        showToast(true, `Đã tạo ${insertedIds.length} hồ sơ soát xét`)
+        router.replace(`/dashboard/iso/documents/${insertedIds[0]}`)
         return
       }
 
@@ -1160,6 +1251,15 @@ export default function IsoDocumentDetailPage() {
             .limit(1)
           invalidatedIds = (toInvalidate || []).map((d) => d.id)
         }
+        // Đánh dấu hết hiệu lực tài liệu cũ TRƯỚC khi kích hoạt tài liệu mới
+        // (tránh vi phạm unique index chỉ cho phép 1 co_hieu_luc mỗi mã)
+        if (invalidatedIds.length > 0) {
+          await supabase
+            .from("iso_documents")
+            .update({ trang_thai: "het_hieu_luc", ngay_het_hieu_luc: now })
+            .in("id", invalidatedIds)
+            .eq("factory_id", factoryId)
+        }
         const updatePayload: Record<string, unknown> = {
           trang_thai: "co_hieu_luc",
           ky_phe_duyet_at: now,
@@ -1180,14 +1280,6 @@ export default function IsoDocumentDetailPage() {
           ngay_hieu_luc: now,
         })
         if (childError) { showToast(false, childError.message); return }
-        // Đánh dấu hết hiệu lực các doc cũ
-        if (invalidatedIds.length > 0) {
-          await supabase
-            .from("iso_documents")
-            .update({ trang_thai: "het_hieu_luc", ngay_het_hieu_luc: now })
-            .in("id", invalidatedIds)
-            .eq("factory_id", factoryId)
-        }
 
       } else if (action === "tra_ve" || action === "khong_xem_xet") {
         const { error } = await supabase
@@ -1394,6 +1486,30 @@ export default function IsoDocumentDetailPage() {
         }
       }
 
+      // Auto-process tài liệu soát xét PDF (Approach B: fill metadata không cần placement modal)
+      if (token && doc.chon_quy_trinh === "Soát xét" && !noSignActions.includes(action)) {
+        const attachmentKinds: Array<{ kind: "change_request" | "review_request"; url: string | null | undefined }> = [
+          { kind: "change_request", url: doc.file_phieu_yeu_cau_thay_doi_url },
+          { kind: "review_request", url: doc.file_de_nghi_soat_xet_url || (doc as Record<string, unknown>).file_soat_xet_url as string | null },
+        ]
+        for (const att of attachmentKinds) {
+          if (!isPdfUrl(att.url)) continue
+          void fetch("/api/sign/generate-pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, docId, docType: "iso", fileKind: att.kind, signaturePlacement: null, action }),
+          }).then(res => res.json()).then((json: Record<string, unknown>) => {
+            if (json.signedPdfUrl) {
+              setDoc((prev) => prev ? {
+                ...prev,
+                ...(att.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_url: json.signedPdfUrl as string } : {}),
+                ...(att.kind === "review_request" ? { file_de_nghi_soat_xet_url: json.signedPdfUrl as string } : {}),
+              } : prev)
+            }
+          }).catch(() => {})
+        }
+      }
+
       // Restamp PDF tài liệu cũ bị hủy hiệu lực
       if (invalidatedIds.length > 0) {
         void fetch("/api/sign/restamp-pdf", {
@@ -1483,15 +1599,7 @@ export default function IsoDocumentDetailPage() {
     if (isPdfUrl(doc.file_goc_url)) {
       queue.push({ docId: doc.id, kind: "main", label: "File PDF chính", url: doc.file_signed_pdf_url || doc.file_goc_url! })
     }
-    if (doc.chon_quy_trinh === "Soát xét") {
-      if (isPdfUrl(doc.file_phieu_yeu_cau_thay_doi_url)) {
-        queue.push({ docId: doc.id, kind: "change_request", label: "Phiếu yêu cầu thay đổi", url: doc.file_phieu_yeu_cau_thay_doi_url! })
-      }
-      const reviewUrl = doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url
-      if (isPdfUrl(reviewUrl)) {
-        queue.push({ docId: doc.id, kind: "review_request", label: "Đề nghị soát xét", url: reviewUrl! })
-      }
-    }
+    // change_request và review_request được auto-process trong doTransition (Approach B) — không cần placement modal
     for (const child of childDocs) {
       if (isPdfUrl(child.file_goc_url)) {
         queue.push({
@@ -1887,6 +1995,62 @@ export default function IsoDocumentDetailPage() {
     setChildDraftRows((rows) => rows.map((row) => row.id === rowId ? { ...row, ...patch } : row))
   }
 
+  const addChildReviewRow = () => {
+    setChildReviewRows((rows) => [
+      ...rows,
+      {
+        id: makeChildDraftId(),
+        old_doc_id: "",
+        ma_tai_lieu_cu: "",
+        ten_tai_lieu_cu: "",
+        loai_tai_lieu: "F",
+        lan_sua_doi: "1",
+        doi_ma: false,
+        ma_tai_lieu_moi: "",
+        ten_tai_lieu_moi: "",
+        file_url: null,
+        file_name: null,
+      },
+    ])
+  }
+
+  const updateChildReviewRow = (rowId: string, patch: Partial<ChildReviewRow>) => {
+    setChildReviewRows((rows) => rows.map((row) => row.id === rowId ? { ...row, ...patch } : row))
+  }
+
+  const applyReviewRowDocument = (rowId: string, docId: string) => {
+    const selected = effectiveDocs.find((item) => item.id === docId)
+    updateChildReviewRow(rowId, {
+      old_doc_id: docId,
+      ma_tai_lieu_cu: selected?.ma_tai_lieu || "",
+      ten_tai_lieu_cu: selected?.ten_tai_lieu || "",
+      loai_tai_lieu: selected?.loai_tai_lieu || "F",
+      ten_tai_lieu_moi: selected?.ten_tai_lieu || "",
+    })
+  }
+
+  const handleReviewRowFileUpload = async (file: File, rowId: string) => {
+    if (!factoryId) return
+    const allowed = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
+    if (!allowed.some((t) => file.type.includes(t.split("/")[1])) && !file.name.match(/\.(pdf|docx|xlsx)$/i)) {
+      setSaveError(`File ${file.name} không hợp lệ. Chỉ hỗ trợ PDF, DOCX, XLSX`)
+      return
+    }
+    setFileUploading(true)
+    setSaveError(null)
+    try {
+      const safeName = sanitizeStorageFileName(file.name)
+      const filePath = `${factoryId}/iso/child-records/${Date.now()}_${safeName}`
+      const { error } = await supabase.storage.from("iso-documents").upload(filePath, file, { upsert: true })
+      if (error) { setSaveError(error.message); return }
+      const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(filePath)
+      updateChildReviewRow(rowId, { file_url: urlData.publicUrl, file_name: file.name })
+      if (hasVietnameseOrNonAsciiName(file.name)) showToast(false, `Đã chuẩn hoá tên file: ${safeName}`)
+    } finally {
+      setFileUploading(false)
+    }
+  }
+
   const childRecordCode = (row: ChildDraftRow) => {
     const parentCode = form.phan_loai_tl === "con" ? form.ma_tai_lieu_cha : form.ma_tai_lieu
     return buildMaTaiLieuCon(parentCode, row.loai_tai_lieu, row.so_hieu)
@@ -2033,8 +2197,19 @@ export default function IsoDocumentDetailPage() {
     !form.phong_ban || item.phong_ban === form.phong_ban
   )
   const reviewTypeOptions = Array.from(new Set(reviewDocsByDepartment.map((item) => item.loai_tai_lieu).filter(Boolean) as string[]))
-  const reviewCodeOptions = reviewDocsByDepartment.filter((item) =>
-    !form.loai_tai_lieu || item.loai_tai_lieu === form.loai_tai_lieu
+  // Khi soát xét hồ sơ con: lọc thêm theo tài liệu cha đã chọn
+  const reviewCodeOptions = reviewDocsByDepartment.filter((item) => {
+    if (!form.loai_tai_lieu || item.loai_tai_lieu === form.loai_tai_lieu) {
+      if (form.phan_loai_tl === "con" && reviewParentDocId) {
+        return item.parent_doc_id === reviewParentDocId
+      }
+      return true
+    }
+    return false
+  })
+  // Danh sách tài liệu cha để chọn khi soát xét hồ sơ con
+  const reviewParentOptions = effectiveDocs.filter(
+    (item) => !isChildDocument(item) && (!form.phong_ban || item.phong_ban === form.phong_ban)
   )
 
   const applyReviewDocument = (id: string) => {
@@ -2157,6 +2332,7 @@ export default function IsoDocumentDetailPage() {
     const titleLabel = isCon ? "Tên hồ sơ" : "Tên tài liệu"
     const codeLabel = isCon ? "Mã hồ sơ" : "Mã tài liệu"
     const levelLabel = isCon ? "Cấp hồ sơ" : "Cấp tài liệu"
+    const typeLabel = isCon ? "Loại hồ sơ" : "Loại tài liệu"
 
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2167,8 +2343,11 @@ export default function IsoDocumentDetailPage() {
             onChange={(e) => {
               const chonQuyTrinh = e.target.value
               setReviewDocId("")
+              setReviewParentDocId("")
               patchDraftForm({
                 chon_quy_trinh: chonQuyTrinh,
+                // Reset filter fields khi chuyển chế độ để cascade lọc đúng
+                ...(chonQuyTrinh === "Soát xét" ? { phong_ban: "", loai_tai_lieu: "" } : {}),
                 ma_tai_lieu_cu: "",
                 ten_tai_lieu_cu: "",
                 doi_ma_tai_lieu: false,
@@ -2194,6 +2373,7 @@ export default function IsoDocumentDetailPage() {
                 if (!isEditable) return
                 const newLoai = parentTypeOptions.includes(form.loai_tai_lieu) ? form.loai_tai_lieu : "QT"
                 setReviewDocId("")
+                setReviewParentDocId("")
                 patchDraftForm({ phan_loai_tl: "cha", loai_tai_lieu: newLoai, ma_tai_lieu_cha: "", ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" })
               }}
               className={`flex-1 py-2 text-sm font-bold transition-all ${!isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
@@ -2206,6 +2386,7 @@ export default function IsoDocumentDetailPage() {
                 if (!isEditable) return
                 const newLoai = childTypeOptions.includes(form.loai_tai_lieu) ? form.loai_tai_lieu : "PL"
                 setReviewDocId("")
+                setReviewParentDocId("")
                 patchDraftForm({ phan_loai_tl: "con", loai_tai_lieu: newLoai, ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" })
               }}
               className={`flex-1 py-2 text-sm font-bold transition-all ${isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
@@ -2248,6 +2429,9 @@ export default function IsoDocumentDetailPage() {
             <option value="">— Chọn phòng ban —</option>
             {departmentOptions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
+          {isReviewForm && !form.phong_ban && (
+            <p className="mt-1 text-[11px] text-amber-600">Chọn phòng ban để lọc danh sách tài liệu.</p>
+          )}
         </div>
 
         {!isCon && (
@@ -2263,7 +2447,7 @@ export default function IsoDocumentDetailPage() {
                   patchDraftForm({ loai_tai_lieu: e.target.value })
                 }
               }}
-              disabled={!isEditable}
+              disabled={!isEditable || (isReviewForm && !form.phong_ban)}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
             >
               <option value="">— Chọn loại tài liệu —</option>
@@ -2318,48 +2502,73 @@ export default function IsoDocumentDetailPage() {
 
         {isReviewForm && (
           <>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} <span className="text-red-500">*</span></label>
-              <select value={reviewDocId || form.ma_tai_lieu_cu} onChange={(e) => applyReviewDocument(e.target.value)} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
-                <option value="">— Chọn {codeLabel.toLowerCase()} có hiệu lực —</option>
-                {reviewCodeOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{item.ma_tai_lieu} — {item.ten_tai_lieu}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} <span className="text-red-500">*</span></label>
-              <input type="text" value={form.ten_tai_lieu_cu} readOnly className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none bg-slate-50 text-slate-600" />
-            </div>
-          </>
-        )}
-
-        {(!isCon || isReviewForm) && (
-          <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">{isReviewForm ? "Lần sửa đổi" : "Lần ban hành"} <span className="text-red-500">*</span></label>
-          <input type="number" min="0" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
-          </div>
-        )}
-
-        {isReviewForm && (
-          <>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Thay đổi {codeLabel.toLowerCase()} <span className="text-red-500">*</span></label>
-              <select value={form.doi_ma_tai_lieu ? "co" : "khong"} onChange={(e) => setForm((f) => ({ ...f, doi_ma_tai_lieu: e.target.value === "co", ma_tai_lieu_moi: e.target.value === "co" ? f.ma_tai_lieu_moi : "" }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
-                <option value="khong">Không</option>
-                <option value="co">Có</option>
-              </select>
-            </div>
-            {form.doi_ma_tai_lieu && (
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} mới <span className="text-red-500">*</span></label>
-                <input type="text" value={form.ma_tai_lieu_moi} onChange={(e) => setForm((f) => ({ ...f, ma_tai_lieu_moi: e.target.value.toUpperCase() }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono" />
+            {/* Soát xét hồ sơ con: chọn tài liệu cha trước để lọc danh sách hồ sơ */}
+            {isCon && (
+              <div className="sm:col-span-2">
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài liệu cha (bộ quy trình) <span className="text-red-500">*</span></label>
+                <select
+                  value={reviewParentDocId}
+                  onChange={(e) => {
+                    setReviewParentDocId(e.target.value)
+                    setReviewDocId("")
+                    setForm((f) => ({ ...f, ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" }))
+                  }}
+                  disabled={!isEditable}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                >
+                  <option value="">— Chọn tài liệu cha có hiệu lực —</option>
+                  {reviewParentOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.ma_tai_lieu} — {p.ten_tai_lieu}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-slate-400">Chọn tài liệu cha để lọc danh sách hồ sơ bên dưới.</p>
               </div>
             )}
-            <div className="sm:col-span-2">
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} mới <span className="text-red-500">*</span></label>
-              <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
-            </div>
+            {/* TH3 only: single mã tài liệu dropdown + tên cũ + lần sửa đổi + đổi mã */}
+            {!isCon && (
+              <>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} <span className="text-red-500">*</span></label>
+                  <select
+                    value={reviewDocId || form.ma_tai_lieu_cu}
+                    onChange={(e) => applyReviewDocument(e.target.value)}
+                    disabled={!isEditable || !form.phong_ban}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                  >
+                    <option value="">— Chọn {codeLabel.toLowerCase()} có hiệu lực —</option>
+                    {reviewCodeOptions.map((item) => (
+                      <option key={item.id} value={item.id}>{item.ma_tai_lieu} — {item.ten_tai_lieu}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.ten_tai_lieu_cu} readOnly className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none bg-slate-50 text-slate-600" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Lần sửa đổi <span className="text-red-500">*</span></label>
+                  <input type="number" min="0" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Thay đổi {codeLabel.toLowerCase()} <span className="text-red-500">*</span></label>
+                  <select value={form.doi_ma_tai_lieu ? "co" : "khong"} onChange={(e) => setForm((f) => ({ ...f, doi_ma_tai_lieu: e.target.value === "co", ma_tai_lieu_moi: e.target.value === "co" ? f.ma_tai_lieu_moi : "" }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+                    <option value="khong">Không</option>
+                    <option value="co">Có</option>
+                  </select>
+                </div>
+                {form.doi_ma_tai_lieu && (
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} mới <span className="text-red-500">*</span></label>
+                    <input type="text" value={form.ma_tai_lieu_moi} onChange={(e) => setForm((f) => ({ ...f, ma_tai_lieu_moi: e.target.value.toUpperCase() }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono" />
+                  </div>
+                )}
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} mới <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+                </div>
+              </>
+            )}
+            {/* Lý do + Nội dung soát xét: dùng chung TH3 và TH4 */}
             <div className="sm:col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do soát xét <span className="text-red-500">*</span></label>
               <textarea value={form.ly_do_soat_xet} onChange={(e) => setForm((f) => ({ ...f, ly_do_soat_xet: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
@@ -2369,6 +2578,14 @@ export default function IsoDocumentDetailPage() {
               <textarea value={form.noi_dung_soat_xet} onChange={(e) => setForm((f) => ({ ...f, noi_dung_soat_xet: e.target.value }))} disabled={!isEditable} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
             </div>
           </>
+        )}
+
+        {/* Lần ban hành — chỉ cho TH1 (cha soạn thảo); TH2/TH4 dùng per-row; TH3 đã có trong !isCon block */}
+        {!isReviewForm && !isCon && (
+          <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Lần ban hành <span className="text-red-500">*</span></label>
+          <input type="number" min="0" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+          </div>
         )}
 
         {!isReviewForm && !isCon && (
@@ -2426,10 +2643,10 @@ export default function IsoDocumentDetailPage() {
 
         {/* Save error */}
         {saveError && (
-          <div className="flex items-center gap-3 px-5 py-3 bg-red-50 border border-red-200 text-red-700 rounded-xl">
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
             <AlertTriangle size={16} className="shrink-0" />
-            <span className="text-sm">{saveError}</span>
-            <button onClick={() => setSaveError(null)} className="ml-auto hover:opacity-70"><X size={14} /></button>
+            <span className="text-sm font-bold">{saveError}</span>
+            <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
           </div>
         )}
 
@@ -2787,6 +3004,140 @@ export default function IsoDocumentDetailPage() {
           />
 
           <div className="space-y-4">
+            {/* TH4: Soát xét nhiều hồ sơ con — right panel */}
+            {isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh === "Soát xét" && (
+              <div className="space-y-3">
+                {/* Section 1: Hồ sơ cần soát xét */}
+                <div className="bg-white rounded-xl border border-emerald-200 shadow-sm p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-extrabold text-emerald-800">Hồ sơ cần soát xét</p>
+                      <p className="text-[11px] text-slate-500">Mỗi dòng là một hồ sơ. Chọn hồ sơ cũ và upload file phiên bản mới.</p>
+                      {!reviewParentDocId && (
+                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha (bộ quy trình) trước.</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addChildReviewRow}
+                      disabled={!reviewParentDocId}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${reviewParentDocId ? "border-emerald-500 !bg-emerald-600 !text-white hover:!bg-emerald-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
+                    >
+                      Thêm hồ sơ
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {childReviewRows.map((row) => {
+                      const rowChildOptions = effectiveDocs.filter(
+                        (item) => (item.phan_loai_tl === "con" || item.loai_tai_lieu === "F") &&
+                          item.parent_doc_id === reviewParentDocId
+                      )
+                      return (
+                        <div key={row.id} className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="col-span-2 text-[11px] font-bold text-slate-600">
+                              Mã hồ sơ cũ <span className="text-red-500">*</span>
+                              <select
+                                value={row.old_doc_id}
+                                onChange={(e) => applyReviewRowDocument(row.id, e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                              >
+                                <option value="">— Chọn hồ sơ đang có hiệu lực —</option>
+                                {rowChildOptions.map((item) => (
+                                  <option key={item.id} value={item.id}>{item.ma_tai_lieu} — {item.ten_tai_lieu}</option>
+                                ))}
+                              </select>
+                              {rowChildOptions.length === 0 && reviewParentDocId && (
+                                <span className="mt-1 block text-[10px] text-amber-600">Tài liệu cha chưa có hồ sơ con có hiệu lực.</span>
+                              )}
+                            </label>
+                            <label className="text-[11px] font-bold text-slate-600">
+                              Lần sửa đổi <span className="text-red-500">*</span>
+                              <input type="number" min="1" value={row.lan_sua_doi} onChange={(e) => updateChildReviewRow(row.id, { lan_sua_doi: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                            </label>
+                            <label className="text-[11px] font-bold text-slate-600">
+                              Đổi mã?
+                              <select value={row.doi_ma ? "co" : "khong"} onChange={(e) => updateChildReviewRow(row.id, { doi_ma: e.target.value === "co", ma_tai_lieu_moi: "" })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs">
+                                <option value="khong">Không</option>
+                                <option value="co">Có</option>
+                              </select>
+                            </label>
+                            {row.doi_ma && (
+                              <label className="col-span-2 text-[11px] font-bold text-slate-600">
+                                Mã hồ sơ mới <span className="text-red-500">*</span>
+                                <input type="text" value={row.ma_tai_lieu_moi} onChange={(e) => updateChildReviewRow(row.id, { ma_tai_lieu_moi: e.target.value.toUpperCase() })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
+                              </label>
+                            )}
+                            <label className="col-span-2 text-[11px] font-bold text-slate-600">
+                              Tên hồ sơ mới <span className="text-red-500">*</span>
+                              <input type="text" value={row.ten_tai_lieu_moi} onChange={(e) => updateChildReviewRow(row.id, { ten_tai_lieu_moi: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+                            </label>
+                            <div className="col-span-2 text-[11px] font-bold text-slate-600">
+                              File hồ sơ mới <span className="text-red-500">*</span>
+                              <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-300 px-2 py-1.5 text-left text-xs text-emerald-700 hover:border-emerald-500">
+                                <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
+                                <Upload size={13} />
+                                <input
+                                  type="file"
+                                  accept=".pdf,.docx,.xlsx"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0]
+                                    if (f) void handleReviewRowFileUpload(f, row.id)
+                                    e.target.value = ""
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => setChildReviewRows((rows) => rows.filter((item) => item.id !== row.id))} className="mt-2 text-[11px] font-bold text-red-600 hover:text-red-700">
+                            Xóa dòng
+                          </button>
+                        </div>
+                      )
+                    })}
+                    {childReviewRows.length === 0 && (
+                      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
+                    )}
+                  </div>
+                </div>
+                {/* Section 2: Tài liệu soát xét */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                  <h2 className="text-sm font-extrabold text-slate-700 mb-3">Tài liệu soát xét</h2>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 mb-2">Phiếu yêu cầu thay đổi</p>
+                      {reviewChangeFileUrl && (
+                        <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
+                          <FileText size={16} className="text-amber-600 shrink-0" />
+                          <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
+                          <a href={reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"><Eye size={13} className="text-amber-600" /></a>
+                        </div>
+                      )}
+                      <button type="button" onClick={() => reviewChangeFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all">
+                        {reviewChangeFileUrl ? "Thay file" : "Upload phiếu yêu cầu thay đổi"}
+                      </button>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-600 mb-2">Đề nghị soát xét</p>
+                      {reviewRequestFileUrl && (
+                        <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
+                          <FileText size={16} className="text-sky-600 shrink-0" />
+                          <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
+                          <a href={reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"><Eye size={13} className="text-sky-600" /></a>
+                        </div>
+                      )}
+                      <button type="button" onClick={() => reviewRequestFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all">
+                        {reviewRequestFileUrl ? "Thay file" : "Upload đề nghị soát xét"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {/* Section 3: Hướng dẫn */}
+                {renderOfficeTagGuide()}
+              </div>
+            )}
+
             {/* Hồ sơ cần soạn thảo — chỉ dành cho hồ sơ riêng lẻ mới (right panel) */}
             {isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "Soát xét" && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
@@ -2940,10 +3291,63 @@ export default function IsoDocumentDetailPage() {
                 </div>
               </div>
             )}
-            {/* File đính kèm */}
-            {!(isCon && form.chon_quy_trinh !== "Soát xét") && (
+            {/* Tài liệu soát xét — TH3 (soát xét tài liệu cha/hồ sơ độc lập): hiện TRƯỚC file card */}
+            {form.chon_quy_trinh === "Soát xét" && !(isNew && form.phan_loai_tl === "con") && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <h2 className="text-sm font-extrabold text-slate-700 mb-3">Tài liệu soát xét</h2>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-bold text-slate-600 mb-2">Phiếu yêu cầu thay đổi</p>
+                    {reviewChangeFileUrl ? (
+                      <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
+                        <FileText size={16} className="text-amber-600 shrink-0" />
+                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
+                        <a href={reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
+                          <Eye size={13} className="text-amber-600" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={() => reviewChangeFileInputRef.current?.click()}
+                        disabled={fileUploading}
+                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all"
+                      >
+                        {reviewChangeFileUrl ? "Thay file" : "Upload phiếu yêu cầu thay đổi"}
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-600 mb-2">Đề nghị soát xét</p>
+                    {reviewRequestFileUrl ? (
+                      <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
+                        <FileText size={16} className="text-sky-600 shrink-0" />
+                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
+                        <a href={reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
+                          <Eye size={13} className="text-sky-600" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={() => reviewRequestFileInputRef.current?.click()}
+                        disabled={fileUploading}
+                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all"
+                      >
+                        {reviewRequestFileUrl ? "Thay file" : "Upload đề nghị soát xét"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* File đính kèm — ẩn khi TẠO MỚI hồ sơ con (TH2/TH4). Hiện khi: cha mới, tài liệu đã tồn tại (kể cả hồ sơ con đang xem xét) */}
+            {!(isNew && form.phan_loai_tl === "con") && (
             <div id="file-goc-upload" className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-3">File tài liệu</h2>
+              <h2 className="text-sm font-extrabold text-slate-700 mb-3">{fileSectionLabel}</h2>
               <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoặc XLSX</p>
 
               {doc?.file_signed_pdf_url && (
@@ -3112,7 +3516,7 @@ export default function IsoDocumentDetailPage() {
                       </div>
                     ))}
                     {childDraftRows.length === 0 && childDocs.length === 0 && (
-                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con nào. Bấm "Thêm hồ sơ" để bắt đầu.</p>
+                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
                     )}
                   </div>
                   )}
@@ -3183,52 +3587,6 @@ export default function IsoDocumentDetailPage() {
                 }}
               />
 
-              {form.chon_quy_trinh === "Soát xét" && (
-                <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
-                  <div>
-                    <p className="text-xs font-bold text-slate-600 mb-2">Phiếu yêu cầu thay đổi</p>
-                    {reviewChangeFileUrl ? (
-                      <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
-                        <FileText size={16} className="text-amber-600 shrink-0" />
-                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
-                        <a href={reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
-                          <Eye size={13} className="text-amber-600" />
-                        </a>
-                      </div>
-                    ) : null}
-                    {isEditable && (
-                      <button
-                        onClick={() => reviewChangeFileInputRef.current?.click()}
-                        disabled={fileUploading}
-                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all"
-                      >
-                        {reviewChangeFileUrl ? "Thay file" : "Upload phiếu yêu cầu thay đổi"}
-                      </button>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-600 mb-2">Đề nghị soát xét</p>
-                    {reviewRequestFileUrl ? (
-                      <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
-                        <FileText size={16} className="text-sky-600 shrink-0" />
-                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
-                        <a href={reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
-                          <Eye size={13} className="text-sky-600" />
-                        </a>
-                      </div>
-                    ) : null}
-                    {isEditable && (
-                      <button
-                        onClick={() => reviewRequestFileInputRef.current?.click()}
-                        disabled={fileUploading}
-                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all"
-                      >
-                        {reviewRequestFileUrl ? "Thay file" : "Upload đề nghị soát xét"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
 
             </div>
             )}

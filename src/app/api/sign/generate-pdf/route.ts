@@ -964,7 +964,11 @@ export async function POST(req: NextRequest) {
       }
     }
     if (signFileKind !== "main" && signaturePlacement) {
+      // File phụ với placement cụ thể: chỉ nhúng chữ ký tại vị trí đó
       allPlacements.splice(0, allPlacements.length, { signerUserId: userId, placement: signaturePlacement })
+    } else if (signFileKind !== "main") {
+      // File phụ không có placement (Approach B auto-process): chỉ fill metadata, không nhúng chữ ký
+      allPlacements.splice(0, allPlacements.length)
     }
 
     const soanPlacement = allPlacements[0]?.placement

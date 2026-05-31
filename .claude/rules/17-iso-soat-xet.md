@@ -572,3 +572,23 @@ Mục này thay thế mọi quy tắc cũ trong file này nếu có mâu thuẫn
 - Với hồ sơ DOCX/XLSX, engine dùng toàn bộ bộ tag chữ chuẩn của ISO cộng `{{QR}}`; tag đúng có thì điền, tag đúng thiếu thì bỏ qua, tag sai/gần giống dạng `{{...}}` thì chặn và yêu cầu thay file.
 - Với hồ sơ cấp 2 gửi thẳng phê duyệt, artifact DOCX/XLSX phải ghi trạng thái `Chờ phê duyệt`, không ghi `Chờ xem xét`.
 - Nút xem file ưu tiên `file_signed_pdf_url`, rồi `file_signed_office_url`, rồi `file_goc_url`; UI không hiển thị trùng hai dòng Office có cùng nội dung.
+
+---
+
+## Cập nhật 2026-05-31 — Fix TH4 soát xét hồ sơ con
+
+### Lọc dropdown "Tài liệu cha" theo phòng ban
+
+`reviewParentOptions` trong TH4 phải filter thêm `item.phong_ban === form.phong_ban`. Nếu không, dropdown hiển thị tài liệu cha của mọi phòng ban dù đã chọn PHK hay phòng ban khác.
+
+### handleSave TH4 — branch điều kiện
+
+Branch `isNew && phan_loai_tl === "con"` dùng `saveChildDraftRecords` (tạo batch). Với TH4 (soát xét hồ sơ con), cần thêm điều kiện `&& form.chon_quy_trinh !== "Soát xét"` để TH4 fall-through sang luồng upsert đơn ở `isNew` branch bên dưới.
+
+### parent_doc_id cho TH4
+
+Payload `parent_doc_id` dùng `selectedParentDocId || reviewParentDocId`. TH4 chỉ set `reviewParentDocId` (dropdown "Tài liệu cha" trong form soát xét), không set `selectedParentDocId` (dùng cho TH2).
+
+### Labels
+
+Xem nguyên tắc tổng quát trong rule 16 mục "Label tài liệu/hồ sơ". Đặc biệt với TH4: codeLabel, titleLabel đã dynamic; typeLabel thêm mới nhưng không hiển thị trong TH4 (section `!isCon` ẩn); fileSectionLabel áp dụng cho header card "File tài liệu" ở right panel.

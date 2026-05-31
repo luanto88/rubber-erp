@@ -103,18 +103,25 @@ export default function IsoDocumentsPage() {
     acc[item.id] = item
     return acc
   }, {})
-  const shouldNestChild = (item: IsoDocument) => {
-    if (!isChildDoc(item) || !item.parent_doc_id) return false
-    const parent = docById[item.parent_doc_id]
-    if (parent?.trang_thai === "co_hieu_luc" && item.trang_thai !== "co_hieu_luc") return false
-    return true
+  // Suy ra mã cha từ mã con: PHK-QT02-F01 + "F" → PHK-QT02
+  const inferParentCode = (ma: string, loai: string | null | undefined): string | null => {
+    if (!ma || !loai) return null
+    const maCha = ma.replace(new RegExp(`-${loai}\\d+$`, "i"), "")
+    return maCha !== ma ? maCha : null
   }
+  const resolveParentId = (item: IsoDocument): string | null => {
+    if (item.parent_doc_id) return docById[item.parent_doc_id] ? item.parent_doc_id : null
+    const maCha = inferParentCode(item.ma_tai_lieu || "", item.loai_tai_lieu)
+    if (!maCha) return null
+    return filtered.find((d) => d.ma_tai_lieu === maCha && !isChildDoc(d))?.id ?? null
+  }
+  const shouldNestChild = (item: IsoDocument) => !isChildDoc(item) ? false : !!resolveParentId(item)
   const parentRows = filtered.filter((item) => !isChildDoc(item) || !shouldNestChild(item))
   const childrenByParent = filtered
     .filter((item) => shouldNestChild(item))
     .reduce<Record<string, IsoDocument[]>>((acc, item) => {
-      const parentId = item.parent_doc_id as string
-      acc[parentId] = [...(acc[parentId] || []), item]
+      const parentId = resolveParentId(item)
+      if (parentId) acc[parentId] = [...(acc[parentId] || []), item]
       return acc
     }, {})
   const renderStatusBadge = (status: IsoTrangThai) => {
