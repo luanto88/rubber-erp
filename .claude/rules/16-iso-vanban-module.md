@@ -950,9 +950,10 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 4. **Reload tất cả 3 placements** từ DB
 5. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
 6. **Scan text layer** bằng `pdfjs-dist` → điền tag header/footer hợp lệ; bỏ qua tag mismatch (trả về `metaMismatched`)
-7. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
-8. **Vẽ tên người ký** nếu `showSignerName !== false`, dùng box tên độc lập nếu user đã đặt
-9. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
+7. **Vẽ QR manual placement trên mỗi trang**: dùng `pageFound` (per-page, reset mỗi vòng) thay vì `filled` (cross-page) — đảm bảo QR xuất hiện đúng trên **tất cả** trang, không chỉ trang 1.
+8. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
+9. **Vẽ tên người ký** nếu `showSignerName !== false`, dùng box tên độc lập nếu user đã đặt
+10. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
 
 **Kết quả:**
 
@@ -996,6 +997,10 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
   - Nếu người dùng đã điền footer thật rồi: code bỏ qua, không ghi đè.
   - Nếu không tìm thấy footer mẫu/tag footer thì bỏ qua, không tự vẽ footer mới ở vị trí đoán.
   - Font footer hệ thống: `Times New Roman`, size `13`.
+- **Footer đã điền một phần** — hệ thống nhận diện được footer đã có mã và ngày nhưng trạng thái vẫn là placeholder:
+  - Ví dụ: `PHK-QT10 (Lần ban hành-01/06/2024) Tình trạng` — mã và ngày đã điền sẵn, "Tình trạng" là placeholder.
+  - Pattern `FOOTER_PARTIAL_FILLED_STATUS_RE` bắt dạng: code + `(…date…)` + `tinh trang|trang thai` ở cuối.
+  - Được xử lý giống footer mẫu đầy đủ — thay toàn bộ bằng giá trị thực.
 
 #### Tag tương tự phải cảnh báo và bỏ qua fill
 
@@ -1547,7 +1552,7 @@ CLOUDCONVERT_API_KEY=...   # đã có trong .env.local và Vercel
 - **UI toggle**:
   - Hồ sơ con (`isCon = true`): hiện nút **"Ẩn chữ ký (X)"** (tắt/bật ảnh chữ ký) VÀ toggle ẩn/hiện tên.
   - Tài liệu cha (`isCon = false`): chỉ có toggle ẩn/hiện tên; chữ ký luôn hiển thị.
-- **Visual feedback**: khi `showSignature === false`, ảnh chữ ký trong modal có `display: none` và hiện overlay "Chữ ký đã ẩn" (màu violet, nền nhạt) thay thế.
+- **Visual feedback**: khi `showSignature === false`, ảnh chữ ký trong modal có `display: none` và hiện overlay "Chữ ký đã ẩn" (màu violet, nền nhạt) thay thế. Label "Không đặt ra ngoài ô chứa" cũng bị ẩn khi signature đã ẩn (không còn ý nghĩa đặt vị trí).
 - **Khởi tạo**: `showSignature: true` khi mở modal (default hiện chữ ký).
 - `showSignature` được truyền vào object placement gửi lên server cùng với `nameX/Y/W/H`, `showSignerName`.
 
@@ -1611,3 +1616,32 @@ const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"    // oute
 ### Vị trí card "Tài liệu soát xét"
 
 2 upload fields (Phiếu yêu cầu thay đổi + Đề nghị soát xét) nằm trong **card riêng** "Tài liệu soát xét" ở right panel, sau card "File tài liệu/hồ sơ". Không còn nằm lồng trong div `file-goc-upload` nữa.
+
+---
+
+## Cập nhật nóng (2026-06-01) — Footer một phần, QR mọi trang, Modal UX + Fixes session trước
+
+### 1) Footer không được thay thế khi đã điền một phần
+
+- **Nguyên nhân**: regex cũ yêu cầu text "Mã tài liệu" ở đầu, nhưng footer đã có giá trị thực (VD: "PHK-QT10") nên không match.
+- **Fix** (`generate-pdf/route.ts`): thêm `FOOTER_PARTIAL_FILLED_STATUS_RE`:
+  ```
+  /^[a-z]{2,}(?:-[a-z0-9]{2,})+\s*\(.*?\d{1,2}\/\d{1,2}\/\d{4}.*?\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
+  ```
+  Nhận diện footer dạng `CODE (…date…) tinh trang` và đưa vào `isFooterFillCandidate`.
+
+### 2) QR manual placement chỉ trang 1
+
+- **Nguyên nhân**: block manual placement dùng `filled` (cross-page). Sau trang 1 `filled.has("QR")` = true → trang 2+ bị chặn.
+- **Fix** (`generate-pdf/route.ts`): đổi `(!filled.has("QR") || shouldDrawDefaultChildQr)` → `!pageFound.has("QR")` (per-page). Thêm `pageFound.add("QR")` trong cùng block để tránh double-draw trên cùng trang.
+
+### 3) Label "Không đặt ra ngoài ô chứa" hiện khi signature đã ẩn
+
+- **Nguyên nhân**: label render unconditionally bên trong Resizable, kể cả khi `showSignature=false` đang hiện overlay "Chữ ký đã ẩn".
+- **Fix** (`[id]/page.tsx`): bọc label trong `{placementModal.showSignature && (...)}`.
+
+### 4) Fixes từ session trước (ghi nhận tham chiếu)
+
+- **Badge sidebar thiếu `tra_ve`** (`iso-shell.tsx`): thêm `soan_thao_user_id` vào select/or, thêm điều kiện `trang_thai === "tra_ve" && soan_thao_user_id === uid`.
+- **`isEditable` guard** (`[id]/page.tsx`): `draft`/`tra_ve` chỉ allow `isSoanThao` (`isNew || userId === doc?.soan_thao_user_id`); người xem xét không thấy nút draft sau `tra_ve_nhap`.
+- **Clear placement cũ khi gửi xem xét lại** (`generate-pdf/route.ts`): khi `currentSignerKey === "soan_thao_placement"`, clear `xem_xet_placement` và `phe_duyet_placement` trong DB — PDF mới chỉ chứa chữ ký soạn thảo.

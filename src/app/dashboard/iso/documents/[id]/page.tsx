@@ -3775,20 +3775,22 @@ export default function IsoDocumentDetailPage() {
                             Chữ ký đã ẩn
                           </div>
                         )}
-                        <span style={{
-                          position: "absolute",
-                          top: -20,
-                          left: 0,
-                          fontSize: 10,
-                          color: "#7c3aed",
-                          background: "rgba(255,255,255,0.92)",
-                          padding: "1px 5px",
-                          borderRadius: 4,
-                          whiteSpace: "nowrap",
-                          pointerEvents: "none",
-                        }}>
-                          Không đặt ra ngoài ô chứa
-                        </span>
+                        {placementModal.showSignature && (
+                          <span style={{
+                            position: "absolute",
+                            top: -20,
+                            left: 0,
+                            fontSize: 10,
+                            color: "#7c3aed",
+                            background: "rgba(255,255,255,0.92)",
+                            padding: "1px 5px",
+                            borderRadius: 4,
+                            whiteSpace: "nowrap",
+                            pointerEvents: "none",
+                          }}>
+                            Không đặt ra ngoài ô chứa
+                          </span>
+                        )}
                       </Resizable>
                     </div>
                   </Draggable>

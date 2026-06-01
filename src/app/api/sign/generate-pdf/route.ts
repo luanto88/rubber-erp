@@ -76,6 +76,8 @@ const FOOTER_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*
 const FOOTER_FILLED_RE = /\b[A-Z]{2,}(?:-[A-Z0-9Đ]{2,})+\s*\(\d{2}-\d{2}\/\d{2}\/\d{4}\)\s*.+/i
 const FOOTER_LABEL = "Footer mẫu"
 const FOOTER_PARTIAL_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*\d{1,2}\/\d{1,2}\/\d{4}.*(tinh\s*trang|trang\s*thai)/i
+// Footer đã có mã và ngày, nhưng trạng thái vẫn là placeholder: "PHK-QT10 (Lần ban hành-01/06/2024) Tình trạng"
+const FOOTER_PARTIAL_FILLED_STATUS_RE = /^[a-z]{2,}(?:-[a-z0-9]{2,})+\s*\(.*?\d{1,2}\/\d{1,2}\/\d{4}.*?\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
 const HEADER_FOOTER_FONT_SIZE = 11
 
 function isLikelyFooterMismatchText(searchText: string): boolean {
@@ -363,7 +365,7 @@ function buildFooterValueForLine(lineText: string, maTl: string, lsStr: string, 
 }
 
 function isFooterFillCandidate(lineText: string, searchText: string): boolean {
-  return FOOTER_FILLED_RE.test(lineText) || FOOTER_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_TEMPLATE_RE.test(searchText)
+  return FOOTER_FILLED_RE.test(lineText) || FOOTER_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_FILLED_STATUS_RE.test(searchText)
 }
 
 async function drawDefaultChildQr(pdfDoc: PDFDocument, page: PDFPage, qrBuffer: Buffer) {
@@ -654,9 +656,9 @@ async function fillMetadataPlaceholders(
         }
       }
 
-      // Draw manual QR even when QR label is not detected in text layer.
-      // For child docs (shouldDrawDefaultChildQr): bypass filled barrier so QR appears on every page.
-      if (manualQrPlacement && (!filled.has("QR") || shouldDrawDefaultChildQr)) {
+      // Draw manual QR on every page (header QR tag xuất hiện ở mọi trang).
+      // Dùng pageFound (per-page) thay filled (cross-page) để QR được vẽ trên mọi trang mà không bị chặn sau trang 1.
+      if (manualQrPlacement && !pageFound.has("QR")) {
         const qrImage = await pdfDoc.embedPng(qrBuffer)
         page.drawImage(qrImage, {
           x: manualQrPlacement.x,
@@ -664,6 +666,7 @@ async function fillMetadataPlaceholders(
           width: manualQrPlacement.width,
           height: manualQrPlacement.height,
         })
+        pageFound.add("QR")
         filled.add("QR")
         found.add("QR")
       }
