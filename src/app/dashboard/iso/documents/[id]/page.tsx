@@ -655,7 +655,10 @@ export default function IsoDocumentDetailPage() {
   // Phải là đúng người được chỉ định VÀ có quyền
   const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
-  const isEditable = isNew || trangThai === "draft" || trangThai === "tra_ve" || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
+  // Người soạn thảo của tài liệu này (hoặc đang tạo mới)
+  const isSoanThao = isNew || (!!userId && userId === doc?.soan_thao_user_id)
+  // draft/tra_ve chỉ cho phép soạn thảo chỉnh sửa; bi_tu_choi chỉ cho xem xét
+  const isEditable = isNew || ((trangThai === "draft" || trangThai === "tra_ve") && isSoanThao) || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
   const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && !!userId && userId === doc?.soan_thao_user_id
   const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
 
@@ -983,6 +986,11 @@ export default function IsoDocumentDetailPage() {
         parent_doc_id: form.phan_loai_tl === "con" ? (selectedParentDocId || reviewParentDocId || null) : null,
         file_goc_url: uploadedFileUrl || null,
         file_template_url: uploadedFileUrl || null,
+        ...(uploadedFileUrl && uploadedFileUrl !== doc?.file_goc_url ? {
+          file_signed_pdf_url: null,
+          file_signed_office_url: null,
+          file_signed_office_type: null,
+        } : {}),
         file_soat_xet_url: reviewRequestFileUrl || null,
         file_phieu_yeu_cau_thay_doi_url: reviewChangeFileUrl || null,
         file_de_nghi_soat_xet_url: reviewRequestFileUrl || null,
@@ -1737,7 +1745,7 @@ export default function IsoDocumentDetailPage() {
       canvasScale: 1,
       pdfPageHeight: 842,
       sigImgUrl: sigUrlData.publicUrl,
-      previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(),
+      previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(action),
       signerName: user.full_name || user.username || "",
       showSignature: true,
       showSignerName: true,
@@ -1821,7 +1829,7 @@ export default function IsoDocumentDetailPage() {
           sigImgUrl: sigUrlData.publicUrl,
           // Khi dùng signed PDF làm nền, chữ ký/tên lũy kế đã nằm sẵn trong canvas.
           // Không render lớp preview nữa để tránh đè 2 lần.
-          previewSignatures: useSignedPdfAsBackground ? [] : buildPreviewSignatures(),
+          previewSignatures: useSignedPdfAsBackground ? [] : buildPreviewSignatures(action),
           signerName: user.full_name || user.username || "",
           showSignature: true,
           showSignerName: true,
@@ -1887,7 +1895,7 @@ export default function IsoDocumentDetailPage() {
     return p ? (p.full_name || p.username) : ""
   }
 
-  const buildPreviewSignatures = () => {
+  const buildPreviewSignatures = (action?: PinModalAction) => {
     if (!doc || !factoryId || !user) return [] as PreviewSignature[]
 
     const nameByUserId: Record<string, string> = {}
@@ -1895,22 +1903,27 @@ export default function IsoDocumentDetailPage() {
     if (doc.xem_xet_user_id)   nameByUserId[doc.xem_xet_user_id]   = doc.xem_xet ?? ""
     if (doc.phe_duyet_user_id) nameByUserId[doc.phe_duyet_user_id] = doc.phe_duyet ?? ""
 
+    // Khi soạn thảo gửi xem xét lại (gui_xem_xet), chữ ký cũ của xem xét/phê duyệt sẽ bị xóa bởi
+    // generate-pdf. Không hiển thị preview chúng để tránh nhầm lẫn.
+    const includePreviousReviewers = action !== "gui_xem_xet"
     const candidates = [
       {
         signerUserId: doc.soan_thao_user_id,
         placement: doc.soan_thao_placement,
         signedAt: doc.ky_soan_thao_at,
       },
-      {
-        signerUserId: doc.xem_xet_user_id,
-        placement: doc.xem_xet_placement,
-        signedAt: doc.ky_xem_xet_at,
-      },
-      {
-        signerUserId: doc.phe_duyet_user_id,
-        placement: doc.phe_duyet_placement,
-        signedAt: doc.ky_phe_duyet_at,
-      },
+      ...(includePreviousReviewers ? [
+        {
+          signerUserId: doc.xem_xet_user_id,
+          placement: doc.xem_xet_placement,
+          signedAt: doc.ky_xem_xet_at,
+        },
+        {
+          signerUserId: doc.phe_duyet_user_id,
+          placement: doc.phe_duyet_placement,
+          signedAt: doc.ky_phe_duyet_at,
+        },
+      ] : []),
     ]
 
     return candidates.flatMap((entry) => {
@@ -2730,7 +2743,7 @@ export default function IsoDocumentDetailPage() {
             )}
 
             {/* Nút workflow — dùng inline style để tránh Tailwind purge */}
-            {!isNew && trangThai === "draft" && (
+            {!isNew && trangThai === "draft" && isSoanThao && (
               <button
                 onClick={() => {
                   const label = form.cap_tl === "Cấp 2" ? "Xác nhận gửi phê duyệt" : "Xác nhận gửi xem xét"
@@ -2744,6 +2757,24 @@ export default function IsoDocumentDetailPage() {
               >
                 <Send size={14} />
                 {form.cap_tl === "Cấp 2" ? "Gửi phê duyệt" : "Gửi xem xét"}
+              </button>
+            )}
+
+            {/* Gửi xem xét lại sau khi bị trả về */}
+            {!isNew && trangThai === "tra_ve" && userId === doc?.soan_thao_user_id && (
+              <button
+                onClick={() => {
+                  const label = form.cap_tl === "Cấp 2" ? "Xác nhận gửi phê duyệt lại" : "Xác nhận gửi xem xét lại"
+                  setPinModal({ action: "gui_xem_xet", label })
+                  setPin("")
+                  setPinError("")
+                }}
+                disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
+                style={{ background: "#d97706" }}
+                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
+              >
+                <Send size={14} />
+                {form.cap_tl === "Cấp 2" ? "Gửi phê duyệt lại" : "Gửi xem xét lại"}
               </button>
             )}
 
@@ -3220,6 +3251,9 @@ export default function IsoDocumentDetailPage() {
                 </div>
               </div>
             )}
+            {/* Hướng dẫn tag cho TH2 (soạn thảo hồ sơ con mới) */}
+            {isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh !== "Soát xét" && renderOfficeTagGuide()}
+
             {/* Các hồ sơ trong bộ — hiển thị trên trang hồ sơ con đã lưu */}
             {!isNew && isCon && form.chon_quy_trinh !== "Soát xét" && siblingDocs.length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
@@ -3291,59 +3325,6 @@ export default function IsoDocumentDetailPage() {
                 </div>
               </div>
             )}
-            {/* Tài liệu soát xét — TH3 (soát xét tài liệu cha/hồ sơ độc lập): hiện TRƯỚC file card */}
-            {form.chon_quy_trinh === "Soát xét" && !(isNew && form.phan_loai_tl === "con") && (
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                <h2 className="text-sm font-extrabold text-slate-700 mb-3">Tài liệu soát xét</h2>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-bold text-slate-600 mb-2">Phiếu yêu cầu thay đổi</p>
-                    {reviewChangeFileUrl ? (
-                      <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
-                        <FileText size={16} className="text-amber-600 shrink-0" />
-                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
-                        <a href={reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
-                          <Eye size={13} className="text-amber-600" />
-                        </a>
-                      </div>
-                    ) : null}
-                    {isEditable && (
-                      <button
-                        type="button"
-                        onClick={() => reviewChangeFileInputRef.current?.click()}
-                        disabled={fileUploading}
-                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all"
-                      >
-                        {reviewChangeFileUrl ? "Thay file" : "Upload phiếu yêu cầu thay đổi"}
-                      </button>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-600 mb-2">Đề nghị soát xét</p>
-                    {reviewRequestFileUrl ? (
-                      <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
-                        <FileText size={16} className="text-sky-600 shrink-0" />
-                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
-                        <a href={reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
-                          <Eye size={13} className="text-sky-600" />
-                        </a>
-                      </div>
-                    ) : null}
-                    {isEditable && (
-                      <button
-                        type="button"
-                        onClick={() => reviewRequestFileInputRef.current?.click()}
-                        disabled={fileUploading}
-                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all"
-                      >
-                        {reviewRequestFileUrl ? "Thay file" : "Upload đề nghị soát xét"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* File đính kèm — ẩn khi TẠO MỚI hồ sơ con (TH2/TH4). Hiện khi: cha mới, tài liệu đã tồn tại (kể cả hồ sơ con đang xem xét) */}
             {!(isNew && form.phan_loai_tl === "con") && (
             <div id="file-goc-upload" className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -3371,6 +3352,16 @@ export default function IsoDocumentDetailPage() {
                   >
                     <Download size={18} />
                   </a>
+                  {isEditable && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={fileUploading}
+                      className="shrink-0 rounded-xl border border-dashed border-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-all"
+                    >
+                      {fileUploading ? "Đang tải..." : "Thay file"}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -3524,72 +3515,82 @@ export default function IsoDocumentDetailPage() {
               )}
 
 
-              {/* Hướng dẫn nhãn header */}
-              <div className="mb-3 p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-700">
-                <p className="font-bold mb-1">Nhãn hệ thống tự nhận diện trong phần header tài liệu:</p>
-                <ul className="list-disc list-inside space-y-0.5">
-                  <li><code className="bg-blue-100 px-1 rounded">Mã tài liệu:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Lần ban hành:</code> hoặc <code className="bg-blue-100 px-1 rounded">Lần sửa đổi:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Tình trạng:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">Ngày hiệu lực:</code></li>
-                  <li><code className="bg-blue-100 px-1 rounded">QR:</code> hoặc <code className="bg-blue-100 px-1 rounded">QR</code></li>
-                </ul>
-                <p className="mt-1 text-blue-600">Nếu dùng nhãn khác (VD: &quot;Trạng thái:&quot;, &quot;Mã hồ sơ:&quot;), hệ thống sẽ cảnh báo và không điền vào đó.</p>
-              </div>
-
-              {renderOfficeTagGuide()}
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) void handleFileUpload(f)
-                  e.target.value = ""
-                }}
-              />
-              <input
-                ref={childFilesInputRef}
-                type="file"
-                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  const rowId = activeChildUploadRowIdRef.current || activeChildUploadRowId
-                  if (f && rowId) void handleChildRowFileUpload(f, rowId)
-                  activeChildUploadRowIdRef.current = null
-                  setActiveChildUploadRowId(null)
-                  e.target.value = ""
-                }}
-              />
-              <input
-                ref={reviewChangeFileInputRef}
-                type="file"
-                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) void handleFileUpload(f, "change")
-                  e.target.value = ""
-                }}
-              />
-              <input
-                ref={reviewRequestFileInputRef}
-                type="file"
-                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) void handleFileUpload(f, "review")
-                  e.target.value = ""
-                }}
-              />
+              {/* Hướng dẫn nhãn header — ẩn với TH3 Soát xét (guide hiện SAU "Tài liệu soát xét") */}
+              {form.chon_quy_trinh !== "Soát xét" && (
+                <>
+                  <div className="mb-3 p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-700">
+                    <p className="font-bold mb-1">Nhãn hệ thống tự nhận diện trong phần header tài liệu:</p>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      <li><code className="bg-blue-100 px-1 rounded">Mã tài liệu:</code></li>
+                      <li><code className="bg-blue-100 px-1 rounded">Lần ban hành:</code> hoặc <code className="bg-blue-100 px-1 rounded">Lần sửa đổi:</code></li>
+                      <li><code className="bg-blue-100 px-1 rounded">Tình trạng:</code></li>
+                      <li><code className="bg-blue-100 px-1 rounded">Ngày hiệu lực:</code></li>
+                      <li><code className="bg-blue-100 px-1 rounded">QR:</code> hoặc <code className="bg-blue-100 px-1 rounded">QR</code></li>
+                    </ul>
+                    <p className="mt-1 text-blue-600">Nếu dùng nhãn khác (VD: &quot;Trạng thái:&quot;, &quot;Mã hồ sơ:&quot;), hệ thống sẽ cảnh báo và không điền vào đó.</p>
+                  </div>
+                  {renderOfficeTagGuide()}
+                </>
+              )}
 
 
             </div>
             )}
+
+            {/* Tài liệu soát xét — TH3 (soát xét tài liệu cha/hồ sơ độc lập): hiện SAU File tài liệu */}
+            {form.chon_quy_trinh === "Soát xét" && !(isNew && form.phan_loai_tl === "con") && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <h2 className="text-sm font-extrabold text-slate-700 mb-3">Tài liệu soát xét</h2>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-bold text-slate-600 mb-2">Phiếu yêu cầu thay đổi</p>
+                    {reviewChangeFileUrl ? (
+                      <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
+                        <FileText size={16} className="text-amber-600 shrink-0" />
+                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
+                        <a href={reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
+                          <Eye size={13} className="text-amber-600" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={() => reviewChangeFileInputRef.current?.click()}
+                        disabled={fileUploading}
+                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all"
+                      >
+                        {reviewChangeFileUrl ? "Thay file" : "Upload phiếu yêu cầu thay đổi"}
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-600 mb-2">Đề nghị soát xét</p>
+                    {reviewRequestFileUrl ? (
+                      <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
+                        <FileText size={16} className="text-sky-600 shrink-0" />
+                        <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
+                        <a href={reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
+                          <Eye size={13} className="text-sky-600" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={() => reviewRequestFileInputRef.current?.click()}
+                        disabled={fileUploading}
+                        className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all"
+                      >
+                        {reviewRequestFileUrl ? "Thay file" : "Upload đề nghị soát xét"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Hướng dẫn tag cho TH3 */}
+            {form.chon_quy_trinh === "Soát xét" && !(isNew && form.phan_loai_tl === "con") && renderOfficeTagGuide()}
 
             {/* Thông tin hiệu lực */}
             {!isNew && doc && (

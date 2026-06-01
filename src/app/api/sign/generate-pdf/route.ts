@@ -654,8 +654,9 @@ async function fillMetadataPlaceholders(
         }
       }
 
-      // Draw manual QR even when QR label is not detected in text layer
-      if (manualQrPlacement && !filled.has("QR")) {
+      // Draw manual QR even when QR label is not detected in text layer.
+      // For child docs (shouldDrawDefaultChildQr): bypass filled barrier so QR appears on every page.
+      if (manualQrPlacement && (!filled.has("QR") || shouldDrawDefaultChildQr)) {
         const qrImage = await pdfDoc.embedPng(qrBuffer)
         page.drawImage(qrImage, {
           x: manualQrPlacement.x,
@@ -667,9 +668,9 @@ async function fillMetadataPlaceholders(
         found.add("QR")
       }
 
-      if (pageIdx === 0 && shouldDrawDefaultChildQr && !manualQrPlacement && !found.has("QR") && !filled.has("QR")) {
+      if (shouldDrawDefaultChildQr && !manualQrPlacement && !pageFound.has("QR")) {
         await drawDefaultChildQr(pdfDoc, page, qrBuffer)
-        filled.add("QR")
+        pageFound.add("QR")
         found.add("QR")
       }
 
@@ -923,6 +924,16 @@ export async function POST(req: NextRequest) {
       if (placementSaveErr) {
         console.warn("[generate-pdf] placement save error (migration 20260524 chưa chạy?):", placementSaveErr.message)
       }
+    }
+
+    // Khi soạn thảo ký lại (resubmit từ draft/tra_ve): xóa placement cũ của xem xét và phê duyệt
+    // để chữ ký vòng trước không bị embed lại vào PDF mới.
+    if (signFileKind === "main" && currentSignerKey === "soan_thao_placement") {
+      await supabaseAdmin
+        .from("iso_documents")
+        .update({ xem_xet_placement: null, phe_duyet_placement: null })
+        .eq("id", docId)
+        .eq("factory_id", factoryId)
     }
 
     const { data: docPlacements, error: placementLoadErr } = await supabaseAdmin

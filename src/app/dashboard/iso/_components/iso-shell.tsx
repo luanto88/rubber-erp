@@ -66,16 +66,17 @@ export function IsoShell({ children }: IsoShellProps) {
 
       const { data } = await supabase
         .from("iso_documents")
-        .select("id, parent_doc_id, trang_thai, xem_xet_user_id, phe_duyet_user_id")
+        .select("id, parent_doc_id, trang_thai, xem_xet_user_id, phe_duyet_user_id, soan_thao_user_id")
         .eq("factory_id", fid)
-        .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
-        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet"])
+        .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid},soan_thao_user_id.eq.${uid}`)
+        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"])
 
       const taskKeys = new Set<string>()
       ;(data || []).filter((doc) =>
         (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === uid) ||
         (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === uid) ||
-        (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === uid)
+        (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === uid) ||
+        (doc.trang_thai === "tra_ve" && doc.soan_thao_user_id === uid)
       ).forEach((doc) => {
         taskKeys.add(doc.parent_doc_id || doc.id)
       })

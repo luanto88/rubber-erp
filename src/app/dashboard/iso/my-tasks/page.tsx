@@ -26,10 +26,10 @@ export default function IsoMyTasksPage() {
       // Tài liệu cần tôi xem xét hoặc phê duyệt
       const { data } = await supabase
         .from("iso_documents")
-        .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, cap_tl, soan_thao, xem_xet, phe_duyet, xem_xet_user_id, phe_duyet_user_id, parent_doc_id, phan_loai_tl, chon_quy_trinh, updated_at")
+        .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, cap_tl, soan_thao, xem_xet, phe_duyet, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, parent_doc_id, phan_loai_tl, chon_quy_trinh, updated_at")
         .eq("factory_id", fid)
-        .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
-        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet"])
+        .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid},soan_thao_user_id.eq.${uid}`)
+        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"])
         .order("updated_at", { ascending: false })
       setTasks((data || []) as IsoDocument[])
     } finally {
@@ -57,13 +57,15 @@ export default function IsoMyTasksPage() {
     if (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === userId) return "Cần xem xét"
     if (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === userId) return "Cần phê duyệt"
     if (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === userId) return "Phê duyệt từ chối — cần xử lý"
+    if (doc.trang_thai === "tra_ve" && doc.soan_thao_user_id === userId) return "Tài liệu bị trả về — cần sửa"
     return "Cần xử lý"
   }
 
   const isMyPendingDoc = (doc: IsoDocument) =>
     (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === userId) ||
     (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === userId) ||
-    (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === userId)
+    (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === userId) ||
+    (doc.trang_thai === "tra_ve" && doc.soan_thao_user_id === userId)
 
   const parentCodeFromChild = (doc: IsoDocument) => {
     const code = doc.ma_tai_lieu || ""
@@ -151,7 +153,7 @@ export default function IsoMyTasksPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell">
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+                        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${doc.trang_thai === "tra_ve" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
                           {getMyRole(doc)}
                         </span>
                       </td>
