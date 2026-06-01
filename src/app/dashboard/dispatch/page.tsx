@@ -2,9 +2,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { buildDispatchAnalytics, formatKg, formatKm, formatTon, getTripDois } from "@/lib/dispatch-analytics"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
+import { dispatchDbRowToLegacy, replaceDispatchEntryRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
+import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Gauge } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DxRow = {
@@ -36,6 +39,10 @@ type DxRow = {
   drc_mn: string   // DRC% mủ nước
   kl_mnk: string   // Mủ nước khô — AUTO-CALC
   ngan_ref: string[]
+  ghi_chu?: string
+  doi?: number[]
+  row_id?: string
+  dispatch_entry_id?: string
   locked?: boolean
   _warn?: string
 }
@@ -211,6 +218,7 @@ const emptyRow = (): DxRow => ({
   kl_dt: "", drc_d: "65", kl_dk: "",
   kl_mn: "", drc_mn: "", kl_mnk: "",
   ngan_ref: [],
+  ghi_chu: "",
   locked: false,
 })
 
@@ -332,6 +340,9 @@ export default function DispatchPage() {
   const [search, setSearch]       = useState("")
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
+  const [listTab, setListTab] = useState<"list"|"stats">("list")
+  const [statsDoi, setStatsDoi] = useState("")
+  const [statsVehicle, setStatsVehicle] = useState("")
 
   // Views: list | detail | add | edit
   const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
@@ -353,6 +364,7 @@ export default function DispatchPage() {
   const [factoryName, setFactoryName] = useState("NMCB Phước Hòa Kampong Thom")
   const [factoryCode, setFactoryCode] = useState("")
   const [isAdmin, setIsAdmin]       = useState(false)
+  const [makerName, setMakerName]   = useState("")
   const [importing, setImporting]   = useState(false)
   const importRef                   = useRef<HTMLInputElement>(null)
 
@@ -436,12 +448,34 @@ export default function DispatchPage() {
       if (filterTo)   q = q.lte("ngay", filterTo)
       const { data } = await q
       const raw = (data || []) as DispatchEntry[]
+      const entryIds = raw.map(e => e.id).filter(Boolean)
+      const physicalRowsByEntry = new Map<string, DxRow[]>()
+
+      if (entryIds.length > 0) {
+        const { data: physicalRows, error: physicalRowsError } = await supabase
+          .from("dispatch_entry_rows")
+          .select("*")
+          .eq("factory_id", fid)
+          .in("dispatch_entry_id", entryIds)
+          .order("sort_order", { ascending: true })
+
+        if (physicalRowsError) {
+          console.warn("Khong tai duoc dispatch_entry_rows, fallback rows JSONB:", physicalRowsError)
+        } else {
+          for (const row of (physicalRows || []) as DispatchEntryRowRecord[]) {
+            const legacy = dispatchDbRowToLegacy(row) as DxRow
+            const list = physicalRowsByEntry.get(row.dispatch_entry_id) || []
+            list.push(legacy)
+            physicalRowsByEntry.set(row.dispatch_entry_id, list)
+          }
+        }
+      }
 
     // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
     const rehydrated = raw.map(e => ({
       ...e,
       day_chuyen: e.day_chuyen || inferDayChuyenFromRows(e.rows),
-      rows: (e.rows || []).map(r => ({
+      rows: (physicalRowsByEntry.get(e.id) || e.rows || []).map(r => ({
         ...r,
         day_chuyen: r.day_chuyen || e.day_chuyen || inferDayChuyenFromRows(e.rows),
         lo_thu_hoach: r.lo_thu_hoach?.length
@@ -491,6 +525,15 @@ export default function DispatchPage() {
       })
       const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
       setIsAdmin(u.role === "admin")
+      setMakerName(
+        u.full_name ||
+        u.name ||
+        u.ten ||
+        u.display_name ||
+        u.email ||
+        u.username ||
+        ""
+      )
     }
     void bootstrap()
   }, [])
@@ -525,6 +568,62 @@ export default function DispatchPage() {
     totalKg: entries.reduce((s,e) =>
       s + (e.rows||[]).reduce((ss,r) => ss + (parseFloat(r.kl_dck)||0), 0), 0),
   }
+  const analytics = buildDispatchAnalytics(entries, deliveryPoints, { doi: statsDoi, vehicle: statsVehicle })
+  const doiOptions = [...new Set(entries.flatMap(entry => (entry.rows || []).flatMap(row => getTripDois(row, deliveryPoints))))].sort((a, b) => a - b)
+  const statVehicleOptions = [...new Set(entries.flatMap(entry => (entry.rows || []).map(row => row.so_xe).filter(Boolean)))].sort((a, b) => a.localeCompare(b))
+
+  const exportStatsPdf = async (mode: "all" | "doi" | "vehicle") => {
+    try {
+      await downloadDispatchStatsPdf({
+        analytics,
+        factoryName,
+        from: filterFrom,
+        to: filterTo,
+        mode,
+        selectedDoi: statsDoi,
+        selectedVehicle: statsVehicle,
+        makerName,
+      })
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF thống kê")
+    }
+  }
+
+  const exportTripPdf = async (entry: DispatchEntry, row: DxRow) => {
+    try {
+      const tripSummary = buildDispatchAnalytics([{ ...entry, rows: [row] }], deliveryPoints).trips[0]
+      if (!tripSummary) throw new Error("Không có dữ liệu chuyến")
+      await downloadDispatchTripPdf({
+        ...row,
+        entryId: entry.id,
+        maDx: entry.ma_dx,
+        ngay: entry.ngay,
+        dayChuyen: entry.day_chuyen,
+        chungNhan: entry.chung_nhan,
+        dois: getTripDois(row, deliveryPoints),
+        totalTuoi: tripSummary.totalTuoi,
+        totalKho: tripSummary.totalKho,
+        totalKm: Number(row.so_km) || 0,
+      }, factoryName, makerName)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF chuyến")
+    }
+  }
+
+  // ── PDF ─────────────────────────────────────────────────────────────────
+  const exportEntryPdf = async (entry: DispatchEntry) => {
+    try {
+      const dayAnalytics = buildDispatchAnalytics([entry], deliveryPoints)
+      await downloadDispatchEntryPdf({
+        entry,
+        trips: dayAnalytics.trips,
+        factoryName,
+        makerName,
+      })
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF ngày")
+    }
+  }
 
   // ── Open Add ─────────────────────────────────────────────────────────────
   const openAdd = () => {
@@ -543,6 +642,7 @@ export default function DispatchPage() {
         kl_dct: "", drc_dc: "", kl_dck: "",
         kl_dkt: "", drc_dk: "", kl_dkk: "",
         kl_dt: "", kl_dk: "",
+        ghi_chu: "",
         locked: false, _warn: undefined,
       })))
     } else {
@@ -573,6 +673,7 @@ export default function DispatchPage() {
         factory_id: factoryId,
         ngay: formNgay,
         chung_nhan: formCN,
+        day_chuyen: formDayChuyen,
         rows: formRows.map((r,i) => ({
           ...r,
           uid: r.uid || `r_${i}_${Date.now()}`,
@@ -583,10 +684,26 @@ export default function DispatchPage() {
       if (editId) {
         const { error } = await supabase.from("dispatch_entries").update(payload).eq("id", editId)
         if (error) { showToast(error.message); return }
+        await replaceDispatchEntryRows(supabase, {
+          factoryId,
+          dispatchEntryId: editId,
+          ngay: formNgay,
+          dayChuyen: formDayChuyen,
+          rows: payload.rows,
+          deliveryPoints,
+        })
         showToast("Đã cập nhật bảng phân xe")
       } else {
-        const { error } = await supabase.from("dispatch_entries").insert(payload)
+        const { data: inserted, error } = await supabase.from("dispatch_entries").insert(payload).select("id").single()
         if (error) { showToast(error.message); return }
+        await replaceDispatchEntryRows(supabase, {
+          factoryId,
+          dispatchEntryId: inserted.id,
+          ngay: formNgay,
+          dayChuyen: formDayChuyen,
+          rows: payload.rows,
+          deliveryPoints,
+        })
         showToast("Đã thêm bảng phân xe mới")
       }
       setView("list")
@@ -762,14 +879,43 @@ export default function DispatchPage() {
     }
     byDate = parseCSVLines(csvText.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith("ngay")))
 
+    try {
     for (const [ngay, rows] of Object.entries(byDate)) {
+      const dayChuyen = inferDayChuyenFromRows(rows)
       const { data: existing } = await supabase.from("dispatch_entries")
         .select("id").eq("factory_id", factoryId).eq("ngay", ngay).single()
       if (existing) {
-        await supabase.from("dispatch_entries").update({ rows, chung_nhan: "PEFC CS" }).eq("id", existing.id)
+        await supabase.from("dispatch_entries").update({ rows, chung_nhan: "PEFC CS", day_chuyen: dayChuyen }).eq("id", existing.id)
+        await replaceDispatchEntryRows(supabase, {
+          factoryId,
+          dispatchEntryId: existing.id,
+          ngay,
+          dayChuyen,
+          rows,
+          deliveryPoints,
+        })
       } else {
-        await supabase.from("dispatch_entries").insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", rows })
+        const { data: inserted, error } = await supabase
+          .from("dispatch_entries")
+          .insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", day_chuyen: dayChuyen, rows })
+          .select("id")
+          .single()
+        if (error) throw error
+        await replaceDispatchEntryRows(supabase, {
+          factoryId,
+          dispatchEntryId: inserted.id,
+          ngay,
+          dayChuyen,
+          rows,
+          deliveryPoints,
+        })
       }
+    }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Import lỗi")
+      setImporting(false)
+      e.target.value = ""
+      return
     }
     setImporting(false)
     showToast(`Import ${Object.keys(byDate).length} ngày thành công`)
@@ -796,6 +942,21 @@ export default function DispatchPage() {
         <button onClick={openAdd}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16}/> Thêm bảng
+        </button>
+      </div>
+
+      <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <button onClick={() => setListTab("list")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
+            listTab === "list" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
+          }`}>
+          <Truck size={15}/> Danh sách
+        </button>
+        <button onClick={() => setListTab("stats")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
+            listTab === "stats" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
+          }`}>
+          <BarChart3 size={15}/> Thống kê
         </button>
       </div>
 
@@ -834,8 +995,128 @@ export default function DispatchPage() {
           </button>}
       </div>
 
+      {listTab === "stats" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+            <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+              <option value="">Tất cả đội</option>
+              {doiOptions.map(doi => <option key={doi} value={doi}>Đội {doi}</option>)}
+            </select>
+            <select value={statsVehicle} onChange={e => setStatsVehicle(e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+              <option value="">Tất cả xe</option>
+              {statVehicleOptions.map(vehicle => <option key={vehicle} value={vehicle}>{vehicle}</option>)}
+            </select>
+            {(statsDoi || statsVehicle) && (
+              <button onClick={() => { setStatsDoi(""); setStatsVehicle("") }}
+                className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
+                <X size={14}/> Xóa lọc thống kê
+              </button>
+            )}
+            <div className="ml-auto flex flex-wrap gap-2">
+              <button onClick={() => exportStatsPdf("all")}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-lg">
+                <Download size={13}/> PDF tổng
+              </button>
+              <button onClick={() => exportStatsPdf("doi")} disabled={!statsDoi}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg disabled:opacity-40">
+                <Download size={13}/> PDF đội
+              </button>
+              <button onClick={() => exportStatsPdf("vehicle")} disabled={!statsVehicle}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg disabled:opacity-40">
+                <Download size={13}/> PDF xe
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+            {([
+              { label: "Chuyến", value: analytics.totals.trips.toLocaleString("vi-VN"), Icon: Truck, tone: "text-emerald-600" },
+              { label: "Xe hoạt động", value: analytics.totals.vehicles.toLocaleString("vi-VN"), Icon: Gauge, tone: "text-blue-600" },
+              { label: "Km", value: formatKm(analytics.totals.km), Icon: MapIcon, tone: "text-cyan-600" },
+              { label: "Tươi (tấn)", value: formatTon(analytics.totals.totalTuoi), Icon: Weight, tone: "text-amber-600" },
+              { label: "Khô (tấn)", value: formatTon(analytics.totals.totalKho), Icon: Weight, tone: "text-purple-600" },
+              { label: "Tài xế", value: analytics.totals.drivers.toLocaleString("vi-VN"), Icon: Info, tone: "text-slate-600" },
+            ] as const).map(card => (
+              <div key={card.label} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <card.Icon size={18} className={`${card.tone} mb-2`}/>
+                <div className="text-xl font-extrabold text-slate-800">{card.value}</div>
+                <div className="text-xs text-slate-500 mt-1">{card.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="font-extrabold text-slate-800">Theo đội</h3>
+                <span className="text-xs text-slate-400">{analytics.byDoi.length} đội</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      {["Đội","Chuyến","Xe","Km","Tươi","Khô","MN khô","Tạp khô"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {analytics.byDoi.map(group => (
+                      <tr key={group.key} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-bold text-emerald-700">{group.label}</td>
+                        <td className="px-3 py-2">{group.trips}</td>
+                        <td className="px-3 py-2">{group.vehicles.size}</td>
+                        <td className="px-3 py-2">{formatKm(group.km)}</td>
+                        <td className="px-3 py-2">{formatKg(group.totalTuoi)}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700">{formatKg(group.totalKho)}</td>
+                        <td className="px-3 py-2">{formatKg(group.mnKho)}</td>
+                        <td className="px-3 py-2">{formatKg(group.ctKho + group.dctKho + group.dktKho + group.dtKho)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="font-extrabold text-slate-800">Theo xe</h3>
+                <span className="text-xs text-slate-400">{analytics.byVehicle.length} xe</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      {["Xe","Chuyến","Tài xế","Km","Tươi","Khô","MN khô","Tạp khô"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {analytics.byVehicle.map(group => (
+                      <tr key={group.key} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-bold text-blue-700">{group.label}</td>
+                        <td className="px-3 py-2">{group.trips}</td>
+                        <td className="px-3 py-2 max-w-36 truncate">{[...group.drivers].join(", ") || "—"}</td>
+                        <td className="px-3 py-2">{formatKm(group.km)}</td>
+                        <td className="px-3 py-2">{formatKg(group.totalTuoi)}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700">{formatKg(group.totalKho)}</td>
+                        <td className="px-3 py-2">{formatKg(group.mnKho)}</td>
+                        <td className="px-3 py-2">{formatKg(group.ctKho + group.dctKho + group.dktKho + group.dtKho)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* List */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className={`${listTab === "list" ? "" : "hidden"} bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden`}>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
@@ -893,6 +1174,10 @@ export default function DispatchPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
+                          className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF ngày">
+                          <FileText size={14}/>
+                        </button>
                         <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
                           className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
                           <Edit2 size={14}/>
@@ -958,14 +1243,22 @@ export default function DispatchPage() {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
+              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PDF</th>
               {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","KM","KL tươi","DRC%","KL khô"].map(h => (
                 <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
+              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ghi chú</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {(selected.rows||[]).map((row, i) => (
               <tr key={row.uid||i} className="hover:bg-slate-50">
+                <td className="px-3 py-2.5">
+                  <button onClick={() => exportTripPdf(selected, row)}
+                    className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF chuyến">
+                    <FileText size={14}/>
+                  </button>
+                </td>
                 <td className="px-3 py-2.5 font-bold text-emerald-700">{row.so_xe}</td>
                 <td className="px-3 py-2.5 text-center">
                   <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-bold">{row.chuyen}</span>
@@ -985,12 +1278,13 @@ export default function DispatchPage() {
                 <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.drc_dc}%</td>
                 <td className="px-3 py-2.5 font-semibold text-emerald-700">{row.kl_dck}</td>
+                <td className="px-3 py-2.5 text-slate-500 max-w-48 truncate">{row.ghi_chu || "—"}</td>
               </tr>
             ))}
           </tbody>
           <tfoot className="bg-slate-50 border-t-2 border-slate-200">
             <tr>
-              <td colSpan={8} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
+              <td colSpan={9} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
               <td className="px-3 py-2.5 font-bold text-slate-700">
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dct)||0),0).toLocaleString()}
               </td>
@@ -998,6 +1292,7 @@ export default function DispatchPage() {
               <td className="px-3 py-2.5 font-bold text-emerald-700">
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dck)||0),0).toLocaleString()}
               </td>
+              <td/>
             </tr>
           </tfoot>
         </table>
@@ -1101,7 +1396,7 @@ export default function DispatchPage() {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","Lộ trình","Km",""].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","Lộ trình","Km","Ghi chú",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -1202,6 +1497,16 @@ export default function DispatchPage() {
                 {/* Km */}
                 <td className="px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
                   {row.so_km ? `${row.so_km} km` : "—"}
+                </td>
+
+                {/* Ghi chú */}
+                <td className="px-2 py-1.5 min-w-[150px]">
+                  {row.locked
+                    ? <span className="text-slate-500 text-xs">{row.ghi_chu || "—"}</span>
+                    : <input value={row.ghi_chu || ""} onChange={e => updateRow(idx,"ghi_chu",e.target.value)}
+                        placeholder="Ghi chú..."
+                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                  }
                 </td>
 
                 {/* Lock / Delete */}

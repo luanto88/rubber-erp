@@ -13,6 +13,20 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 
 ## 2. Module Điều xe (`dispatch_entries`)
 
+### Cập nhật 2026-06-01: tách dòng điều xe vật lý
+
+- `dispatch_entries` hiện là header/chứng từ; chi tiết từng chuyến đã có bảng vật lý `dispatch_entry_rows`.
+- Migration đã chạy: `supabase/migrations/20260601_dispatch_entry_rows.sql`.
+- `dispatch_entry_rows` là nguồn chính cho các tính năng mới cần query/thống kê/PDF theo ngày, đội, xe, tài xế, km, sản lượng.
+- `dispatch_entries.rows` vẫn được giữ và cập nhật song song như lớp legacy/cache để các module cũ (`storage`, `output`, `eudr`) chưa bị vỡ.
+- Khi thêm/sửa/import điều xe trong `src/app/dashboard/dispatch/page.tsx`, phải ghi cả `dispatch_entries` (`day_chuyen`, `rows`) và `dispatch_entry_rows` qua helper `replaceDispatchEntryRows`.
+- Khi đọc ở module điều xe, ưu tiên `dispatch_entry_rows`; nếu bảng vật lý chưa có dữ liệu thì fallback `dispatch_entries.rows`.
+- Helper mapping đặt tại `src/lib/dispatch-entry-rows.ts`.
+- Helper thống kê đặt tại `src/lib/dispatch-analytics.ts`; helper PDF đặt tại `src/lib/dispatch-pdf.ts`.
+- Mỗi dòng điều xe có `ghi_chu`; với dữ liệu vật lý lưu ở `dispatch_entry_rows.ghi_chu`, với legacy lưu trong `rows[].ghi_chu`.
+- Tab `Thống kê` trong `/dashboard/dispatch` có lọc theo đội/xe và xuất PDF tổng/theo đội/theo xe.
+- Màn hình chi tiết ngày điều xe có nút xuất PDF từng chuyến.
+
 ### Schema chính
 
 ```ts

@@ -87,3 +87,22 @@ Hệ thống ERP quản lý sản xuất cao su cho:
 - Sau các thay đổi quan trọng ở module thành phẩm hoặc xuất hàng, cần chạy:
   - `npx eslint src/app/dashboard/product/page.tsx src/app/dashboard/export/page.tsx src/app/dashboard/product/actions.ts src/app/dashboard/product/shared.ts`
   - `npm run build`
+
+## Cập nhật session 2026-06-01 - Điều xe
+
+- Đã chạy migration `supabase/migrations/20260601_dispatch_entry_rows.sql`.
+- `dispatch_entries` là header/chứng từ; `dispatch_entry_rows` là bảng vật lý cho từng chuyến.
+- Module điều xe (`src/app/dashboard/dispatch/page.tsx`) đọc ưu tiên `dispatch_entry_rows`, fallback `dispatch_entries.rows`.
+- Khi thêm/sửa/import điều xe, code ghi song song `dispatch_entries.rows` và `dispatch_entry_rows`.
+- Mỗi chuyến có `ghi_chu`; dữ liệu vật lý lưu ở `dispatch_entry_rows.ghi_chu`.
+- Helper mới:
+  - `src/lib/dispatch-entry-rows.ts`: map legacy JSON <-> row vật lý, replace rows.
+  - `src/lib/dispatch-analytics.ts`: flatten/tổng hợp theo đội, xe, km, sản lượng.
+  - `src/lib/dispatch-pdf.ts`: xuất PDF chuyến và PDF thống kê.
+- Tab `Thống kê` trong `/dashboard/dispatch` đã có KPI, bảng theo đội/xe, lọc đội/xe, PDF tổng/PDF đội/PDF xe.
+- Chi tiết ngày điều xe đã có nút PDF từng chuyến.
+- `writeBackToDispatch` trong `src/app/dashboard/output/_components/output-types.ts` cập nhật cả `dispatch_entries.rows[]` và `dispatch_entry_rows`.
+- Kiểm tra đã chạy:
+  - `npx eslint src/app/dashboard/dispatch/page.tsx src/lib/dispatch-entry-rows.ts src/lib/dispatch-analytics.ts src/lib/dispatch-pdf.ts src/app/dashboard/output/_components/output-types.ts`
+  - `npx tsc --noEmit --pretty false`
+- `npm run lint` toàn repo vẫn fail do lỗi cũ ngoài phạm vi ở `page.tsx` và `src/app/test-sodo/page.tsx`.

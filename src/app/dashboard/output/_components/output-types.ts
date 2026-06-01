@@ -1,3 +1,5 @@
+import { toISODate } from "@/lib/dispatch-entry-rows"
+
 export type WarnCode =
   | "NO_DISPATCH_DATE"
   | "VEHICLE_NOT_FOUND"
@@ -204,6 +206,33 @@ export async function writeBackToDispatch(
     if (changed) {
       await supabase.from("dispatch_entries").update({ rows: newRows }).eq("id", entry.id)
     }
+  }
+
+  const entryIds = (entries as Array<{ id: string }>).map(entry => entry.id)
+  if (entryIds.length > 0) {
+    const { data: physicalRows } = await supabase
+      .from("dispatch_entry_rows")
+      .select("id, so_xe, chuyen")
+      .eq("factory_id", factoryId)
+      .eq("ngay", toISODate(ngay))
+      .in("dispatch_entry_id", entryIds)
+
+    await Promise.all((physicalRows ?? []).map(async (row: { id: string; so_xe: string; chuyen: number }) => {
+      const key = `${parseVehicleCode(String(row.so_xe ?? "")).base_xe}:${Number(row.chuyen ?? 1)}`
+      const g = groups.get(key)
+      if (!g) return
+      await supabase
+        .from("dispatch_entry_rows")
+        .update({
+          kl_mn: fmt(g.mn_tuoi), kl_mnk: fmt(g.mn_kho), drc_mn: wdrc(g.mn_kho, g.mn_tuoi),
+          kl_ct: fmt(g.ct_tuoi), kl_ck: fmt(g.ct_kho), drc_c: wdrc(g.ct_kho, g.ct_tuoi),
+          kl_dct: fmt(g.dct_tuoi), kl_dck: fmt(g.dct_kho), drc_dc: wdrc(g.dct_kho, g.dct_tuoi),
+          kl_dkt: fmt(g.dkt_tuoi), kl_dkk: fmt(g.dkt_kho), drc_dk: wdrc(g.dkt_kho, g.dkt_tuoi),
+          kl_dt: fmt(g.dt_tuoi), kl_dk: fmt(g.dt_kho), drc_d: wdrc(g.dt_kho, g.dt_tuoi),
+        })
+        .eq("id", row.id)
+        .eq("factory_id", factoryId)
+    }))
   }
 
   // 4. Đồng bộ KL ngăn lưu — cập nhật tong_tuoi/tong_kho cho ngăn có chuyến từ ngày này

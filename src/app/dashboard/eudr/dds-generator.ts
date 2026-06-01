@@ -2,9 +2,9 @@ import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 
-const PDF_FONT_FILE = "Geist-Regular.ttf"
-const PDF_FONT_NAME = "GeistRegular"
-let fontLoadPromise: Promise<void> | null = null
+const PDF_FONT_FILE = "NotoSans-Regular.ttf"
+const PDF_FONT_NAME = "NotoSans"
+let fontBase64Promise: Promise<string> | null = null
 
 type PdfWithTable = jsPDF & {
   lastAutoTable?: {
@@ -71,8 +71,10 @@ function normalizePdfText(value?: string | null): string {
     "Rá»i": "Rời",
     "R Ý i": "Rời",
     "PE Ä‘áº¿ gá»—": "PE đế gỗ",
+    "PE đế gá»—": "PE đế gỗ",
     "PE Ä‘áº¿ nhá»±a": "PE đế nhựa",
     "Pallet sáº¯t Ä‘áº¿ gá»—": "Pallet sắt đế gỗ",
+    "Pallet sắt đế gá»—": "Pallet sắt đế gỗ",
     "Pallet sáº¯t má»ng": "Pallet sắt mỏng",
     "Pallet gá»—": "Pallet gỗ",
   }
@@ -86,11 +88,11 @@ function fmtDate(d?: string | null): string {
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`
 }
 
-async function ensurePdfFont(doc: jsPDF) {
-  if (!fontLoadPromise) {
-    fontLoadPromise = fetch(`/fonts/${PDF_FONT_FILE}`)
+async function loadPdfFontBase64() {
+  if (!fontBase64Promise) {
+    fontBase64Promise = fetch(`/fonts/${PDF_FONT_FILE}`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(`Khong tai duoc font PDF: ${PDF_FONT_FILE}`)
+        if (!res.ok) throw new Error(`Không tải được font PDF: ${PDF_FONT_FILE}`)
         const buffer = await res.arrayBuffer()
         const bytes = new Uint8Array(buffer)
         let binary = ""
@@ -98,18 +100,22 @@ async function ensurePdfFont(doc: jsPDF) {
         for (let i = 0; i < bytes.length; i += chunkSize) {
           binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
         }
-        const base64 = btoa(binary)
-        doc.addFileToVFS(PDF_FONT_FILE, base64)
-        doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "normal")
-        doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "bold")
+        return btoa(binary)
       })
       .catch((error) => {
-        fontLoadPromise = null
+        fontBase64Promise = null
         throw error
       })
   }
 
-  await fontLoadPromise
+  return fontBase64Promise
+}
+
+async function ensurePdfFont(doc: jsPDF) {
+  const base64 = await loadPdfFontBase64()
+  doc.addFileToVFS(PDF_FONT_FILE, base64)
+  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "normal")
+  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "bold")
   doc.setFont(PDF_FONT_NAME, "normal")
 }
 

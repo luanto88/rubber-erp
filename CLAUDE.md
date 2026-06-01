@@ -324,6 +324,23 @@ Vi du:
   - `Phan loai vat tu` trong `The kho` chi hien thi ten phan loai, khong hien thi UUID / id ben duoi.
   - Xuat Excel `The kho` phai bam theo mau `cung_cap_dl/mau_the_kho.png`.
 
+## Ghi chu cap nhat module dieu xe (2026-06-01)
+
+- Migration `supabase/migrations/20260601_dispatch_entry_rows.sql` da chay.
+- `dispatch_entries` la header/chung tu; `dispatch_entry_rows` la bang vat ly chi tiet tung chuyen.
+- `dispatch_entries.rows` van duoc giu va cap nhat song song de tuong thich legacy.
+- Module dieu xe doc uu tien `dispatch_entry_rows`, fallback `dispatch_entries.rows`.
+- Khi them/sua/import dieu xe, phai ghi song song header legacy va bang vat ly qua `replaceDispatchEntryRows`.
+- Helper moi:
+  - `src/lib/dispatch-entry-rows.ts`
+  - `src/lib/dispatch-analytics.ts`
+  - `src/lib/dispatch-pdf.ts`
+- `/dashboard/dispatch` co tab `Thong ke`, loc theo doi/xe, KPI, bang tong hop theo doi/xe, PDF tong/PDF doi/PDF xe.
+- Chi tiet ngay dieu xe co nut PDF tung chuyen.
+- `writeBackToDispatch` cap nhat ca `dispatch_entries.rows[]` va `dispatch_entry_rows`.
+- Kiem tra da pass: ESLint scoped cac file dieu xe/output moi va `npx tsc --noEmit --pretty false`.
+- `npm run lint` toan repo con fail do loi cu ngoai pham vi o `page.tsx` va `src/app/test-sodo/page.tsx`.
+
 ## Nho ky
 
 - Khong xoa file hay xoa du lieu khi chua duoc xac nhan

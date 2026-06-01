@@ -1390,6 +1390,10 @@ export default function IsoDocumentDetailPage() {
             if (pdfJson.metaMismatched?.length > 0) {
               setHeaderMismatchWarnings(pdfJson.metaMismatched as Array<{ found: string; expected: string }>)
             }
+            if (pdfJson.diagnostics?.metaFillError && !pdfJson.skipped) {
+              showToast(false, "Không đọc được text của PDF — tag header/footer chưa được điền. Kiểm tra PDF template có chứa text thuần (không phải ảnh).")
+              console.warn("[generate-pdf] metaFillError:", pdfJson.diagnostics.metaFillError)
+            }
             const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
             if (failedSigs && failedSigs.length > 0) {
               pdfError = `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`

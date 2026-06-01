@@ -73,6 +73,22 @@ sign_pins (không có factory_id — theo auth.users)
   └── user_id PK → auth.users
 ```
 
+## Cập nhật schema điều xe 2026-06-01
+
+- Migration đã chạy: `supabase/migrations/20260601_dispatch_entry_rows.sql`.
+- `dispatch_entries` có thêm `day_chuyen TEXT` và tiếp tục giữ `rows JSONB` để tương thích legacy.
+- Bảng mới `dispatch_entry_rows` lưu vật lý từng chuyến điều xe:
+  - khóa chính `id`
+  - `factory_id`, `dispatch_entry_id`
+  - `uid_legacy`, `ngay DATE`, `day_chuyen`
+  - snapshot xe/tài xế/chuyến: `so_xe`, `chuyen`, `tai_xe`
+  - nghiệp vụ tuyến: `diem_gn[]`, `phien[]`, `lo_thu_hoach[]`, `lo_trinh[]`, `doi[]`, `so_km`
+  - sản lượng: `kl_ct/drc_c/kl_ck`, `kl_dct/drc_dc/kl_dck`, `kl_dkt/drc_dk/kl_dkk`, `kl_dt/drc_d/kl_dk`, `kl_mn/drc_mn/kl_mnk`
+  - `ngan_ref[]`, `ghi_chu`, `locked`, `sort_order`
+  - unique `(dispatch_entry_id, uid_legacy)`
+- Tính năng mới nên query `dispatch_entry_rows`; chỉ dùng `dispatch_entries.rows` khi cần fallback/legacy.
+- Mọi query vẫn phải filter theo `factory_id`.
+
 ## Schema auth / profile
 
 ### `departments`

@@ -50,9 +50,51 @@ CREATE TABLE dispatch_entries (
   factory_id UUID REFERENCES factories(id),
   ngay TEXT NOT NULL, -- dd/mm/yyyy
   chung_nhan TEXT,
+  day_chuyen TEXT,
   rows JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE dispatch_entry_rows (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  factory_id UUID REFERENCES factories(id) ON DELETE CASCADE NOT NULL,
+  dispatch_entry_id UUID REFERENCES dispatch_entries(id) ON DELETE CASCADE NOT NULL,
+  uid_legacy TEXT,
+  ngay DATE NOT NULL,
+  day_chuyen TEXT,
+  so_xe TEXT NOT NULL DEFAULT '',
+  chuyen INTEGER NOT NULL DEFAULT 1,
+  tai_xe TEXT,
+  diem_gn TEXT[] NOT NULL DEFAULT '{}',
+  phien TEXT[] NOT NULL DEFAULT '{}',
+  lo_thu_hoach TEXT[] NOT NULL DEFAULT '{}',
+  xu_ly TEXT,
+  lo_trinh TEXT[] NOT NULL DEFAULT '{}',
+  doi INTEGER[] NOT NULL DEFAULT '{}',
+  so_km NUMERIC(10,2) NOT NULL DEFAULT 0,
+  kl_ct NUMERIC(12,2) NOT NULL DEFAULT 0,
+  drc_c NUMERIC(6,2) NOT NULL DEFAULT 0,
+  kl_ck NUMERIC(12,2) NOT NULL DEFAULT 0,
+  kl_dct NUMERIC(12,2) NOT NULL DEFAULT 0,
+  drc_dc NUMERIC(6,2) NOT NULL DEFAULT 0,
+  kl_dck NUMERIC(12,2) NOT NULL DEFAULT 0,
+  kl_dkt NUMERIC(12,2) NOT NULL DEFAULT 0,
+  drc_dk NUMERIC(6,2) NOT NULL DEFAULT 0,
+  kl_dkk NUMERIC(12,2) NOT NULL DEFAULT 0,
+  kl_dt NUMERIC(12,2) NOT NULL DEFAULT 0,
+  drc_d NUMERIC(6,2) NOT NULL DEFAULT 0,
+  kl_dk NUMERIC(12,2) NOT NULL DEFAULT 0,
+  kl_mn NUMERIC(12,2) NOT NULL DEFAULT 0,
+  drc_mn NUMERIC(6,2) NOT NULL DEFAULT 0,
+  kl_mnk NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ngan_ref TEXT[] NOT NULL DEFAULT '{}',
+  ghi_chu TEXT,
+  locked BOOLEAN NOT NULL DEFAULT false,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(dispatch_entry_id, uid_legacy)
 );
 
 CREATE TABLE dispatch_drivers (

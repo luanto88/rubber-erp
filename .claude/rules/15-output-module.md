@@ -179,6 +179,15 @@ supabase/migrations/
 
 ## Ghi ngược sản lượng vào phiếu điều xe (Write-back)
 
+### Cập nhật 2026-06-01
+
+- Sau migration `20260601_dispatch_entry_rows.sql`, write-back phải cập nhật song song:
+  - legacy `dispatch_entries.rows[]`
+  - bảng vật lý `dispatch_entry_rows`
+- Hàm `writeBackToDispatch` trong `src/app/dashboard/output/_components/output-types.ts` đã cập nhật cả hai nơi.
+- `dispatch_entry_rows.ngay` là `DATE`; khi match ngày dùng helper `toISODate()` từ `src/lib/dispatch-entry-rows.ts`.
+- Các module cũ vẫn có thể đọc `dispatch_entries.rows`, nhưng thống kê/PDF điều xe mới dùng dữ liệu vật lý đã hydrate từ `dispatch_entry_rows`.
+
 Sau khi import Excel hoặc lưu / xóa thủ công, hệ thống tự động tổng hợp sản lượng từ `production_records` và ghi ngược vào các trường KL của `dispatch_entries.rows[]`.
 
 ### Hàm `writeBackToDispatch`

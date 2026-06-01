@@ -46,6 +46,7 @@ type MetaFillResult = {
   notFound: string[]
   mismatched: MetaMismatch[]
   footerFilledPages: number[]
+  error?: string
 }
 
 type PdfTextItem = {
@@ -518,6 +519,9 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
     disableWorker: true,
     useWorkerFetch: false,
     isEvalSupported: false,
+    cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
   } as never).promise
 }
 
@@ -735,7 +739,16 @@ async function fillMetadataPlaceholders(
       void pageFound
     }
   } catch (err) {
-    console.warn("[generate-pdf] fillMetadataPlaceholders:", err instanceof Error ? err.message : err)
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.warn("[generate-pdf] fillMetadataPlaceholders error:", errMsg)
+    const notFoundOnError = [
+      ...headerPatterns
+        .map((entry) => entry.expected)
+        .filter((label, index, all) => all.indexOf(label) === index)
+        .filter((label) => !found.has(label) && !isSkippedLabel(skipLabels, label)),
+      ...(found.has(FOOTER_LABEL) || isSkippedLabel(skipLabels, FOOTER_LABEL) ? [] : [FOOTER_LABEL]),
+    ]
+    return { filled: [...filled], notFound: notFoundOnError, mismatched, footerFilledPages: [...footerFilledPages], error: errMsg }
   }
 
   const notFound = [
@@ -1433,6 +1446,7 @@ export async function POST(req: NextRequest) {
         signerImagePath,
         sigImgLoadFailed: sigImgNullFor,
         sigEmbedErrors,
+        metaFillError: metaResult.error ?? null,
       },
     })
   } catch (err) {
