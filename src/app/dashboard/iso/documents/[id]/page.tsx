@@ -1393,8 +1393,8 @@ export default function IsoDocumentDetailPage() {
                   ? {
                       ...prev,
                       ...(filePlacement.kind === "main" ? { file_signed_pdf_url: pdfJson.signedPdfUrl as string } : {}),
-                      ...(filePlacement.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_url: pdfJson.signedPdfUrl as string } : {}),
-                      ...(filePlacement.kind === "review_request" ? { file_de_nghi_soat_xet_url: pdfJson.signedPdfUrl as string, file_soat_xet_url: pdfJson.signedPdfUrl as string } : {}),
+                      ...(filePlacement.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_signed_url: pdfJson.signedPdfUrl as string } : {}),
+                      ...(filePlacement.kind === "review_request" ? { file_de_nghi_soat_xet_signed_url: pdfJson.signedPdfUrl as string } : {}),
                     }
                   : prev)
               } else if (filePlacement.kind === "main") {
@@ -1606,13 +1606,20 @@ export default function IsoDocumentDetailPage() {
       queue.push({ docId: doc.id, kind: "main", label: "File PDF chính", url: doc.file_signed_pdf_url || doc.file_goc_url! })
     }
     // File phụ soát xét PDF — xử lý qua placement modal như hồ sơ con
+    // Dùng _signed_ URL cho preview modal (signer thấy chữ ký bước trước); generate-pdf luôn đọc từ URL gốc
     if (doc.chon_quy_trinh === "Soát xét") {
       if (isPdfUrl(doc.file_phieu_yeu_cau_thay_doi_url)) {
-        queue.push({ docId: doc.id, kind: "change_request", label: "Phiếu yêu cầu thay đổi", url: doc.file_phieu_yeu_cau_thay_doi_url! })
+        queue.push({
+          docId: doc.id, kind: "change_request", label: "Phiếu yêu cầu thay đổi",
+          url: doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url!,
+        })
       }
       const reviewUrl = doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url
       if (isPdfUrl(reviewUrl)) {
-        queue.push({ docId: doc.id, kind: "review_request", label: "Đề nghị soát xét", url: reviewUrl! })
+        queue.push({
+          docId: doc.id, kind: "review_request", label: "Đề nghị soát xét",
+          url: doc.file_de_nghi_soat_xet_signed_url || reviewUrl!,
+        })
       }
     }
     for (const child of childDocs) {

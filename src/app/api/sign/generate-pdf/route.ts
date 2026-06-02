@@ -323,10 +323,8 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
   return TRANG_THAI_LABEL_SERVER[currentStatus] || "Chờ phê duyệt"
 }
 
-function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string, skipPageIndexes: number[] = []) {
-  const skip = new Set(skipPageIndexes)
-  for (const [pageIndex, page] of pdfDoc.getPages().entries()) {
-    if (skip.has(pageIndex)) continue
+function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string) {
+  for (const page of pdfDoc.getPages()) {
     const fontSize = HEADER_FOOTER_FONT_SIZE
     const marginX = 30
     const y = 18
@@ -334,13 +332,8 @@ function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: st
     let size = fontSize
     while (size > 8 && font.widthOfTextAtSize(footerText, size) > maxWidth) size -= 0.5
     const textWidth = font.widthOfTextAtSize(footerText, size)
-    page.drawRectangle({
-      x: marginX - 2,
-      y: y - 3,
-      width: maxWidth + 4,
-      height: size + 8,
-      color: rgb(1, 1, 1),
-    })
+    // Full-width strip to cover any existing footer text at any y position
+    page.drawRectangle({ x: 0, y: 0, width: page.getWidth(), height: 45, color: rgb(1, 1, 1) })
     page.drawText(footerText, {
       x: marginX + Math.max((maxWidth - textWidth) / 2, 0),
       y,
@@ -770,8 +763,8 @@ async function fillMetadataPlaceholders(
         }
       }
 
-      // Fill body labels cho change_request: Lý do soát xét / Nội dung soát xét (và alias thay đổi)
-      if (signFileKind === "change_request") {
+      // Fill body labels cho change_request và review_request: Lý do soát xét / Nội dung soát xét (và alias)
+      if (signFileKind === "change_request" || signFileKind === "review_request") {
         const lyDoValue = ((doc.ly_do_soat_xet as string) || "").trim()
         const noiDungValue = ((doc.noi_dung_soat_xet as string) || "").trim()
         const extraLabels: Array<{ normalized: string; value: string }> = [
@@ -782,13 +775,15 @@ async function fillMetadataPlaceholders(
         ]
         for (const extra of extraLabels) {
           if (!extra.value) continue
-          for (const item of items) {
-            const normalizedItem = normalizeTagText(item.str)
-            if (!normalizedItem.startsWith(extra.normalized)) continue
+          // Dùng line-based matching để tránh pdfjs fragmentation (label bị tách nhiều item)
+          for (const line of lines) {
+            const lineNorm = normalizeTagText(textOfLine(line))
+            if (!lineNorm.startsWith(extra.normalized)) continue
+            const item = line[0]
             // Kiểm tra xem dòng đó đã có giá trị thật bên phải label chưa
             const rowY = item.transform[5]
             const rowItems = items.filter(
-              (ri) => ri !== item && Math.abs(ri.transform[5] - rowY) < 4,
+              (ri) => !line.includes(ri) && Math.abs(ri.transform[5] - rowY) < 4,
             )
             const alreadyHasValue = rowItems.some(
               (ri) =>
@@ -797,9 +792,9 @@ async function fillMetadataPlaceholders(
                 !HEADER_VALUE_PLACEHOLDER_RE.test(ri.str.trim()),
             )
             if (alreadyHasValue) break
-            // Vẽ giá trị: nếu vừa 1 dòng thì inline, nếu quá dài thì xuống dòng với word-wrap
-            const labelEndX = item.transform[4] + item.width
-            const colonOffset = item.str.trimEnd().endsWith(":") ? 4 : 12
+            // labelEndX = rightmost position của toàn bộ items trong line (handle fragmented label)
+            const labelEndX = Math.max(...line.map((it) => it.transform[4] + (it.width ?? 0)))
+            const colonOffset = lineNorm.trimEnd().endsWith(":") ? 4 : 12
             const valueStartX = labelEndX + colonOffset
             const pageWidth = page.getWidth()
             const maxInlineWidth = pageWidth - valueStartX - 20
@@ -1248,7 +1243,7 @@ export async function POST(req: NextRequest) {
               signFileKind,
             )
             if (!isAuxReviewFilePdf) {
-              drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+              drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
             }
             // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
             // vẽ QR tại vị trí manual placement trên trang đầu tiên.
@@ -1418,8 +1413,8 @@ export async function POST(req: NextRequest) {
         signFileKind,
       )
       const isAuxReviewFilePdf = signFileKind === "change_request" || signFileKind === "review_request"
-      if (docIsConVal || isAuxReviewFilePdf || metaResult.footerFilledPages.length > 0) {
-        drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
+      if (!isAuxReviewFilePdf) {
+        drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
       }
       if (manualQrPlacement && !metaResult.filled.includes("QR")) {
         try {
@@ -1528,11 +1523,12 @@ export async function POST(req: NextRequest) {
 
     console.log("[generate-pdf] upload OK - public URL:", urlData.publicUrl)
 
+    // Lưu file phụ soát xét vào cột _signed_ để giữ nguyên URL gốc (tránh tích lũy QR)
     const updateUrlPayload =
       signFileKind === "change_request"
-        ? { file_phieu_yeu_cau_thay_doi_url: urlData.publicUrl }
+        ? { file_phieu_yeu_cau_thay_doi_signed_url: urlData.publicUrl }
         : signFileKind === "review_request"
-          ? { file_de_nghi_soat_xet_url: urlData.publicUrl, file_soat_xet_url: urlData.publicUrl }
+          ? { file_de_nghi_soat_xet_signed_url: urlData.publicUrl }
           : { file_signed_pdf_url: urlData.publicUrl }
 
     const { error: updateUrlErr } = await supabaseAdmin
