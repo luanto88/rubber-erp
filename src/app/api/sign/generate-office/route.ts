@@ -40,6 +40,8 @@ const TEXT_TAGS = [
   "{{MA_TAI_LIEU_MOI}}",
   "{{LY_DO_SOAT_XET}}",
   "{{NOI_DUNG_SOAT_XET}}",
+  "{{LY_DO_THAY_DOI}}",
+  "{{NOI_DUNG_THAY_DOI}}",
   "{{TEN_SOAN_THAO}}",
   "{{TEN_XEM_XET}}",
   "{{TEN_PHE_DUYET}}",
@@ -193,6 +195,8 @@ function buildTextValues(doc: Record<string, unknown>, statusText: string): Reco
     "{{MA_TAI_LIEU_MOI}}": String(doc.ma_tai_lieu_moi || doc.ma_tai_lieu || ""),
     "{{LY_DO_SOAT_XET}}": String(doc.ly_do_soat_xet || ""),
     "{{NOI_DUNG_SOAT_XET}}": String(doc.noi_dung_soat_xet || ""),
+    "{{LY_DO_THAY_DOI}}": String(doc.ly_do_soat_xet || ""),
+    "{{NOI_DUNG_THAY_DOI}}": String(doc.noi_dung_soat_xet || ""),
     "{{TEN_SOAN_THAO}}": String(doc.soan_thao || ""),
     "{{TEN_XEM_XET}}": String(doc.xem_xet || ""),
     "{{TEN_PHE_DUYET}}": String(doc.phe_duyet || ""),
@@ -533,10 +537,11 @@ export async function POST(req: NextRequest) {
       const sigBuffer = await getSigImage(factoryId, userId)
       imageByTag[stepTags.signatureTag] = sigBuffer
     }
-    const requiredTags = isChildOffice
+    const isAuxReviewFile = fileKind === "change_request" || fileKind === "review_request"
+    const requiredTags = (isChildOffice || isAuxReviewFile)
       ? []
       : [stepTags.signatureTag, stepTags.nameTag]
-    const defaultQrWhenMissing = false
+    const defaultQrWhenMissing = isChildOffice || isAuxReviewFile
     const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 

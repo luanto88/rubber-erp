@@ -950,10 +950,15 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
 4. **Reload tất cả 3 placements** từ DB
 5. **Bắt đầu từ `file_goc_url`** (KHÔNG dùng `file_signed_pdf_url` — tránh double-stamp)
 6. **Scan text layer** bằng `pdfjs-dist` → điền tag header/footer hợp lệ; bỏ qua tag mismatch (trả về `metaMismatched`)
-7. **Vẽ QR manual placement trên mỗi trang**: dùng `pageFound` (per-page, reset mỗi vòng) thay vì `filled` (cross-page) — đảm bảo QR xuất hiện đúng trên **tất cả** trang, không chỉ trang 1.
+7. **Vẽ QR trên tất cả trang** — 3 nguồn ưu tiên theo thứ tự trong mỗi vòng lặp trang:
+   - `manualQrPlacement`: từ `qrX/qrY/qrWidth/qrHeight` trong stored placement (hiện tại luôn null vì client không gửi các field này)
+   - `autoQrPosition`: vị trí được nhớ khi QR auto-detected từ "QR:" tag trong header trang đầu — vẽ lại vị trí đó cho tất cả trang sau
+   - `shouldDrawDefaultChildQr`: QR mặc định góc trên cho hồ sơ con
+   - Dùng `pageFound` (per-page, reset mỗi vòng) thay `filled` (cross-page) — QR xuất hiện đúng mọi trang
 8. **Re-apply tất cả placements đã lưu** (ảnh chữ ký body): mỗi bước ký đã qua đều được nhúng lại
 9. **Vẽ tên người ký** nếu `showSignerName !== false`, dùng box tên độc lập nếu user đã đặt
-10. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
+10. **`drawFooterOnAllPages` luôn được gọi unconditional** sau `fillMetadataPlaceholders` — đảm bảo footer stamp trên mọi trang (skip các trang đã được pdfjs xử lý qua `footerFilledPages`).
+11. **Upload PDF kết quả** → cập nhật `file_signed_pdf_url`
 
 **Kết quả:**
 
@@ -999,8 +1004,14 @@ Mỗi lần generate PDF, server thực hiện theo thứ tự:
   - Font footer hệ thống: `Times New Roman`, size `13`.
 - **Footer đã điền một phần** — hệ thống nhận diện được footer đã có mã và ngày nhưng trạng thái vẫn là placeholder:
   - Ví dụ: `PHK-QT10 (Lần ban hành-01/06/2024) Tình trạng` — mã và ngày đã điền sẵn, "Tình trạng" là placeholder.
-  - Pattern `FOOTER_PARTIAL_FILLED_STATUS_RE` bắt dạng: code + `(…date…)` + `tinh trang|trang thai` ở cuối.
+  - Pattern `FOOTER_PARTIAL_FILLED_STATUS_RE` bắt dạng: code dạng `xxx-yyy` (hyphenated) + `(…date…)` + `tinh trang|trang thai`.
   - Được xử lý giống footer mẫu đầy đủ — thay toàn bộ bằng giá trị thực.
+- **Footer dùng label gốc + date thực** (`Mã tài liệu (01-01/09/2024) Tình trạng`):
+  - Pattern `FOOTER_LABEL_WITH_DATE_RE` bắt dạng: `ma tai lieu|ma ho so` + `(…date…)` + `tinh trang|trang thai`.
+  - **KHÔNG** dùng `FOOTER_PARTIAL_FILLED_STATUS_RE` vì pattern đó require hyphenated code (`xxx-yyy`), trong khi "Mã tài liệu" là label dạng words.
+  - `drawFooterOnAllPages` **luôn được gọi unconditional** sau `fillMetadataPlaceholders` để đảm bảo footer stamp mọi trang kể cả khi pdfjs không detect được template footer.
+
+- **Invariant quan trọng — `extractHeaderValueFromPageItems`**: Hàm này loại trừ các items là tag label (ma tai lieu, ngay hieu luc, tinh trang, lan ban hanh/sua doi/soat xet, qr) khỏi "same row value detection". Không xóa filter này — nếu xóa, "QR:" trong merged cell cùng hàng với "Mã tài liệu:" sẽ bị detect nhầm là existing value → fill bị skip.
 
 #### Tag tương tự phải cảnh báo và bỏ qua fill
 
@@ -1600,16 +1611,26 @@ const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"    // oute
 
 3. **parent_doc_id cho TH4**: payload dùng `selectedParentDocId || reviewParentDocId` — vì TH4 chỉ set `reviewParentDocId`, không set `selectedParentDocId`.
 
-### Ký file phụ soát xét (Approach B — tự động)
+### Ký file phụ soát xét (Approach A — placement modal, cập nhật 2026-06-02)
 
-2 file đính kèm soát xét (`file_phieu_yeu_cau_thay_doi_url`, `file_de_nghi_soat_xet_url`) được xử lý **tự động sau khi ký file chính**, không yêu cầu placement modal thêm.
+2 file đính kèm soát xét (`file_phieu_yeu_cau_thay_doi_url`, `file_de_nghi_soat_xet_url`) được xử lý **như hồ sơ con** — có placement modal, có thể ẩn/hiện chữ ký, có QR tự động.
 
-**Trigger**: Tất cả actions có ký (gui_xem_xet, gui_phe_duyet, gui_lai_phe_duyet, phe_duyet, tra_ve, tu_choi_phe_duyet...) khi `doc.chon_quy_trinh === "Soát xét"`.
+> **Approach B (fire-and-forget không placement) đã bị xóa** khỏi `doTransition` trong `[id]/page.tsx`.
 
-**Xử lý**:
-- File phụ là PDF: gọi `POST /api/sign/generate-pdf` với `signaturePlacement: null` → chỉ fill metadata tags (TINH_TRANG, footer), không nhúng chữ ký. `generate-pdf` khi `signFileKind !== "main"` và không có placement sẽ clear `allPlacements` → bỏ qua re-apply placements của main doc.
-- File phụ là DOCX/XLSX: đã được xử lý bởi `generateOfficeFiles()` trong `buildOfficeFileQueue()`.
-- Lỗi file phụ: fire-and-forget, không block workflow.
+**Flow PDF file phụ** (qua `buildSignFileQueue` trong `page.tsx`):
+- Khi `doc.chon_quy_trinh === "Soát xét"`, `buildSignFileQueue` thêm PDF change_request + review_request vào queue sau main PDF
+- User thấy placement modal lần lượt: main PDF → Phiếu yêu cầu thay đổi → Đề nghị soát xét → child docs
+- `placementDocIsCon` trả `true` khi `fileKind === "change_request"/"review_request"` → nút "Ẩn chữ ký" hiển thị
+- `signedFilePlacements` loop trong `doTransition` xử lý và cập nhật `file_phieu_yeu_cau_thay_doi_url` / `file_de_nghi_soat_xet_url`
+
+**generate-pdf/route.ts cho file phụ**:
+- `fillMetadataPlaceholders` có param `signFileKind: SignFileKind = "main"` (optional)
+- `isAuxReviewFile = signFileKind === "change_request" || signFileKind === "review_request"` → bật `shouldDrawDefaultChildQr` + footer unconditional
+- `change_request`: scan toàn trang tìm "Lý do soát xét:" / "Nội dung soát xét:", điền `doc.ly_do_soat_xet` / `doc.noi_dung_soat_xet` sau label nếu chưa có giá trị
+
+**generate-office/route.ts cho file phụ** (DOCX/XLSX):
+- `isAuxReviewFile`: `requiredTags = []` (signature optional), `defaultQrWhenMissing = true`
+- `{{LY_DO_SOAT_XET}}` và `{{NOI_DUNG_SOAT_XET}}` đã có trong TEXT_TAGS — fill tự động khi tag có trong template
 
 **Khi hủy hiệu lực (restamp)**: `restamp-pdf` cũng stamp "Hết hiệu lực" lên 2 file phụ nếu chúng là PDF.
 

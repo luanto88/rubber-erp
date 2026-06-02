@@ -89,7 +89,7 @@ type ChildReviewRow = {
 
 type PinModalAction = "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "tra_ve" | "khong_xem_xet" | "tu_choi_phe_duyet" | "gui_lai_phe_duyet" | "tra_ve_nhap"
 
-type SignPlacement = {
+type ExtraSignPlacement = {
   page: number
   x: number
   y: number
@@ -101,10 +101,14 @@ type SignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+}
+
+type SignPlacement = ExtraSignPlacement & {
   qrX?: number
   qrY?: number
   qrWidth?: number
   qrHeight?: number
+  extraPlacements?: ExtraSignPlacement[]
 }
 
 type PreviewSignature = SignPlacement & {
@@ -201,6 +205,8 @@ const ISO_OFFICE_REVIEW_TAGS = [
   "{{MA_TAI_LIEU_MOI}}",
   "{{LY_DO_SOAT_XET}}",
   "{{NOI_DUNG_SOAT_XET}}",
+  "{{LY_DO_THAY_DOI}}",
+  "{{NOI_DUNG_THAY_DOI}}",
 ]
 
 const ISO_OFFICE_SIGNATURE_TAGS = [
@@ -310,11 +316,21 @@ export default function IsoDocumentDetailPage() {
     signerName: string
     showSignature: boolean
     showSignerName: boolean
+    extraSigBoxes: Array<{
+      id: number
+      sigX: number; sigY: number; sigW: number; sigH: number
+      nameX: number; nameY: number; nameW: number; nameH: number
+      showSignature: boolean; showSignerName: boolean
+    }>
   } | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const draggableNodeRef = useRef<HTMLDivElement>(null)
   const nameNodeRef = useRef<HTMLDivElement>(null)
   const qrNodeRef = useRef<HTMLDivElement>(null)
+  const MAX_EXTRA_SIG = 5
+  const extraSigNodeArray = useRef<Array<{ current: HTMLDivElement | null }>>(
+    Array.from({ length: 5 }, () => ({ current: null as HTMLDivElement | null }))
+  )
   const pdfDocRef = useRef<unknown>(null)
 
   // Success toast
@@ -648,9 +664,11 @@ export default function IsoDocumentDetailPage() {
   const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"
   // isCon của doc đang hiển thị trong placement modal (có thể là hồ sơ con, không phải main doc)
   const placementDocIsCon = placementModal
-    ? placementModal.docId === docId
-      ? isCon
-      : childDocs.some((c) => c.id === placementModal.docId && (c.phan_loai_tl === "con" || c.loai_tai_lieu === "F"))
+    ? (placementModal.fileKind === "change_request" || placementModal.fileKind === "review_request")
+      ? true  // file phụ soát xét treated như isCon → hiển thị toggle "Ẩn chữ ký"
+      : placementModal.docId === docId
+        ? isCon
+        : childDocs.some((c) => c.id === placementModal.docId && (c.phan_loai_tl === "con" || c.loai_tai_lieu === "F"))
     : false
   // Phải là đúng người được chỉ định VÀ có quyền
   const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
@@ -1498,30 +1516,6 @@ export default function IsoDocumentDetailPage() {
         }
       }
 
-      // Auto-process tài liệu soát xét PDF (Approach B: fill metadata không cần placement modal)
-      if (token && doc.chon_quy_trinh === "Soát xét" && !noSignActions.includes(action)) {
-        const attachmentKinds: Array<{ kind: "change_request" | "review_request"; url: string | null | undefined }> = [
-          { kind: "change_request", url: doc.file_phieu_yeu_cau_thay_doi_url },
-          { kind: "review_request", url: doc.file_de_nghi_soat_xet_url || (doc as Record<string, unknown>).file_soat_xet_url as string | null },
-        ]
-        for (const att of attachmentKinds) {
-          if (!isPdfUrl(att.url)) continue
-          void fetch("/api/sign/generate-pdf", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, docId, docType: "iso", fileKind: att.kind, signaturePlacement: null, action }),
-          }).then(res => res.json()).then((json: Record<string, unknown>) => {
-            if (json.signedPdfUrl) {
-              setDoc((prev) => prev ? {
-                ...prev,
-                ...(att.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_url: json.signedPdfUrl as string } : {}),
-                ...(att.kind === "review_request" ? { file_de_nghi_soat_xet_url: json.signedPdfUrl as string } : {}),
-              } : prev)
-            }
-          }).catch(() => {})
-        }
-      }
-
       // Restamp PDF tài liệu cũ bị hủy hiệu lực
       if (invalidatedIds.length > 0) {
         void fetch("/api/sign/restamp-pdf", {
@@ -1611,7 +1605,16 @@ export default function IsoDocumentDetailPage() {
     if (isPdfUrl(doc.file_goc_url)) {
       queue.push({ docId: doc.id, kind: "main", label: "File PDF chính", url: doc.file_signed_pdf_url || doc.file_goc_url! })
     }
-    // change_request và review_request được auto-process trong doTransition (Approach B) — không cần placement modal
+    // File phụ soát xét PDF — xử lý qua placement modal như hồ sơ con
+    if (doc.chon_quy_trinh === "Soát xét") {
+      if (isPdfUrl(doc.file_phieu_yeu_cau_thay_doi_url)) {
+        queue.push({ docId: doc.id, kind: "change_request", label: "Phiếu yêu cầu thay đổi", url: doc.file_phieu_yeu_cau_thay_doi_url! })
+      }
+      const reviewUrl = doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url
+      if (isPdfUrl(reviewUrl)) {
+        queue.push({ docId: doc.id, kind: "review_request", label: "Đề nghị soát xét", url: reviewUrl! })
+      }
+    }
     for (const child of childDocs) {
       if (isPdfUrl(child.file_goc_url)) {
         queue.push({
@@ -1743,7 +1746,9 @@ export default function IsoDocumentDetailPage() {
       qrY: 110,
       qrW: 96,
       qrH: 96,
-      showQrPlacement: task.kind === "main" && isSoanThaoStep,
+      showQrPlacement: task.kind === "main"
+        ? isSoanThaoStep
+        : (task.kind === "change_request" || task.kind === "review_request"),
       currentPage: 1,
       totalPages: 1,
       canvasScale: 1,
@@ -1753,6 +1758,7 @@ export default function IsoDocumentDetailPage() {
       signerName: user.full_name || user.username || "",
       showSignature: true,
       showSignerName: true,
+      extraSigBoxes: [],
     })
   }
 
@@ -1837,6 +1843,7 @@ export default function IsoDocumentDetailPage() {
           signerName: user.full_name || user.username || "",
           showSignature: true,
           showSignerName: true,
+          extraSigBoxes: [],
         })
         return
       }
@@ -1868,6 +1875,21 @@ export default function IsoDocumentDetailPage() {
       qrY: placementModal.showQrPlacement ? (pdfPageHeight - (placementModal.qrY / canvasScale) - (placementModal.qrH / canvasScale)) : undefined,
       qrWidth: placementModal.showQrPlacement ? (placementModal.qrW / canvasScale) : undefined,
       qrHeight: placementModal.showQrPlacement ? (placementModal.qrH / canvasScale) : undefined,
+      extraPlacements: placementModal.extraSigBoxes.length > 0
+        ? placementModal.extraSigBoxes.map((box) => ({
+            page: currentPage,
+            x: box.sigX / canvasScale,
+            y: pdfPageHeight - (box.sigY / canvasScale) - (box.sigH / canvasScale),
+            width: box.sigW / canvasScale,
+            height: box.sigH / canvasScale,
+            showSignature: box.showSignature,
+            showSignerName: box.showSignerName,
+            nameX: box.nameX / canvasScale,
+            nameY: pdfPageHeight - (box.nameY / canvasScale) - (box.nameH / canvasScale),
+            nameWidth: box.nameW / canvasScale,
+            nameHeight: box.nameH / canvasScale,
+          }))
+        : undefined,
     }
     const completedPlacements = [...placementModal.completedPlacements, { docId: placementModal.docId, kind: placementModal.fileKind, placement }]
     const [nextTask, ...remainingFiles] = placementModal.pendingFiles
@@ -3677,6 +3699,29 @@ export default function IsoDocumentDetailPage() {
                 >
                   {placementModal.showSignerName ? "Ẩn tên (X)" : "Hiện tên"}
                 </button>
+                {placementModal.fileKind === "change_request" && placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
+                  <button
+                    onClick={() => setPlacementModal((p) => p ? {
+                      ...p,
+                      extraSigBoxes: [...p.extraSigBoxes, {
+                        id: Date.now(),
+                        sigX: p.sigX + 30 * (p.extraSigBoxes.length + 1),
+                        sigY: p.sigY + 30 * (p.extraSigBoxes.length + 1),
+                        sigW: p.sigW,
+                        sigH: p.sigH,
+                        nameX: p.nameX + 30 * (p.extraSigBoxes.length + 1),
+                        nameY: p.nameY + 30 * (p.extraSigBoxes.length + 1),
+                        nameW: p.nameW,
+                        nameH: p.nameH,
+                        showSignature: p.showSignature,
+                        showSignerName: p.showSignerName,
+                      }],
+                    } : null)}
+                    className="px-2 py-1 rounded-lg border border-violet-300 text-violet-700 hover:bg-violet-50 transition-all font-bold"
+                  >
+                    + Nhân bản chữ ký
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
@@ -3764,21 +3809,6 @@ export default function IsoDocumentDetailPage() {
                           style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: placementModal.showSignature ? "block" : "none" }}
                           draggable={false}
                         />
-                        {!placementModal.showSignature && (
-                          <div style={{
-                            position: "absolute",
-                            inset: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: "rgba(124,58,237,0.08)",
-                            fontSize: 11,
-                            color: "#7c3aed",
-                            fontWeight: 600,
-                          }}>
-                            Chữ ký đã ẩn
-                          </div>
-                        )}
                         {placementModal.showSignature && (
                           <span style={{
                             position: "absolute",
@@ -3913,6 +3943,70 @@ export default function IsoDocumentDetailPage() {
                     </div>
                   </Draggable>
                 )}
+                {/* Extra sig boxes (clone) cho change_request */}
+                {placementModal.extraSigBoxes.map((box, idx) => (
+                  <Draggable
+                    key={box.id}
+                    nodeRef={extraSigNodeArray.current[idx] as RefObject<HTMLElement>}
+                    position={{ x: box.sigX, y: box.sigY }}
+                    onStop={(_, d) => setPlacementModal((p) => p ? {
+                      ...p,
+                      extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b),
+                    } : null)}
+                    bounds="parent"
+                  >
+                    <div
+                      ref={(el) => { extraSigNodeArray.current[idx].current = el }}
+                      style={{ position: "absolute", top: 0, left: 0, zIndex: 12, cursor: "move" }}
+                    >
+                      <Resizable
+                        size={{ width: box.sigW, height: box.sigH }}
+                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
+                          ...p,
+                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
+                            ...b,
+                            sigW: parseInt(ref.style.width) || b.sigW,
+                            sigH: parseInt(ref.style.height) || b.sigH,
+                          } : b),
+                        } : null)}
+                        minWidth={40}
+                        minHeight={20}
+                        style={{ border: "2px dashed #9333ea", position: "relative" }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={placementModal.sigImgUrl ?? ""}
+                          alt="chữ ký bản sao"
+                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: box.showSignature ? "block" : "none" }}
+                          draggable={false}
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={() => setPlacementModal((p) => p ? {
+                            ...p,
+                            extraSigBoxes: p.extraSigBoxes.filter((b) => b.id !== box.id),
+                          } : null)}
+                          style={{
+                            position: "absolute", top: -10, right: -10, zIndex: 20,
+                            background: "#fff", border: "1px solid #ccc", borderRadius: "50%",
+                            width: 18, height: 18, fontSize: 11, cursor: "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+                          }}
+                        >
+                          ×
+                        </button>
+                        <span style={{
+                          position: "absolute", top: -20, left: 0, fontSize: 10,
+                          color: "#9333ea", background: "rgba(255,255,255,0.92)",
+                          padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none",
+                        }}>
+                          Bản sao {idx + 1}
+                        </span>
+                      </Resizable>
+                    </div>
+                  </Draggable>
+                ))}
               </div>
             </div>
           </div>

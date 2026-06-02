@@ -18,7 +18,7 @@ const JWT_SECRET = new TextEncoder().encode(
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
-type SignPlacement = {
+type ExtraSignPlacement = {
   page: number
   x: number
   y: number
@@ -30,10 +30,14 @@ type SignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+}
+
+type SignPlacement = ExtraSignPlacement & {
   qrX?: number
   qrY?: number
   qrWidth?: number
   qrHeight?: number
+  extraPlacements?: ExtraSignPlacement[]
 }
 
 type SignFileKind = "main" | "change_request" | "review_request"
@@ -79,6 +83,10 @@ const FOOTER_LABEL = "Footer mẫu"
 const FOOTER_PARTIAL_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*\d{1,2}\/\d{1,2}\/\d{4}.*(tinh\s*trang|trang\s*thai)/i
 // Footer đã có mã và ngày, nhưng trạng thái vẫn là placeholder: "PHK-QT10 (Lần ban hành-01/06/2024) Tình trạng"
 const FOOTER_PARTIAL_FILLED_STATUS_RE = /^[a-z]{2,}(?:-[a-z0-9]{2,})+\s*\(.*?\d{1,2}\/\d{1,2}\/\d{4}.*?\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
+// Footer dùng label gốc + date thực + trạng thái placeholder: "Mã tài liệu (01-01/09/2024) Tình trạng"
+const FOOTER_LABEL_WITH_DATE_RE = /^(ma\s*tai\s*lieu|ma\s*ho\s*so)\s*\(.*\d{1,2}\/\d{1,2}\/\d{4}.*\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
+// Footer có mã thật + số lần thật + text placeholder thay date: "PHK-QT07-F06 (03-Ngày hiệu lực) Tình trạng"
+const FOOTER_CODE_TEXT_PLACEHOLDER_RE = /^[a-z]{2,}(?:-[a-z0-9đ]{2,})+\s*\(\d{1,2}-(?!\d{2}\/)[^)]+\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
 const HEADER_FOOTER_FONT_SIZE = 11
 
 function isLikelyFooterMismatchText(searchText: string): boolean {
@@ -306,8 +314,8 @@ function buildFooterValue(maTl: string, lsStr: string, dateStr: string, statusTe
   return `${maTl} (${lsStr}-${dateStr}) ${statusText}`.trim()
 }
 
-function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string): string {
-  if (action === "gui_xem_xet") return "Chờ xem xét"
+function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string, capTl?: string): string {
+  if (action === "gui_xem_xet") return capTl === "Cấp 2" ? "Chờ phê duyệt" : "Chờ xem xét"
   if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
   if (action === "phe_duyet") return "Có hiệu lực"
   if (action === "tra_ve" || action === "khong_xem_xet" || action === "tra_ve_nhap") return "Trả về"
@@ -366,7 +374,14 @@ function buildFooterValueForLine(lineText: string, maTl: string, lsStr: string, 
 }
 
 function isFooterFillCandidate(lineText: string, searchText: string): boolean {
-  return FOOTER_FILLED_RE.test(lineText) || FOOTER_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_TEMPLATE_RE.test(searchText) || FOOTER_PARTIAL_FILLED_STATUS_RE.test(searchText)
+  return (
+    FOOTER_FILLED_RE.test(lineText) ||
+    FOOTER_TEMPLATE_RE.test(searchText) ||
+    FOOTER_PARTIAL_TEMPLATE_RE.test(searchText) ||
+    FOOTER_PARTIAL_FILLED_STATUS_RE.test(searchText) ||
+    FOOTER_LABEL_WITH_DATE_RE.test(searchText) ||
+    FOOTER_CODE_TEXT_PLACEHOLDER_RE.test(searchText)
+  )
 }
 
 async function drawDefaultChildQr(pdfDoc: PDFDocument, page: PDFPage, qrBuffer: Buffer) {
@@ -399,11 +414,15 @@ function buildSignerNamePlacement(placement: SignPlacement) {
 function extractHeaderValueFromPageItems(items: PdfTextItem[], anchor: PdfTextItem): string {
   const anchorEndX = anchor.transform[4] + (anchor.width ?? 0)
   const sameRowItems = items
-    .filter((item) =>
-      Math.abs(item.transform[5] - anchor.transform[5]) < 4 &&
-      item.transform[4] >= anchorEndX + 2 &&
-      normalizeText(item.str).length > 0,
-    )
+    .filter((item) => {
+      if (Math.abs(item.transform[5] - anchor.transform[5]) >= 4) return false
+      if (item.transform[4] < anchorEndX + 2) return false
+      if (!normalizeText(item.str).length) return false
+      // Loại trừ items bản thân là tag label (vd: "QR:" trong merged cell cùng hàng)
+      const norm = normalizeTagText(item.str)
+      if (/^(ma\s*tai\s*lieu|ngay\s*hieu\s*luc|tinh\s*trang|lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet)|qr)\b/i.test(norm)) return false
+      return true
+    })
     .sort((a, b) => a.transform[4] - b.transform[4])
   return normalizeText(sameRowItems.map((item) => item.str).join(" ").replace(/^:\s*/, ""))
 }
@@ -538,17 +557,21 @@ async function fillMetadataPlaceholders(
   statusText: string,
   skipLabels: string[] = [],
   chonQuyTrinh: string | null = null,
+  signFileKind: SignFileKind = "main",
 ): Promise<MetaFillResult> {
   const filled = new Set<string>()
   const found = new Set<string>()
   const footerFilledPages = new Set<number>()
   const mismatched: MetaMismatch[] = []
+  let autoQrPosition: { x: number; y: number; width: number; height: number } | null = null
   const headerPatterns = getHeaderPatterns(doc, maTl, lsStr, dateStr, statusText)
   const mismatchPatterns = getMismatchPatterns(chonQuyTrinh)
-  const shouldDrawDefaultChildQr = isConDoc(
-    (doc.loai_tai_lieu as string | null) ?? null,
-    (doc.phan_loai_tl as string | null) ?? null,
-  )
+  const isAuxReviewFileMeta = signFileKind === "change_request" || signFileKind === "review_request"
+  const shouldDrawDefaultChildQr =
+    isConDoc(
+      (doc.loai_tai_lieu as string | null) ?? null,
+      (doc.phan_loai_tl as string | null) ?? null,
+    ) || isAuxReviewFileMeta
 
   try {
     const pdfjsDoc = await openPdfjsDocument(pdfBytes)
@@ -634,12 +657,14 @@ async function fillMetadataPlaceholders(
               const maxWidth = Math.max(viewport.width - qrX - 12, 18)
               const drawSize = Math.min(qrSize, maxWidth)
               if (drawSize > 18) {
-                page.drawImage(qrImage, {
+                const qrPos = {
                   x: qrX,
                   y: item.transform[5] - drawSize + (item.height ?? 10),
                   width: drawSize,
                   height: drawSize,
-                })
+                }
+                page.drawImage(qrImage, qrPos)
+                if (!autoQrPosition) autoQrPosition = qrPos
                 filled.add(header.expected)
               }
             }
@@ -670,6 +695,15 @@ async function fillMetadataPlaceholders(
           width: manualQrPlacement.width,
           height: manualQrPlacement.height,
         })
+        pageFound.add("QR")
+        filled.add("QR")
+        found.add("QR")
+      }
+
+      // Vẽ QR từ vị trí auto-detected (khi header QR tag chỉ có ở trang 1)
+      if (!pageFound.has("QR") && !manualQrPlacement && autoQrPosition) {
+        const qrImgAuto = await pdfDoc.embedPng(qrBuffer)
+        page.drawImage(qrImgAuto, autoQrPosition)
         pageFound.add("QR")
         filled.add("QR")
         found.add("QR")
@@ -732,6 +766,74 @@ async function fillMetadataPlaceholders(
             !mismatched.some((entry) => entry.expected === FOOTER_LABEL && entry.found === lineText)
           ) {
             mismatched.push({ found: lineText, expected: FOOTER_LABEL })
+          }
+        }
+      }
+
+      // Fill body labels cho change_request: Lý do soát xét / Nội dung soát xét (và alias thay đổi)
+      if (signFileKind === "change_request") {
+        const lyDoValue = ((doc.ly_do_soat_xet as string) || "").trim()
+        const noiDungValue = ((doc.noi_dung_soat_xet as string) || "").trim()
+        const extraLabels: Array<{ normalized: string; value: string }> = [
+          { normalized: "ly do soat xet", value: lyDoValue },
+          { normalized: "noi dung soat xet", value: noiDungValue },
+          { normalized: "ly do thay doi", value: lyDoValue },
+          { normalized: "noi dung thay doi", value: noiDungValue },
+        ]
+        for (const extra of extraLabels) {
+          if (!extra.value) continue
+          for (const item of items) {
+            const normalizedItem = normalizeTagText(item.str)
+            if (!normalizedItem.startsWith(extra.normalized)) continue
+            // Kiểm tra xem dòng đó đã có giá trị thật bên phải label chưa
+            const rowY = item.transform[5]
+            const rowItems = items.filter(
+              (ri) => ri !== item && Math.abs(ri.transform[5] - rowY) < 4,
+            )
+            const alreadyHasValue = rowItems.some(
+              (ri) =>
+                ri.transform[4] > item.transform[4] &&
+                normalizeTagText(ri.str).length > 2 &&
+                !HEADER_VALUE_PLACEHOLDER_RE.test(ri.str.trim()),
+            )
+            if (alreadyHasValue) break
+            // Vẽ giá trị: nếu vừa 1 dòng thì inline, nếu quá dài thì xuống dòng với word-wrap
+            const labelEndX = item.transform[4] + item.width
+            const colonOffset = item.str.trimEnd().endsWith(":") ? 4 : 12
+            const valueStartX = labelEndX + colonOffset
+            const pageWidth = page.getWidth()
+            const maxInlineWidth = pageWidth - valueStartX - 20
+            const valueWidth = font.widthOfTextAtSize(extra.value, HEADER_FOOTER_FONT_SIZE)
+            if (valueWidth <= maxInlineWidth) {
+              page.drawText(extra.value, {
+                x: valueStartX,
+                y: item.transform[5],
+                font,
+                size: HEADER_FOOTER_FONT_SIZE,
+                color: rgb(0, 0, 0),
+              })
+            } else {
+              // Vẽ value xuống dòng tiếp theo, căn trái từ vị trí label, với word-wrap
+              const leftX = item.transform[4]
+              const maxLineWidth = pageWidth - leftX - 20
+              const lineHeight = HEADER_FOOTER_FONT_SIZE * 1.5
+              const words = extra.value.split(/\s+/)
+              let currentLine = ""
+              let currentY = item.transform[5] - lineHeight
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word
+                if (font.widthOfTextAtSize(testLine, HEADER_FOOTER_FONT_SIZE) > maxLineWidth && currentLine) {
+                  page.drawText(currentLine, { x: leftX, y: currentY, font, size: HEADER_FOOTER_FONT_SIZE, color: rgb(0, 0, 0) })
+                  currentY -= lineHeight
+                  currentLine = word
+                } else {
+                  currentLine = testLine
+                }
+              }
+              if (currentLine) page.drawText(currentLine, { x: leftX, y: currentY, font, size: HEADER_FOOTER_FONT_SIZE, color: rgb(0, 0, 0) })
+            }
+            filled.add(extra.normalized)
+            break
           }
         }
       }
@@ -917,7 +1019,8 @@ export async function POST(req: NextRequest) {
     const lanBanHanh = (doc.lan_ban_hanh as number) ?? 0
     const lsStr = String(lanBanHanh).padStart(2, "0")
     const trangThai = doc.trang_thai as string
-    const statusText = getTargetStatusText(action, trangThai)
+    const isAuxReviewFilePdf = signFileKind === "change_request" || signFileKind === "review_request"
+    const statusText = getTargetStatusText(action, trangThai, doc.cap_tl as string | undefined)
     const docIsConVal = isConDoc(
       (doc.loai_tai_lieu as string | null) ?? null,
       (doc.phan_loai_tl as string | null) ?? null,
@@ -1142,8 +1245,9 @@ export async function POST(req: NextRequest) {
               statusText,
               skipTagLabels ?? [],
               (doc.chon_quy_trinh as string | null) ?? null,
+              signFileKind,
             )
-            if (docIsConVal || metaResult.footerFilledPages.length > 0) {
+            if (!isAuxReviewFilePdf) {
               drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
             }
             // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
@@ -1208,6 +1312,44 @@ export async function POST(req: NextRequest) {
                 sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })
               }
             }
+
+            // Nhúng các bản sao chữ ký (clone) cho file phụ soát xét (change_request)
+            if (signFileKind !== "main" && signaturePlacement?.extraPlacements?.length) {
+              const extraSigImg = await getSigImage(factoryId, userId)
+              const extraSignerName = signerNames.get(userId)?.trim()
+              for (const extraP of signaturePlacement.extraPlacements) {
+                const extraPageIndex = extraP.page - 1
+                if (extraPageIndex < 0 || extraPageIndex >= originalPages.getPageCount()) continue
+                try {
+                  if (extraSigImg && extraP.showSignature !== false) {
+                    const embedded = await originalPages.embedPng(extraSigImg).catch(() => originalPages!.embedJpg(extraSigImg))
+                    originalPages.getPage(extraPageIndex).drawImage(embedded, {
+                      x: extraP.x,
+                      y: extraP.y,
+                      width: extraP.width,
+                      height: extraP.height,
+                      opacity: 0.92,
+                    })
+                  }
+                  if (extraSignerName && extraP.showSignerName !== false) {
+                    const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+                    let nameFontSize = 13
+                    while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
+                      nameFontSize -= 0.5
+                    }
+                    const nameWidth = signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize)
+                    originalPages.getPage(extraPageIndex).drawText(extraSignerName, {
+                      x: extraSlot.xCenter - nameWidth / 2,
+                      y: extraSlot.y,
+                      size: nameFontSize,
+                      font: signerNameFont,
+                      color: rgb(0, 0, 0),
+                    })
+                  }
+                } catch { /* bỏ qua lỗi embed bản sao */ }
+              }
+            }
+
             didApplyStamping = true
           }
         }
@@ -1273,8 +1415,10 @@ export async function POST(req: NextRequest) {
         statusText,
         skipTagLabels ?? [],
         (doc.chon_quy_trinh as string | null) ?? null,
+        signFileKind,
       )
-      if (docIsConVal || metaResult.footerFilledPages.length > 0) {
+      const isAuxReviewFilePdf = signFileKind === "change_request" || signFileKind === "review_request"
+      if (docIsConVal || isAuxReviewFilePdf || metaResult.footerFilledPages.length > 0) {
         drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText), metaResult.footerFilledPages)
       }
       if (manualQrPlacement && !metaResult.filled.includes("QR")) {
