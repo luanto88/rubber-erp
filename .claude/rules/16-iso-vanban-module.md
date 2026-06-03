@@ -1681,3 +1681,38 @@ const fileSectionLabel = isCon ? "File há»“ sÆ¡" : "File tÃ i liá»‡u"    // oute
 - **Badge sidebar thiáº¿u `tra_ve`** (`iso-shell.tsx`): thÃªm `soan_thao_user_id` vÃ o select/or, thÃªm Ä‘iá»u kiá»‡n `trang_thai === "tra_ve" && soan_thao_user_id === uid`.
 - **`isEditable` guard** (`[id]/page.tsx`): `draft`/`tra_ve` chá»‰ allow `isSoanThao` (`isNew || userId === doc?.soan_thao_user_id`); ngÆ°á»i xem xÃ©t khÃ´ng tháº¥y nÃºt draft sau `tra_ve_nhap`.
 - **Clear placement cÅ© khi gá»­i xem xÃ©t láº¡i** (`generate-pdf/route.ts`): khi `currentSignerKey === "soan_thao_placement"`, clear `xem_xet_placement` vÃ  `phe_duyet_placement` trong DB â€” PDF má»›i chá»‰ chá»©a chá»¯ kÃ½ soáº¡n tháº£o.
+
+---
+
+## C?p nh?t 2026-06-03 (b? sung) — PDF deploy, footer fallback, suy ra bý?c k?
+
+### PDF sau deploy
+
+- `generate-pdf/route.ts` ph?i ýu tiên dùng asset local c?a `pdfjs-dist` trong `node_modules` cho `cMap` và `standard_fonts`, không ðý?c ph? thu?c CDN.
+- N?u local asset không s?n, m?i fallback sang c?u h?nh t?i gi?n.
+- M?c tiêu: tránh l?i sau deploy khi server không t?i ðý?c asset ngoài, d?n ð?n `metaFillError` và toast "Không ð?c ðý?c text c?a PDF".
+
+### Footer fallback
+
+- N?u `fillMetadataPlaceholders()` tr? `metaResult.error`, route PDF không ðý?c g?i `drawFooterOnAllPages()`.
+- Rule này áp d?ng cho c? file PDF chính và file ph? soát xét.
+- M?c tiêu: tránh l?i "header không ðý?c chèn nhýng footer l?i ð? thêm m?t d?ng m?i toàn tài li?u".
+
+### Suy ra bý?c k?
+
+- `generate-office/route.ts` và `generate-pdf/route.ts` ph?i ýu tiên suy ra bý?c k? t? `action`:
+  - `gui_xem_xet` -> `soan_thao`
+  - `gui_phe_duyet`, `gui_lai_phe_duyet` -> `xem_xet`
+  - `phe_duyet` -> `phe_duyet`
+- Ch? fallback sang map theo `userId` khi không có `action`.
+- M?c tiêu: tránh chèn sai tag tên/ch? k? trong DOCX/XLSX/PDF khi cùng m?t user ðý?c gán nhi?u vai tr?.
+
+
+## Cap nhat 2026-06-03 (bo sung) - Office signer names + artifact chain
+
+- Ho so Office (`.docx`, `.xlsx`) khi ky nhieu buoc phai ky tiep tren artifact moi nhat; khong duoc tao lai tu template cu neu da co artifact buoc truoc.
+- B2/B3 khong duoc tu chen them QR mac dinh cho ho so Office; QR mac dinh chi duoc chen o buoc `soan_thao`.
+- Cac tag ten nguoi ky cua buoc sau khong duoc bi xoa neu gia tri buoc hien tai rong.
+- Neu snapshot ten `xem_xet` / `phe_duyet` trong ban ghi rong, route Office phai fallback lay ten tu `profiles` qua `*_user_id`.
+- Ten nguoi ky do he thong chen vao DOCX/XLSX phai dung `Times New Roman`, size `12`.
+- XLSX phai ap dung logic tuong tu DOCX cho ten nguoi ky va giu nguyen artifact cua buoc truoc.

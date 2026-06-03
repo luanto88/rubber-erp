@@ -106,3 +106,13 @@ Há»‡ thá»‘ng ERP quáº£n lÃ½ sáº£n xuáº¥t cao su cho:
   - `npx eslint src/app/dashboard/dispatch/page.tsx src/lib/dispatch-entry-rows.ts src/lib/dispatch-analytics.ts src/lib/dispatch-pdf.ts src/app/dashboard/output/_components/output-types.ts`
   - `npx tsc --noEmit --pretty false`
 - `npm run lint` toÃ n repo váº«n fail do lá»—i cÅ© ngoÃ i pháº¡m vi á»Ÿ `page.tsx` vÃ  `src/app/test-sodo/page.tsx`.
+
+## C?p nh?t session 2026-06-03 - ISO PDF/DOCX và soát xét
+
+- Ð? fix `generate-pdf/route.ts` ð? pdfjs ýu tiên dùng asset local trong `node_modules/pdfjs-dist`, gi?m l?i ð?c text PDF sau deploy.
+- N?u `fillMetadataPlaceholders()` tr? `metaResult.error`, route PDF không v? `drawFooterOnAllPages()` n?a, tránh l?i footer ð? thêm d?ng khi header/footer không ð?c ðý?c.
+- Ð? ð?i logic xác ð?nh bý?c k? ? `generate-office` và `generate-pdf`: ýu tiên suy ra theo `action`, fallback theo `userId`.
+- Ð? tách:
+  - `normalizeDocumentCode()` = canonical so trùng
+  - `formatDocumentCode()` = gi? nguyên format m? ð? lýu DB
+- Rule nghi?p v? ch?t: soát xét không ðý?c bi?n m? có d?u g?ch/format chu?n ISO thành chu?i li?n nhý `PHKQT22F01`.

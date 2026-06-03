@@ -27,6 +27,8 @@ type OfficeDiagnostics = {
   imagesInserted: string[]
 }
 
+type SignerNameMap = Partial<Record<SignStep, string>>
+
 const TEXT_TAGS = [
   "{{MA_TAI_LIEU}}",
   "{{TEN_TAI_LIEU}}",
@@ -53,9 +55,23 @@ const IMAGE_TAGS = [
   "{{CHU_KY_XEM_XET}}",
   "{{CHU_KY_PHE_DUYET}}",
 ] as const
+const SIGNER_NAME_TAGS = new Set<string>([
+  "{{TEN_SOAN_THAO}}",
+  "{{TEN_XEM_XET}}",
+  "{{TEN_PHE_DUYET}}",
+])
 
 const ALL_TAGS = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
 const CHILD_OFFICE_TAG_SET = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
+const STATUS_TEXT_VALUES = [
+  "Nháp",
+  "Chờ xem xét",
+  "Chờ phê duyệt",
+  "Có hiệu lực",
+  "Hết hiệu lực",
+  "Trả về",
+  "Phê duyệt từ chối",
+] as const
 
 function fmtDate(d: unknown): string {
   if (!d || typeof d !== "string") return ""
@@ -154,10 +170,34 @@ function getStep(doc: Record<string, unknown>, userId: string): SignStep | null 
   return null
 }
 
+function getStepFromAction(doc: Record<string, unknown>, action?: WorkflowAction): SignStep | null {
+  if (action === "gui_xem_xet") return "soan_thao"
+  if (action === "gui_lai_phe_duyet") return "xem_xet"
+  if (action === "gui_phe_duyet") {
+    const capTl = String(doc.cap_tl || "")
+    const hasReviewer = !!doc.xem_xet_user_id
+    return capTl === "Cấp 2" || !hasReviewer ? "soan_thao" : "xem_xet"
+  }
+  if (action === "phe_duyet") return "phe_duyet"
+  return null
+}
+
+function resolveStep(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): SignStep | null {
+  const actionStep = getStepFromAction(doc, action)
+  if (actionStep) return actionStep
+  return getStep(doc, userId)
+}
+
 function getStepTags(step: SignStep): { signatureTag: string; nameTag: string; nameValue: string } {
   if (step === "soan_thao") return { signatureTag: "{{CHU_KY_SOAN_THAO}}", nameTag: "{{TEN_SOAN_THAO}}", nameValue: "" }
   if (step === "xem_xet") return { signatureTag: "{{CHU_KY_XEM_XET}}", nameTag: "{{TEN_XEM_XET}}", nameValue: "" }
   return { signatureTag: "{{CHU_KY_PHE_DUYET}}", nameTag: "{{TEN_PHE_DUYET}}", nameValue: "" }
+}
+
+function getNameValuesForStep(step: SignStep, signerNames?: SignerNameMap): Record<string, string> {
+  if (step === "soan_thao") return { "{{TEN_SOAN_THAO}}": signerNames?.soan_thao || "" }
+  if (step === "xem_xet") return { "{{TEN_XEM_XET}}": signerNames?.xem_xet || "" }
+  return { "{{TEN_PHE_DUYET}}": signerNames?.phe_duyet || "" }
 }
 
 function isChildOfficeDoc(doc: Record<string, unknown>): boolean {
@@ -183,11 +223,13 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
 function buildTextValues(
   doc: Record<string, unknown>,
   statusText: string,
-  options?: { includeAuxBodyValues?: boolean },
+  options?: { includeAuxBodyValues?: boolean; step?: SignStep; signerNames?: SignerNameMap },
 ): Record<string, string> {
   const rawRevision = String(doc.lan_ban_hanh ?? "").trim()
   const revision = rawRevision || "00"
   const includeAuxBodyValues = options?.includeAuxBodyValues !== false
+  const step = options?.step
+  const signerNames = options?.signerNames
   return {
     "{{MA_TAI_LIEU}}": String(doc.ma_tai_lieu || ""),
     "{{TEN_TAI_LIEU}}": String(doc.ten_tai_lieu || ""),
@@ -199,17 +241,48 @@ function buildTextValues(
     "{{TINH_TRANG}}": statusText,
     "{{MA_TAI_LIEU_CU}}": String(doc.ma_tai_lieu_cu || ""),
     "{{MA_TAI_LIEU_MOI}}": String(doc.ma_tai_lieu_moi || doc.ma_tai_lieu || ""),
-    "{{TEN_SOAN_THAO}}": String(doc.soan_thao || ""),
-    "{{TEN_XEM_XET}}": String(doc.xem_xet || ""),
-    "{{TEN_PHE_DUYET}}": String(doc.phe_duyet || ""),
+    ...(step ? getNameValuesForStep(step, signerNames) : {}),
     ...(includeAuxBodyValues
       ? {
           "{{LY_DO_SOAT_XET}}": String(doc.ly_do_soat_xet || ""),
-          "{{NOI_DUNG_SOAT_XET}}": String(doc.noi_dung_soat_xet || ""),
+          "{{NOI_DUNG_SOAT_XET}}": wrapPlainText(String(doc.noi_dung_soat_xet || ""), 45).join("\n"),
           "{{LY_DO_THAY_DOI}}": String(doc.ly_do_soat_xet || ""),
-          "{{NOI_DUNG_THAY_DOI}}": String(doc.noi_dung_soat_xet || ""),
+          "{{NOI_DUNG_THAY_DOI}}": wrapPlainText(String(doc.noi_dung_soat_xet || ""), 45).join("\n"),
         }
       : {}),
+  }
+}
+
+async function resolveSignerNames(doc: Record<string, unknown>): Promise<SignerNameMap> {
+  const directNames: SignerNameMap = {
+    soan_thao: String(doc.soan_thao || "").trim(),
+    xem_xet: String(doc.xem_xet || "").trim(),
+    phe_duyet: String(doc.phe_duyet || "").trim(),
+  }
+
+  const userIds = [
+    doc.soan_thao_user_id,
+    doc.xem_xet_user_id,
+    doc.phe_duyet_user_id,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+
+  if (userIds.length === 0) return directNames
+
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("id, full_name, username")
+    .in("id", [...new Set(userIds)])
+
+  const byId = new Map<string, string>()
+  for (const row of data || []) {
+    const name = String(row.full_name || row.username || "").trim()
+    if (name) byId.set(String(row.id), name)
+  }
+
+  return {
+    soan_thao: directNames.soan_thao || byId.get(String(doc.soan_thao_user_id || "")) || "",
+    xem_xet: directNames.xem_xet || byId.get(String(doc.xem_xet_user_id || "")) || "",
+    phe_duyet: directNames.phe_duyet || byId.get(String(doc.phe_duyet_user_id || "")) || "",
   }
 }
 
@@ -249,12 +322,68 @@ function flexibleDocxTagPattern(tag: string): RegExp {
 function replaceAllTextTags(text: string, values: Record<string, string>, diagnostics: OfficeDiagnostics): string {
   let next = text
   for (const [tag, value] of Object.entries(values)) {
+    if (!value) continue
+    if (SIGNER_NAME_TAGS.has(tag)) continue
     const directFound = next.includes(tag)
     const flexiblePattern = flexibleDocxTagPattern(tag)
     const flexibleFound = flexiblePattern.test(next)
     if (directFound || flexibleFound) diagnostics.tagsFound.push(tag)
-    next = next.split(tag).join(xmlEscape(value))
-    next = next.replace(flexibleDocxTagPattern(tag), xmlEscape(value))
+    const xmlValue = value.includes("\n")
+      ? value
+          .split("\n")
+          .map((line) => xmlEscape(line))
+          .join("</w:t><w:br/><w:t xml:space=\"preserve\">")
+      : xmlEscape(value)
+    next = next.split(tag).join(xmlValue)
+    next = next.replace(flexibleDocxTagPattern(tag), xmlValue)
+  }
+  return next
+}
+
+function wrapPlainText(text: string, maxChars: number): string[] {
+  if (!text) return [""]
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length <= 1 && text.length > maxChars) {
+    const chunks: string[] = []
+    for (let i = 0; i < text.length; i += maxChars) chunks.push(text.slice(i, i + maxChars))
+    return chunks
+  }
+
+  const lines: string[] = []
+  let current = ""
+  for (const word of words) {
+    if (word.length > maxChars) {
+      if (current) {
+        lines.push(current)
+        current = ""
+      }
+      for (let i = 0; i < word.length; i += maxChars) lines.push(word.slice(i, i + maxChars))
+      continue
+    }
+    const nextLine = current ? `${current} ${word}` : word
+    if (nextLine.length > maxChars && current) {
+      lines.push(current)
+      current = word
+    } else {
+      current = nextLine
+    }
+  }
+  if (current) lines.push(current)
+  return lines.length > 0 ? lines : [text]
+}
+
+function replaceStatusTextInXml(text: string, statusText: string): string {
+  let next = text
+  for (const value of STATUS_TEXT_VALUES) {
+    if (value === statusText) continue
+    next = next.replace(
+      new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "g"),
+      `$1${statusText}`,
+    )
+    next = next.replace(
+      new RegExp(`>(\\s*)${escapeRegExp(value)}(\\s*)<`, "g"),
+      `>$1${statusText}$2<`,
+    )
   }
   return next
 }
@@ -275,6 +404,35 @@ function drawingXml(relId: string, cx: number, cy: number): string {
 
 function textRunXml(text: string, runProperties = ""): string {
   return text ? `<w:r>${runProperties}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>` : ""
+}
+
+function signerNameRunPropertiesXml(): string {
+  return [
+    "<w:rPr>",
+    '<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>',
+    '<w:sz w:val="24"/>',
+    '<w:szCs w:val="24"/>',
+    "</w:rPr>",
+  ].join("")
+}
+
+function replaceDocxTextTagWithStyledRun(xml: string, tag: string, value: string, runProperties: string): { xml: string; replaced: boolean } {
+  let replaced = false
+  let next = xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    const textMatch = run.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/)
+    if (!textMatch) return run
+    const rawText = xmlTextDecode(textMatch[1])
+    if (!rawText.includes(tag)) return run
+    replaced = true
+    const [before, after] = rawText.split(tag)
+    const originalRunProperties = run.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] || ""
+    return `${textRunXml(before, originalRunProperties)}${textRunXml(value, runProperties)}${textRunXml(after, originalRunProperties)}`
+  })
+  if (!replaced && next.includes(tag)) {
+    replaced = true
+    next = next.split(tag).join(textRunXml(value, runProperties))
+  }
+  return { xml: next, replaced }
 }
 
 function replaceDocxImageTag(xml: string, tag: string, drawing: string): { xml: string; replaced: boolean } {
@@ -338,6 +496,7 @@ async function renderDocx(
   imageByTag: Record<string, Buffer>,
   requiredTags: string[],
   defaultQrWhenMissing: boolean,
+  statusText: string,
   allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const zip = await JSZip.loadAsync(bytes)
@@ -346,9 +505,10 @@ async function renderDocx(
   if (contentTypes) zip.file("[Content_Types].xml", ensureDocxPngContentType(contentTypes))
 
   const mediaEntries = new Map<string, string>()
+  const mediaPrefix = `iso_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   let imageIndex = 1
   for (const [tag, img] of Object.entries(imageByTag)) {
-    const path = `word/media/iso_${imageIndex++}.png`
+    const path = `word/media/${mediaPrefix}_${imageIndex++}.png`
     zip.file(path, img)
     mediaEntries.set(tag, path)
   }
@@ -364,6 +524,17 @@ async function renderDocx(
     let xml = await file.async("string")
     allTextParts.push(docxVisibleText(xml))
     xml = replaceAllTextTags(xml, values, diagnostics)
+    xml = replaceStatusTextInXml(xml, statusText)
+    for (const tag of SIGNER_NAME_TAGS) {
+      const value = values[tag]
+      if (!value) continue
+      const directFound = xml.includes(tag)
+      const flexibleFound = flexibleDocxTagPattern(tag).test(xml)
+      if (!directFound && !flexibleFound) continue
+      diagnostics.tagsFound.push(tag)
+      const styled = replaceDocxTextTagWithStyledRun(xml, tag, value, signerNameRunPropertiesXml())
+      xml = styled.xml
+    }
     for (const [tag, imagePath] of mediaEntries) {
       const directImageTagFound = xml.includes(tag)
       const flexibleImageTagFound = flexibleDocxTagPattern(tag).test(xml)
@@ -403,6 +574,7 @@ async function renderXlsx(
   imageByTag: Record<string, Buffer>,
   requiredTags: string[],
   defaultQrWhenMissing: boolean,
+  statusText: string,
   allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const diagnostics: OfficeDiagnostics = { tagsFound: [], tagsMissing: [], tagsSimilar: [], imagesInserted: [] }
@@ -427,11 +599,26 @@ async function renderXlsx(
           return
         }
         let next = text
+        let replacedSignerName = false
         for (const [tag, value] of Object.entries(values)) {
+          if (!value) continue
           if (next.includes(tag)) diagnostics.tagsFound.push(tag)
+          if (SIGNER_NAME_TAGS.has(tag) && next.includes(tag)) replacedSignerName = true
           next = next.split(tag).join(value)
         }
+        for (const value of STATUS_TEXT_VALUES) {
+          if (value === statusText) continue
+          next = next.replace(new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "g"), `$1${statusText}`)
+          if (next.trim() === value) next = statusText
+        }
         cell.value = next
+        if (replacedSignerName) {
+          cell.font = {
+            ...(cell.font || {}),
+            name: "Times New Roman",
+            size: 12,
+          }
+        }
       })
     })
   })
@@ -459,14 +646,13 @@ async function renderXlsx(
   return { buffer: Buffer.from(await workbook.xlsx.writeBuffer()), diagnostics }
 }
 
-function getFileUrl(doc: Record<string, unknown>, fileKind: FileKind, preferOriginal = false): string | null {
+function getFileUrl(doc: Record<string, unknown>, fileKind: FileKind): string | null {
   if (fileKind === "change_request") {
     return (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url) as string | null
   }
   if (fileKind === "review_request") {
     return (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null
   }
-  if (preferOriginal) return (doc.file_template_url || doc.file_goc_url) as string | null
   return (doc.file_signed_office_url || doc.file_goc_url) as string | null
 }
 
@@ -526,11 +712,11 @@ export async function POST(req: NextRequest) {
       if (!sameChildBatch) return NextResponse.json({ error: "Token khong hop le" }, { status: 401 })
     }
 
-    const step = getStep(doc, userId)
+    const step = resolveStep(doc, userId, action)
     if (!step) return NextResponse.json({ error: "Người dùng không thuộc luồng ký tài liệu này" }, { status: 403 })
 
     const isChildOffice = isChildOfficeDoc(doc)
-    const sourceUrl = getFileUrl(doc, fileKind, isChildOffice && fileKind === "main")
+    const sourceUrl = getFileUrl(doc, fileKind)
     const ext = sourceUrl?.split("?")[0].split(".").pop()?.toLowerCase()
     if (ext !== "docx" && ext !== "xlsx") {
       return NextResponse.json({ error: "File không phải DOCX/XLSX" }, { status: 400 })
@@ -540,7 +726,8 @@ export async function POST(req: NextRequest) {
     const isAuxReviewFile = fileKind === "change_request" || fileKind === "review_request"
     const shouldStampAuxQr = !isAuxReviewFile || step === "soan_thao"
     const shouldFillAuxBodyValues = isAuxReviewFile && step === "soan_thao"
-    const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues })
+    const signerNames = await resolveSignerNames(doc)
+    const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues, step, signerNames })
     const stepTags = getStepTags(step)
     const imageByTag: Record<string, Buffer> = {}
     if (shouldStampAuxQr) {
@@ -552,13 +739,13 @@ export async function POST(req: NextRequest) {
     const requiredTags = (isChildOffice || isAuxReviewFile)
       ? []
       : [stepTags.signatureTag, stepTags.nameTag]
-    const defaultQrWhenMissing = isChildOffice
+    const defaultQrWhenMissing = isChildOffice && !isAuxReviewFile && step === "soan_thao"
     const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 
     const result = ext === "docx"
-      ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
-      : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, allowedTags)
+      ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, allowedTags)
+      : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, allowedTags)
 
     const namePrefix = sanitizeOutputName(`${String(doc.ma_tai_lieu || "ISO")} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
     const outputPath = `${factoryId}/iso/office-signed/${namePrefix}_${Date.now()}.${ext}`

@@ -6,6 +6,7 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
+import { pathToFileURL } from "url"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -443,6 +444,46 @@ function findNearbyText(
   })
 }
 
+function wrapPlainTextForPdf(text: string, maxChars: number): string[] {
+  if (!text) return [""]
+  const paragraphs = text.split(/\r?\n/)
+  const wrapped: string[] = []
+
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(/\s+/).filter(Boolean)
+    if (words.length === 0) {
+      wrapped.push("")
+      continue
+    }
+
+    let current = ""
+    for (const word of words) {
+      if (word.length > maxChars) {
+        if (current) {
+          wrapped.push(current)
+          current = ""
+        }
+        for (let i = 0; i < word.length; i += maxChars) {
+          wrapped.push(word.slice(i, i + maxChars))
+        }
+        continue
+      }
+
+      const nextLine = current ? `${current} ${word}` : word
+      if (nextLine.length > maxChars && current) {
+        wrapped.push(current)
+        current = word
+      } else {
+        current = nextLine
+      }
+    }
+
+    if (current) wrapped.push(current)
+  }
+
+  return wrapped.length > 0 ? wrapped : [text]
+}
+
 async function extractTextLinesByPage(pdfBytes: ArrayBuffer): Promise<PdfTextItem[][][]> {
   try {
     const pdfjsDoc = await openPdfjsDocument(pdfBytes)
@@ -533,17 +574,59 @@ async function loadPdfjs() {
   return await import("pdfjs-dist/legacy/build/pdf.mjs")
 }
 
+function getPdfJsAssetUrl(relativePath: string): string | undefined {
+  const absolutePath = path.join(process.cwd(), "node_modules", "pdfjs-dist", relativePath)
+  if (!fs.existsSync(absolutePath)) return undefined
+  let href = pathToFileURL(absolutePath).href
+  if (!href.endsWith("/")) href += "/"
+  return href
+}
+
 async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
   const pdfjsLib = await loadPdfjs()
-  return await pdfjsLib.getDocument({
+  const baseOptions = {
     data: new Uint8Array(pdfBytes),
     disableWorker: true,
     useWorkerFetch: false,
     isEvalSupported: false,
-    cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
-    cMapPacked: true,
-    standardFontDataUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
-  } as never).promise
+    disableFontFace: true,
+  }
+  const localCMapUrl = getPdfJsAssetUrl("cmaps")
+  const localStandardFontUrl = getPdfJsAssetUrl("standard_fonts")
+  const attempts = [
+    {
+      ...baseOptions,
+      ...(localCMapUrl ? { cMapUrl: localCMapUrl, cMapPacked: true } : {}),
+      ...(localStandardFontUrl ? { standardFontDataUrl: localStandardFontUrl } : {}),
+    },
+    baseOptions,
+  ]
+
+  let lastError: unknown = null
+  for (const options of attempts) {
+    try {
+      return await pdfjsLib.getDocument(options as never).promise
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+function getCurrentSignerKey(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): string | null {
+  if (action === "gui_xem_xet") return "soan_thao_placement"
+  if (action === "gui_lai_phe_duyet") return "xem_xet_placement"
+  if (action === "gui_phe_duyet") {
+    const capTl = String(doc.cap_tl || "")
+    const hasReviewer = !!doc.xem_xet_user_id
+    return capTl === "Cấp 2" || !hasReviewer ? "soan_thao_placement" : "xem_xet_placement"
+  }
+  if (action === "phe_duyet") return "phe_duyet_placement"
+  if (userId === (doc.soan_thao_user_id as string)) return "soan_thao_placement"
+  if (userId === (doc.xem_xet_user_id as string)) return "xem_xet_placement"
+  if (userId === (doc.phe_duyet_user_id as string)) return "phe_duyet_placement"
+  return null
 }
 
 async function fillMetadataPlaceholders(
@@ -571,10 +654,11 @@ async function fillMetadataPlaceholders(
   const mismatchPatterns = getMismatchPatterns(chonQuyTrinh)
   const isAuxReviewFileMeta = signFileKind === "change_request" || signFileKind === "review_request"
   const shouldDrawDefaultChildQr =
-    isConDoc(
+    !isAuxReviewFileMeta && isConDoc(
       (doc.loai_tai_lieu as string | null) ?? null,
       (doc.phan_loai_tl as string | null) ?? null,
-    ) || isAuxReviewFileMeta
+    )
+  const shouldTouchFooter = signFileKind === "main"
 
   try {
     const pdfjsDoc = await openPdfjsDocument(pdfBytes)
@@ -736,7 +820,7 @@ async function fillMetadataPlaceholders(
           }
         }
 
-        if (isFooter) {
+        if (isFooter && shouldTouchFooter) {
           if (isFooterFillCandidate(lineText, searchText)) {
             found.add(FOOTER_LABEL)
             pageFound.add(FOOTER_LABEL)
@@ -822,20 +906,13 @@ async function fillMetadataPlaceholders(
               const leftX = item.transform[4]
               const maxLineWidth = pageWidth - leftX - 20
               const lineHeight = HEADER_FOOTER_FONT_SIZE * 1.5
-              const words = extra.value.split(/\s+/)
-              let currentLine = ""
+              const wrappedLines = wrapPlainTextForPdf(extra.value, 45)
               let currentY = item.transform[5] - lineHeight
-              for (const word of words) {
-                const testLine = currentLine ? `${currentLine} ${word}` : word
-                if (font.widthOfTextAtSize(testLine, HEADER_FOOTER_FONT_SIZE) > maxLineWidth && currentLine) {
-                  page.drawText(currentLine, { x: leftX, y: currentY, font, size: HEADER_FOOTER_FONT_SIZE, color: rgb(0, 0, 0) })
-                  currentY -= lineHeight
-                  currentLine = word
-                } else {
-                  currentLine = testLine
-                }
+              for (const wrappedLine of wrappedLines) {
+                const lineText = wrappedLine || " "
+                page.drawText(lineText, { x: leftX, y: currentY, font, size: HEADER_FOOTER_FONT_SIZE, color: rgb(0, 0, 0), maxWidth: maxLineWidth })
+                currentY -= lineHeight
               }
-              if (currentLine) page.drawText(currentLine, { x: leftX, y: currentY, font, size: HEADER_FOOTER_FONT_SIZE, color: rgb(0, 0, 0) })
             }
             filled.add(extra.normalized)
             break
@@ -1032,10 +1109,7 @@ export async function POST(req: NextRequest) {
       ? new Date().toISOString()
       : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string))
     const dateStr = fmtDate(effectiveDate)
-    let currentSignerKey: string | null = null
-    if (userId === (doc.soan_thao_user_id as string)) currentSignerKey = "soan_thao_placement"
-    else if (userId === (doc.xem_xet_user_id as string)) currentSignerKey = "xem_xet_placement"
-    else if (userId === (doc.phe_duyet_user_id as string)) currentSignerKey = "phe_duyet_placement"
+    const currentSignerKey = getCurrentSignerKey(doc, userId, action)
 
     if (signFileKind === "main" && currentSignerKey && signaturePlacement) {
       const { error: placementSaveErr } = await supabaseAdmin
@@ -1262,12 +1336,14 @@ export async function POST(req: NextRequest) {
             )
             // Vẽ footer fallback cho các trang chưa được fillMetadataPlaceholders xử lý
             // (bỏ qua trang đã có footer gốc để giữ vị trí ban đầu của footer trong template)
-            drawFooterOnAllPages(
-              originalPages,
-              stampFont,
-              buildFooterValue(maTl, lsStr, dateStr, statusText),
-              new Set(metaResult.footerFilledPages),
-            )
+            if (!metaResult.error && signFileKind === "main") {
+              drawFooterOnAllPages(
+                originalPages,
+                stampFont,
+                buildFooterValue(maTl, lsStr, dateStr, statusText),
+                new Set(metaResult.footerFilledPages),
+              )
+            }
             // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
             // vẽ QR tại vị trí manual placement trên trang đầu tiên.
             if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
@@ -1437,12 +1513,14 @@ export async function POST(req: NextRequest) {
         shouldFillAuxBodyValues,
       )
       // Vẽ footer fallback, bỏ qua trang đã được fillMetadataPlaceholders xử lý
-      drawFooterOnAllPages(
-        originalPages,
-        stampFont,
-        buildFooterValue(maTl, lsStr, dateStr, statusText),
-        new Set(metaResult.footerFilledPages),
-      )
+      if (!metaResult.error && signFileKind === "main") {
+        drawFooterOnAllPages(
+          originalPages,
+          stampFont,
+          buildFooterValue(maTl, lsStr, dateStr, statusText),
+          new Set(metaResult.footerFilledPages),
+        )
+      }
       if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
         try {
           const qrImgFallback = await originalPages.embedPng(qrBuffer)

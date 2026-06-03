@@ -12,6 +12,15 @@ Moi tai lieu co the ap dung mot hoac nhieu tieu chuan de phuc vu loc va truy xua
 
 ## Cap nhat moi nhat (2026-06-03)
 
+
+### Bo sung Office ky nhieu buoc (2026-06-03)
+
+- Ho so Office (`.docx`, `.xlsx`) ky nhieu buoc phai giu lai artifact cua buoc truoc; B2/B3 khong duoc ghi de QR hoac chu ky cua buoc truoc.
+- B2/B3 khong duoc tu chen them QR mac dinh neu artifact da khong con `{{QR}}`; QR mac dinh cho ho so Office chi duoc chen o buoc `soan_thao`.
+- Tag ten cua cac buoc sau khong duoc bi xoa chi vi gia tri buoc hien tai dang rong.
+- Neu snapshot ten `xem_xet` / `phe_duyet` trong document dang rong thi route phai fallback lay ten tu `profiles` qua `xem_xet_user_id` / `phe_duyet_user_id`.
+- Ten nguoi ky do he thong chen vao Office phai dung `Times New Roman`, size `12` cho ca DOCX va XLSX.
+
 - Validate trung ma:
   - `Soan thao moi` van chan trung ma voi moi ban ghi khac trong cung `factory_id`.
   - `Soat xet` duoc phep luu ma trung neu ma do trung voi dung tai lieu/ho so nguon dang duoc soat xet.
@@ -605,3 +614,29 @@ Payload `parent_doc_id` dÃ¹ng `selectedParentDocId || reviewParentDocId`. TH4 ch
 ### Labels
 
 Xem nguyÃªn táº¯c tá»•ng quÃ¡t trong rule 16 má»¥c "Label tÃ i liá»‡u/há»“ sÆ¡". Äáº·c biá»‡t vá»›i TH4: codeLabel, titleLabel Ä‘Ã£ dynamic; typeLabel thÃªm má»›i nhÆ°ng khÃ´ng hiá»ƒn thá»‹ trong TH4 (section `!isCon` áº©n); fileSectionLabel Ã¡p dá»¥ng cho header card "File tÃ i liá»‡u" á»Ÿ right panel.
+
+---
+
+## C?p nh?t 2026-06-03 (b? sung) — Soát xét gi? format m?
+
+### So trùng m? vs lýu m?
+
+- `normalizeDocumentCode()` ch? dùng cho so sánh canonical/trùng m?.
+- Khi lýu `ma_tai_lieu` ho?c `ma_tai_lieu_moi` trong lu?ng soát xét, ph?i gi? nguyên format user nh?p sau khi `trim().toUpperCase()`.
+- Không ðý?c dùng canonical ð? xóa k? t? phân cách ð? ghi DB, v? s? làm sai nghiêm tr?ng các m? ISO nhý:
+  - `PHK-QT22-F01` -> `PHKQT22F01`
+  - các m? có d?u g?ch/format chu?n ISO thành chu?i li?n.
+
+### Rule nghi?p v? ch?t
+
+- Soát xét ðý?c gi? nguyên m? c?a tài li?u/h? sõ ngu?n n?u không ch?n ð?i m?.
+- N?u ch?n ð?i m?, h? th?ng ph?i lýu m? m?i ðúng format user nh?p, không chu?n hóa m?t d?u g?ch hay k? t? phân tách h?p l?.
+- Canonical form v?n ðý?c dùng cho:
+  - detect trùng m? trong danh sách draft,
+  - detect trùng m? v?i record `co_hieu_luc`,
+  - xác ð?nh b?n c? c?n chuy?n `het_hieu_luc`.
+
+### File ph? soát xét
+
+- Khi k? `change_request`/`review_request`, bý?c chèn tag ch? k?/tên ph?i suy ra theo `action`, không ch? theo `userId`.
+- V?i PDF file ph?, n?u không ð?c ðý?c text template th? không ðý?c v? footer fallback toàn trang.

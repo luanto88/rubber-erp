@@ -22,6 +22,17 @@ function normalizeRevisionText(value: unknown): string {
   return text || "00"
 }
 
+function normalizeSearchText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 // Chuẩn hóa chuỗi để so sánh pattern (bỏ dấu, lowercase, bỏ dấu câu thừa)
 function normalizeText(text: string): string {
   return text
@@ -36,7 +47,7 @@ function normalizeText(text: string): string {
 
 // Kiểm tra text đã chứa "Hết hiệu lực" chưa
 function isAlreadyInvalidated(text: string): boolean {
-  const norm = normalizeText(text)
+  const norm = normalizeSearchText(text)
   return norm.includes("het hieu luc")
 }
 
@@ -159,7 +170,7 @@ async function replaceInvalidatedTags(
       for (const item of textContent.items as PdfjsTextItem[]) {
         if (!item.str || !item.str.trim()) continue
 
-        const normStr = normalizeText(item.str)
+        const normStr = normalizeSearchText(item.str)
         if (isAlreadyInvalidated(item.str)) continue
 
         // Tính tọa độ pdf-lib từ pdfjs (transform: [scaleX, 0, 0, scaleY, x, y])
@@ -252,7 +263,7 @@ async function reinforceInvalidatedLines(
       for (const line of lines) {
         if (!line.text || isAlreadyInvalidated(line.text)) continue
 
-        const normalizedLine = normalizeText(line.text)
+        const normalizedLine = normalizeSearchText(line.text)
         let replacement: string | null = null
         let color = rgb(0.15, 0.15, 0.15)
 
@@ -264,6 +275,16 @@ async function reinforceInvalidatedLines(
         } else if (normalizedLine.includes("co hieu luc") && /\d{2}\/\d{2}\/\d{4}/.test(line.text)) {
           replacement = `${maTl} (${lsStr}-${dateHetStr}) Háº¿t hiá»‡u lá»±c`
           color = rgb(0.85, 0, 0)
+        }
+
+        if (replacement) {
+          if (normalizedLine.startsWith("ngay hieu luc") || normalizedLine.startsWith("ngay het hieu luc")) {
+            replacement = `Ngày hết hiệu lực: ${dateHetStr}`
+          } else if (normalizedLine.includes("tinh trang")) {
+            replacement = "Tình trạng: Hết hiệu lực"
+          } else if (normalizedLine.includes("co hieu luc") && /\d{2}\/\d{2}\/\d{4}/.test(line.text)) {
+            replacement = `${maTl} (${lsStr}-${dateHetStr}) Hết hiệu lực`
+          }
         }
 
         if (!replacement) continue

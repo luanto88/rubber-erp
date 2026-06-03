@@ -132,6 +132,8 @@ type SignedFilePlacement = {
   placement: SignPlacement
 }
 
+type WorkflowSignStep = "soan_thao" | "xem_xet" | "phe_duyet"
+
 function sanitizeStorageFileName(fileName: string): string {
   const lastDot = fileName.lastIndexOf(".")
   const rawBase = lastDot > 0 ? fileName.slice(0, lastDot) : fileName
@@ -187,6 +189,23 @@ function normalizeDocumentCode(value: string | null | undefined): string {
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "")
+}
+
+function formatDocumentCode(value: string | null | undefined): string {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+}
+
+function resolveWorkflowStepForAction(item: Pick<IsoDocument, "cap_tl" | "xem_xet_user_id">, action: PinModalAction): WorkflowSignStep | null {
+  if (action === "gui_xem_xet") return "soan_thao"
+  if (action === "gui_lai_phe_duyet") return "xem_xet"
+  if (action === "gui_phe_duyet") {
+    const hasReviewer = !!item.xem_xet_user_id
+    return item.cap_tl === "Cấp 2" || !hasReviewer ? "soan_thao" : "xem_xet"
+  }
+  if (action === "phe_duyet") return "phe_duyet"
+  return null
 }
 
 type InferredDocFields = {
@@ -1077,7 +1096,7 @@ export default function IsoDocumentDetailPage() {
         ma_tai_lieu_cu: form.ma_tai_lieu_cu || doc?.ma_tai_lieu_cu || doc?.ma_tai_lieu || form.ma_tai_lieu || null,
         ly_do_soat_xet: form.ly_do_soat_xet || null,
         noi_dung_soat_xet: form.noi_dung_soat_xet || null,
-        ma_tai_lieu_moi: form.doi_ma_tai_lieu ? (form.ma_tai_lieu_moi || null) : null,
+        ma_tai_lieu_moi: form.doi_ma_tai_lieu ? (formatDocumentCode(form.ma_tai_lieu_moi) || null) : null,
         phan_loai_tl: form.phan_loai_tl || "cha",
         parent_doc_id: form.phan_loai_tl === "con" ? (selectedParentDocId || reviewParentDocId || null) : null,
         file_goc_url: uploadedFileUrl || null,
@@ -1152,7 +1171,7 @@ export default function IsoDocumentDetailPage() {
         if (childReviewRows.length === 0) return []
         const childReviewPayloads = childReviewRows.map((row) => ({
           factory_id: factoryId,
-          ma_tai_lieu: normalizeDocumentCode(row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi : row.ma_tai_lieu_cu) || null,
+          ma_tai_lieu: formatDocumentCode(row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi : row.ma_tai_lieu_cu) || null,
           ten_tai_lieu: row.ten_tai_lieu_moi,
           loai_tai_lieu: row.loai_tai_lieu || null,
           phong_ban: form.phong_ban || null,
@@ -1170,7 +1189,7 @@ export default function IsoDocumentDetailPage() {
           ma_tai_lieu_cu: row.ma_tai_lieu_cu,
           ly_do_soat_xet: form.ly_do_soat_xet || null,
           noi_dung_soat_xet: form.noi_dung_soat_xet || null,
-          ma_tai_lieu_moi: row.doi_ma && row.ma_tai_lieu_moi ? normalizeDocumentCode(row.ma_tai_lieu_moi) : null,
+          ma_tai_lieu_moi: row.doi_ma && row.ma_tai_lieu_moi ? formatDocumentCode(row.ma_tai_lieu_moi) : null,
           phan_loai_tl: "con",
           parent_doc_id: parentId,
           file_goc_url: row.file_url,
@@ -1260,13 +1279,13 @@ export default function IsoDocumentDetailPage() {
         }
         const childReviewPayloads = childReviewRows.map((row) => ({
           ...basePayload,
-          ma_tai_lieu: row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi.trim().toUpperCase() : row.ma_tai_lieu_cu,
+          ma_tai_lieu: row.doi_ma && row.ma_tai_lieu_moi ? formatDocumentCode(row.ma_tai_lieu_moi) : formatDocumentCode(row.ma_tai_lieu_cu),
           ten_tai_lieu: row.ten_tai_lieu_moi,
           loai_tai_lieu: row.loai_tai_lieu || null,
           lan_ban_hanh: normalizeRevisionText(row.lan_sua_doi, "01"),
           doi_ma_tai_lieu: row.doi_ma,
           ma_tai_lieu_cu: row.ma_tai_lieu_cu,
-          ma_tai_lieu_moi: row.doi_ma && row.ma_tai_lieu_moi ? row.ma_tai_lieu_moi.trim().toUpperCase() : null,
+          ma_tai_lieu_moi: row.doi_ma && row.ma_tai_lieu_moi ? formatDocumentCode(row.ma_tai_lieu_moi) : null,
           file_goc_url: row.file_url,
           file_template_url: row.file_url,
           standard_ids: form.standard_ids,
@@ -1770,7 +1789,11 @@ export default function IsoDocumentDetailPage() {
   const isActionAssignee = (item: IsoDocument, action: PinModalAction) => {
     if (!userId) return false
     if (action === "gui_xem_xet") return item.soan_thao_user_id === userId
-    if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return item.xem_xet_user_id === userId
+    if (action === "gui_lai_phe_duyet") return item.xem_xet_user_id === userId
+    if (action === "gui_phe_duyet") {
+      const step = resolveWorkflowStepForAction(item, action)
+      return step === "soan_thao" ? item.soan_thao_user_id === userId : item.xem_xet_user_id === userId
+    }
     if (action === "phe_duyet") return item.phe_duyet_user_id === userId
     return true
   }
@@ -1902,7 +1925,9 @@ export default function IsoDocumentDetailPage() {
     if (!factoryId || !user) return
     const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
     const { data: sigUrlData } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-    const isSoanThaoStep = user.id === doc?.soan_thao_user_id && (action === "gui_xem_xet" || action === "gui_phe_duyet")
+    const item = task.docId === doc?.id ? doc : childDocs.find((child) => child.id === task.docId)
+    const currentStep = item ? resolveWorkflowStepForAction(item, action) : null
+    const isSoanThaoStep = currentStep === "soan_thao"
     const useSignedPdfAsBackground = task.kind === "main" && !!doc?.file_signed_pdf_url
     setPlacementModal({
       show: true,
@@ -2243,13 +2268,13 @@ export default function IsoDocumentDetailPage() {
 
   const resolvedMainDocumentCode = () => {
     if (form.chon_quy_trinh === "Soát xét" && form.phan_loai_tl !== "con") {
-      return normalizeDocumentCode(form.doi_ma_tai_lieu ? (form.ma_tai_lieu_moi || form.ma_tai_lieu) : form.ma_tai_lieu)
+      return formatDocumentCode(form.doi_ma_tai_lieu ? (form.ma_tai_lieu_moi || form.ma_tai_lieu) : form.ma_tai_lieu)
     }
-    return normalizeDocumentCode(form.ma_tai_lieu)
+    return formatDocumentCode(form.ma_tai_lieu)
   }
 
   const resolvedChildParentCode = () => {
-    if (form.phan_loai_tl === "con") return normalizeDocumentCode(form.ma_tai_lieu_cha)
+    if (form.phan_loai_tl === "con") return formatDocumentCode(form.ma_tai_lieu_cha)
     return resolvedMainDocumentCode()
   }
 
