@@ -341,6 +341,24 @@ Vi du:
 - Kiem tra da pass: ESLint scoped cac file dieu xe/output moi va `npx tsc --noEmit --pretty false`.
 - `npm run lint` toan repo con fail do loi cu ngoai pham vi o `page.tsx` va `src/app/test-sodo/page.tsx`.
 
+## Ghi chu cap nhat module ISO (2026-06-03)
+
+- Migration `supabase/migrations/20260603_iso_lan_ban_hanh_text.sql` da chay.
+- `iso_documents.lan_ban_hanh` da doi sang `TEXT`; trong code va UI phai xem day la chuoi, khong parse/ep buoc ve numeric.
+- Gia tri hop le dang duoc nghiep vu chap nhan: `NN` hoac `NN/NN` (vi du `00`, `01`, `01/01`).
+- Khi soat xet:
+  - Tai lieu/ho so dang `01` thi auto-increment thanh `02`.
+  - Tai lieu/ho so dang `01/01` thi auto-increment thanh `01/02`.
+- File phu soat xet (`Phiếu yêu cầu thay đổi`, `Đề nghị soát xét`) ky noi tiep tren ban `*_signed_url` moi nhat, khong quay lai file goc.
+- Preview nut mat o 2 section `Tài liệu soát xét` uu tien mo file da ky:
+  - `file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl`
+  - `file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl`
+- Luong `Soat xet tai lieu cha` da bat dau code trong `src/app/dashboard/iso/documents/[id]/page.tsx`:
+  - Co panel `Soát xét hồ sơ con hiện có`
+  - Co panel `Thêm hồ sơ con mới`
+  - Da noi validate/lưu cho ca 2 nhom nay khi luu parent review
+- Chua test tay nghiep vu ISO sau thay doi tren 3 case revision: `00`, `01`, `01/01`.
+
 ## Nho ky
 
 - Khong xoa file hay xoa du lieu khi chua duoc xac nhan

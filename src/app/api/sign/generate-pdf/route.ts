@@ -314,6 +314,11 @@ function buildFooterValue(maTl: string, lsStr: string, dateStr: string, statusTe
   return `${maTl} (${lsStr}-${dateStr}) ${statusText}`.trim()
 }
 
+function normalizeRevisionText(value: unknown): string {
+  const text = String(value ?? "").trim()
+  return text || "00"
+}
+
 function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: string, capTl?: string): string {
   if (action === "gui_xem_xet") return capTl === "Cấp 2" ? "Chờ phê duyệt" : "Chờ xem xét"
   if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
@@ -323,8 +328,12 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
   return TRANG_THAI_LABEL_SERVER[currentStatus] || "Chờ phê duyệt"
 }
 
-function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string) {
-  for (const page of pdfDoc.getPages()) {
+function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: string, skipPageIndices?: Set<number>) {
+  const pages = pdfDoc.getPages()
+  for (let i = 0; i < pages.length; i++) {
+    // Bỏ qua trang đã được fillMetadataPlaceholders vẽ footer ở vị trí gốc
+    if (skipPageIndices?.has(i)) continue
+    const page = pages[i]
     const fontSize = HEADER_FOOTER_FONT_SIZE
     const marginX = 30
     const y = 18
@@ -551,6 +560,7 @@ async function fillMetadataPlaceholders(
   skipLabels: string[] = [],
   chonQuyTrinh: string | null = null,
   signFileKind: SignFileKind = "main",
+  includeAuxBodyValues = true,
 ): Promise<MetaFillResult> {
   const filled = new Set<string>()
   const found = new Set<string>()
@@ -764,7 +774,7 @@ async function fillMetadataPlaceholders(
       }
 
       // Fill body labels cho change_request và review_request: Lý do soát xét / Nội dung soát xét (và alias)
-      if (signFileKind === "change_request" || signFileKind === "review_request") {
+      if (includeAuxBodyValues && (signFileKind === "change_request" || signFileKind === "review_request")) {
         const lyDoValue = ((doc.ly_do_soat_xet as string) || "").trim()
         const noiDungValue = ((doc.noi_dung_soat_xet as string) || "").trim()
         const extraLabels: Array<{ normalized: string; value: string }> = [
@@ -1011,10 +1021,8 @@ export async function POST(req: NextRequest) {
 
     const doc = docData as Record<string, unknown>
     const maTl = (doc.ma_tai_lieu as string) || "-"
-    const lanBanHanh = (doc.lan_ban_hanh as number) ?? 0
-    const lsStr = String(lanBanHanh).padStart(2, "0")
+    const lsStr = normalizeRevisionText(doc.lan_ban_hanh)
     const trangThai = doc.trang_thai as string
-    const isAuxReviewFilePdf = signFileKind === "change_request" || signFileKind === "review_request"
     const statusText = getTargetStatusText(action, trangThai, doc.cap_tl as string | undefined)
     const docIsConVal = isConDoc(
       (doc.loai_tai_lieu as string | null) ?? null,
@@ -1096,8 +1104,17 @@ export async function POST(req: NextRequest) {
       allPlacements.splice(0, allPlacements.length)
     }
 
+    const shouldStampQr =
+      signFileKind === "main" || currentSignerKey === "soan_thao_placement"
+    const shouldFillAuxBodyValues =
+      (signFileKind === "change_request" || signFileKind === "review_request") && currentSignerKey === "soan_thao_placement"
+    const effectiveSkipTagLabels = shouldStampQr
+      ? (skipTagLabels ?? [])
+      : [...(skipTagLabels ?? []), "QR"]
+
     const soanPlacement = allPlacements[0]?.placement
     const manualQrPlacement = (
+      shouldStampQr &&
       soanPlacement &&
       typeof soanPlacement.qrX === "number" &&
       typeof soanPlacement.qrY === "number" &&
@@ -1146,9 +1163,9 @@ export async function POST(req: NextRequest) {
 
     const fileGocUrl = (
       signFileKind === "change_request"
-        ? doc.file_phieu_yeu_cau_thay_doi_url
+        ? (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url)
         : signFileKind === "review_request"
-          ? (doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url)
+          ? (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url)
           : doc.file_goc_url
     ) as string | null
     console.log("[generate-pdf] file_goc_url:", fileGocUrl)
@@ -1238,16 +1255,22 @@ export async function POST(req: NextRequest) {
               lsStr,
               dateStr,
               statusText,
-              skipTagLabels ?? [],
+              effectiveSkipTagLabels,
               (doc.chon_quy_trinh as string | null) ?? null,
               signFileKind,
+              shouldFillAuxBodyValues,
             )
-            if (!isAuxReviewFilePdf) {
-              drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
-            }
+            // Vẽ footer fallback cho các trang chưa được fillMetadataPlaceholders xử lý
+            // (bỏ qua trang đã có footer gốc để giữ vị trí ban đầu của footer trong template)
+            drawFooterOnAllPages(
+              originalPages,
+              stampFont,
+              buildFooterValue(maTl, lsStr, dateStr, statusText),
+              new Set(metaResult.footerFilledPages),
+            )
             // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
             // vẽ QR tại vị trí manual placement trên trang đầu tiên.
-            if (manualQrPlacement && !metaResult.filled.includes("QR")) {
+            if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
               try {
                 const qrImgFallback = await originalPages.embedPng(qrBuffer)
                 originalPages.getPage(0).drawImage(qrImgFallback, {
@@ -1408,15 +1431,19 @@ export async function POST(req: NextRequest) {
         lsStr,
         dateStr,
         statusText,
-        skipTagLabels ?? [],
+        effectiveSkipTagLabels,
         (doc.chon_quy_trinh as string | null) ?? null,
         signFileKind,
+        shouldFillAuxBodyValues,
       )
-      const isAuxReviewFilePdf = signFileKind === "change_request" || signFileKind === "review_request"
-      if (!isAuxReviewFilePdf) {
-        drawFooterOnAllPages(originalPages, stampFont, buildFooterValue(maTl, lsStr, dateStr, statusText))
-      }
-      if (manualQrPlacement && !metaResult.filled.includes("QR")) {
+      // Vẽ footer fallback, bỏ qua trang đã được fillMetadataPlaceholders xử lý
+      drawFooterOnAllPages(
+        originalPages,
+        stampFont,
+        buildFooterValue(maTl, lsStr, dateStr, statusText),
+        new Set(metaResult.footerFilledPages),
+      )
+      if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
         try {
           const qrImgFallback = await originalPages.embedPng(qrBuffer)
           originalPages.getPage(0).drawImage(qrImgFallback, {
@@ -1597,5 +1624,3 @@ export async function POST(req: NextRequest) {
     )
   }
 }
-
-

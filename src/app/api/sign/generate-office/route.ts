@@ -180,8 +180,14 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
   return "Chờ phê duyệt"
 }
 
-function buildTextValues(doc: Record<string, unknown>, statusText: string): Record<string, string> {
-  const revision = String(doc.lan_ban_hanh ?? "").padStart(2, "0")
+function buildTextValues(
+  doc: Record<string, unknown>,
+  statusText: string,
+  options?: { includeAuxBodyValues?: boolean },
+): Record<string, string> {
+  const rawRevision = String(doc.lan_ban_hanh ?? "").trim()
+  const revision = rawRevision || "00"
+  const includeAuxBodyValues = options?.includeAuxBodyValues !== false
   return {
     "{{MA_TAI_LIEU}}": String(doc.ma_tai_lieu || ""),
     "{{TEN_TAI_LIEU}}": String(doc.ten_tai_lieu || ""),
@@ -193,13 +199,17 @@ function buildTextValues(doc: Record<string, unknown>, statusText: string): Reco
     "{{TINH_TRANG}}": statusText,
     "{{MA_TAI_LIEU_CU}}": String(doc.ma_tai_lieu_cu || ""),
     "{{MA_TAI_LIEU_MOI}}": String(doc.ma_tai_lieu_moi || doc.ma_tai_lieu || ""),
-    "{{LY_DO_SOAT_XET}}": String(doc.ly_do_soat_xet || ""),
-    "{{NOI_DUNG_SOAT_XET}}": String(doc.noi_dung_soat_xet || ""),
-    "{{LY_DO_THAY_DOI}}": String(doc.ly_do_soat_xet || ""),
-    "{{NOI_DUNG_THAY_DOI}}": String(doc.noi_dung_soat_xet || ""),
     "{{TEN_SOAN_THAO}}": String(doc.soan_thao || ""),
     "{{TEN_XEM_XET}}": String(doc.xem_xet || ""),
     "{{TEN_PHE_DUYET}}": String(doc.phe_duyet || ""),
+    ...(includeAuxBodyValues
+      ? {
+          "{{LY_DO_SOAT_XET}}": String(doc.ly_do_soat_xet || ""),
+          "{{NOI_DUNG_SOAT_XET}}": String(doc.noi_dung_soat_xet || ""),
+          "{{LY_DO_THAY_DOI}}": String(doc.ly_do_soat_xet || ""),
+          "{{NOI_DUNG_THAY_DOI}}": String(doc.noi_dung_soat_xet || ""),
+        }
+      : {}),
   }
 }
 
@@ -527,21 +537,24 @@ export async function POST(req: NextRequest) {
     }
 
     const statusText = getTargetStatusText(action, String(doc.trang_thai || ""), String(doc.cap_tl || ""))
-    const values = buildTextValues(doc, statusText)
+    const isAuxReviewFile = fileKind === "change_request" || fileKind === "review_request"
+    const shouldStampAuxQr = !isAuxReviewFile || step === "soan_thao"
+    const shouldFillAuxBodyValues = isAuxReviewFile && step === "soan_thao"
+    const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues })
     const stepTags = getStepTags(step)
-    const qrBuffer = await QRCode.toBuffer(`${APP_URL}/dashboard/iso/documents/${docId}`, { width: 160, margin: 1 })
-    const imageByTag: Record<string, Buffer> = {
-      "{{QR}}": qrBuffer,
+    const imageByTag: Record<string, Buffer> = {}
+    if (shouldStampAuxQr) {
+      const qrBuffer = await QRCode.toBuffer(`${APP_URL}/dashboard/iso/documents/${docId}`, { width: 160, margin: 1 })
+      imageByTag["{{QR}}"] = qrBuffer
     }
     if (!isChildOffice) {
       const sigBuffer = await getSigImage(factoryId, userId)
       imageByTag[stepTags.signatureTag] = sigBuffer
     }
-    const isAuxReviewFile = fileKind === "change_request" || fileKind === "review_request"
     const requiredTags = (isChildOffice || isAuxReviewFile)
       ? []
       : [stepTags.signatureTag, stepTags.nameTag]
-    const defaultQrWhenMissing = isChildOffice || isAuxReviewFile
+    const defaultQrWhenMissing = isChildOffice || (isAuxReviewFile && shouldStampAuxQr)
     const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 

@@ -25,6 +25,8 @@ Mọi dữ liệu phải có `factory_id`, filter theo nhà máy đang đăng nh
 | `20260527_iso_office_signing.sql`                                          | Thêm `file_signed_office_url`, `file_signed_office_type`, `file_phieu_yeu_cau_thay_doi_signed_url`, `file_de_nghi_soat_xet_signed_url` vào `iso_documents`      |
 | `20260530_iso_auto_convert_pdf.sql`                                        | Thêm `auto_convert_pdf BOOLEAN DEFAULT false` vào `iso_documents`                                                                                              |
 
+| `20260603_iso_lan_ban_hanh_text.sql` (**da chay thu cong - 2026-06-03**) | Doi `lan_ban_hanh` sang `TEXT`, default `00`, cho phep gia tri nghiep vu dang `NN` hoac `NN/NN` |
+
 ```sql
 -- 20260524_iso_signature_placement.sql
 ALTER TABLE iso_documents
@@ -47,7 +49,7 @@ phong_ban TEXT,
 cap_tl TEXT,            -- "Cấp 1" | "Cấp 2"
 chon_quy_trinh TEXT,    -- "Soạn thảo" | "Soát xét"
 loai_vb TEXT,           -- "Thường" | "Mật"
-lan_ban_hanh INTEGER DEFAULT 1,
+lan_ban_hanh TEXT DEFAULT '00',
 phan_loai_tl TEXT DEFAULT 'cha',  -- "cha" | "con" — F luôn là con; PL và HD có thể cha hoặc con
 
 trang_thai TEXT DEFAULT 'draft',

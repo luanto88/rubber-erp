@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS iso_documents (
   cap_tl               TEXT,          -- Cấp 1 | Cấp 2
   chon_quy_trinh       TEXT,          -- Soạn thảo | Soát xét
   loai_vb              TEXT DEFAULT 'Thường',  -- Thường | Mật
-  lan_ban_hanh         INTEGER DEFAULT 1,
+  lan_ban_hanh         TEXT DEFAULT '00',
 
   trang_thai           TEXT NOT NULL DEFAULT 'draft',
   -- draft | cho_xem_xet | cho_phe_duyet | co_hieu_luc | het_hieu_luc | tra_ve

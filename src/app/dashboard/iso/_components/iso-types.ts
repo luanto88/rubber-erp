@@ -19,7 +19,7 @@ export type IsoDocument = {
   cap_tl: string | null        // "Cấp 1" | "Cấp 2"
   chon_quy_trinh: string | null // "Soạn thảo" | "Soát xét"
   loai_vb: string
-  lan_ban_hanh: number
+  lan_ban_hanh: string
   trang_thai: IsoTrangThai
   soan_thao: string | null
   xem_xet: string | null
@@ -246,7 +246,7 @@ export function emptyIsoForm(): IsoDocumentForm {
     phong_ban: "",
     cap_tl: "Cấp 1",
     chon_quy_trinh: "Soạn thảo",
-    lan_ban_hanh: "0",
+    lan_ban_hanh: "00",
     soan_thao: "",
     soan_thao_user_id: "",
     xem_xet: "",

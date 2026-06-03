@@ -17,6 +17,11 @@ function fmtDate(iso: string | null | undefined): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
 }
 
+function normalizeRevisionText(value: unknown): string {
+  const text = String(value ?? "").trim()
+  return text || "00"
+}
+
 // Chuẩn hóa chuỗi để so sánh pattern (bỏ dấu, lowercase, bỏ dấu câu thừa)
 function normalizeText(text: string): string {
   return text
@@ -204,8 +209,7 @@ export async function POST(req: NextRequest) {
     for (const doc of docs) {
       try {
         const maTl = (doc.ma_tai_lieu as string) || "—"
-        const lanSuaDoi = (doc.lan_ban_hanh as number) ?? 0
-        const lsStr = String(lanSuaDoi).padStart(2, "0")
+        const lsStr = normalizeRevisionText(doc.lan_ban_hanh)
         const effectiveDate = (doc.ngay_het_hieu_luc as string) || (doc.updated_at as string)
         const dateStr = fmtDate(effectiveDate)
 
