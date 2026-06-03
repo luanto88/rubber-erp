@@ -359,6 +359,14 @@ Vi du:
   - Da noi validate/lưu cho ca 2 nhom nay khi luu parent review
 - Chua test tay nghiep vu ISO sau thay doi tren 3 case revision: `00`, `01`, `01/01`.
 
+## Ghi chu cap nhat module ISO (2026-06-03, bo sung session sau)
+
+- `Soat xet` duoc phep luu ma trung voi dung tai lieu/ho so nguon dang duoc soat xet; `Soan thao moi` van chan trung ma nhu cu.
+- Khi `phe_duyet` luong `Soat xet`, phai ha `het_hieu_luc` tat ca ban `co_hieu_luc` trung ma lien quan truoc khi nang ban moi len `co_hieu_luc`; khong con dung rule "chi invalidate 1 ban gan nhat".
+- Quy tac tren ap dung cho ca tai lieu cha va cac ho so con trong cung dot soat xet, de tranh loi unique constraint `uniq_iso_documents_factory_ma_tai_lieu_active`.
+- 2 file phu soat xet (`file_phieu_yeu_cau_thay_doi_*`, `file_de_nghi_soat_xet_*`) chi hien/cho dat QR o buoc `soan_thao`; buoc `xem_xet` va `phe_duyet` khong hien lai QR draggable.
+- Tinh nang `Nhan ban chu ky` cho file phu phai nhan ban ca o ten nguoi ky; o ten ban sao phai drag/resize duoc va luu dung vi tri user dat.
+
 ## Nho ky
 
 - Khong xoa file hay xoa du lieu khi chua duoc xac nhan

@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
@@ -183,7 +183,10 @@ function makeChildDraftId(): string {
 }
 
 function normalizeDocumentCode(value: string | null | undefined): string {
-  return String(value || "").trim().toUpperCase()
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
 }
 
 type InferredDocFields = {
@@ -355,6 +358,9 @@ export default function IsoDocumentDetailPage() {
   const extraSigNodeArray = useRef<Array<{ current: HTMLDivElement | null }>>(
     Array.from({ length: 5 }, () => ({ current: null as HTMLDivElement | null }))
   )
+  const extraNameNodeArray = useRef<Array<{ current: HTMLDivElement | null }>>(
+    Array.from({ length: 5 }, () => ({ current: null as HTMLDivElement | null }))
+  )
   const pdfDocRef = useRef<unknown>(null)
 
   // Success toast
@@ -472,6 +478,7 @@ export default function IsoDocumentDetailPage() {
     const isCon = d.phan_loai_tl === "con" || d.loai_tai_lieu === "F"
     setSelectedParentDocId(d.parent_doc_id || "")
     if (!isCon) {
+      setSiblingDocs([])
       let childrenQuery = supabase
         .from("iso_documents")
         .select("*")
@@ -573,22 +580,28 @@ export default function IsoDocumentDetailPage() {
       ma_tai_lieu_moi: d.ma_tai_lieu_moi || "",
       phan_loai_tl: d.phan_loai_tl || "cha",
     })
+    setUploadedFileUrl(d.file_goc_url || null)
     if (d.file_goc_url) {
-      setUploadedFileUrl(d.file_goc_url)
       const parts = d.file_goc_url.split("/")
       setUploadedFileName(decodeURIComponent(parts[parts.length - 1]))
+    } else {
+      setUploadedFileName(null)
     }
     const changeUrl = d.file_phieu_yeu_cau_thay_doi_url || null
+    setReviewChangeFileUrl(changeUrl)
     if (changeUrl) {
-      setReviewChangeFileUrl(changeUrl)
       const parts = changeUrl.split("/")
       setReviewChangeFileName(decodeURIComponent(parts[parts.length - 1]))
+    } else {
+      setReviewChangeFileName(null)
     }
     const requestUrl = d.file_de_nghi_soat_xet_url || d.file_soat_xet_url || null
+    setReviewRequestFileUrl(requestUrl)
     if (requestUrl) {
-      setReviewRequestFileUrl(requestUrl)
       const parts = requestUrl.split("/")
       setReviewRequestFileName(decodeURIComponent(parts[parts.length - 1]))
+    } else {
+      setReviewRequestFileName(null)
     }
   }, [])
 
@@ -896,9 +909,22 @@ export default function IsoDocumentDetailPage() {
 
   const validateUniqueDocumentCodes = async () => {
     const codesToCheck: string[] = []
+    const allowedExistingIdsByCode = new Map<string, Set<string>>()
+    const isReviewFlow = form.chon_quy_trinh === "Soát xét"
+    const allowExistingCodeForDoc = (code: string | null | undefined, sourceDocId: string | null | undefined) => {
+      const normalizedCode = normalizeDocumentCode(code)
+      if (!normalizedCode || !sourceDocId) return
+      const allowedIds = allowedExistingIdsByCode.get(normalizedCode) || new Set<string>()
+      allowedIds.add(sourceDocId)
+      allowedExistingIdsByCode.set(normalizedCode, allowedIds)
+    }
+
     const mainCode = resolvedMainDocumentCode()
     if (form.phan_loai_tl !== "con" && mainCode) {
       codesToCheck.push(mainCode)
+      if (isReviewFlow) {
+        allowExistingCodeForDoc(mainCode, reviewDocId || parentReviewSourceDocId || null)
+      }
     }
     for (const row of childDraftRows) {
       const code = childRecordCode(row)
@@ -906,24 +932,32 @@ export default function IsoDocumentDetailPage() {
     }
     for (const row of childReviewRows) {
       const code = normalizeDocumentCode(row.doi_ma ? row.ma_tai_lieu_moi : row.ma_tai_lieu_cu)
-      if (code) codesToCheck.push(code)
+      if (!code) continue
+      codesToCheck.push(code)
+      if (isReviewFlow) {
+        allowExistingCodeForDoc(code, row.old_doc_id || null)
+      }
     }
-    const normalizedCodes = codesToCheck.map((code) => code.trim().toUpperCase()).filter(Boolean)
+    const normalizedCodes = codesToCheck.map((code) => normalizeDocumentCode(code)).filter(Boolean)
     const duplicateInDraft = normalizedCodes.find((code, index) => normalizedCodes.indexOf(code) !== index)
     if (duplicateInDraft) return `M\u00e3 ${duplicateInDraft} b\u1ecb tr\u00f9ng trong danh s\u00e1ch \u0111ang so\u1ea1n th\u1ea3o.`
     if (normalizedCodes.length === 0) return null
 
     const { data, error } = await supabase
       .from("iso_documents")
-      .select("id, ma_tai_lieu, ten_tai_lieu")
+      .select("id, ma_tai_lieu, ten_tai_lieu, trang_thai")
       .eq("factory_id", factoryId)
-      .in("ma_tai_lieu", normalizedCodes)
     if (error) return error.message
 
-    const existing = ((data || []) as Pick<IsoDocument, "id" | "ma_tai_lieu" | "ten_tai_lieu">[]).find((item) => {
+    const existing = ((data || []) as Pick<IsoDocument, "id" | "ma_tai_lieu" | "ten_tai_lieu" | "trang_thai">[]).find((item) => {
       if (!item.ma_tai_lieu) return false
       if (!isNew && item.id === docId) return false
-      return normalizedCodes.includes(item.ma_tai_lieu.trim().toUpperCase())
+      const normalizedCode = normalizeDocumentCode(item.ma_tai_lieu)
+      if (!normalizedCodes.includes(normalizedCode)) return false
+      const allowedIds = allowedExistingIdsByCode.get(normalizedCode)
+      if (allowedIds?.has(item.id)) return false
+      if (isReviewFlow && item.trang_thai !== "co_hieu_luc") return false
+      return true
     })
     if (!existing) return null
     return `M\u00e3 ${existing.ma_tai_lieu} \u0111\u00e3 t\u1ed3n t\u1ea1i${existing.ten_tai_lieu ? ` (${existing.ten_tai_lieu})` : ""}. Kh\u00f4ng th\u1ec3 so\u1ea1n th\u1ea3o m\u00e3 tr\u00f9ng.`
@@ -960,7 +994,7 @@ export default function IsoDocumentDetailPage() {
         if (childReviewRows.some((row) => !isValidRevisionText(row.lan_sua_doi))) return "Lần sửa đổi của hồ sơ phải có dạng 2 chữ số hoặc NN/NN, ví dụ 01 hoặc 01/01"
         const dupMa = childReviewRows.filter((row) => row.doi_ma && !row.ma_tai_lieu_moi.trim())
         if (dupMa.length > 0) return "Vui lòng nhập mã hồ sơ mới cho các dòng có đổi mã"
-        const newCodes = childReviewRows.map((row) => (row.doi_ma ? row.ma_tai_lieu_moi.trim().toUpperCase() : row.ma_tai_lieu_cu.trim().toUpperCase()))
+        const newCodes = childReviewRows.map((row) => normalizeDocumentCode(row.doi_ma ? row.ma_tai_lieu_moi : row.ma_tai_lieu_cu))
         const hasDupNewCode = new Set(newCodes).size !== newCodes.length
         if (hasDupNewCode) return "Có mã hồ sơ mới bị trùng nhau trong danh sách"
       } else {
@@ -1263,6 +1297,7 @@ export default function IsoDocumentDetailPage() {
         if (createdReviewChildIds === null) return
         const createdIds = await saveChildDraftRecords(data.id)
         if (!createdIds) return
+        void loadEffectiveDocs(factoryId)
         showToast(true, "Đã tạo tài liệu")
         router.replace(`/dashboard/iso/documents/${data.id}`)
       } else {
@@ -1277,6 +1312,7 @@ export default function IsoDocumentDetailPage() {
         if (createdReviewChildIds === null) return
         const createdIds = await saveChildDraftRecords(docId)
         if (!createdIds) return
+        void loadEffectiveDocs(factoryId)
         showToast(true, "Đã lưu thay đổi")
         void loadDoc(docId, factoryId)
       }
@@ -1316,6 +1352,25 @@ export default function IsoDocumentDetailPage() {
     const now = new Date().toISOString()
     let invalidatedIds: string[] = []
     const childDocIds = childDocs.map((child) => child.id).filter(Boolean)
+    const collectReviewCodesToInvalidate = () => {
+      const docsToApprove = [doc, ...childDocs].filter((item): item is IsoDocument => !!item)
+      const codes = new Set<string>()
+      const approvingIds = new Set<string>()
+
+      for (const item of docsToApprove) {
+        approvingIds.add(item.id)
+        if (item.chon_quy_trinh !== "Soát xét") continue
+        const oldCode = normalizeDocumentCode(item.ma_tai_lieu_cu || item.ma_tai_lieu)
+        const newCode = normalizeDocumentCode(item.doi_ma_tai_lieu ? (item.ma_tai_lieu_moi || item.ma_tai_lieu) : item.ma_tai_lieu)
+        if (oldCode) codes.add(oldCode)
+        if (newCode) codes.add(newCode)
+      }
+
+      return {
+        codes: [...codes],
+        approvingIds: [...approvingIds],
+      }
+    }
     const updateChildDocs = async (payload: Record<string, unknown>) => {
       if (childDocIds.length === 0) return null
       const { error } = await supabase
@@ -1355,31 +1410,29 @@ export default function IsoDocumentDetailPage() {
         if (childError) { showToast(false, childError.message); return }
 
       } else if (action === "phe_duyet") {
-        // Thu thập ID tài liệu cũ TRƯỚC khi đổi mã (dùng mã HIỆN TẠI của doc)
         const isReview = doc.chon_quy_trinh === "Soát xét"
         const newDocumentCode = doc.doi_ma_tai_lieu && doc.ma_tai_lieu_moi ? doc.ma_tai_lieu_moi : doc.ma_tai_lieu
-        const oldDocumentCode = doc.ma_tai_lieu_cu || doc.ma_tai_lieu
-        if (isReview && oldDocumentCode) {
-          const { data: toInvalidate } = await supabase
+        const { codes: reviewCodesToInvalidate, approvingIds } = collectReviewCodesToInvalidate()
+        if (reviewCodesToInvalidate.length > 0) {
+          const { data: toInvalidate, error: invalidateLookupError } = await supabase
             .from("iso_documents")
-            .select("id")
+            .select("id, ma_tai_lieu")
             .eq("factory_id", factoryId)
-            .eq("ma_tai_lieu", oldDocumentCode)
             .eq("trang_thai", "co_hieu_luc")
-            .neq("id", docId)
-            .order("ngay_hieu_luc", { ascending: false, nullsFirst: false })
-            .order("updated_at", { ascending: false })
-            .limit(1)
-          invalidatedIds = (toInvalidate || []).map((d) => d.id)
+          if (invalidateLookupError) { showToast(false, invalidateLookupError.message); return }
+          const reviewCodeSet = new Set(reviewCodesToInvalidate)
+          invalidatedIds = ((toInvalidate || []) as Array<{ id: string; ma_tai_lieu: string | null }>)
+            .filter((item) => reviewCodeSet.has(normalizeDocumentCode(item.ma_tai_lieu)))
+            .map((item) => item.id)
+            .filter((id) => !approvingIds.includes(id))
         }
-        // Đánh dấu hết hiệu lực tài liệu cũ TRƯỚC khi kích hoạt tài liệu mới
-        // (tránh vi phạm unique index chỉ cho phép 1 co_hieu_luc mỗi mã)
         if (invalidatedIds.length > 0) {
-          await supabase
+          const { error: invalidateError } = await supabase
             .from("iso_documents")
             .update({ trang_thai: "het_hieu_luc", ngay_het_hieu_luc: now })
             .in("id", invalidatedIds)
             .eq("factory_id", factoryId)
+          if (invalidateError) { showToast(false, invalidateError.message); return }
         }
         const updatePayload: Record<string, unknown> = {
           trang_thai: "co_hieu_luc",
@@ -1395,12 +1448,39 @@ export default function IsoDocumentDetailPage() {
           .update(updatePayload)
           .eq("id", docId).eq("factory_id", factoryId)
         if (error) { showToast(false, error.message); return }
-        const childError = await updateChildDocs({
-          trang_thai: "co_hieu_luc",
-          ky_phe_duyet_at: now,
-          ngay_hieu_luc: now,
-        })
-        if (childError) { showToast(false, childError.message); return }
+        if (childDocIds.length > 0) {
+          const childReviewUpdates = childDocs
+            .filter((child) => child.chon_quy_trinh === "Soát xét" && child.doi_ma_tai_lieu && child.ma_tai_lieu_moi)
+            .map((child) => ({
+              id: child.id,
+              ma_tai_lieu: child.ma_tai_lieu_moi as string,
+              trang_thai: "co_hieu_luc" as const,
+              ky_phe_duyet_at: now,
+              ngay_hieu_luc: now,
+            }))
+          const childReviewUpdateIds = new Set(childReviewUpdates.map((child) => child.id))
+          for (const childUpdate of childReviewUpdates) {
+            const { error: childReviewError } = await supabase
+              .from("iso_documents")
+              .update(childUpdate)
+              .eq("id", childUpdate.id)
+              .eq("factory_id", factoryId)
+            if (childReviewError) { showToast(false, childReviewError.message); return }
+          }
+          const remainingChildIds = childDocIds.filter((id) => !childReviewUpdateIds.has(id))
+          if (remainingChildIds.length > 0) {
+            const { error: childError } = await supabase
+              .from("iso_documents")
+              .update({
+                trang_thai: "co_hieu_luc",
+                ky_phe_duyet_at: now,
+                ngay_hieu_luc: now,
+              })
+              .in("id", remainingChildIds)
+              .eq("factory_id", factoryId)
+            if (childError) { showToast(false, childError.message); return }
+          }
+        }
 
       } else if (action === "tra_ve" || action === "khong_xem_xet") {
         const { error } = await supabase
@@ -1642,6 +1722,7 @@ export default function IsoDocumentDetailPage() {
       } else {
         showToast(true, "Đã cập nhật trạng thái")
       }
+      void loadEffectiveDocs(factoryId)
       void loadDoc(docId, factoryId)
     } catch (err) {
       showToast(false, err instanceof Error ? err.message : "Lỗi xử lý")
@@ -1848,9 +1929,7 @@ export default function IsoDocumentDetailPage() {
       qrY: 110,
       qrW: 96,
       qrH: 96,
-      showQrPlacement: task.kind === "main"
-        ? isSoanThaoStep
-        : (task.kind === "change_request" || task.kind === "review_request"),
+      showQrPlacement: isSoanThaoStep,
       currentPage: 1,
       totalPages: 1,
       canvasScale: 1,
@@ -2371,7 +2450,7 @@ export default function IsoDocumentDetailPage() {
     ? effectiveDocs.find((item) => {
         if (isChildDocument(item)) return false
         if (reviewDocId) return item.id === reviewDocId
-        return !!form.ma_tai_lieu_cu && item.ma_tai_lieu === form.ma_tai_lieu_cu
+        return !!form.ma_tai_lieu_cu && normalizeDocumentCode(item.ma_tai_lieu) === normalizeDocumentCode(form.ma_tai_lieu_cu)
       }) || null
     : null
   const parentReviewSourceDocId = parentReviewSourceDoc?.id || ""
@@ -3724,8 +3803,15 @@ export default function IsoDocumentDetailPage() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    {childReviewRows.map((row) => (
-                      <div key={row.id} className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
+                    {childReviewRows.map((row) => {
+                      const reviewFileInputId = `child-review-file-${row.id}`
+                      return (
+                      <div
+                        key={row.id}
+                        className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100"
+                        data-testid="child-review-row"
+                        data-row-id={row.id}
+                      >
                         <div className="grid grid-cols-2 gap-2">
                           <label className="col-span-2 text-[11px] font-bold text-slate-600">
                             Mã hồ sơ cũ <span className="text-red-500">*</span>
@@ -3767,22 +3853,30 @@ export default function IsoDocumentDetailPage() {
                           </label>
                           <div className="col-span-2 text-[11px] font-bold text-slate-600">
                             File hồ sơ mới <span className="text-red-500">*</span>
-                            <label className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-300 px-2 py-1.5 text-left text-xs text-emerald-700 ${isEditable ? "cursor-pointer hover:border-emerald-500" : "cursor-default opacity-70"}`}>
+                            <label
+                              htmlFor={reviewFileInputId}
+                              data-testid="child-review-file-trigger"
+                              data-row-id={row.id}
+                              className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-300 px-2 py-1.5 text-left text-xs text-emerald-700 ${isEditable ? "cursor-pointer hover:border-emerald-500" : "cursor-default opacity-70"}`}
+                            >
                               <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
                               <Upload size={13} />
-                              {isEditable && (
-                                <input
-                                  type="file"
-                                  accept=".pdf,.docx,.xlsx"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    const f = e.target.files?.[0]
-                                    if (f) void handleReviewRowFileUpload(f, row.id)
-                                    e.target.value = ""
-                                  }}
-                                />
-                              )}
                             </label>
+                            {isEditable && (
+                              <input
+                                id={reviewFileInputId}
+                                type="file"
+                                accept=".pdf,.docx,.xlsx"
+                                className="hidden"
+                                data-testid="child-review-file-input"
+                                data-row-id={row.id}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0]
+                                  if (f) void handleReviewRowFileUpload(f, row.id)
+                                  e.target.value = ""
+                                }}
+                              />
+                            )}
                           </div>
                         </div>
                         {isEditable && (
@@ -3791,7 +3885,7 @@ export default function IsoDocumentDetailPage() {
                           </button>
                         )}
                       </div>
-                    ))}
+                    )})}
                     {childReviewRows.length === 0 && (
                       <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ con nào cần soát xét trong đợt này.</p>
                     )}
@@ -3820,8 +3914,15 @@ export default function IsoDocumentDetailPage() {
                   </div>
                   {!isNew && renderSavedChildDocs()}
                   <div className="space-y-2">
-                    {childDraftRows.map((row) => (
-                      <div key={row.id} className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100">
+                    {childDraftRows.map((row) => {
+                      const draftFileInputId = `child-draft-file-${row.id}`
+                      return (
+                      <div
+                        key={row.id}
+                        className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100"
+                        data-testid="child-draft-row"
+                        data-row-id={row.id}
+                      >
                         <div className="grid grid-cols-2 gap-2">
                           <label className="text-[11px] font-bold text-slate-600">
                             Mã hồ sơ
@@ -3850,22 +3951,30 @@ export default function IsoDocumentDetailPage() {
                           </label>
                           <div className="text-[11px] font-bold text-slate-600">
                             File hồ sơ
-                            <label className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 ${isEditable ? "cursor-pointer hover:border-sky-500" : "cursor-default opacity-70"}`}>
+                            <label
+                              htmlFor={draftFileInputId}
+                              data-testid="child-draft-file-trigger"
+                              data-row-id={row.id}
+                              className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-sky-300 px-2 py-1.5 text-left text-xs text-sky-700 ${isEditable ? "cursor-pointer hover:border-sky-500" : "cursor-default opacity-70"}`}
+                            >
                               <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
                               <Upload size={13} />
-                              {isEditable && (
-                                <input
-                                  type="file"
-                                  accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    const f = e.target.files?.[0]
-                                    if (f) void handleChildRowFileUpload(f, row.id)
-                                    e.target.value = ""
-                                  }}
-                                />
-                              )}
                             </label>
+                            {isEditable && (
+                              <input
+                                id={draftFileInputId}
+                                type="file"
+                                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                className="hidden"
+                                data-testid="child-draft-file-input"
+                                data-row-id={row.id}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0]
+                                  if (f) void handleChildRowFileUpload(f, row.id)
+                                  e.target.value = ""
+                                }}
+                              />
+                            )}
                           </div>
                           <label className="col-span-2 text-[11px] font-bold text-slate-600">
                             Ghi chú
@@ -3878,7 +3987,7 @@ export default function IsoDocumentDetailPage() {
                           </button>
                         )}
                       </div>
-                    ))}
+                    )})}
                     {childDraftRows.length === 0 && childDocs.length === 0 && (
                       <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con mới nào trong đợt soát xét này.</p>
                     )}
@@ -4111,8 +4220,10 @@ export default function IsoDocumentDetailPage() {
                   <Draggable
                     nodeRef={draggableNodeRef as RefObject<HTMLElement>}
                     position={{ x: placementModal.sigX, y: placementModal.sigY }}
+                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
                     bounds="parent"
+                    cancel=".react-resizable-handle,button"
                   >
                     <div ref={draggableNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
                       <Resizable
@@ -4157,8 +4268,10 @@ export default function IsoDocumentDetailPage() {
                   <Draggable
                     nodeRef={qrNodeRef as RefObject<HTMLElement>}
                     position={{ x: placementModal.qrX, y: placementModal.qrY }}
+                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
                     bounds="parent"
+                    cancel=".react-resizable-handle,button"
                   >
                     <div ref={qrNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
                       <Resizable
@@ -4199,8 +4312,10 @@ export default function IsoDocumentDetailPage() {
                   <Draggable
                     nodeRef={nameNodeRef as RefObject<HTMLElement>}
                     position={{ x: placementModal.nameX, y: placementModal.nameY }}
+                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
                     bounds="parent"
+                    cancel=".react-resizable-handle,button"
                   >
                     <div
                       ref={nameNodeRef}
@@ -4269,67 +4384,148 @@ export default function IsoDocumentDetailPage() {
                 )}
                 {/* Extra sig boxes (clone) cho change_request */}
                 {placementModal.extraSigBoxes.map((box, idx) => (
-                  <Draggable
-                    key={box.id}
-                    nodeRef={extraSigNodeArray.current[idx] as RefObject<HTMLElement>}
-                    position={{ x: box.sigX, y: box.sigY }}
-                    onStop={(_, d) => setPlacementModal((p) => p ? {
-                      ...p,
-                      extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b),
-                    } : null)}
-                    bounds="parent"
-                  >
-                    <div
-                      ref={(el) => { extraSigNodeArray.current[idx].current = el }}
-                      style={{ position: "absolute", top: 0, left: 0, zIndex: 12, cursor: "move" }}
+                  <Fragment key={box.id}>
+                    <Draggable
+                      nodeRef={extraSigNodeArray.current[idx] as RefObject<HTMLElement>}
+                      position={{ x: box.sigX, y: box.sigY }}
+                      onDrag={(_, d) => setPlacementModal((p) => p ? {
+                        ...p,
+                        extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b),
+                      } : null)}
+                      onStop={(_, d) => setPlacementModal((p) => p ? {
+                        ...p,
+                        extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b),
+                      } : null)}
+                      bounds="parent"
+                      cancel=".react-resizable-handle,button"
                     >
-                      <Resizable
-                        size={{ width: box.sigW, height: box.sigH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
-                            ...b,
-                            sigW: parseInt(ref.style.width) || b.sigW,
-                            sigH: parseInt(ref.style.height) || b.sigH,
-                          } : b),
-                        } : null)}
-                        minWidth={40}
-                        minHeight={20}
-                        style={{ border: "2px dashed #9333ea", position: "relative" }}
+                      <div
+                        ref={(el) => { extraSigNodeArray.current[idx].current = el }}
+                        style={{ position: "absolute", top: 0, left: 0, zIndex: 12, cursor: "move" }}
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={placementModal.sigImgUrl ?? ""}
-                          alt="chữ ký bản sao"
-                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: box.showSignature ? "block" : "none" }}
-                          draggable={false}
-                        />
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={() => setPlacementModal((p) => p ? {
+                        <Resizable
+                          size={{ width: box.sigW, height: box.sigH }}
+                          onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
                             ...p,
-                            extraSigBoxes: p.extraSigBoxes.filter((b) => b.id !== box.id),
+                            extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
+                              ...b,
+                              sigW: parseInt(ref.style.width) || b.sigW,
+                              sigH: parseInt(ref.style.height) || b.sigH,
+                            } : b),
                           } : null)}
-                          style={{
-                            position: "absolute", top: -10, right: -10, zIndex: 20,
-                            background: "#fff", border: "1px solid #ccc", borderRadius: "50%",
-                            width: 18, height: 18, fontSize: 11, cursor: "pointer",
-                            display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
-                          }}
+                          minWidth={40}
+                          minHeight={20}
+                          style={{ border: "2px dashed #9333ea", position: "relative" }}
                         >
-                          ×
-                        </button>
-                        <span style={{
-                          position: "absolute", top: -20, left: 0, fontSize: 10,
-                          color: "#9333ea", background: "rgba(255,255,255,0.92)",
-                          padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none",
-                        }}>
-                          Bản sao {idx + 1}
-                        </span>
-                      </Resizable>
-                    </div>
-                  </Draggable>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={placementModal.sigImgUrl ?? ""}
+                            alt="chữ ký bản sao"
+                            style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: box.showSignature ? "block" : "none" }}
+                            draggable={false}
+                          />
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => setPlacementModal((p) => p ? {
+                              ...p,
+                              extraSigBoxes: p.extraSigBoxes.filter((b) => b.id !== box.id),
+                            } : null)}
+                            style={{
+                              position: "absolute", top: -10, right: -10, zIndex: 20,
+                              background: "#fff", border: "1px solid #ccc", borderRadius: "50%",
+                              width: 18, height: 18, fontSize: 11, cursor: "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+                            }}
+                          >
+                            ×
+                          </button>
+                          <span style={{
+                            position: "absolute", top: -20, left: 0, fontSize: 10,
+                            color: "#9333ea", background: "rgba(255,255,255,0.92)",
+                            padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none",
+                          }}>
+                            Bản sao {idx + 1}
+                          </span>
+                        </Resizable>
+                      </div>
+                    </Draggable>
+                    {box.showSignerName && placementModal.signerName && (
+                      <Draggable
+                        nodeRef={extraNameNodeArray.current[idx] as RefObject<HTMLElement>}
+                        position={{ x: box.nameX, y: box.nameY }}
+                        onDrag={(_, d) => setPlacementModal((p) => p ? {
+                          ...p,
+                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b),
+                        } : null)}
+                        onStop={(_, d) => setPlacementModal((p) => p ? {
+                          ...p,
+                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b),
+                        } : null)}
+                        bounds="parent"
+                        cancel=".react-resizable-handle,button"
+                      >
+                        <div
+                          ref={(el) => { extraNameNodeArray.current[idx].current = el }}
+                          style={{ position: "absolute", top: 0, left: 0, zIndex: 13, cursor: "move" }}
+                        >
+                          <Resizable
+                            size={{ width: box.nameW, height: box.nameH }}
+                            onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
+                              ...p,
+                              extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
+                                ...b,
+                                nameW: parseInt(ref.style.width) || b.nameW,
+                                nameH: parseInt(ref.style.height) || b.nameH,
+                              } : b),
+                            } : null)}
+                            minWidth={90}
+                            minHeight={22}
+                            style={{
+                              border: "2px dashed #0f766e",
+                              position: "relative",
+                              background: "rgba(255,255,255,0.95)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: "\"Times New Roman\", serif",
+                                fontSize: 13,
+                                lineHeight: 1.1,
+                                color: "#111827",
+                                maxWidth: "100%",
+                                textAlign: "center",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                pointerEvents: "none",
+                              }}
+                            >
+                              {placementModal.signerName}
+                            </span>
+                            <span style={{
+                              position: "absolute",
+                              top: -20,
+                              left: 0,
+                              fontSize: 10,
+                              color: "#0f766e",
+                              background: "rgba(255,255,255,0.92)",
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              whiteSpace: "nowrap",
+                              pointerEvents: "none",
+                            }}>
+                              Tên bản sao {idx + 1}
+                            </span>
+                          </Resizable>
+                        </div>
+                      </Draggable>
+                    )}
+                  </Fragment>
                 ))}
               </div>
             </div>

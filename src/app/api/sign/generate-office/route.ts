@@ -55,7 +55,7 @@ const IMAGE_TAGS = [
 ] as const
 
 const ALL_TAGS = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
-const CHILD_OFFICE_TAG_SET = new Set<string>([...TEXT_TAGS, "{{QR}}"])
+const CHILD_OFFICE_TAG_SET = new Set<string>([...TEXT_TAGS, ...IMAGE_TAGS])
 
 function fmtDate(d: unknown): string {
   if (!d || typeof d !== "string") return ""
@@ -242,7 +242,7 @@ function escapeRegExp(value: string): string {
 }
 
 function flexibleDocxTagPattern(tag: string): RegExp {
-  const betweenChars = "(?:<[^>]+>|\\s)*"
+  const betweenChars = "(?:<[^>]+>|\\s|&#\\d+;|&#x[0-9A-Fa-f]+;|&nbsp;|&thinsp;|&ensp;|&emsp;|\u00A0|\u00AD|\u200B|\u200C|\u200D|\u2060|\uFEFF)*"
   return new RegExp(tag.split("").map(escapeRegExp).join(betweenChars), "g")
 }
 
@@ -547,14 +547,12 @@ export async function POST(req: NextRequest) {
       const qrBuffer = await QRCode.toBuffer(`${APP_URL}/dashboard/iso/documents/${docId}`, { width: 160, margin: 1 })
       imageByTag["{{QR}}"] = qrBuffer
     }
-    if (!isChildOffice) {
-      const sigBuffer = await getSigImage(factoryId, userId)
-      imageByTag[stepTags.signatureTag] = sigBuffer
-    }
+    const sigBuffer = await getSigImage(factoryId, userId)
+    imageByTag[stepTags.signatureTag] = sigBuffer
     const requiredTags = (isChildOffice || isAuxReviewFile)
       ? []
       : [stepTags.signatureTag, stepTags.nameTag]
-    const defaultQrWhenMissing = isChildOffice || (isAuxReviewFile && shouldStampAuxQr)
+    const defaultQrWhenMissing = isChildOffice
     const allowedTags = isChildOffice ? CHILD_OFFICE_TAG_SET : ALL_TAGS
     const bytes = await downloadStorageFile(sourceUrl)
 

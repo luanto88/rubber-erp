@@ -1663,6 +1663,19 @@ const fileSectionLabel = isCon ? "File hồ sơ" : "File tài liệu"    // oute
 - **Nguyên nhân**: label render unconditionally bên trong Resizable, kể cả khi `showSignature=false` đang hiện overlay "Chữ ký đã ẩn".
 - **Fix** (`[id]/page.tsx`): bọc label trong `{placementModal.showSignature && (...)}`.
 
+## Cập nhật nóng (2026-06-03) — Soát xét trùng mã, QR file phụ, nhân bản tên
+
+- Validate trùng mã ở màn ISO:
+  - `Soạn thảo mới` vẫn chặn trùng mã như cũ.
+  - `Soát xét` được phép lưu khi mã trùng với đúng tài liệu/hồ sơ nguồn đang được soát xét.
+- Với 2 file phụ soát xét (`change_request`, `review_request`):
+  - Placement modal chỉ cho đặt/hiện QR ở bước `soạn thảo`.
+  - Bước `xem xét` và `phê duyệt` không được hiện lại QR draggable.
+- `Nhân bản chữ ký` cho file phụ phải nhân bản cả ô tên người ký:
+  - ô tên bản sao phải nhìn thấy ngay trong modal,
+  - drag/resize độc lập với ô chữ ký,
+  - và lưu đúng tọa độ user đã đặt.
+
 ### 4) Fixes từ session trước (ghi nhận tham chiếu)
 
 - **Badge sidebar thiếu `tra_ve`** (`iso-shell.tsx`): thêm `soan_thao_user_id` vào select/or, thêm điều kiện `trang_thai === "tra_ve" && soan_thao_user_id === uid`.

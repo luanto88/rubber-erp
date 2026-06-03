@@ -81,6 +81,54 @@ interface PdfjsTextItem {
   fontName?: string
 }
 
+type PdfTextLine = {
+  items: PdfjsTextItem[]
+  text: string
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+function groupTextItemsIntoLines(items: PdfjsTextItem[]): PdfTextLine[] {
+  const sorted = [...items]
+    .filter((item) => item.str && item.str.trim())
+    .sort((a, b) => {
+      const dy = b.transform[5] - a.transform[5]
+      if (Math.abs(dy) > 2) return dy
+      return a.transform[4] - b.transform[4]
+    })
+
+  const lines: PdfTextLine[] = []
+  for (const item of sorted) {
+    const y = item.transform[5]
+    const x = item.transform[4]
+    const width = item.width || 0
+    const height = item.height || 10
+    const line = lines.find((candidate) => Math.abs(candidate.items[0].transform[5] - y) <= 2)
+    if (!line) {
+      lines.push({
+        items: [item],
+        text: item.str,
+        minX: x,
+        minY: y,
+        maxX: x + width,
+        maxY: y + height,
+      })
+      continue
+    }
+    line.items.push(item)
+    line.items.sort((a, b) => a.transform[4] - b.transform[4])
+    line.text = line.items.map((part) => part.str).join(" ").replace(/\s+/g, " ").trim()
+    line.minX = Math.min(line.minX, x)
+    line.minY = Math.min(line.minY, y)
+    line.maxX = Math.max(line.maxX, x + width)
+    line.maxY = Math.max(line.maxY, y + height)
+  }
+
+  return lines
+}
+
 // Thay thế các tag header/footer trong PDF khi hủy hiệu lực
 // Dùng pdfjs để lấy tọa độ text, pdf-lib để cover trắng và vẽ lại
 async function replaceInvalidatedTags(
@@ -174,6 +222,81 @@ async function replaceInvalidatedTags(
   }
 }
 
+async function reinforceInvalidatedLines(
+  pdfDoc: PDFDocument,
+  pdfBytes: ArrayBuffer,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  maTl: string,
+  lsStr: string,
+  dateHetStr: string,
+) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
+    const loadingTask = pdfjsLib.getDocument({ data: pdfBytes })
+    const pdfJsDoc = await loadingTask.promise
+    const pages = pdfDoc.getPages()
+
+    for (let pageIdx = 0; pageIdx < pdfJsDoc.numPages; pageIdx++) {
+      const pdfJsPage = await pdfJsDoc.getPage(pageIdx + 1)
+      const textContent = await pdfJsPage.getTextContent()
+      const pdfLibPage = pages[pageIdx]
+      if (!pdfLibPage) continue
+
+      const { width: pageWidth, height: pageHeight } = pdfLibPage.getSize()
+      const viewport = pdfJsPage.getViewport({ scale: 1 })
+      const scaleX = viewport.width / pageWidth
+      const scaleY = viewport.height / pageHeight
+      const lines = groupTextItemsIntoLines(textContent.items as PdfjsTextItem[])
+
+      for (const line of lines) {
+        if (!line.text || isAlreadyInvalidated(line.text)) continue
+
+        const normalizedLine = normalizeText(line.text)
+        let replacement: string | null = null
+        let color = rgb(0.15, 0.15, 0.15)
+
+        if (normalizedLine.startsWith("ngay hieu luc") || normalizedLine.startsWith("ngay het hieu luc")) {
+          replacement = `NgĂ y háº¿t hiá»‡u lá»±c: ${dateHetStr}`
+        } else if (normalizedLine.includes("tinh trang") && (normalizedLine.includes("co hieu luc") || !normalizedLine.includes("het hieu luc"))) {
+          replacement = "TĂ¬nh tráº¡ng: Háº¿t hiá»‡u lá»±c"
+          color = rgb(0.85, 0, 0)
+        } else if (normalizedLine.includes("co hieu luc") && /\d{2}\/\d{2}\/\d{4}/.test(line.text)) {
+          replacement = `${maTl} (${lsStr}-${dateHetStr}) Háº¿t hiá»‡u lá»±c`
+          color = rgb(0.85, 0, 0)
+        }
+
+        if (!replacement) continue
+
+        const x = line.minX / scaleX
+        const y = line.minY / scaleY
+        const lineWidth = (line.maxX - line.minX) / scaleX
+        const lineHeight = Math.max((line.maxY - line.minY) / scaleY, 10)
+        const fontSize = Math.max(lineHeight * 0.9, 8)
+        const coverWidth = Math.max(lineWidth, font.widthOfTextAtSize(replacement, fontSize)) + 8
+
+        pdfLibPage.drawRectangle({
+          x: x - 2,
+          y: y - 2,
+          width: coverWidth,
+          height: lineHeight + 5,
+          color: rgb(1, 1, 1),
+          opacity: 1,
+        })
+        pdfLibPage.drawText(replacement, {
+          x,
+          y,
+          size: fontSize,
+          font,
+          color,
+        })
+      }
+    }
+  } catch {
+    // Fallback bổ sung này không được phép làm hỏng luồng chính.
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -197,7 +320,7 @@ export async function POST(req: NextRequest) {
     // Fetch all docs
     const { data: docs, error: docsErr } = await supabaseAdmin
       .from("iso_documents")
-      .select("id, ma_tai_lieu, lan_ban_hanh, ngay_hieu_luc, ngay_het_hieu_luc, updated_at, file_goc_url, file_signed_pdf_url, chon_quy_trinh, file_phieu_yeu_cau_thay_doi_url, file_de_nghi_soat_xet_url, file_soat_xet_url")
+      .select("id, ma_tai_lieu, lan_ban_hanh, ngay_hieu_luc, ngay_het_hieu_luc, updated_at, file_goc_url, file_signed_pdf_url, chon_quy_trinh, file_phieu_yeu_cau_thay_doi_url, file_phieu_yeu_cau_thay_doi_signed_url, file_de_nghi_soat_xet_url, file_de_nghi_soat_xet_signed_url, file_soat_xet_url")
       .eq("factory_id", factoryId)
       .in("id", docIds)
     if (docsErr || !docs) {
@@ -248,6 +371,7 @@ export async function POST(req: NextRequest) {
 
         // Bước 1: Thay thế tag "Ngày hiệu lực", "Tình trạng: Có hiệu lực", footer
         await replaceInvalidatedTags(pdfDoc, pdfBytes, font, maTl, lsStr, dateStr)
+        await reinforceInvalidatedLines(pdfDoc, pdfBytes, font, maTl, lsStr, dateStr)
 
         // Bước 2: Stamp ảnh "Hết hiệu lực" ở góc trên phải mỗi trang
         const stamImgBytes = await readFile(path.join(process.cwd(), "cung_cap_dl", "iso", "HẾT HIỆU LỰC.jpg"))
@@ -281,8 +405,16 @@ export async function POST(req: NextRequest) {
         // Stamp file phụ soát xét nếu có
         if (doc.chon_quy_trinh === "Soát xét") {
           const attachments: Array<{ kind: string; url: string | null | undefined; updateCol: Record<string, string> }> = [
-            { kind: "change_request", url: doc.file_phieu_yeu_cau_thay_doi_url as string | null, updateCol: { file_phieu_yeu_cau_thay_doi_url: "" } },
-            { kind: "review_request", url: (doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null, updateCol: { file_de_nghi_soat_xet_url: "", file_soat_xet_url: "" } },
+            {
+              kind: "change_request",
+              url: (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url) as string | null,
+              updateCol: { file_phieu_yeu_cau_thay_doi_signed_url: "" },
+            },
+            {
+              kind: "review_request",
+              url: (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null,
+              updateCol: { file_de_nghi_soat_xet_signed_url: "" },
+            },
           ]
           for (const att of attachments) {
             if (!att.url) continue
@@ -299,6 +431,7 @@ export async function POST(req: NextRequest) {
               const attFontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "TimesNewRoman.ttf"))
               const attFont = await attDoc.embedFont(attFontBytes)
               await replaceInvalidatedTags(attDoc, attBytes, attFont, maTl, lsStr, dateStr)
+              await reinforceInvalidatedLines(attDoc, attBytes, attFont, maTl, lsStr, dateStr)
               const attStamImgBytes = await readFile(path.join(process.cwd(), "cung_cap_dl", "iso", "HẾT HIỆU LỰC.jpg"))
               const attStamImg = await attDoc.embedJpg(attStamImgBytes)
               for (const page of attDoc.getPages()) {

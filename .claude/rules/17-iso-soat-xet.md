@@ -10,6 +10,19 @@ Quy trinh soat xet dung khi mot tai lieu ISO da co hieu luc can duoc cap nhat, t
 
 Moi tai lieu co the ap dung mot hoac nhieu tieu chuan de phuc vu loc va truy xuat sau nay.
 
+## Cap nhat moi nhat (2026-06-03)
+
+- Validate trung ma:
+  - `Soan thao moi` van chan trung ma voi moi ban ghi khac trong cung `factory_id`.
+  - `Soat xet` duoc phep luu ma trung neu ma do trung voi dung tai lieu/ho so nguon dang duoc soat xet.
+  - Ngoai le tren khong mo rong cho bat ky tai lieu active khac nao.
+- File phu soat xet (`file_phieu_yeu_cau_thay_doi_*`, `file_de_nghi_soat_xet_*`):
+  - Chi buoc `soan_thao` moi hien/cho dat QR.
+  - Buoc `xem_xet` va `phe_duyet` khong hien lai QR draggable tren placement modal.
+- Tinh nang `Nhan ban chu ky` cua file phu phai nhan ban ca o ten nguoi ky:
+  - User phai thay duoc o ten ngay trong modal.
+  - O ten ban sao phai co drag/resize rieng va luu dung vi tri da dat.
+
 ---
 
 ## Tieu chuan ap dung
@@ -260,17 +273,17 @@ Khi action `phe_duyet` thanh cong va `chon_quy_trinh = 'Soát xét'`:
    - Neu doi ma: `ma_tai_lieu = ma_tai_lieu_moi`
    - Neu khong doi ma: giu `ma_tai_lieu`
 
-2. Tim tai lieu cu can huy:
-   - Dung `ma_tai_lieu_cu` neu co, fallback `ma_tai_lieu`.
+2. Tim cac tai lieu/ho so cu can huy:
+   - Thu thap toan bo ma lien quan cua dot soat xet:
+     - `ma_tai_lieu_cu` cua tai lieu/ho so dang duoc phe duyet
+     - `ma_tai_lieu_moi` neu co doi ma
+     - fallback `ma_tai_lieu` hien tai neu can
    - Dieu kien:
      - cung `factory_id`
-     - `ma_tai_lieu = ma_tai_lieu_cu`
      - `trang_thai = 'co_hieu_luc'`
-     - `id <> docId`
-   - Sap xep:
-     - `ngay_hieu_luc DESC NULLS LAST`
-     - `updated_at DESC`
-   - Chi lay 1 ban ghi gan nhat.
+     - `ma_tai_lieu IN (...)` voi tap ma thu thap duoc
+     - loai tru cac ban ghi dang duoc nang len `co_hieu_luc` trong dot hien tai
+   - Muc tieu la ha het cac ban active trung ma lien quan truoc khi nang ban moi.
 
 3. Cap nhat tai lieu cu:
    - `trang_thai = 'het_hieu_luc'`
@@ -282,7 +295,7 @@ Khi action `phe_duyet` thanh cong va `chon_quy_trinh = 'Soát xét'`:
    - API bo qua an toan neu file khong phai PDF.
    - PDF phai hien "Hết hiệu lực" mau do o footer va co dau hieu o header.
 
-Khong duoc huy hang loat tat ca tai lieu cung ma. Chi huy tai lieu co hieu luc gan nhat theo ngay hieu luc.
+Khong duoc de ton tai hon 1 ban `co_hieu_luc` cung ma sau khi phe duyet soat xet. Neu dot soat xet gom ca tai lieu cha va ho so con, quy tac ha hieu luc phai ap dung cho tat ca ma trung lien quan trong cung dot.
 
 ---
 

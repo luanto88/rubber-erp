@@ -1,0 +1,948 @@
+
+> rubber-erp@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.102:3000
+- Environments: .env.local
+✓ Ready in 325ms
+Creating turbopack project { dir: 'C:\\Users\\Software\\rubber-erp', testMode: true }
+
+ GET /login 200 in 283ms (next.js: 140ms, application-code: 142ms)
+ GET /login 200 in 43ms (next.js: 4ms, application-code: 39ms)
+ GET /login 200 in 32ms (next.js: 2ms, application-code: 29ms)
+ GET /login 200 in 33ms (next.js: 3ms, application-code: 30ms)
+ GET /login 200 in 35ms (next.js: 4ms, application-code: 31ms)
+ GET /login 200 in 31ms (next.js: 3ms, application-code: 29ms)
+ GET /dashboard 200 in 57ms (next.js: 38ms, application-code: 19ms)
+ GET /dashboard/iso/documents/new-doc 200 in 383ms (next.js: 313ms, application-code: 70ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 504ms (next.js: 66ms, application-code: 438ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 515ms (next.js: 87ms, application-code: 428ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 615ms (next.js: 93ms, application-code: 522ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 204ms (next.js: 2ms, application-code: 202ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 201ms (next.js: 1325µs, application-code: 200ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 217ms (next.js: 1655µs, application-code: 216ms)
+ GET /login 200 in 37ms (next.js: 4ms, application-code: 33ms)
+ GET /dashboard 200 in 18ms (next.js: 2ms, application-code: 15ms)
+ GET /dashboard/iso/documents/new-doc 200 in 38ms (next.js: 7ms, application-code: 31ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 311ms (next.js: 12ms, application-code: 299ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 386ms (next.js: 2ms, application-code: 383ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 403ms (next.js: 7ms, application-code: 395ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 192ms (next.js: 1744µs, application-code: 191ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 212ms (next.js: 1435µs, application-code: 210ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 197ms (next.js: 1368µs, application-code: 196ms)
+ GET /login 200 in 28ms (next.js: 1866µs, application-code: 26ms)
+ GET /login 200 in 29ms (next.js: 1850µs, application-code: 27ms)
+ GET /login 200 in 30ms (next.js: 3ms, application-code: 27ms)
+ GET /dashboard 200 in 16ms (next.js: 2ms, application-code: 13ms)
+ GET /dashboard/iso/documents/new-doc 200 in 35ms (next.js: 7ms, application-code: 29ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 301ms (next.js: 12ms, application-code: 289ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 303ms (next.js: 1907µs, application-code: 301ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 429ms (next.js: 7ms, application-code: 422ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 196ms (next.js: 1635µs, application-code: 194ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 199ms (next.js: 7ms, application-code: 192ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 205ms (next.js: 1339µs, application-code: 204ms)
+ GET /login 200 in 28ms (next.js: 1968µs, application-code: 26ms)
+ GET /dashboard 200 in 14ms (next.js: 1864µs, application-code: 12ms)
+ GET /dashboard/iso/documents/new-doc 200 in 34ms (next.js: 6ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 304ms (next.js: 1953µs, application-code: 302ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 330ms (next.js: 12ms, application-code: 318ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 416ms (next.js: 8ms, application-code: 409ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 203ms (next.js: 1616µs, application-code: 201ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 217ms (next.js: 1594µs, application-code: 216ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 224ms (next.js: 2ms, application-code: 222ms)
+ GET /login 200 in 27ms (next.js: 1941µs, application-code: 25ms)
+ GET /dashboard 200 in 16ms (next.js: 1948µs, application-code: 14ms)
+ GET /dashboard/iso/documents/new-doc 200 in 34ms (next.js: 6ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 338ms (next.js: 11ms, application-code: 326ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 358ms (next.js: 2ms, application-code: 356ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 438ms (next.js: 8ms, application-code: 431ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 203ms (next.js: 1275µs, application-code: 202ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 207ms (next.js: 1156µs, application-code: 206ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 211ms (next.js: 1961µs, application-code: 209ms)
+ GET /dashboard/iso/documents/7a33c2db-20d0-4f01-b92a-fa002584e171 200 in 21ms (next.js: 6ms, application-code: 15ms)
+ GET /dashboard/iso/documents/new-doc 200 in 29ms (next.js: 2ms, application-code: 27ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 207ms (next.js: 2ms, application-code: 205ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 211ms (next.js: 11ms, application-code: 200ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 216ms (next.js: 8ms, application-code: 207ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 190ms (next.js: 2ms, application-code: 188ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 186ms (next.js: 1283µs, application-code: 184ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 192ms (next.js: 1211µs, application-code: 191ms)
+ GET /dashboard/iso/documents/7c01261f-1823-4e73-b908-25be5c7f6942 200 in 20ms (next.js: 6ms, application-code: 15ms)
+ GET /dashboard/iso/documents/new-doc 200 in 29ms (next.js: 2ms, application-code: 26ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 197ms (next.js: 1812µs, application-code: 195ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 206ms (next.js: 5ms, application-code: 201ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 208ms (next.js: 8ms, application-code: 199ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 199ms (next.js: 1273µs, application-code: 198ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 196ms (next.js: 1395µs, application-code: 195ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 194ms (next.js: 1158µs, application-code: 193ms)
+ GET /dashboard/iso/documents/8ea72d2e-aa53-4747-87cb-57ee80bfc6b7 200 in 27ms (next.js: 8ms, application-code: 20ms)
+ GET /dashboard/iso/documents/new-doc 200 in 30ms (next.js: 2ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 190ms (next.js: 1849µs, application-code: 189ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 201ms (next.js: 7ms, application-code: 193ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 203ms (next.js: 5ms, application-code: 198ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 204ms (next.js: 4ms, application-code: 200ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 195ms (next.js: 1103µs, application-code: 194ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 213ms (next.js: 1022µs, application-code: 212ms)
+ GET /dashboard/iso 200 in 488ms (next.js: 223ms, application-code: 266ms)
+ GET /dashboard/iso/documents/new 200 in 97ms (next.js: 62ms, application-code: 35ms)
+ GET /dashboard/iso/documents/new-doc 200 in 147ms (next.js: 105ms, application-code: 42ms)
+ GET /dashboard/iso/documents/new-doc 200 in 43ms (next.js: 18ms, application-code: 25ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 464ms (next.js: 116ms, application-code: 348ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 533ms (next.js: 95ms, application-code: 438ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 209ms (next.js: 3ms, application-code: 206ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 708ms (next.js: 125ms, application-code: 584ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 220ms (next.js: 4ms, application-code: 215ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 229ms (next.js: 3ms, application-code: 227ms)
+ GET /login 200 in 211ms (next.js: 30ms, application-code: 180ms)
+ GET /dashboard 200 in 53ms (next.js: 24ms, application-code: 30ms)
+ GET /dashboard/iso 200 in 34ms (next.js: 6ms, application-code: 28ms)
+ GET /dashboard/iso/documents/new 200 in 41ms (next.js: 4ms, application-code: 37ms)
+ GET /dashboard/iso/documents/new-doc 200 in 49ms (next.js: 17ms, application-code: 32ms)
+ GET /dashboard/iso/documents/new-doc 200 in 33ms (next.js: 3ms, application-code: 29ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 320ms (next.js: 21ms, application-code: 299ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 398ms (next.js: 14ms, application-code: 384ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 447ms (next.js: 3ms, application-code: 443ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 221ms (next.js: 8ms, application-code: 213ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 207ms (next.js: 2ms, application-code: 204ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 208ms (next.js: 2ms, application-code: 206ms)
+ GET /dashboard/iso/documents/11980053-1238-4f30-a61f-fae04685be0c 200 in 50ms (next.js: 16ms, application-code: 34ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 309ms (next.js: 1597µs, application-code: 307ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 337ms (next.js: 1867µs, application-code: 335ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 344ms (next.js: 5ms, application-code: 339ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 231ms (next.js: 9ms, application-code: 222ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 212ms (next.js: 3ms, application-code: 209ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 224ms (next.js: 3ms, application-code: 221ms)
+ POST /api/sign/verify 200 in 647ms (next.js: 87ms, application-code: 559ms)
+[generate-pdf] called - docId: 11980053-1238-4f30-a61f-fae04685be0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_PHK-QT-22_Bo_test_soan_thao_main_signed_1780471974595.pdf
+[generate-pdf] DB update OK - docId: 11980053-1238-4f30-a61f-fae04685be0c
+ POST /api/sign/generate-pdf 200 in 4.7s (next.js: 270ms, application-code: 4.4s)
+[generate-pdf] called - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_main_signed_1780471977002.pdf
+[generate-pdf] DB update OK - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590
+ POST /api/sign/generate-pdf 200 in 2.1s (next.js: 3ms, application-code: 2.1s)
+[generate-pdf] called - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_main_signed_1780471979183.pdf
+[generate-pdf] DB update OK - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c
+ POST /api/sign/generate-pdf 200 in 2.1s (next.js: 2ms, application-code: 2.1s)
+ POST /api/iso/notify 200 in 1496ms (next.js: 73ms, application-code: 1422ms)
+ GET /login 200 in 69ms (next.js: 4ms, application-code: 65ms)
+ GET /dashboard 200 in 41ms (next.js: 4ms, application-code: 37ms)
+ GET /dashboard/iso 200 in 46ms (next.js: 5ms, application-code: 41ms)
+ GET /dashboard/iso/my-tasks 200 in 120ms (next.js: 80ms, application-code: 41ms)
+ GET /dashboard/iso/documents/11980053-1238-4f30-a61f-fae04685be0c 200 in 43ms (next.js: 18ms, application-code: 26ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 353ms (next.js: 5ms, application-code: 348ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 369ms (next.js: 20ms, application-code: 349ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 374ms (next.js: 30ms, application-code: 344ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 203ms (next.js: 7ms, application-code: 196ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 227ms (next.js: 13ms, application-code: 214ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 229ms (next.js: 4ms, application-code: 225ms)
+ POST /api/sign/verify 401 in 891ms (next.js: 4ms, application-code: 887ms)
+ POST /api/sign/verify 200 in 457ms (next.js: 4ms, application-code: 453ms)
+[generate-pdf] called - docId: 11980053-1238-4f30-a61f-fae04685be0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_PHK-QT-22_Bo_test_soan_thao_main_signed_1780472208888.pdf
+[generate-pdf] DB update OK - docId: 11980053-1238-4f30-a61f-fae04685be0c
+ POST /api/sign/generate-pdf 200 in 3.5s (next.js: 4ms, application-code: 3.5s)
+[generate-pdf] called - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_main_signed_1780472211256.pdf
+[generate-pdf] DB update OK - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 3ms, application-code: 2.2s)
+[generate-pdf] called - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_main_signed_1780472213431.pdf
+[generate-pdf] DB update OK - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c
+ POST /api/sign/generate-pdf 200 in 2.1s (next.js: 4ms, application-code: 2.1s)
+ POST /api/iso/notify 200 in 1349ms (next.js: 3ms, application-code: 1347ms)
+ GET /login 200 in 61ms (next.js: 4ms, application-code: 57ms)
+ GET /dashboard 200 in 63ms (next.js: 4ms, application-code: 59ms)
+ GET /dashboard/iso 200 in 26ms (next.js: 5ms, application-code: 21ms)
+ GET /dashboard/iso/my-tasks 200 in 26ms (next.js: 5ms, application-code: 21ms)
+ GET /dashboard/iso 200 in 28ms (next.js: 5ms, application-code: 23ms)
+ GET /dashboard/iso/documents/a3a6c0db-d615-4200-a815-2151ab5cd72c 200 in 33ms (next.js: 10ms, application-code: 23ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 339ms (next.js: 4ms, application-code: 335ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 343ms (next.js: 24ms, application-code: 318ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 378ms (next.js: 17ms, application-code: 361ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 223ms (next.js: 10ms, application-code: 214ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 226ms (next.js: 18ms, application-code: 208ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 237ms (next.js: 3ms, application-code: 234ms)
+ GET /dashboard/iso 200 in 27ms (next.js: 5ms, application-code: 22ms)
+ GET /login 200 in 72ms (next.js: 5ms, application-code: 67ms)
+ GET /dashboard 200 in 27ms (next.js: 3ms, application-code: 24ms)
+ GET /dashboard/iso 200 in 30ms (next.js: 6ms, application-code: 24ms)
+ GET /dashboard/iso/my-tasks 200 in 35ms (next.js: 5ms, application-code: 30ms)
+ GET /dashboard/iso/documents/11980053-1238-4f30-a61f-fae04685be0c 200 in 42ms (next.js: 9ms, application-code: 33ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 1157ms (next.js: 4ms, application-code: 1152ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 1164ms (next.js: 19ms, application-code: 1146ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 1323ms (next.js: 17ms, application-code: 1307ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 198ms (next.js: 1444µs, application-code: 196ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 218ms (next.js: 1262µs, application-code: 217ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 218ms (next.js: 2ms, application-code: 216ms)
+ POST /api/sign/verify 200 in 521ms (next.js: 4ms, application-code: 517ms)
+[generate-pdf] called - docId: 11980053-1238-4f30-a61f-fae04685be0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780471740396_PHK-QT-22_Bo_test_soan_thao.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_PHK-QT-22_Bo_test_soan_thao_main_signed_1780472367291.pdf
+[generate-pdf] DB update OK - docId: 11980053-1238-4f30-a61f-fae04685be0c
+ POST /api/sign/generate-pdf 200 in 4.0s (next.js: 6ms, application-code: 4.0s)
+[generate-pdf] called - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471783711_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_main_signed_1780472369708.pdf
+[generate-pdf] DB update OK - docId: 91bf5509-61e7-4f7c-8f88-f0e72503c590
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 4ms, application-code: 2.2s)
+[generate-pdf] called - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780471808526_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_main_signed_1780472371853.pdf
+[generate-pdf] DB update OK - docId: a3a6c0db-d615-4200-a815-2151ab5cd72c
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 6ms, application-code: 2.2s)
+ POST /api/iso/notify 200 in 4.5s (next.js: 3ms, application-code: 4.5s)
+ GET /dashboard/iso/my-tasks 200 in 28ms (next.js: 5ms, application-code: 23ms)
+ GET /dashboard/iso/documents/c5facb77-f4e5-4d07-a969-51e70c2a3606 200 in 33ms (next.js: 10ms, application-code: 23ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 354ms (next.js: 27ms, application-code: 328ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 360ms (next.js: 12ms, application-code: 348ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 455ms (next.js: 4ms, application-code: 451ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 207ms (next.js: 1894µs, application-code: 206ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 218ms (next.js: 3ms, application-code: 215ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 203ms (next.js: 3ms, application-code: 200ms)
+ GET /dashboard/iso 200 in 30ms (next.js: 3ms, application-code: 27ms)
+ GET /dashboard/iso/documents/new 200 in 30ms (next.js: 5ms, application-code: 26ms)
+ GET /dashboard/iso/documents/new-doc 200 in 50ms (next.js: 16ms, application-code: 33ms)
+ GET /dashboard/iso/documents/new-doc 200 in 27ms (next.js: 3ms, application-code: 23ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 327ms (next.js: 4ms, application-code: 323ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 351ms (next.js: 16ms, application-code: 335ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 369ms (next.js: 23ms, application-code: 346ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 220ms (next.js: 1504µs, application-code: 219ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 210ms (next.js: 1497µs, application-code: 209ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 244ms (next.js: 4ms, application-code: 240ms)
+✓ Compiled in 351ms
+ GET /dashboard/iso/documents/new-doc 200 in 163ms (next.js: 104ms, application-code: 59ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 415ms (next.js: 4ms, application-code: 410ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 507ms (next.js: 12ms, application-code: 496ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 735ms (next.js: 97ms, application-code: 639ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 54ms (next.js: 14ms, application-code: 39ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 341ms (next.js: 4ms, application-code: 337ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 367ms (next.js: 18ms, application-code: 349ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 421ms (next.js: 10ms, application-code: 410ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 231ms (next.js: 4ms, application-code: 227ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 229ms (next.js: 5ms, application-code: 224ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 306ms (next.js: 3ms, application-code: 303ms)
+ POST /api/sign/verify 401 in 611ms (next.js: 45ms, application-code: 566ms)
+ POST /api/sign/verify 200 in 698ms (next.js: 3ms, application-code: 695ms)
+ POST /api/sign/generate-office 200 in 2.7s (next.js: 229ms, application-code: 2.5s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_main_signed_1780474375509.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 3.0s (next.js: 246ms, application-code: 2.7s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472715010_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472715010_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472715010_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf
+[generate-pdf] downloaded file_goc bytes: 166589
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_change_request_signed_1780474377524.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 4ms, application-code: 2.2s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472718619_De_nghi_soat_xet_PHK-QT22.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472718619_De_nghi_soat_xet_PHK-QT22.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780472718619_De_nghi_soat_xet_PHK-QT22.pdf
+[generate-pdf] downloaded file_goc bytes: 105205
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_review_request_signed_1780474379650.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 1899ms (next.js: 4ms, application-code: 1895ms)
+[generate-pdf] called - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_00_01_main_signed_1780474381551.pdf
+[generate-pdf] DB update OK - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21
+ POST /api/sign/generate-pdf 200 in 1921ms (next.js: 4ms, application-code: 1916ms)
+[generate-pdf] called - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_00_01_main_signed_1780474383548.pdf
+[generate-pdf] DB update OK - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c
+ POST /api/sign/generate-pdf 200 in 1971ms (next.js: 3ms, application-code: 1968ms)
+[generate-pdf] called - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F03_Phu_luc_3_test_00_01_main_signed_1780474385358.pdf
+[generate-pdf] DB update OK - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb
+ POST /api/sign/generate-pdf 200 in 1860ms (next.js: 3ms, application-code: 1857ms)
+[generate-pdf] called - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F04_Phu_luc_4_test_00_01_main_signed_1780474387148.pdf
+[generate-pdf] DB update OK - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47
+ POST /api/sign/generate-pdf 200 in 1730ms (next.js: 4ms, application-code: 1726ms)
+ POST /api/iso/notify 200 in 1474ms (next.js: 73ms, application-code: 1402ms)
+ GET /login 200 in 266ms (next.js: 26ms, application-code: 240ms)
+ GET /dashboard 200 in 93ms (next.js: 24ms, application-code: 69ms)
+ GET /dashboard/iso 200 in 41ms (next.js: 18ms, application-code: 23ms)
+ GET /dashboard/iso/my-tasks 200 in 44ms (next.js: 17ms, application-code: 27ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 44ms (next.js: 16ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 345ms (next.js: 10ms, application-code: 335ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 529ms (next.js: 18ms, application-code: 510ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 214ms (next.js: 3ms, application-code: 211ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 565ms (next.js: 25ms, application-code: 540ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 228ms (next.js: 5ms, application-code: 223ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 201ms (next.js: 3ms, application-code: 198ms)
+ POST /api/sign/verify 200 in 562ms (next.js: 3ms, application-code: 559ms)
+ GET / 200 in 226ms (next.js: 81ms, application-code: 144ms)
+ GET /login 200 in 29ms (next.js: 5ms, application-code: 24ms)
+ GET /dashboard 200 in 38ms (next.js: 4ms, application-code: 34ms)
+ GET /dashboard/iso 200 in 29ms (next.js: 5ms, application-code: 24ms)
+ GET /dashboard/iso/my-tasks 200 in 28ms (next.js: 5ms, application-code: 23ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 54ms (next.js: 20ms, application-code: 34ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 341ms (next.js: 4ms, application-code: 337ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 398ms (next.js: 15ms, application-code: 383ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 423ms (next.js: 22ms, application-code: 402ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 213ms (next.js: 1491µs, application-code: 212ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 202ms (next.js: 3ms, application-code: 199ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 360ms (next.js: 4ms, application-code: 356ms)
+ POST /api/sign/generate-office 401 in 13ms (next.js: 4ms, application-code: 9ms)
+ POST /api/sign/verify 200 in 1339ms (next.js: 2ms, application-code: 1337ms)
+ POST /api/sign/generate-office 200 in 2.1s (next.js: 4ms, application-code: 2.1s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780472918929_PHK-QT-22_Bo_test_soan_thao_0001.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_main_signed_1780475613013.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 3.3s (next.js: 4ms, application-code: 3.3s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_change_request_signed_1780474377524.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_change_request_signed_1780474377524.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_change_request_signed_1780474377524.pdf
+[generate-pdf] downloaded file_goc bytes: 940792
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_change_request_signed_1780475615697.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 2.7s (next.js: 4ms, application-code: 2.7s)
+[generate-pdf] called - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_review_request_signed_1780474379650.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_review_request_signed_1780474379650.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_review_request_signed_1780474379650.pdf
+[generate-pdf] downloaded file_goc bytes: 882482
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22_Bo_test_soan_thao_review_request_signed_1780475618520.pdf
+[generate-pdf] DB update OK - docId: 083e6349-2533-4e49-8784-4d5c5693c2d0
+ POST /api/sign/generate-pdf 200 in 2.5s (next.js: 4ms, application-code: 2.5s)
+[generate-pdf] called - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_00_01_main_signed_1780475620753.pdf
+[generate-pdf] DB update OK - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21
+ POST /api/sign/generate-pdf 200 in 2.3s (next.js: 4ms, application-code: 2.3s)
+[generate-pdf] called - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_00_01_main_signed_1780475623098.pdf
+[generate-pdf] DB update OK - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c
+ POST /api/sign/generate-pdf 200 in 2.4s (next.js: 4ms, application-code: 2.4s)
+[generate-pdf] called - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F03_Phu_luc_3_test_00_01_main_signed_1780475625443.pdf
+[generate-pdf] DB update OK - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb
+ POST /api/sign/generate-pdf 200 in 2.3s (next.js: 4ms, application-code: 2.3s)
+[generate-pdf] called - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F04_Phu_luc_4_test_00_01_main_signed_1780475627738.pdf
+[generate-pdf] DB update OK - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47
+ POST /api/sign/generate-pdf 200 in 2.1s (next.js: 4ms, application-code: 2.1s)
+ POST /api/iso/notify 200 in 1441ms (next.js: 3ms, application-code: 1439ms)
+ GET /login 200 in 83ms (next.js: 7ms, application-code: 76ms)
+ GET /dashboard 200 in 46ms (next.js: 7ms, application-code: 39ms)
+ GET /dashboard/iso 200 in 24ms (next.js: 3ms, application-code: 21ms)
+ GET /dashboard/iso/my-tasks 200 in 27ms (next.js: 5ms, application-code: 22ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 47ms (next.js: 12ms, application-code: 35ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 339ms (next.js: 6ms, application-code: 333ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 364ms (next.js: 23ms, application-code: 341ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 433ms (next.js: 16ms, application-code: 416ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 233ms (next.js: 4ms, application-code: 229ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 217ms (next.js: 2ms, application-code: 215ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 209ms (next.js: 3ms, application-code: 206ms)
+ POST /api/sign/verify 200 in 566ms (next.js: 4ms, application-code: 562ms)
+ POST /api/sign/generate-office 200 in 2.3s (next.js: 4ms, application-code: 2.3s)
+ POST /api/sign/verify 200 in 772ms (next.js: 4ms, application-code: 768ms)
+ POST /api/sign/generate-office 200 in 1484ms (next.js: 3ms, application-code: 1481ms)
+✓ Compiled in 293ms
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 83ms (next.js: 51ms, application-code: 33ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 366ms (next.js: 46ms, application-code: 320ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 377ms (next.js: 10ms, application-code: 367ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 388ms (next.js: 6ms, application-code: 382ms)
+✓ Compiled in 80ms
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 77ms (next.js: 50ms, application-code: 27ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 285ms (next.js: 6ms, application-code: 279ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 289ms (next.js: 1797µs, application-code: 288ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 354ms (next.js: 48ms, application-code: 306ms)
+✓ Compiled in 114ms
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 112ms (next.js: 76ms, application-code: 36ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 335ms (next.js: 1356µs, application-code: 334ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 361ms (next.js: 1297µs, application-code: 360ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 503ms (next.js: 48ms, application-code: 455ms)
+✓ Compiled in 118ms
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 79ms (next.js: 51ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 301ms (next.js: 6ms, application-code: 295ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 332ms (next.js: 1586µs, application-code: 330ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 516ms (next.js: 45ms, application-code: 471ms)
+ GET /dashboard/iso/my-tasks 200 in 54ms (next.js: 24ms, application-code: 29ms)
+ GET /dashboard/iso/documents/48c918c9-933e-4d40-8a7c-adf3d9e98dcc 200 in 46ms (next.js: 16ms, application-code: 30ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 326ms (next.js: 26ms, application-code: 300ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 429ms (next.js: 4ms, application-code: 425ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 432ms (next.js: 19ms, application-code: 413ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 319ms (next.js: 1652µs, application-code: 317ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 218ms (next.js: 4ms, application-code: 214ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 245ms (next.js: 16ms, application-code: 229ms)
+ POST /api/sign/verify 200 in 610ms (next.js: 47ms, application-code: 563ms)
+ POST /api/sign/generate-office 200 in 2.1s (next.js: 177ms, application-code: 1878ms)
+[generate-pdf] called - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472542444_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F01_Phu_luc_1_test_00_01_main_signed_1780476621214.pdf
+[generate-pdf] DB update OK - docId: 25e4d33f-7bd7-4192-b440-bd913020ce21
+ POST /api/sign/generate-pdf 200 in 3.6s (next.js: 220ms, application-code: 3.3s)
+[generate-pdf] called - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472577646_PHK-QT-22-F02_Phu_luc_2_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F02_Phu_luc_2_test_00_01_main_signed_1780476623472.pdf
+[generate-pdf] DB update OK - docId: d1419291-2b31-46b7-9f5a-5b5449675b0c
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 4ms, application-code: 2.2s)
+[generate-pdf] called - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472590595_PHK-QT-22-F03_Phu_luc_3_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F03_Phu_luc_3_test_00_01_main_signed_1780476625623.pdf
+[generate-pdf] DB update OK - docId: 43643e0e-e25b-4554-8ece-7215a2268fcb
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 2ms, application-code: 2.2s)
+[generate-pdf] called - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780472678054_PHK-QT-22-F04_Phu_luc_4_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHK-QT22-F04_Phu_luc_4_test_00_01_main_signed_1780476627874.pdf
+[generate-pdf] DB update OK - docId: 0ad48d34-d3ec-4912-a67f-a590f77f5b47
+ POST /api/sign/generate-pdf 200 in 2.3s (next.js: 5ms, application-code: 2.3s)
+[generate-pdf] called - docId: 48c918c9-933e-4d40-8a7c-adf3d9e98dcc docType: iso hasPlacement: false
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/office-signed/PHK-QT22-F05_Phu_luc_5_test_00_01_1780476616745.docx
+[generate-pdf] non-PDF file, ext: docx - skipping
+ POST /api/sign/generate-pdf 200 in 1402ms (next.js: 6ms, application-code: 1396ms)
+ POST /api/sign/convert-office 200 in 7.0s (next.js: 56ms, application-code: 6.9s)
+ POST /api/iso/notify 200 in 1756ms (next.js: 59ms, application-code: 1697ms)
+ POST /api/sign/restamp-pdf 200 in 4.5s (next.js: 109ms, application-code: 4.4s)
+ GET /dashboard/iso 200 in 55ms (next.js: 20ms, application-code: 35ms)
+ GET /dashboard/iso/documents/91bf5509-61e7-4f7c-8f88-f0e72503c590 200 in 53ms (next.js: 18ms, application-code: 35ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 327ms (next.js: 20ms, application-code: 307ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 357ms (next.js: 13ms, application-code: 344ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 485ms (next.js: 5ms, application-code: 481ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 220ms (next.js: 6ms, application-code: 214ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 217ms (next.js: 3ms, application-code: 214ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 227ms (next.js: 3ms, application-code: 224ms)
+ GET /dashboard/iso 200 in 30ms (next.js: 4ms, application-code: 25ms)
+ GET /dashboard/iso/documents 200 in 112ms (next.js: 83ms, application-code: 28ms)
+ GET /dashboard/iso/documents/25e4d33f-7bd7-4192-b440-bd913020ce21 200 in 38ms (next.js: 10ms, application-code: 29ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 333ms (next.js: 5ms, application-code: 328ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 350ms (next.js: 13ms, application-code: 336ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 451ms (next.js: 24ms, application-code: 428ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 206ms (next.js: 1999µs, application-code: 204ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 263ms (next.js: 3ms, application-code: 259ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 232ms (next.js: 3ms, application-code: 229ms)
+ GET /dashboard/iso/documents 200 in 28ms (next.js: 4ms, application-code: 24ms)
+ GET /dashboard/iso/documents/11980053-1238-4f30-a61f-fae04685be0c 200 in 45ms (next.js: 13ms, application-code: 32ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 414ms (next.js: 25ms, application-code: 390ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 419ms (next.js: 6ms, application-code: 414ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 511ms (next.js: 32ms, application-code: 479ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 236ms (next.js: 7ms, application-code: 229ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 245ms (next.js: 17ms, application-code: 228ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 234ms (next.js: 3ms, application-code: 230ms)
+ GET /dashboard/iso 200 in 34ms (next.js: 8ms, application-code: 27ms)
+ GET /dashboard/iso/documents/11980053-1238-4f30-a61f-fae04685be0c 200 in 49ms (next.js: 17ms, application-code: 31ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 346ms (next.js: 26ms, application-code: 320ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 365ms (next.js: 17ms, application-code: 348ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 451ms (next.js: 6ms, application-code: 445ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 234ms (next.js: 3ms, application-code: 231ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 224ms (next.js: 2ms, application-code: 222ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 218ms (next.js: 4ms, application-code: 214ms)
+ GET /dashboard/iso/documents 200 in 36ms (next.js: 5ms, application-code: 31ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 50ms (next.js: 15ms, application-code: 34ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 365ms (next.js: 4ms, application-code: 361ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 412ms (next.js: 14ms, application-code: 399ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 440ms (next.js: 22ms, application-code: 418ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 229ms (next.js: 8ms, application-code: 221ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 201ms (next.js: 3ms, application-code: 198ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 215ms (next.js: 2ms, application-code: 213ms)
+ GET /dashboard/iso/documents 200 in 34ms (next.js: 5ms, application-code: 29ms)
+ GET /dashboard/iso/documents/new-doc 200 in 36ms (next.js: 10ms, application-code: 26ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 368ms (next.js: 15ms, application-code: 353ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 376ms (next.js: 25ms, application-code: 351ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 458ms (next.js: 6ms, application-code: 452ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 211ms (next.js: 5ms, application-code: 207ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 208ms (next.js: 5ms, application-code: 203ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 222ms (next.js: 5ms, application-code: 217ms)
+ GET /dashboard/iso 200 in 30ms (next.js: 4ms, application-code: 26ms)
+ GET /dashboard/iso/documents/083e6349-2533-4e49-8784-4d5c5693c2d0 200 in 45ms (next.js: 14ms, application-code: 31ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 335ms (next.js: 26ms, application-code: 309ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 341ms (next.js: 5ms, application-code: 336ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 513ms (next.js: 17ms, application-code: 496ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 214ms (next.js: 10ms, application-code: 204ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 212ms (next.js: 3ms, application-code: 209ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 227ms (next.js: 4ms, application-code: 223ms)
+ GET /dashboard/iso 200 in 32ms (next.js: 6ms, application-code: 26ms)
+ GET /dashboard/iso/documents/new 200 in 109ms (next.js: 35ms, application-code: 74ms)
+ GET /dashboard/iso/documents/new-doc 200 in 46ms (next.js: 13ms, application-code: 33ms)
+ GET /dashboard/iso/documents/new-doc 200 in 99ms (next.js: 6ms, application-code: 93ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 468ms (next.js: 6ms, application-code: 462ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 477ms (next.js: 21ms, application-code: 456ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 492ms (next.js: 34ms, application-code: 458ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 210ms (next.js: 1478µs, application-code: 209ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 250ms (next.js: 13ms, application-code: 237ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 256ms (next.js: 10ms, application-code: 246ms)
+✓ Compiled in 468ms
+ GET /dashboard/iso/documents/new-doc 200 in 180ms (next.js: 103ms, application-code: 77ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 540ms (next.js: 124ms, application-code: 416ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 432ms (next.js: 16ms, application-code: 416ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 560ms (next.js: 108ms, application-code: 452ms)
+✓ Compiled in 204ms
+ GET /dashboard/iso/documents/new-doc 200 in 161ms (next.js: 102ms, application-code: 59ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 427ms (next.js: 117ms, application-code: 310ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 441ms (next.js: 109ms, application-code: 332ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 458ms (next.js: 93ms, application-code: 365ms)
+✓ Compiled in 123ms
+ GET /dashboard/iso/documents/new-doc 200 in 87ms (next.js: 52ms, application-code: 34ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 337ms (next.js: 45ms, application-code: 292ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 372ms (next.js: 1478µs, application-code: 371ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 386ms (next.js: 2ms, application-code: 384ms)
+✓ Compiled in 92ms
+ GET /dashboard/iso/documents/new-doc 200 in 80ms (next.js: 51ms, application-code: 28ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 326ms (next.js: 6ms, application-code: 320ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 416ms (next.js: 55ms, application-code: 360ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 431ms (next.js: 2ms, application-code: 429ms)
+✓ Compiled in 131ms
+ GET /dashboard/iso/documents/new-doc 200 in 83ms (next.js: 53ms, application-code: 30ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 287ms (next.js: 1810µs, application-code: 285ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 374ms (next.js: 52ms, application-code: 322ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 397ms (next.js: 7ms, application-code: 390ms)
+ GET /dashboard/iso/documents/new-doc 200 in 78ms (next.js: 42ms, application-code: 36ms)
+ GET /dashboard/iso/documents/new-doc 200 in 73ms (next.js: 46ms, application-code: 27ms)
+ GET /dashboard/iso/documents/new-doc 200 in 80ms (next.js: 51ms, application-code: 29ms)
+ GET /dashboard/iso/documents/new-doc 200 in 73ms (next.js: 47ms, application-code: 25ms)
+ GET /dashboard/iso/documents/new-doc 200 in 72ms (next.js: 47ms, application-code: 25ms)
+ GET /dashboard/iso 200 in 57ms (next.js: 28ms, application-code: 29ms)
+ GET /dashboard/iso/documents/new 200 in 42ms (next.js: 17ms, application-code: 25ms)
+ GET /dashboard/iso/documents/new-doc 200 in 42ms (next.js: 13ms, application-code: 29ms)
+ GET /dashboard/iso/documents/new-doc 200 in 31ms (next.js: 4ms, application-code: 27ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 319ms (next.js: 5ms, application-code: 315ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 325ms (next.js: 11ms, application-code: 313ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 520ms (next.js: 94ms, application-code: 426ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 214ms (next.js: 5ms, application-code: 209ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 238ms (next.js: 4ms, application-code: 234ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 205ms (next.js: 4ms, application-code: 201ms)
+✓ Compiled in 295ms
+ GET /dashboard/iso/documents/new-doc 200 in 158ms (next.js: 101ms, application-code: 57ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 382ms (next.js: 14ms, application-code: 368ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 496ms (next.js: 76ms, application-code: 420ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 497ms (next.js: 5ms, application-code: 492ms)
+✓ Compiled in 284ms
+ GET /dashboard/iso/documents/new-doc 200 in 336ms (next.js: 158ms, application-code: 178ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 401ms (next.js: 83ms, application-code: 318ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 483ms (next.js: 109ms, application-code: 374ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 491ms (next.js: 101ms, application-code: 389ms)
+✓ Compiled in 358ms
+ GET /dashboard/iso/documents/new-doc 200 in 295ms (next.js: 92ms, application-code: 203ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 415ms (next.js: 96ms, application-code: 319ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 433ms (next.js: 79ms, application-code: 354ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 375ms (next.js: 16ms, application-code: 359ms)
+✓ Compiled in 248ms
+ GET /dashboard/iso/documents/new-doc 200 in 367ms (next.js: 101ms, application-code: 266ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 446ms (next.js: 153ms, application-code: 293ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 456ms (next.js: 158ms, application-code: 298ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 577ms (next.js: 134ms, application-code: 443ms)
+✓ Compiled in 119ms
+ GET /dashboard/iso/documents/new-doc 200 in 82ms (next.js: 52ms, application-code: 30ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 414ms (next.js: 58ms, application-code: 356ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 350ms (next.js: 8ms, application-code: 342ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 353ms (next.js: 1617µs, application-code: 352ms)
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 42ms (next.js: 14ms, application-code: 29ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 325ms (next.js: 4ms, application-code: 321ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 346ms (next.js: 14ms, application-code: 332ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 348ms (next.js: 20ms, application-code: 327ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 219ms (next.js: 4ms, application-code: 215ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 200ms (next.js: 4ms, application-code: 196ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 228ms (next.js: 11ms, application-code: 217ms)
+ POST /api/sign/verify 401 in 589ms (next.js: 65ms, application-code: 524ms)
+ POST /api/sign/verify 200 in 454ms (next.js: 3ms, application-code: 451ms)
+ POST /api/sign/generate-office 500 in 2.2s (next.js: 215ms, application-code: 1949ms)
+ POST /api/sign/verify 401 in 627ms (next.js: 4ms, application-code: 623ms)
+ POST /api/sign/verify 200 in 614ms (next.js: 3ms, application-code: 611ms)
+ POST /api/sign/generate-office 500 in 1724ms (next.js: 5ms, application-code: 1719ms)
+ POST /api/sign/verify 200 in 1089ms (next.js: 6ms, application-code: 1084ms)
+ POST /api/sign/generate-office 500 in 1392ms (next.js: 4ms, application-code: 1388ms)
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 84ms (next.js: 51ms, application-code: 33ms)
+✓ Compiled in 134ms
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 81ms (next.js: 52ms, application-code: 29ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 316ms (next.js: 5ms, application-code: 310ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 392ms (next.js: 61ms, application-code: 331ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 321ms (next.js: 1407µs, application-code: 319ms)
+ POST /api/sign/verify 200 in 1517ms (next.js: 45ms, application-code: 1472ms)
+ POST /api/sign/generate-office 500 in 2.0s (next.js: 252ms, application-code: 1796ms)
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 151ms (next.js: 97ms, application-code: 53ms)
+✓ Compiled in 270ms
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 159ms (next.js: 100ms, application-code: 58ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 401ms (next.js: 87ms, application-code: 315ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 469ms (next.js: 113ms, application-code: 355ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 456ms (next.js: 17ms, application-code: 439ms)
+✓ Compiled in 1087ms
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 157ms (next.js: 94ms, application-code: 63ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 1112ms (next.js: 96ms, application-code: 1016ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 1119ms (next.js: 80ms, application-code: 1039ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 1120ms (next.js: 103ms, application-code: 1017ms)
+ POST /api/sign/verify 200 in 694ms (next.js: 52ms, application-code: 642ms)
+ POST /api/sign/generate-office 200 in 4.4s (next.js: 290ms, application-code: 4.1s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_main_signed_1780483252613.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 2.6s (next.js: 275ms, application-code: 2.3s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480793738_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480793738_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480793738_Phieu_yeu_cau_thay_doi_PHK-QT22.pdf
+[generate-pdf] downloaded file_goc bytes: 166589
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483254560.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 1960ms (next.js: 5ms, application-code: 1955ms)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480798714_De_nghi_soat_xet_PHK-QT22.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480798714_De_nghi_soat_xet_PHK-QT22.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/review-attachments/1780480798714_De_nghi_soat_xet_PHK-QT22.pdf
+[generate-pdf] downloaded file_goc bytes: 105205
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483256476.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 1976ms (next.js: 5ms, application-code: 1971ms)
+[generate-pdf] called - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22-F06_PHK-QT-22-F06_Phu_luc_6_test_main_signed_1780483258567.pdf
+[generate-pdf] DB update OK - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673
+ POST /api/sign/generate-pdf 200 in 2.0s (next.js: 3ms, application-code: 2.0s)
+[generate-pdf] called - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22F01_Phu_luc_1_test_00_02_main_signed_1780483260616.pdf
+[generate-pdf] DB update OK - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 3ms, application-code: 2.2s)
+ POST /api/iso/notify 200 in 1565ms (next.js: 79ms, application-code: 1486ms)
+ GET /login 200 in 327ms (next.js: 20ms, application-code: 306ms)
+ GET /dashboard 200 in 61ms (next.js: 24ms, application-code: 37ms)
+ GET /dashboard/iso 200 in 44ms (next.js: 20ms, application-code: 24ms)
+ GET /dashboard/iso/my-tasks 200 in 54ms (next.js: 29ms, application-code: 25ms)
+ GET /dashboard/iso/documents/c5facb77-f4e5-4d07-a969-51e70c2a3606 200 in 50ms (next.js: 18ms, application-code: 32ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 352ms (next.js: 25ms, application-code: 326ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 357ms (next.js: 6ms, application-code: 351ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 380ms (next.js: 17ms, application-code: 364ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 213ms (next.js: 5ms, application-code: 208ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 211ms (next.js: 3ms, application-code: 208ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 300ms (next.js: 3ms, application-code: 297ms)
+ GET /login 200 in 53ms (next.js: 4ms, application-code: 49ms)
+ GET /dashboard 200 in 30ms (next.js: 4ms, application-code: 26ms)
+ GET /dashboard/iso 200 in 36ms (next.js: 4ms, application-code: 32ms)
+ GET /dashboard/iso/my-tasks 200 in 34ms (next.js: 5ms, application-code: 29ms)
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 52ms (next.js: 14ms, application-code: 38ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 370ms (next.js: 27ms, application-code: 343ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 443ms (next.js: 6ms, application-code: 437ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 456ms (next.js: 19ms, application-code: 437ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 216ms (next.js: 3ms, application-code: 213ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 222ms (next.js: 2ms, application-code: 219ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 218ms (next.js: 3ms, application-code: 215ms)
+ POST /api/sign/verify 200 in 549ms (next.js: 4ms, application-code: 545ms)
+ POST /api/sign/generate-office 200 in 2.9s (next.js: 4ms, application-code: 2.9s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_main_signed_1780483364981.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 3.0s (next.js: 4ms, application-code: 3.0s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483254560.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483254560.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483254560.pdf
+[generate-pdf] downloaded file_goc bytes: 1001760
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483367307.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 2.5s (next.js: 5ms, application-code: 2.5s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483256476.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483256476.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483256476.pdf
+[generate-pdf] downloaded file_goc bytes: 857849
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483370277.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 3.1s (next.js: 3ms, application-code: 3.1s)
+[generate-pdf] called - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22-F06_PHK-QT-22-F06_Phu_luc_6_test_main_signed_1780483373971.pdf
+[generate-pdf] DB update OK - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673
+ POST /api/sign/generate-pdf 200 in 3.2s (next.js: 5ms, application-code: 3.2s)
+[generate-pdf] called - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22F01_Phu_luc_1_test_00_02_main_signed_1780483376815.pdf
+[generate-pdf] DB update OK - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16
+ POST /api/sign/generate-pdf 200 in 3.1s (next.js: 4ms, application-code: 3.1s)
+ POST /api/iso/notify 200 in 1404ms (next.js: 5ms, application-code: 1398ms)
+ GET /login 200 in 61ms (next.js: 4ms, application-code: 57ms)
+ GET /dashboard 200 in 34ms (next.js: 4ms, application-code: 30ms)
+ GET /dashboard/iso 200 in 22ms (next.js: 3ms, application-code: 19ms)
+ GET /dashboard/iso/my-tasks 200 in 34ms (next.js: 5ms, application-code: 29ms)
+ GET /dashboard/iso/documents/e3863dd2-bc66-429d-a9c6-00283de4cef0 200 in 37ms (next.js: 13ms, application-code: 24ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 318ms (next.js: 11ms, application-code: 306ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 321ms (next.js: 9ms, application-code: 312ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 338ms (next.js: 17ms, application-code: 322ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.soat_xet 200 in 210ms (next.js: 8ms, application-code: 201ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.xem_xet 200 in 197ms (next.js: 3ms, application-code: 194ms)
+ GET /api/iso/profiles-by-permission?factoryId=0268ab41-a564-4538-acf1-6297ac372f57&permCode=iso.phe_duyet 200 in 209ms (next.js: 9ms, application-code: 201ms)
+ POST /api/sign/verify 200 in 521ms (next.js: 4ms, application-code: 517ms)
+ POST /api/sign/generate-office 200 in 3.0s (next.js: 4ms, application-code: 3.0s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/1780480689185_PHK-QT-22_Bo_test_soan_thao_0002.pdf
+[generate-pdf] downloaded file_goc bytes: 256757
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_main_signed_1780483460994.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 3.1s (next.js: 4ms, application-code: 3.1s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483367307.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483367307.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483367307.pdf
+[generate-pdf] downloaded file_goc bytes: 1803069
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_change_request_signed_1780483463415.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 2.7s (next.js: 3ms, application-code: 2.7s)
+[generate-pdf] called - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483370277.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483370277.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483370277.pdf
+[generate-pdf] downloaded file_goc bytes: 1659250
+[generate-pdf] original page count: 2
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22_Bo_test_soan_thao_review_request_signed_1780483465465.pdf
+[generate-pdf] DB update OK - docId: e3863dd2-bc66-429d-a9c6-00283de4cef0
+ POST /api/sign/generate-pdf 200 in 2.4s (next.js: 4ms, application-code: 2.4s)
+[generate-pdf] called - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480769334_PHK-QT-22-F06_Phu_luc_6_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22-F06_PHK-QT-22-F06_Phu_luc_6_test_main_signed_1780483468157.pdf
+[generate-pdf] DB update OK - docId: 7e8ed7e8-c2ef-467f-81ab-9d4b14ea5673
+ POST /api/sign/generate-pdf 200 in 2.2s (next.js: 6ms, application-code: 2.2s)
+[generate-pdf] called - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16 docType: iso hasPlacement: true
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] storagePath candidates: [
+  '0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf'
+]
+[generate-pdf] resolved storagePath: 0268ab41-a564-4538-acf1-6297ac372f57/iso/child-records/1780480714536_PHK-QT-22-F01_Phu_luc_1_test.pdf
+[generate-pdf] downloaded file_goc bytes: 256761
+[generate-pdf] original page count: 1
+[generate-pdf] upload OK - public URL: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/signed/PHKQT22F01_Phu_luc_1_test_00_02_main_signed_1780483470350.pdf
+[generate-pdf] DB update OK - docId: 2c8b1c7b-ff07-487a-9ca1-a808682d7c16
+ POST /api/sign/generate-pdf 200 in 2.4s (next.js: 2ms, application-code: 2.4s)
+[generate-pdf] called - docId: c4479bd9-ba23-4b90-8dc4-4ed4eadcfd5a docType: iso hasPlacement: false
+[generate-pdf] file_goc_url: https://kaoeenrewvltnrbxmjfe.supabase.co/storage/v1/object/public/iso-documents/0268ab41-a564-4538-acf1-6297ac372f57/iso/office-signed/PHKQT22-F07_PHK-QT-22-F07_Phu_luc_7_test_1780483456333.docx
+[generate-pdf] non-PDF file, ext: docx - skipping
+ POST /api/sign/generate-pdf 200 in 434ms (next.js: 4ms, application-code: 430ms)
+ POST /api/sign/convert-office 200 in 7.1s (next.js: 77ms, application-code: 7.0s)
+ POST /api/iso/notify 200 in 1734ms (next.js: 239ms, application-code: 1495ms)
+ POST /api/sign/restamp-pdf 200 in 10.9s (next.js: 227ms, application-code: 10.6s)
