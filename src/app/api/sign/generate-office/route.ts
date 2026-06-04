@@ -73,6 +73,30 @@ const STATUS_TEXT_VALUES = [
   "Phê duyệt từ chối",
 ] as const
 
+const STATUS_TEXT_VALUES_NORMALIZED = [
+  "Nháp",
+  "Chờ xem xét",
+  "Chờ phê duyệt",
+  "Có hiệu lực",
+  "Hết hiệu lực",
+  "Trả về",
+  "Phê duyệt từ chối",
+] as const
+
+function getCanonicalTargetStatusText(action: WorkflowAction | undefined, currentStatus: string, capTl?: string): string {
+  if (action === "gui_xem_xet") return capTl === "Cấp 2" ? "Chờ phê duyệt" : "Chờ xem xét"
+  if (action === "gui_phe_duyet" || action === "gui_lai_phe_duyet") return "Chờ phê duyệt"
+  if (action === "phe_duyet") return "Có hiệu lực"
+  if (action === "tra_ve" || action === "khong_xem_xet" || action === "tra_ve_nhap") return "Trả về"
+  if (action === "tu_choi_phe_duyet") return "Phê duyệt từ chối"
+  if (currentStatus === "co_hieu_luc") return "Có hiệu lực"
+  if (currentStatus === "cho_xem_xet") return "Chờ xem xét"
+  if (currentStatus === "cho_phe_duyet") return "Chờ phê duyệt"
+  if (currentStatus === "tra_ve") return "Trả về"
+  if (currentStatus === "bi_tu_choi_phe_duyet") return "Phê duyệt từ chối"
+  return "Chờ phê duyệt"
+}
+
 function fmtDate(d: unknown): string {
   if (!d || typeof d !== "string") return ""
   const dt = new Date(d)
@@ -314,6 +338,68 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
+function docxParagraphVisibleText(paragraphXml: string): string {
+  return [...paragraphXml.matchAll(/<(?:w|a):t\b[^>]*>([\s\S]*?)<\/(?:w|a):t>/g)]
+    .map((match) => xmlTextDecode(match[1]))
+    .join("")
+}
+
+function normalizeVisibleText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function replaceVisibleStatusText(text: string, statusText: string): string {
+  let next = text
+  const compactFooterMatch = next.match(/^\s*([A-Z]{2,}(?:-[A-Z0-9Đ]+)+)\s*\(([^)]*)\)\s*(.*)$/u)
+  if (compactFooterMatch) {
+    const [, docCode, footerMeta] = compactFooterMatch
+    return `${docCode} (${footerMeta.trim()}) ${statusText}`
+  }
+  const normalizedNext = normalizeVisibleText(next)
+  if (/^(ma (tai lieu|ho so))\s*\([^)]*\)/.test(normalizedNext)) {
+    return `${next.replace(/\s+$/u, "")} ${statusText}`.replace(/\s+/gu, " ").trim()
+  }
+  next = next.replace(/((?:Tình trạng|Trạng thái)\s*:\s*).*/iu, `$1${statusText}`)
+
+  const footerMatch = next.match(/^(\s*(?:[A-Z]{2,}(?:-[A-Z0-9Đ]+)+|Mã\s+(?:tài\s+liệu|hồ\s+sơ))\s*\([^)]*\))\s+(.+?)\s*$/u)
+  if (footerMatch) {
+    return `${footerMatch[1]} ${statusText}`
+  }
+
+  for (const value of STATUS_TEXT_VALUES_NORMALIZED) {
+    if (value === statusText) continue
+    next = next.replace(
+      new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "gu"),
+      `$1${statusText}`,
+    )
+    if (next.trim() === value) next = statusText
+    next = next.replace(
+      new RegExp(`(^\\s*(?:[A-Z]{2,}(?:-[A-Z0-9Đ]+)+|Mã\\s+(?:tài\\s+liệu|hồ\\s+sơ))\\s*\\([^\\n\\r)]*\\)\\s*)${escapeRegExp(value)}(\\s*$)`, "gmu"),
+      `$1${statusText}$2`,
+    )
+  }
+  return next
+}
+
+function replaceHeaderFooterParagraphText(xml: string, replacer: (text: string) => string): string {
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const visibleText = docxParagraphVisibleText(paragraphXml)
+    if (!visibleText) return paragraphXml
+    const nextText = replacer(visibleText)
+    if (nextText === visibleText) return paragraphXml
+    const paragraphProps = paragraphXml.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] || ""
+    const runProps = paragraphXml.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] || ""
+    return `<w:p>${paragraphProps}${textRunXml(nextText, runProps)}</w:p>`
+  })
+}
+
 function flexibleDocxTagPattern(tag: string): RegExp {
   const betweenChars = "(?:<[^>]+>|\\s|&#\\d+;|&#x[0-9A-Fa-f]+;|&nbsp;|&thinsp;|&ensp;|&emsp;|\u00A0|\u00AD|\u200B|\u200C|\u200D|\u2060|\uFEFF)*"
   return new RegExp(tag.split("").map(escapeRegExp).join(betweenChars), "g")
@@ -383,6 +469,38 @@ function replaceStatusTextInXml(text: string, statusText: string): string {
     next = next.replace(
       new RegExp(`>(\\s*)${escapeRegExp(value)}(\\s*)<`, "g"),
       `>$1${statusText}$2<`,
+    )
+  }
+  return replaceFooterStatusText(next, statusText)
+}
+
+function replaceFooterStatusText(text: string, statusText: string): string {
+  let next = text
+  for (const value of STATUS_TEXT_VALUES) {
+    if (value === statusText) continue
+    next = next.replace(
+      new RegExp(`(^\\s*(?:[A-Z]{2,}(?:-[A-Z0-9Đ]+)+|Mã\\s+(?:tài\\s+liệu|hồ\\s+sơ))\\s*\\([^\\n\\r)]*\\)\\s*)${escapeRegExp(value)}(\\s*$)`, "gm"),
+      `$1${statusText}$2`,
+    )
+  }
+  return next
+}
+
+function replaceStatusTextInXmlSafe(text: string, statusText: string): string {
+  let next = text
+  for (const value of STATUS_TEXT_VALUES_NORMALIZED) {
+    if (value === statusText) continue
+    next = next.replace(
+      new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "gu"),
+      `$1${statusText}`,
+    )
+    next = next.replace(
+      new RegExp(`>(\\s*)${escapeRegExp(value)}(\\s*)<`, "gu"),
+      `>$1${statusText}$2<`,
+    )
+    next = next.replace(
+      new RegExp(`(^\\s*(?:[A-Z]{2,}(?:-[A-Z0-9Đ]+)+|Mã\\s+(?:tài\\s+liệu|hồ\\s+sơ))\\s*\\([^\\n\\r)]*\\)\\s*)${escapeRegExp(value)}(\\s*$)`, "gmu"),
+      `$1${statusText}$2`,
     )
   }
   return next
@@ -497,6 +615,7 @@ async function renderDocx(
   requiredTags: string[],
   defaultQrWhenMissing: boolean,
   statusText: string,
+  applyFooterStatusText = true,
   allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const zip = await JSZip.loadAsync(bytes)
@@ -524,7 +643,11 @@ async function renderDocx(
     let xml = await file.async("string")
     allTextParts.push(docxVisibleText(xml))
     xml = replaceAllTextTags(xml, values, diagnostics)
-    xml = replaceStatusTextInXml(xml, statusText)
+    if (applyFooterStatusText) {
+      const normalizedXml = replaceStatusTextInXmlSafe(xml, statusText)
+      xml = normalizedXml || replaceStatusTextInXml(xml, statusText)
+      xml = replaceHeaderFooterParagraphText(xml, (text) => replaceVisibleStatusText(text, statusText))
+    }
     for (const tag of SIGNER_NAME_TAGS) {
       const value = values[tag]
       if (!value) continue
@@ -575,6 +698,7 @@ async function renderXlsx(
   requiredTags: string[],
   defaultQrWhenMissing: boolean,
   statusText: string,
+  applyFooterStatusText = true,
   allowedTags: Set<string> = ALL_TAGS,
 ): Promise<{ buffer: Buffer; diagnostics: OfficeDiagnostics }> {
   const diagnostics: OfficeDiagnostics = { tagsFound: [], tagsMissing: [], tagsSimilar: [], imagesInserted: [] }
@@ -606,10 +730,14 @@ async function renderXlsx(
           if (SIGNER_NAME_TAGS.has(tag) && next.includes(tag)) replacedSignerName = true
           next = next.split(tag).join(value)
         }
-        for (const value of STATUS_TEXT_VALUES) {
-          if (value === statusText) continue
-          next = next.replace(new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "g"), `$1${statusText}`)
-          if (next.trim() === value) next = statusText
+        if (applyFooterStatusText) next = replaceVisibleStatusText(next, statusText)
+        if (applyFooterStatusText) {
+          for (const value of STATUS_TEXT_VALUES) {
+            if (value === statusText) continue
+            next = next.replace(new RegExp(`((?:Tình trạng|Trạng thái)\\s*:\\s*)${escapeRegExp(value)}`, "g"), `$1${statusText}`)
+            if (next.trim() === value) next = statusText
+          }
+          next = replaceFooterStatusText(next, statusText)
         }
         cell.value = next
         if (replacedSignerName) {
@@ -722,10 +850,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File không phải DOCX/XLSX" }, { status: 400 })
     }
 
-    const statusText = getTargetStatusText(action, String(doc.trang_thai || ""), String(doc.cap_tl || ""))
+    const statusText = getCanonicalTargetStatusText(action, String(doc.trang_thai || ""), String(doc.cap_tl || "")) || getTargetStatusText(action, String(doc.trang_thai || ""), String(doc.cap_tl || ""))
     const isAuxReviewFile = fileKind === "change_request" || fileKind === "review_request"
     const shouldStampAuxQr = !isAuxReviewFile || step === "soan_thao"
     const shouldFillAuxBodyValues = isAuxReviewFile && step === "soan_thao"
+    const shouldApplyFooterStatusText = !isAuxReviewFile
     const signerNames = await resolveSignerNames(doc)
     const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues, step, signerNames })
     const stepTags = getStepTags(step)
@@ -744,8 +873,8 @@ export async function POST(req: NextRequest) {
     const bytes = await downloadStorageFile(sourceUrl)
 
     const result = ext === "docx"
-      ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, allowedTags)
-      : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, allowedTags)
+      ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, shouldApplyFooterStatusText, allowedTags)
+      : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, shouldApplyFooterStatusText, allowedTags)
 
     const namePrefix = sanitizeOutputName(`${String(doc.ma_tai_lieu || "ISO")} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
     const outputPath = `${factoryId}/iso/office-signed/${namePrefix}_${Date.now()}.${ext}`

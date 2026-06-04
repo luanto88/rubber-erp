@@ -1710,13 +1710,27 @@ export default function IsoDocumentDetailPage() {
         }
       }
 
-      // Restamp PDF tài liệu cũ bị hủy hiệu lực
+      let invalidationError: string | null = null
+      // Cập nhật artifact tài liệu cũ bị hủy hiệu lực
       if (invalidatedIds.length > 0) {
-        void fetch("/api/sign/restamp-pdf", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ docIds: invalidatedIds, factoryId }),
-        })
+        try {
+          const invalidationRes = await fetch("/api/sign/restamp-pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ docIds: invalidatedIds, factoryId }),
+          })
+          const invalidationJson = await invalidationRes.json()
+          if (!invalidationJson.ok) {
+            const failed = Array.isArray(invalidationJson.results)
+              ? invalidationJson.results.filter((item: { ok?: boolean }) => item.ok === false).length
+              : 0
+            invalidationError = failed > 0
+              ? `${failed} file cũ chưa được cập nhật "Hết hiệu lực"`
+              : (invalidationJson.error as string) || "Không cập nhật được file cũ hết hiệu lực"
+          }
+        } catch (error) {
+          invalidationError = error instanceof Error ? error.message : String(error)
+        }
       }
 
       // Gửi thông báo
@@ -1736,8 +1750,8 @@ export default function IsoDocumentDetailPage() {
         })
       }
 
-      if (pdfError) {
-        showToast(false, "Đã ký duyệt nhưng tạo PDF thất bại: " + pdfError)
+      if (pdfError || invalidationError) {
+        showToast(false, "Đã ký duyệt nhưng còn lỗi hậu xử lý: " + [pdfError, invalidationError].filter(Boolean).join(" | "))
       } else {
         showToast(true, "Đã cập nhật trạng thái")
       }

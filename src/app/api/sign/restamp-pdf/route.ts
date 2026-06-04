@@ -1,19 +1,48 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { PDFDocument, rgb, PDFImage } from "pdf-lib"
+import { PDFDocument, rgb } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import { readFile } from "fs/promises"
 import path from "path"
+import JSZip from "jszip"
+import ExcelJS from "exceljs"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
+type InvalidatedDoc = {
+  id: string
+  ma_tai_lieu: string | null
+  lan_ban_hanh: string | null
+  ngay_het_hieu_luc: string | null
+  updated_at: string | null
+  file_goc_url: string | null
+  file_signed_pdf_url: string | null
+  file_signed_office_url: string | null
+  file_signed_office_type: string | null
+}
+
+type PdfjsTextItem = {
+  str: string
+  transform: number[]
+  width: number
+  height: number
+}
+
+type PdfTextLine = {
+  text: string
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return ""
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return iso
+  if (Number.isNaN(d.getTime())) return iso
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
 }
 
@@ -33,72 +62,107 @@ function normalizeSearchText(text: string): string {
     .trim()
 }
 
-// Chuẩn hóa chuỗi để so sánh pattern (bỏ dấu, lowercase, bỏ dấu câu thừa)
-function normalizeText(text: string): string {
-  return text
+function normalizeOutputName(value: string): string {
+  return value
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 140) || "ISO"
 }
 
-// Kiểm tra text đã chứa "Hết hiệu lực" chưa
-function isAlreadyInvalidated(text: string): boolean {
-  const norm = normalizeSearchText(text)
-  return norm.includes("het hieu luc")
+function safeDecodeUri(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
-// Stamp ảnh dấu "Hết hiệu lực" ở góc trên phải mỗi trang + đường kẻ separator footer
-// Footer text được xử lý bởi replaceInvalidatedTags (tránh double-stamp)
-function stampWatermark(
-  page: ReturnType<PDFDocument["getPages"]>[number],
-  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
-  _maTl: string,
-  _lsStr: string,
-  _dateStr: string,
-  stamImg: PDFImage,
-) {
-  const { width, height } = page.getSize()
-
-  // Đường kẻ separator footer
-  page.drawLine({
-    start: { x: 28, y: 26 },
-    end: { x: width - 28, y: 26 },
-    thickness: 0.4, color: rgb(0.75, 0.8, 0.85),
-  })
-
-  // Ảnh dấu "HẾT HIỆU LỰC" căn giữa ngang header (tránh đè QR góc phải)
-  const imgW = 108
-  const imgH = 37
-  page.drawImage(stamImg, {
-    x: (width - imgW) / 2,
-    y: height - imgH - 20,
-    width: imgW,
-    height: imgH,
-    opacity: 1,
-  })
-
-  void font // giữ signature để không cần refactor caller
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
 }
 
-interface PdfjsTextItem {
-  str: string
-  transform: number[]
-  width: number
-  height: number
-  fontName?: string
+function xmlTextDecode(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
 }
 
-type PdfTextLine = {
-  items: PdfjsTextItem[]
-  text: string
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
+function textRunXml(text: string, runProperties = ""): string {
+  return text ? `<w:r>${runProperties}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>` : ""
+}
+
+function getStoragePathCandidatesFromUrl(fileUrl: string | null, bucket: string): string[] {
+  if (!fileUrl) return []
+
+  const candidates: string[] = []
+  const pushCandidate = (value: string | null) => {
+    if (!value) return
+    const clean = value.replace(/^\/+/, "").trim()
+    if (!clean || /[\\?#]/.test(clean)) return
+    if (!candidates.includes(clean)) candidates.push(clean)
+  }
+
+  const cleanUrl = fileUrl.split("?")[0]
+  try {
+    const parsed = new URL(cleanUrl)
+    const marker = "/storage/v1/object/"
+    const markerIndex = parsed.pathname.indexOf(marker)
+    if (markerIndex >= 0) {
+      const parts = parsed.pathname.slice(markerIndex + marker.length).split("/").filter(Boolean)
+      if (parts.length >= 3 && ["public", "sign", "authenticated"].includes(parts[0]) && parts[1] === bucket) {
+        const rel = parts.slice(2).join("/")
+        pushCandidate(rel)
+        pushCandidate(safeDecodeUri(rel))
+      }
+    }
+  } catch {
+    // fallback below
+  }
+
+  const marker = `/storage/v1/object/public/${bucket}/`
+  const markerIndex = cleanUrl.indexOf(marker)
+  if (markerIndex >= 0) {
+    const rel = cleanUrl.slice(markerIndex + marker.length)
+    pushCandidate(rel)
+    pushCandidate(safeDecodeUri(rel))
+  }
+
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    pushCandidate(cleanUrl)
+    pushCandidate(safeDecodeUri(cleanUrl))
+  }
+
+  return candidates
+}
+
+async function downloadStorageFile(fileUrl: string | null): Promise<ArrayBuffer> {
+  const errors: string[] = []
+  for (const candidate of getStoragePathCandidatesFromUrl(fileUrl, "iso-documents")) {
+    const { data, error } = await supabaseAdmin.storage.from("iso-documents").download(candidate)
+    if (data && !error) return await data.arrayBuffer()
+    errors.push(`${candidate}: ${error?.message || "empty data"}`)
+  }
+
+  if (fileUrl) {
+    const res = await fetch(fileUrl, { cache: "no-store" })
+    if (res.ok) return await res.arrayBuffer()
+    errors.push(`fetch: HTTP ${res.status}`)
+  }
+
+  throw new Error(`Không tải được file cần đóng dấu hết hiệu lực. ${errors.join("; ")}`)
 }
 
 function groupTextItemsIntoLines(items: PdfjsTextItem[]): PdfTextLine[] {
@@ -110,7 +174,7 @@ function groupTextItemsIntoLines(items: PdfjsTextItem[]): PdfTextLine[] {
       return a.transform[4] - b.transform[4]
     })
 
-  const lines: PdfTextLine[] = []
+  const lines: Array<PdfTextLine & { items: PdfjsTextItem[] }> = []
   for (const item of sorted) {
     const y = item.transform[5]
     const x = item.transform[4]
@@ -128,6 +192,7 @@ function groupTextItemsIntoLines(items: PdfjsTextItem[]): PdfTextLine[] {
       })
       continue
     }
+
     line.items.push(item)
     line.items.sort((a, b) => a.transform[4] - b.transform[4])
     line.text = line.items.map((part) => part.str).join(" ").replace(/\s+/g, " ").trim()
@@ -137,109 +202,41 @@ function groupTextItemsIntoLines(items: PdfjsTextItem[]): PdfTextLine[] {
     line.maxY = Math.max(line.maxY, y + height)
   }
 
-  return lines
+  return lines.map((line) => ({
+    text: line.text,
+    minX: line.minX,
+    minY: line.minY,
+    maxX: line.maxX,
+    maxY: line.maxY,
+  }))
 }
 
-// Thay thế các tag header/footer trong PDF khi hủy hiệu lực
-// Dùng pdfjs để lấy tọa độ text, pdf-lib để cover trắng và vẽ lại
-async function replaceInvalidatedTags(
-  pdfDoc: PDFDocument,
-  pdfBytes: ArrayBuffer,
-  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
-  maTl: string,
-  lsStr: string,
-  dateHetStr: string,
-) {
-  try {
-    // Import pdfjs-dist (Node/server mode)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBytes })
-    const pdfJsDoc = await loadingTask.promise
-    const pages = pdfDoc.getPages()
+function getInvalidatedReplacement(lineText: string, maTl: string, revision: string, expiredDate: string): { text: string; color: ReturnType<typeof rgb> } | null {
+  const normalizedLine = normalizeSearchText(lineText)
+  if (!normalizedLine || normalizedLine.includes("het hieu luc")) return null
 
-    for (let pageIdx = 0; pageIdx < pdfJsDoc.numPages; pageIdx++) {
-      const pdfJsPage = await pdfJsDoc.getPage(pageIdx + 1)
-      const textContent = await pdfJsPage.getTextContent()
-      const pdfLibPage = pages[pageIdx]
-      if (!pdfLibPage) continue
-
-      const { height: pageHeight } = pdfLibPage.getSize()
-      const viewport = pdfJsPage.getViewport({ scale: 1 })
-
-      for (const item of textContent.items as PdfjsTextItem[]) {
-        if (!item.str || !item.str.trim()) continue
-
-        const normStr = normalizeSearchText(item.str)
-        if (isAlreadyInvalidated(item.str)) continue
-
-        // Tính tọa độ pdf-lib từ pdfjs (transform: [scaleX, 0, 0, scaleY, x, y])
-        const x = item.transform[4]
-        const yPdfjs = item.transform[5]
-        // pdfjs y tính từ bottom-left (giống pdf-lib), nhưng viewport có thể khác
-        const scaleY = viewport.height / pageHeight
-        const yPdf = yPdfjs / scaleY
-        const itemWidth = item.width / (viewport.width / pdfLibPage.getSize().width)
-        const itemHeight = (item.height || 10) / scaleY
-        const fontSize = itemHeight > 0 ? itemHeight * 0.9 : 9
-
-        let newText: string | null = null
-        let textColor = rgb(0.15, 0.15, 0.15)
-
-        // Pattern 1: "Ngày hiệu lực: ..." → "Ngày hết hiệu lực: [dateHet]"
-        if (normStr.startsWith("ngay hieu luc")) {
-          newText = `Ngày hết hiệu lực: ${dateHetStr}`
-          textColor = rgb(0.15, 0.15, 0.15)
-        }
-        // Pattern 2: "Tình trạng: Có hiệu lực" → "Tình trạng: Hết hiệu lực"
-        else if (normStr.includes("tinh trang") && normStr.includes("co hieu luc")) {
-          newText = "Tình trạng: Hết hiệu lực"
-          textColor = rgb(0.85, 0, 0)
-        }
-        // Pattern 3: footer "[mã] ([lần]-[date]) Có hiệu lực"
-        // Nhận diện: có "co hieu luc" và có pattern ngày dd/mm/yyyy
-        else if (
-          normStr.includes("co hieu luc") &&
-          /\d{2}\/\d{2}\/\d{4}/.test(item.str)
-        ) {
-          newText = `${maTl} (${lsStr}-${dateHetStr}) Hết hiệu lực`
-          textColor = rgb(0.85, 0, 0)
-        }
-
-        if (newText) {
-          // Cover text cũ bằng hình chữ nhật trắng
-          const coverWidth = Math.max(itemWidth, font.widthOfTextAtSize(newText, fontSize)) + 6
-          pdfLibPage.drawRectangle({
-            x: x - 1,
-            y: yPdf - 1,
-            width: coverWidth,
-            height: itemHeight + 3,
-            color: rgb(1, 1, 1),
-            opacity: 1,
-          })
-          // Vẽ text mới
-          pdfLibPage.drawText(newText, {
-            x: x,
-            y: yPdf,
-            size: Math.max(fontSize, 8),
-            font,
-            color: textColor,
-          })
-        }
-      }
-    }
-  } catch {
-    // pdfjs scan không bắt buộc — nếu lỗi, tiếp tục với watermark thôi
+  if (normalizedLine.startsWith("ngay hieu luc") || normalizedLine.startsWith("ngay het hieu luc")) {
+    return { text: `Ngày hết hiệu lực: ${expiredDate}`, color: rgb(0.15, 0.15, 0.15) }
   }
+
+  if (normalizedLine.includes("tinh trang")) {
+    return { text: "Tình trạng: Hết hiệu lực", color: rgb(0.85, 0, 0) }
+  }
+
+  if (/\d{2}\/\d{2}\/\d{4}/.test(lineText) && /(co hieu luc|cho xem xet|cho phe duyet|tra ve|phe duyet tu choi)/.test(normalizedLine)) {
+    return { text: `${maTl} (${revision}-${expiredDate}) Hết hiệu lực`, color: rgb(0.85, 0, 0) }
+  }
+
+  return null
 }
 
-async function reinforceInvalidatedLines(
+async function replaceInvalidatedPdfText(
   pdfDoc: PDFDocument,
   pdfBytes: ArrayBuffer,
   font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
   maTl: string,
-  lsStr: string,
-  dateHetStr: string,
+  revision: string,
+  expiredDate: string,
 ) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,32 +258,7 @@ async function reinforceInvalidatedLines(
       const lines = groupTextItemsIntoLines(textContent.items as PdfjsTextItem[])
 
       for (const line of lines) {
-        if (!line.text || isAlreadyInvalidated(line.text)) continue
-
-        const normalizedLine = normalizeSearchText(line.text)
-        let replacement: string | null = null
-        let color = rgb(0.15, 0.15, 0.15)
-
-        if (normalizedLine.startsWith("ngay hieu luc") || normalizedLine.startsWith("ngay het hieu luc")) {
-          replacement = `NgĂ y háº¿t hiá»‡u lá»±c: ${dateHetStr}`
-        } else if (normalizedLine.includes("tinh trang") && (normalizedLine.includes("co hieu luc") || !normalizedLine.includes("het hieu luc"))) {
-          replacement = "TĂ¬nh tráº¡ng: Háº¿t hiá»‡u lá»±c"
-          color = rgb(0.85, 0, 0)
-        } else if (normalizedLine.includes("co hieu luc") && /\d{2}\/\d{2}\/\d{4}/.test(line.text)) {
-          replacement = `${maTl} (${lsStr}-${dateHetStr}) Háº¿t hiá»‡u lá»±c`
-          color = rgb(0.85, 0, 0)
-        }
-
-        if (replacement) {
-          if (normalizedLine.startsWith("ngay hieu luc") || normalizedLine.startsWith("ngay het hieu luc")) {
-            replacement = `Ngày hết hiệu lực: ${dateHetStr}`
-          } else if (normalizedLine.includes("tinh trang")) {
-            replacement = "Tình trạng: Hết hiệu lực"
-          } else if (normalizedLine.includes("co hieu luc") && /\d{2}\/\d{2}\/\d{4}/.test(line.text)) {
-            replacement = `${maTl} (${lsStr}-${dateHetStr}) Hết hiệu lực`
-          }
-        }
-
+        const replacement = getInvalidatedReplacement(line.text, maTl, revision, expiredDate)
         if (!replacement) continue
 
         const x = line.minX / scaleX
@@ -294,7 +266,7 @@ async function reinforceInvalidatedLines(
         const lineWidth = (line.maxX - line.minX) / scaleX
         const lineHeight = Math.max((line.maxY - line.minY) / scaleY, 10)
         const fontSize = Math.max(lineHeight * 0.9, 8)
-        const coverWidth = Math.max(lineWidth, font.widthOfTextAtSize(replacement, fontSize)) + 8
+        const coverWidth = Math.max(lineWidth, font.widthOfTextAtSize(replacement.text, fontSize)) + 8
 
         pdfLibPage.drawRectangle({
           x: x - 2,
@@ -304,18 +276,176 @@ async function reinforceInvalidatedLines(
           color: rgb(1, 1, 1),
           opacity: 1,
         })
-        pdfLibPage.drawText(replacement, {
+        pdfLibPage.drawText(replacement.text, {
           x,
           y,
           size: fontSize,
           font,
-          color,
+          color: replacement.color,
         })
       }
     }
   } catch {
-    // Fallback bổ sung này không được phép làm hỏng luồng chính.
+    // best effort only
   }
+}
+
+function stampPdfInvalidatedMark(
+  pdfDoc: PDFDocument,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+) {
+  for (const page of pdfDoc.getPages()) {
+    const { width, height } = page.getSize()
+    const stampText = "HẾT HIỆU LỰC"
+    let fontSize = 22
+    while (fontSize > 14 && font.widthOfTextAtSize(stampText, fontSize) > width - 120) {
+      fontSize -= 1
+    }
+    const textWidth = font.widthOfTextAtSize(stampText, fontSize)
+
+    page.drawLine({
+      start: { x: 28, y: 26 },
+      end: { x: width - 28, y: 26 },
+      thickness: 0.4,
+      color: rgb(0.75, 0.8, 0.85),
+    })
+    page.drawText(stampText, {
+      x: (width - textWidth) / 2,
+      y: height - 42,
+      size: fontSize,
+      font,
+      color: rgb(0.85, 0, 0),
+    })
+  }
+}
+
+function docxParagraphVisibleText(paragraphXml: string): string {
+  return [...paragraphXml.matchAll(/<(?:w|a):t\b[^>]*>([\s\S]*?)<\/(?:w|a):t>/g)]
+    .map((match) => xmlTextDecode(match[1]))
+    .join("")
+}
+
+function replaceInvalidationVisibleText(text: string, maTl: string, revision: string, expiredDate: string): string {
+  let next = text
+  next = next.replace(/(?:Ngày hiệu lực|Ngày hết hiệu lực)\s*:\s*.*/iu, `Ngày hết hiệu lực: ${expiredDate}`)
+  next = next.replace(/(?:Tình trạng|Trạng thái)\s*:\s*.*/iu, "Tình trạng: Hết hiệu lực")
+
+  const normalizedLine = normalizeSearchText(next)
+  if (/\d{2}\/\d{2}\/\d{4}/.test(next) && /(co hieu luc|cho xem xet|cho phe duyet|tra ve|phe duyet tu choi|tinh trang)/.test(normalizedLine)) {
+    const footerLike = /^(?:[A-Z]{2,}(?:-[A-Z0-9Đ]+)+|Mã\s+(?:tài\s+liệu|hồ\s+sơ))\s*\([^)]*\)\s*.*$/u
+    if (footerLike.test(next.trim())) {
+      next = `${maTl} (${revision}-${expiredDate}) Hết hiệu lực`
+    }
+  }
+
+  if (next.trim() === "Có hiệu lực") return "Hết hiệu lực"
+  return next
+}
+
+function replaceDocxParagraphText(
+  xml: string,
+  replacer: (text: string) => string,
+): string {
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const visibleText = docxParagraphVisibleText(paragraphXml)
+    if (!visibleText) return paragraphXml
+
+    const nextText = replacer(visibleText)
+    if (nextText === visibleText) return paragraphXml
+
+    const paragraphProps = paragraphXml.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] || ""
+    const runProps = paragraphXml.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/)?.[0] || ""
+    return `<w:p>${paragraphProps}${textRunXml(nextText, runProps)}</w:p>`
+  })
+}
+
+function ensureDocxPngContentType(contentTypesXml: string): string {
+  if (contentTypesXml.includes('Extension="png"')) return contentTypesXml
+  return contentTypesXml.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>')
+}
+
+function buildInvalidatedStampParagraph(): string {
+  const runProperties = [
+    "<w:rPr>",
+    "<w:b/>",
+    '<w:color w:val="C00000"/>',
+    '<w:sz w:val="28"/>',
+    '<w:szCs w:val="28"/>',
+    "</w:rPr>",
+  ].join("")
+
+  return [
+    "<w:p>",
+    "<w:pPr>",
+    '<w:jc w:val="center"/>',
+    '<w:spacing w:after="120"/>',
+    "</w:pPr>",
+    textRunXml("HẾT HIỆU LỰC", runProperties),
+    "</w:p>",
+  ].join("")
+}
+
+async function renderInvalidatedDocx(
+  bytes: ArrayBuffer,
+  maTl: string,
+  revision: string,
+  expiredDate: string,
+): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(bytes)
+  const contentTypes = await zip.file("[Content_Types].xml")?.async("string")
+  if (contentTypes) zip.file("[Content_Types].xml", ensureDocxPngContentType(contentTypes))
+
+  const xmlParts = Object.keys(zip.files).filter((name) => /^word\/(?:document|header\d+|footer\d+)\.xml$/.test(name))
+  for (const partPath of xmlParts) {
+    const file = zip.file(partPath)
+    if (!file) continue
+    const xml = await file.async("string")
+    zip.file(partPath, replaceDocxParagraphText(xml, (text) => replaceInvalidationVisibleText(text, maTl, revision, expiredDate)))
+  }
+
+  const documentXmlFile = zip.file("word/document.xml")
+  if (documentXmlFile) {
+    const documentXml = await documentXmlFile.async("string")
+    if (!normalizeSearchText(docxParagraphVisibleText(documentXml)).includes("het hieu luc")) {
+      const stampParagraph = buildInvalidatedStampParagraph()
+      zip.file("word/document.xml", documentXml.replace("<w:body>", `<w:body>${stampParagraph}`))
+    }
+  }
+
+  return await zip.generateAsync({ type: "nodebuffer" })
+}
+
+async function renderInvalidatedXlsx(
+  bytes: ArrayBuffer,
+  maTl: string,
+  revision: string,
+  expiredDate: string,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(bytes)
+
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        const text = typeof cell.value === "string" ? cell.value : null
+        if (!text) return
+        cell.value = replaceInvalidationVisibleText(text, maTl, revision, expiredDate)
+      })
+    })
+  })
+
+  return Buffer.from(await workbook.xlsx.writeBuffer())
+}
+
+function getMainSourceUrl(doc: InvalidatedDoc): string | null {
+  return doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+}
+
+function buildOfficeUpdatePayload(doc: InvalidatedDoc, publicUrl: string, ext: string): Record<string, string | null> {
+  if (doc.file_signed_office_url) {
+    return { file_signed_office_url: publicUrl, file_signed_office_type: ext }
+  }
+  return { file_goc_url: publicUrl, file_signed_office_url: null, file_signed_office_type: null }
 }
 
 export async function POST(req: NextRequest) {
@@ -327,166 +457,125 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
-    // Verify factoryId by checking at least one doc belongs to it
-    const { data: checkData } = await supabaseAdmin
-      .from("iso_documents")
-      .select("id")
-      .eq("factory_id", factoryId)
-      .in("id", docIds)
-      .limit(1)
-    if (!checkData || checkData.length === 0) {
-      return NextResponse.json({ error: "Không có quyền truy cập" }, { status: 403 })
-    }
-
-    // Fetch all docs
     const { data: docs, error: docsErr } = await supabaseAdmin
       .from("iso_documents")
-      .select("id, ma_tai_lieu, lan_ban_hanh, ngay_hieu_luc, ngay_het_hieu_luc, updated_at, file_goc_url, file_signed_pdf_url, chon_quy_trinh, file_phieu_yeu_cau_thay_doi_url, file_phieu_yeu_cau_thay_doi_signed_url, file_de_nghi_soat_xet_url, file_de_nghi_soat_xet_signed_url, file_soat_xet_url")
+      .select("id, ma_tai_lieu, lan_ban_hanh, ngay_het_hieu_luc, updated_at, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type")
       .eq("factory_id", factoryId)
       .in("id", docIds)
+
     if (docsErr || !docs) {
       return NextResponse.json({ error: "Lỗi truy vấn tài liệu" }, { status: 500 })
     }
 
-    const results: { id: string; ok: boolean; error?: string }[] = []
+    const results: Array<{ id: string; ok: boolean; type?: string; error?: string }> = []
+    const fontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "TimesNewRoman.ttf"))
 
-    for (const doc of docs) {
+    for (const rawDoc of docs as InvalidatedDoc[]) {
       try {
-        const maTl = (doc.ma_tai_lieu as string) || "—"
-        const lsStr = normalizeRevisionText(doc.lan_ban_hanh)
-        const effectiveDate = (doc.ngay_het_hieu_luc as string) || (doc.updated_at as string)
-        const dateStr = fmtDate(effectiveDate)
-
-        // Dùng file_signed_pdf_url nếu có, fallback về file_goc_url
-        const sourceUrl = (doc.file_signed_pdf_url as string) || (doc.file_goc_url as string)
+        const maTl = rawDoc.ma_tai_lieu || "ISO"
+        const revision = normalizeRevisionText(rawDoc.lan_ban_hanh)
+        const expiredDate = fmtDate(rawDoc.ngay_het_hieu_luc || rawDoc.updated_at)
+        const sourceUrl = getMainSourceUrl(rawDoc)
         if (!sourceUrl) {
-          results.push({ id: doc.id, ok: false, error: "Không có file PDF" })
-          continue
-        }
-        if (!sourceUrl.split("?")[0].toLowerCase().endsWith(".pdf")) {
-          results.push({ id: doc.id, ok: true })
+          results.push({ id: rawDoc.id, ok: false, error: "Không có file chính để đóng dấu hết hiệu lực" })
           continue
         }
 
-        // Extract storage path
-        const urlParts = sourceUrl.split("/storage/v1/object/public/iso-documents/")
-        const storagePath = urlParts.length === 2 ? urlParts[1] : null
-        if (!storagePath) {
-          results.push({ id: doc.id, ok: false, error: "Không parse được storage path" })
+        const ext = sourceUrl.split("?")[0].split(".").pop()?.toLowerCase()
+        if (!ext) {
+          results.push({ id: rawDoc.id, ok: false, error: "Không xác định được định dạng file" })
           continue
         }
 
-        const { data: pdfData, error: pdfErr } = await supabaseAdmin.storage
-          .from("iso-documents")
-          .download(decodeURIComponent(storagePath))
-        if (pdfErr || !pdfData) {
-          results.push({ id: doc.id, ok: false, error: "Không tải được PDF" })
+        const sourceBytes = await downloadStorageFile(sourceUrl)
+        const outputBase = `${factoryId}/iso/invalidated/${normalizeOutputName(`${maTl}_${rawDoc.id}_${Date.now()}`)}`
+
+        if (ext === "pdf") {
+          const pdfDoc = await PDFDocument.load(sourceBytes)
+          pdfDoc.registerFontkit(fontkit)
+          const font = await pdfDoc.embedFont(fontBytes)
+          await replaceInvalidatedPdfText(pdfDoc, sourceBytes, font, maTl, revision, expiredDate)
+          stampPdfInvalidatedMark(pdfDoc, font)
+
+          const outputPath = `${outputBase}.pdf`
+          const { error: uploadErr } = await supabaseAdmin.storage
+            .from("iso-documents")
+            .upload(outputPath, await pdfDoc.save(), { contentType: "application/pdf", upsert: true })
+          if (uploadErr) throw new Error(uploadErr.message)
+
+          const { data: urlData } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(outputPath)
+          const { error: updateErr } = await supabaseAdmin
+            .from("iso_documents")
+            .update({ file_signed_pdf_url: urlData.publicUrl })
+            .eq("id", rawDoc.id)
+            .eq("factory_id", factoryId)
+          if (updateErr) throw new Error(updateErr.message)
+
+          results.push({ id: rawDoc.id, ok: true, type: "pdf" })
           continue
         }
 
-        const pdfBytes = await pdfData.arrayBuffer()
-        const pdfDoc = await PDFDocument.load(pdfBytes)
-        pdfDoc.registerFontkit(fontkit)
-        const fontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "TimesNewRoman.ttf"))
-        const font = await pdfDoc.embedFont(fontBytes)
+        if (ext === "docx") {
+          const outputPath = `${outputBase}.docx`
+          const buffer = await renderInvalidatedDocx(sourceBytes, maTl, revision, expiredDate)
+          const { error: uploadErr } = await supabaseAdmin.storage
+            .from("iso-documents")
+            .upload(outputPath, buffer, {
+              contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              upsert: true,
+            })
+          if (uploadErr) throw new Error(uploadErr.message)
 
-        // Bước 1: Thay thế tag "Ngày hiệu lực", "Tình trạng: Có hiệu lực", footer
-        await replaceInvalidatedTags(pdfDoc, pdfBytes, font, maTl, lsStr, dateStr)
-        await reinforceInvalidatedLines(pdfDoc, pdfBytes, font, maTl, lsStr, dateStr)
+          const { data: urlData } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(outputPath)
+          const { error: updateErr } = await supabaseAdmin
+            .from("iso_documents")
+            .update(buildOfficeUpdatePayload(rawDoc, urlData.publicUrl, "docx"))
+            .eq("id", rawDoc.id)
+            .eq("factory_id", factoryId)
+          if (updateErr) throw new Error(updateErr.message)
 
-        // Bước 2: Stamp ảnh "Hết hiệu lực" ở góc trên phải mỗi trang
-        const stamImgBytes = await readFile(path.join(process.cwd(), "cung_cap_dl", "iso", "HẾT HIỆU LỰC.jpg"))
-        const stamImg = await pdfDoc.embedJpg(stamImgBytes)
-        for (const page of pdfDoc.getPages()) {
-          stampWatermark(page, font, maTl, lsStr, dateStr, stamImg)
-        }
-
-        const signedBytes = await pdfDoc.save()
-        const outputPath = `${factoryId}/iso/signed/${doc.id}_signed.pdf`
-
-        const { error: uploadErr } = await supabaseAdmin.storage
-          .from("iso-documents")
-          .upload(outputPath, signedBytes, { contentType: "application/pdf", upsert: true })
-
-        if (uploadErr) {
-          results.push({ id: doc.id, ok: false, error: uploadErr.message })
+          results.push({ id: rawDoc.id, ok: true, type: "docx" })
           continue
         }
 
-        const { data: urlData } = supabaseAdmin.storage
-          .from("iso-documents")
-          .getPublicUrl(outputPath)
+        if (ext === "xlsx") {
+          const outputPath = `${outputBase}.xlsx`
+          const buffer = await renderInvalidatedXlsx(sourceBytes, maTl, revision, expiredDate)
+          const { error: uploadErr } = await supabaseAdmin.storage
+            .from("iso-documents")
+            .upload(outputPath, buffer, {
+              contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              upsert: true,
+            })
+          if (uploadErr) throw new Error(uploadErr.message)
 
-        await supabaseAdmin
-          .from("iso_documents")
-          .update({ file_signed_pdf_url: urlData.publicUrl })
-          .eq("id", doc.id)
-          .eq("factory_id", factoryId)
+          const { data: urlData } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(outputPath)
+          const { error: updateErr } = await supabaseAdmin
+            .from("iso_documents")
+            .update(buildOfficeUpdatePayload(rawDoc, urlData.publicUrl, "xlsx"))
+            .eq("id", rawDoc.id)
+            .eq("factory_id", factoryId)
+          if (updateErr) throw new Error(updateErr.message)
 
-        // Stamp file phụ soát xét nếu có
-        if (doc.chon_quy_trinh === "Soát xét") {
-          const attachments: Array<{ kind: string; url: string | null | undefined; updateCol: Record<string, string> }> = [
-            {
-              kind: "change_request",
-              url: (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url) as string | null,
-              updateCol: { file_phieu_yeu_cau_thay_doi_signed_url: "" },
-            },
-            {
-              kind: "review_request",
-              url: (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url) as string | null,
-              updateCol: { file_de_nghi_soat_xet_signed_url: "" },
-            },
-          ]
-          for (const att of attachments) {
-            if (!att.url) continue
-            if (!att.url.split("?")[0].toLowerCase().endsWith(".pdf")) continue
-            try {
-              const attUrlParts = att.url.split("/storage/v1/object/public/iso-documents/")
-              const attPath = attUrlParts.length === 2 ? attUrlParts[1] : null
-              if (!attPath) continue
-              const { data: attData } = await supabaseAdmin.storage.from("iso-documents").download(decodeURIComponent(attPath))
-              if (!attData) continue
-              const attBytes = await attData.arrayBuffer()
-              const attDoc = await PDFDocument.load(attBytes)
-              attDoc.registerFontkit(fontkit)
-              const attFontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "TimesNewRoman.ttf"))
-              const attFont = await attDoc.embedFont(attFontBytes)
-              await replaceInvalidatedTags(attDoc, attBytes, attFont, maTl, lsStr, dateStr)
-              await reinforceInvalidatedLines(attDoc, attBytes, attFont, maTl, lsStr, dateStr)
-              const attStamImgBytes = await readFile(path.join(process.cwd(), "cung_cap_dl", "iso", "HẾT HIỆU LỰC.jpg"))
-              const attStamImg = await attDoc.embedJpg(attStamImgBytes)
-              for (const page of attDoc.getPages()) {
-                stampWatermark(page, attFont, maTl, lsStr, dateStr, attStamImg)
-              }
-              const attSignedBytes = await attDoc.save()
-              const attOutputPath = `${factoryId}/iso/signed/${doc.id}_${att.kind}_stamped.pdf`
-              const { error: attUploadErr } = await supabaseAdmin.storage
-                .from("iso-documents")
-                .upload(attOutputPath, attSignedBytes, { contentType: "application/pdf", upsert: true })
-              if (attUploadErr) continue
-              const { data: attUrlData } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(attOutputPath)
-              const updatePayload: Record<string, string> = {}
-              for (const col of Object.keys(att.updateCol)) {
-                updatePayload[col] = attUrlData.publicUrl
-              }
-              await supabaseAdmin.from("iso_documents").update(updatePayload).eq("id", doc.id).eq("factory_id", factoryId)
-            } catch {
-              // Lỗi attachment không block kết quả chính
-            }
-          }
+          results.push({ id: rawDoc.id, ok: true, type: "xlsx" })
+          continue
         }
 
-        results.push({ id: doc.id, ok: true })
-      } catch (e) {
-        results.push({ id: doc.id, ok: false, error: e instanceof Error ? e.message : "Lỗi không xác định" })
+        results.push({ id: rawDoc.id, ok: true, type: ext })
+      } catch (error) {
+        results.push({
+          id: rawDoc.id,
+          ok: false,
+          error: error instanceof Error ? error.message : "Lỗi không xác định",
+        })
       }
     }
 
-    const allOk = results.every((r) => r.ok)
+    const allOk = results.every((item) => item.ok)
     return NextResponse.json({ ok: allOk, results }, { status: allOk ? 200 : 207 })
-  } catch (err) {
+  } catch (error) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi server" },
+      { error: error instanceof Error ? error.message : "Lỗi server" },
       { status: 500 },
     )
   }

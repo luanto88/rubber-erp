@@ -77,6 +77,7 @@ const NAV: NavItem[] = [
         permission: "inventory.view",
       },
       { key: "/dashboard/product", label: "Thành phẩm", icon: Package, permission: "product.view" },
+      { key: "/dashboard/warehouse", label: "Kho thành phẩm", icon: Warehouse, permission: "warehouse.view" },
       {
         key: "/dashboard/quality",
         label: "Chất lượng",
