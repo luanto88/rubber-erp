@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { X, AlertTriangle, CheckCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import type { ProductionRecord, OutputFormState } from "./output-types"
 import { emptyOutputForm, parseVehicleCode } from "./output-types"
 
@@ -44,6 +45,7 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
   const [dispatchLoading, setDispatchLoading] = useState(false)
   const [enteredKeys, setEnteredKeys] = useState<Set<string>>(new Set())
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   useEffect(() => {
     if (record) {
@@ -110,6 +112,19 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
     void fetchForDate()
   }, [form.ngay, factoryId])
 
+  useEffect(() => {
+    if (!factoryId) return
+    const run = async () => {
+      try {
+        const rows = await loadRequiredNotes(supabase, factoryId)
+        setRequiredNotes(rows.map((row) => row.content))
+      } catch {
+        setRequiredNotes([])
+      }
+    }
+    void run()
+  }, [factoryId])
+
   // Auto-fill tài xế khi chọn xe + chuyến từ dispatch
   useEffect(() => {
     if (!form.so_xe || !form.chuyen || dispatchVehicles.length === 0) return
@@ -174,6 +189,18 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
   // Banner tiến độ
   const daXuat = dispatchVehicles.filter(d => enteredKeys.has(`${d.so_xe}:${d.chuyen}`)).length
   const chuaNhap = dispatchVehicles.length - daXuat
+  const handleAddRequiredNote = async () => {
+    if (!factoryId) return
+    const input = window.prompt("Nhập ghi chú mới")
+    if (!input || !input.trim()) return
+    try {
+      const row = await createRequiredNote(supabase, factoryId, input)
+      setRequiredNotes((prev) => prev.includes(row.content) ? prev : [...prev, row.content])
+      setField("ghi_chu", row.content)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thêm được ghi chú")
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -367,14 +394,22 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
           </div>
 
           <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-            <textarea
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-600 block">Ghi chú</label>
+              <button type="button" onClick={() => void handleAddRequiredNote()} className="text-xs font-bold text-amber-700 hover:text-amber-800">
+                + Thêm ghi chú mới
+              </button>
+            </div>
+            <input
+              list="output-required-notes"
               value={form.ghi_chu}
               onChange={e => setField("ghi_chu", e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
               placeholder="Ghi chú (tùy chọn)"
             />
+            <datalist id="output-required-notes">
+              {requiredNotes.map(note => <option key={note} value={note} />)}
+            </datalist>
           </div>
 
           {error && (

@@ -52,10 +52,11 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
     const dct_tuoi = toNum(row[9]); const dct_drc = toNum(row[10]); const dct_kho = calcKho(dct_tuoi, dct_drc, toNum(row[11]))
     const dkt_tuoi = toNum(row[12]); const dkt_drc = toNum(row[13]); const dkt_kho = calcKho(dkt_tuoi, dkt_drc, toNum(row[14]))
     const dt_tuoi = toNum(row[15]); const dt_drc = toNum(row[16]);  const dt_kho = calcKho(dt_tuoi, dt_drc, toNum(row[17]))
+    const ghi_chu = String(row[18] ?? "").trim()
 
     result.push({
       row_index: idx + 3,
-      ngay, doi, base_xe, chuyen,
+      ngay, doi, base_xe, chuyen, ghi_chu,
       mn_tuoi, mn_drc, mn_kho,
       ct_tuoi, ct_drc, ct_kho,
       dct_tuoi, dct_drc, dct_kho,
@@ -245,6 +246,7 @@ export function OutputImport({
         dispatch_entry_id: r.dispatch_entry_id,
         warn_codes: r.warn_codes,
         import_batch_id: batchId,
+        ghi_chu: r.ghi_chu || null,
       }))
       const { error } = await supabase
         .from("production_records")
@@ -322,10 +324,10 @@ export function OutputImport({
                 </div>
               )}
               <div className="mt-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-600">
-                <p className="font-bold mb-2">Cấu trúc file (18 cột A–R):</p>
+                <p className="font-bold mb-2">Cấu trúc file (19 cột A–S):</p>
                 <p>A: Ngày &nbsp;|&nbsp; B: Đội (1–12) &nbsp;|&nbsp; C: Số xe (1A, 1A2, 1A3...)</p>
                 <p>D–F: Mủ nước &nbsp;|&nbsp; G–I: Mủ chén &nbsp;|&nbsp; J–L: Mủ đông chén &nbsp;|&nbsp; M–O: Mủ đông khối &nbsp;|&nbsp; P–R: Mủ dây</p>
-                <p className="mt-1 text-slate-400">Mỗi nhóm: Tươi / DRC% / Khô</p>
+                <p className="mt-1 text-slate-400">Mỗi nhóm: Tươi / DRC% / Khô · Cột S: Ghi chú</p>
               </div>
             </div>
           )}
@@ -362,6 +364,7 @@ export function OutputImport({
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Tài xế</th>
                       <th className="px-3 py-2 text-right font-bold text-slate-600">Tươi (kg)</th>
                       <th className="px-3 py-2 text-right font-bold text-slate-600">Khô (kg)</th>
+                      <th className="px-3 py-2 text-left font-bold text-slate-600">Ghi chú</th>
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Cảnh báo</th>
                     </tr>
                   </thead>
@@ -381,6 +384,7 @@ export function OutputImport({
                           <td className="px-3 py-1.5 text-slate-600">{r.tai_xe || <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-1.5 text-right text-slate-700">{totalTuoi > 0 ? totalTuoi.toLocaleString("vi-VN") : "—"}</td>
                           <td className="px-3 py-1.5 text-right font-bold text-emerald-700">{totalKho > 0 ? totalKho.toLocaleString("vi-VN") : "—"}</td>
+                          <td className="px-3 py-1.5 text-slate-500">{r.ghi_chu || <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-1.5">
                             {r.warn_codes.map(c => <WarnBadge key={c} code={c} />)}
                           </td>

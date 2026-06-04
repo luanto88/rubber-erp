@@ -3327,3 +3327,83 @@ Creating turbopack project { dir: 'C:\\Users\\Software\\rubber-erp', testMode: t
  POST /api/sign/generate-pdf 200 in 2.1s (next.js: 2ms, application-code: 2.1s)
  POST /api/iso/notify 200 in 1317ms (next.js: 4ms, application-code: 1313ms)
  GET /dashboard/iso/documents/4baf0b3a-4dfd-421b-962d-c4f4776e12fa 200 in 85ms (next.js: 53ms, application-code: 32ms)
+ GET /login 200 in 164ms (next.js: 16ms, application-code: 148ms)
+ GET /dashboard 200 in 42ms (next.js: 17ms, application-code: 25ms)
+ GET /dashboard/settings 200 in 156ms (next.js: 109ms, application-code: 47ms)
+○ Compiling /dashboard/warehouse ...
+ GET /dashboard/settings 200 in 50ms (next.js: 5ms, application-code: 45ms)
+ GET /dashboard/warehouse 200 in 5.5s (next.js: 5.4s, application-code: 34ms)
+ GET /dashboard/warehouse 200 in 25ms (next.js: 3ms, application-code: 21ms)
+ GET / 200 in 538ms (next.js: 173ms, application-code: 365ms)
+ GET /login 200 in 121ms (next.js: 52ms, application-code: 69ms)
+ GET /dashboard 200 in 72ms (next.js: 37ms, application-code: 35ms)
+ GET /dashboard/dispatch 200 in 152ms (next.js: 109ms, application-code: 43ms)
+ GET /dashboard/output 200 in 138ms (next.js: 105ms, application-code: 34ms)
+ GET /dashboard/settings 200 in 55ms (next.js: 29ms, application-code: 26ms)
+✓ Compiled in 702ms
+ GET /dashboard/settings 200 in 80ms (next.js: 49ms, application-code: 31ms)
+ GET /dashboard/settings 200 in 26ms (next.js: 3ms, application-code: 23ms)
+✓ Compiled in 237ms
+ GET /dashboard/settings 200 in 70ms (next.js: 45ms, application-code: 25ms)
+✓ Compiled in 174ms
+ GET /dashboard/settings 200 in 73ms (next.js: 50ms, application-code: 23ms)
+✓ Compiled in 756ms
+ GET /dashboard/settings 200 in 264ms (next.js: 208ms, application-code: 56ms)
+✓ Compiled in 115ms
+ GET /dashboard/settings 200 in 85ms (next.js: 55ms, application-code: 30ms)
+✓ Compiled in 665ms
+ GET /dashboard/settings 200 in 64ms (next.js: 39ms, application-code: 25ms)
+ GET /dashboard/settings 200 in 22ms (next.js: 1846µs, application-code: 20ms)
+ GET /dashboard/settings 200 in 27ms (next.js: 3ms, application-code: 24ms)
+✓ Compiled in 83ms
+ GET /dashboard/settings 200 in 62ms (next.js: 37ms, application-code: 25ms)
+✓ Compiled in 78ms
+ GET /dashboard/settings 200 in 62ms (next.js: 39ms, application-code: 23ms)
+✓ Compiled in 232ms
+ GET /dashboard/settings 200 in 121ms (next.js: 70ms, application-code: 50ms)
+✓ Compiled in 267ms
+ GET /dashboard/settings 200 in 128ms (next.js: 66ms, application-code: 61ms)
+✓ Compiled in 82ms
+ GET /dashboard/settings 200 in 63ms (next.js: 38ms, application-code: 25ms)
+✓ Compiled in 285ms
+ GET /dashboard/settings 200 in 61ms (next.js: 38ms, application-code: 23ms)
+ GET /dashboard/settings 200 in 17ms (next.js: 1917µs, application-code: 15ms)
+ GET /dashboard/settings 200 in 24ms (next.js: 1663µs, application-code: 22ms)
+✓ Compiled in 67ms
+ GET /dashboard/settings 200 in 66ms (next.js: 38ms, application-code: 27ms)
+ GET /dashboard/output 200 in 137ms (next.js: 94ms, application-code: 43ms)
+ GET /dashboard/dispatch 200 in 163ms (next.js: 93ms, application-code: 70ms)
+ GET /dashboard/dispatch 200 in 423ms (next.js: 69ms, application-code: 354ms)
+ GET /dashboard/dispatch 200 in 67ms (next.js: 4ms, application-code: 63ms)
+ GET /dashboard/dispatch 200 in 166ms (next.js: 42ms, application-code: 124ms)
+ GET /dashboard/dispatch 200 in 156ms (next.js: 39ms, application-code: 116ms)
+ GET /dashboard/dispatch 200 in 152ms (next.js: 37ms, application-code: 115ms)
+ GET /dashboard/dispatch 200 in 148ms (next.js: 37ms, application-code: 111ms)
+ GET /dashboard/dispatch 200 in 195ms (next.js: 41ms, application-code: 154ms)
+ GET /dashboard/dispatch 200 in 210ms (next.js: 51ms, application-code: 159ms)
+ GET /dashboard/dispatch 200 in 191ms (next.js: 48ms, application-code: 143ms)
+ GET /dashboard/dispatch 200 in 226ms (next.js: 83ms, application-code: 143ms)
+ GET /dashboard/dispatch 200 in 207ms (next.js: 50ms, application-code: 158ms)
+ GET / 200 in 176ms (next.js: 27ms, application-code: 150ms)
+ GET /login 200 in 55ms (next.js: 29ms, application-code: 27ms)
+ GET /dashboard 200 in 70ms (next.js: 29ms, application-code: 40ms)
+ GET /dashboard/storage 200 in 100ms (next.js: 68ms, application-code: 32ms)
+ GET /dashboard/warehouse 200 in 58ms (next.js: 32ms, application-code: 26ms)
+ GET /dashboard/output 200 in 52ms (next.js: 24ms, application-code: 28ms)
+ GET /dashboard/dispatch 200 in 27ms (next.js: 3ms, application-code: 23ms)
+ GET / 200 in 80ms (next.js: 3ms, application-code: 78ms)
+ GET /login 200 in 26ms (next.js: 3ms, application-code: 23ms)
+ GET /dashboard 200 in 37ms (next.js: 5ms, application-code: 33ms)
+ GET /dashboard/storage 200 in 25ms (next.js: 3ms, application-code: 22ms)
+ GET /dashboard/output 200 in 25ms (next.js: 3ms, application-code: 22ms)
+ GET /dashboard/dispatch 200 in 25ms (next.js: 3ms, application-code: 22ms)
+ GET / 200 in 76ms (next.js: 4ms, application-code: 72ms)
+ GET /login 200 in 27ms (next.js: 4ms, application-code: 22ms)
+ GET /login 200 in 156ms (next.js: 106ms, application-code: 50ms)
+ GET /dashboard 200 in 253ms (next.js: 150ms, application-code: 103ms)
+ GET /dashboard 200 in 146ms (next.js: 97ms, application-code: 49ms)
+ GET /dashboard/dispatch 200 in 146ms (next.js: 102ms, application-code: 44ms)
+ GET /dashboard/output 200 in 86ms (next.js: 23ms, application-code: 63ms)
+✓ Compiled in 361ms
+ GET /dashboard/output 200 in 287ms (next.js: 95ms, application-code: 193ms)
+ GET /dashboard/dispatch 200 in 141ms (next.js: 99ms, application-code: 43ms)

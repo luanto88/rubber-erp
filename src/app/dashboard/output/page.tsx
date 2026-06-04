@@ -15,6 +15,7 @@ import {
 } from "./_components/output-types"
 import { OutputImport, matchRows } from "./_components/output-import"
 import { OutputForm } from "./_components/output-form"
+import { loadRequiredNotes } from "@/lib/required-notes"
 
 // ────────────────────────────────────────────────────────────────
 // Types for dispatch data used in matching
@@ -94,7 +95,9 @@ export default function OutputPage() {
   const [filterTo, setFilterTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [filterDoi, setFilterDoi] = useState("")
   const [filterXe, setFilterXe] = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState("")
   const [filterWarnOnly, setFilterWarnOnly] = useState(false)
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   // Sort
   const [sortCol, setSortCol] = useState<"ngay" | "doi" | "so_xe">("ngay")
@@ -137,6 +140,15 @@ export default function OutputPage() {
     setDispatches((data as DispatchEntry[]) || [])
   }, [])
 
+  const loadNoteOptions = useCallback(async (fid: string) => {
+    try {
+      const rows = await loadRequiredNotes(supabase, fid)
+      setRequiredNotes(rows.map((row) => row.content))
+    } catch {
+      setRequiredNotes([])
+    }
+  }, [])
+
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
@@ -151,14 +163,16 @@ export default function OutputPage() {
     if (factoryId) {
       void loadRecords(factoryId)
       void loadDispatches(factoryId)
+      void loadNoteOptions(factoryId)
     }
-  }, [factoryId, loadRecords, loadDispatches])
+  }, [factoryId, loadRecords, loadDispatches, loadNoteOptions])
 
   // ── Filtered + sorted records ────────────────────────────────
   const filtered = records
     .filter(r => {
       if (filterDoi && r.doi !== parseInt(filterDoi)) return false
       if (filterXe && !r.so_xe.toUpperCase().includes(filterXe.toUpperCase())) return false
+      if (filterGhiChu && (r.ghi_chu || "") !== filterGhiChu) return false
       if (filterWarnOnly && r.warn_codes.length === 0) return false
       return true
     })
@@ -309,6 +323,11 @@ export default function OutputPage() {
               <input type="text" value={filterXe} onChange={e => setFilterXe(e.target.value)}
                 placeholder="Tìm số xe..." className="pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 w-36" />
             </div>
+            <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
+              className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+              <option value="">Tất cả ghi chú</option>
+              {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
+            </select>
             <button
               onClick={() => setFilterWarnOnly(v => !v)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${filterWarnOnly ? "bg-amber-100 text-amber-700 border border-amber-300" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
@@ -504,7 +523,7 @@ export default function OutputPage() {
           <h3 className="font-bold text-slate-800 text-base">Hướng dẫn import file sản lượng</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <p className="font-bold mb-2">Cấu trúc file (18 cột A–R):</p>
+              <p className="font-bold mb-2">Cấu trúc file (19 cột A–S):</p>
               <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
                 <thead className="bg-slate-50"><tr><th className="px-2 py-1 text-left">Cột</th><th className="px-2 py-1 text-left">Nội dung</th></tr></thead>
                 <tbody>
@@ -517,6 +536,7 @@ export default function OutputPage() {
                     ["J–L", "Mủ đông chén: Tươi / DRC% / Khô"],
                     ["M–O", "Mủ đông khối: Tươi / DRC% / Khô"],
                     ["P–R", "Mủ dây: Tươi / DRC% / Khô"],
+                    ["S", "Ghi chú"],
                   ].map(([col, desc]) => (
                     <tr key={col} className="border-t border-slate-100">
                       <td className="px-2 py-1 font-mono font-bold text-emerald-700">{col}</td>

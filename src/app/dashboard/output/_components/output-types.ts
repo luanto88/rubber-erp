@@ -37,6 +37,7 @@ export interface ParsedSlRow {
   doi: number
   base_xe: string        // after parseVehicleCode
   chuyen: number
+  ghi_chu: string
   mn_tuoi: number; mn_drc: number; mn_kho: number
   ct_tuoi: number; ct_drc: number; ct_kho: number
   dct_tuoi: number; dct_drc: number; dct_kho: number

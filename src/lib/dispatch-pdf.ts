@@ -5,11 +5,12 @@ import {
   formatKg,
   formatKm,
   formatTon,
+  getTripMaterials,
   getTripTotals,
   type DispatchAnalytics,
   type DispatchAnalyticsEntry,
+  type DispatchMaterialTotals,
   type DispatchFlatTrip,
-  type DispatchGroupSummary,
 } from "@/lib/dispatch-analytics"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
@@ -23,6 +24,26 @@ type PdfWithTable = jsPDF & {
     finalY: number
   }
 }
+
+type MaterialAggregateRow = {
+  ngay: string
+  doiLabel?: string
+  trip?: DispatchFlatTrip
+  materials: DispatchMaterialTotals
+}
+
+const MATERIAL_DEFS: Array<{
+  tuoiKey: keyof DispatchMaterialTotals
+  khoKey: keyof DispatchMaterialTotals
+  baseKey: "mn" | "ct" | "dct" | "dkt" | "dt"
+  label: string
+}> = [
+  { baseKey: "mn", label: "Mủ nước", tuoiKey: "mnTuoi", khoKey: "mnKho" },
+  { baseKey: "ct", label: "Mủ chén", tuoiKey: "ctTuoi", khoKey: "ctKho" },
+  { baseKey: "dct", label: "Đông chén", tuoiKey: "dctTuoi", khoKey: "dctKho" },
+  { baseKey: "dkt", label: "Đông khối", tuoiKey: "dktTuoi", khoKey: "dktKho" },
+  { baseKey: "dt", label: "Mủ dây", tuoiKey: "dtTuoi", khoKey: "dtKho" },
+]
 
 async function loadPdfFontBase64() {
   if (!fontBase64Promise) {
@@ -109,6 +130,108 @@ function footer(doc: jsPDF) {
   }
 }
 
+function formatDrc(kho: number, tuoi: number) {
+  if (tuoi <= 0 || kho <= 0) return "-"
+  return (kho / tuoi * 100).toLocaleString("vi-VN", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+}
+
+function getVisibleMaterials(rows: MaterialAggregateRow[]) {
+  return MATERIAL_DEFS.filter((def) =>
+    rows.some((row) => {
+      const tuoi = row.materials[def.tuoiKey] as number
+      const kho = row.materials[def.khoKey] as number
+      return tuoi > 0 || kho > 0
+    }),
+  )
+}
+
+function buildMaterialColumns(materials: ReturnType<typeof getVisibleMaterials>) {
+  return materials.flatMap((material) => [
+    `${material.label} tươi`,
+    `${material.label} DRC`,
+    `${material.label} khô`,
+  ])
+}
+
+function materialTripValues(materials: DispatchMaterialTotals, defs: ReturnType<typeof getVisibleMaterials>) {
+  return defs.flatMap((def) => {
+    const tuoi = materials[def.tuoiKey] as number
+    const kho = materials[def.khoKey] as number
+    return [formatKg(tuoi), formatDrc(kho, tuoi), formatKg(kho)]
+  })
+}
+
+function buildDoiRows(trips: DispatchFlatTrip[]) {
+  const grouped = new Map<string, MaterialAggregateRow>()
+  for (const trip of trips) {
+    const dois = trip.dois.length > 0 ? trip.dois : [0]
+    const tripMaterials = getTripMaterials(trip)
+    for (const doi of dois) {
+      const doiLabel = doi ? `Đội ${doi}` : "Chưa rõ đội"
+      const key = `${trip.ngay}__${doiLabel}`
+      const current = grouped.get(key) || {
+        ngay: trip.ngay,
+        doiLabel,
+        materials: {
+          mnTuoi: 0, mnKho: 0,
+          ctTuoi: 0, ctKho: 0,
+          dctTuoi: 0, dctKho: 0,
+          dktTuoi: 0, dktKho: 0,
+          dtTuoi: 0, dtKho: 0,
+        },
+      }
+      for (const def of MATERIAL_DEFS) {
+        current.materials[def.tuoiKey] = (current.materials[def.tuoiKey] as number) + (tripMaterials[def.tuoiKey] as number)
+        current.materials[def.khoKey] = (current.materials[def.khoKey] as number) + (tripMaterials[def.khoKey] as number)
+      }
+      grouped.set(key, current)
+    }
+  }
+  return [...grouped.values()].sort((a, b) =>
+    a.ngay === b.ngay ? (a.doiLabel || "").localeCompare(b.doiLabel || "") : a.ngay.localeCompare(b.ngay),
+  )
+}
+
+function buildVehicleRows(trips: DispatchFlatTrip[]) {
+  return trips
+    .map((trip) => ({
+      ngay: trip.ngay,
+      trip,
+      materials: getTripMaterials(trip),
+    }))
+    .sort((a, b) => {
+      if (a.ngay !== b.ngay) return a.ngay.localeCompare(b.ngay)
+      if ((a.trip?.so_xe || "") !== (b.trip?.so_xe || "")) return (a.trip?.so_xe || "").localeCompare(b.trip?.so_xe || "")
+      return Number(a.trip?.chuyen || 1) - Number(b.trip?.chuyen || 1)
+    })
+}
+
+function buildAllRows(trips: DispatchFlatTrip[]) {
+  const grouped = new Map<string, MaterialAggregateRow>()
+  for (const trip of trips) {
+    const tripMaterials = getTripMaterials(trip)
+    const current = grouped.get(trip.ngay) || {
+      ngay: trip.ngay,
+      materials: {
+        mnTuoi: 0, mnKho: 0,
+        ctTuoi: 0, ctKho: 0,
+        dctTuoi: 0, dctKho: 0,
+        dktTuoi: 0, dktKho: 0,
+        dtTuoi: 0, dtKho: 0,
+      },
+    }
+    for (const def of MATERIAL_DEFS) {
+      current.materials[def.tuoiKey] = (current.materials[def.tuoiKey] as number) + (tripMaterials[def.tuoiKey] as number)
+      current.materials[def.khoKey] = (current.materials[def.khoKey] as number) + (tripMaterials[def.khoKey] as number)
+    }
+    grouped.set(trip.ngay, current)
+  }
+  return [...grouped.values()].sort((a, b) => a.ngay.localeCompare(b.ngay))
+}
+
 function tripInfoRows(trip: DispatchFlatTrip) {
   const dois = trip.dois.length ? trip.dois.map((doi) => `Đội ${doi}`).join(", ") : "-"
 
@@ -120,7 +243,6 @@ function tripInfoRows(trip: DispatchFlatTrip) {
     ["Điểm giao nhận", (trip.diem_gn || []).join(", ") || "-", "Phiên", (trip.phien || []).join(", ") || "-"],
     ["Lộ trình", (trip.lo_trinh || []).join(" - ") || "-", "Km", `${formatKm(trip.totalKm)} km`],
     ["Lô thu hoạch", (trip.lo_thu_hoach || []).join(", ") || "-", "Xử lý", trip.xu_ly || "-"],
-    ["Ghi chú", trip.ghi_chu || "-", "", ""],
   ]
 }
 
@@ -128,12 +250,12 @@ function materialRows(trip: DispatchFlatTrip) {
   const { materials, totalTuoi, totalKho } = getTripTotals(trip)
 
   return [
-    ["Mủ nước", formatKg(materials.mnTuoi), formatKg(materials.mnKho)],
-    ["Mủ chén", formatKg(materials.ctTuoi), formatKg(materials.ctKho)],
-    ["Đông chén", formatKg(materials.dctTuoi), formatKg(materials.dctKho)],
-    ["Đông khối", formatKg(materials.dktTuoi), formatKg(materials.dktKho)],
-    ["Mủ dây", formatKg(materials.dtTuoi), formatKg(materials.dtKho)],
-    ["TỔNG", formatKg(totalTuoi), formatKg(totalKho)],
+    ["Mủ nước", formatKg(materials.mnTuoi), formatDrc(materials.mnKho, materials.mnTuoi), formatKg(materials.mnKho)],
+    ["Mủ chén", formatKg(materials.ctTuoi), formatDrc(materials.ctKho, materials.ctTuoi), formatKg(materials.ctKho)],
+    ["Đông chén", formatKg(materials.dctTuoi), formatDrc(materials.dctKho, materials.dctTuoi), formatKg(materials.dctKho)],
+    ["Đông khối", formatKg(materials.dktTuoi), formatDrc(materials.dktKho, materials.dktTuoi), formatKg(materials.dktKho)],
+    ["Mủ dây", formatKg(materials.dtTuoi), formatDrc(materials.dtKho, materials.dtTuoi), formatKg(materials.dtKho)],
+    ["TỔNG", formatKg(totalTuoi), formatDrc(totalKho, totalTuoi), formatKg(totalKho)],
   ]
 }
 
@@ -159,12 +281,12 @@ export async function downloadDispatchTripPdf(trip: DispatchFlatTrip, factoryNam
   const pdf = doc as PdfWithTable
   autoTable(doc, {
     startY: (pdf.lastAutoTable?.finalY || 96) + 8,
-    head: [["Loại nguyên liệu", "Tươi (kg)", "Khô (kg)"]],
+    head: [["Loại nguyên liệu", "Tươi (kg)", "DRC (%)", "Khô (kg)"]],
     body: materialRows(trip),
     theme: "grid",
     styles: { font: PDF_FONT_NAME, fontSize: 9, cellPadding: 2 },
     headStyles: { fillColor: [30, 64, 175], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right" }, 2: { halign: "right" } },
+    columnStyles: { 0: { fontStyle: "bold" }, 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } },
   })
 
   renderSignatures(doc, makerName)
@@ -187,7 +309,7 @@ export async function downloadDispatchEntryPdf(params: {
     theme: "grid",
     styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    head: [["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Xử lý", "Km", "Tươi (kg)", "Khô (kg)", "Ghi chú"]],
+    head: [["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Xử lý", "Km", "Tươi (kg)", "Khô (kg)"]],
     body: params.trips.map((trip) => [
       trip.so_xe || "-",
       String(trip.chuyen || 1),
@@ -200,7 +322,6 @@ export async function downloadDispatchEntryPdf(params: {
       formatKm(trip.totalKm),
       formatKg(trip.totalTuoi),
       formatKg(trip.totalKho),
-      trip.ghi_chu || "-",
     ]),
     columnStyles: {
       1: { halign: "center" },
@@ -213,21 +334,6 @@ export async function downloadDispatchEntryPdf(params: {
   renderSignatures(doc, params.makerName)
   footer(doc)
   doc.save(`phieu-dieu-xe-ngay-${safeName(params.entry.ngay)}.pdf`)
-}
-
-function summaryRows(groups: DispatchGroupSummary[]) {
-  return groups.map((group) => [
-    group.label,
-    String(group.trips),
-    String(group.vehicles.size),
-    formatKm(group.km),
-    formatTon(group.mnTuoi, 2),
-    formatTon(group.mnKho, 2),
-    formatTon(group.ctTuoi + group.dctTuoi + group.dktTuoi + group.dtTuoi, 2),
-    formatTon(group.ctKho + group.dctKho + group.dktKho + group.dtKho, 2),
-    formatTon(group.totalTuoi, 2),
-    formatTon(group.totalKho, 2),
-  ])
 }
 
 function buildStatsContext(params: {
@@ -253,7 +359,8 @@ export async function downloadDispatchStatsPdf(params: {
   selectedVehicle?: string
   makerName?: string
 }) {
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
+  const isVehicleMode = params.mode === "vehicle"
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: isVehicleMode ? "a3" : "a4" })
   await ensurePdfFont(doc)
   renderHeader(doc, "THỐNG KÊ ĐIỀU XE", `Nhà máy: ${params.factoryName}; ${buildStatsContext(params)}`)
 
@@ -276,31 +383,73 @@ export async function downloadDispatchStatsPdf(params: {
   })
 
   const pdf = doc as PdfWithTable
-  const groups = params.mode === "vehicle" ? params.analytics.byVehicle : params.analytics.byDoi
-  const heading = params.mode === "vehicle" ? "Tổng hợp theo xe" : "Tổng hợp theo đội"
+  const allRows = buildAllRows(params.analytics.trips)
+  const doiRows = buildDoiRows(params.analytics.trips)
+  const vehicleRows = buildVehicleRows(params.analytics.trips)
+  const materialRows = params.mode === "vehicle" ? vehicleRows : params.mode === "doi" ? doiRows : allRows
+  const visibleMaterials = getVisibleMaterials(materialRows)
+  const materialColumns = buildMaterialColumns(visibleMaterials)
+  const heading = params.mode === "vehicle"
+    ? "Chi tiết theo xe"
+    : params.mode === "doi"
+      ? "Chi tiết theo đội theo ngày"
+      : "Tổng hợp theo ngày"
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(11)
   doc.text(heading, 14, (pdf.lastAutoTable?.finalY || 46) + 10)
 
-  autoTable(doc, {
-    startY: (pdf.lastAutoTable?.finalY || 46) + 14,
-    head: [[params.mode === "vehicle" ? "Số xe" : "Đội", "Chuyến", "Xe", "Km", "MN tươi", "MN khô", "Tạp tươi", "Tạp khô", "Tổng tươi", "Tổng khô"]],
-    body: summaryRows(groups),
-    theme: "grid",
-    styles: { font: PDF_FONT_NAME, fontSize: 8, cellPadding: 1.6 },
-    headStyles: { fillColor: [30, 64, 175], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    columnStyles: {
-      1: { halign: "right" },
-      2: { halign: "right" },
-      3: { halign: "right" },
-      4: { halign: "right" },
-      5: { halign: "right" },
-      6: { halign: "right" },
-      7: { halign: "right" },
-      8: { halign: "right" },
-      9: { halign: "right" },
-    },
-  })
+  const startY = (pdf.lastAutoTable?.finalY || 46) + 14
+  if (params.mode === "vehicle") {
+    autoTable(doc, {
+      startY,
+      head: [[
+        "Ngày",
+        "Số xe",
+        "Tài xế",
+        "Chuyến",
+        "Phiên",
+        "Điểm giao nhận",
+        "Lộ trình",
+        "Số Km",
+        ...materialColumns,
+      ]],
+      body: vehicleRows.map(({ trip, materials, ngay }) => [
+        formatDateVi(ngay),
+        trip?.so_xe || "-",
+        trip?.tai_xe || "-",
+        String(trip?.chuyen || 1),
+        (trip?.phien || []).join(", ") || "-",
+        (trip?.diem_gn || []).join(", ") || "-",
+        (trip?.lo_trinh || []).join(" - ") || "-",
+        formatKm(trip?.totalKm || 0),
+        ...materialTripValues(materials, visibleMaterials),
+      ]),
+      theme: "grid",
+      styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3 },
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
+      columnStyles: {
+        3: { halign: "center" },
+        7: { halign: "right" },
+      },
+    })
+  } else {
+    autoTable(doc, {
+      startY,
+      head: [[
+        "Ngày",
+        params.mode === "doi" ? "Đội" : "Nhóm",
+        ...materialColumns,
+      ]],
+      body: (params.mode === "doi" ? doiRows : allRows).map((row) => [
+        formatDateVi(row.ngay),
+        params.mode === "doi" ? (row.doiLabel || "-") : "Tổng ngày",
+        ...materialTripValues(row.materials, visibleMaterials),
+      ]),
+      theme: "grid",
+      styles: { font: PDF_FONT_NAME, fontSize: 8, cellPadding: 1.6 },
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
+    })
+  }
 
   renderSignatures(doc, params.makerName)
   footer(doc)

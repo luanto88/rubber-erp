@@ -15,6 +15,7 @@ const PolygonDrawMap = dynamic(
   }
 )
 import { supabase } from "@/lib/supabase"
+import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -118,7 +119,7 @@ type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" |
 
 type SystemTab = "users" | "permissions"
 
-type MasterDataTab = "suffixes" | "company" | "customers"
+type MasterDataTab = "suffixes" | "company" | "customers" | "required-notes"
 
 type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots"
 
@@ -170,6 +171,12 @@ type CustomerForm = {
   ten_kh_en: string
   email: string
   dia_chi: string
+}
+
+type RequiredNoteForm = {
+  content: string
+  sort_order: string
+  is_active: boolean
 }
 
 const BO_PHAN_OPTIONS = ["Mủ tạp", "Mủ nước", "Nước thải", "Biomass", "Đội xe", "Văn phòng", "Khác"] as const
@@ -592,6 +599,16 @@ export default function SettingsPage() {
   const [customerDelConfirm, setCustomerDelConfirm] = useState<{ id: string; label: string } | null>(null)
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
 
+  const [requiredNotes, setRequiredNotes] = useState<RequiredNote[]>([])
+  const [requiredNotesLoading, setRequiredNotesLoading] = useState(false)
+  const [requiredNotesLoaded, setRequiredNotesLoaded] = useState(false)
+  const [requiredNoteModal, setRequiredNoteModal] = useState<"add" | "edit" | null>(null)
+  const [requiredNoteEditId, setRequiredNoteEditId] = useState<string | null>(null)
+  const [requiredNoteForm, setRequiredNoteForm] = useState<RequiredNoteForm>({ content: "", sort_order: "0", is_active: true })
+  const [requiredNoteSaving, setRequiredNoteSaving] = useState(false)
+  const [requiredNoteError, setRequiredNoteError] = useState("")
+  const [requiredNoteDelConfirm, setRequiredNoteDelConfirm] = useState<{ id: string; label: string } | null>(null)
+
   // ISO & Văn bản tab state
   const [isoVanBanTab, setIsoVanBanTab] = useState<"chu-ky">("chu-ky")
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
@@ -735,6 +752,16 @@ export default function SettingsPage() {
       setCustomerLoaded(true)
     } finally {
       setCustomerLoading(false)
+    }
+  }, [])
+
+  const loadMasterRequiredNotes = useCallback(async (fid: string) => {
+    setRequiredNotesLoading(true)
+    try {
+      setRequiredNotes(await loadRequiredNotes(supabase, fid, false))
+      setRequiredNotesLoaded(true)
+    } finally {
+      setRequiredNotesLoading(false)
     }
   }, [])
 
@@ -1282,6 +1309,12 @@ export default function SettingsPage() {
   }, [tab, masterDataTab, factoryId, customerLoaded, customerLoading, loadCustomers])
 
   useEffect(() => {
+    if (tab === "master-data" && masterDataTab === "required-notes" && factoryId && !requiredNotesLoaded && !requiredNotesLoading) {
+      void loadMasterRequiredNotes(factoryId)
+    }
+  }, [tab, masterDataTab, factoryId, requiredNotesLoaded, requiredNotesLoading, loadMasterRequiredNotes])
+
+  useEffect(() => {
     if (tab === "iso-vanban" && user && factoryId) {
       const loadSignInfo = async () => {
         // Kiểm tra đã có ảnh chữ ký chưa
@@ -1586,6 +1619,56 @@ export default function SettingsPage() {
     await supabase.from("customers").delete().eq("id", customerDelConfirm.id).eq("factory_id", factoryId)
     setCustomerDelConfirm(null)
     void loadCustomers(factoryId)
+  }
+
+  const saveRequiredNote = async () => {
+    if (!factoryId) return
+    if (!requiredNoteForm.content.trim()) { setRequiredNoteError("Nội dung ghi chú không được để trống"); return }
+    setRequiredNoteSaving(true)
+    setRequiredNoteError("")
+    try {
+      if (requiredNoteEditId) {
+        const { error: updateError } = await supabase
+          .from("required_notes")
+          .update({
+            content: requiredNoteForm.content.trim(),
+            sort_order: Number(requiredNoteForm.sort_order) || 0,
+            is_active: requiredNoteForm.is_active,
+          })
+          .eq("id", requiredNoteEditId)
+          .eq("factory_id", factoryId)
+        if (updateError) { setRequiredNoteError(updateError.message); return }
+      } else {
+        const { error: insertError } = await supabase
+          .from("required_notes")
+          .insert({
+            factory_id: factoryId,
+            content: requiredNoteForm.content.trim(),
+            sort_order: Number(requiredNoteForm.sort_order) || 0,
+            is_active: requiredNoteForm.is_active,
+          })
+        if (insertError) { setRequiredNoteError(insertError.message); return }
+      }
+      setRequiredNoteModal(null)
+      setRequiredNoteEditId(null)
+      setRequiredNoteForm({ content: "", sort_order: "0", is_active: true })
+      void loadMasterRequiredNotes(factoryId)
+    } catch (e) {
+      setRequiredNoteError(e instanceof Error ? e.message : "Lỗi")
+    } finally {
+      setRequiredNoteSaving(false)
+    }
+  }
+
+  const deleteRequiredNote = async () => {
+    if (!factoryId || !requiredNoteDelConfirm) return
+    await supabase
+      .from("required_notes")
+      .delete()
+      .eq("id", requiredNoteDelConfirm.id)
+      .eq("factory_id", factoryId)
+    setRequiredNoteDelConfirm(null)
+    void loadMasterRequiredNotes(factoryId)
   }
 
   const handleSignatureUpload = async (file: File) => {
@@ -2273,6 +2356,7 @@ export default function SettingsPage() {
                 { key: "suffixes" as const, label: "Hậu tố lô", icon: Tag },
                 { key: "company" as const, label: "Thông tin công ty", icon: Building2 },
                 { key: "customers" as const, label: "Khách hàng", icon: ShoppingBag },
+                { key: "required-notes" as const, label: "Ghi chú bắt buộc", icon: FileText },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -2517,6 +2601,90 @@ export default function SettingsPage() {
                           </tr>
                         )}
                       </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+          )}
+
+          {masterDataTab === "required-notes" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-amber-600" />
+                <span className="font-extrabold text-slate-700">Ghi chú bắt buộc</span>
+                <span className="text-xs text-slate-400 ml-1">({requiredNotes.length} ghi chú)</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => {
+                    setRequiredNoteEditId(null)
+                    setRequiredNoteForm({ content: "", sort_order: String(requiredNotes.length + 1), is_active: true })
+                    setRequiredNoteError("")
+                    setRequiredNoteModal("add")
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm ghi chú
+                </button>
+              )}
+            </div>
+
+            <div className="p-4">
+              {requiredNotesLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : requiredNotes.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <FileText size={32} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Chưa có ghi chú dùng chung nào</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Nội dung", "Thứ tự", "Trạng thái", ""].map((head) => (
+                        <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          {head}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {requiredNotes.map((item) => (
+                      <tr key={item.id} className="row-hover">
+                        <td className="px-4 py-3 text-slate-700 font-medium">{item.content}</td>
+                        <td className="px-4 py-3 text-slate-500">{item.sort_order}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${item.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {item.is_active ? "Đang dùng" : "Ẩn"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setRequiredNoteEditId(item.id)
+                                  setRequiredNoteForm({ content: item.content, sort_order: String(item.sort_order), is_active: item.is_active })
+                                  setRequiredNoteError("")
+                                  setRequiredNoteModal("edit")
+                                }}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setRequiredNoteDelConfirm({ id: item.id, label: item.content })}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -3036,6 +3204,50 @@ export default function SettingsPage() {
               <button onClick={() => handleDelete(delConfirm)} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">
                 Xóa
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {requiredNoteModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{requiredNoteModal === "add" ? "Thêm ghi chú" : "Sửa ghi chú"}</h2>
+              <button onClick={() => setRequiredNoteModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {requiredNoteError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{requiredNoteError}</div>}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung ghi chú *</label>
+                <input value={requiredNoteForm.content} onChange={e => setRequiredNoteForm((p) => ({ ...p, content: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500" placeholder="VD: Xe hư giữa đường" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                  <input value={requiredNoteForm.sort_order} onChange={e => setRequiredNoteForm((p) => ({ ...p, sort_order: e.target.value.replace(/\D/g, "") }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500" />
+                </div>
+                <div className="flex items-center gap-2 pt-7">
+                  <input type="checkbox" id="required-note-active" checked={requiredNoteForm.is_active} onChange={e => setRequiredNoteForm((p) => ({ ...p, is_active: e.target.checked }))} className="rounded" />
+                  <label htmlFor="required-note-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
+                </div>
+              </div>
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+              <button onClick={() => setRequiredNoteModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveRequiredNote} disabled={requiredNoteSaving} className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{requiredNoteSaving ? "Đang lưu..." : "Lưu"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {requiredNoteDelConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <p className="text-sm text-slate-600 mb-6">Xóa ghi chú <span className="font-bold text-red-600">&quot;{requiredNoteDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setRequiredNoteDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={deleteRequiredNote} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
             </div>
           </div>
         </div>

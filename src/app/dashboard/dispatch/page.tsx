@@ -7,6 +7,7 @@ import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcMa
 import { dispatchDbRowToLegacy, replaceDispatchEntryRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
+import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Gauge } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -234,6 +235,31 @@ function inferDayChuyenFromRows(rows: DxRow[] | undefined, fallback = "Mủ tạ
   return hasMuNuoc ? "Mủ nước" : fallback
 }
 
+function getDispatchRowKey(row: Partial<DxRow>) {
+  return `${row.uid || ""}|${row.so_xe || ""}|${Number(row.chuyen || 1)}`
+}
+
+function shouldRepairPhysicalRows(entry: DispatchEntry, physicalRows: DxRow[]) {
+  const legacyRows = entry.rows || []
+  if (legacyRows.length === 0) return false
+  if (physicalRows.length === 0) return true
+  if (physicalRows.length !== legacyRows.length) return true
+
+  const legacyKeys = legacyRows.map(getDispatchRowKey).sort()
+  const physicalKeys = physicalRows.map(getDispatchRowKey).sort()
+  return legacyKeys.join("||") !== physicalKeys.join("||")
+}
+
+function pickDispatchRowSource(entry: DispatchEntry, physicalRows: DxRow[]) {
+  const legacyRows = entry.rows || []
+  if (shouldRepairPhysicalRows(entry, physicalRows)) {
+    if (legacyRows.length > physicalRows.length) return legacyRows
+    if (physicalRows.length > legacyRows.length) return physicalRows
+    return legacyRows
+  }
+  return physicalRows.length > 0 ? physicalRows : legacyRows
+}
+
 // ─── MultiSelect inline dropdown ─────────────────────────────────────────────
 function MultiSelect({ options, selected, onChange, placeholder }: {
   options: string[]
@@ -338,6 +364,7 @@ export default function DispatchPage() {
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
   const [search, setSearch]       = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState("")
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
   const [listTab, setListTab] = useState<"list"|"stats">("list")
@@ -367,12 +394,26 @@ export default function DispatchPage() {
   const [makerName, setMakerName]   = useState("")
   const [importing, setImporting]   = useState(false)
   const importRef                   = useRef<HTMLInputElement>(null)
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
   const vehicleOptions = vehicles
   const driverOptions = drivers
+  const handleAddRequiredNote = useCallback(async () => {
+    if (!factoryId) return
+    const input = window.prompt("Nhập ghi chú mới")
+    if (!input || !input.trim()) return
+    try {
+      await createRequiredNote(supabase, factoryId, input)
+      const rows = await loadRequiredNotes(supabase, factoryId)
+      setRequiredNotes(rows.map((row) => row.content))
+      showToast("Đã thêm ghi chú mới")
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+    }
+  }, [factoryId])
 
   const loadDeliveryPoints = useCallback(async (fid: string) => {
     const { data, error } = await supabase
@@ -424,6 +465,15 @@ export default function DispatchPage() {
     }
   }, [])
 
+  const loadNoteOptions = useCallback(async (fid: string) => {
+    try {
+      const rows = await loadRequiredNotes(supabase, fid)
+      setRequiredNotes(rows.map((row) => row.content))
+    } catch {
+      setRequiredNotes([])
+    }
+  }, [])
+
   const resolveLoThuHoach = useCallback((diemGn: string[], phien: string[], points = deliveryPoints) => {
     return buildLoThuHoachFromPoints(diemGn, phien, points)
   }, [deliveryPoints])
@@ -450,6 +500,7 @@ export default function DispatchPage() {
       const raw = (data || []) as DispatchEntry[]
       const entryIds = raw.map(e => e.id).filter(Boolean)
       const physicalRowsByEntry = new Map<string, DxRow[]>()
+      const repairQueue: Array<{ entry: DispatchEntry; rows: DxRow[]; dayChuyen: string }> = []
 
       if (entryIds.length > 0) {
         const { data: physicalRows, error: physicalRowsError } = await supabase
@@ -471,11 +522,37 @@ export default function DispatchPage() {
         }
       }
 
+      for (const entry of raw) {
+        const physicalRows = physicalRowsByEntry.get(entry.id) || []
+        if (!shouldRepairPhysicalRows(entry, physicalRows)) continue
+        const rowsForRepair = pickDispatchRowSource(entry, physicalRows)
+        if (rowsForRepair.length === 0) continue
+        repairQueue.push({
+          entry,
+          rows: rowsForRepair,
+          dayChuyen: entry.day_chuyen || inferDayChuyenFromRows(rowsForRepair),
+        })
+      }
+
+      if (repairQueue.length > 0) {
+        await Promise.allSettled(repairQueue.map(async ({ entry, rows, dayChuyen }) => {
+          await replaceDispatchEntryRows(supabase, {
+            factoryId: fid,
+            dispatchEntryId: entry.id,
+            ngay: toISO(entry.ngay),
+            dayChuyen,
+            rows,
+            deliveryPoints: points,
+          })
+          physicalRowsByEntry.set(entry.id, rows)
+        }))
+      }
+
     // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
     const rehydrated = raw.map(e => ({
       ...e,
       day_chuyen: e.day_chuyen || inferDayChuyenFromRows(e.rows),
-      rows: (physicalRowsByEntry.get(e.id) || e.rows || []).map(r => ({
+      rows: pickDispatchRowSource(e, physicalRowsByEntry.get(e.id) || []).map(r => ({
         ...r,
         day_chuyen: r.day_chuyen || e.day_chuyen || inferDayChuyenFromRows(e.rows),
         lo_thu_hoach: r.lo_thu_hoach?.length
@@ -551,14 +628,25 @@ export default function DispatchPage() {
 
   useEffect(() => {
     if (!factoryId) return
+    void loadNoteOptions(factoryId)
+  }, [factoryId, loadNoteOptions])
+
+  useEffect(() => {
+    if (!factoryId) return
     void loadData(factoryId, deliveryPoints)
   }, [deliveryPoints, factoryId, loadData])
 
   // ── Filtered ──────────────────────────────────────────────────────────────
   const filtered = entries.filter(e =>
-    !search || e.ngay?.includes(search) ||
-    e.rows?.some(r => r.so_xe?.toLowerCase().includes(search.toLowerCase()) ||
-      r.tai_xe?.toLowerCase().includes(search.toLowerCase()))
+    (
+      !search || e.ngay?.includes(search) ||
+      e.rows?.some(r => r.so_xe?.toLowerCase().includes(search.toLowerCase()) ||
+        r.tai_xe?.toLowerCase().includes(search.toLowerCase()))
+    ) &&
+    (
+      !filterGhiChu ||
+      e.rows?.some(r => (r.ghi_chu || "").trim() === filterGhiChu)
+    )
   )
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -988,8 +1076,13 @@ export default function DispatchPage() {
         <span className="text-slate-400 text-sm">→</span>
         <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        {(search||filterFrom||filterTo) &&
-          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo("") }}
+        <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+          <option value="">Tất cả ghi chú</option>
+          {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
+        </select>
+        {(search||filterFrom||filterTo||filterGhiChu) &&
+          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu("") }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}
@@ -1361,13 +1454,13 @@ export default function DispatchPage() {
           <Info size={14}/> Lộ trình: chọn từng điểm theo đội.
         </p>
         <div className="flex gap-2 flex-wrap">
-          {isAdmin && (
+          {isAdmin && !editId && (
             <button onClick={downloadTemplate}
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white border border-slate-300 rounded-lg transition-colors">
               <Download size={12}/> Tải bảng
             </button>
           )}
-          {isAdmin && (
+          {isAdmin && !editId && (
             <>
               <input ref={importRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImport}/>
               <button onClick={() => importRef.current?.click()} disabled={importing}
@@ -1376,13 +1469,19 @@ export default function DispatchPage() {
               </button>
             </>
           )}
-          <button onClick={() => setKlModal(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-300 rounded-lg transition-colors">
-            <Weight size={12}/> Nhập KL
-          </button>
+          {!editId && (
+            <button onClick={() => setKlModal(true)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-300 rounded-lg transition-colors">
+              <Weight size={12}/> Nhập KL
+            </button>
+          )}
           <button onClick={downloadGeoJSON}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-50 border border-blue-300 rounded-lg transition-colors">
             <MapIcon size={12}/> GeoJSON
+          </button>
+          <button onClick={() => void handleAddRequiredNote()}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors">
+            <Plus size={12}/> Thêm ghi chú
           </button>
           <button onClick={() => setFormRows(r => [...r, emptyRow()])}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors">
@@ -1503,9 +1602,14 @@ export default function DispatchPage() {
                 <td className="px-2 py-1.5 min-w-[150px]">
                   {row.locked
                     ? <span className="text-slate-500 text-xs">{row.ghi_chu || "—"}</span>
-                    : <input value={row.ghi_chu || ""} onChange={e => updateRow(idx,"ghi_chu",e.target.value)}
-                        placeholder="Ghi chú..."
-                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                    : <>
+                        <input list="dispatch-required-notes" value={row.ghi_chu || ""} onChange={e => updateRow(idx,"ghi_chu",e.target.value)}
+                          placeholder="Ghi chú..."
+                          className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
+                        <datalist id="dispatch-required-notes">
+                          {requiredNotes.map(note => <option key={note} value={note} />)}
+                        </datalist>
+                      </>
                   }
                 </td>
 

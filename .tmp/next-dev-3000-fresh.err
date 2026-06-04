@@ -4999,3 +4999,258 @@
   89 |             void loadPendingTasks()
   90 |           })
   91 |           .subscribe()
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] Image with src "/images/nha_may.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Image with src "/images/nha_may.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Image with src "/images/nha_may.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] Uncaught ReferenceError: can't access lexical declaration 'loadNoteOptions' before initialization
+    at DispatchPage (src/app/dashboard/dispatch/page.tsx:415:18)
+  413 |       showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+  414 |     }
+> 415 |   }, [factoryId, loadNoteOptions])
+      |                  ^
+  416 |
+  417 |   const loadDeliveryPoints = useCallback(async (fid: string) => {
+  418 |     const { data, error } = await supabase
+[browser] Image with src "/images/nha_may.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.

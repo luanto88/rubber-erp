@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck,
@@ -26,6 +27,7 @@ type Ngan = {
   tong_kho: number
   trips: string[]
   lo_nguon_goc: string
+  ghi_chu?: string
 }
 
 type TripItem = {
@@ -97,6 +99,7 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
   trang_thai: "Đang nhận (Cần cập nhật)",
   tong_tuoi: 0, tong_kho: 0,
   lo_nguon_goc: "",
+  ghi_chu: "",
 })
 
 const headerStyle = (tt: string) => {
@@ -158,7 +161,9 @@ export default function StoragePage() {
   // filters
   const [search, setSearch]     = useState("")
   const [filterTT, setFilterTT] = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState("")
   const [dayChuyen, setDayChuyen] = useState<"Mủ tạp" | "Mủ nước">("Mủ tạp")
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   // modal / form
   const [modal, setModal]         = useState<"add" | "edit" | "view" | null>(null)
@@ -301,6 +306,19 @@ export default function StoragePage() {
     if (factoryId) loadData(factoryId)
   }, [factoryId, loadData])
 
+  useEffect(() => {
+    if (!factoryId) return
+    const run = async () => {
+      try {
+        const rows = await loadRequiredNotes(supabase, factoryId)
+        setRequiredNotes(rows.map((row) => row.content))
+      } catch {
+        setRequiredNotes([])
+      }
+    }
+    void run()
+  }, [factoryId])
+
   // ── Fetch trips from dispatch ─────────────────────────────────────────────
   const fetchTrips = useCallback(async (ngay_bd: string, ngay_kt: string, autoSelect = false) => {
     if (!ngay_bd || !ngay_kt || !factoryId) return
@@ -383,6 +401,7 @@ export default function StoragePage() {
   const filtered = ngans.filter(n => {
     if (!dcLoaiNL.includes(n.loai_nl)) return false
     if (filterTT && n.trang_thai !== filterTT) return false
+    if (filterGhiChu && (n.ghi_chu || "") !== filterGhiChu) return false
     if (search &&
       !n.ten_ngan?.toLowerCase().includes(search.toLowerCase()) &&
       !n.ma_ngan?.toLowerCase().includes(search.toLowerCase())
@@ -427,6 +446,18 @@ export default function StoragePage() {
 
   // ── Save / Delete ─────────────────────────────────────────────────────────
   const [saveError, setSaveError] = useState<string | null>(null)
+  const handleAddRequiredNote = async () => {
+    if (!factoryId) return
+    const input = window.prompt("Nhập ghi chú mới")
+    if (!input || !input.trim()) return
+    try {
+      const row = await createRequiredNote(supabase, factoryId, input)
+      setRequiredNotes((prev) => prev.includes(row.content) ? prev : [...prev, row.content])
+      updateForm({ ghi_chu: row.content })
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú")
+    }
+  }
 
   const handleSave = async () => {
     if (!factoryId) return
@@ -440,6 +471,7 @@ export default function StoragePage() {
         factory_id: factoryId,
         ngay_kt: form.ngay_kt || null,
         trips: Array.from(selectedTrips),
+        ghi_chu: form.ghi_chu || null,
       }
       if (editId) {
         const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
@@ -484,6 +516,7 @@ export default function StoragePage() {
       trang_thai: n.trang_thai || "Đang nhận (Cần cập nhật)",
       tong_tuoi: n.tong_tuoi || 0, tong_kho: n.tong_kho || 0,
       lo_nguon_goc: n.lo_nguon_goc || "",
+      ghi_chu: n.ghi_chu || "",
     }
     setForm(f)
     setEditId(n.id)
@@ -625,8 +658,13 @@ export default function StoragePage() {
             <option value="">Tất cả trạng thái</option>
             {TRANG_THAI_OPTS.map(t => <option key={t}>{t}</option>)}
           </select>
-          {(search || filterTT) && (
-            <button onClick={() => { setSearch(""); setFilterTT("") }}
+          <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+            <option value="">Tất cả ghi chú</option>
+            {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
+          </select>
+          {(search || filterTT || filterGhiChu) && (
+            <button onClick={() => { setSearch(""); setFilterTT(""); setFilterGhiChu("") }}
               className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
               <X size={14} /> Xóa lọc
             </button>
@@ -740,6 +778,13 @@ export default function StoragePage() {
                         )}
                       </span>
                     </div>
+                    {n.ghi_chu && (
+                      <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
+                        <Tag size={14} className="text-slate-400 shrink-0 mt-0.5" />
+                        <span className="text-xs text-slate-500 w-24 shrink-0">Ghi chú</span>
+                        <span className="text-xs font-semibold text-slate-700 break-words">{n.ghi_chu}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
@@ -888,7 +933,8 @@ export default function StoragePage() {
                                 onClick={() => {
                                   setSelectedTrips(prev => {
                                     const next = new Set(prev)
-                                    checked ? next.delete(t.uid) : next.add(t.uid)
+                                    if (checked) next.delete(t.uid)
+                                    else next.add(t.uid)
                                     return next
                                   })
                                 }}
@@ -940,6 +986,20 @@ export default function StoragePage() {
               </div>
 
               {/* Mã ngăn (auto-generated, read-only) */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600 block">Ghi chú</label>
+                  <button type="button" onClick={() => void handleAddRequiredNote()} className="text-xs font-bold text-amber-700 hover:text-amber-800">
+                    + Thêm ghi chú mới
+                  </button>
+                </div>
+                <input list="storage-required-notes" value={form.ghi_chu} onChange={e => updateForm({ ghi_chu: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="Ghi chú (tùy chọn)" />
+                <datalist id="storage-required-notes">
+                  {requiredNotes.map(note => <option key={note} value={note} />)}
+                </datalist>
+              </div>
+
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
                   Mã {subTerm.toLowerCase()} (tự sinh)

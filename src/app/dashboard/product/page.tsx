@@ -10,6 +10,7 @@ import {
   dedupeLotsByMaLo,
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
+import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes";
 import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import {
   Plus,
@@ -621,9 +622,11 @@ export default function ProductPage() {
   const [filterTT, setFilterTT] = useState("");
   const [filterCa, setFilterCa] = useState("");
   const [filterDC, setFilterDC] = useState("");
+  const [filterGhiChu, setFilterGhiChu] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [expandedDates, setExpandedDates] = useState<string[]>([]);
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([]);
 
   const [view, setView] = useState<"list" | "create">("list");
 
@@ -732,6 +735,10 @@ export default function ProductPage() {
           if (data) setSuffixList(data);
         });
 
+      loadRequiredNotes(supabase, fid)
+        .then((rows) => setRequiredNotes(rows.map((row) => row.content)))
+        .catch(() => setRequiredNotes([]));
+
       supabase
         .from("lots")
         .update({ day_chuyen: DAY_CHUYEN_TAP })
@@ -805,6 +812,7 @@ export default function ProductPage() {
       if (filterTT && normalizeLotStatus(c.trang_thai) !== normalizeLotStatus(filterTT)) {
         return false;
       }
+      if (filterGhiChu && (c.ghi_chu || "") !== filterGhiChu) return false;
       if (filterFrom && c.ngay_sx < filterFrom) return false;
       if (filterTo && c.ngay_sx > filterTo) return false;
       return true;
@@ -816,6 +824,7 @@ export default function ProductPage() {
     filterDC,
     filterLoai,
     filterTT,
+    filterGhiChu,
     filterFrom,
     filterTo,
   ]);
@@ -1928,6 +1937,21 @@ export default function ProductPage() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddRequiredNote = async () => {
+    if (!factoryId) return;
+    const input = window.prompt("Nhập ghi chú mới");
+    if (!input || !input.trim()) return;
+    try {
+      const row = await createRequiredNote(supabase, factoryId, input);
+      setRequiredNotes((prev) =>
+        prev.includes(row.content) ? prev : [...prev, row.content],
+      );
+      updateEditForm({ ghi_chu: row.content });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú");
     }
   };
   const handleDelete = async (uid: string) => {
@@ -3335,6 +3359,20 @@ export default function ProductPage() {
             </option>
           ))}
         </select>
+        <select
+          value={filterGhiChu}
+          onChange={(e) => {
+            setFilterGhiChu(e.target.value);
+          }}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+        >
+          <option value="">Tất cả ghi chú</option>
+          {requiredNotes.map((note) => (
+            <option key={note} value={note}>
+              {note}
+            </option>
+          ))}
+        </select>
         <input
           type="date"
           value={filterFrom}
@@ -3355,6 +3393,7 @@ export default function ProductPage() {
         {(filterLoai ||
           filterTT ||
           filterCa ||
+          filterGhiChu ||
           filterFrom ||
           filterTo ||
           search ||
@@ -3364,6 +3403,7 @@ export default function ProductPage() {
               setFilterLoai("");
               setFilterTT("");
               setFilterCa("");
+              setFilterGhiChu("");
               setFilterFrom("");
               setFilterTo("");
               setSearch("");
@@ -3974,14 +4014,25 @@ export default function ProductPage() {
               })()}
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ghi chú
-                </label>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600 block">
+                    Ghi chú
+                  </label>
+                  <button type="button" onClick={() => void handleAddRequiredNote()} className="text-xs font-bold text-amber-700 hover:text-amber-800">
+                    + Thêm ghi chú mới
+                  </button>
+                </div>
                 <input
+                  list="product-required-notes"
                   value={editForm.ghi_chu}
                   onChange={(e) => updateEditForm({ ghi_chu: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
+                <datalist id="product-required-notes">
+                  {requiredNotes.map((note) => (
+                    <option key={note} value={note} />
+                  ))}
+                </datalist>
               </div>
             </div>
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
