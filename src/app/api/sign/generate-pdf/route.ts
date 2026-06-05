@@ -782,11 +782,21 @@ async function fillMetadataPlaceholders(
         const normalizedLineText = normalizeTagText(lineText)
         if (!normalizedLineText) continue
 
+        // DEBUG: log bất kỳ line nào có "ngay hieu luc"
+        if (/ngay\s*hieu\s*luc/.test(normalizedLineText)) {
+          console.log("[pdf-meta-dbg] found ngay-hieu-luc line pg:", pageIdx, "lineText:", JSON.stringify(lineText))
+        }
+
         // Bỏ qua dòng bị phát hiện là mismatch
         let lineHasMismatch = false
         for (const { pattern, expected } of mismatchPatterns) {
           if (isSkippedLabel(skipLabels, expected)) continue
-          if (pattern.test(normalizedLineText)) { lineHasMismatch = true; break }
+          if (pattern.test(normalizedLineText)) {
+            if (/ngay\s*hieu\s*luc/.test(normalizedLineText)) {
+              console.log("[pdf-meta-dbg] ngay-hieu-luc line BLOCKED by mismatch pattern:", pattern.toString(), "expected:", expected)
+            }
+            lineHasMismatch = true; break
+          }
         }
         if (lineHasMismatch) continue
 
@@ -811,10 +821,25 @@ async function fillMetadataPlaceholders(
           // Kiểm tra giá trị đã có: ưu tiên dùng full lineText để tránh nhầm label fragment là value.
           // Với non-fragmented case (directMatchItem tìm được), bổ sung check per-item để bắt
           // các value nằm trên cùng dòng nhưng bị tách Y nhẹ (ngoài window < 3px).
-          const existingValue = normalizeText([
-            extractHeaderValueFromAnchorText(lineText, header.expected),
-            directMatchItem ? extractHeaderValueFromPageItems(headerItems, directMatchItem) : "",
-          ].filter(Boolean).join(" "))
+          const anchorFromVal = extractHeaderValueFromAnchorText(lineText, header.expected)
+          const pageItemsFromVal = directMatchItem ? extractHeaderValueFromPageItems(headerItems, directMatchItem) : ""
+          const existingValue = normalizeText([anchorFromVal, pageItemsFromVal].filter(Boolean).join(" "))
+
+          // DEBUG cho Ngay hieu luc
+          if (header.label === "Ngày hiệu lực") {
+            console.log("[pdf-meta-dbg] ngay-hieu-luc: anchorFrom=", JSON.stringify(anchorFromVal))
+            console.log("[pdf-meta-dbg] ngay-hieu-luc: pageItemsFrom=", JSON.stringify(pageItemsFromVal))
+            console.log("[pdf-meta-dbg] ngay-hieu-luc: existingValue=", JSON.stringify(existingValue))
+            console.log("[pdf-meta-dbg] ngay-hieu-luc: hasReal=", hasRealHeaderValue(existingValue))
+            console.log("[pdf-meta-dbg] ngay-hieu-luc: header.value=", JSON.stringify(header.value))
+            if (directMatchItem) {
+              const dbgDrawX = directMatchItem.transform[4] + (directMatchItem.width ?? 0) + 4
+              console.log("[pdf-meta-dbg] ngay-hieu-luc: drawX=", Math.round(dbgDrawX), "pageWidth=", Math.round(viewport.width))
+            } else {
+              console.log("[pdf-meta-dbg] ngay-hieu-luc: no directMatchItem, lineRightX=", Math.round(lineRightX))
+            }
+          }
+
           if (hasRealHeaderValue(existingValue)) break
 
           const drawX = directMatchItem
