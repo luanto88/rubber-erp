@@ -377,13 +377,13 @@ function drawFooterOnAllPages(pdfDoc: PDFDocument, font: PDFFont, footerText: st
     const page = pages[i]
     const fontSize = HEADER_FOOTER_FONT_SIZE
     const marginX = 30
-    const y = 18
+    const y = 28
     const maxWidth = page.getWidth() - marginX * 2
     let size = fontSize
     while (size > 8 && font.widthOfTextAtSize(footerText, size) > maxWidth) size -= 0.5
     const textWidth = font.widthOfTextAtSize(footerText, size)
-    // Full-width strip to cover any existing footer text at any y position
-    page.drawRectangle({ x: 0, y: 0, width: page.getWidth(), height: 45, color: rgb(1, 1, 1) })
+    // Full-width strip to cover any existing footer text at any y position (height=90 covers bottom ~10% of A4)
+    page.drawRectangle({ x: 0, y: 0, width: page.getWidth(), height: 90, color: rgb(1, 1, 1) })
     page.drawText(footerText, {
       x: marginX + Math.max((maxWidth - textWidth) / 2, 0),
       y,
