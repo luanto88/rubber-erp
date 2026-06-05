@@ -635,6 +635,19 @@ export default function DispatchPage() {
     if (!factoryId) return
     void loadData(factoryId, deliveryPoints)
   }, [deliveryPoints, factoryId, loadData])
+  const filterRowsByNote = useCallback((rows: DxRow[] = []) => {
+    if (!filterGhiChu) return rows
+    return rows.filter((row) => (row.ghi_chu || "").trim() === filterGhiChu)
+  }, [filterGhiChu])
+
+  const exportableEntries = filterGhiChu
+    ? entries
+      .map((entry) => ({
+        ...entry,
+        rows: filterRowsByNote(entry.rows || []),
+      }))
+      .filter((entry) => (entry.rows?.length || 0) > 0)
+    : entries
 
   // ── Filtered ──────────────────────────────────────────────────────────────
   const filtered = entries.filter(e =>
@@ -651,17 +664,21 @@ export default function DispatchPage() {
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const stats = {
-    total: entries.length,
-    totalXe: entries.reduce((s,e) => s + (e.rows?.length||0), 0),
-    totalKg: entries.reduce((s,e) =>
+    total: exportableEntries.length,
+    totalXe: exportableEntries.reduce((s,e) => s + (e.rows?.length||0), 0),
+    totalKg: exportableEntries.reduce((s,e) =>
       s + (e.rows||[]).reduce((ss,r) => ss + (parseFloat(r.kl_dck)||0), 0), 0),
   }
-  const analytics = buildDispatchAnalytics(entries, deliveryPoints, { doi: statsDoi, vehicle: statsVehicle })
-  const doiOptions = [...new Set(entries.flatMap(entry => (entry.rows || []).flatMap(row => getTripDois(row, deliveryPoints))))].sort((a, b) => a - b)
-  const statVehicleOptions = [...new Set(entries.flatMap(entry => (entry.rows || []).map(row => row.so_xe).filter(Boolean)))].sort((a, b) => a.localeCompare(b))
+  const analytics = buildDispatchAnalytics(exportableEntries, deliveryPoints, { doi: statsDoi, vehicle: statsVehicle, note: filterGhiChu })
+  const doiOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).flatMap(row => getTripDois(row, deliveryPoints))))].sort((a, b) => a - b)
+  const statVehicleOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).map(row => row.so_xe).filter(Boolean)))].sort((a, b) => a.localeCompare(b))
 
   const exportStatsPdf = async (mode: "all" | "doi" | "vehicle") => {
     try {
+      if (analytics.trips.length === 0) {
+        showToast("Không có dữ liệu để xuất PDF")
+        return
+      }
       await downloadDispatchStatsPdf({
         analytics,
         factoryName,
@@ -670,6 +687,7 @@ export default function DispatchPage() {
         mode,
         selectedDoi: statsDoi,
         selectedVehicle: statsVehicle,
+        selectedNote: filterGhiChu,
         makerName,
       })
     } catch (err) {
@@ -701,9 +719,17 @@ export default function DispatchPage() {
   // ── PDF ─────────────────────────────────────────────────────────────────
   const exportEntryPdf = async (entry: DispatchEntry) => {
     try {
-      const dayAnalytics = buildDispatchAnalytics([entry], deliveryPoints)
+      const exportEntry = {
+        ...entry,
+        rows: filterRowsByNote(entry.rows || []),
+      }
+      const dayAnalytics = buildDispatchAnalytics([exportEntry], deliveryPoints, { note: filterGhiChu })
+      if (dayAnalytics.trips.length === 0) {
+        showToast("KhĂ´ng cĂ³ dá»¯ liá»‡u Ä‘á»ƒ xuáº¥t PDF")
+        return
+      }
       await downloadDispatchEntryPdf({
-        entry,
+        entry: exportEntry,
         trips: dayAnalytics.trips,
         factoryName,
         makerName,
@@ -1081,8 +1107,18 @@ export default function DispatchPage() {
           <option value="">Tất cả ghi chú</option>
           {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
         </select>
-        {(search||filterFrom||filterTo||filterGhiChu) &&
-          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu("") }}
+        <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+          <option value="">{"T\u1ea5t c\u1ea3 \u0111\u1ed9i"}</option>
+          {doiOptions.map(doi => <option key={doi} value={doi}>{`\u0110\u1ed9i ${doi}`}</option>)}
+        </select>
+        <select value={statsVehicle} onChange={e => setStatsVehicle(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+          <option value="">{"T\u1ea5t c\u1ea3 xe"}</option>
+          {statVehicleOptions.map(vehicle => <option key={vehicle} value={vehicle}>{vehicle}</option>)}
+        </select>
+        {(search||filterFrom||filterTo||filterGhiChu||statsDoi||statsVehicle) &&
+          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu(""); setStatsDoi(""); setStatsVehicle("") }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}
@@ -1091,6 +1127,8 @@ export default function DispatchPage() {
       {listTab === "stats" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+            {false && (
+              <>
             <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
               className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
               <option value="">Tất cả đội</option>
@@ -1107,17 +1145,19 @@ export default function DispatchPage() {
                 <X size={14}/> Xóa lọc thống kê
               </button>
             )}
+              </>
+            )}
             <div className="ml-auto flex flex-wrap gap-2">
               <button onClick={() => exportStatsPdf("all")}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-lg">
                 <Download size={13}/> PDF tổng
               </button>
-              <button onClick={() => exportStatsPdf("doi")} disabled={!statsDoi}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg disabled:opacity-40">
+              <button onClick={() => exportStatsPdf("doi")}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg">
                 <Download size={13}/> PDF đội
               </button>
-              <button onClick={() => exportStatsPdf("vehicle")} disabled={!statsVehicle}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg disabled:opacity-40">
+              <button onClick={() => exportStatsPdf("vehicle")}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg">
                 <Download size={13}/> PDF xe
               </button>
             </div>

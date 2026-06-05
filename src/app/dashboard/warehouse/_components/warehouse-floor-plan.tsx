@@ -1,153 +1,198 @@
 "use client"
 
 import { AlertTriangle } from "lucide-react"
-import WarehouseSlotCell from "./warehouse-slot-cell"
+import WarehouseFrame from "./warehouse-frame"
 import {
   type WarehouseCode,
   type WarehouseSlot,
   type WarehousePlacement,
   type DragKienData,
-  KHO1_LAYOUT,
-  KHO2_LAYOUT,
+  type DragLotData,
+  type PlacementTarget,
+  type FilterState,
+  type LotInfo,
+  KHO1_FRAMES,
+  KHO2_FRAMES,
   WAREHOUSE_LABELS,
+  isLotMatching,
+  isFilterActive,
 } from "./warehouse-types"
 
 type Props = {
   activeWarehouse: WarehouseCode
   slots: WarehouseSlot[]
   allPlacements: WarehousePlacement[]
-  onDrop: (data: DragKienData, slotCode: string, warehouseCode: WarehouseCode) => Promise<void>
+  onDropKien: (data: DragKienData, slotCode: string, wh: WarehouseCode) => Promise<void>
+  onDropLot: (targets: PlacementTarget[], lotData: DragLotData, wh: WarehouseCode) => Promise<void>
   onRemovePlacement: (placementId: string) => Promise<void>
   onClearExported: (placementId: string) => Promise<void>
   dragWarning: string | null
+  filter: FilterState
+  lots: LotInfo[]
 }
 
 export default function WarehouseFloorPlan({
   activeWarehouse,
   slots,
   allPlacements,
-  onDrop,
+  onDropKien,
+  onDropLot,
   onRemovePlacement,
   onClearExported,
   dragWarning,
+  filter,
+  lots,
 }: Props) {
-  const layout = activeWarehouse === "kho1" ? KHO1_LAYOUT : KHO2_LAYOUT
+  const frames = activeWarehouse === "kho1" ? KHO1_FRAMES : KHO2_FRAMES
+  const filterOn = isFilterActive(filter)
 
-  // Build lookup: slot_code → slot config
+  // Build matchingLotIds set
+  const matchingLotIds = new Set(
+    filterOn ? lots.filter(l => isLotMatching(l, filter)).map(l => l.id) : []
+  )
+
+  // Build lookup: slot_code → slot
   const slotMap = new Map(slots.map(s => [s.slot_code, s]))
 
-  // Build placement lookup: slot_code → placements[]
+  // Build placement lookup: slot_code → {active, exported}
   const placementsBySlot = new Map<string, { active: WarehousePlacement[]; exported: WarehousePlacement[] }>()
   for (const p of allPlacements) {
     if (!placementsBySlot.has(p.slot_code)) {
       placementsBySlot.set(p.slot_code, { active: [], exported: [] })
     }
-    const bucket = placementsBySlot.get(p.slot_code)!
-    if (p.removed_at) {
-      bucket.exported.push(p)
-    } else {
-      bucket.active.push(p)
-    }
+    const b = placementsBySlot.get(p.slot_code)!
+    if (p.removed_at) b.exported.push(p); else b.active.push(p)
   }
 
-  const renderRow = (
-    row: Array<{ code: string; restricted: boolean; gap?: boolean }>,
-    rowLabel: string
-  ) => (
-    <div className="flex items-end gap-1 flex-wrap">
-      {/* Row label */}
-      <span className="text-[10px] font-extrabold text-slate-400 w-4 text-center self-start pt-1">
-        {rowLabel}
-      </span>
-      {row.map((item, i) => {
-        if (item.gap) {
-          return (
-            <div key={`gap-${i}`} className="w-3 flex items-center justify-center">
-              <div className="w-px h-8 bg-slate-200" />
-            </div>
-          )
-        }
-        const slot = slotMap.get(item.code)
-        if (!slot) {
-          // Slot config chưa có (nhà máy khác) — render placeholder
-          return (
-            <div
-              key={item.code}
-              className={`rounded border-2 border-dashed flex items-center justify-center ${item.restricted ? "border-red-200 bg-red-50/30" : "border-slate-100 bg-slate-50"}`}
-              style={{ minWidth: 72, minHeight: 56 }}
-            >
-              <span className="text-[9px] text-slate-300">{item.code}</span>
-            </div>
-          )
-        }
-        const bucket = placementsBySlot.get(item.code) || { active: [], exported: [] }
-        return (
-          <WarehouseSlotCell
-            key={item.code}
-            slot={slot}
-            placements={bucket.active}
-            exportedPlacements={bucket.exported}
-            onDrop={(data, slotCode) => onDrop(data, slotCode, activeWarehouse)}
-            onRemovePlacement={onRemovePlacement}
-            onClearExported={onClearExported}
-          />
-        )
-      })}
-    </div>
-  )
+  // Get all slots for a frame
+  const getFrameSlots = (frameCode: string): WarehouseSlot[] =>
+    slots.filter(s => s.frame_code === frameCode)
+
+  const getFrameActivePlacements = (frameCode: string): WarehousePlacement[] => {
+    const frameSlotsSet = new Set(slots.filter(s => s.frame_code === frameCode).map(s => s.slot_code))
+    return allPlacements.filter(p => !p.removed_at && frameSlotsSet.has(p.slot_code))
+  }
+
+  const getFrameExportedPlacements = (frameCode: string): WarehousePlacement[] => {
+    const frameSlotsSet = new Set(slots.filter(s => s.frame_code === frameCode).map(s => s.slot_code))
+    return allPlacements.filter(p => p.removed_at && frameSlotsSet.has(p.slot_code))
+  }
+
+  // Render một hàng (A hoặc B)
+  const renderRow = (rowLabel: "A" | "B") => {
+    const rowFrames = frames.filter(f => f.rowLabel === rowLabel)
+    return (
+      <div className="flex items-end gap-1 flex-wrap">
+        {rowFrames.map((fc, idx) => (
+          <div key={fc.code} className="flex items-end gap-1">
+            <WarehouseFrame
+              frameConfig={fc}
+              slots={getFrameSlots(fc.code)}
+              activePlacements={getFrameActivePlacements(fc.code)}
+              exportedPlacements={getFrameExportedPlacements(fc.code)}
+              onDropKien={(data, sc) => onDropKien(data, sc, activeWarehouse)}
+              onDropLot={(targets, lotData) => onDropLot(targets, lotData, activeWarehouse)}
+              onRemovePlacement={onRemovePlacement}
+              onClearExported={onClearExported}
+              matchingLotIds={matchingLotIds}
+              filterActive={filterOn}
+            />
+            {/* Lối đi nhỏ sau khung */}
+            {fc.aisleAfterThis && (
+              <div className="flex flex-col items-center justify-end" style={{ width: 12, height: fc.numRows * 19 + 14 }}>
+                <div className="flex-1 border-l border-dashed border-slate-200 mx-auto" style={{ width: 1 }} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const isKho1 = activeWarehouse === "kho1"
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-      {/* Tên kho */}
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-extrabold text-slate-700">
-          {WAREHOUSE_LABELS[activeWarehouse]}
-        </h2>
-        <div className="flex items-center gap-3 text-[10px] text-slate-400">
+    <div className="relative bg-white rounded-xl border-2 border-amber-500 shadow-sm overflow-hidden">
+      {/* Header kho + legend */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-amber-100 bg-amber-50/40">
+        <div>
+          <span className="text-sm font-extrabold text-slate-700">{WAREHOUSE_LABELS[activeWarehouse]}</span>
+        </div>
+        <div className="flex items-center gap-3 text-[9px] text-slate-400">
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded border-2 border-slate-300 inline-block" /> Thường
+            <span className="w-3 h-3 border border-slate-300 rounded-sm inline-block" /> Thường
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded border-2 border-dashed border-red-400 inline-block bg-red-50" /> Khuyến cáo
+            <span className="w-3 h-3 border border-dashed border-red-400 rounded-sm inline-block bg-red-50" /> Khuyến cáo
           </span>
+          {filterOn && (
+            <span className="flex items-center gap-1 text-sky-600 font-bold">
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" /> Filter đang bật
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Cảnh báo kéo sai kho */}
+      {/* Cảnh báo drag sai kho */}
       {dragWarning && (
-        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+        <div className="flex items-center gap-2 mx-3 mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
           <AlertTriangle size={13} className="shrink-0" />
           {dragWarning}
         </div>
       )}
 
-      {/* Layout kho */}
-      <div className="space-y-4 overflow-x-auto pb-1">
-        {/* Hàng A */}
-        <div>
-          <div className="text-[10px] text-slate-400 mb-1 ml-5">Hàng A</div>
-          {renderRow(layout.rowA, "A")}
+      {/* Main body — relative để đặt label Cửa/Khu sản xuất */}
+      <div className="relative flex">
+        {/* Floor plan area */}
+        <div className="flex-1 p-3 overflow-x-auto">
+          {/* Label hàng A mờ nhỏ */}
+          <div className="text-[9px] text-slate-300 italic mb-1 ml-1">Hàng A</div>
+
+          {/* Cửa — top right (giữa hàng A và viền phải) */}
+          <div className="relative">
+            {renderRow("A")}
+            {isKho1 && (
+              <span className="absolute -top-1 right-0 text-[9px] text-slate-300 font-normal">Cửa</span>
+            )}
+          </div>
+
+          {/* Lối đi chính giữa 2 hàng */}
+          <div className="flex items-center gap-2 my-2 ml-1">
+            <div className="flex-1 border-t border-dashed border-slate-200" />
+            <span className="text-[9px] text-slate-300 italic px-1">Lối đi</span>
+            <div className="flex-1 border-t border-dashed border-slate-200" />
+          </div>
+
+          {/* Label hàng B mờ nhỏ */}
+          <div className="text-[9px] text-slate-300 italic mb-1 ml-1">Hàng B</div>
+
+          {/* Hàng B + Cửa bottom-left */}
+          <div className="relative">
+            <span className="absolute -left-1 -bottom-1 text-[9px] text-slate-300 font-normal">Cửa</span>
+            {renderRow("B")}
+          </div>
+
+          {/* Cửa bottom-center */}
+          <div className="flex justify-center mt-1">
+            <span className="text-[9px] text-slate-300 font-normal">Cửa</span>
+          </div>
         </div>
 
-        {/* Lối đi / Cửa */}
-        <div className="flex items-center gap-2 ml-5">
-          <div className="flex-1 border-t-2 border-dashed border-slate-200" />
-          <span className="text-[10px] text-slate-400 font-bold px-2">Lối đi</span>
-          <div className="flex-1 border-t-2 border-dashed border-slate-200" />
-        </div>
-
-        {/* Hàng B */}
-        <div>
-          <div className="text-[10px] text-slate-400 mb-1 ml-5">Hàng B</div>
-          {renderRow(layout.rowB, "B")}
+        {/* KHU SẢN XUẤT — dải nhỏ màu cam */}
+        <div className="flex items-center justify-center w-5 shrink-0 border-l border-orange-200 bg-orange-500/10">
+          <span
+            className="text-[8px] text-orange-500 font-semibold"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: 1 }}
+          >
+            Khu SX
+          </span>
         </div>
       </div>
 
-      {/* Chú thích hướng khu sản xuất */}
-      <div className="mt-3 flex justify-end">
-        <span className="text-[10px] text-slate-400 border border-slate-200 rounded px-2 py-0.5">
-          ← Khu sản xuất
-        </span>
+      {/* Legend bottom */}
+      <div className="px-3 pb-2 flex gap-3 text-[9px] text-slate-300 italic">
+        <span>⬛ = 1 kiện · chồng max 3 tầng</span>
+        <span>Kéo từng kiện hoặc cả lô vào ô/khung</span>
       </div>
     </div>
   )

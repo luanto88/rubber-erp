@@ -27,6 +27,7 @@ type PdfWithTable = jsPDF & {
 
 type MaterialAggregateRow = {
   ngay: string
+  doi?: number
   doiLabel?: string
   trip?: DispatchFlatTrip
   materials: DispatchMaterialTotals
@@ -164,6 +165,19 @@ function materialTripValues(materials: DispatchMaterialTotals, defs: ReturnType<
   })
 }
 
+function compareDateAsc(a: string, b: string) {
+  return a.localeCompare(b)
+}
+
+function compareVehicleAsc(a?: string, b?: string) {
+  const left = (a || "").trim()
+  const right = (b || "").trim()
+  if (!left && !right) return 0
+  if (!left) return 1
+  if (!right) return -1
+  return left.localeCompare(right, "vi", { numeric: true, sensitivity: "base" })
+}
+
 function buildDoiRows(trips: DispatchFlatTrip[]) {
   const grouped = new Map<string, MaterialAggregateRow>()
   for (const trip of trips) {
@@ -174,6 +188,7 @@ function buildDoiRows(trips: DispatchFlatTrip[]) {
       const key = `${trip.ngay}__${doiLabel}`
       const current = grouped.get(key) || {
         ngay: trip.ngay,
+        doi,
         doiLabel,
         materials: {
           mnTuoi: 0, mnKho: 0,
@@ -190,9 +205,11 @@ function buildDoiRows(trips: DispatchFlatTrip[]) {
       grouped.set(key, current)
     }
   }
-  return [...grouped.values()].sort((a, b) =>
-    a.ngay === b.ngay ? (a.doiLabel || "").localeCompare(b.doiLabel || "") : a.ngay.localeCompare(b.ngay),
-  )
+  return [...grouped.values()].sort((a, b) => {
+    const dateCompare = compareDateAsc(a.ngay, b.ngay)
+    if (dateCompare !== 0) return dateCompare
+    return (a.doi || 0) - (b.doi || 0)
+  })
 }
 
 function buildVehicleRows(trips: DispatchFlatTrip[]) {
@@ -203,8 +220,10 @@ function buildVehicleRows(trips: DispatchFlatTrip[]) {
       materials: getTripMaterials(trip),
     }))
     .sort((a, b) => {
-      if (a.ngay !== b.ngay) return a.ngay.localeCompare(b.ngay)
-      if ((a.trip?.so_xe || "") !== (b.trip?.so_xe || "")) return (a.trip?.so_xe || "").localeCompare(b.trip?.so_xe || "")
+      const dateCompare = compareDateAsc(a.ngay, b.ngay)
+      if (dateCompare !== 0) return dateCompare
+      const vehicleCompare = compareVehicleAsc(a.trip?.so_xe, b.trip?.so_xe)
+      if (vehicleCompare !== 0) return vehicleCompare
       return Number(a.trip?.chuyen || 1) - Number(b.trip?.chuyen || 1)
     })
 }
@@ -342,6 +361,7 @@ function buildStatsContext(params: {
   mode: "all" | "doi" | "vehicle"
   selectedDoi?: string
   selectedVehicle?: string
+  selectedNote?: string
 }) {
   const range = `Từ ngày ${params.from ? formatDateVi(params.from) : "tất cả"} đến ngày ${params.to ? formatDateVi(params.to) : "tất cả"}`
   if (params.mode === "doi" && params.selectedDoi) return `${range}; đội ${params.selectedDoi}`
@@ -453,10 +473,10 @@ export async function downloadDispatchStatsPdf(params: {
 
   renderSignatures(doc, params.makerName)
   footer(doc)
-  const suffix = params.mode === "doi" && params.selectedDoi
-    ? `doi-${params.selectedDoi}`
-    : params.mode === "vehicle" && params.selectedVehicle
-      ? `xe-${safeName(params.selectedVehicle)}`
+  const suffix = params.mode === "doi"
+    ? `doi-${safeName(params.selectedDoi || "tat-ca")}`
+    : params.mode === "vehicle"
+      ? `xe-${safeName(params.selectedVehicle || "tat-ca")}`
       : "tong-hop"
   doc.save(`thong-ke-dieu-xe-${suffix}-${params.from || "all"}-${params.to || "all"}.pdf`)
 }

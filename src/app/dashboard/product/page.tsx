@@ -115,6 +115,7 @@ type SessionHeader = {
   tham: string;
   chi_thi: string;
   pallet: string[];
+  ghi_chu: string;
   image_url_1: string;
   image_url_2: string;
 };
@@ -563,7 +564,8 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
     tham: "C\u0169",
     chi_thi: "1",
     pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
-    image_url_1: "",
+      ghi_chu: "",
+      image_url_1: "",
     image_url_2: "",
   };
 }
@@ -1552,8 +1554,9 @@ export default function ProductPage() {
         "",
       tham: "cũ",
       chi_thi: lastChiThi,
-      pallet: ["Sắt đế gỗ"],
-      image_url_1: "",
+    pallet: ["Sắt đế gỗ"],
+    ghi_chu: "",
+    image_url_1: "",
       image_url_2: "",
     };
     setSession(s);
@@ -1642,7 +1645,7 @@ export default function ProductPage() {
               tham: session.tham,
               chi_thi: session.chi_thi,
               pallet: session.pallet,
-              ghi_chu: "",
+              ghi_chu: session.ghi_chu,
               image_url_1: session.image_url_1 || null,
               image_url_2: session.image_url_2 || null,
               trang_thai,
@@ -1950,6 +1953,21 @@ export default function ProductPage() {
         prev.includes(row.content) ? prev : [...prev, row.content],
       );
       updateEditForm({ ghi_chu: row.content });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú");
+    }
+  };
+
+  const handleAddSessionRequiredNote = async () => {
+    if (!factoryId) return;
+    const input = window.prompt("Nhập ghi chú mới");
+    if (!input || !input.trim()) return;
+    try {
+      const row = await createRequiredNote(supabase, factoryId, input);
+      setRequiredNotes((prev) =>
+        prev.includes(row.content) ? prev : [...prev, row.content],
+      );
+      updateSession({ ghi_chu: row.content });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú");
     }
@@ -2332,6 +2350,33 @@ export default function ProductPage() {
                   })}
                 </div>
               </div>
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-600 block">
+                  Ghi chú
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleAddSessionRequiredNote()}
+                  className="text-xs font-bold text-amber-700 hover:text-amber-800"
+                >
+                  + Thêm ghi chú mới
+                </button>
+              </div>
+              <input
+                list="product-session-required-notes"
+                value={session.ghi_chu}
+                onChange={(e) => updateSession({ ghi_chu: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                placeholder="Ghi chú (tùy chọn)"
+              />
+              <datalist id="product-session-required-notes">
+                {requiredNotes.map((note) => (
+                  <option key={note} value={note} />
+                ))}
+              </datalist>
             </div>
 
             {/* Hàng 4: Hình ảnh 1 - Hình ảnh 2 */}

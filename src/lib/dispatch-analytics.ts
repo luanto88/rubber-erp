@@ -172,10 +172,11 @@ function addTrip(summary: DispatchGroupSummary, trip: DispatchFlatTrip) {
 export function buildDispatchAnalytics(
   entries: DispatchAnalyticsEntry[],
   deliveryPoints: DiemGN[],
-  filters?: { doi?: string; vehicle?: string },
+  filters?: { doi?: string; vehicle?: string; note?: string },
 ): DispatchAnalytics {
   const vehicleNeedle = (filters?.vehicle || "").trim().toLowerCase()
   const doiFilter = filters?.doi ? Number(filters.doi) : 0
+  const noteFilter = (filters?.note || "").trim()
   const trips: DispatchFlatTrip[] = []
   const vehicles = new Set<string>()
   const drivers = new Set<string>()
@@ -193,6 +194,7 @@ export function buildDispatchAnalytics(
   for (const entry of entries) {
     for (const row of entry.rows || []) {
       const dois = getTripDois(row, deliveryPoints)
+      if (noteFilter && (row.ghi_chu || "").trim() !== noteFilter) continue
       if (doiFilter && !dois.includes(doiFilter)) continue
       if (vehicleNeedle && !(row.so_xe || "").toLowerCase().includes(vehicleNeedle)) continue
 
