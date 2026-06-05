@@ -6,7 +6,6 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
-import { pathToFileURL } from "url"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -574,16 +573,9 @@ async function loadPdfjs() {
   return await import("pdfjs-dist/legacy/build/pdf.mjs")
 }
 
-function getPdfJsAssetUrl(relativePath: string): string | undefined {
-  const absolutePath = path.join(process.cwd(), "node_modules", "pdfjs-dist", relativePath)
-  if (!fs.existsSync(absolutePath)) return undefined
-  let href = pathToFileURL(absolutePath).href
-  if (!href.endsWith("/")) href += "/"
-  return href
-}
-
 async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
   const pdfjsLib = await loadPdfjs()
+
   const baseOptions = {
     data: new Uint8Array(pdfBytes),
     disableWorker: true,
@@ -591,27 +583,36 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
     isEvalSupported: false,
     disableFontFace: true,
   }
-  const localCMapUrl = getPdfJsAssetUrl("cmaps")
-  const localStandardFontUrl = getPdfJsAssetUrl("standard_fonts")
-  const attempts = [
-    {
-      ...baseOptions,
-      ...(localCMapUrl ? { cMapUrl: localCMapUrl, cMapPacked: true } : {}),
-      ...(localStandardFontUrl ? { standardFontDataUrl: localStandardFontUrl } : {}),
-    },
-    baseOptions,
-  ]
 
-  let lastError: unknown = null
-  for (const options of attempts) {
+  const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
+  const hasCMaps = fs.existsSync(cmapsDir)
+
+  if (hasCMaps) {
+    // Dùng fs.readFile trực tiếp thay vì file:// URL.
+    // Node.js 18+ (Vercel runtime) không hỗ trợ file:// trong globalThis.fetch,
+    // nên cMapUrl kiểu file:// mà pdfjs dùng để fetch sẽ silently fail trên Vercel.
+    class NodeCMapReaderFactory {
+      async fetch({ name }: { name: string }) {
+        try {
+          const data = await fs.promises.readFile(path.join(cmapsDir, `${name}.bcmap`))
+          return { cMapData: new Uint8Array(data), compressionType: 1 }
+        } catch {
+          return null
+        }
+      }
+    }
     try {
-      return await pdfjsLib.getDocument(options as never).promise
-    } catch (error) {
-      lastError = error
+      return await pdfjsLib.getDocument({
+        ...baseOptions,
+        CMapReaderFactory: NodeCMapReaderFactory,
+        cMapPacked: true,
+      } as never).promise
+    } catch {
+      // fallback không có cMaps nếu factory fail
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  return await pdfjsLib.getDocument(baseOptions as never).promise
 }
 
 function getCurrentSignerKey(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): string | null {

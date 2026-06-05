@@ -55761,3 +55761,126 @@ Import traces:
        please check the style of container, or the props width(100%) and height(100%),
        or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
        height and width.
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-c2394bf7-257d-4b5f-8e79-b8861502e916 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] The width(-1) and height(-1) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-dea9ae97-90d5-4ee6-b8d2-21c11a4e8f75 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-dea9ae97-90d5-4ee6-b8d2-21c11a4e8f75 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-dea9ae97-90d5-4ee6-b8d2-21c11a4e8f75 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-dea9ae97-90d5-4ee6-b8d2-21c11a4e8f75 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
+[browser] ⨯ unhandledRejection: Error: cannot add `postgres_changes` callbacks for realtime:iso-task-count-0268ab41-a564-4538-acf1-6297ac372f57-dea9ae97-90d5-4ee6-b8d2-21c11a4e8f75 after `subscribe()`.
+    at IsoShell.useEffect.loadPendingTasks (src/app/dashboard/iso/_components/iso-shell.tsx:88:12)
+  86 |         channel = supabase
+  87 |           .channel(`iso-task-count-${fid}-${uid}`)
+> 88 |           .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", ...
+     |            ^
+  89 |             void loadPendingTasks()
+  90 |           })
+  91 |           .subscribe()
