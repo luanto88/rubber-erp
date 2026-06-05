@@ -7,6 +7,46 @@ import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
 
+// Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
+if (typeof globalThis.DOMMatrix === "undefined") {
+  class DOMMatrixPolyfill {
+    a = 1; b = 0; c = 0; d = 1; e = 0; f = 0
+    m11 = 1; m12 = 0; m21 = 0; m22 = 1; m41 = 0; m42 = 0
+    is2D = true; isIdentity = true
+    constructor(init?: number[]) {
+      if (Array.isArray(init) && init.length >= 6) {
+        [this.a, this.b, this.c, this.d, this.e, this.f] = init
+        this.m11 = init[0]; this.m12 = init[1]; this.m21 = init[2]
+        this.m22 = init[3]; this.m41 = init[4]; this.m42 = init[5]
+      }
+    }
+    multiply(o: DOMMatrixPolyfill) {
+      return new DOMMatrixPolyfill([
+        this.a * o.a + this.c * o.b, this.b * o.a + this.d * o.b,
+        this.a * o.c + this.c * o.d, this.b * o.c + this.d * o.d,
+        this.a * o.e + this.c * o.f + this.e, this.b * o.e + this.d * o.f + this.f,
+      ])
+    }
+    inverse() {
+      const det = this.a * this.d - this.b * this.c
+      if (!det) return new DOMMatrixPolyfill()
+      return new DOMMatrixPolyfill([
+        this.d / det, -this.b / det, -this.c / det, this.a / det,
+        (this.c * this.f - this.d * this.e) / det,
+        (this.b * this.e - this.a * this.f) / det,
+      ])
+    }
+    transformPoint(p: { x: number; y: number }) {
+      return { x: this.a * p.x + this.c * p.y + this.e, y: this.b * p.x + this.d * p.y + this.f }
+    }
+    static fromMatrix(o: DOMMatrixPolyfill) {
+      return new DOMMatrixPolyfill([o.a, o.b, o.c, o.d, o.e, o.f])
+    }
+  }
+  ;(globalThis as Record<string, unknown>).DOMMatrix = DOMMatrixPolyfill
+  ;(globalThis as Record<string, unknown>).DOMMatrixReadOnly = DOMMatrixPolyfill
+}
+
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
