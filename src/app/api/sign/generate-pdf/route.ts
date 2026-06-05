@@ -586,6 +586,7 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
 
   const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
   const hasCMaps = fs.existsSync(cmapsDir)
+  console.log("[pdfjs] cmapsDir:", cmapsDir, "exists:", hasCMaps)
 
   if (hasCMaps) {
     // Dùng fs.readFile trực tiếp thay vì file:// URL.
@@ -695,27 +696,49 @@ async function fillMetadataPlaceholders(
       const pageFound = new Set<string>()
 
       const headerItems = items.filter((item) => item.transform[5] > headerThreshold)
+      const headerLines = lines.filter((line) => line[0].transform[5] > headerThreshold)
+
+      // Debug log tạm — xác nhận text items trên Vercel
+      if (pageIdx === 0) {
+        const dbgHeaderItems = headerItems.slice(0, 10)
+        console.log("[pdf-meta] pg0 threshold:", Math.round(headerThreshold), "headerItems:", JSON.stringify(dbgHeaderItems.map((it) => ({ s: it.str, y: Math.round(it.transform[5]) }))))
+      }
+
+      // Mismatch detection (per-item để giữ `found: item.str` trong báo lỗi)
       for (const item of headerItems) {
         const normalizedItem = normalizeTagText(item.str)
         if (!normalizedItem) continue
-
-        let isMismatched = false
         for (const { pattern, expected } of mismatchPatterns) {
           if (isSkippedLabel(skipLabels, expected)) continue
           if (pattern.test(normalizedItem) && !mismatched.some((entry) => entry.expected === expected && entry.found === item.str)) {
             mismatched.push({ found: item.str, expected })
-            isMismatched = true
           }
         }
-        // Không fill tag bị phát hiện là mismatch - yêu cầu người dùng sửa template
-        if (isMismatched) continue
+      }
+
+      // Header fill — per-LINE matching để xử lý pdfjs text fragmentation.
+      // Trên Vercel, pdfjs có thể tách "Mã tài liệu" thành nhiều item riêng
+      // ("Mã", " tài", " liệu", ":"). Per-item matching bỏ sót; per-line dùng
+      // textOfLine() gom tất cả item cùng dòng trước khi so khớp pattern.
+      for (const line of headerLines) {
+        const lineText = textOfLine(line)
+        const normalizedLineText = normalizeTagText(lineText)
+        if (!normalizedLineText) continue
+
+        // Bỏ qua dòng bị phát hiện là mismatch
+        let lineHasMismatch = false
+        for (const { pattern, expected } of mismatchPatterns) {
+          if (isSkippedLabel(skipLabels, expected)) continue
+          if (pattern.test(normalizedLineText)) { lineHasMismatch = true; break }
+        }
+        if (lineHasMismatch) continue
 
         for (const header of headerPatterns) {
           if (
             pageFound.has(header.expected) ||
             isSkippedLabel(skipLabels, header.expected) ||
             !header.value ||
-            !header.pattern.test(normalizedItem)
+            !header.pattern.test(normalizedLineText)
           ) {
             continue
           }
@@ -723,11 +746,24 @@ async function fillMetadataPlaceholders(
           found.add(header.expected)
           pageFound.add(header.expected)
 
+          // Tìm item khớp trực tiếp (non-fragmented) → dùng vị trí của item đó.
+          // Nếu không tìm được (fragmented) → dùng edge phải nhất của cả dòng.
+          const directMatchItem = line.find((it) => header.pattern.test(normalizeTagText(it.str)))
+          const lineRightX = Math.max(...line.map((it) => it.transform[4] + (it.width ?? 0)))
+
+          // Kiểm tra giá trị đã có: ưu tiên dùng full lineText để tránh nhầm label fragment là value.
+          // Với non-fragmented case (directMatchItem tìm được), bổ sung check per-item để bắt
+          // các value nằm trên cùng dòng nhưng bị tách Y nhẹ (ngoài window < 3px).
           const existingValue = normalizeText([
-            extractHeaderValueFromAnchorText(item.str, header.expected),
-            extractHeaderValueFromPageItems(headerItems, item),
+            extractHeaderValueFromAnchorText(lineText, header.expected),
+            directMatchItem ? extractHeaderValueFromPageItems(headerItems, directMatchItem) : "",
           ].filter(Boolean).join(" "))
           if (hasRealHeaderValue(existingValue)) break
+
+          const drawX = directMatchItem
+            ? directMatchItem.transform[4] + (directMatchItem.width ?? 0) + 4
+            : lineRightX + 4
+          const anchorItem = directMatchItem ?? line[0]
 
           if (header.label === "QR") {
             const qrImage = await pdfDoc.embedPng(qrBuffer)
@@ -740,14 +776,13 @@ async function fillMetadataPlaceholders(
               })
               filled.add(header.expected)
             } else {
-              const qrX = item.transform[4] + (item.width ?? 0) + 4
-              const qrSize = Math.max((item.height ?? 10) * 2.64, 26)
-              const maxWidth = Math.max(viewport.width - qrX - 12, 18)
+              const qrSize = Math.max((anchorItem.height ?? 10) * 2.64, 26)
+              const maxWidth = Math.max(viewport.width - drawX - 12, 18)
               const drawSize = Math.min(qrSize, maxWidth)
               if (drawSize > 18) {
                 const qrPos = {
-                  x: qrX,
-                  y: item.transform[5] - drawSize + (item.height ?? 10),
+                  x: drawX,
+                  y: anchorItem.transform[5] - drawSize + (anchorItem.height ?? 10),
                   width: drawSize,
                   height: drawSize,
                 }
@@ -759,11 +794,11 @@ async function fillMetadataPlaceholders(
             break
           }
 
-          const hasColon = item.str.includes(":")
+          const hasColon = lineText.includes(":")
           const fontSize = HEADER_FOOTER_FONT_SIZE
           page.drawText(`${hasColon ? "" : ":"} ${String(header.value)}`, {
-            x: item.transform[4] + (item.width ?? 0) + 4,
-            y: item.transform[5],
+            x: drawX,
+            y: anchorItem.transform[5],
             size: fontSize,
             font,
             color: rgb(0, 0, 0),
