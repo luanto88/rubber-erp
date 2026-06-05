@@ -55884,3 +55884,4 @@ Import traces:
   89 |             void loadPendingTasks()
   90 |           })
   91 |           .subscribe()
+⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
