@@ -47,6 +47,12 @@ if (typeof globalThis.DOMMatrix === "undefined") {
   ;(globalThis as Record<string, unknown>).DOMMatrixReadOnly = DOMMatrixPolyfill
 }
 
+// Preload pdf.worker vào globalThis để Vercel nft trace file vào Lambda bundle.
+// pdfjs v5 PDFWorker._setupFakeWorkerGlobal kiểm tra globalThis.pdfjsWorker?.WorkerMessageHandler
+// TRƯỚC khi gọi dynamic import — nếu đã có thì bỏ qua dynamic import hoàn toàn.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+;(globalThis as Record<string, unknown>).pdfjsWorker = require("pdfjs-dist/legacy/build/pdf.worker.mjs")
+
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
