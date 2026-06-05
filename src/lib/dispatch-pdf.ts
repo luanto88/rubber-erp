@@ -15,8 +15,8 @@ import {
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
-const ORG_LINE_1 = "Nhà máy chế biến"
-const ORG_LINE_2 = "Đội xe vận chuyển"
+const ORG_LINE_1 = "Nh\u00e0 m\u00e1y ch\u1ebf bi\u1ebfn"
+const ORG_LINE_2 = "\u0110\u1ed9i xe v\u1eadn chuy\u1ec3n"
 let fontBase64Promise: Promise<string> | null = null
 
 type PdfWithTable = jsPDF & {
@@ -39,18 +39,18 @@ const MATERIAL_DEFS: Array<{
   baseKey: "mn" | "ct" | "dct" | "dkt" | "dt"
   label: string
 }> = [
-  { baseKey: "mn", label: "Mủ nước", tuoiKey: "mnTuoi", khoKey: "mnKho" },
-  { baseKey: "ct", label: "Mủ chén", tuoiKey: "ctTuoi", khoKey: "ctKho" },
-  { baseKey: "dct", label: "Đông chén", tuoiKey: "dctTuoi", khoKey: "dctKho" },
-  { baseKey: "dkt", label: "Đông khối", tuoiKey: "dktTuoi", khoKey: "dktKho" },
-  { baseKey: "dt", label: "Mủ dây", tuoiKey: "dtTuoi", khoKey: "dtKho" },
+  { baseKey: "mn", label: "M\u1ee7 n\u01b0\u1edbc", tuoiKey: "mnTuoi", khoKey: "mnKho" },
+  { baseKey: "ct", label: "M\u1ee7 ch\u00e9n", tuoiKey: "ctTuoi", khoKey: "ctKho" },
+  { baseKey: "dct", label: "\u0110\u00f4ng ch\u00e9n", tuoiKey: "dctTuoi", khoKey: "dctKho" },
+  { baseKey: "dkt", label: "\u0110\u00f4ng kh\u1ed1i", tuoiKey: "dktTuoi", khoKey: "dktKho" },
+  { baseKey: "dt", label: "M\u1ee7 d\u00e2y", tuoiKey: "dtTuoi", khoKey: "dtKho" },
 ]
 
 async function loadPdfFontBase64() {
   if (!fontBase64Promise) {
     fontBase64Promise = fetch(`/fonts/${PDF_FONT_FILE}`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(`Không tải được font PDF: ${PDF_FONT_FILE}`)
+        if (!res.ok) throw new Error(`Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c font PDF: ${PDF_FONT_FILE}`)
         const buffer = await res.arrayBuffer()
         const bytes = new Uint8Array(buffer)
         let binary = ""
@@ -109,8 +109,8 @@ function renderSignatures(doc: jsPDF, makerName?: string) {
 
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(10)
-  doc.text("Giám đốc nhà máy", 24, startY)
-  doc.text("Lập bảng", pageW - 42, startY, { align: "center" })
+  doc.text("Gi\u00e1m \u0111\u1ed1c nh\u00e0 m\u00e1y", 24, startY)
+  doc.text("L\u1eadp b\u1ea3ng", pageW - 42, startY, { align: "center" })
 
   if (makerName) {
     doc.setFont(PDF_FONT_NAME, "normal")
@@ -184,7 +184,7 @@ function buildDoiRows(trips: DispatchFlatTrip[]) {
     const dois = trip.dois.length > 0 ? trip.dois : [0]
     const tripMaterials = getTripMaterials(trip)
     for (const doi of dois) {
-      const doiLabel = doi ? `Đội ${doi}` : "Chưa rõ đội"
+      const doiLabel = doi ? `\u0110\u1ed9i ${doi}` : "Ch\u01b0a r\u00f5 \u0111\u1ed9i"
       const key = `${trip.ngay}__${doiLabel}`
       const current = grouped.get(key) || {
         ngay: trip.ngay,
@@ -252,16 +252,16 @@ function buildAllRows(trips: DispatchFlatTrip[]) {
 }
 
 function tripInfoRows(trip: DispatchFlatTrip) {
-  const dois = trip.dois.length ? trip.dois.map((doi) => `Đội ${doi}`).join(", ") : "-"
+  const dois = trip.dois.length ? trip.dois.map((doi) => `\u0110\u1ed9i ${doi}`).join(", ") : "-"
 
   return [
-    ["Mã ĐX", trip.maDx || "-", "Ngày", formatDateVi(trip.ngay)],
-    ["Số xe", trip.so_xe || "-", "Tài xế", trip.tai_xe || "-"],
-    ["Chuyến", String(trip.chuyen || 1), "Đội", dois],
-    ["Dây chuyền", trip.dayChuyen || "-", "Chứng nhận", trip.chungNhan || "-"],
-    ["Điểm giao nhận", (trip.diem_gn || []).join(", ") || "-", "Phiên", (trip.phien || []).join(", ") || "-"],
-    ["Lộ trình", (trip.lo_trinh || []).join(" - ") || "-", "Km", `${formatKm(trip.totalKm)} km`],
-    ["Lô thu hoạch", (trip.lo_thu_hoach || []).join(", ") || "-", "Xử lý", trip.xu_ly || "-"],
+    ["M\u00e3 \u0110X", trip.maDx || "-", "Ng\u00e0y", formatDateVi(trip.ngay)],
+    ["S\u1ed1 xe", trip.so_xe || "-", "T\u00e0i x\u1ebf", trip.tai_xe || "-"],
+    ["Chuy\u1ebfn", String(trip.chuyen || 1), "\u0110\u1ed9i", dois],
+    ["D\u00e2y chuy\u1ec1n", trip.dayChuyen || "-", "Ch\u1ee9ng nh\u1eadn", trip.chungNhan || "-"],
+    ["\u0110i\u1ec3m giao nh\u1eadn", (trip.diem_gn || []).join(", ") || "-", "Phi\u00ean", (trip.phien || []).join(", ") || "-"],
+    ["L\u1ed9 tr\u00ecnh", (trip.lo_trinh || []).join(" - ") || "-", "Km", `${formatKm(trip.totalKm)} km`],
+    ["L\u00f4 thu ho\u1ea1ch", (trip.lo_thu_hoach || []).join(", ") || "-", "X\u1eed l\u00fd", trip.xu_ly || "-"],
   ]
 }
 
@@ -269,12 +269,12 @@ function materialRows(trip: DispatchFlatTrip) {
   const { materials, totalTuoi, totalKho } = getTripTotals(trip)
 
   return [
-    ["Mủ nước", formatKg(materials.mnTuoi), formatDrc(materials.mnKho, materials.mnTuoi), formatKg(materials.mnKho)],
-    ["Mủ chén", formatKg(materials.ctTuoi), formatDrc(materials.ctKho, materials.ctTuoi), formatKg(materials.ctKho)],
-    ["Đông chén", formatKg(materials.dctTuoi), formatDrc(materials.dctKho, materials.dctTuoi), formatKg(materials.dctKho)],
-    ["Đông khối", formatKg(materials.dktTuoi), formatDrc(materials.dktKho, materials.dktTuoi), formatKg(materials.dktKho)],
-    ["Mủ dây", formatKg(materials.dtTuoi), formatDrc(materials.dtKho, materials.dtTuoi), formatKg(materials.dtKho)],
-    ["TỔNG", formatKg(totalTuoi), formatDrc(totalKho, totalTuoi), formatKg(totalKho)],
+    ["M\u1ee7 n\u01b0\u1edbc", formatKg(materials.mnTuoi), formatDrc(materials.mnKho, materials.mnTuoi), formatKg(materials.mnKho)],
+    ["M\u1ee7 ch\u00e9n", formatKg(materials.ctTuoi), formatDrc(materials.ctKho, materials.ctTuoi), formatKg(materials.ctKho)],
+    ["\u0110\u00f4ng ch\u00e9n", formatKg(materials.dctTuoi), formatDrc(materials.dctKho, materials.dctTuoi), formatKg(materials.dctKho)],
+    ["\u0110\u00f4ng kh\u1ed1i", formatKg(materials.dktTuoi), formatDrc(materials.dktKho, materials.dktTuoi), formatKg(materials.dktKho)],
+    ["M\u1ee7 d\u00e2y", formatKg(materials.dtTuoi), formatDrc(materials.dtKho, materials.dtTuoi), formatKg(materials.dtKho)],
+    ["T\u1ed4NG", formatKg(totalTuoi), formatDrc(totalKho, totalTuoi), formatKg(totalKho)],
   ]
 }
 
@@ -363,10 +363,11 @@ function buildStatsContext(params: {
   selectedVehicle?: string
   selectedNote?: string
 }) {
-  const range = `Từ ngày ${params.from ? formatDateVi(params.from) : "tất cả"} đến ngày ${params.to ? formatDateVi(params.to) : "tất cả"}`
-  if (params.mode === "doi" && params.selectedDoi) return `${range}; đội ${params.selectedDoi}`
-  if (params.mode === "vehicle" && params.selectedVehicle) return `${range}; xe ${params.selectedVehicle}`
-  return `${range}; tất cả đội xe`
+  const range = `T\u1eeb ng\u00e0y ${params.from ? formatDateVi(params.from) : "t\u1ea5t c\u1ea3"} \u0111\u1ebfn ng\u00e0y ${params.to ? formatDateVi(params.to) : "t\u1ea5t c\u1ea3"}`
+  const note = params.selectedNote ? `; ghi ch\u00fa ${params.selectedNote}` : ""
+  if (params.mode === "doi" && params.selectedDoi) return `${range}; \u0111\u1ed9i ${params.selectedDoi}${note}`
+  if (params.mode === "vehicle" && params.selectedVehicle) return `${range}; xe ${params.selectedVehicle}${note}`
+  return `${range}; t\u1ea5t c\u1ea3 \u0111\u1ed9i xe${note}`
 }
 
 export async function downloadDispatchStatsPdf(params: {
@@ -377,12 +378,13 @@ export async function downloadDispatchStatsPdf(params: {
   mode: "all" | "doi" | "vehicle"
   selectedDoi?: string
   selectedVehicle?: string
+  selectedNote?: string
   makerName?: string
 }) {
   const isVehicleMode = params.mode === "vehicle"
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: isVehicleMode ? "a3" : "a4" })
   await ensurePdfFont(doc)
-  renderHeader(doc, "THỐNG KÊ ĐIỀU XE", `Nhà máy: ${params.factoryName}; ${buildStatsContext(params)}`)
+  renderHeader(doc, "TH\u1ed0NG K\u00ca \u0110I\u1ec0U XE", `Nh\u00e0 m\u00e1y: ${params.factoryName}; ${buildStatsContext(params)}`)
 
   const t = params.analytics.totals
   autoTable(doc, {
@@ -390,7 +392,7 @@ export async function downloadDispatchStatsPdf(params: {
     theme: "grid",
     styles: { font: PDF_FONT_NAME, fontSize: 9, cellPadding: 2, halign: "center" },
     headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    head: [["Bảng ĐX", "Chuyến", "Xe", "Tài xế", "Km", "Tươi (tấn)", "Khô (tấn)"]],
+    head: [["B\u1ea3ng \u0110X", "Chuy\u1ebfn", "Xe", "T\u00e0i x\u1ebf", "Km", "T\u01b0\u01a1i (t\u1ea5n)", "Kh\u00f4 (t\u1ea5n)"]],
     body: [[
       String(t.entries),
       String(t.trips),
@@ -410,10 +412,10 @@ export async function downloadDispatchStatsPdf(params: {
   const visibleMaterials = getVisibleMaterials(materialRows)
   const materialColumns = buildMaterialColumns(visibleMaterials)
   const heading = params.mode === "vehicle"
-    ? "Chi tiết theo xe"
+    ? "Chi ti\u1ebft theo xe"
     : params.mode === "doi"
-      ? "Chi tiết theo đội theo ngày"
-      : "Tổng hợp theo ngày"
+      ? "Chi ti\u1ebft theo \u0111\u1ed9i theo ng\u00e0y"
+      : "T\u1ed5ng h\u1ee3p theo ng\u00e0y"
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(11)
   doc.text(heading, 14, (pdf.lastAutoTable?.finalY || 46) + 10)
@@ -423,14 +425,14 @@ export async function downloadDispatchStatsPdf(params: {
     autoTable(doc, {
       startY,
       head: [[
-        "Ngày",
-        "Số xe",
-        "Tài xế",
-        "Chuyến",
-        "Phiên",
-        "Điểm giao nhận",
-        "Lộ trình",
-        "Số Km",
+        "Ng\u00e0y",
+        "S\u1ed1 xe",
+        "T\u00e0i x\u1ebf",
+        "Chuy\u1ebfn",
+        "Phi\u00ean",
+        "\u0110i\u1ec3m giao nh\u1eadn",
+        "L\u1ed9 tr\u00ecnh",
+        "S\u1ed1 Km",
         ...materialColumns,
       ]],
       body: vehicleRows.map(({ trip, materials, ngay }) => [
@@ -456,13 +458,13 @@ export async function downloadDispatchStatsPdf(params: {
     autoTable(doc, {
       startY,
       head: [[
-        "Ngày",
-        params.mode === "doi" ? "Đội" : "Nhóm",
+        "Ng\u00e0y",
+        params.mode === "doi" ? "\u0110\u1ed9i" : "Nh\u00f3m",
         ...materialColumns,
       ]],
       body: (params.mode === "doi" ? doiRows : allRows).map((row) => [
         formatDateVi(row.ngay),
-        params.mode === "doi" ? (row.doiLabel || "-") : "Tổng ngày",
+        params.mode === "doi" ? (row.doiLabel || "-") : "T\u1ed5ng ng\u00e0y",
         ...materialTripValues(row.materials, visibleMaterials),
       ]),
       theme: "grid",

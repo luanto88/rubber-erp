@@ -676,7 +676,7 @@ export default function DispatchPage() {
   const exportStatsPdf = async (mode: "all" | "doi" | "vehicle") => {
     try {
       if (analytics.trips.length === 0) {
-        showToast("Không có dữ liệu để xuất PDF")
+        showToast("Kh\u00f4ng c\u00f3 d\u1eef li\u1ec7u \u0111\u1ec3 xu\u1ea5t PDF")
         return
       }
       await downloadDispatchStatsPdf({
@@ -1050,12 +1050,12 @@ export default function DispatchPage() {
       <ToastNotification/>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Bảng phân xe thu mủ hàng ngày</p>
+          <h1 className="text-2xl font-extrabold text-slate-800">{"\u0110i\u1ec1u xe"}</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{"B\u1ea3ng ph\u00e2n xe thu m\u1ee7 h\u00e0ng ng\u00e0y"}</p>
         </div>
         <button onClick={openAdd}
           className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
-          <Plus size={16}/> Thêm bảng
+          <Plus size={16}/> {"Th\u00eam b\u1ea3ng"}
         </button>
       </div>
 
@@ -1064,22 +1064,22 @@ export default function DispatchPage() {
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
             listTab === "list" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
           }`}>
-          <Truck size={15}/> Danh sách
+          <Truck size={15}/> {"Danh s\u00e1ch"}
         </button>
         <button onClick={() => setListTab("stats")}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
             listTab === "stats" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
           }`}>
-          <BarChart3 size={15}/> Thống kê
+          <BarChart3 size={15}/> {"Th\u1ed1ng k\u00ea"}
         </button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
         {([
-          { label: "Tổng bảng phân xe", value: stats.total,                         Icon: Calendar, ic: "text-slate-400"   },
-          { label: "Tổng chuyến xe",    value: stats.totalXe,                        Icon: Truck,    ic: "text-emerald-400" },
-          { label: "Tổng KL khô (tấn)", value: (stats.totalKg/1000).toFixed(1)+"T", Icon: Weight,   ic: "text-blue-400"    },
+          { label: "T\u1ed5ng b\u1ea3ng ph\u00e2n xe", value: stats.total,                         Icon: Calendar, ic: "text-slate-400"   },
+          { label: "T\u1ed5ng chuy\u1ebfn xe",    value: stats.totalXe,                        Icon: Truck,    ic: "text-emerald-400" },
+          { label: "T\u1ed5ng KL kh\u00f4 (t\u1ea5n)", value: (stats.totalKg/1000).toFixed(1)+"T", Icon: Weight,   ic: "text-blue-400"    },
         ] as const).map(s => (
           <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
             <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
@@ -1094,17 +1094,17 @@ export default function DispatchPage() {
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Tìm ngày, xe, tài xế..."
+            placeholder={"T\u00ecm ng\u00e0y, xe, t\u00e0i x\u1ebf..."}
             className="flex-1 text-sm outline-none"/>
         </div>
         <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        <span className="text-slate-400 text-sm">→</span>
+        <span className="text-slate-400 text-sm">{"\u2192"}</span>
         <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
         <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-          <option value="">Tất cả ghi chú</option>
+          <option value="">{"T\u1ea5t c\u1ea3 ghi ch\u00fa"}</option>
           {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
         </select>
         <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
@@ -1120,41 +1120,21 @@ export default function DispatchPage() {
         {(search||filterFrom||filterTo||filterGhiChu||statsDoi||statsVehicle) &&
           <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu(""); setStatsDoi(""); setStatsVehicle("") }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-            <X size={14}/> Xóa lọc
+            <X size={14}/> {"X\u00f3a l\u1ecdc"}
           </button>}
       </div>
 
       {listTab === "stats" && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
-            {false && (
-              <>
-            <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-              <option value="">Tất cả đội</option>
-              {doiOptions.map(doi => <option key={doi} value={doi}>Đội {doi}</option>)}
-            </select>
-            <select value={statsVehicle} onChange={e => setStatsVehicle(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-              <option value="">Tất cả xe</option>
-              {statVehicleOptions.map(vehicle => <option key={vehicle} value={vehicle}>{vehicle}</option>)}
-            </select>
-            {(statsDoi || statsVehicle) && (
-              <button onClick={() => { setStatsDoi(""); setStatsVehicle("") }}
-                className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-                <X size={14}/> Xóa lọc thống kê
-              </button>
-            )}
-              </>
-            )}
             <div className="ml-auto flex flex-wrap gap-2">
               <button onClick={() => exportStatsPdf("all")}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-lg">
-                <Download size={13}/> PDF tổng
+                <Download size={13}/> {"PDF t\u1ed5ng"}
               </button>
               <button onClick={() => exportStatsPdf("doi")}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg">
-                <Download size={13}/> PDF đội
+                <Download size={13}/> {"PDF \u0111\u1ed9i"}
               </button>
               <button onClick={() => exportStatsPdf("vehicle")}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg">
@@ -1165,12 +1145,12 @@ export default function DispatchPage() {
 
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             {([
-              { label: "Chuyến", value: analytics.totals.trips.toLocaleString("vi-VN"), Icon: Truck, tone: "text-emerald-600" },
-              { label: "Xe hoạt động", value: analytics.totals.vehicles.toLocaleString("vi-VN"), Icon: Gauge, tone: "text-blue-600" },
+              { label: "Chuy\u1ebfn", value: analytics.totals.trips.toLocaleString("vi-VN"), Icon: Truck, tone: "text-emerald-600" },
+              { label: "Xe ho\u1ea1t \u0111\u1ed9ng", value: analytics.totals.vehicles.toLocaleString("vi-VN"), Icon: Gauge, tone: "text-blue-600" },
               { label: "Km", value: formatKm(analytics.totals.km), Icon: MapIcon, tone: "text-cyan-600" },
-              { label: "Tươi (tấn)", value: formatTon(analytics.totals.totalTuoi), Icon: Weight, tone: "text-amber-600" },
-              { label: "Khô (tấn)", value: formatTon(analytics.totals.totalKho), Icon: Weight, tone: "text-purple-600" },
-              { label: "Tài xế", value: analytics.totals.drivers.toLocaleString("vi-VN"), Icon: Info, tone: "text-slate-600" },
+              { label: "T\u01b0\u01a1i (t\u1ea5n)", value: formatTon(analytics.totals.totalTuoi), Icon: Weight, tone: "text-amber-600" },
+              { label: "Kh\u00f4 (t\u1ea5n)", value: formatTon(analytics.totals.totalKho), Icon: Weight, tone: "text-purple-600" },
+              { label: "T\u00e0i x\u1ebf", value: analytics.totals.drivers.toLocaleString("vi-VN"), Icon: Info, tone: "text-slate-600" },
             ] as const).map(card => (
               <div key={card.label} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
                 <card.Icon size={18} className={`${card.tone} mb-2`}/>
@@ -1183,14 +1163,14 @@ export default function DispatchPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-extrabold text-slate-800">Theo đội</h3>
-                <span className="text-xs text-slate-400">{analytics.byDoi.length} đội</span>
+                <h3 className="font-extrabold text-slate-800">{"Theo \u0111\u1ed9i"}</h3>
+                <span className="text-xs text-slate-400">{analytics.byDoi.length} {"\u0111\u1ed9i"}</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
                     <tr>
-                      {["Đội","Chuyến","Xe","Km","Tươi","Khô","MN khô","Tạp khô"].map(h => (
+                      {["\u0110\u1ed9i","Chuy\u1ebfn","Xe","Km","T\u01b0\u01a1i","Kh\u00f4","MN kh\u00f4","T\u1ea1p kh\u00f4"].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1222,7 +1202,7 @@ export default function DispatchPage() {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
                     <tr>
-                      {["Xe","Chuyến","Tài xế","Km","Tươi","Khô","MN khô","Tạp khô"].map(h => (
+                      {["Xe","Chuy\u1ebfn","T\u00e0i x\u1ebf","Km","T\u01b0\u01a1i","Kh\u00f4","MN kh\u00f4","T\u1ea1p kh\u00f4"].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1232,7 +1212,7 @@ export default function DispatchPage() {
                       <tr key={group.key} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-bold text-blue-700">{group.label}</td>
                         <td className="px-3 py-2">{group.trips}</td>
-                        <td className="px-3 py-2 max-w-36 truncate">{[...group.drivers].join(", ") || "—"}</td>
+                        <td className="px-3 py-2 max-w-36 truncate">{[...group.drivers].join(", ") || "\u2014"}</td>
                         <td className="px-3 py-2">{formatKm(group.km)}</td>
                         <td className="px-3 py-2">{formatKg(group.totalTuoi)}</td>
                         <td className="px-3 py-2 font-bold text-slate-700">{formatKg(group.totalKho)}</td>
@@ -1251,17 +1231,17 @@ export default function DispatchPage() {
       {/* List */}
       <div className={`${listTab === "list" ? "" : "hidden"} bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden`}>
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <div className="p-12 text-center text-slate-400">{"\u0110ang t\u1ea3i..."}</div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
             <Truck size={40} className="mx-auto mb-3 opacity-30"/>
-            <p>Không có bảng phân xe nào</p>
+            <p>{"Kh\u00f4ng c\u00f3 b\u1ea3ng ph\u00e2n xe n\u00e0o"}</p>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Mã ĐX","Ngày","Dây chuyền","Chứng nhận","Số xe","Tổng KL tươi","Tổng KL khô",""].map(h => (
+                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4",""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
