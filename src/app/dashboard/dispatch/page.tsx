@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback, useRef } from "react"
+import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { buildDispatchAnalytics, formatKg, formatKm, formatTon, getTripDois } from "@/lib/dispatch-analytics"
@@ -261,6 +262,7 @@ function pickDispatchRowSource(entry: DispatchEntry, physicalRows: DxRow[]) {
 }
 
 // ─── MultiSelect inline dropdown ─────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function MultiSelect({ options, selected, onChange, placeholder }: {
   options: string[]
   selected: string[]
@@ -356,6 +358,196 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+function SmartMultiSelect({ options, selected, onChange, placeholder }: {
+  options: string[]
+  selected: string[]
+  onChange: (val: string[]) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 280, maxHeight: 280, openUp: false })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  const updatePosition = useCallback(() => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    const viewportPadding = 12
+    const preferredWidth = Math.max(rect.width, 280)
+    const width = Math.min(preferredWidth, Math.max(220, window.innerWidth - viewportPadding * 2))
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding
+    const spaceAbove = rect.top - viewportPadding
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow
+    const availableHeight = Math.max(180, (openUp ? spaceAbove : spaceBelow) - 8)
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left + window.scrollX),
+      window.scrollX + window.innerWidth - width - viewportPadding,
+    )
+
+    setPos({
+      top: openUp
+        ? rect.top + window.scrollY - availableHeight - 8
+        : rect.bottom + window.scrollY + 8,
+      left,
+      width,
+      maxHeight: availableHeight,
+      openUp,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+
+    updatePosition()
+    const onViewportChange = () => updatePosition()
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        btnRef.current &&
+        !btnRef.current.contains(target) &&
+        panelRef.current &&
+        !panelRef.current.contains(target)
+      ) {
+        setOpen(false)
+        setSearch("")
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false)
+        setSearch("")
+      }
+    }
+
+    window.addEventListener("resize", onViewportChange)
+    window.addEventListener("scroll", onViewportChange, true)
+    document.addEventListener("mousedown", onMouseDown)
+    document.addEventListener("keydown", onKeyDown)
+    const focusTimer = window.setTimeout(() => searchRef.current?.focus(), 20)
+
+    return () => {
+      window.removeEventListener("resize", onViewportChange)
+      window.removeEventListener("scroll", onViewportChange, true)
+      document.removeEventListener("mousedown", onMouseDown)
+      document.removeEventListener("keydown", onKeyDown)
+      window.clearTimeout(focusTimer)
+    }
+  }, [open, updatePosition])
+
+  const filtered = options.filter((option) => option.toLowerCase().includes(search.toLowerCase()))
+  const allSelected = filtered.length > 0 && filtered.every((option) => selected.includes(option))
+  const selectedPreview = selected.slice(0, 2)
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => {
+          if (!open) updatePosition()
+          setOpen((value) => !value)
+          if (open) setSearch("")
+        }}
+        className={`w-full min-h-[34px] rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors ${
+          open ? "border-emerald-500 ring-2 ring-emerald-100" : "border-slate-300 hover:border-emerald-400"
+        } bg-white`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            {selected.length === 0 ? (
+              <span className="block truncate text-slate-400">{placeholder || "Chọn..."}</span>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="truncate font-semibold text-slate-700">
+                  {selectedPreview.join(", ")}
+                  {selected.length > selectedPreview.length ? ` +${selected.length - selectedPreview.length}` : ""}
+                </span>
+                <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                  {selected.length}
+                </span>
+              </div>
+            )}
+          </div>
+          <ChevronRight
+            size={14}
+            className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        </div>
+      </button>
+
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, width: pos.width }}
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
+        >
+          <div className="border-b border-slate-100 bg-slate-50/80 p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-500">
+                {selected.length > 0 ? `${selected.length} đã chọn` : "Chưa chọn mục nào"}
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {pos.openUp ? "Mở lên trên" : "Mở xuống dưới"}
+              </span>
+            </div>
+            <input
+              ref={searchRef}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tìm kiếm..."
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-emerald-400"
+            />
+          </div>
+          <div className="flex gap-1 border-b border-slate-100 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => onChange([...new Set([...selected, ...filtered])])}
+              className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-600 transition-colors hover:bg-emerald-50"
+            >
+              {allSelected ? "Giữ nguyên tất cả" : "Chọn tất cả"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(selected.filter((item) => !filtered.includes(item)))}
+              className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-50"
+            >
+              Bỏ chọn
+            </button>
+          </div>
+          <div className="overflow-y-auto p-1.5" style={{ maxHeight: pos.maxHeight }}>
+            {filtered.length === 0 ? (
+              <p className="py-5 text-center text-xs text-slate-400">Không tìm thấy kết quả phù hợp</p>
+            ) : (
+              filtered.map((option) => (
+                <label key={option} className="flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 text-xs hover:bg-amber-50">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(option)}
+                    onChange={(e) =>
+                      onChange(
+                        e.target.checked
+                          ? [...selected, option]
+                          : selected.filter((item) => item !== option),
+                      )
+                    }
+                    className="shrink-0 accent-amber-500"
+                  />
+                  <span className={`min-w-0 truncate ${selected.includes(option) ? "font-semibold text-amber-700" : "text-slate-700"}`}>
+                    {option}
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
 export default function DispatchPage() {
   const [entries, setEntries]     = useState<DispatchEntry[]>([])
   const [deliveryPoints, setDeliveryPoints] = useState<DiemGN[]>(DIEM_GN)
@@ -1559,7 +1751,7 @@ export default function DispatchPage() {
                 <td className="px-2 py-1.5 min-w-[140px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.diem_gn.join(", ") || "—"}</span>
-                    : <MultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn}
+                    : <SmartMultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn}
                         onChange={val => updateRow(idx,"diem_gn",val)} placeholder="Chọn điểm..."/>
                   }
                 </td>
@@ -1568,7 +1760,7 @@ export default function DispatchPage() {
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.phien.join(", ") || "—"}</span>
-                    : <MultiSelect
+                    : <SmartMultiSelect
                         options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
                         selected={row.phien}
                         onChange={val => updateRow(idx,"phien",val)}
@@ -1607,7 +1799,7 @@ export default function DispatchPage() {
                         const opts = allowed.length > 0
                           ? deliveryPoints.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
                           : deliveryPoints.map(d => d.ma_lo)
-                        return <MultiSelect options={opts} selected={row.lo_trinh}
+                        return <SmartMultiSelect options={opts} selected={row.lo_trinh}
                           onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
                       })()
                   }

@@ -1201,7 +1201,7 @@ export async function POST(req: NextRequest) {
     )
     const effectiveDate = action
       ? new Date().toISOString()
-      : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string))
+      : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string) || new Date().toISOString())
     const dateStr = fmtDate(effectiveDate)
     const currentSignerKey = getCurrentSignerKey(doc, userId, action)
 
