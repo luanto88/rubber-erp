@@ -3895,3 +3895,12 @@ Creating turbopack project { dir: 'C:\\Users\\Software\\rubber-erp', testMode: t
  GET /dashboard/iso/documents/f0eb31d8-4fc8-436f-afd8-92bf3757bf29 200 in 240ms (next.js: 2ms, application-code: 238ms)
  GET /dashboard/iso/documents/f0eb31d8-4fc8-436f-afd8-92bf3757bf29 200 in 103ms (next.js: 69ms, application-code: 34ms)
  GET /login 200 in 332ms (next.js: 49ms, application-code: 283ms)
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.100:3000
+- Environments: .env.local
+✓ Ready in 535ms
+Creating turbopack project { dir: 'C:\\Users\\Software\\rubber-erp', testMode: true }
+
+○ Compiling /dashboard/iso ...
+✓ Finished writing to filesystem cache in 16.0s
