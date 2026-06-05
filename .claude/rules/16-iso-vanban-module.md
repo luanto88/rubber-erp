@@ -239,11 +239,42 @@ File phụ soát xét gồm:
 
 ## PDF generation
 
+### Auto-fill trường form từ tên file upload
+
+Hàm `parseDocNameFromFileName(filename)` tại `documents/[id]/page.tsx` parse tên file theo pattern:
+
+```
+{PHONG_BAN}-{LOAI}{SO_HIEU} {TEN_TAI_LIEU}
+Ví dụ: "PHK-QT22 Quy trình kiểm soát" → phong_ban=PHK, loai=QT, so_hieu=22, ten=Quy trình kiểm soát
+```
+
+Quy tắc áp dụng khi upload file chính (`target === "main"`):
+
+- **Soạn thảo**: chỉ điền vào trường đang trống (không override nếu user đã nhập)
+- **Soát xét**: luôn override `form.ten_tai_lieu` (= trường "Tên tài liệu mới") từ tên file nếu parse được, vì pre-fill từ tài liệu nguồn đã lấp đầy trường này bằng tên cũ
+- Các trường `phong_ban`, `loai_tai_lieu`, `so_hieu` vẫn chỉ fill khi trống (cả Soạn thảo lẫn Soát xét)
+- Hàm `rebuildDraftCode` được gọi ngay sau khi điền để tự sinh mã tài liệu
+
+Với upload file hồ sơ con soát xét (`handleReviewRowFileUpload`):
+
+- `ten_tai_lieu_moi` trong `ChildReviewRow` được fill từ tên file nếu đang trống và parse được
+
 ### Nguồn tài nguyên pdfjs trên production
 
 - `generate-pdf/route.ts` phải ưu tiên dùng asset local của `pdfjs-dist` trong `node_modules` cho `cMap` và `standard_fonts`
 - Không phụ thuộc CDN để đọc text PDF trên production
 - Nếu local asset không sẵn mới fallback tối giản
+
+### Ngày hiệu lực trong header và footer PDF
+
+- `effectiveDate` chỉ được lấy ngày hiện tại khi `action === "phe_duyet"`.
+- Với mọi action khác (`gui_xem_xet`, `gui_phe_duyet`): `dateStr = ""`.
+- Khi `dateStr = ""`: header "Ngày hiệu lực" tự động bị skip (check `!header.value`).
+- Khi `dateStr = ""`: footer dùng chuỗi `"Ngày hiệu lực"` làm placeholder thay vì để ngày rỗng, tránh footer dị dạng như `PHK-QT10 (01-) Chờ xem xét`.
+- Footer trung gian sẽ có dạng: `PHK-QT10 (01-Ngày hiệu lực) Chờ xem xét`.
+- Regex `FOOTER_PENDING_DATE_RE` detect footer đã có placeholder "Ngày hiệu lực" để các bước ký tiếp theo (kể cả `phe_duyet`) nhận ra và cập nhật đúng.
+- Tại `phe_duyet`: footer trở thành `PHK-QT10 (01-dd/mm/yyyy) Có hiệu lực` với ngày thật.
+- Nếu `doc.ngay_hieu_luc` đã được set (tài liệu đã phê duyệt, dùng lại route): ưu tiên ngày đó cho mọi action.
 
 ### Footer fallback
 

@@ -783,7 +783,7 @@ export default function IsoDocumentDetailPage() {
       } else {
         setUploadedFileUrl(urlData.publicUrl)
         setUploadedFileName(file.name)
-        // Gợi ý điền các trường form từ tên file (chỉ điền khi trường đang trống)
+        // Gợi ý điền các trường form từ tên file
         const inferred = parseDocNameFromFileName(file.name)
         if (Object.keys(inferred).length > 0) {
           setForm((f) => rebuildDraftCode({
@@ -791,7 +791,11 @@ export default function IsoDocumentDetailPage() {
             phong_ban: f.phong_ban || inferred.phong_ban || f.phong_ban,
             loai_tai_lieu: f.loai_tai_lieu || inferred.loai_tai_lieu || f.loai_tai_lieu,
             so_hieu: f.so_hieu || inferred.so_hieu || f.so_hieu,
-            ten_tai_lieu: f.ten_tai_lieu || inferred.ten_tai_lieu || f.ten_tai_lieu,
+            // Soát xét: override "Tên tài liệu mới" từ tên file (pre-fill từ tài liệu nguồn đã lấp đầy trường này bằng tên cũ)
+            // Soạn thảo: chỉ fill khi trống
+            ten_tai_lieu: f.chon_quy_trinh === "Soát xét"
+              ? (inferred.ten_tai_lieu || f.ten_tai_lieu)
+              : (f.ten_tai_lieu || inferred.ten_tai_lieu || f.ten_tai_lieu),
           }))
         }
       }
@@ -2319,7 +2323,14 @@ export default function IsoDocumentDetailPage() {
       const { error } = await supabase.storage.from("iso-documents").upload(filePath, file, { upsert: true })
       if (error) { setSaveError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(filePath)
-      updateChildReviewRow(rowId, { file_url: urlData.publicUrl, file_name: file.name })
+      const inferred = parseDocNameFromFileName(file.name)
+      setChildReviewRows((rows) => rows.map((row) => {
+        if (row.id !== rowId) return row
+        const tenMoi = (!row.ten_tai_lieu_moi && inferred.ten_tai_lieu)
+          ? inferred.ten_tai_lieu
+          : row.ten_tai_lieu_moi
+        return { ...row, file_url: urlData.publicUrl, file_name: file.name, ten_tai_lieu_moi: tenMoi }
+      }))
       if (hasVietnameseOrNonAsciiName(file.name)) showToast(false, `Đã chuẩn hoá tên file: ${safeName}`)
     } finally {
       setFileUploading(false)

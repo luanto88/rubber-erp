@@ -133,6 +133,8 @@ const FOOTER_PARTIAL_FILLED_STATUS_RE = /^[a-z]{2,}(?:-[a-z0-9]{2,})+\s*\(.*?\d{
 const FOOTER_LABEL_WITH_DATE_RE = /^(ma\s*tai\s*lieu|ma\s*ho\s*so)\s*\(.*\d{1,2}\/\d{1,2}\/\d{4}.*\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
 // Footer có mã thật + số lần thật + text placeholder thay date: "PHK-QT07-F06 (03-Ngày hiệu lực) Tình trạng"
 const FOOTER_CODE_TEXT_PLACEHOLDER_RE = /^[a-z]{2,}(?:-[a-z0-9đ]{2,})+\s*\(\d{1,2}-(?!\d{2}\/)[^)]+\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
+// Footer đã fill với placeholder date "Ngày hiệu lực": "PHK-QT10 (01-Ngày hiệu lực) Chờ xem xét"
+const FOOTER_PENDING_DATE_RE = /^[a-z]{2,}(?:-[a-z0-9đ]{2,})+\s*\(\d{1,2}-ngay\s*hieu\s*luc\)\s+\S/i
 const HEADER_FOOTER_FONT_SIZE = 11
 
 function isLikelyFooterMismatchText(searchText: string): boolean {
@@ -418,7 +420,7 @@ function extractDateFromText(value: string): string | null {
 }
 
 function buildFooterValueForLine(lineText: string, maTl: string, lsStr: string, dateStr: string, statusText: string): string {
-  return buildFooterValue(maTl, lsStr, extractDateFromText(lineText) || dateStr, statusText)
+  return buildFooterValue(maTl, lsStr, extractDateFromText(lineText) || dateStr || "Ngày hiệu lực", statusText)
 }
 
 function isFooterFillCandidate(lineText: string, searchText: string): boolean {
@@ -428,7 +430,8 @@ function isFooterFillCandidate(lineText: string, searchText: string): boolean {
     FOOTER_PARTIAL_TEMPLATE_RE.test(searchText) ||
     FOOTER_PARTIAL_FILLED_STATUS_RE.test(searchText) ||
     FOOTER_LABEL_WITH_DATE_RE.test(searchText) ||
-    FOOTER_CODE_TEXT_PLACEHOLDER_RE.test(searchText)
+    FOOTER_CODE_TEXT_PLACEHOLDER_RE.test(searchText) ||
+    FOOTER_PENDING_DATE_RE.test(searchText)
   )
 }
 
@@ -1207,10 +1210,10 @@ export async function POST(req: NextRequest) {
       (doc.loai_tai_lieu as string | null) ?? null,
       (doc.phan_loai_tl as string | null) ?? null,
     )
-    const effectiveDate = action
-      ? new Date().toISOString()
-      : ((doc.ngay_hieu_luc as string) || (doc.ky_phe_duyet_at as string) || (doc.updated_at as string) || new Date().toISOString())
-    const dateStr = fmtDate(effectiveDate)
+    const effectiveDate = action === "phe_duyet"
+      ? ((doc.ngay_hieu_luc as string) || new Date().toISOString())
+      : ((doc.ngay_hieu_luc as string) || "")
+    const dateStr = effectiveDate ? fmtDate(effectiveDate) : ""
     const currentSignerKey = getCurrentSignerKey(doc, userId, action)
 
     if (signFileKind === "main" && currentSignerKey && signaturePlacement) {
@@ -1443,7 +1446,7 @@ export async function POST(req: NextRequest) {
               drawFooterOnAllPages(
                 originalPages,
                 stampFont,
-                buildFooterValue(maTl, lsStr, dateStr, statusText),
+                buildFooterValue(maTl, lsStr, dateStr || "Ngày hiệu lực", statusText),
                 metaResult.error ? undefined : new Set(metaResult.footerFilledPages),
               )
             }
@@ -1620,7 +1623,7 @@ export async function POST(req: NextRequest) {
         drawFooterOnAllPages(
           originalPages,
           stampFont,
-          buildFooterValue(maTl, lsStr, dateStr, statusText),
+          buildFooterValue(maTl, lsStr, dateStr || "Ngày hiệu lực", statusText),
           new Set(metaResult.footerFilledPages),
         )
       }

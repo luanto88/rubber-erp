@@ -185,20 +185,25 @@ export default function OutputPage() {
     })
 
   // ── Stats aggregation ─────────────────────────────────────────
-  const totalT = records.reduce((s, r) => s + totalTuoi(r), 0)
-  const totalK = records.reduce((s, r) => s + totalKho(r), 0)
-  const warnCount = records.filter(r => r.warn_codes.length > 0).length
+  const statsFiltered = records.filter((r) => {
+    if (filterGhiChu && (r.ghi_chu || "") !== filterGhiChu) return false
+    return true
+  })
+
+  const totalT = statsFiltered.reduce((s, r) => s + totalTuoi(r), 0)
+  const totalK = statsFiltered.reduce((s, r) => s + totalKho(r), 0)
+  const warnCount = statsFiltered.filter(r => r.warn_codes.length > 0).length
 
   // KL khô theo đội
   const byDoi = new Map<number, number>()
-  for (const r of records) {
+  for (const r of statsFiltered) {
     const kho = totalKho(r)
     byDoi.set(r.doi, (byDoi.get(r.doi) ?? 0) + kho)
   }
 
   // Thống kê pivot xe + tài xế
   const byXe = new Map<string, { tai_xe: string; chuyen_count: number; tuoi: number; kho: number }>()
-  for (const r of records) {
+  for (const r of statsFiltered) {
     const key = `${r.so_xe}:${r.chuyen}`
     const existing = byXe.get(key)
     if (existing) {
@@ -309,31 +314,40 @@ export default function OutputPage() {
           <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
             className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
         </div>
-        {tab === "list" && (
+        {(tab === "list" || tab === "stats") && (
           <>
-            <select value={filterDoi} onChange={e => setFilterDoi(e.target.value)}
-              className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-              <option value="">Tất cả đội</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(d => (
-                <option key={d} value={d}>Đội {d}</option>
-              ))}
-            </select>
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="text" value={filterXe} onChange={e => setFilterXe(e.target.value)}
-                placeholder="Tìm số xe..." className="pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 w-36" />
-            </div>
-            <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
-              className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-              <option value="">Tất cả ghi chú</option>
+            {tab === "list" && (
+              <>
+                <select value={filterDoi} onChange={e => setFilterDoi(e.target.value)}
+                  className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  <option value="">Tất cả đội</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(d => (
+                    <option key={d} value={d}>Đội {d}</option>
+                  ))}
+                </select>
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input type="text" value={filterXe} onChange={e => setFilterXe(e.target.value)}
+                    placeholder="Tìm số xe..." className="pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 w-36" />
+                </div>
+              </>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-500">Ghi chú Đội</label>
+              <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                <option value="">Tất cả ghi chú đội</option>
               {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
-            </select>
-            <button
-              onClick={() => setFilterWarnOnly(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${filterWarnOnly ? "bg-amber-100 text-amber-700 border border-amber-300" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
-            >
-              <Filter size={12} />Chỉ cảnh báo
-            </button>
+              </select>
+            </div>
+            {tab === "list" && (
+              <button
+                onClick={() => setFilterWarnOnly(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${filterWarnOnly ? "bg-amber-100 text-amber-700 border border-amber-300" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+              >
+                <Filter size={12} />Chỉ cảnh báo
+              </button>
+            )}
           </>
         )}
         <span className="ml-auto text-xs text-slate-400">{records.length} bản ghi trong kỳ</span>
@@ -447,7 +461,7 @@ export default function OutputPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard label="Tổng KL tươi" value={`${fmtNum(totalT, 0)} kg`} color="blue" />
             <StatCard label="Tổng KL khô" value={`${fmtNum(totalK, 0)} kg`} color="emerald" />
-            <StatCard label="Số bản ghi" value={String(records.length)} color="blue" />
+            <StatCard label="Số bản ghi" value={String(statsFiltered.length)} color="blue" />
             <StatCard label="Cảnh báo" value={String(warnCount)} sub={warnCount > 0 ? "Cần kiểm tra" : "Tất cả OK"} color={warnCount > 0 ? "amber" : "emerald"} />
           </div>
 
