@@ -6,7 +6,6 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
-import { pathToFileURL } from "url"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -629,18 +628,26 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
   const hasCMaps = fs.existsSync(cmapsDir)
   console.log("[pdfjs] cmapsDir:", cmapsDir, "exists:", hasCMaps)
 
+  const standardFontsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "standard_fonts")
+  const hasStdFonts = fs.existsSync(standardFontsDir)
+  console.log("[pdfjs] standardFontsDir:", standardFontsDir, "exists:", hasStdFonts)
+
   if (hasCMaps) {
-    // pdfjs-dist v5 dùng cMapUrl (file:// URL) thay vì CMapReaderFactory (deprecated từ v4).
-    // NodeBinaryDataFactory của pdfjs v5 dùng fs.readFile(url) nên cần file:// URL tuyệt đối.
-    const cMapUrl = pathToFileURL(cmapsDir).href + "/"
+    // pdfjs-dist v5: NodeBinaryDataFactory gọi fs.readFile(url) với url = cMapUrl + filename.
+    // fs.readFile chấp nhận plain path string hoặc URL object, nhưng KHÔNG chấp nhận
+    // "file://" string literal → ENOENT. Dùng plain path để tránh lỗi này.
+    const cMapUrl = cmapsDir + "/"
+    const extraOpts: Record<string, unknown> = { cMapUrl, cMapPacked: true }
+    if (hasStdFonts) {
+      extraOpts.standardFontDataUrl = standardFontsDir + "/"
+    }
     try {
       return await pdfjsLib.getDocument({
         ...baseOptions,
-        cMapUrl,
-        cMapPacked: true,
+        ...extraOpts,
       } as never).promise
     } catch (err) {
-      console.warn("[pdfjs] getDocument with cMapUrl failed:", err instanceof Error ? err.message : String(err), "- fallback no cmap")
+      console.warn("[pdfjs] getDocument with cMapUrl failed:", err instanceof Error ? err.message : String(err), "- retry without cmap")
     }
   }
 
@@ -700,12 +707,15 @@ async function fillMetadataPlaceholders(
 
   try {
     const pdfjsDoc = await openPdfjsDocument(pdfBytes)
+    console.log("[pdf-meta] pdfjs doc opened ok, numPages:", pdfjsDoc.numPages)
     const pages = pdfDoc.getPages()
 
     for (let pageIdx = 0; pageIdx < Math.min(pdfjsDoc.numPages, pages.length); pageIdx++) {
       const pdfjsPage = await pdfjsDoc.getPage(pageIdx + 1)
       const viewport = pdfjsPage.getViewport({ scale: 1 })
+      if (pageIdx === 0) console.log("[pdf-meta] pg0 viewport:", Math.round(viewport.width), "x", Math.round(viewport.height))
       const textContent = await pdfjsPage.getTextContent()
+      if (pageIdx === 0) console.log("[pdf-meta] pg0 getTextContent ok, items:", textContent.items.length)
       const page = pages[pageIdx]
 
       const items = (textContent.items as unknown[]).filter((item): item is PdfTextItem => {
