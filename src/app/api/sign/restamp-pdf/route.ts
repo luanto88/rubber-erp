@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { PDFDocument, rgb } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
+import fs from "fs"
 import { readFile } from "fs/promises"
 import path from "path"
+import { pathToFileURL } from "url"
 import JSZip from "jszip"
 import ExcelJS from "exceljs"
 
@@ -281,7 +283,18 @@ async function replaceInvalidatedPdfText(
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBytes })
+    const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
+    const hasCMaps = fs.existsSync(cmapsDir)
+    const cMapUrl = hasCMaps ? pathToFileURL(cmapsDir).href + "/" : undefined
+    console.log("[restamp-pdfjs] cmapsDir exists:", hasCMaps)
+    const loadingTask = pdfjsLib.getDocument({
+      data: pdfBytes,
+      disableWorker: true,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      disableFontFace: true,
+      ...(cMapUrl ? { cMapUrl, cMapPacked: true } : {}),
+    })
     const pdfJsDoc = await loadingTask.promise
     const pages = pdfDoc.getPages()
 

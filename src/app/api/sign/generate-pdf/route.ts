@@ -6,6 +6,7 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
+import { pathToFileURL } from "url"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -629,31 +630,26 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
   console.log("[pdfjs] cmapsDir:", cmapsDir, "exists:", hasCMaps)
 
   if (hasCMaps) {
-    // Dùng fs.readFile trực tiếp thay vì file:// URL.
-    // Node.js 18+ (Vercel runtime) không hỗ trợ file:// trong globalThis.fetch,
-    // nên cMapUrl kiểu file:// mà pdfjs dùng để fetch sẽ silently fail trên Vercel.
-    class NodeCMapReaderFactory {
-      async fetch({ name }: { name: string }) {
-        try {
-          const data = await fs.promises.readFile(path.join(cmapsDir, `${name}.bcmap`))
-          return { cMapData: new Uint8Array(data), compressionType: 1 }
-        } catch {
-          return null
-        }
-      }
-    }
+    // pdfjs-dist v5 dùng cMapUrl (file:// URL) thay vì CMapReaderFactory (deprecated từ v4).
+    // NodeBinaryDataFactory của pdfjs v5 dùng fs.readFile(url) nên cần file:// URL tuyệt đối.
+    const cMapUrl = pathToFileURL(cmapsDir).href + "/"
     try {
       return await pdfjsLib.getDocument({
         ...baseOptions,
-        CMapReaderFactory: NodeCMapReaderFactory,
+        cMapUrl,
         cMapPacked: true,
       } as never).promise
-    } catch {
-      // fallback không có cMaps nếu factory fail
+    } catch (err) {
+      console.warn("[pdfjs] getDocument with cMapUrl failed:", err instanceof Error ? err.message : String(err), "- fallback no cmap")
     }
   }
 
-  return await pdfjsLib.getDocument(baseOptions as never).promise
+  try {
+    return await pdfjsLib.getDocument(baseOptions as never).promise
+  } catch (err) {
+    console.error("[pdfjs] getDocument fallback FAILED:", err instanceof Error ? err.message : String(err))
+    throw err
+  }
 }
 
 function getCurrentSignerKey(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): string | null {
@@ -738,10 +734,15 @@ async function fillMetadataPlaceholders(
       const headerItems = items.filter((item) => item.transform[5] > headerThreshold)
       const headerLines = lines.filter((line) => line[0].transform[5] > headerThreshold)
 
-      // Debug log tạm — xác nhận text items trên Vercel
+      // Debug log — xác nhận text items trên Vercel
       if (pageIdx === 0) {
         const dbgHeaderItems = headerItems.slice(0, 10)
-        console.log("[pdf-meta] pg0 threshold:", Math.round(headerThreshold), "headerItems:", JSON.stringify(dbgHeaderItems.map((it) => ({ s: it.str, y: Math.round(it.transform[5]) }))))
+        console.log("[pdf-meta] pg0 threshold:", Math.round(headerThreshold), "totalItems:", items.length, "headerItems:", JSON.stringify(dbgHeaderItems.map((it) => ({ s: it.str, y: Math.round(it.transform[5]) }))))
+        if (items.length === 0) {
+          console.warn("[pdf-meta] pg0 NO text items found — PDF may have non-extractable text or encoding issue")
+        } else if (headerItems.length === 0) {
+          console.warn("[pdf-meta] pg0 no header items above threshold — ALL items sample:", JSON.stringify(items.slice(0, 8).map((it) => ({ s: it.str, y: Math.round(it.transform[5]) }))))
+        }
       }
 
       // Mismatch detection (per-item để giữ `found: item.str` trong báo lỗi)
@@ -1000,7 +1001,8 @@ async function fillMetadataPlaceholders(
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
-    console.warn("[generate-pdf] fillMetadataPlaceholders error:", errMsg)
+    const errStack = err instanceof Error ? (err.stack?.split("\n").slice(0, 3).join(" | ") ?? "") : ""
+    console.warn("[generate-pdf] fillMetadataPlaceholders error:", errMsg, "| stack:", errStack)
     const notFoundOnError = [
       ...headerPatterns
         .map((entry) => entry.expected)
@@ -1410,14 +1412,15 @@ export async function POST(req: NextRequest) {
               signFileKind,
               shouldFillAuxBodyValues,
             )
-            // Vẽ footer fallback cho các trang chưa được fillMetadataPlaceholders xử lý
-            // (bỏ qua trang đã có footer gốc để giữ vị trí ban đầu của footer trong template)
-            if (!metaResult.error && signFileKind === "main") {
+            // Vẽ footer cho tất cả trang của main file.
+            // Bỏ qua trang đã được fillMetadataPlaceholders điền footer (giữ vị trí gốc trong template).
+            // Khi fillMetadataPlaceholders lỗi, vẫn vẽ footer để đảm bảo footer luôn có mặt.
+            if (signFileKind === "main") {
               drawFooterOnAllPages(
                 originalPages,
                 stampFont,
                 buildFooterValue(maTl, lsStr, dateStr, statusText),
-                new Set(metaResult.footerFilledPages),
+                metaResult.error ? undefined : new Set(metaResult.footerFilledPages),
               )
             }
             // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
