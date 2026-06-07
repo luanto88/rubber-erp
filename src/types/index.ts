@@ -33,11 +33,14 @@ export interface Ngan {
   chung_nhan: string
   ngay_bd: string
   ngay_kt: string | null
+  xe_tu_ngay: string | null
+  xe_den_ngay: string | null
   trang_thai: string
   tong_tuoi: number
   tong_kho: number
   trips: string[]
   lo_nguon_goc: string
+  ghi_chu?: string | null
 }
 
 export interface Lot {

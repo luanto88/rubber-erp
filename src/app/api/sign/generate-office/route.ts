@@ -27,7 +27,14 @@ type OfficeDiagnostics = {
   imagesInserted: string[]
 }
 
-type SignerNameMap = Partial<Record<SignStep, string>>
+type SignerInfo = {
+  name: string
+  gioi_tinh: string
+  chuc_vu_chinh_quyen: string
+  chuc_vu_kim_nhiem: string
+}
+
+type SignerInfoMap = Partial<Record<SignStep, SignerInfo>>
 
 const TEXT_TAGS = [
   "{{MA_TAI_LIEU}}",
@@ -47,6 +54,15 @@ const TEXT_TAGS = [
   "{{TEN_SOAN_THAO}}",
   "{{TEN_XEM_XET}}",
   "{{TEN_PHE_DUYET}}",
+  "{{GIOI_TINH_SOAN_THAO}}",
+  "{{GIOI_TINH_XEM_XET}}",
+  "{{GIOI_TINH_PHE_DUYET}}",
+  "{{CHUC_VU_CHINH_QUYEN_SOAN_THAO}}",
+  "{{CHUC_VU_CHINH_QUYEN_XEM_XET}}",
+  "{{CHUC_VU_CHINH_QUYEN_PHE_DUYET}}",
+  "{{CHUC_VU_KIEM_NHIEM_SOAN_THAO}}",
+  "{{CHUC_VU_KIEM_NHIEM_XEM_XET}}",
+  "{{CHUC_VU_KIEM_NHIEM_PHE_DUYET}}",
 ] as const
 
 const IMAGE_TAGS = [
@@ -218,10 +234,39 @@ function getStepTags(step: SignStep): { signatureTag: string; nameTag: string; n
   return { signatureTag: "{{CHU_KY_PHE_DUYET}}", nameTag: "{{TEN_PHE_DUYET}}", nameValue: "" }
 }
 
-function getNameValuesForStep(step: SignStep, signerNames?: SignerNameMap): Record<string, string> {
-  if (step === "soan_thao") return { "{{TEN_SOAN_THAO}}": signerNames?.soan_thao || "" }
-  if (step === "xem_xet") return { "{{TEN_XEM_XET}}": signerNames?.xem_xet || "" }
-  return { "{{TEN_PHE_DUYET}}": signerNames?.phe_duyet || "" }
+function emptySignerInfo(): SignerInfo {
+  return {
+    name: "",
+    gioi_tinh: "",
+    chuc_vu_chinh_quyen: "",
+    chuc_vu_kim_nhiem: "",
+  }
+}
+
+function getSignerTextValuesForStep(step: SignStep, signerInfo?: SignerInfoMap): Record<string, string> {
+  const info = signerInfo?.[step] || emptySignerInfo()
+  if (step === "soan_thao") {
+    return {
+      "{{TEN_SOAN_THAO}}": info.name,
+      "{{GIOI_TINH_SOAN_THAO}}": info.gioi_tinh,
+      "{{CHUC_VU_CHINH_QUYEN_SOAN_THAO}}": info.chuc_vu_chinh_quyen,
+      "{{CHUC_VU_KIEM_NHIEM_SOAN_THAO}}": info.chuc_vu_kim_nhiem,
+    }
+  }
+  if (step === "xem_xet") {
+    return {
+      "{{TEN_XEM_XET}}": info.name,
+      "{{GIOI_TINH_XEM_XET}}": info.gioi_tinh,
+      "{{CHUC_VU_CHINH_QUYEN_XEM_XET}}": info.chuc_vu_chinh_quyen,
+      "{{CHUC_VU_KIEM_NHIEM_XEM_XET}}": info.chuc_vu_kim_nhiem,
+    }
+  }
+  return {
+    "{{TEN_PHE_DUYET}}": info.name,
+    "{{GIOI_TINH_PHE_DUYET}}": info.gioi_tinh,
+    "{{CHUC_VU_CHINH_QUYEN_PHE_DUYET}}": info.chuc_vu_chinh_quyen,
+    "{{CHUC_VU_KIEM_NHIEM_PHE_DUYET}}": info.chuc_vu_kim_nhiem,
+  }
 }
 
 function isChildOfficeDoc(doc: Record<string, unknown>): boolean {
@@ -247,13 +292,13 @@ function getTargetStatusText(action: WorkflowAction | undefined, currentStatus: 
 function buildTextValues(
   doc: Record<string, unknown>,
   statusText: string,
-  options?: { includeAuxBodyValues?: boolean; step?: SignStep; signerNames?: SignerNameMap },
+  options?: { includeAuxBodyValues?: boolean; step?: SignStep; signerInfo?: SignerInfoMap },
 ): Record<string, string> {
   const rawRevision = String(doc.lan_ban_hanh ?? "").trim()
   const revision = rawRevision || "00"
   const includeAuxBodyValues = options?.includeAuxBodyValues !== false
   const step = options?.step
-  const signerNames = options?.signerNames
+  const signerInfo = options?.signerInfo
   return {
     "{{MA_TAI_LIEU}}": String(doc.ma_tai_lieu || ""),
     "{{TEN_TAI_LIEU}}": String(doc.ten_tai_lieu || ""),
@@ -265,7 +310,7 @@ function buildTextValues(
     "{{TINH_TRANG}}": statusText,
     "{{MA_TAI_LIEU_CU}}": String(doc.ma_tai_lieu_cu || ""),
     "{{MA_TAI_LIEU_MOI}}": String(doc.ma_tai_lieu_moi || doc.ma_tai_lieu || ""),
-    ...(step ? getNameValuesForStep(step, signerNames) : {}),
+    ...(step ? getSignerTextValuesForStep(step, signerInfo) : {}),
     ...(includeAuxBodyValues
       ? {
           "{{LY_DO_SOAT_XET}}": String(doc.ly_do_soat_xet || ""),
@@ -277,11 +322,11 @@ function buildTextValues(
   }
 }
 
-async function resolveSignerNames(doc: Record<string, unknown>): Promise<SignerNameMap> {
-  const directNames: SignerNameMap = {
-    soan_thao: String(doc.soan_thao || "").trim(),
-    xem_xet: String(doc.xem_xet || "").trim(),
-    phe_duyet: String(doc.phe_duyet || "").trim(),
+async function resolveSignerInfo(doc: Record<string, unknown>, factoryId: string): Promise<SignerInfoMap> {
+  const directInfo: SignerInfoMap = {
+    soan_thao: { ...emptySignerInfo(), name: String(doc.soan_thao || "").trim() },
+    xem_xet: { ...emptySignerInfo(), name: String(doc.xem_xet || "").trim() },
+    phe_duyet: { ...emptySignerInfo(), name: String(doc.phe_duyet || "").trim() },
   }
 
   const userIds = [
@@ -290,7 +335,7 @@ async function resolveSignerNames(doc: Record<string, unknown>): Promise<SignerN
     doc.phe_duyet_user_id,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
 
-  if (userIds.length === 0) return directNames
+  if (userIds.length === 0) return directInfo
 
   const { data } = await supabaseAdmin
     .from("profiles")
@@ -303,10 +348,74 @@ async function resolveSignerNames(doc: Record<string, unknown>): Promise<SignerN
     if (name) byId.set(String(row.id), name)
   }
 
+  const resolvedNames = [directInfo.soan_thao?.name, directInfo.xem_xet?.name, directInfo.phe_duyet?.name]
+    .concat([
+      byId.get(String(doc.soan_thao_user_id || "")) || "",
+      byId.get(String(doc.xem_xet_user_id || "")) || "",
+      byId.get(String(doc.phe_duyet_user_id || "")) || "",
+    ])
+    .map((value) => (value || "").trim())
+    .filter(Boolean)
+
+  const staffRows = resolvedNames.length > 0
+    ? await (async () => {
+        const [staffByProfileRes, staffByNameRes] = await Promise.all([
+          supabaseAdmin
+            .from("maintenance_staff")
+            .select("id, ten, profile_id, gioi_tinh, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
+            .eq("factory_id", factoryId)
+            .in("profile_id", [...new Set(userIds)]),
+          supabaseAdmin
+            .from("maintenance_staff")
+            .select("id, ten, profile_id, gioi_tinh, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
+            .eq("factory_id", factoryId)
+            .in("ten", [...new Set(resolvedNames)]),
+        ])
+
+        const merged = new Map<string, { ten: string; profile_id: string | null; gioi_tinh: string | null; chuc_vu_chinh_quyen: string | null; chuc_vu_kim_nhiem: string | null }>()
+        for (const row of [...(staffByProfileRes.data || []), ...(staffByNameRes.data || [])] as Array<{ id: string; ten: string; profile_id: string | null; gioi_tinh: string | null; chuc_vu_chinh_quyen: string | null; chuc_vu_kim_nhiem: string | null }>) {
+          merged.set(row.id, {
+            ten: row.ten,
+            profile_id: row.profile_id,
+            gioi_tinh: row.gioi_tinh,
+            chuc_vu_chinh_quyen: row.chuc_vu_chinh_quyen,
+            chuc_vu_kim_nhiem: row.chuc_vu_kim_nhiem,
+          })
+        }
+        return [...merged.values()]
+      })()
+    : [] as Array<{ ten: string; profile_id: string | null; gioi_tinh: string | null; chuc_vu_chinh_quyen: string | null; chuc_vu_kim_nhiem: string | null }>
+
+  const staffByName = new Map<string, { gioi_tinh: string; chuc_vu_chinh_quyen: string; chuc_vu_kim_nhiem: string }>()
+  const staffByProfileId = new Map<string, { gioi_tinh: string; chuc_vu_chinh_quyen: string; chuc_vu_kim_nhiem: string }>()
+  for (const row of staffRows || []) {
+    const name = String(row.ten || "").trim()
+    const staffInfo = {
+      gioi_tinh: String(row.gioi_tinh || "").trim(),
+      chuc_vu_chinh_quyen: String(row.chuc_vu_chinh_quyen || "").trim(),
+      chuc_vu_kim_nhiem: String(row.chuc_vu_kim_nhiem || "").trim(),
+    }
+    if (name) staffByName.set(name, staffInfo)
+    if (row.profile_id) staffByProfileId.set(String(row.profile_id), staffInfo)
+  }
+
+  function mergeSignerInfo(step: SignStep, userIdValue: unknown) {
+    const resolvedName = directInfo[step]?.name || byId.get(String(userIdValue || "")) || ""
+    const staff = staffByProfileId.get(String(userIdValue || "")) || staffByName.get(resolvedName.trim())
+    return {
+      ...emptySignerInfo(),
+      ...directInfo[step],
+      name: resolvedName,
+      gioi_tinh: staff?.gioi_tinh || "",
+      chuc_vu_chinh_quyen: staff?.chuc_vu_chinh_quyen || "",
+      chuc_vu_kim_nhiem: staff?.chuc_vu_kim_nhiem || "",
+    }
+  }
+
   return {
-    soan_thao: directNames.soan_thao || byId.get(String(doc.soan_thao_user_id || "")) || "",
-    xem_xet: directNames.xem_xet || byId.get(String(doc.xem_xet_user_id || "")) || "",
-    phe_duyet: directNames.phe_duyet || byId.get(String(doc.phe_duyet_user_id || "")) || "",
+    soan_thao: mergeSignerInfo("soan_thao", doc.soan_thao_user_id),
+    xem_xet: mergeSignerInfo("xem_xet", doc.xem_xet_user_id),
+    phe_duyet: mergeSignerInfo("phe_duyet", doc.phe_duyet_user_id),
   }
 }
 
@@ -855,8 +964,8 @@ export async function POST(req: NextRequest) {
     const shouldStampAuxQr = !isAuxReviewFile || step === "soan_thao"
     const shouldFillAuxBodyValues = isAuxReviewFile && step === "soan_thao"
     const shouldApplyFooterStatusText = !isAuxReviewFile
-    const signerNames = await resolveSignerNames(doc)
-    const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues, step, signerNames })
+    const signerInfo = await resolveSignerInfo(doc, factoryId)
+    const values = buildTextValues(doc, statusText, { includeAuxBodyValues: shouldFillAuxBodyValues, step, signerInfo })
     const stepTags = getStepTags(step)
     const imageByTag: Record<string, Buffer> = {}
     if (shouldStampAuxQr) {

@@ -258,10 +258,19 @@ const ISO_OFFICE_REVIEW_TAGS = [
 const ISO_OFFICE_SIGNATURE_TAGS = [
   "{{CHU_KY_SOAN_THAO}}",
   "{{TEN_SOAN_THAO}}",
+  "{{GIOI_TINH_SOAN_THAO}}",
+  "{{CHUC_VU_CHINH_QUYEN_SOAN_THAO}}",
+  "{{CHUC_VU_KIEM_NHIEM_SOAN_THAO}}",
   "{{CHU_KY_XEM_XET}}",
   "{{TEN_XEM_XET}}",
+  "{{GIOI_TINH_XEM_XET}}",
+  "{{CHUC_VU_CHINH_QUYEN_XEM_XET}}",
+  "{{CHUC_VU_KIEM_NHIEM_XEM_XET}}",
   "{{CHU_KY_PHE_DUYET}}",
   "{{TEN_PHE_DUYET}}",
+  "{{GIOI_TINH_PHE_DUYET}}",
+  "{{CHUC_VU_CHINH_QUYEN_PHE_DUYET}}",
+  "{{CHUC_VU_KIEM_NHIEM_PHE_DUYET}}",
 ]
 
 export default function IsoDocumentDetailPage() {
@@ -592,6 +601,7 @@ export default function IsoDocumentDetailPage() {
       phe_duyet: d.phe_duyet || "",
       phe_duyet_user_id: d.phe_duyet_user_id || "",
       ghi_chu: d.ghi_chu || "",
+      mo_ta_tim_kiem: d.mo_ta_tim_kiem || "",
       standard_ids: selectedStandardIds,
       doi_ma_tai_lieu: !!d.doi_ma_tai_lieu || !!d.ma_tai_lieu_moi,
       ly_do_soat_xet: d.ly_do_soat_xet || "",
@@ -1096,6 +1106,7 @@ export default function IsoDocumentDetailPage() {
         phe_duyet: form.phe_duyet || null,
         phe_duyet_user_id: form.phe_duyet_user_id || null,
         ghi_chu: form.ghi_chu || null,
+        mo_ta_tim_kiem: form.mo_ta_tim_kiem || null,
         doi_ma_tai_lieu: !!form.doi_ma_tai_lieu,
         ma_tai_lieu_cu: form.ma_tai_lieu_cu || doc?.ma_tai_lieu_cu || doc?.ma_tai_lieu || form.ma_tai_lieu || null,
         ly_do_soat_xet: form.ly_do_soat_xet || null,
@@ -1503,6 +1514,21 @@ export default function IsoDocumentDetailPage() {
               .eq("factory_id", factoryId)
             if (childError) { showToast(false, childError.message); return }
           }
+        }
+
+        // Trigger embedding (fire-and-forget) — không block workflow
+        void fetch("/api/iso/forms/embed-doc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docId, factoryId }),
+        }).catch(() => {})
+        // Trigger embed cho hồ sơ con nếu có
+        for (const cid of childDocIds) {
+          void fetch("/api/iso/forms/embed-doc", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ docId: cid, factoryId }),
+          }).catch(() => {})
         }
 
       } else if (action === "tra_ve" || action === "khong_xem_xet") {
@@ -2914,6 +2940,24 @@ export default function IsoDocumentDetailPage() {
           <div className="sm:col-span-2">
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
           <textarea value={form.ghi_chu} onChange={(e) => setForm((f) => ({ ...f, ghi_chu: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
+          </div>
+        )}
+
+        {!isCon && (
+          <div className="sm:col-span-2">
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              Mô tả tìm kiếm AI
+              <span className="ml-1.5 font-normal text-slate-400">(tăng độ chính xác khi tìm kiếm biểu mẫu)</span>
+            </label>
+            <textarea
+              value={form.mo_ta_tim_kiem}
+              onChange={(e) => setForm((f) => ({ ...f, mo_ta_tim_kiem: e.target.value }))}
+              disabled={!isEditable}
+              rows={2}
+              maxLength={500}
+              placeholder="Mô tả ngắn về nội dung, mục đích, phạm vi áp dụng của tài liệu này..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none"
+            />
           </div>
         )}
       </div>

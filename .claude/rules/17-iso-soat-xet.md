@@ -336,11 +336,35 @@ Chỉ fallback sang map theo `userId` khi không có `action`.
 - File phụ `change_request` / `review_request`:
   - Không được xử lý footer
 
+### Ngày hiệu lực trong footer và header PDF
+
+- `effectiveDate` chỉ lấy ngày hiện tại khi `action === "phe_duyet"`.
+- Với mọi action trung gian (`gui_xem_xet`, `gui_phe_duyet`): `dateStr = ""`.
+- Khi `dateStr = ""`: header "Ngày hiệu lực" bị skip (check `!header.value`).
+- Khi `dateStr = ""`: footer dùng chuỗi `"Ngày hiệu lực"` làm placeholder — tránh footer dị dạng `PHK-QT10 (01-)`.
+- Footer trung gian có dạng: `PHK-QT10 (01-Ngày hiệu lực) Chờ xem xét`.
+- `FOOTER_PENDING_DATE_RE` detect footer placeholder để bước ký tiếp theo (kể cả `phe_duyet`) nhận ra và cập nhật đúng.
+- Tại `phe_duyet`: footer trở thành `PHK-QT10 (01-dd/mm/yyyy) Có hiệu lực`.
+- Nếu `doc.ngay_hieu_luc` đã set (tài liệu phê duyệt trước): ưu tiên ngày đó cho mọi action.
+
 ### Khi đọc text PDF trên production
 
 - `generate-pdf/route.ts` phải ưu tiên asset local của `pdfjs-dist` trong `node_modules` cho `cMap` và `standard_fonts`
 - Không phụ thuộc CDN để đọc text PDF production
 - Nếu `fillMetadataPlaceholders()` trả lỗi thì không được gọi `drawFooterOnAllPages()`
+
+---
+
+## Auto-fill từ tên file upload (form soát xét)
+
+Khi user upload file trong form soát xét (`target === "main"`):
+
+- Hàm `parseDocNameFromFileName(filename)` parse tên file theo pattern `{PB}-{LOAI}{SO} {TEN}`.
+- `phong_ban`, `loai_tai_lieu`, `so_hieu`: chỉ fill khi trường đang trống (không override).
+- `ten_tai_lieu` (trường "Tên tài liệu mới"): **luôn override** từ tên file nếu parse được, vì trường này đã bị pre-fill bằng tên tài liệu cũ từ tài liệu nguồn.
+- Hàm `rebuildDraftCode` được gọi ngay sau khi điền (no-op với Soát xét nhưng vẫn phải gọi).
+
+Quy tắc này áp dụng khác với Soạn thảo (điền khi trống). Không được dùng logic Soạn thảo cho Soát xét.
 
 ---
 

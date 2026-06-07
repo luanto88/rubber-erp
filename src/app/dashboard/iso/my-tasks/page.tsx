@@ -5,8 +5,13 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "../_components/iso-types"
-import { ClipboardCheck, Eye, FileText } from "lucide-react"
+import { ClipboardCheck, ClipboardList, Eye, FileText } from "lucide-react"
 import Link from "next/link"
+import {
+  FORM_INSTANCE_STATUS_COLOR,
+  FORM_INSTANCE_STATUS_LABEL,
+  type IsoFormInstance,
+} from "../_components/iso-types"
 
 type IsoTaskGroup = {
   doc: IsoDocument
@@ -19,6 +24,8 @@ export default function IsoMyTasksPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<IsoDocument[]>([])
+  const [formTasks, setFormTasks] = useState<IsoFormInstance[]>([])
+  const [formTasksLoading, setFormTasksLoading] = useState(false)
 
   const loadTasks = useCallback(async (fid: string, uid: string) => {
     setLoading(true)
@@ -52,6 +59,33 @@ export default function IsoMyTasksPage() {
   useEffect(() => {
     if (factoryId && userId) void loadTasks(factoryId, userId)
   }, [factoryId, userId, loadTasks])
+
+  const loadFormTasks = useCallback(async (fid: string, uid: string) => {
+    setFormTasksLoading(true)
+    try {
+      const { data } = await supabase
+        .from("iso_form_instances")
+        .select("id, tieu_de, trang_thai, cap_tl, created_at, updated_at, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, ly_do_tra_ve, draft_file_url, draft_file_type, final_office_url, final_pdf_url, soan_thao_signed_url, xem_xet, phe_duyet, ky_xem_xet_at, ky_phe_duyet_at, auto_convert_pdf, ghi_chu, template_doc_id, factory_id, soan_thao, xem_xet_placement, phe_duyet_placement, soan_thao_placement, ky_soan_thao_at")
+        .eq("factory_id", fid)
+        .or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
+        .in("trang_thai", ["draft", "cho_xem_xet", "cho_phe_duyet", "tra_ve"])
+        .order("updated_at", { ascending: false })
+      const myTasks = ((data ?? []) as IsoFormInstance[]).filter((inst) => {
+        if (inst.trang_thai === "draft") return inst.nguoi_tao === uid
+        if (inst.trang_thai === "cho_xem_xet") return inst.xem_xet_user_id === uid
+        if (inst.trang_thai === "cho_phe_duyet") return inst.phe_duyet_user_id === uid
+        if (inst.trang_thai === "tra_ve") return true
+        return false
+      })
+      setFormTasks(myTasks)
+    } finally {
+      setFormTasksLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (factoryId && userId) void loadFormTasks(factoryId, userId)
+  }, [factoryId, userId, loadFormTasks])
 
   const getMyRole = (doc: IsoDocument): string => {
     if (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === userId) return "Cần xem xét"
@@ -179,6 +213,81 @@ export default function IsoMyTasksPage() {
               </table>
             </>
           )}
+        </div>
+
+        {/* ── Hồ sơ thực hiện cần xử lý ── */}
+        <div>
+          <h2 className="text-base font-extrabold text-slate-700 mb-2 flex items-center gap-2">
+            <ClipboardList size={16} className="text-emerald-600" />
+            Hồ sơ thực hiện cần xử lý
+          </h2>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {formTasksLoading ? (
+              <div className="p-10 text-center text-slate-400 text-sm">Đang tải...</div>
+            ) : formTasks.length === 0 ? (
+              <div className="p-8 text-center">
+                <ClipboardCheck size={32} className="mx-auto mb-2 text-slate-300" />
+                <p className="text-sm text-slate-400">Không có hồ sơ nào cần xử lý</p>
+              </div>
+            ) : (
+              <>
+                <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-100 text-sm text-emerald-700 font-medium">
+                  Có {formTasks.length} hồ sơ đang chờ bạn xử lý
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold">Tiêu đề</th>
+                      <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">Vai trò</th>
+                      <th className="px-4 py-3 text-left font-semibold">Trạng thái</th>
+                      <th className="px-4 py-3 text-left font-semibold hidden lg:table-cell">Ngày tạo</th>
+                      <th className="px-4 py-3 text-right font-semibold">Hành động</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {formTasks.map((inst) => {
+                      let roleLabel = "Cần xử lý"
+                      if (inst.trang_thai === "draft") roleLabel = "Cần ký & gửi"
+                      else if (inst.trang_thai === "cho_xem_xet") roleLabel = "Cần xem xét"
+                      else if (inst.trang_thai === "cho_phe_duyet") roleLabel = "Cần phê duyệt"
+                      else if (inst.trang_thai === "tra_ve") roleLabel = "Đã trả về — cần chỉnh sửa"
+                      return (
+                        <tr key={inst.id} className="hover:bg-emerald-50/40 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-700 line-clamp-1">{inst.tieu_de}</div>
+                            {inst.trang_thai === "tra_ve" && inst.ly_do_tra_ve && (
+                              <div className="text-[11px] text-rose-500 mt-0.5 line-clamp-1">{inst.ly_do_tra_ve}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${inst.trang_thai === "tra_ve" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                              {roleLabel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${FORM_INSTANCE_STATUS_COLOR[inst.trang_thai]}`}>
+                              {FORM_INSTANCE_STATUS_LABEL[inst.trang_thai]}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
+                            {fmtDate(inst.created_at)}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Link
+                              href={`/dashboard/iso/forms/${inst.id}`}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all"
+                            >
+                              <Eye size={12} /> Xử lý
+                            </Link>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </IsoShell>

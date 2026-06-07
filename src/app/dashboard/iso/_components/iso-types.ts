@@ -52,6 +52,7 @@ export type IsoDocument = {
   ngay_het_hieu_luc: string | null
   qr_url: string | null
   ghi_chu: string | null
+  mo_ta_tim_kiem: string | null
   phan_loai_tl: string | null
   parent_doc_id?: string | null
   standards?: IsoStandard[]
@@ -103,6 +104,7 @@ export type IsoDocumentForm = {
   phe_duyet: string
   phe_duyet_user_id: string
   ghi_chu: string
+  mo_ta_tim_kiem: string
   standard_ids: number[]
   doi_ma_tai_lieu: boolean
   ly_do_soat_xet: string
@@ -254,6 +256,7 @@ export function emptyIsoForm(): IsoDocumentForm {
     phe_duyet: "",
     phe_duyet_user_id: "",
     ghi_chu: "",
+    mo_ta_tim_kiem: "",
     standard_ids: [],
     doi_ma_tai_lieu: false,
     ly_do_soat_xet: "",
@@ -271,4 +274,87 @@ export function fmtDate(d: string | null | undefined): string {
   const month = String(dt.getMonth() + 1).padStart(2, "0")
   const year = dt.getFullYear()
   return `${day}/${month}/${year}`
+}
+
+// ─── Module Thực hiện hồ sơ ISO ───────────────────────────────────────────
+
+export type IsoFormInstanceStatus =
+  | "draft"
+  | "cho_xem_xet"
+  | "cho_phe_duyet"
+  | "da_phe_duyet"
+  | "tra_ve"
+  | "tu_choi"
+
+export type IsoFormAction =
+  | "gui_xem_xet"
+  | "gui_phe_duyet"
+  | "xem_xet_ky"
+  | "phe_duyet"
+  | "tra_ve"
+  | "tu_choi"
+
+export interface IsoFormInstance {
+  id: string
+  factory_id: string
+  template_doc_id: string
+  tieu_de: string
+  nguoi_tao: string
+  trang_thai: IsoFormInstanceStatus
+  cap_tl: string
+  draft_file_url: string | null
+  draft_file_type: string | null
+  final_office_url: string | null
+  final_pdf_url: string | null
+  xem_xet_user_id: string | null
+  xem_xet: string | null
+  phe_duyet_user_id: string | null
+  phe_duyet: string | null
+  ky_xem_xet_at: string | null
+  ky_phe_duyet_at: string | null
+  soan_thao: string | null
+  soan_thao_placement: Record<string, unknown> | null
+  soan_thao_signed_url: string | null
+  ky_soan_thao_at: string | null
+  xem_xet_placement: Record<string, number> | null
+  phe_duyet_placement: Record<string, number> | null
+  auto_convert_pdf: boolean
+  ghi_chu: string | null
+  ly_do_tra_ve: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const FORM_INSTANCE_STATUS_LABEL: Record<IsoFormInstanceStatus, string> = {
+  draft: "Nháp",
+  cho_xem_xet: "Chờ xem xét",
+  cho_phe_duyet: "Chờ phê duyệt",
+  da_phe_duyet: "Đã phê duyệt",
+  tra_ve: "Trả về",
+  tu_choi: "Từ chối",
+}
+
+export const FORM_INSTANCE_STATUS_COLOR: Record<IsoFormInstanceStatus, string> = {
+  draft: "bg-slate-100 text-slate-600",
+  cho_xem_xet: "bg-amber-100 text-amber-700",
+  cho_phe_duyet: "bg-orange-100 text-orange-700",
+  da_phe_duyet: "bg-emerald-100 text-emerald-700",
+  tra_ve: "bg-rose-100 text-rose-700",
+  tu_choi: "bg-red-100 text-red-700",
+}
+
+export interface TemplateSearchResult {
+  id: string
+  ten_tai_lieu: string
+  ma_tai_lieu: string | null
+  loai_tai_lieu: string | null
+  phong_ban: string | null
+  lan_ban_hanh: string | null
+  phan_loai_tl: string | null
+  file_signed_office_url: string | null
+  file_signed_office_type: string | null
+  file_goc_url: string | null
+  file_signed_pdf_url: string | null
+  mo_ta_tim_kiem: string | null
+  similarity: number
 }

@@ -1,71 +1,33 @@
 ﻿"use client"
+import Link from "next/link"
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
+import {
+  addDaysISO,
+  buildStorageLookupPath,
+  formatStorageDate,
+  getKLFromTrip,
+  loadDispatchTripsByUids,
+  loadStorageDetail,
+  loadStorageGeoJson,
+  loadStorageLots,
+  summarizeStorageLots,
+  toISODate,
+  type StorageNgan as Ngan,
+  type StorageProducedLot as ProducedLot,
+  type StorageTripItem as TripItem,
+} from "@/lib/storage-detail"
+import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
-  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck,
-  ChevronDown, ChevronRight
+  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
+  ChevronDown, ChevronRight, Map
 } from "lucide-react"
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type Ngan = {
-  id: string
-  factory_id: string
-  ma_ngan: string
-  ten_ngan: string
-  loai_nl: string
-  nguon_goc: string
-  xu_ly: string
-  chung_nhan: string
-  ngay_bd: string
-  ngay_kt: string
-  trang_thai: string
-  tong_tuoi: number
-  tong_kho: number
-  trips: string[]
-  lo_nguon_goc: string
-  ghi_chu?: string
-}
-
-type TripItem = {
-  uid: string
-  _date: string
-  so_xe: string
-  chuyen: number
-  tai_xe: string
-  kl_ct: number; kl_ck: number    // Mủ chén
-  kl_dct: number; kl_dck: number  // Mủ đông chén
-  kl_dkt: number; kl_dkk: number  // Mủ đông khối
-  kl_dt: number;  kl_dk: number   // Mủ dây
-  kl_mn: number;  kl_mnk: number  // Mủ nước
-}
-
-type ProducedLot = {
-  id: string
-  ma_lo: string
-  ngay_sx: string
-  ca: string
-  loai_csr: string
-  loai_banh: number
-  boc: string
-  tong_banh: number
-  tong_kg: number
-  trang_thai: string
-}
-
-function getKLFromTrip(t: TripItem, loai_nl: string): { tuoi: number; kho: number } {
-  switch (loai_nl) {
-    case "Mủ chén":      return { tuoi: t.kl_ct,  kho: t.kl_ck }
-    case "Mủ đông chén": return { tuoi: t.kl_dct, kho: t.kl_dck }
-    case "Mủ đông khối": return { tuoi: t.kl_dkt, kho: t.kl_dkk }
-    case "Mủ dây":       return { tuoi: t.kl_dt,  kho: t.kl_dk }
-    case "Mủ nước":      return { tuoi: t.kl_mn,  kho: t.kl_mnk }
-    default:             return { tuoi: 0, kho: 0 }
-  }
-}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL_POSITIONS = [
@@ -96,11 +58,15 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
   xu_ly: "Xé", chung_nhan: "PEFC CS",
   ngay_bd: new Date().toISOString().slice(0, 10),
   ngay_kt: "",
+  xe_tu_ngay: addDaysISO(new Date().toISOString().slice(0, 10), 1),
+  xe_den_ngay: "",
   trang_thai: "Đang nhận (Cần cập nhật)",
   tong_tuoi: 0, tong_kho: 0,
   lo_nguon_goc: "",
   ghi_chu: "",
 })
+
+type StorageForm = ReturnType<typeof emptyForm>
 
 const headerStyle = (tt: string) => {
   if (tt === "Đang sản xuất")            return { grad: "from-emerald-50 to-teal-50",   icon: "text-emerald-600" }
@@ -133,19 +99,13 @@ const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
     .filter(Boolean).join("-")
 }
 
-// Normalize "dd/mm/yyyy" → "YYYY-MM-DD" (dispatch_entries.ngay can be either format)
-const toISO = (d: string) =>
-  d && d.includes("/") ? d.split("/").reverse().join("-") : d
-
-// Format any date string → "dd/mm/yyyy" without timezone issues
-const fmtDate = (d: string) => {
-  if (!d) return "—"
-  const iso = (d.includes("/") ? d.split("/").reverse().join("-") : d).match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`
-  return "—"
-}
-
+const fmtDate = formatStorageDate
 const fmtKg = (kg: number) => `${Math.round(kg || 0).toLocaleString("vi-VN")} kg`
+const safeDownloadName = (value: string) => value
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^a-zA-Z0-9_-]+/g, "-")
+  .replace(/^-+|-+$/g, "")
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function StoragePage() {
@@ -164,12 +124,18 @@ export default function StoragePage() {
   const [filterGhiChu, setFilterGhiChu] = useState("")
   const [dayChuyen, setDayChuyen] = useState<"Mủ tạp" | "Mủ nước">("Mủ tạp")
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
+  const [reportFrom, setReportFrom] = useState("")
+  const [reportTo, setReportTo] = useState("")
+  const [reportLoaiNL, setReportLoaiNL] = useState("")
 
   // modal / form
   const [modal, setModal]         = useState<"add" | "edit" | "view" | null>(null)
-  const [form, setForm]           = useState(emptyForm())
+  const [form, setForm]           = useState<StorageForm>(emptyForm())
   const [editId, setEditId]       = useState<string | null>(null)
   const [saving, setSaving]       = useState(false)
+  const [exportingDetailId, setExportingDetailId] = useState<string | null>(null)
+  const [exportingGeoId, setExportingGeoId] = useState<string | null>(null)
+  const [exportingPeriod, setExportingPeriod] = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
   const [viewLots, setViewLots]   = useState<ProducedLot[]>([])
@@ -247,7 +213,7 @@ export default function StoragePage() {
       .order("ngay", { ascending: true })
     const byDate: Record<string, number> = {}
     for (const entry of (data || [])) {
-      const dateKey = toISO(entry.ngay)
+      const dateKey = toISODate(entry.ngay)
       if (isDateCovered(dateKey)) continue
       for (const row of ((entry.rows || []) as { uid: string }[])) {
         if (!assignedUIDs.has(row.uid)) {
@@ -270,7 +236,11 @@ export default function StoragePage() {
         q,
         supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
       ])
-      const loaded = data || []
+      const loaded = ((data || []) as Ngan[]).map((ngan) => ({
+        ...ngan,
+        xe_tu_ngay: ngan.xe_tu_ngay || addDaysISO(ngan.ngay_bd?.slice(0, 10) || "", 1),
+        xe_den_ngay: ngan.xe_den_ngay || addDaysISO(ngan.ngay_kt?.slice(0, 10) || "", 1),
+      }))
       setNgans(loaded)
       const ls: Record<string, number> = {}
       for (const l of lotsData || []) {
@@ -319,51 +289,80 @@ export default function StoragePage() {
     void run()
   }, [factoryId])
 
+  useEffect(() => {
+    const candidates = ngans
+      .filter((ngan) => loaiNLByDC(dayChuyen, factoryCode).includes(ngan.loai_nl))
+      .filter((ngan) => ngan.ngay_bd && ngan.ngay_kt)
+    if (candidates.length === 0) return
+    if (reportFrom && reportTo) return
+    const from = candidates
+      .map((ngan) => ngan.ngay_bd.slice(0, 10))
+      .sort()[0]
+    const to = candidates
+      .map((ngan) => (ngan.ngay_kt || ngan.ngay_bd).slice(0, 10))
+      .sort()
+      .at(-1)
+    if (!reportFrom && from) setReportFrom(from)
+    if (!reportTo && to) setReportTo(to)
+  }, [ngans, dayChuyen, factoryCode, reportFrom, reportTo])
+
   // ── Fetch trips from dispatch ─────────────────────────────────────────────
-  const fetchTrips = useCallback(async (ngay_bd: string, ngay_kt: string, autoSelect = false) => {
+  const fetchTrips = useCallback(async (
+    ngay_bd: string,
+    ngay_kt: string,
+    autoSelect = false,
+    overrideEditId?: string | null,
+  ) => {
     if (!ngay_bd || !ngay_kt || !factoryId) return
     setLoadingTrips(true)
-    const { data } = await supabase
-      .from("dispatch_entries")
-      .select("rows,ngay")
-      .eq("factory_id", factoryId)
-    // Trips/dates already claimed by OTHER ngăns (not the one currently being edited)
-    const otherNgans = ngans.filter(n => n.id !== editId)
-    const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
-    const coveredRanges = otherNgans
-      .filter(n => n.ngay_bd)
-      .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
-    const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
-    // Filter by date range in JS — handles both "YYYY-MM-DD" and "dd/mm/yyyy" stored formats
-    const trips: TripItem[] = (data || [])
-      .filter((entry: { ngay: string }) => {
-        const d = toISO(entry.ngay)
-        return d >= ngay_bd && d <= ngay_kt
-      })
-      .flatMap(
-        (entry: { rows: Record<string, string>[]; ngay: string }) =>
+    try {
+      const { data } = await supabase
+        .from("dispatch_entries")
+        .select("rows,ngay")
+        .eq("factory_id", factoryId)
+      const editingId = overrideEditId ?? editId
+      const otherNgans = ngans.filter(n => n.id !== editingId)
+      const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
+      const coveredRanges = otherNgans
+        .filter(n => n.ngay_bd)
+        .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
+      const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
+      const trips: TripItem[] = (data || [])
+        .filter((entry: { ngay: string }) => {
+          const d = toISODate(entry.ngay)
+          return d >= ngay_bd && d <= ngay_kt
+        })
+        .flatMap((entry: { rows: Record<string, string>[]; ngay: string }) =>
           (entry.rows || []).map((r: Record<string, string>) => ({
             uid: r.uid,
-            _date: toISO(entry.ngay),
+            _date: toISODate(entry.ngay),
             so_xe: r.so_xe,
             chuyen: Number(r.chuyen) || 1,
             tai_xe: r.tai_xe,
-            kl_ct:  +r.kl_ct  || 0, kl_ck:  +r.kl_ck  || 0,
-            kl_dct: +r.kl_dct || 0, kl_dck: +r.kl_dck || 0,
-            kl_dkt: +r.kl_dkt || 0, kl_dkk: +r.kl_dkk || 0,
-            kl_dt:  +r.kl_dt  || 0, kl_dk:  +r.kl_dk  || 0,
-            kl_mn:  +r.kl_mn  || 0, kl_mnk: +r.kl_mnk || 0,
-          }))
-      )
-      .filter(t => !assignedUIDs.has(t.uid) && !isDateCovered(t._date))
-    setDispatchTrips(trips)
-    if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
-    setLoadingTrips(false)
+            kl_ct: +r.kl_ct || 0,
+            kl_ck: +r.kl_ck || 0,
+            kl_dct: +r.kl_dct || 0,
+            kl_dck: +r.kl_dck || 0,
+            kl_dkt: +r.kl_dkt || 0,
+            kl_dkk: +r.kl_dkk || 0,
+            kl_dt: +r.kl_dt || 0,
+            kl_dk: +r.kl_dk || 0,
+            kl_mn: +r.kl_mn || 0,
+            kl_mnk: +r.kl_mnk || 0,
+          })),
+        )
+        .filter(t => !assignedUIDs.has(t.uid) && !isDateCovered(t._date))
+      setDispatchTrips(trips)
+      if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
+    } finally {
+      setLoadingTrips(false)
+    }
   }, [factoryId, ngans, editId])
 
   // ── Auto-calc KL from selected trips (filtered by loai_nl) ───────────────
   const formLoaiNL = form.loai_nl
   useEffect(() => {
+    if (selectedTrips.size > 0 && dispatchTrips.length === 0) return
     const sel = dispatchTrips.filter(t => selectedTrips.has(t.uid))
     const { tuoi, kho } = sel.reduce(
       (acc, t) => {
@@ -376,9 +375,19 @@ export default function StoragePage() {
   }, [selectedTrips, dispatchTrips, formLoaiNL])
 
   // ── Form helpers ──────────────────────────────────────────────────────────
-  const updateForm = (patch: Partial<ReturnType<typeof emptyForm>>) => {
+  const updateForm = (patch: Partial<StorageForm>) => {
     setForm(p => {
       const next = { ...p, ...patch }
+      const prevAutoXeTu = p.ngay_bd ? addDaysISO(p.ngay_bd, 1) : ""
+      const prevAutoXeDen = p.ngay_kt ? addDaysISO(p.ngay_kt, 1) : ""
+      const shouldSyncXeTu = !p.xe_tu_ngay || p.xe_tu_ngay === prevAutoXeTu
+      const shouldSyncXeDen = !p.xe_den_ngay || p.xe_den_ngay === prevAutoXeDen
+      if ("ngay_bd" in patch && shouldSyncXeTu) {
+        next.xe_tu_ngay = next.ngay_bd ? addDaysISO(next.ngay_bd, 1) : ""
+      }
+      if ("ngay_kt" in patch && shouldSyncXeDen) {
+        next.xe_den_ngay = next.ngay_kt ? addDaysISO(next.ngay_kt, 1) : ""
+      }
       next.ma_ngan = genMaNgan(next)
       return next
     })
@@ -470,6 +479,8 @@ export default function StoragePage() {
         trang_thai: trangThai,
         factory_id: factoryId,
         ngay_kt: form.ngay_kt || null,
+        xe_tu_ngay: form.xe_tu_ngay || null,
+        xe_den_ngay: form.xe_den_ngay || null,
         trips: Array.from(selectedTrips),
         ghi_chu: form.ghi_chu || null,
       }
@@ -513,6 +524,8 @@ export default function StoragePage() {
       xu_ly: n.xu_ly || "Xé", chung_nhan: n.chung_nhan || "PEFC CS",
       ngay_bd: n.ngay_bd?.slice(0, 10) || "",
       ngay_kt: n.ngay_kt?.slice(0, 10) || "",
+      xe_tu_ngay: n.xe_tu_ngay?.slice(0, 10) || addDaysISO(n.ngay_bd?.slice(0, 10) || "", 1),
+      xe_den_ngay: n.xe_den_ngay?.slice(0, 10) || addDaysISO(n.ngay_kt?.slice(0, 10) || "", 1),
       trang_thai: n.trang_thai || "Đang nhận (Cần cập nhật)",
       tong_tuoi: n.tong_tuoi || 0, tong_kho: n.tong_kho || 0,
       lo_nguon_goc: n.lo_nguon_goc || "",
@@ -523,7 +536,12 @@ export default function StoragePage() {
     setSelectedTrips(new Set(n.trips || []))
     setDispatchTrips([])
     setModal("edit")
-    if (f.ngay_bd && f.ngay_kt) fetchTrips(f.ngay_bd, f.ngay_kt)
+    if (factoryId && (n.trips || []).length > 0) {
+      void loadDispatchTripsByUids(factoryId, n.trips || [])
+        .then((storedTrips) => setDispatchTrips(storedTrips))
+        .catch(() => setDispatchTrips([]))
+    }
+    if (f.ngay_bd && f.ngay_kt) void fetchTrips(f.ngay_bd, f.ngay_kt, false, n.id)
   }
 
   const openView = async (n: Ngan) => {
@@ -534,19 +552,126 @@ export default function StoragePage() {
     setExpandedProductKeys(new Set())
     setExpandedDateKeys(new Set())
     setModal("view")
-    const { data, error } = await supabase
-      .from("lots")
-      .select("id,ma_lo,ngay_sx,ca,loai_csr,loai_banh,boc,tong_banh,tong_kg,trang_thai")
-      .eq("factory_id", factoryId)
-      .eq("ngan_id", n.id)
-      .order("ngay_sx", { ascending: false })
-      .order("created_at", { ascending: false })
-    if (error) {
+    try {
+      const data = await loadStorageLots(factoryId, n.id)
+      setViewLots(data)
+    } catch {
       setViewLots([])
-    } else {
-      setViewLots((data || []) as ProducedLot[])
     }
     setViewLotsLoading(false)
+  }
+
+  const handleExportDetailPdf = async (nganId: string) => {
+    if (!factoryId) return
+    setExportingDetailId(nganId)
+    try {
+      const detail = await loadStorageDetail(factoryId, nganId)
+      await downloadStorageDetailPdf(detail)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không xuất được PDF chi tiết ngăn")
+    } finally {
+      setExportingDetailId(null)
+    }
+  }
+
+  const handleExportGeoJson = async (ngan: Ngan) => {
+    if (!factoryId) return
+    setExportingGeoId(ngan.id)
+    setSaveError(null)
+    try {
+      const geojson = await loadStorageGeoJson(factoryId, ngan)
+      if (geojson.metadata.total_plot_codes === 0) {
+        setSaveError(`Ngăn ${ngan.ten_ngan} chưa có lô thu hoạch để xuất GeoJSON.`)
+        return
+      }
+
+      const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/geo+json" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `ngan-${safeDownloadName(ngan.ten_ngan || ngan.ma_ngan || ngan.id)}.geojson`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không xuất được GeoJSON của ngăn")
+    } finally {
+      setExportingGeoId(null)
+    }
+  }
+
+  const handleExportPeriodReport = async () => {
+    if (!factoryId || !reportFrom || !reportTo) {
+      setSaveError("Vui lòng chọn đầy đủ Từ ngày và Đến ngày để xuất báo cáo kỳ.")
+      return
+    }
+    if (reportFrom > reportTo) {
+      setSaveError("Từ ngày không được lớn hơn Đến ngày.")
+      return
+    }
+
+    setExportingPeriod(true)
+    setSaveError(null)
+    try {
+      const matchedNgans = ngans
+        .filter((ngan) => dcLoaiNL.includes(ngan.loai_nl))
+        .filter((ngan) => !reportLoaiNL || ngan.loai_nl === reportLoaiNL)
+        .filter((ngan) => {
+          const from = ngan.ngay_bd?.slice(0, 10) || ""
+          const to = (ngan.ngay_kt || "").slice(0, 10)
+          if (!from || !to) return false
+          return from >= reportFrom && to <= reportTo
+        })
+
+      const nganIds = matchedNgans.map((ngan) => ngan.id)
+      let lotMap: Record<string, ProducedLot[]> = {}
+      if (nganIds.length > 0) {
+        const { data, error } = await supabase
+          .from("lots")
+          .select("id,ngan_id,ma_lo,ngay_sx,ca,loai_csr,loai_banh,boc,tong_banh,tong_kg,trang_thai")
+          .eq("factory_id", factoryId)
+          .in("ngan_id", nganIds)
+          .order("ngay_sx", { ascending: true })
+        if (error) throw new Error(error.message)
+        lotMap = ((data || []) as (ProducedLot & { ngan_id: string })[]).reduce<Record<string, ProducedLot[]>>((acc, lot) => {
+          const nganId = lot.ngan_id
+          if (!acc[nganId]) acc[nganId] = []
+          acc[nganId].push(lot)
+          return acc
+        }, {})
+      }
+
+      const rows = matchedNgans
+        .sort((a, b) => a.ngay_bd.localeCompare(b.ngay_bd) || a.ten_ngan.localeCompare(b.ten_ngan))
+        .map((ngan) => {
+          const lots = lotMap[ngan.id] || []
+          const summary = summarizeStorageLots(lots)
+          const lotDetailsText = lots.length > 0
+            ? [...lots]
+                .sort((a, b) => a.ngay_sx.localeCompare(b.ngay_sx) || a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }))
+                .map((lot) => lot.ma_lo || "")
+                .filter(Boolean)
+                .join(", ")
+            : ""
+          return {
+            ngan,
+            thanhPhamKg: summary.thanhPhamKg,
+            totalLots: summary.totalLots,
+            doDangCount: summary.doDangCount,
+            ratioPct: ngan.tong_kho > 0 ? (summary.thanhPhamKg / ngan.tong_kho) * 100 : null,
+            lotDetailsText,
+          }
+        })
+
+      await downloadStoragePeriodReportPdf({
+        from: reportFrom,
+        to: reportTo,
+        rows,
+      })
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không xuất được báo cáo theo kỳ")
+    } finally {
+      setExportingPeriod(false)
+    }
   }
 
   const toggleProductKey = (key: string) => {
@@ -646,29 +771,79 @@ export default function StoragePage() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2 flex-1 min-w-48">
-            <Search size={15} className="text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder={`Tìm tên ${subTerm.toLowerCase()}, mã...`}
-              className="flex-1 text-sm outline-none" />
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-5 space-y-4">
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="flex items-center gap-2 flex-1 min-w-48">
+              <Search size={15} className="text-slate-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder={`Tìm tên ${subTerm.toLowerCase()}, mã...`}
+                className="flex-1 text-sm outline-none" />
+            </div>
+            <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+              <option value="">Tất cả trạng thái</option>
+              {TRANG_THAI_OPTS.map(t => <option key={t}>{t}</option>)}
+            </select>
+            <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+              <option value="">Tất cả ghi chú</option>
+              {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
+            </select>
+            {(search || filterTT || filterGhiChu) && (
+              <button onClick={() => { setSearch(""); setFilterTT(""); setFilterGhiChu("") }}
+                className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
+                <X size={14} /> Xóa lọc
+              </button>
+            )}
           </div>
-          <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-            <option value="">Tất cả trạng thái</option>
-            {TRANG_THAI_OPTS.map(t => <option key={t}>{t}</option>)}
-          </select>
-          <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-            <option value="">Tất cả ghi chú</option>
-            {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
-          </select>
-          {(search || filterTT || filterGhiChu) && (
-            <button onClick={() => { setSearch(""); setFilterTT(""); setFilterGhiChu("") }}
-              className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-              <X size={14} /> Xóa lọc
-            </button>
-          )}
+
+          <div className="border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap items-end gap-2.5">
+              <div className="min-w-[150px]">
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
+                <input
+                  type="date"
+                  value={reportFrom}
+                  onChange={e => setReportFrom(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="min-w-[150px]">
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đến ngày</label>
+                <input
+                  type="date"
+                  value={reportTo}
+                  onChange={e => setReportTo(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="min-w-[220px] flex-1 max-w-[280px]">
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại nguyên liệu</label>
+                <select
+                  value={reportLoaiNL}
+                  onChange={e => setReportLoaiNL(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  <option value="">Tất cả loại nguyên liệu</option>
+                  {dcLoaiNL.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleExportPeriodReport()}
+                disabled={exportingPeriod}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl shadow-sm whitespace-nowrap disabled:opacity-50"
+              >
+                <FileText size={14} />
+                {exportingPeriod ? "Đang xuất báo cáo..." : "Xuất báo cáo theo kỳ"}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Chỉ lấy các {subTerm.toLowerCase()} có toàn bộ thời gian nguyên liệu nằm trọn trong kỳ lọc.
+            </p>
+          </div>
         </div>
 
         {/* Card grid */}
@@ -687,6 +862,8 @@ export default function StoragePage() {
               const hs      = headerStyle(n.trang_thai)
               const tpKg    = lotStats[n.id] || 0
               const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+              const lookupPath = buildStorageLookupPath(n.id)
+              const lookupUrl = typeof window !== "undefined" ? `${window.location.origin}${lookupPath}` : lookupPath
 
               return (
                 <div key={n.id} className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden hover-lift">
@@ -700,6 +877,29 @@ export default function StoragePage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <Link
+                        href={lookupPath}
+                        className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
+                        title="QR / Tra cứu"
+                      >
+                        <QrCode size={14} />
+                      </Link>
+                      <button
+                        onClick={() => void handleExportDetailPdf(n.id)}
+                        disabled={exportingDetailId === n.id}
+                        className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
+                        title="Xuất PDF"
+                      >
+                        <FileText size={14} />
+                      </button>
+                      <button
+                        onClick={() => void handleExportGeoJson(n)}
+                        disabled={exportingGeoId === n.id}
+                        className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
+                        title="Xuất GeoJSON"
+                      >
+                        <Map size={14} />
+                      </button>
                       <button onClick={() => openView(n)}
                         className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors">
                         <Eye size={14} />
@@ -778,6 +978,13 @@ export default function StoragePage() {
                         )}
                       </span>
                     </div>
+                    <div className="flex items-center gap-2 py-2 border-t border-dashed border-slate-200">
+                      <Activity size={14} className="text-slate-400 shrink-0" />
+                      <span className="text-xs text-slate-500 w-24 shrink-0">Ngày xé</span>
+                      <span className="text-sm font-semibold text-slate-800">
+                        {fmtDate(n.xe_tu_ngay)}{n.xe_den_ngay ? ` → ${fmtDate(n.xe_den_ngay)}` : ""}
+                      </span>
+                    </div>
                     {n.ghi_chu && (
                       <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
                         <Tag size={14} className="text-slate-400 shrink-0 mt-0.5" />
@@ -785,6 +992,19 @@ export default function StoragePage() {
                         <span className="text-xs font-semibold text-slate-700 break-words">{n.ghi_chu}</span>
                       </div>
                     )}
+                    <div className="pt-3 border-t border-dashed border-slate-200">
+                      <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                        <div className="shrink-0 rounded-lg border border-slate-200 bg-white p-1.5">
+                          <QRCodeSVG value={lookupUrl} size={48} level="M" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">QR ngăn</div>
+                          <Link href={lookupPath} className="mt-1 block text-xs font-semibold text-emerald-700 hover:underline">
+                            Quét để mở trang chi tiết ngăn
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )
@@ -877,6 +1097,27 @@ export default function StoragePage() {
                       fetchTrips(form.ngay_bd, e.target.value, modal === "add")
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Xé từ ngày</label>
+                  <input
+                    type="date"
+                    value={form.xe_tu_ngay}
+                    onChange={e => updateForm({ xe_tu_ngay: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Xé đến ngày</label>
+                  <input
+                    type="date"
+                    value={form.xe_den_ngay}
+                    onChange={e => updateForm({ xe_den_ngay: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
                 </div>
               </div>
 
@@ -1044,7 +1285,7 @@ export default function StoragePage() {
       {/* ── View detail modal ──────────────────────────────────────────────── */}
       {modal === "view" && viewNgan && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className={`bg-gradient-to-r ${headerStyle(viewNgan.trang_thai).grad} border-b border-slate-200 px-6 py-4 flex items-center justify-between`}>
               <div className="flex items-center gap-2">
                 <Warehouse size={18} className={headerStyle(viewNgan.trang_thai).icon} />
@@ -1059,7 +1300,7 @@ export default function StoragePage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="p-6 space-y-0 text-sm">
+            <div className="flex-1 overflow-y-auto p-6 space-y-0 text-sm">
               {([
                 [`Mã ${subTerm.toLowerCase()}`, viewNgan.ma_ngan],
                 ["Loại NL",    viewNgan.loai_nl],
@@ -1068,6 +1309,8 @@ export default function StoragePage() {
                 ["Chứng nhận", viewNgan.chung_nhan],
                 ["Ngày BD",    fmtDate(viewNgan.ngay_bd)],
                 ["Ngày KT",    fmtDate(viewNgan.ngay_kt)],
+                ["Xé từ ngày", fmtDate(viewNgan.xe_tu_ngay)],
+                ["Xé đến ngày", fmtDate(viewNgan.xe_den_ngay)],
                 ["KL tươi",    (viewNgan.tong_tuoi || 0).toLocaleString() + " kg"],
                 ["KL khô",     (viewNgan.tong_kho  || 0).toLocaleString() + " kg"],
                 ["TP / QK",    viewNgan.tong_kho > 0
@@ -1081,6 +1324,16 @@ export default function StoragePage() {
                   <span className="font-semibold text-slate-700 text-right max-w-[60%]">{v}</span>
                 </div>
               ))}
+
+              <div className="pt-4">
+                <InventoryQrCard
+                  compact
+                  title="QR ngăn"
+                  caption="Quét để mở trang chi tiết ngăn lưu trên web."
+                  hrefPath={buildStorageLookupPath(viewNgan.id)}
+                  valueText={viewNgan.ma_ngan || viewNgan.ten_ngan}
+                />
+              </div>
 
               <div className="pt-5 mt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between gap-3 mb-3">
@@ -1100,7 +1353,7 @@ export default function StoragePage() {
                     Chưa có lô thành phẩm nào sử dụng nguyên liệu từ {viewNgan.ten_ngan}
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-4 overscroll-contain">
                     {groupedViewLots.map(group => {
                       const productExpanded = expandedProductKeys.has(group.key)
                       return (

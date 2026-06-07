@@ -359,7 +359,8 @@ function inferRevisionLabel(doc: Record<string, unknown>): string {
 }
 
 function buildFooterValue(maTl: string, lsStr: string, dateStr: string, statusText: string): string {
-  return `${maTl} (${lsStr}-${dateStr}) ${statusText}`.trim()
+  const datePart = dateStr || "Ngày hiệu lực"
+  return `${maTl} (${lsStr}-${datePart}) ${statusText}`.trim()
 }
 
 function normalizeRevisionText(value: unknown): string {

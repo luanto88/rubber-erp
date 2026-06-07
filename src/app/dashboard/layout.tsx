@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   BarChart3,
+  Bell,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
@@ -32,6 +33,15 @@ import {
   signOutEverywhere,
   type SessionUser,
 } from "@/lib/auth"
+
+interface AppNotification {
+  id: string
+  title: string
+  body: string | null
+  link: string | null
+  is_read: boolean
+  created_at: string
+}
 
 type NavLeaf = {
   key: string
@@ -110,6 +120,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
   const isLoggingOutRef = useRef(false)
   const userDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Notifications
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+  const unreadCount = notifications.filter((n) => !n.is_read).length
 
   useEffect(() => {
     let alive = true
@@ -238,6 +254,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [])
 
+  // Load notifications when user is available
+  useEffect(() => {
+    if (!user?.id || !user?.factory_id) return
+    const load = async () => {
+      const { data } = await supabase
+        .from("notifications")
+        .select("id, title, body, link, is_read, created_at")
+        .eq("factory_id", user.factory_id as string)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(15)
+      setNotifications((data ?? []) as AppNotification[])
+    }
+    void load()
+  }, [user?.id, user?.factory_id])
+
+  // Realtime: append new notifications live
+  useEffect(() => {
+    if (!user?.id) return
+    const channel = supabase
+      .channel(`notif-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          setNotifications((prev) => [payload.new as AppNotification, ...prev].slice(0, 15))
+        },
+      )
+      .subscribe()
+    return () => { void supabase.removeChannel(channel) }
+  }, [user?.id])
+
   const visibleNav: NavItem[] = NAV.flatMap((item) => {
     if (isNavGroup(item)) {
       const children = item.children.filter((child) => hasPermission(user, child.permission || ""))
@@ -261,6 +309,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const handleClickOutside = (e: MouseEvent) => {
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
         setUserDropdownOpen(false)
+      }
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
       }
     }
     document.addEventListener("mousedown", handleClickOutside)
@@ -408,7 +459,78 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-end border-b border-slate-200 bg-white/95 px-6 py-2.5 shadow-sm backdrop-blur-sm">
+        <header className="sticky top-0 z-30 flex items-center justify-end gap-2 border-b border-slate-200 bg-white/95 px-6 py-2.5 shadow-sm backdrop-blur-sm">
+          {/* Bell notifications */}
+          <div ref={notifRef} className="relative">
+            <button
+              onClick={() => setNotifOpen(!notifOpen)}
+              className="relative flex h-8 w-8 items-center justify-center rounded-xl hover:bg-slate-100 transition-colors"
+              title="Thông báo"
+            >
+              <Bell size={17} className="text-slate-500" />
+              {unreadCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white leading-none">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notifOpen && (
+              <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                  <span className="text-sm font-bold text-slate-700">Thông báo</span>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={async () => {
+                        const ids = notifications.filter((n) => !n.is_read).map((n) => n.id)
+                        if (ids.length === 0) return
+                        await supabase.from("notifications").update({ is_read: true }).in("id", ids)
+                        setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+                      }}
+                      className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800"
+                    >
+                      Đánh dấu tất cả đã đọc
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-slate-400">Không có thông báo</div>
+                  ) : (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={async () => {
+                          if (!n.is_read) {
+                            await supabase.from("notifications").update({ is_read: true }).eq("id", n.id)
+                            setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x))
+                          }
+                          setNotifOpen(false)
+                          if (n.link) window.location.href = n.link
+                        }}
+                        className={
+                          "w-full text-left px-4 py-3 border-b border-slate-50 transition-colors hover:bg-slate-50 " +
+                          (n.is_read ? "opacity-60" : "")
+                        }
+                      >
+                        <div className="flex items-start gap-2">
+                          {!n.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />}
+                          <div className={!n.is_read ? "" : "pl-4"}>
+                            <p className="text-xs font-bold text-slate-800 line-clamp-1">{n.title}</p>
+                            {n.body && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>}
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              {new Date(n.created_at).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div ref={userDropdownRef} className="relative">
             <button
               onClick={() => setUserDropdownOpen(!userDropdownOpen)}

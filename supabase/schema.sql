@@ -148,6 +148,8 @@ CREATE TABLE ngans (
   chung_nhan TEXT,
   ngay_bd DATE,
   ngay_kt DATE,
+  xe_tu_ngay DATE,
+  xe_den_ngay DATE,
   trang_thai TEXT DEFAULT 'Đang nhận',
   tong_tuoi NUMERIC DEFAULT 0,
   tong_kho NUMERIC DEFAULT 0,

@@ -28,8 +28,14 @@ export type MaintenanceAsset = {
 export type MaintenanceStaff = {
   id: string
   factory_id: string
+  profile_id: string | null
   ten: string
+  group_ids: string[]
+  group_names: string[]
   chuc_vu: string | null
+  gioi_tinh: string | null
+  chuc_vu_chinh_quyen: string | null
+  chuc_vu_kim_nhiem: string | null
   email: string | null
   active: boolean
 }
@@ -128,7 +134,29 @@ export async function loadMaintenanceStaff(factoryId: string): Promise<Maintenan
     .eq("factory_id", factoryId)
     .eq("active", true)
     .order("ten")
-  return (data || []) as MaintenanceStaff[]
+
+  const { data: groupMemberData } = await supabase
+    .from("personnel_group_members")
+    .select("staff_id, group_id, personnel_groups(id, name, code)")
+    .eq("factory_id", factoryId)
+
+  const groupMap = new Map<string, { group_ids: string[]; group_names: string[] }>()
+  for (const row of (groupMemberData || []) as Array<{ staff_id: string; group_id: string; personnel_groups: Array<{ id: string; name: string | null; code: string | null }> | null }>) {
+    const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [] }
+    if (row.group_id && !existing.group_ids.includes(row.group_id)) existing.group_ids.push(row.group_id)
+    const groupName = row.personnel_groups?.[0]?.name?.trim()
+    if (groupName && !existing.group_names.includes(groupName)) existing.group_names.push(groupName)
+    groupMap.set(row.staff_id, existing)
+  }
+
+  return ((data || []) as Array<Omit<MaintenanceStaff, "group_ids" | "group_names">>).map((staff) => {
+    const groups = groupMap.get(staff.id)
+    return {
+      ...staff,
+      group_ids: groups?.group_ids || [],
+      group_names: groups?.group_names || [],
+    }
+  })
 }
 
 export async function loadMaintenanceExtMaterials(factoryId: string): Promise<MaintenanceExtMaterial[]> {

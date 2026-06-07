@@ -168,16 +168,28 @@ export async function POST(req: NextRequest) {
         .map((p: { full_name: string | null; username: string | null }) => p.full_name || p.username)
         .filter(Boolean) as string[]
 
-      if (recipientFullNames.length > 0) {
-        const { data: staffRows } = await supabaseAdmin
-          .from("maintenance_staff")
-          .select("ten, email")
-          .eq("factory_id", factoryId)
-          .in("ten", recipientFullNames)
+        if (recipientFullNames.length > 0) {
+          const [staffByProfileRes, staffByNameRes] = await Promise.all([
+            supabaseAdmin
+              .from("maintenance_staff")
+              .select("id, ten, email, profile_id")
+              .eq("factory_id", factoryId)
+              .in("profile_id", recipientUserIds),
+            supabaseAdmin
+              .from("maintenance_staff")
+              .select("id, ten, email, profile_id")
+              .eq("factory_id", factoryId)
+              .in("ten", recipientFullNames),
+          ])
 
-        const emails = ((staffRows || []) as Array<{ ten: string; email: string | null }>)
-          .map((s) => s.email)
-          .filter((e): e is string => !!e && e.includes("@"))
+          const staffMap = new Map<string, { ten: string; email: string | null; profile_id: string | null }>()
+          for (const row of [...(staffByProfileRes.data || []), ...(staffByNameRes.data || [])] as Array<{ id: string; ten: string; email: string | null; profile_id: string | null }>) {
+            staffMap.set(row.id, { ten: row.ten, email: row.email, profile_id: row.profile_id })
+          }
+
+          const emails = [...staffMap.values()]
+            .map((s) => s.email)
+            .filter((e): e is string => !!e && e.includes("@"))
 
         if (emails.length > 0) {
           const isWarning = action === "tra_ve" || action === "khong_xem_xet" || action === "tu_choi_phe_duyet" || action === "tra_ve_nhap"

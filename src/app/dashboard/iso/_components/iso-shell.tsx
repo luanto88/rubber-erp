@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
-import { FileText, LayoutDashboard, ClipboardCheck, type LucideIcon } from "lucide-react"
+import { FileText, LayoutDashboard, ClipboardCheck, FolderEdit, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
@@ -33,6 +33,12 @@ const tabs: NavTab[] = [
     label: "Việc của tôi",
     icon: ClipboardCheck,
     matchPrefixes: ["/dashboard/iso/my-tasks"],
+  },
+  {
+    href: "/dashboard/iso/forms",
+    label: "Thực hiện hồ sơ",
+    icon: FolderEdit,
+    matchPrefixes: ["/dashboard/iso/forms"],
   },
 ]
 
@@ -82,14 +88,13 @@ export function IsoShell({ children }: IsoShellProps) {
       })
       if (alive) setPendingTaskCount(taskKeys.size)
 
-      if (!channel) {
-        channel = supabase
-          .channel(`iso-task-count-${fid}-${uid}`)
-          .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", filter: `factory_id=eq.${fid}` }, () => {
-            void loadPendingTasks()
-          })
-          .subscribe()
-      }
+      if (!alive || channel) return
+      channel = supabase
+        .channel(`iso-task-count-${fid}-${uid}-${Date.now()}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", filter: `factory_id=eq.${fid}` }, () => {
+          void loadPendingTasks()
+        })
+        .subscribe()
     }
 
     void loadPendingTasks()

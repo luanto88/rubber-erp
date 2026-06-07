@@ -103,6 +103,8 @@ type PermissionOption = {
   label: string
   module_name: string
   action_name: string
+  module_label?: string
+  action_label?: string
 }
 
 type UserEditor = {
@@ -117,7 +119,7 @@ type UserEditor = {
 
 type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban"
 
-type SystemTab = "users" | "permissions"
+type SystemTab = "users" | "permissions" | "personnel"
 
 type MasterDataTab = "suffixes" | "company" | "customers" | "required-notes"
 
@@ -141,9 +143,42 @@ type MaintenanceAssetRow = {
 type MaintenanceStaffRow = {
   id: string
   factory_id: string
+  profile_id: string | null
   ten: string
+  group_ids: string[]
+  group_names: string[]
   chuc_vu: string | null
+  gioi_tinh: string | null
+  chuc_vu_chinh_quyen: string | null
+  chuc_vu_kim_nhiem: string | null
+  email: string | null
   active: boolean
+}
+
+type StaffViewFilter = "all" | "maintenance" | "unlinked"
+
+type PersonnelAccountAuditRow = {
+  profile: ProfileRow
+  linkedStaff: MaintenanceStaffRow | null
+}
+
+type PersonnelGroupRow = {
+  id: string
+  factory_id: string
+  code: string | null
+  name: string
+  description: string | null
+  is_system: boolean
+  is_active: boolean
+  sort_order: number
+}
+
+type PersonnelGroupForm = {
+  code: string
+  name: string
+  description: string
+  sort_order: string
+  is_active: boolean
 }
 
 type MaintenanceExtMaterialRow = {
@@ -425,12 +460,74 @@ function parsePointPhaseList(value: string) {
     .filter(Boolean)
 }
 
+const PERMISSION_MODULE_LABELS: Record<string, string> = {
+  dispatch: "Điều xe",
+  documents: "Văn bản",
+  export: "Xuất hàng",
+  inventory: "Kho vật tư",
+  iso: "ISO",
+  product: "Thành phẩm",
+  quality: "Kiểm nghiệm",
+  settings: "Cài đặt",
+  storage: "Ngăn",
+  suffixes: "Hậu tố",
+  users: "Người dùng",
+}
+
+const PERMISSION_ACTION_LABELS: Record<string, string> = {
+  analytics: "thống kê",
+  approve: "duyệt tài khoản",
+  create: "tạo",
+  delete: "xóa",
+  delete_order: "xóa đơn",
+  edit: "sửa",
+  edit_permission: "sửa quyền",
+  import: "nhập",
+  ky_phong_ban: "ký phòng ban",
+  manage_config: "quản trị cấu hình",
+  mark_completed: "đánh dấu hoàn thành",
+  master_data: "danh mục",
+  maintenance_config: "cấu hình bảo trì",
+  phe_duyet: "phê duyệt",
+  post: "ghi sổ",
+  print: "in",
+  quick_add: "thêm nhanh",
+  quick_add_customer: "thêm nhanh khách hàng",
+  settings: "cấu hình",
+  signature: "ký số",
+  soat_xet: "soát xét",
+  view: "xem",
+  xem_xet: "xem xét",
+}
+
+function prettifyPermissionModule(moduleName: string) {
+  return PERMISSION_MODULE_LABELS[moduleName] || moduleName.replaceAll("_", " ")
+}
+
+function prettifyPermissionAction(actionName: string) {
+  return PERMISSION_ACTION_LABELS[actionName] || actionName.replaceAll("_", " ")
+}
+
+function isMaintenanceStaffRole(value?: string | null) {
+  const normalized = String(value || "").toLowerCase()
+  return normalized.includes("bảo trì")
+    || normalized.includes("bao tri")
+    || normalized.includes("cơ điện")
+    || normalized.includes("co dien")
+}
+
+function isMaintenanceStaffMember(staff: Pick<MaintenanceStaffRow, "group_names" | "chuc_vu">) {
+  return staff.group_names.some((groupName) => isMaintenanceStaffRole(groupName)) || isMaintenanceStaffRole(staff.chuc_vu)
+}
+
 function labelPermission(code: string) {
   const [moduleName = "", actionName = ""] = code.split(".")
   return {
     code,
     module_name: moduleName,
     action_name: actionName,
+    module_label: prettifyPermissionModule(moduleName),
+    action_label: prettifyPermissionAction(actionName),
     label: `${moduleName} · ${actionName}`,
   }
 }
@@ -575,16 +672,36 @@ export default function SettingsPage() {
   const [maintTab, setMaintTab] = useState<MaintenanceTab>("assets")
   const [maintAssets, setMaintAssets] = useState<MaintenanceAssetRow[]>([])
   const [maintStaff, setMaintStaff] = useState<MaintenanceStaffRow[]>([])
+  const [personnelGroups, setPersonnelGroups] = useState<PersonnelGroupRow[]>([])
   const [maintExtMats, setMaintExtMats] = useState<MaintenanceExtMaterialRow[]>([])
   const [maintLoading, setMaintLoading] = useState(false)
   const [maintLoaded, setMaintLoaded] = useState(false)
-  const [maintModal, setMaintModal] = useState<"asset" | "staff" | "ext-mat" | null>(null)
+  const [maintModal, setMaintModal] = useState<"asset" | "staff" | "staff-group" | "ext-mat" | null>(null)
   const [maintEditId, setMaintEditId] = useState<string | null>(null)
   const [maintSaving, setMaintSaving] = useState(false)
   const [maintError, setMaintError] = useState("")
-  const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "ext-mat"; id: string; label: string } | null>(null)
+  const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "staff-group" | "ext-mat"; id: string; label: string } | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
-  const [staffForm, setStaffForm] = useState({ ten: "", chuc_vu: "", email: "", active: true })
+  const [staffForm, setStaffForm] = useState({
+    profile_id: "",
+    ten: "",
+    group_ids: [] as string[],
+    chuc_vu: "",
+    gioi_tinh: "",
+    chuc_vu_chinh_quyen: "",
+    chuc_vu_kim_nhiem: "",
+    email: "",
+    active: true,
+  })
+  const [staffViewFilter, setStaffViewFilter] = useState<StaffViewFilter>("all")
+  const [personnelLinkModal, setPersonnelLinkModal] = useState<{ profileId: string; staffId: string } | null>(null)
+  const [personnelGroupForm, setPersonnelGroupForm] = useState<PersonnelGroupForm>({
+    code: "",
+    name: "",
+    description: "",
+    sort_order: "0",
+    is_active: true,
+  })
   const [extMatForm, setExtMatForm] = useState({ ten_vat_tu: "", dvt: "", code: "", specification: "", category_id: "", is_active: true })
 
   // Customers state
@@ -655,6 +772,8 @@ export default function SettingsPage() {
         code: item.code,
         module_name: item.module_name,
         action_name: item.action_name,
+        module_label: prettifyPermissionModule(item.module_name),
+        action_label: prettifyPermissionAction(item.action_name),
         label: `${item.module_name} · ${item.action_name}`,
       })),
     )
@@ -709,16 +828,35 @@ export default function SettingsPage() {
   const loadMaintenanceData = useCallback(async (fid: string) => {
     setMaintLoading(true)
     try {
-      const [aRes, sRes, mRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
+      const [aRes, sRes, gRes, gmRes, mRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
         supabase.from("maintenance_assets").select("*").eq("factory_id", fid).order("bo_phan").order("ma_tb"),
         supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
+        supabase.from("personnel_groups").select("id, factory_id, code, name, description, is_system, is_active, sort_order").eq("factory_id", fid).order("sort_order").order("name"),
+        supabase.from("personnel_group_members").select("staff_id, group_id, personnel_groups(id, name, code)").eq("factory_id", fid),
         supabase.from("maintenance_external_materials").select("*").eq("factory_id", fid).order("ten_vat_tu"),
         supabase.from("dispatch_drivers").select("*").eq("factory_id", fid).order("name"),
         supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("dispatch_vehicle_driver_assignments").select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note").eq("factory_id", fid).order("is_current", { ascending: false }).order("effective_from", { ascending: false }),
       ])
       setMaintAssets((aRes.data || []) as MaintenanceAssetRow[])
-      setMaintStaff((sRes.data || []) as MaintenanceStaffRow[])
+      setPersonnelGroups((gRes.data || []) as PersonnelGroupRow[])
+      const groupMap = new Map<string, { group_ids: string[]; group_names: string[] }>()
+      for (const row of (gmRes.data || []) as Array<{ staff_id: string; group_id: string; personnel_groups: Array<{ id: string; name: string | null; code: string | null }> | null }>) {
+        const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [] }
+        if (row.group_id && !existing.group_ids.includes(row.group_id)) existing.group_ids.push(row.group_id)
+        const groupName = row.personnel_groups?.[0]?.name?.trim()
+        if (groupName && !existing.group_names.includes(groupName)) existing.group_names.push(groupName)
+        groupMap.set(row.staff_id, existing)
+      }
+      const nextStaff = ((sRes.data || []) as Array<Omit<MaintenanceStaffRow, "group_ids" | "group_names">>).map((staff) => {
+        const groups = groupMap.get(staff.id)
+        return {
+          ...staff,
+          group_ids: groups?.group_ids || [],
+          group_names: groups?.group_names || [],
+        }
+      })
+      setMaintStaff(nextStaff)
       setMaintExtMats((mRes.data || []) as MaintenanceExtMaterialRow[])
 
       const nextDrivers = (driverRes.data || []) as DispatchDriverRow[]
@@ -786,10 +924,61 @@ export default function SettingsPage() {
     if (!staffForm.ten.trim()) { setMaintError("Tên không được để trống"); return }
     setMaintSaving(true); setMaintError("")
     try {
-      const payload = { factory_id: factoryId, ten: staffForm.ten.trim(), chuc_vu: staffForm.chuc_vu.trim() || null, email: staffForm.email.trim() || null, active: staffForm.active }
+        const payload = {
+          factory_id: factoryId,
+          profile_id: staffForm.profile_id || null,
+          ten: staffForm.ten.trim(),
+          chuc_vu: staffForm.chuc_vu.trim() || null,
+          gioi_tinh: staffForm.gioi_tinh || null,
+          chuc_vu_chinh_quyen: staffForm.chuc_vu_chinh_quyen.trim() || null,
+          chuc_vu_kim_nhiem: staffForm.chuc_vu_kim_nhiem.trim() || null,
+          email: staffForm.email.trim() || null,
+          active: staffForm.active,
+        }
       const result = maintEditId
-        ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
-        : await supabase.from("maintenance_staff").insert(payload)
+        ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
+        : await supabase.from("maintenance_staff").insert(payload).select("id").single()
+      if (result.error) { setMaintError(result.error.message); return }
+      const savedStaffId = result.data?.id
+      if (savedStaffId) {
+        const deleteMembershipRes = await supabase.from("personnel_group_members").delete().eq("factory_id", factoryId).eq("staff_id", savedStaffId)
+        if (deleteMembershipRes.error && !/personnel_group_members|does not exist|Could not find the table/i.test(deleteMembershipRes.error.message)) {
+          setMaintError(deleteMembershipRes.error.message)
+          return
+        }
+
+        if (staffForm.group_ids.length > 0) {
+          const insertMembershipRes = await supabase
+            .from("personnel_group_members")
+            .insert(staffForm.group_ids.map((groupId) => ({ factory_id: factoryId, staff_id: savedStaffId, group_id: groupId })))
+
+          if (insertMembershipRes.error && !/personnel_group_members|does not exist|Could not find the table/i.test(insertMembershipRes.error.message)) {
+            setMaintError(insertMembershipRes.error.message)
+            return
+          }
+        }
+      }
+      setMaintModal(null)
+      void loadMaintenanceData(factoryId)
+    } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
+  }
+
+  const savePersonnelGroup = async () => {
+    if (!factoryId) return
+    if (!personnelGroupForm.name.trim()) { setMaintError("Tên nhóm không được để trống"); return }
+    setMaintSaving(true); setMaintError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        code: personnelGroupForm.code.trim() || null,
+        name: personnelGroupForm.name.trim(),
+        description: personnelGroupForm.description.trim() || null,
+        sort_order: Number(personnelGroupForm.sort_order || 0),
+        is_active: personnelGroupForm.is_active,
+      }
+      const result = maintEditId
+        ? await supabase.from("personnel_groups").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
+        : await supabase.from("personnel_groups").insert(payload)
       if (result.error) { setMaintError(result.error.message); return }
       setMaintModal(null)
       void loadMaintenanceData(factoryId)
@@ -821,7 +1010,13 @@ export default function SettingsPage() {
 
   const deleteMaintItem = async () => {
     if (!factoryId || !maintDelConfirm) return
-    const table = maintDelConfirm.type === "asset" ? "maintenance_assets" : maintDelConfirm.type === "staff" ? "maintenance_staff" : "maintenance_external_materials"
+    const table = maintDelConfirm.type === "asset"
+      ? "maintenance_assets"
+      : maintDelConfirm.type === "staff"
+        ? "maintenance_staff"
+        : maintDelConfirm.type === "staff-group"
+          ? "personnel_groups"
+          : "maintenance_external_materials"
     await supabase.from(table).delete().eq("id", maintDelConfirm.id).eq("factory_id", factoryId)
     setMaintDelConfirm(null)
     void loadMaintenanceData(factoryId)
@@ -1369,6 +1564,128 @@ export default function SettingsPage() {
     }, {})
   }, [permissionOptions])
 
+  const activeProfilesForLink = useMemo(
+    () => profiles.filter((profile) => profile.status === "active"),
+    [profiles],
+  )
+
+  const maintStaffByProfileId = useMemo(() => {
+    const map = new Map<string, MaintenanceStaffRow>()
+    for (const staff of maintStaff) {
+      if (staff.profile_id && !map.has(staff.profile_id)) {
+        map.set(staff.profile_id, staff)
+      }
+    }
+    return map
+  }, [maintStaff])
+
+  const personnelAccountAudit = useMemo<PersonnelAccountAuditRow[]>(() => {
+    return profiles.map((profile) => ({
+      profile,
+      linkedStaff: maintStaffByProfileId.get(profile.id) || null,
+    }))
+  }, [profiles, maintStaffByProfileId])
+
+  const profilesWithoutPersonnel = useMemo(
+    () => personnelAccountAudit.filter((item) => !item.linkedStaff),
+    [personnelAccountAudit],
+  )
+
+  const staffWithoutProfile = useMemo(
+    () => maintStaff.filter((staff) => !staff.profile_id),
+    [maintStaff],
+  )
+
+  const linkedProfileCount = useMemo(
+    () => personnelAccountAudit.filter((item) => item.linkedStaff).length,
+    [personnelAccountAudit],
+  )
+
+  const availableStaffForAccountLink = useMemo(() => {
+    return maintStaff
+      .filter((staff) => !staff.profile_id)
+      .sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
+  }, [maintStaff])
+
+  const availableProfilesForStaffForm = useMemo(() => {
+    const currentProfileId = maintEditId
+      ? maintStaff.find((staff) => staff.id === maintEditId)?.profile_id || null
+      : staffForm.profile_id || null
+
+    return profiles.filter((profile) => {
+      if (profile.id === currentProfileId) return true
+      if (profile.status !== "active") return false
+      return !maintStaffByProfileId.has(profile.id)
+    })
+  }, [maintEditId, maintStaff, maintStaffByProfileId, profiles, staffForm.profile_id])
+
+  const filteredMaintStaff = useMemo(() => {
+    if (staffViewFilter === "maintenance") {
+      return maintStaff.filter((staff) => isMaintenanceStaffMember(staff))
+    }
+    if (staffViewFilter === "unlinked") {
+      return maintStaff.filter((staff) => !staff.profile_id)
+    }
+    return maintStaff
+  }, [maintStaff, staffViewFilter])
+
+  const openNewStaffModal = useCallback((profile?: ProfileRow) => {
+    setMaintEditId(null)
+    setMaintError("")
+    setStaffForm({
+      profile_id: profile?.id || "",
+      ten: profile?.full_name || "",
+      group_ids: [],
+      chuc_vu: "",
+      gioi_tinh: "",
+      chuc_vu_chinh_quyen: "",
+      chuc_vu_kim_nhiem: "",
+      email: "",
+      active: true,
+    })
+    setMaintModal("staff")
+  }, [])
+
+  const openEditStaffModal = useCallback((staff: MaintenanceStaffRow, nextProfileId?: string) => {
+    setMaintEditId(staff.id)
+    setMaintError("")
+    setStaffForm({
+      profile_id: nextProfileId ?? (staff.profile_id || ""),
+      ten: staff.ten,
+      group_ids: [...staff.group_ids],
+      chuc_vu: staff.chuc_vu || "",
+      gioi_tinh: staff.gioi_tinh || "",
+      chuc_vu_chinh_quyen: staff.chuc_vu_chinh_quyen || "",
+      chuc_vu_kim_nhiem: staff.chuc_vu_kim_nhiem || "",
+      email: staff.email || "",
+      active: staff.active,
+    })
+    setMaintModal("staff")
+  }, [])
+
+  const handleQuickLinkProfileToStaff = useCallback(async () => {
+    if (!factoryId || !personnelLinkModal) return
+    setMaintSaving(true)
+    setMaintError("")
+    try {
+      const result = await supabase
+        .from("maintenance_staff")
+        .update({ profile_id: personnelLinkModal.profileId })
+        .eq("id", personnelLinkModal.staffId)
+        .eq("factory_id", factoryId)
+      if (result.error) {
+        setMaintError(result.error.message)
+        return
+      }
+      setPersonnelLinkModal(null)
+      await loadMaintenanceData(factoryId)
+    } catch (error) {
+      setMaintError(error instanceof Error ? error.message : "Lỗi không xác định")
+    } finally {
+      setMaintSaving(false)
+    }
+  }, [factoryId, loadMaintenanceData, personnelLinkModal])
+
   const handleSaveFactory = async () => {
     if (!factoryId || !canManageSettings) return
     setSavingFactory(true)
@@ -1766,10 +2083,11 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
             <div className="flex gap-2">
-              {([
-                { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
-                { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canEditPermissions },
-              ] as const).filter((t) => t.show).map((item) => (
+                {([
+                  { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
+                  { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canEditPermissions },
+                  { key: "personnel" as const, label: "Nhân sự", icon: UserCog, show: canViewMaintenanceConfig },
+                ] as const).filter((t) => t.show).map((item) => (
                 <button
                   key={item.key}
                   onClick={() => setSystemTab(item.key)}
@@ -1922,6 +2240,260 @@ export default function SettingsPage() {
         </div>
           )}
 
+          {systemTab === "personnel" && canViewMaintenanceConfig && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-50 to-amber-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UserCog size={16} className="text-orange-600" />
+                <span className="font-extrabold text-slate-700">Nhân sự</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => openNewStaffModal()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm nhân sự
+                </button>
+              )}
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Tài khoản đã liên kết</div>
+                  <div className="mt-1 text-2xl font-extrabold text-emerald-900">{linkedProfileCount}</div>
+                  <div className="text-xs text-emerald-700/80">Tài khoản đã có hồ sơ nhân sự tương ứng.</div>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Tài khoản chưa có hồ sơ</div>
+                  <div className="mt-1 text-2xl font-extrabold text-amber-900">{profilesWithoutPersonnel.length}</div>
+                  <div className="text-xs text-amber-700/80">Có thể tạo hồ sơ mới hoặc gắn vào hồ sơ đang trống link.</div>
+                </div>
+                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-sky-700">Hồ sơ chưa liên kết</div>
+                  <div className="mt-1 text-2xl font-extrabold text-sky-900">{staffWithoutProfile.length}</div>
+                  <div className="text-xs text-sky-700/80">Dùng filter "Chưa liên kết" để rà soát nhanh các hồ sơ này.</div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.3fr,1fr]">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/40">
+                  <div className="flex items-center justify-between border-b border-amber-200 px-4 py-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-700">Tài khoản chưa có hồ sơ</h3>
+                      <p className="text-xs text-slate-500">Admin có thể tạo hồ sơ mới hoặc gắn tài khoản này vào hồ sơ đang có.</p>
+                    </div>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-amber-700">{profilesWithoutPersonnel.length}</span>
+                  </div>
+                  <div className="divide-y divide-amber-100">
+                    {profilesWithoutPersonnel.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-slate-500">Tất cả tài khoản trong nhà máy này đã có hồ sơ nhân sự.</div>
+                    ) : profilesWithoutPersonnel.map(({ profile }) => (
+                      <div key={profile.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <div className="font-semibold text-slate-700">{profile.full_name}</div>
+                          <div className="text-xs text-slate-500">{profile.username} • {profile.department || "Chưa có phòng ban"} • {profile.status}</div>
+                        </div>
+                        {canManageSettings && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => openNewStaffModal(profile)}
+                              className="rounded-xl bg-orange-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-orange-700"
+                            >
+                              Tạo hồ sơ từ tài khoản
+                            </button>
+                            <button
+                              onClick={() => setPersonnelLinkModal({ profileId: profile.id, staffId: availableStaffForAccountLink[0]?.id || "" })}
+                              disabled={availableStaffForAccountLink.length === 0}
+                              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition-all hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Liên kết vào hồ sơ có sẵn
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-sky-200 bg-sky-50/40">
+                  <div className="flex items-center justify-between border-b border-sky-200 px-4 py-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-700">Hồ sơ chưa liên kết tài khoản</h3>
+                      <p className="text-xs text-slate-500">Các hồ sơ này đang dùng độc lập và nên được rà soát định kỳ.</p>
+                    </div>
+                    <button
+                      onClick={() => setStaffViewFilter("unlinked")}
+                      className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs font-bold text-sky-700 transition-all hover:bg-sky-100"
+                    >
+                      Lọc chưa liên kết
+                    </button>
+                  </div>
+                  <div className="divide-y divide-sky-100">
+                    {staffWithoutProfile.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-slate-500">Chưa có hồ sơ nào bị bỏ trống liên kết tài khoản.</div>
+                    ) : staffWithoutProfile.slice(0, 6).map((staff) => (
+                      <div key={staff.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div>
+                          <div className="font-semibold text-slate-700">{staff.ten}</div>
+                          <div className="text-xs text-slate-500">{staff.chuc_vu || "Chưa có chức vụ"} • {staff.group_names.join(", ") || "Chưa có nhóm"}</div>
+                        </div>
+                        {canManageSettings && (
+                          <button
+                            onClick={() => openEditStaffModal(staff)}
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition-all hover:border-slate-400"
+                          >
+                            Mở hồ sơ
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {staffWithoutProfile.length > 6 && (
+                      <div className="px-4 py-3 text-xs text-slate-500">Còn {staffWithoutProfile.length - 6} hồ sơ chưa liên kết khác trong danh sách bên dưới.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {([
+                  { key: "all", label: "Tất cả nhân sự" },
+                  { key: "maintenance", label: "Nhân sự bảo trì" },
+                  { key: "unlinked", label: "Chưa liên kết" },
+                ] as const).map((filter) => (
+                  <button
+                    key={filter.key}
+                    onClick={() => setStaffViewFilter(filter.key)}
+                    className={"rounded-full px-3 py-1.5 text-xs font-bold transition-all " + (staffViewFilter === filter.key ? "bg-sky-100 text-sky-700 border border-sky-200" : "text-slate-500 hover:bg-slate-100")}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Tên", "Tài khoản", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredMaintStaff.length === 0 ? (
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
+                    ) : filteredMaintStaff.map((s) => (
+                      <tr key={`sys-${s.id}`} className="row-hover">
+                        <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_chinh_quyen || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_kim_nhiem || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{s.active ? "Đang làm" : "Ngừng"}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => openEditStaffModal(s)} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => setMaintDelConfirm({ type: "staff", id: s.id, label: s.ten })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/60">
+                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-700">Nhóm</h3>
+                    <p className="text-xs text-slate-500">Danh mục nhóm dùng chung cho Nhân sự, Bảo trì và các module sau này.</p>
+                  </div>
+                  {canManageSettings && (
+                    <button
+                      onClick={() => {
+                        setMaintEditId(null)
+                        setMaintError("")
+                        setPersonnelGroupForm({ code: "", name: "", description: "", sort_order: "0", is_active: true })
+                        setMaintModal("staff-group")
+                      }}
+                      className="flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-slate-900"
+                    >
+                      <Plus size={13} /> Thêm nhóm
+                    </button>
+                  )}
+                </div>
+                <div className="overflow-hidden rounded-b-2xl">
+                  <table className="w-full text-sm">
+                    <thead className="bg-white border-b border-slate-200">
+                      <tr>
+                        {["Mã", "Tên nhóm", "Mô tả", "Loại", "Thứ tự", "Trạng thái", ""].map((h) => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {personnelGroups.length === 0 ? (
+                        <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có nhóm nào</td></tr>
+                      ) : personnelGroups.map((group) => (
+                        <tr key={group.id} className="row-hover">
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{group.code || "—"}</td>
+                          <td className="px-4 py-3 font-medium text-slate-700">{group.name}</td>
+                          <td className="px-4 py-3 text-slate-500">{group.description || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">{group.is_system ? "Hệ thống" : "Tự tạo"}</td>
+                          <td className="px-4 py-3 text-slate-500">{group.sort_order}</td>
+                          <td className="px-4 py-3">
+                            <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (group.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>
+                              {group.is_active ? "Đang dùng" : "Ngừng"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {canManageSettings && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => {
+                                    setMaintEditId(group.id)
+                                    setMaintError("")
+                                    setPersonnelGroupForm({
+                                      code: group.code || "",
+                                      name: group.name,
+                                      description: group.description || "",
+                                      sort_order: String(group.sort_order ?? 0),
+                                      is_active: group.is_active,
+                                    })
+                                    setMaintModal("staff-group")
+                                  }}
+                                  className="rounded-lg p-1.5 text-blue-500 transition-colors hover:bg-blue-50"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                {!group.is_system && (
+                                  <button
+                                    onClick={() => setMaintDelConfirm({ type: "staff-group", id: group.id, label: group.name })}
+                                    className="rounded-lg p-1.5 text-red-400 transition-colors hover:bg-red-50"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          )}
+
           {systemTab === "permissions" && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
             <div className="bg-gradient-to-r from-indigo-50 to-sky-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
@@ -1937,14 +2509,14 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-4">
                 {Object.entries(groupedPermissions).map(([moduleName, options]) => (
                   <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
-                    <div className="font-bold text-slate-800 mb-3">{moduleName}</div>
+                      <div className="font-bold text-slate-800 mb-3">{options[0]?.module_label || moduleName}</div>
                     <div className="flex flex-wrap gap-2">
                       {options.map((option) => (
                         <span
                           key={option.code}
                           className="px-2 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700"
                         >
-                          {option.action_name}
+                          {option.action_label || option.action_name}
                         </span>
                       ))}
                     </div>
@@ -2718,7 +3290,7 @@ export default function SettingsPage() {
                     onClick={() => {
                       setMaintEditId(null); setMaintError("")
                       if (maintTab === "assets") { setAssetForm({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" }); setMaintModal("asset") }
-                      else if (maintTab === "staff") { setStaffForm({ ten: "", chuc_vu: "", email: "", active: true }); setMaintModal("staff") }
+                      else if (maintTab === "staff") openNewStaffModal()
                       else if (maintTab === "vehicles") { setConfigEditId(null); setConfigError(""); setDispatchVehicleForm(emptyDispatchVehicleForm(String((dispatchVehicles.length > 0 ? Math.max(...dispatchVehicles.map(v => v.sort_order || 0)) + 1 : 1)))); setConfigModal("vehicle") }
                       else { setExtMatForm({ ten_vat_tu: "", dvt: "", code: "", specification: "", category_id: "", is_active: true }); setMaintModal("ext-mat") }
                     }}
@@ -2738,7 +3310,7 @@ export default function SettingsPage() {
                     onClick={() => setMaintTab(key)}
                     className={"flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all " + (maintTab === key ? "bg-orange-100 text-orange-700 border border-orange-200" : "text-slate-500 hover:bg-slate-50")}
                   >
-                    {key === "assets" ? <><Car size={13} /> Thiết bị</> : key === "staff" ? <><UserCog size={13} /> Nhân sự bảo trì</> : key === "vehicles" ? <><Car size={13} /> Xe &amp; Tài xế</> : <><ShoppingBag size={13} /> Vật tư ngoài</>}
+                    {key === "assets" ? <><Car size={13} /> Thiết bị</> : key === "staff" ? <><UserCog size={13} /> Nhân sự</> : key === "vehicles" ? <><Car size={13} /> Xe &amp; Tài xế</> : <><ShoppingBag size={13} /> Vật tư ngoài</>}
                   </button>
                 ))}
               </div>
@@ -2881,28 +3453,49 @@ export default function SettingsPage() {
                 </div>
                 </>
               ) : maintTab === "staff" ? (
+                <>
+                <div className="mb-3 flex items-center gap-2">
+                  {([
+                    { key: "all", label: "Tất cả nhân sự" },
+                    { key: "maintenance", label: "Nhân sự bảo trì" },
+                    { key: "unlinked", label: "Chưa liên kết" },
+                  ] as const).map((filter) => (
+                    <button
+                      key={filter.key}
+                      onClick={() => setStaffViewFilter(filter.key)}
+                      className={"rounded-full px-3 py-1.5 text-xs font-bold transition-all " + (staffViewFilter === filter.key ? "bg-sky-100 text-sky-700 border border-sky-200" : "text-slate-500 hover:bg-slate-100")}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Tên", "Chức vụ", "Trạng thái", ""].map((h) => (
+                      {["Tên", "Tài khoản", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {maintStaff.length === 0 ? (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự</td></tr>
-                    ) : maintStaff.map((s) => (
+                    {filteredMaintStaff.length === 0 ? (
+                      <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
+                    ) : filteredMaintStaff.map((s) => (
                       <tr key={s.id} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_chinh_quyen || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_kim_nhiem || "—"}</td>
                         <td className="px-4 py-3">
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{s.active ? "Đang làm" : "Ngừng"}</span>
                         </td>
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setMaintEditId(s.id); setMaintError(""); setStaffForm({ ten: s.ten, chuc_vu: s.chuc_vu || "", email: (s as { email?: string | null }).email || "", active: s.active }); setMaintModal("staff") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => openEditStaffModal(s)} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "staff", id: s.id, label: s.ten })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -2911,6 +3504,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -3019,7 +3613,7 @@ export default function SettingsPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhân sự" : "Thêm nhân sự bảo trì"}</h2>
+              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhân sự" : "Thêm nhân sự"}</h2>
               <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -3029,12 +3623,83 @@ export default function SettingsPage() {
                 <input value={staffForm.ten} onChange={e => setStaffForm(p => ({ ...p, ten: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nguyễn Văn A" />
               </div>
               <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Liên kết tài khoản</label>
+                <select
+                  value={staffForm.profile_id}
+                  onChange={(e) => {
+                    const nextProfileId = e.target.value
+                    const linkedProfile = availableProfilesForStaffForm.find((profile) => profile.id === nextProfileId)
+                    setStaffForm((prev) => ({
+                      ...prev,
+                      profile_id: nextProfileId,
+                      ten: linkedProfile && !prev.ten.trim() ? linkedProfile.full_name : prev.ten,
+                    }))
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  <option value="">Không liên kết</option>
+                  {availableProfilesForStaffForm.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.full_name} ({profile.username})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm</label>
+                {personnelGroups.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                    Chưa có danh mục nhóm. Chạy migration `personnel_groups` để bật tính năng này.
+                  </div>
+                ) : (
+                  <div className="max-h-40 space-y-2 overflow-auto rounded-xl border border-slate-300 px-3 py-2">
+                    {personnelGroups.filter((group) => group.is_active !== false).map((group) => {
+                      const checked = staffForm.group_ids.includes(group.id)
+                      return (
+                        <label key={group.id} className="flex items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => setStaffForm((prev) => ({
+                              ...prev,
+                              group_ids: e.target.checked
+                                ? [...prev.group_ids, group.id]
+                                : prev.group_ids.filter((item) => item !== group.id),
+                            }))}
+                          />
+                          <span>{group.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ</label>
                 <input value={staffForm.chuc_vu} onChange={e => setStaffForm(p => ({ ...p, chuc_vu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nhân viên kỹ thuật" />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Email nhận thông báo</label>
                 <input type="email" value={staffForm.email} onChange={e => setStaffForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: giamdoc@gmail.com" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Giới tính</label>
+                  <select value={staffForm.gioi_tinh} onChange={e => setStaffForm(p => ({ ...p, gioi_tinh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                    <option value="">Chưa chọn</option>
+                    <option value="Nam">Nam</option>
+                    <option value="Nữ">Nữ</option>
+                    <option value="Khác">Khác</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ chính quyền</label>
+                  <input value={staffForm.chuc_vu_chinh_quyen} onChange={e => setStaffForm(p => ({ ...p, chuc_vu_chinh_quyen: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Chủ tịch công đoàn" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ kiêm nhiệm</label>
+                <input value={staffForm.chuc_vu_kim_nhiem} onChange={e => setStaffForm(p => ({ ...p, chuc_vu_kim_nhiem: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Trưởng ban ISO" />
               </div>
               <div className="flex items-center gap-3">
                 <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
@@ -3043,6 +3708,86 @@ export default function SettingsPage() {
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
                 <button onClick={saveMaintStaff} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {personnelLinkModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-800">Liên kết vào hồ sơ có sẵn</h2>
+                <p className="text-xs text-slate-500">
+                  {profiles.find((profile) => profile.id === personnelLinkModal.profileId)?.full_name || "Tài khoản đã chọn"}
+                </p>
+              </div>
+              <button onClick={() => setPersonnelLinkModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Chọn hồ sơ chưa liên kết</label>
+                <select
+                  value={personnelLinkModal.staffId}
+                  onChange={(e) => setPersonnelLinkModal((prev) => (prev ? { ...prev, staffId: e.target.value } : prev))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  <option value="">Chọn hồ sơ</option>
+                  {availableStaffForAccountLink.map((staff) => (
+                    <option key={staff.id} value={staff.id}>
+                      {staff.ten}{staff.chuc_vu ? ` - ${staff.chuc_vu}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setPersonnelLinkModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={handleQuickLinkProfileToStaff} disabled={maintSaving || !personnelLinkModal.staffId} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
+                  {maintSaving ? "Đang lưu..." : "Liên kết"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintModal === "staff-group" && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhóm" : "Thêm nhóm"}</h2>
+              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã nhóm</label>
+                  <input value={personnelGroupForm.code} onChange={e => setPersonnelGroupForm((p) => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: bao-tri" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                  <input value={personnelGroupForm.sort_order} onChange={e => setPersonnelGroupForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" inputMode="numeric" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên nhóm *</label>
+                <input value={personnelGroupForm.name} onChange={e => setPersonnelGroupForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Bảo trì" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả</label>
+                <textarea value={personnelGroupForm.description} onChange={e => setPersonnelGroupForm((p) => ({ ...p, description: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 min-h-[96px]" placeholder="Nhóm dùng cho phê duyệt, bảo trì hoặc quản lý công việc..." />
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="personnel-group-active" checked={personnelGroupForm.is_active} onChange={e => setPersonnelGroupForm((p) => ({ ...p, is_active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
+                <label htmlFor="personnel-group-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+                <button onClick={savePersonnelGroup} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu nhóm"}</button>
               </div>
             </div>
           </div>
@@ -3363,7 +4108,7 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   {Object.entries(groupedPermissions).map(([moduleName, options]) => (
                     <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
-                      <div className="font-bold text-slate-800 mb-3">{moduleName}</div>
+                      <div className="font-bold text-slate-800 mb-3">{options[0]?.module_label || moduleName}</div>
                       <div className="space-y-2">
                         {options.map((option) => (
                           <label key={option.code} className="flex items-center gap-2 text-sm text-slate-700">
@@ -3373,7 +4118,7 @@ export default function SettingsPage() {
                               onChange={() => togglePermission(option.code)}
                               className="rounded border-slate-300"
                             />
-                            <span>{option.action_name}</span>
+                            <span>{option.action_label || option.action_name}</span>
                           </label>
                         ))}
                       </div>
@@ -3385,7 +4130,7 @@ export default function SettingsPage() {
 
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setUserEditor(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Huy
+                Hủy
               </button>
               <button
                 onClick={saveUserApproval}

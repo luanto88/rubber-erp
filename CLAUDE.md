@@ -309,6 +309,7 @@ Vi du:
 - Bao tri: `.claude/rules/14-maintenance-module.md`
 - San luong: `.claude/rules/15-output-module.md`
 - Dieu xe: `.claude/rules/19-dispatch-module.md`
+- Thuc hien ho so ISO (form instances + pgvector search): `.claude/rules/20-iso-forms-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
 - ISO và hồ sơ con: đọc `.claude/rules/16-iso-vanban-module.md` và `.claude/rules/17-iso-soat-xet.md`; ưu tiên các mục "Cập nhật mới nhất (2026-05-28)" nếu có mâu thuẫn với logic cũ.
 

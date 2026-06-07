@@ -13,7 +13,7 @@ import {
   writeBackToDispatch,
   type WarnCode,
 } from "./_components/output-types"
-import { OutputImport, matchRows } from "./_components/output-import"
+import { OutputImport } from "./_components/output-import"
 import { OutputForm } from "./_components/output-form"
 import { loadRequiredNotes } from "@/lib/required-notes"
 
@@ -66,6 +66,11 @@ function StatCard({ label, value, sub, color = "emerald" }: {
       {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
     </div>
   )
+}
+
+function renderSortIcon(col: "ngay" | "doi" | "so_xe", sortCol: "ngay" | "doi" | "so_xe", sortAsc: boolean) {
+  if (sortCol !== col) return null
+  return sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -131,24 +136,6 @@ export default function OutputPage() {
     setDeliveryPoints((dp as DeliveryPoint[]) || [])
   }, [])
 
-  const loadDispatches = useCallback(async (fid: string) => {
-    // Load toàn bộ dispatch — không lọc theo ngày vì ngay có thể lưu dạng dd/mm/yyyy hoặc YYYY-MM-DD
-    const { data } = await supabase
-      .from("dispatch_entries")
-      .select("id, ngay, rows")
-      .eq("factory_id", fid)
-    setDispatches((data as DispatchEntry[]) || [])
-  }, [])
-
-  const loadNoteOptions = useCallback(async (fid: string) => {
-    try {
-      const rows = await loadRequiredNotes(supabase, fid)
-      setRequiredNotes(rows.map((row) => row.content))
-    } catch {
-      setRequiredNotes([])
-    }
-  }, [])
-
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
@@ -160,12 +147,47 @@ export default function OutputPage() {
   }, [loadSupportData])
 
   useEffect(() => {
-    if (factoryId) {
-      void loadRecords(factoryId)
-      void loadDispatches(factoryId)
-      void loadNoteOptions(factoryId)
+    if (!factoryId) return
+
+    let active = true
+    const refreshPageData = async () => {
+      setLoading(true)
+      try {
+        const [recordsResult, dispatchResult, noteRows] = await Promise.all([
+          supabase
+            .from("production_records")
+            .select("*")
+            .eq("factory_id", factoryId)
+            .gte("ngay", filterFrom)
+            .lte("ngay", filterTo)
+            .order("ngay", { ascending: false })
+            .order("so_xe")
+            .order("chuyen"),
+          supabase
+            .from("dispatch_entries")
+            .select("id, ngay, rows")
+            .eq("factory_id", factoryId),
+          loadRequiredNotes(supabase, factoryId),
+        ])
+
+        if (!active) return
+
+        setRecords((recordsResult.data as ProductionRecord[]) || [])
+        setDispatches((dispatchResult.data as DispatchEntry[]) || [])
+        setRequiredNotes(noteRows.map((row) => row.content))
+      } catch {
+        if (!active) return
+        setRequiredNotes([])
+      } finally {
+        if (active) setLoading(false)
+      }
     }
-  }, [factoryId, loadRecords, loadDispatches, loadNoteOptions])
+
+    void refreshPageData()
+    return () => {
+      active = false
+    }
+  }, [factoryId, filterFrom, filterTo])
 
   // ── Filtered + sorted records ────────────────────────────────
   const filtered = records
@@ -258,9 +280,6 @@ export default function OutputPage() {
     void loadRecords(factoryId)
     if (rec) void writeBackToDispatch(factoryId, rec.ngay, supabase).catch(() => {})
   }
-
-  const SortIcon = ({ col }: { col: typeof sortCol }) =>
-    sortCol === col ? (sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null
 
   // ── Render ────────────────────────────────────────────────────
   return (
@@ -370,13 +389,13 @@ export default function OutputPage() {
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th onClick={() => toggleSort("ngay")} className="px-3 py-3 text-left font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1">Ngày <SortIcon col="ngay" /></span>
+                        <span className="flex items-center gap-1">Ngày {renderSortIcon("ngay", sortCol, sortAsc)}</span>
                       </th>
                       <th onClick={() => toggleSort("doi")} className="px-3 py-3 text-center font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1 justify-center">Đội <SortIcon col="doi" /></span>
+                        <span className="flex items-center gap-1 justify-center">Đội {renderSortIcon("doi", sortCol, sortAsc)}</span>
                       </th>
                       <th onClick={() => toggleSort("so_xe")} className="px-3 py-3 text-left font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1">Số xe <SortIcon col="so_xe" /></span>
+                        <span className="flex items-center gap-1">Số xe {renderSortIcon("so_xe", sortCol, sortAsc)}</span>
                       </th>
                       <th className="px-3 py-3 text-center font-bold text-slate-600">Chuyến</th>
                       <th className="px-3 py-3 text-left font-bold text-slate-600">Tài xế</th>

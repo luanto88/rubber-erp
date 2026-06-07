@@ -132,3 +132,62 @@ production_records thay doi (import / save / delete)
 - Neu ngay do khong co uid nao thuoc ngan → ngan khong bi anh huong → khong co UPDATE.
 - Nguoi dung **khong can mo lai form ngan** de cap nhat KL — he thong tu dong xu ly.
 - Ham `getNganKL` trong `output-types.ts` phai mirror chinh xac `getKLFromTrip` trong `storage/page.tsx`. Neu sua mot ham, phai sua ca hai.
+
+## 10. Cập nhật session 2026-06-06 - Ngăn lưu
+
+### Phạm vi đã chốt
+
+- Đã chạy migration thêm 2 cột `xe_tu_ngay`, `xe_den_ngay` vào bảng `ngans`.
+- View dashboard ngăn và PDF chi tiết ngăn hiện đã hoạt động lại sau khi DB có đủ cột.
+- QR tra cứu ngăn dùng route chi tiết `/dashboard/storage/[id]`.
+
+### Rule nghiệp vụ đã áp dụng
+
+- `Xé từ ngày = ngay_bd + 1`
+- `Xé đến ngày = ngay_kt + 1`
+- Báo cáo theo kỳ chỉ lấy các ngăn có:
+  - `ngay_bd >= tu_ngay`
+  - `ngay_kt <= den_ngay`
+- Ngăn chưa có `ngay_kt` thì không vào báo cáo kỳ.
+
+### Rule UI chi tiết ngăn
+
+- Danh sách thành phẩm trong modal chi tiết vẫn đi theo luồng:
+  - `ngăn -> nhóm thành phẩm -> ngày sản xuất -> lô chi tiết`
+- Khi danh sách dài, modal phải có vùng cuộn riêng để không làm kẹt nút đóng.
+- Hành động trên card dashboard hiện có thêm:
+  - mở QR / tra cứu
+  - xuất PDF chi tiết
+  - xuất GeoJSON
+  - xem chi tiết
+  - sửa
+  - xóa
+
+### Rule xuất GeoJSON của ngăn
+
+- Nút `GeoJSON` nằm cạnh nút `Xuất PDF` trên card ngăn ở dashboard.
+- GeoJSON lấy theo toàn bộ `trip uid` đã gắn trong `ngans.trips`.
+- Nguồn dữ liệu lô vườn:
+  - ưu tiên `forest_plots`
+  - fallback file tĩnh `/geojson/Lo cao su - 2026_Full.geojson`
+- Nếu ngăn chưa có `lo_thu_hoach` từ các chuyến đã gắn thì không xuất file, phải báo lỗi rõ cho người dùng.
+
+### Rule PDF chi tiết ngăn
+
+- QR của phiếu chi tiết ngăn phải nằm gọn trong header màu xanh, góc phải.
+- Không để QR rơi xuống vùng bảng `Thông tin ngăn lưu`.
+- Header phiếu hiện gồm:
+  - tên nhà máy
+  - dòng mô tả báo cáo
+  - tiêu đề phiếu
+  - dòng thời gian nguyên liệu
+  - QR góc phải
+
+### File chính đã chạm trong session này
+
+- `src/app/dashboard/storage/page.tsx`
+- `src/lib/storage-detail.ts`
+- `src/lib/storage-pdf.ts`
+- `supabase/migrations/20260606_storage_xe_dates.sql`
+- `supabase/schema.sql`
+- `src/types/index.ts`
