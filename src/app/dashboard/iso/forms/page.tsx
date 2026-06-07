@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   Search, Plus, FolderOpen, AlertTriangle, X,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
+  Eye, Pencil, Trash2,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
@@ -387,6 +388,10 @@ export default function IsoFormsPage() {
   // Lập hồ sơ quick dialog
   const [lapHoSoOpen, setLapHoSoOpen] = useState(false)
 
+  // Role & delete
+  const [userRole, setUserRole] = useState("")
+  const [delConfirm, setDelConfirm] = useState<string | null>(null)
+
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Bootstrap
@@ -398,8 +403,10 @@ export default function IsoFormsPage() {
         const session = await getFreshAuthSession()
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
+        const { data: prof } = await supabase.from("profiles").select("role").eq("id", uid).single()
         setFactoryId(fid)
         setUserId(uid)
+        setUserRole(prof?.role || "")
       } finally {
         setLoading(false)
       }
@@ -407,16 +414,19 @@ export default function IsoFormsPage() {
     void bootstrap()
   }, [])
 
-  const loadInstances = useCallback(async (fid: string, uid: string) => {
+  const loadInstances = useCallback(async (fid: string, uid: string, role = "") => {
     setInstLoading(true)
     try {
-      const { data } = await supabase
+      let query = supabase
         .from("iso_form_instances")
         .select("*")
         .eq("factory_id", fid)
-        .or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
         .order("created_at", { ascending: false })
-        .limit(50)
+        .limit(100)
+      if (role !== "admin") {
+        query = query.or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
+      }
+      const { data } = await query
       setInstances((data ?? []) as IsoFormInstance[])
     } finally {
       setInstLoading(false)
@@ -424,8 +434,15 @@ export default function IsoFormsPage() {
   }, [])
 
   useEffect(() => {
-    if (factoryId && userId) void loadInstances(factoryId, userId)
-  }, [factoryId, userId, loadInstances])
+    if (factoryId && userId) void loadInstances(factoryId, userId, userRole)
+  }, [factoryId, userId, userRole, loadInstances])
+
+  const handleDeleteInst = async (instId: string) => {
+    if (!factoryId || !userId) return
+    await supabase.from("iso_form_instances").delete().eq("id", instId)
+    setDelConfirm(null)
+    void loadInstances(factoryId, userId, userRole)
+  }
 
   const handleSearch = async () => {
     if (!searchQuery.trim() || !factoryId) return
@@ -636,17 +653,10 @@ export default function IsoFormsPage() {
               </thead>
               <tbody>
                 {filteredInstances.map((inst) => {
-                  let actionLabel = "Mở"
-                  let actionColor = "bg-slate-100 text-slate-600"
-                  if (inst.trang_thai === "draft" && inst.nguoi_tao === userId) {
-                    actionLabel = "Ký & Gửi"; actionColor = "bg-emerald-100 text-emerald-700"
-                  } else if (inst.trang_thai === "cho_xem_xet" && inst.xem_xet_user_id === userId) {
-                    actionLabel = "Xem xét"; actionColor = "bg-blue-100 text-blue-700"
-                  } else if (inst.trang_thai === "cho_phe_duyet" && inst.phe_duyet_user_id === userId) {
-                    actionLabel = "Phê duyệt"; actionColor = "bg-green-100 text-green-700"
-                  } else if (inst.trang_thai === "tra_ve") {
-                    actionLabel = "Xem lý do"; actionColor = "bg-amber-100 text-amber-700"
-                  }
+                  const isAdmin = userRole === "admin"
+                  const isCreator = inst.nguoi_tao === userId
+                  const canEditInst = (inst.trang_thai === "draft" && isCreator) || isAdmin
+                  const canDeleteInst = (inst.trang_thai === "draft" && isCreator) || isAdmin
                   return (
                     <tr
                       key={inst.id}
@@ -666,10 +676,34 @@ export default function IsoFormsPage() {
                       <td className="px-4 py-3">
                         <span className="text-xs text-slate-500">{inst.cap_tl}</span>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`inline-flex px-4 py-1.5 rounded-lg text-sm font-bold ${actionColor}`}>
-                          {actionLabel}
-                        </span>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            title="Xem chi tiết"
+                            onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                          >
+                            <Eye size={14} />
+                          </button>
+                          {canEditInst && (
+                            <button
+                              title="Sửa"
+                              onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
+                              className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          {canDeleteInst && (
+                            <button
+                              title="Xóa"
+                              onClick={() => setDelConfirm(inst.id)}
+                              className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -702,6 +736,30 @@ export default function IsoFormsPage() {
             router.push(`/dashboard/iso/forms/${instanceId}`)
           }}
         />
+      )}
+
+      {/* Delete confirm dialog */}
+      {delConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></div>
+              <h3 className="font-bold text-slate-800">Xóa hồ sơ?</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-5">Hành động này không thể hoàn tác. Hồ sơ và file đính kèm sẽ bị xóa vĩnh viễn.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleDeleteInst(delConfirm)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl"
+              >
+                Xóa
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </IsoShell>
   )

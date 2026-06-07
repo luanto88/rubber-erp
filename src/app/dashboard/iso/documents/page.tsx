@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import {
   TRANG_THAI_LABEL,
@@ -16,13 +16,16 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2 } from "lucide-react"
 import Link from "next/link"
 
 export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [userRole, setUserRole] = useState("")
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<IsoDocument[]>([])
+  const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [standards, setStandards] = useState<IsoStandard[]>(ISO_STANDARD_FALLBACK)
   const [docTypes, setDocTypes] = useState<IsoDocumentTypeMaster[]>(isoDocumentTypeFallback())
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
@@ -42,7 +45,7 @@ export default function IsoDocumentsPage() {
         supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at",
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false }),
@@ -75,6 +78,13 @@ export default function IsoDocumentsPage() {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
+      const session = await getFreshAuthSession()
+      const uid = session?.user?.id
+      if (uid) {
+        setUserId(uid)
+        const { data: prof } = await supabase.from("profiles").select("role").eq("id", uid).single()
+        if (prof) setUserRole(prof.role || "")
+      }
       setFactoryId(fid)
     }
     void bootstrap()
@@ -83,6 +93,13 @@ export default function IsoDocumentsPage() {
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
   }, [factoryId, loadData])
+
+  const handleDeleteDoc = async (docId: string) => {
+    if (!factoryId) return
+    await supabase.from("iso_documents").delete().eq("id", docId)
+    setDelConfirm(null)
+    void loadData(factoryId)
+  }
 
   const filtered = docs.filter((d) => {
     const q = search.toLowerCase()
@@ -328,12 +345,40 @@ export default function IsoDocumentsPage() {
                       {fmtDate(doc.ngay_hieu_luc)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/dashboard/iso/documents/${doc.id}`}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-violet-100 text-slate-600 hover:text-violet-700 text-xs font-bold rounded-lg transition-all"
-                      >
-                        <Eye size={12} /> Chi tiết
-                      </Link>
+                      {(() => {
+                        const isAdmin = userRole === "admin"
+                        const canEditDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
+                        const canDeleteDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
+                        return (
+                          <div className="inline-flex items-center gap-1">
+                            <Link
+                              href={`/dashboard/iso/documents/${doc.id}`}
+                              title="Xem chi tiết"
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                              <Eye size={14} />
+                            </Link>
+                            {canEditDoc && (
+                              <Link
+                                href={`/dashboard/iso/documents/${doc.id}`}
+                                title="Sửa"
+                                className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                              >
+                                <Pencil size={14} />
+                              </Link>
+                            )}
+                            {canDeleteDoc && (
+                              <button
+                                title="Xóa"
+                                onClick={() => setDelConfirm(doc.id)}
+                                className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                   </tr>
                   {isExpanded && childRows.map((child) => (
@@ -356,12 +401,40 @@ export default function IsoDocumentsPage() {
                       <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
                       <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
                       <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/dashboard/iso/documents/${child.id}`}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-violet-100 text-slate-600 hover:text-violet-700 text-xs font-bold rounded-lg transition-all"
-                        >
-                          <Eye size={12} /> Chi tiết
-                        </Link>
+                        {(() => {
+                          const isAdmin = userRole === "admin"
+                          const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          return (
+                            <div className="inline-flex items-center gap-1">
+                              <Link
+                                href={`/dashboard/iso/documents/${child.id}`}
+                                title="Xem chi tiết"
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                              >
+                                <Eye size={14} />
+                              </Link>
+                              {canEditChild && (
+                                <Link
+                                  href={`/dashboard/iso/documents/${child.id}`}
+                                  title="Sửa"
+                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </Link>
+                              )}
+                              {canDeleteChild && (
+                                <button
+                                  title="Xóa"
+                                  onClick={() => setDelConfirm(child.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -378,6 +451,30 @@ export default function IsoDocumentsPage() {
           )}
         </div>
       </div>
+
+      {/* Delete confirm dialog */}
+      {delConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></div>
+              <h3 className="font-bold text-slate-800">Xóa tài liệu?</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-5">Hành động này không thể hoàn tác. Tài liệu và file liên quan sẽ bị xóa vĩnh viễn.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleDeleteDoc(delConfirm)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl"
+              >
+                Xóa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </IsoShell>
   )
 }

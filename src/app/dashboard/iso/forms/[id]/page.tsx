@@ -659,13 +659,17 @@ export default function IsoFormInstancePage() {
     setUploadError(null)
     try {
       const ext = fileToUpload.name.split(".").pop()?.toLowerCase() ?? "docx"
-      if (ext === "pdf") setAutoConvertPdf(true)
+      if (ext === "pdf") {
+        setAutoConvertPdf(true)
+      } else {
+        setAutoConvertPdf(false)
+      }
       const storagePath = `${factoryId}/iso/instances/${instanceId}/draft.${ext}`
       const { error } = await supabase.storage.from("iso-documents").upload(storagePath, fileToUpload, { upsert: true })
       if (error) { setUploadError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(storagePath)
       const updateData: Record<string, unknown> = { draft_file_url: urlData.publicUrl, draft_file_type: ext }
-      if (ext === "pdf") updateData.auto_convert_pdf = true
+      updateData.auto_convert_pdf = ext === "pdf"
       const { error: upErr } = await supabase.from("iso_form_instances")
         .update(updateData)
         .eq("id", instanceId)
