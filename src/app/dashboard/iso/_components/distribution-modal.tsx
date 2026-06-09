@@ -22,6 +22,14 @@ type RecipientOption = {
   alreadyReceived?: boolean
 }
 
+type RecipientApiItem = {
+  id: string
+  full_name: string | null
+  username: string | null
+  department: string | null
+  alreadyReceived: boolean
+}
+
 type Props = {
   factoryId: string
   userId: string
@@ -83,52 +91,34 @@ export function DistributionModal({
   }, [factoryId])
 
   // Load người nhận khi vào bước 2
+  // Dùng API thay vì query trực tiếp để bypass RLS (profiles chỉ cho admin đọc tất cả)
   const loadRecipients = useCallback(async () => {
     if (selectedDocIds.length === 0) return
     setLoadingRecipients(true)
-
-    const [profilesRes, existingRes] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("id, full_name, username, department")
-        .eq("factory_id", factoryId)
-        .eq("status", "active"),
-      supabase
-        .from("iso_distribution_recipients")
-        .select("recipient_user_id, iso_document_id")
-        .eq("factory_id", factoryId)
-        .in("iso_document_id", selectedDocIds),
-    ])
-
-    const existingSet = new Set(
-      ((
-        existingRes.data as Array<{
-          recipient_user_id: string
-          iso_document_id: string
-        }>
-      ) || []).map((r) => r.recipient_user_id),
-    )
-
-    const allProfiles = (
-      profilesRes.data as Array<{
-        id: string
-        full_name: string | null
-        username: string | null
-        department: string | null
-      }>
-    ) || []
-
-    setRecipients(
-      allProfiles.map((p) => ({
-        id: p.id,
-        full_name: p.full_name,
-        username: p.username,
-        department: p.department,
-        displayName: `${p.full_name || p.username || "Không rõ"} — ${p.department || "Chưa phân phòng"}`,
-        alreadyReceived: existingSet.has(p.id),
-      })),
-    )
-    setLoadingRecipients(false)
+    try {
+      const params = new URLSearchParams({
+        factoryId,
+        docIds: selectedDocIds.join(","),
+      })
+      const res = await fetch(`/api/iso/distribute?${params.toString()}`)
+      const json = (await res.json()) as { recipients?: RecipientApiItem[]; error?: string }
+      if (!res.ok || !json.recipients) {
+        setRecipients([])
+        return
+      }
+      setRecipients(
+        json.recipients.map((r) => ({
+          id: r.id,
+          full_name: r.full_name,
+          username: r.username,
+          department: r.department,
+          displayName: `${r.full_name || r.username || "Không rõ"} — ${r.department || "Chưa phân phòng"}`,
+          alreadyReceived: r.alreadyReceived,
+        })),
+      )
+    } finally {
+      setLoadingRecipients(false)
+    }
   }, [factoryId, selectedDocIds])
 
   useEffect(() => {

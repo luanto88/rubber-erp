@@ -23,6 +23,7 @@ Mọi dữ liệu phải gắn `factory_id` và lọc theo nhà máy đang đăn
 - `20260527_iso_office_signing.sql`
 - `20260530_iso_auto_convert_pdf.sql`
 - `20260603_iso_lan_ban_hanh_text.sql`
+- `20260609_iso_distribution.sql` — Tạo bảng `iso_distribution_batches`, `iso_distribution_recipients`; indexes; RLS; seed `iso.distribute` vào `permissions` và cấp mặc định cho `admin`, `manager` trong `role_permissions`
 
 Các migration đánh dấu “chạy thủ công” trong lịch sử phải được xác nhận đã áp dụng ở môi trường production trước khi kết luận lỗi là do code.
 

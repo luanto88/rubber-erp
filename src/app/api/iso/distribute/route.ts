@@ -9,6 +9,88 @@ const supabaseAdmin = createClient(
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
+// GET /api/iso/distribute?factoryId=xxx&docIds=id1,id2
+// Trả về danh sách active profiles + thông tin đã nhận trước đó
+// Dùng supabaseAdmin để bypass RLS (manager cần xem tất cả users trong factory)
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const factoryId = searchParams.get("factoryId")
+    const docIdsParam = searchParams.get("docIds")
+
+    if (!factoryId) {
+      return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
+    }
+
+    const docIds = docIdsParam ? docIdsParam.split(",").filter(Boolean) : []
+
+    const [profilesRes, deptsRes, existingRes] = await Promise.all([
+      supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, username, department, department_id")
+        .eq("factory_id", factoryId)
+        .eq("status", "active")
+        .order("full_name"),
+      supabaseAdmin.from("departments").select("id, code, name").eq("is_active", true),
+      docIds.length > 0
+        ? supabaseAdmin
+            .from("iso_distribution_recipients")
+            .select("recipient_user_id, iso_document_id")
+            .eq("factory_id", factoryId)
+            .in("iso_document_id", docIds)
+        : Promise.resolve({ data: [], error: null }),
+    ])
+
+    if (profilesRes.error) {
+      return NextResponse.json({ error: profilesRes.error.message }, { status: 500 })
+    }
+
+    const depts = (deptsRes.data || []) as Array<{ id: string; code: string; name: string }>
+    const deptNameById = new Map(depts.map((d) => [d.id, d.name]))
+    const deptNameByCode = new Map(depts.map((d) => [d.code, d.name]))
+    const deptNameValues = new Set(depts.map((d) => d.name))
+
+    const existingSet = new Set(
+      ((existingRes.data || []) as Array<{ recipient_user_id: string }>).map(
+        (r) => r.recipient_user_id,
+      ),
+    )
+
+    const recipients = (
+      profilesRes.data as Array<{
+        id: string
+        full_name: string | null
+        username: string | null
+        department: string | null
+        department_id: string | null
+      }>
+    ).map((p) => {
+      let deptName: string | null = null
+      if (p.department_id) {
+        deptName = deptNameById.get(p.department_id) ?? p.department
+      } else if (p.department) {
+        deptName = deptNameValues.has(p.department)
+          ? p.department
+          : (deptNameByCode.get(p.department) ?? p.department)
+      }
+      return {
+        id: p.id,
+        full_name: p.full_name,
+        username: p.username,
+        department: deptName,
+        alreadyReceived: existingSet.has(p.id),
+      }
+    })
+
+    return NextResponse.json({ recipients })
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Lỗi server" },
+      { status: 500 },
+    )
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { factoryId, docIds, recipientUserIds, ghiChu, distributorUserId } =

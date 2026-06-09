@@ -91,12 +91,12 @@ CREATE POLICY "iso_distrib_recipients_delete" ON iso_distribution_recipients
   );
 
 -- Thêm permission iso.distribute vào bảng permissions
-INSERT INTO permissions (code, ten, mo_ta, module, nhom)
-VALUES (
-  'iso.distribute',
-  'Phân phối tài liệu',
-  'Phân phối tài liệu ISO cho người nhận, theo dõi xem/tải',
-  'iso',
-  'Tài liệu ISO'
-)
+INSERT INTO permissions (code, module_name, action_name)
+VALUES ('iso.distribute', 'iso', 'distribute')
 ON CONFLICT (code) DO NOTHING;
+
+-- Cấp mặc định cho admin và manager
+INSERT INTO role_permissions (role, permission_code) VALUES
+  ('admin', 'iso.distribute'),
+  ('manager', 'iso.distribute')
+ON CONFLICT DO NOTHING;
