@@ -88,6 +88,7 @@ Permissions hiệu lực:
 - `iso.view`, `iso.create`, `iso.edit`, `iso.delete`
 - `iso.soat_xet`, `iso.xem_xet`, `iso.phe_duyet`, `iso.print`
 - `iso.signature`
+- `iso.distribute` — phân phối tài liệu đến người dùng; cấp mặc định cho `admin` và `manager`
 - `documents.view`, `documents.create`, `documents.edit`, `documents.delete`
 - `documents.ky_phong_ban`, `documents.phe_duyet`, `documents.print`
 - `settings.master_data`, `settings.maintenance_config`
@@ -342,6 +343,40 @@ File rule này chỉ giữ lại các nguyên tắc chung đã ổn định:
 - Guard permission phải có ở cả UI và API
 
 Các quy tắc chi tiết riêng của văn bản nội bộ nếu phát sinh thêm nên tách sang file rule riêng để tránh lẫn với module ISO.
+
+---
+
+## Phân phối tài liệu ISO
+
+### Bảng dữ liệu
+
+- `iso_distribution_batches`: mỗi lần bấm "Phân phối" tạo 1 batch — `id`, `factory_id`, `distributed_by` (UUID auth.users), `distributed_at`, `ghi_chu`
+- `iso_distribution_recipients`: mỗi row = 1 tài liệu × 1 người nhận — `id`, `batch_id`, `iso_document_id`, `factory_id`, `recipient_user_id`, `first_viewed_at`, `first_downloaded_at`
+
+### Permission
+
+- `iso.distribute` — cấp mặc định cho `admin` và `manager`
+- Guard ở cả UI (nút Phân phối) và API route
+
+### API routes
+
+- `GET /api/iso/distribute?factoryId=xxx&docIds=id1,id2` — trả về danh sách active profiles kèm `alreadyReceived`, department đã resolve
+- `POST /api/iso/distribute` — tạo batch, insert recipients, gửi in-app notification + Telegram + Email
+- Các route con: `track/`, `notify-obsolete/`, `recipient/[recipientId]/`
+
+### Quy tắc RLS quan trọng
+
+RLS của bảng `profiles` chỉ cho `admin` đọc tất cả profiles trong factory (policy `profiles read own or admin same factory`). Role `manager` bị chặn khi query trực tiếp từ browser client.
+
+**Bắt buộc**: mọi query lấy danh sách users trong factory phải dùng API route server-side với `supabaseAdmin`, **không được** dùng `supabase` browser client trực tiếp trong component. Quy tắc này áp dụng cho cả `DistributionModal` và bất kỳ feature nào cần xem danh sách người dùng mà không phải trang Settings (Settings chỉ dành cho admin).
+
+### UI — DistributionModal
+
+- Bước 1: Chọn tài liệu (filter theo loại + search)
+- Bước 2: Chọn người nhận — load qua `GET /api/iso/distribute` (không query profiles trực tiếp)
+- Người đã nhận tài liệu đó hiển thị mờ + badge "Đã nhận", checkbox disabled
+- Nút "Chọn tất cả" chỉ chọn người chưa nhận
+- Sau phân phối: in-app notification + Telegram + Email
 
 ---
 

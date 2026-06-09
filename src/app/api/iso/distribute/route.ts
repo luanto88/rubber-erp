@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     const [profilesRes, deptsRes, existingRes] = await Promise.all([
       supabaseAdmin
         .from("profiles")
-        .select("id, full_name, username, department, department_id")
+        .select("id, full_name, username, department")
         .eq("factory_id", factoryId)
         .eq("status", "active")
         .order("full_name"),
@@ -46,7 +46,6 @@ export async function GET(req: NextRequest) {
     }
 
     const depts = (deptsRes.data || []) as Array<{ id: string; code: string; name: string }>
-    const deptNameById = new Map(depts.map((d) => [d.id, d.name]))
     const deptNameByCode = new Map(depts.map((d) => [d.code, d.name]))
     const deptNameValues = new Set(depts.map((d) => d.name))
 
@@ -62,13 +61,10 @@ export async function GET(req: NextRequest) {
         full_name: string | null
         username: string | null
         department: string | null
-        department_id: string | null
       }>
     ).map((p) => {
       let deptName: string | null = null
-      if (p.department_id) {
-        deptName = deptNameById.get(p.department_id) ?? p.department
-      } else if (p.department) {
+      if (p.department) {
         deptName = deptNameValues.has(p.department)
           ? p.department
           : (deptNameByCode.get(p.department) ?? p.department)
@@ -82,7 +78,7 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ recipients })
+    return NextResponse.json({ recipients, departments: depts })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },

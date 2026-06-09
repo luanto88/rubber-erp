@@ -1315,7 +1315,7 @@ export default function SettingsPage() {
     setConfigError("")
     try {
       const geojson = JSON.parse(await file.text())
-      const features: Array<{ properties?: Record<string, unknown> | null }> = geojson?.features ?? []
+      const features: Array<{ properties?: Record<string, unknown> | null; geometry?: unknown }> = geojson?.features ?? []
       if (!features.length) { setConfigError("File GeoJSON không có features"); return }
       const seen = new Set<string>()
       const rows = features.flatMap((f) => {
@@ -1328,11 +1328,11 @@ export default function SettingsPage() {
           ten,
           ma_lo_full: p.Ma_lo_2026 ? String(p.Ma_lo_2026).trim() : null,
           nong_truong: p.Nong_truong ? String(p.Nong_truong).trim() : null,
-          doi: p.Doi_2026 != null ? (parseInt(p.Doi_2026) || null) : null,
+          doi: p.Doi_2026 != null ? (parseInt(String(p.Doi_2026)) || null) : null,
           giong: p.Giong ? String(p.Giong).trim() : null,
-          dien_tich_ha: p.Dtich2026_ha != null ? (parseFloat(p.Dtich2026_ha) || null) : null,
-          nam_trong: p.Nam_trong != null ? (parseInt(p.Nam_trong) || null) : null,
-          nam_cao_up: p.Nam_cao_up != null ? (parseInt(p.Nam_cao_up) || null) : null,
+          dien_tich_ha: p.Dtich2026_ha != null ? (parseFloat(String(p.Dtich2026_ha)) || null) : null,
+          nam_trong: p.Nam_trong != null ? (parseInt(String(p.Nam_trong)) || null) : null,
+          nam_cao_up: p.Nam_cao_up != null ? (parseInt(String(p.Nam_cao_up)) || null) : null,
           geometry: f.geometry || null,
           is_active: true,
         }]

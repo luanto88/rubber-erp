@@ -30,6 +30,12 @@ type RecipientApiItem = {
   alreadyReceived: boolean
 }
 
+type DepartmentItem = {
+  id: string
+  code: string
+  name: string
+}
+
 type Props = {
   factoryId: string
   userId: string
@@ -58,7 +64,9 @@ export function DistributionModal({
 
   // Bước 2: chọn người nhận
   const [recipients, setRecipients] = useState<RecipientOption[]>([])
+  const [departments, setDepartments] = useState<DepartmentItem[]>([])
   const [loadingRecipients, setLoadingRecipients] = useState(false)
+  const [recipientsError, setRecipientsError] = useState<string | null>(null)
   const [deptFilter, setDeptFilter] = useState<string[]>([])
   const [recipientSearch, setRecipientSearch] = useState("")
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
@@ -95,27 +103,39 @@ export function DistributionModal({
   const loadRecipients = useCallback(async () => {
     if (selectedDocIds.length === 0) return
     setLoadingRecipients(true)
+    setRecipientsError(null)
     try {
       const params = new URLSearchParams({
         factoryId,
         docIds: selectedDocIds.join(","),
       })
       const res = await fetch(`/api/iso/distribute?${params.toString()}`)
-      const json = (await res.json()) as { recipients?: RecipientApiItem[]; error?: string }
-      if (!res.ok || !json.recipients) {
+      const json = (await res.json()) as {
+        recipients?: RecipientApiItem[]
+        departments?: DepartmentItem[]
+        error?: string
+      }
+      if (!res.ok) {
+        setRecipientsError(json.error || "Lỗi tải danh sách người dùng")
         setRecipients([])
+        setDepartments([])
         return
       }
+      setDepartments(json.departments || [])
       setRecipients(
-        json.recipients.map((r) => ({
+        (json.recipients || []).map((r) => ({
           id: r.id,
           full_name: r.full_name,
           username: r.username,
           department: r.department,
-          displayName: `${r.full_name || r.username || "Không rõ"} — ${r.department || "Chưa phân phòng"}`,
+          displayName: `${r.full_name || r.username || "Không rõ"}${r.department ? ` — ${r.department}` : ""}`,
           alreadyReceived: r.alreadyReceived,
         })),
       )
+    } catch (err) {
+      setRecipientsError(err instanceof Error ? err.message : "Lỗi tải danh sách người dùng")
+      setRecipients([])
+      setDepartments([])
     } finally {
       setLoadingRecipients(false)
     }
@@ -139,9 +159,11 @@ export function DistributionModal({
     return true
   })
 
-  const allDepts = [
-    ...new Set(recipients.map((r) => r.department).filter(Boolean)),
-  ] as string[]
+  // Ưu tiên dùng departments từ DB; fallback sang từ recipients nếu chưa load
+  const allDepts: string[] =
+    departments.length > 0
+      ? departments.map((d) => d.name)
+      : ([...new Set(recipients.map((r) => r.department).filter(Boolean))] as string[])
 
   const filteredRecipients = recipients.filter((r) => {
     if (deptFilter.length > 0 && !deptFilter.includes(r.department || ""))
@@ -439,11 +461,16 @@ export function DistributionModal({
                 <p className="text-sm text-slate-400 text-center py-6">
                   Đang tải...
                 </p>
+              ) : recipientsError ? (
+                <div className="flex items-center gap-2 px-3 py-3 bg-red-50 text-red-600 rounded-xl text-sm">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>{recipientsError}</span>
+                </div>
               ) : (
                 <div className="space-y-1 max-h-72 overflow-y-auto">
                   {filteredRecipients.length === 0 && (
                     <p className="text-sm text-slate-400 text-center py-6">
-                      Không có người dùng nào
+                      {deptFilter.length > 0 ? "Không có người dùng thuộc phòng ban đã chọn" : "Không có người dùng nào"}
                     </p>
                   )}
                   {filteredRecipients.map((r) => (
