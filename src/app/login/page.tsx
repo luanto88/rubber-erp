@@ -84,17 +84,18 @@ function LoginPageContent() {
       try {
         const [factoryResult, deptResult, sessionResult] = await Promise.allSettled([
           withTimeout(
-            supabase.from("factories").select("id, code, name, prefix").order("name").then((r) => r),
+            Promise.resolve(supabase.from("factories").select("id, code, name, prefix").order("name")),
             LOGIN_BOOT_TIMEOUT_MS,
             "load factories",
           ),
           withTimeout(
-            supabase
-              .from("departments")
-              .select("id, code, name, sort_order")
-              .eq("is_active", true)
-              .order("sort_order")
-              .then((r) => r),
+            Promise.resolve(
+              supabase
+                .from("departments")
+                .select("id, code, name, sort_order")
+                .eq("is_active", true)
+                .order("sort_order"),
+            ),
             LOGIN_BOOT_TIMEOUT_MS,
             "load departments",
           ),
