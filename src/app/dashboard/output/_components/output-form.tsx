@@ -177,9 +177,11 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
       : []
 
   // Chuyến available cho xe đã chọn (từ dispatch)
-  const chuyenOptions = dispatchVehicles
-    .filter(d => d.so_xe === form.so_xe)
-    .map(d => d.chuyen)
+  const chuyenOptions = [...new Set(
+    dispatchVehicles
+      .filter(d => d.so_xe === form.so_xe)
+      .map(d => d.chuyen),
+  )]
 
   // Tài xế từ dispatch (readonly nếu có)
   const taiXeFromDispatch = dispatchVehicles.find(
@@ -280,15 +282,16 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Số xe *</label>
-              <select
-                value={form.so_xe}
-                disabled={dispatchLoading || (noDispatch && !record)}
-                onChange={e => {
-                  setField("so_xe", e.target.value)
-                  if (dispatchVehicles.length > 0) setField("chuyen", 1)
-                }}
-                className={`w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 ${dispatchLoading || (noDispatch && !record) ? "bg-slate-100 text-slate-400 cursor-not-allowed" : ""}`}
-              >
+                <select
+                  value={form.so_xe}
+                  disabled={dispatchLoading || (noDispatch && !record)}
+                  onChange={e => {
+                    const nextXe = e.target.value
+                    const nextChuyen = dispatchVehicles.find(d => d.so_xe === nextXe)?.chuyen ?? 1
+                    setForm(f => ({ ...f, so_xe: nextXe, chuyen: nextChuyen }))
+                  }}
+                  className={`w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 ${dispatchLoading || (noDispatch && !record) ? "bg-slate-100 text-slate-400 cursor-not-allowed" : ""}`}
+                >
                 <option value="">{noDispatch && !record ? "-- Chưa có điều xe --" : "-- Chọn xe --"}</option>
                 {vehicleOptions.map(v => (
                   <option key={v.so_xe} value={v.so_xe}>{v.so_xe}</option>

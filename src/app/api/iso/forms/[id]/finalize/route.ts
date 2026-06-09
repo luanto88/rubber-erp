@@ -213,65 +213,96 @@ async function replaceFormTags(
     })
   }
 
-  // Helper: replace text tag trong XML string
+  // Helper: replace text tag trong XML string (literal string, không dùng regex)
   function replaceTextTag(xml: string, tag: string, value: string): string {
     if (!xml.includes(tag)) return xml
-    // Tag có thể bị split thành nhiều <w:t> run trong DOCX
-    // Thay toàn bộ occurrence đơn giản trước
-    const escaped = tag.replace(/[{}]/g, (c) => `\\${c}`)
-    return xml.replace(new RegExp(escaped.replace(/\\/g, "\\\\"), "g"), () => value)
+    return xml.split(tag).join(value)
   }
 
   // Helper: thay image tag trong DOCX bằng embedded image
+  // Scan cả document body, headers, footers để tìm tag
   async function replaceDocxImageTag(
     zip: JSZip,
     tag: string,
-    imgBuf: ArrayBuffer,
+    imgBuf: ArrayBuffer | Uint8Array,
     mediaFilename: string,
-    contentType: string,
+    _contentType: string,
   ): Promise<void> {
-    const docXmlFile = zip.file("word/document.xml")
-    if (!docXmlFile) return
-    let docXml = await docXmlFile.async("string")
-    if (!docXml.includes(tag)) return
-
-    // Thêm ảnh vào media
-    zip.file(`word/media/${mediaFilename}`, Buffer.from(imgBuf))
-
-    // Tìm relationship ID tiếp theo
-    const relsPath = "word/_rels/document.xml.rels"
-    const relsFile = zip.file(relsPath)
-    let relsXml = relsFile ? await relsFile.async("string") : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
-
-    const existingIds = [...relsXml.matchAll(/Id="(rId\d+)"/g)].map((m) => m[1])
-    let maxId = 0
-    for (const rid of existingIds) {
-      const n = parseInt(rid.replace("rId", ""), 10)
-      if (!isNaN(n) && n > maxId) maxId = n
-    }
-    const newRId = `rId${maxId + 1}`
-
-    relsXml = relsXml.replace(
-      "</Relationships>",
-      `  <Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaFilename}"/>\n</Relationships>`,
-    )
-    zip.file(relsPath, relsXml)
-
-    // Xây drawing XML — 12mm × 12mm (432000 × 432000 EMU)
-    const emuW = 900000
-    const emuH = 450000
-    const drawingXml = `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:extent cx="${emuW}" cy="${emuH}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="1" name="${mediaFilename}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${mediaFilename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${newRId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emuW}" cy="${emuH}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
-
-    // Thay tag trong paragraph: tìm <w:p> chứa tag và thay toàn bộ run bằng drawing
-    docXml = docXml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
-      if (!para.includes(tag)) return para
-      // Lấy props đầu đoạn (w:pPr)
-      const pPrMatch = para.match(/(<w:pPr[\s\S]*?<\/w:pPr>)/)
-      const pPr = pPrMatch ? pPrMatch[1] : ""
-      return `<w:p>${pPr}<w:r><w:rPr/>${drawingXml}</w:r></w:p>`
+    // Lấy tất cả XML trong word/ có thể chứa tag (body, headers, footers)
+    const candidatePaths: string[] = []
+    zip.forEach((relPath) => {
+      if (
+        relPath.startsWith("word/") &&
+        relPath.endsWith(".xml") &&
+        !relPath.includes("/_rels/") &&
+        !relPath.endsWith(".rels")
+      ) {
+        const base = relPath.split("/").pop() ?? ""
+        if (
+          base === "document.xml" ||
+          base.startsWith("header") ||
+          base.startsWith("footer")
+        ) {
+          candidatePaths.push(relPath)
+        }
+      }
     })
 
-    zip.file("word/document.xml", docXml)
+    let imgAdded = false
+
+    for (const docPath of candidatePaths) {
+      const docFile = zip.file(docPath)
+      if (!docFile) continue
+      let docXml = await docFile.async("string")
+      if (!docXml.includes(tag)) continue
+
+      // Thêm ảnh vào media (chỉ một lần)
+      if (!imgAdded) {
+        zip.file(`word/media/${mediaFilename}`, Buffer.isBuffer(imgBuf) ? (imgBuf as Buffer) : Buffer.from(imgBuf as ArrayBuffer))
+        imgAdded = true
+      }
+
+      // Tìm/tạo rels file tương ứng với docPath này
+      const docFilename = docPath.split("/").pop()!
+      const relsPath = `word/_rels/${docFilename}.rels`
+      const relsFile = zip.file(relsPath)
+      let relsXml = relsFile
+        ? await relsFile.async("string")
+        : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
+
+      const existingIds = [...relsXml.matchAll(/Id="(rId\d+)"/g)].map((m) => m[1])
+      let maxId = 0
+      for (const rid of existingIds) {
+        const n = parseInt(rid.replace("rId", ""), 10)
+        if (!isNaN(n) && n > maxId) maxId = n
+      }
+      const newRId = `rId${maxId + 1}`
+
+      relsXml = relsXml.replace(
+        "</Relationships>",
+        `  <Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaFilename}"/>\n</Relationships>`,
+      )
+      zip.file(relsPath, relsXml)
+
+      // Xây drawing XML
+      const isQr = tag === "{{QR}}"
+      const emuW = isQr ? 432000 : 900000
+      const emuH = isQr ? 432000 : 450000
+      // docPr id phải unique trong toàn document; tính từ XML đã có trước đó
+      const existingDocPrIds = [...docXml.matchAll(/<wp:docPr[^>]*\bid="(\d+)"/g)].map(m => parseInt(m[1]))
+      const newDocPrId = existingDocPrIds.length > 0 ? Math.max(...existingDocPrIds) + 1 : 1
+      const drawingXml = `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:extent cx="${emuW}" cy="${emuH}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${newDocPrId}" name="${mediaFilename}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${mediaFilename}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${newRId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emuW}" cy="${emuH}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
+
+      // Thay tag trong paragraph: tìm <w:p> chứa tag và thay toàn bộ run bằng drawing
+      docXml = docXml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+        if (!para.includes(tag)) return para
+        const pPrMatch = para.match(/(<w:pPr[\s\S]*?<\/w:pPr>)/)
+        const pPr = pPrMatch ? pPrMatch[1] : ""
+        return `<w:p>${pPr}<w:r><w:rPr/>${drawingXml}</w:r></w:p>`
+      })
+
+      zip.file(docPath, docXml)
+    }
   }
 
   // Thay text tags trong tất cả XML files
@@ -292,7 +323,7 @@ async function replaceFormTags(
   if (step === "soan_thao" && qrUrl && ext === "docx") {
     try {
       const qrBuffer = await QRCode.toBuffer(qrUrl, { width: 100, margin: 1 })
-      await replaceDocxImageTag(zip, "{{QR}}", qrBuffer.buffer as ArrayBuffer, "qr_form.png", "image/png")
+      await replaceDocxImageTag(zip, "{{QR}}", qrBuffer, "qr_form.png", "image/png")
     } catch { /* bỏ qua nếu QR thất bại */ }
   }
 
@@ -410,19 +441,8 @@ export async function POST(
           qrUrl,
           qrFromCurrent,
         )
-      } else if (auto_convert_pdf) {
-        const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(sourceUrl)
-        const pdfBuf = await pdfDoc.save()
-        signedBytes = await stampPdf(
-          pdfBuf.buffer as ArrayBuffer,
-          [{ userId, placement, signerName }],
-          factoryId,
-          qrUrl,
-          qrFromCurrent,
-        )
-        signedExt = "pdf"
       } else {
-        // Office không convert → thay tag
+        // Office (DOCX/XLSX): luôn thay tag — bất kể auto_convert_pdf
         const sigImgBuf = await getSigImage(factoryId, userId)
         signedBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "soan_thao",
@@ -452,6 +472,10 @@ export async function POST(
       }
       if (signedExt === "pdf") {
         updates.final_pdf_url = signedUrlData?.publicUrl
+      } else {
+        // Xóa giá trị stale từ lần test cũ để phe_duyet không bị dẫn vào stampPdf path
+        updates.final_pdf_url = null
+        updates.final_office_url = null
       }
 
       await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
@@ -484,13 +508,8 @@ export async function POST(
       if (sourceIsPdf) {
         signedBytes = await stampPdf(fileBytes, [{ userId, placement, signerName }], factoryId, null)
         signedExt = "pdf"
-      } else if (auto_convert_pdf) {
-        const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(sourceUrl)
-        const pdfBuf = await pdfDoc.save()
-        signedBytes = await stampPdf(pdfBuf.buffer as ArrayBuffer, [{ userId, placement, signerName }], factoryId, null)
-        signedExt = "pdf"
       } else {
-        // Office không convert → thay tag
+        // Office (DOCX/XLSX): luôn thay tag — bất kể auto_convert_pdf
         const sigImgBuf = await getSigImage(factoryId, userId)
         signedBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "xem_xet",
@@ -533,10 +552,12 @@ export async function POST(
 
     // ---- PHÊ DUYỆT: ký + finalize ----
     if (action === "phe_duyet") {
-      const sourceUrl =
-        (instance.final_pdf_url as string | null) ||
-        (instance.soan_thao_signed_url as string | null) ||
-        (instance.draft_file_url as string | null)
+      const sourceUrl = draftExt === "pdf"
+        ? ((instance.final_pdf_url as string | null) ||
+           (instance.soan_thao_signed_url as string | null) ||
+           (instance.draft_file_url as string | null))
+        : ((instance.soan_thao_signed_url as string | null) ||
+           (instance.draft_file_url as string | null))
 
       if (!sourceUrl) {
         return NextResponse.json({ error: "Hồ sơ chưa có file" }, { status: 400 })
@@ -570,20 +591,12 @@ export async function POST(
       let finalBytes: Uint8Array
       let finalExt = "pdf"
 
-      if (sourceIsPdf || (instance.final_pdf_url as string | null)) {
+      if (sourceIsPdf) {
+        // Nguồn đã là PDF (backward compat hoặc upload PDF gốc) → stamp với tất cả placement
         finalBytes = await stampPdf(fileBytes, allPlacements, factoryId, qrUrl, qrPlacementFromSoanThao)
-      } else if (auto_convert_pdf) {
-        try {
-          const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(sourceUrl)
-          const pdfBuf = await pdfDoc.save()
-          finalBytes = await stampPdf(pdfBuf.buffer as ArrayBuffer, allPlacements, factoryId, qrUrl, qrPlacementFromSoanThao)
-        } catch (convErr) {
-          console.error("[finalize] CloudConvert lỗi:", convErr)
-          finalExt = draftExt
-          finalBytes = new Uint8Array(fileBytes)
-        }
+        finalExt = "pdf"
       } else {
-        // Office không convert → thay tag phê duyệt (file đã có sig bước trước nếu là Office)
+        // Office: thay tag bước phê duyệt
         const sigImgBuf = await getSigImage(factoryId, userId)
         finalBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "phe_duyet",
@@ -592,6 +605,28 @@ export async function POST(
           qrUrl,
         })
         finalExt = draftExt
+
+        // Nếu auto_convert_pdf: upload DOCX đã tag → CloudConvert → PDF
+        if (auto_convert_pdf) {
+          try {
+            const tempPath = `${factoryId}/iso/instances/${instanceId}/temp_final.${draftExt}`
+            const mime =
+              draftExt === "xlsx"
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            await supabaseAdmin.storage
+              .from(BUCKET)
+              .upload(tempPath, new Blob([Buffer.from(finalBytes)], { type: mime }), { upsert: true })
+            const { data: tempUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(tempPath)
+            const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempUrlData.publicUrl)
+            const pdfBuf = await pdfDoc.save()
+            finalBytes = new Uint8Array(pdfBuf)
+            finalExt = "pdf"
+          } catch (convErr) {
+            console.error("[finalize] CloudConvert lỗi:", convErr)
+            // Giữ DOCX đã tag làm final — không block workflow
+          }
+        }
       }
 
       const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`

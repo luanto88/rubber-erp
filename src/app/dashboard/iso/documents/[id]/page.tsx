@@ -42,11 +42,15 @@ import {
   Lock,
   ChevronLeft,
   ChevronRight,
+  Share2,
+  ChevronUp,
 } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
+import { DistributionModal } from "../../_components/distribution-modal"
+import { DistributionManagement } from "../../_components/distribution-management"
 
 type ProfileOption = {
   id: string
@@ -391,6 +395,12 @@ export default function IsoDocumentDetailPage() {
   )
   const pdfDocRef = useRef<unknown>(null)
 
+  // Distribution
+  const [canDistribute, setCanDistribute] = useState(false)
+  const [showDistributeModal, setShowDistributeModal] = useState(false)
+  const [showManagement, setShowManagement] = useState(false)
+  const [oldRecipientCount, setOldRecipientCount] = useState(0)
+
   // Success toast
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -640,9 +650,23 @@ export default function IsoDocumentDetailPage() {
       if (!fid) { setLoading(false); return }
       const session = await getFreshAuthSession()
       if (!session?.user) { setLoading(false); return }
+      const uid = session.user.id
       const erp = JSON.parse(localStorage.getItem("erp_user") || "{}")
       setUser(erp)
       setFactoryId(fid)
+
+      // Check iso.distribute permission
+      const [profRes, permRes] = await Promise.all([
+        supabase.from("profiles").select("role").eq("id", uid).single(),
+        supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
+      ])
+      setCanDistribute(
+        profRes.data?.role === "admin" ||
+        ((permRes.data || []) as Array<{ permission_code: string }>).some(
+          (p) => p.permission_code === "iso.distribute",
+        ),
+      )
+
       void loadMasterData()
       void loadProfiles(fid)
       void loadEffectiveDocs(fid)
@@ -1530,6 +1554,14 @@ export default function IsoDocumentDetailPage() {
             body: JSON.stringify({ docId: cid, factoryId }),
           }).catch(() => {})
         }
+        // Trigger notify-obsolete cho các bản đã hết hiệu lực (soát xét)
+        for (const obsoleteId of invalidatedIds) {
+          void fetch("/api/iso/distribute/notify-obsolete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ obsoleteDocId: obsoleteId, newDocId: docId, factoryId }),
+          }).catch(() => {})
+        }
 
       } else if (action === "tra_ve" || action === "khong_xem_xet") {
         const { error } = await supabase
@@ -2015,14 +2047,23 @@ export default function IsoDocumentDetailPage() {
   const handlePinConfirm = async () => {
     if (!pinModal || !factoryId || !user) return
     if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
-    setPinLoading(true)
-    setPinError("")
-    try {
-      const verifyRes = await fetch("/api/sign/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, pin, docId, docType: "iso" }),
-      })
+      setPinLoading(true)
+      setPinError("")
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const accessToken = sessionData.session?.access_token
+        if (!accessToken) {
+          setPinError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+          return
+        }
+        const verifyRes = await fetch("/api/sign/verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ userId: user.id, pin, docId, docType: "iso" }),
+        })
       const verifyJson = await verifyRes.json()
       if (!verifyRes.ok) { setPinError(verifyJson.error || "PIN không đúng"); return }
 
@@ -3177,6 +3218,16 @@ export default function IsoDocumentDetailPage() {
                   <RotateCcw size={14} /> Trả về Nháp
                 </button>
               </>
+            )}
+
+            {/* Nút phân phối — chỉ khi tài liệu đã có hiệu lực */}
+            {!isNew && canDistribute && doc?.trang_thai === "co_hieu_luc" && (
+              <button
+                onClick={() => setShowDistributeModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-all"
+              >
+                <Share2 size={14} /> Phân phối
+              </button>
             )}
 
             {/* Nút lưu */}
@@ -4626,6 +4677,32 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
+        {/* Quản lý phân phối tài liệu */}
+        {!isNew && canDistribute && factoryId && user?.id && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowManagement((prev) => !prev)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 text-left"
+            >
+              <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <Share2 size={14} className="text-emerald-600" />
+                Quản lý phân phối tài liệu
+              </span>
+              <ChevronUp size={14} className={`text-slate-400 transition-transform ${showManagement ? "" : "rotate-180"}`} />
+            </button>
+            {showManagement && (
+              <div className="border-t border-slate-100 p-4">
+                <DistributionManagement
+                  factoryId={factoryId}
+                  userId={user.id}
+                  docId={docId}
+                  canDistribute={canDistribute}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* PIN Modal */}
         {pinModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -4705,6 +4782,20 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Modal phân phối */}
+      {showDistributeModal && factoryId && user?.id && (
+        <DistributionModal
+          factoryId={factoryId}
+          userId={user.id}
+          initialDocIds={isNew ? [] : [docId]}
+          onClose={() => setShowDistributeModal(false)}
+          onSuccess={() => {
+            setShowDistributeModal(false)
+            setShowManagement(true)
+          }}
+        />
+      )}
     </IsoShell>
   )
 }

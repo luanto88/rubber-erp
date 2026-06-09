@@ -337,7 +337,7 @@ export function summarizeStorageTrips(ngan: StorageNgan, trips: StorageTripItem[
     tripCount: trips.length,
     tuoi: totals.tuoi,
     kho: totals.kho,
-    ratio: totals.kho > 0 ? 0 : 0,
+    ratio: totals.tuoi > 0 ? (totals.kho / totals.tuoi) * 100 : 0,
   }
 }
 

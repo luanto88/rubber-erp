@@ -16,8 +16,10 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2 } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp } from "lucide-react"
 import Link from "next/link"
+import { DistributionModal } from "../_components/distribution-modal"
+import { DistributionManagement } from "../_components/distribution-management"
 
 export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -29,6 +31,10 @@ export default function IsoDocumentsPage() {
   const [standards, setStandards] = useState<IsoStandard[]>(ISO_STANDARD_FALLBACK)
   const [docTypes, setDocTypes] = useState<IsoDocumentTypeMaster[]>(isoDocumentTypeFallback())
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
+  const [canDistribute, setCanDistribute] = useState(false)
+  const [showDistributeModal, setShowDistributeModal] = useState(false)
+  const [distributeDocId, setDistributeDocId] = useState<string | undefined>(undefined)
+  const [showManagement, setShowManagement] = useState(false)
 
   // Bộ lọc
   const [search, setSearch] = useState("")
@@ -82,8 +88,17 @@ export default function IsoDocumentsPage() {
       const uid = session?.user?.id
       if (uid) {
         setUserId(uid)
-        const { data: prof } = await supabase.from("profiles").select("role").eq("id", uid).single()
-        if (prof) setUserRole(prof.role || "")
+        const [profRes, permRes] = await Promise.all([
+          supabase.from("profiles").select("role").eq("id", uid).single(),
+          supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
+        ])
+        if (profRes.data) setUserRole(profRes.data.role || "")
+        setCanDistribute(
+          profRes.data?.role === "admin" ||
+          ((permRes.data || []) as Array<{ permission_code: string }>).some(
+            (p) => p.permission_code === "iso.distribute",
+          ),
+        )
       }
       setFactoryId(fid)
     }
@@ -184,12 +199,22 @@ export default function IsoDocumentsPage() {
             <h1 className="text-2xl font-extrabold text-slate-800">Tài liệu ISO</h1>
             <p className="text-sm text-slate-500 mt-0.5">Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn</p>
           </div>
-          <Link
-            href="/dashboard/iso/documents/new-doc"
-            className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            <Plus size={16} /> Tạo tài liệu
-          </Link>
+          <div className="flex items-center gap-2">
+            {canDistribute && (
+              <button
+                onClick={() => { setDistributeDocId(undefined); setShowDistributeModal(true) }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
+              >
+                <Share2 size={15} /> Phân phối
+              </button>
+            )}
+            <Link
+              href="/dashboard/iso/documents/new-doc"
+              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
+            >
+              <Plus size={16} /> Tạo tài liệu
+            </Link>
+          </div>
         </div>
 
         {/* Bộ lọc */}
@@ -358,6 +383,15 @@ export default function IsoDocumentsPage() {
                             >
                               <Eye size={14} />
                             </Link>
+                            {canDistribute && doc.trang_thai === "co_hieu_luc" && (
+                              <button
+                                title="Phân phối tài liệu này"
+                                onClick={() => { setDistributeDocId(doc.id); setShowDistributeModal(true) }}
+                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                              >
+                                <Share2 size={14} />
+                              </button>
+                            )}
                             {canEditDoc && (
                               <Link
                                 href={`/dashboard/iso/documents/${doc.id}`}
@@ -452,6 +486,31 @@ export default function IsoDocumentsPage() {
         </div>
       </div>
 
+      {/* Quản lý phân phối */}
+      {canDistribute && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowManagement((prev) => !prev)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <Share2 size={14} className="text-emerald-600" />
+              Quản lý phân phối tài liệu
+            </span>
+            <ChevronUp size={14} className={`text-slate-400 transition-transform ${showManagement ? "" : "rotate-180"}`} />
+          </button>
+          {showManagement && factoryId && userId && (
+            <div className="border-t border-slate-100 p-4">
+              <DistributionManagement
+                factoryId={factoryId}
+                userId={userId}
+                canDistribute={canDistribute}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Delete confirm dialog */}
       {delConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -474,6 +533,20 @@ export default function IsoDocumentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Distribution modal */}
+      {showDistributeModal && factoryId && userId && (
+        <DistributionModal
+          factoryId={factoryId}
+          userId={userId}
+          initialDocIds={distributeDocId ? [distributeDocId] : undefined}
+          onClose={() => setShowDistributeModal(false)}
+          onSuccess={() => {
+            setShowDistributeModal(false)
+            setShowManagement(true)
+          }}
+        />
       )}
     </IsoShell>
   )

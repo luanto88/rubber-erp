@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
-import { FileText, LayoutDashboard, ClipboardCheck, FolderEdit, type LucideIcon } from "lucide-react"
+import { FileText, LayoutDashboard, ClipboardCheck, FolderEdit, Archive, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
@@ -39,6 +39,12 @@ const tabs: NavTab[] = [
     label: "Thực hiện hồ sơ",
     icon: FolderEdit,
     matchPrefixes: ["/dashboard/iso/forms"],
+  },
+  {
+    href: "/dashboard/iso/kho",
+    label: "Kho của tôi",
+    icon: Archive,
+    matchPrefixes: ["/dashboard/iso/kho"],
   },
 ]
 

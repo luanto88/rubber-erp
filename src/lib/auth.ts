@@ -258,6 +258,7 @@ export async function signUpWithUsername(input: {
   username: string
   password: string
   fullName: string
+  email: string
   department: string
   factoryId: string
 }) {
@@ -270,6 +271,7 @@ export async function signUpWithUsername(input: {
       username: normalizeUsername(input.username),
       password: input.password,
       fullName: input.fullName.trim(),
+      email: input.email.trim(),
       department: input.department.trim(),
       factoryId: input.factoryId,
     }),

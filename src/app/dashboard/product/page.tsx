@@ -11,6 +11,7 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes";
+import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter";
 import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import {
   Plus,
@@ -814,7 +815,7 @@ export default function ProductPage() {
       if (filterTT && normalizeLotStatus(c.trang_thai) !== normalizeLotStatus(filterTT)) {
         return false;
       }
-      if (filterGhiChu && (c.ghi_chu || "") !== filterGhiChu) return false;
+      if (!matchesNoteFilter(c.ghi_chu, filterGhiChu)) return false;
       if (filterFrom && c.ngay_sx < filterFrom) return false;
       if (filterTo && c.ngay_sx > filterTo) return false;
       return true;
@@ -3412,6 +3413,7 @@ export default function ProductPage() {
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
           <option value="">Tất cả ghi chú</option>
+          <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
           {requiredNotes.map((note) => (
             <option key={note} value={note}>
               {note}

@@ -358,3 +358,53 @@ export interface TemplateSearchResult {
   mo_ta_tim_kiem: string | null
   similarity: number
 }
+
+// ─── Module Phân phối tài liệu ISO ────────────────────────────────────────
+
+export type IsoDistributionBatch = {
+  id: string
+  factory_id: string
+  distributed_by: string
+  distributed_at: string
+  ghi_chu: string | null
+  created_at: string
+}
+
+export type IsoDistributionRecipient = {
+  id: string
+  batch_id: string
+  iso_document_id: string
+  factory_id: string
+  recipient_user_id: string
+  first_viewed_at: string | null
+  first_downloaded_at: string | null
+  created_at: string
+  // Joined fields
+  recipient_profile?: {
+    id: string
+    full_name: string | null
+    username: string | null
+    department: string | null
+  }
+  iso_document?: {
+    id: string
+    ma_tai_lieu: string | null
+    ten_tai_lieu: string
+    loai_tai_lieu: string | null
+    trang_thai: IsoTrangThai
+    ngay_hieu_luc: string | null
+    lan_ban_hanh: string | null
+    file_signed_pdf_url: string | null
+    file_signed_office_url: string | null
+    file_goc_url: string | null
+  }
+}
+
+// Recipient profile với display name đầy đủ
+export type RecipientProfile = {
+  id: string
+  full_name: string | null
+  username: string | null
+  department: string | null
+  displayName: string // "{full_name} — {department}" đã format
+}

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import {
   addDaysISO,
@@ -26,7 +27,7 @@ import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map
+  ChevronDown, ChevronRight, Map as MapIcon
 } from "lucide-react"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -107,6 +108,21 @@ const safeDownloadName = (value: string) => value
   .replace(/[^a-zA-Z0-9_-]+/g, "-")
   .replace(/^-+|-+$/g, "")
 
+const mergeTripsByUid = (...tripGroups: TripItem[][]): TripItem[] => {
+  const byUid = new Map<string, TripItem>()
+  for (const trips of tripGroups) {
+    for (const trip of trips) {
+      if (!trip.uid) continue
+      byUid.set(trip.uid, trip)
+    }
+  }
+  return Array.from(byUid.values()).sort((a, b) =>
+    a._date.localeCompare(b._date) ||
+    a.so_xe.localeCompare(b.so_xe, "vi", { numeric: true, sensitivity: "base" }) ||
+    a.chuyen - b.chuyen,
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function StoragePage() {
   const revealRef = useScrollReveal()
@@ -148,9 +164,14 @@ export default function StoragePage() {
   const [unassignedSummary, setUnassignedSummary] = useState<{ total: number; byDate: Record<string, number> }>({ total: 0, byDate: {} })
 
   // trips
-  const [dispatchTrips, setDispatchTrips]   = useState<TripItem[]>([])
+  const [linkedTrips, setLinkedTrips]       = useState<TripItem[]>([])
+  const [availableTrips, setAvailableTrips] = useState<TripItem[]>([])
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
   const [loadingTrips, setLoadingTrips]     = useState(false)
+  const dispatchTrips = useMemo(
+    () => mergeTripsByUid(linkedTrips, availableTrips),
+    [linkedTrips, availableTrips],
+  )
   const groupedViewLots = useMemo(() => {
     const grouped = viewLots.reduce<Record<string, {
       key: string
@@ -312,8 +333,8 @@ export default function StoragePage() {
     ngay_kt: string,
     autoSelect = false,
     overrideEditId?: string | null,
-  ) => {
-    if (!ngay_bd || !ngay_kt || !factoryId) return
+  ): Promise<TripItem[]> => {
+    if (!ngay_bd || !ngay_kt || !factoryId) return []
     setLoadingTrips(true)
     try {
       const { data } = await supabase
@@ -352,8 +373,8 @@ export default function StoragePage() {
           })),
         )
         .filter(t => !assignedUIDs.has(t.uid) && !isDateCovered(t._date))
-      setDispatchTrips(trips)
       if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
+      return trips
     } finally {
       setLoadingTrips(false)
     }
@@ -410,7 +431,7 @@ export default function StoragePage() {
   const filtered = ngans.filter(n => {
     if (!dcLoaiNL.includes(n.loai_nl)) return false
     if (filterTT && n.trang_thai !== filterTT) return false
-    if (filterGhiChu && (n.ghi_chu || "") !== filterGhiChu) return false
+    if (!matchesNoteFilter(n.ghi_chu, filterGhiChu)) return false
     if (search &&
       !n.ten_ngan?.toLowerCase().includes(search.toLowerCase()) &&
       !n.ma_ngan?.toLowerCase().includes(search.toLowerCase())
@@ -513,7 +534,8 @@ export default function StoragePage() {
     setForm({ ...f, ma_ngan: genMaNgan(f) })
     setEditId(null)
     setSelectedTrips(new Set())
-    setDispatchTrips([])
+    setLinkedTrips([])
+    setAvailableTrips([])
     setModal("add")
   }
 
@@ -534,14 +556,22 @@ export default function StoragePage() {
     setForm(f)
     setEditId(n.id)
     setSelectedTrips(new Set(n.trips || []))
-    setDispatchTrips([])
+    setLinkedTrips([])
+    setAvailableTrips([])
     setModal("edit")
-    if (factoryId && (n.trips || []).length > 0) {
-      void loadDispatchTripsByUids(factoryId, n.trips || [])
-        .then((storedTrips) => setDispatchTrips(storedTrips))
-        .catch(() => setDispatchTrips([]))
-    }
-    if (f.ngay_bd && f.ngay_kt) void fetchTrips(f.ngay_bd, f.ngay_kt, false, n.id)
+    if (!factoryId) return
+    void (async () => {
+      const [storedTrips, tripsInRange] = await Promise.all([
+        (n.trips || []).length > 0
+          ? loadDispatchTripsByUids(factoryId, n.trips || []).catch(() => [])
+          : Promise.resolve([]),
+        f.ngay_bd && f.ngay_kt
+          ? fetchTrips(f.ngay_bd, f.ngay_kt, false, n.id).catch(() => [])
+          : Promise.resolve([]),
+      ])
+      setLinkedTrips(storedTrips)
+      setAvailableTrips(tripsInRange)
+    })()
   }
 
   const openView = async (n: Ngan) => {
@@ -787,6 +817,7 @@ export default function StoragePage() {
             <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
               className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
               <option value="">Tất cả ghi chú</option>
+              <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
               {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
             </select>
             {(search || filterTT || filterGhiChu) && (
@@ -898,7 +929,7 @@ export default function StoragePage() {
                         className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
                         title="Xuất GeoJSON"
                       >
-                        <Map size={14} />
+                        <MapIcon size={14} />
                       </button>
                       <button onClick={() => openView(n)}
                         className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors">
@@ -1085,7 +1116,9 @@ export default function StoragePage() {
                   <input type="date" value={form.ngay_bd}
                     onChange={e => {
                       updateForm({ ngay_bd: e.target.value })
-                      fetchTrips(e.target.value, form.ngay_kt, modal === "add")
+                      void fetchTrips(e.target.value, form.ngay_kt, modal === "add").then((trips) => {
+                        setAvailableTrips(trips)
+                      })
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                 </div>
@@ -1094,7 +1127,9 @@ export default function StoragePage() {
                   <input type="date" value={form.ngay_kt}
                     onChange={e => {
                       updateForm({ ngay_kt: e.target.value })
-                      fetchTrips(form.ngay_bd, e.target.value, modal === "add")
+                      void fetchTrips(form.ngay_bd, e.target.value, modal === "add").then((trips) => {
+                        setAvailableTrips(trips)
+                      })
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                 </div>

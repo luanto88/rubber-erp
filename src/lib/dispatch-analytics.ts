@@ -1,5 +1,6 @@
 import type { LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
 import type { DiemGN } from "@/lib/dispatch-master"
+import { matchesNoteFilter } from "@/lib/note-filter"
 
 export type DispatchAnalyticsEntry = {
   id: string
@@ -194,7 +195,7 @@ export function buildDispatchAnalytics(
   for (const entry of entries) {
     for (const row of entry.rows || []) {
       const dois = getTripDois(row, deliveryPoints)
-      if (noteFilter && (row.ghi_chu || "").trim() !== noteFilter) continue
+      if (!matchesNoteFilter(row.ghi_chu, noteFilter)) continue
       if (doiFilter && !dois.includes(doiFilter)) continue
       if (vehicleNeedle && !(row.so_xe || "").toLowerCase().includes(vehicleNeedle)) continue
 

@@ -18,11 +18,16 @@ export async function POST(request: Request) {
   const username = normalizeUsername(body?.username || "")
   const password = String(body?.password || "")
   const fullName = String(body?.fullName || "").trim()
+  const email = String(body?.email || "").trim().toLowerCase()
   const department = String(body?.department || "").trim()
   const factoryId = String(body?.factoryId || "").trim()
 
-  if (!username || !password || !fullName || !factoryId) {
+  if (!username || !password || !fullName || !email || !factoryId) {
     return badRequest("Vui long nhap day du thong tin bat buoc")
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return badRequest("Email khong hop le")
   }
 
   if (password.length < 6) {
@@ -83,6 +88,66 @@ export async function POST(request: Request) {
   if (profileError) {
     await adminSupabase.auth.admin.deleteUser(createdUser.id)
     return badRequest(profileError.message, 500)
+  }
+
+  const { data: existingStaffByProfile, error: existingStaffByProfileError } = await adminSupabase
+    .from("maintenance_staff")
+    .select("id")
+    .eq("factory_id", factoryId)
+    .eq("profile_id", createdUser.id)
+    .maybeSingle()
+
+  if (existingStaffByProfileError) {
+    await adminSupabase.from("profiles").delete().eq("id", createdUser.id)
+    await adminSupabase.auth.admin.deleteUser(createdUser.id)
+    return badRequest(existingStaffByProfileError.message, 500)
+  }
+
+  let existingStaffId = existingStaffByProfile?.id ?? null
+
+  if (!existingStaffId) {
+    const { data: unlinkedStaffByName, error: unlinkedStaffByNameError } = await adminSupabase
+      .from("maintenance_staff")
+      .select("id")
+      .eq("factory_id", factoryId)
+      .is("profile_id", null)
+      .eq("ten", fullName)
+      .limit(2)
+
+    if (unlinkedStaffByNameError) {
+      await adminSupabase.from("profiles").delete().eq("id", createdUser.id)
+      await adminSupabase.auth.admin.deleteUser(createdUser.id)
+      return badRequest(unlinkedStaffByNameError.message, 500)
+    }
+
+    if ((unlinkedStaffByName?.length || 0) > 1) {
+      await adminSupabase.from("profiles").delete().eq("id", createdUser.id)
+      await adminSupabase.auth.admin.deleteUser(createdUser.id)
+      return badRequest(
+        "Có nhiều hồ sơ nhân sự trùng họ tên chưa liên kết. Vui lòng liên hệ admin để gán đúng email.",
+        409,
+      )
+    }
+
+    existingStaffId = unlinkedStaffByName?.[0]?.id ?? null
+  }
+
+  const staffPayload = {
+    factory_id: factoryId,
+    profile_id: createdUser.id,
+    ten: fullName,
+    email,
+    active: true,
+  }
+
+  const staffResult = existingStaffId
+    ? await adminSupabase.from("maintenance_staff").update(staffPayload).eq("id", existingStaffId)
+    : await adminSupabase.from("maintenance_staff").insert(staffPayload)
+
+  if (staffResult.error) {
+    await adminSupabase.from("profiles").delete().eq("id", createdUser.id)
+    await adminSupabase.auth.admin.deleteUser(createdUser.id)
+    return badRequest(staffResult.error.message, 500)
   }
 
   return NextResponse.json({

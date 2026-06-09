@@ -12,6 +12,7 @@ import {
   type DispatchMaterialTotals,
   type DispatchFlatTrip,
 } from "@/lib/dispatch-analytics"
+import { describeNoteFilter } from "@/lib/note-filter"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -105,7 +106,11 @@ function renderSignatures(doc: jsPDF, makerName?: string) {
   const pdf = doc as PdfWithTable
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
-  const startY = Math.min((pdf.lastAutoTable?.finalY || 0) + 16, pageH - 42)
+  const desiredY = (pdf.lastAutoTable?.finalY || 0) + 16
+  if (desiredY > pageH - 42) {
+    doc.addPage()
+  }
+  const startY = desiredY > pageH - 42 ? 20 : desiredY
 
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(10)
@@ -278,6 +283,21 @@ function materialRows(trip: DispatchFlatTrip) {
   ]
 }
 
+function buildDispatchEntrySummaryRows(trips: DispatchFlatTrip[], entry: DispatchAnalyticsEntry) {
+  const vehicleCount = new Set(trips.map((trip) => trip.so_xe).filter(Boolean)).size
+  const driverCount = new Set(trips.map((trip) => trip.tai_xe).filter(Boolean)).size
+  const totalKm = trips.reduce((sum, trip) => sum + (trip.totalKm || 0), 0)
+  const totalTuoi = trips.reduce((sum, trip) => sum + (trip.totalTuoi || 0), 0)
+  const totalKho = trips.reduce((sum, trip) => sum + (trip.totalKho || 0), 0)
+
+  return [
+    ["Mã ĐX", entry.ma_dx || "-", "Số chuyến", String(trips.length)],
+    ["Số xe", String(vehicleCount), "Tài xế", String(driverCount)],
+    ["Tổng Km", formatKm(totalKm), "Tươi (kg)", formatKg(totalTuoi)],
+    ["Chứng nhận", entry.chung_nhan || "-", "Khô (kg)", formatKg(totalKho)],
+  ]
+}
+
 export async function downloadDispatchTripPdf(trip: DispatchFlatTrip, factoryName: string, makerName?: string) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
@@ -326,6 +346,21 @@ export async function downloadDispatchEntryPdf(params: {
   autoTable(doc, {
     startY: 32,
     theme: "grid",
+    styles: { font: PDF_FONT_NAME, fontSize: 9, cellPadding: 2 },
+    headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
+    body: buildDispatchEntrySummaryRows(params.trips, params.entry),
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 24 },
+      1: { cellWidth: 48 },
+      2: { fontStyle: "bold", cellWidth: 24 },
+      3: { cellWidth: 48 },
+    },
+  })
+
+  const pdf = doc as PdfWithTable
+  autoTable(doc, {
+    startY: (pdf.lastAutoTable?.finalY || 32) + 8,
+    theme: "grid",
     styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
     head: [["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Xử lý", "Km", "Tươi (kg)", "Khô (kg)"]],
@@ -364,7 +399,8 @@ function buildStatsContext(params: {
   selectedNote?: string
 }) {
   const range = `T\u1eeb ng\u00e0y ${params.from ? formatDateVi(params.from) : "t\u1ea5t c\u1ea3"} \u0111\u1ebfn ng\u00e0y ${params.to ? formatDateVi(params.to) : "t\u1ea5t c\u1ea3"}`
-  const note = params.selectedNote ? `; ghi ch\u00fa ${params.selectedNote}` : ""
+  const noteLabel = describeNoteFilter(params.selectedNote || "")
+  const note = noteLabel ? `; ${noteLabel}` : ""
   if (params.mode === "doi" && params.selectedDoi) return `${range}; \u0111\u1ed9i ${params.selectedDoi}${note}`
   if (params.mode === "vehicle" && params.selectedVehicle) return `${range}; xe ${params.selectedVehicle}${note}`
   return `${range}; t\u1ea5t c\u1ea3 \u0111\u1ed9i xe${note}`

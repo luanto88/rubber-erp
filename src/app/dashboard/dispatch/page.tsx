@@ -8,6 +8,7 @@ import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcMa
 import { dispatchDbRowToLegacy, replaceDispatchEntryRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
+import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Gauge } from "lucide-react"
 
@@ -156,7 +157,6 @@ const DIEM_GN: DiemGN[] = [
   { ma_lo:"H13", doi:7,  lat:12.605372, lng:105.532396, phien_a:["G13Đ","G14Đ","G14T","G13T","G15Đ","G15T","G16Đ","G16T"], phien_b:["G16T","G15Đ","G15T","H13Đ","H13T","H14Đ","H14T","H15T"], phien_c:["H15Đ","H15T","I-13Đ","I-13T","I-14Đ","I-14T","I-15Đ","I-15T"], phien_d:["I-13Đ","J15Đ","J15T","K13Đ","K13T","K14Đ","K14T"] },
 ]
 
-const XU_LY_OPTS = ["Xé","Không xé","Hỗn hợp"]
 const DRIVERS = [...new Set(VEHICLES.map(v => v.tai_xe))].sort()
 
 // ─── Manhattan distance calc ──────────────────────────────────────────────────
@@ -204,6 +204,10 @@ function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
     }
   }
   return [...new Set(lots)]
+}
+
+function formatDoiLabel(dois: number[]) {
+  return dois.length > 0 ? dois.join(", ") : "—"
 }
 
 const emptyRow = (): DxRow => ({
@@ -358,11 +362,12 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-function SmartMultiSelect({ options, selected, onChange, placeholder }: {
+function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: {
   options: string[]
   selected: string[]
   onChange: (val: string[]) => void
   placeholder?: string
+  labels?: Record<string, string>
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -439,6 +444,7 @@ function SmartMultiSelect({ options, selected, onChange, placeholder }: {
   const filtered = options.filter((option) => option.toLowerCase().includes(search.toLowerCase()))
   const allSelected = filtered.length > 0 && filtered.every((option) => selected.includes(option))
   const selectedPreview = selected.slice(0, 2)
+  const labelOf = (value: string) => labels?.[value] || value
 
   return (
     <div className="relative">
@@ -535,7 +541,7 @@ function SmartMultiSelect({ options, selected, onChange, placeholder }: {
                     className="shrink-0 accent-amber-500"
                   />
                   <span className={`min-w-0 truncate ${selected.includes(option) ? "font-semibold text-amber-700" : "text-slate-700"}`}>
-                    {option}
+                    {labelOf(option)}
                   </span>
                 </label>
               ))
@@ -673,6 +679,10 @@ export default function DispatchPage() {
   const resolveAllowedDoi = useCallback((diemGn: string[]) => {
     return getAllowedDoiFromPoints(deliveryPoints, diemGn)
   }, [deliveryPoints])
+
+  const deliveryPointLabels = Object.fromEntries(
+    deliveryPoints.map((point) => [point.ma_lo, `${point.ma_lo} - Đội ${point.doi}`]),
+  )
 
   const resolveSoKm = useCallback((stops: string[]) => {
     return calcManhattanKmFromPoints(stops, deliveryPoints)
@@ -829,7 +839,7 @@ export default function DispatchPage() {
   }, [deliveryPoints, factoryId, loadData])
   const filterRowsByNote = useCallback((rows: DxRow[] = []) => {
     if (!filterGhiChu) return rows
-    return rows.filter((row) => (row.ghi_chu || "").trim() === filterGhiChu)
+    return rows.filter((row) => matchesNoteFilter(row.ghi_chu, filterGhiChu))
   }, [filterGhiChu])
 
   const exportableEntries = filterGhiChu
@@ -850,7 +860,7 @@ export default function DispatchPage() {
     ) &&
     (
       !filterGhiChu ||
-      e.rows?.some(r => (r.ghi_chu || "").trim() === filterGhiChu)
+      e.rows?.some(r => matchesNoteFilter(r.ghi_chu, filterGhiChu))
     )
   )
 
@@ -982,6 +992,8 @@ export default function DispatchPage() {
         day_chuyen: formDayChuyen,
         rows: formRows.map((r,i) => ({
           ...r,
+          xu_ly: "Xé",
+          doi: resolveAllowedDoi(r.diem_gn || []),
           uid: r.uid || `r_${i}_${Date.now()}`,
           _date: formNgay,
           day_chuyen: formDayChuyen,
@@ -1068,6 +1080,7 @@ export default function DispatchPage() {
       // Khi Điểm GN thay đổi: lọc lộ trình theo đội
       if (field === "diem_gn") {
         const allowed = resolveAllowedDoi(val as string[])
+        next.doi = allowed
         if (allowed.length > 0) {
           next.lo_trinh = next.lo_trinh.filter(lt => {
             const d = deliveryPoints.find(g => g.ma_lo === lt)
@@ -1297,6 +1310,7 @@ export default function DispatchPage() {
         <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
           <option value="">{"T\u1ea5t c\u1ea3 ghi ch\u00fa"}</option>
+          <option value={EMPTY_NOTE_FILTER}>{"Kh\u00f4ng c\u00f3 ghi ch\u00fa"}</option>
           {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
         </select>
         <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
@@ -1549,7 +1563,7 @@ export default function DispatchPage() {
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PDF</th>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","KM","KL tươi","DRC%","KL khô"].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
                 <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
               <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ghi chú</th>
@@ -1576,9 +1590,9 @@ export default function DispatchPage() {
                     ))}
                   </div>
                 </td>
+                <td className="px-3 py-2.5 text-slate-600">{formatDoiLabel(getTripDois(row, deliveryPoints))}</td>
                 <td className="px-3 py-2.5 text-slate-500">{(row.phien||[]).join(", ")}</td>
                 <td className="px-3 py-2.5 text-slate-500 text-[10px] max-w-48 truncate">{Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : row.lo_thu_hoach}</td>
-                <td className="px-3 py-2.5 text-slate-600">{row.xu_ly}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.so_km} km</td>
                 <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.drc_dc}%</td>
@@ -1707,7 +1721,7 @@ export default function DispatchPage() {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Phiên","Lô thu hoạch","Xử lý","Lộ trình","Km","Ghi chú",""].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","Lộ trình","Km","Ghi chú",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -1751,9 +1765,14 @@ export default function DispatchPage() {
                 <td className="px-2 py-1.5 min-w-[140px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.diem_gn.join(", ") || "—"}</span>
-                    : <SmartMultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn}
+                    : <SmartMultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn} labels={deliveryPointLabels}
                         onChange={val => updateRow(idx,"diem_gn",val)} placeholder="Chọn điểm..."/>
                   }
+                </td>
+
+                {/* Đội */}
+                <td className="px-2 py-1.5 text-slate-600 font-semibold whitespace-nowrap">
+                  {formatDoiLabel(resolveAllowedDoi(row.diem_gn))}
                 </td>
 
                 {/* Phiên */}
@@ -1781,15 +1800,6 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Xử lý */}
-                <td className="px-2 py-1.5">
-                  <select value={row.xu_ly} disabled={!!row.locked}
-                    onChange={e => updateRow(idx,"xu_ly",e.target.value)}
-                    className="w-16 px-2 py-1 border border-slate-300 rounded-lg text-xs disabled:bg-transparent disabled:border-transparent outline-none focus:border-emerald-400">
-                    {XU_LY_OPTS.map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </td>
-
                 {/* Lộ trình — lọc theo đội của Điểm GN */}
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
@@ -1799,7 +1809,7 @@ export default function DispatchPage() {
                         const opts = allowed.length > 0
                           ? deliveryPoints.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
                           : deliveryPoints.map(d => d.ma_lo)
-                        return <SmartMultiSelect options={opts} selected={row.lo_trinh}
+                        return <SmartMultiSelect options={opts} selected={row.lo_trinh} labels={deliveryPointLabels}
                           onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
                       })()
                   }

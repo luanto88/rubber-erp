@@ -145,6 +145,32 @@ function getNganKL(row: Record<string, number>, loai_nl: string): { tuoi: number
   }
 }
 
+type DispatchKg = {
+  mn_tuoi: number
+  mn_kho: number
+  ct_tuoi: number
+  ct_kho: number
+  dct_tuoi: number
+  dct_kho: number
+  dkt_tuoi: number
+  dkt_kho: number
+  dt_tuoi: number
+  dt_kho: number
+}
+
+const ZERO_KG: DispatchKg = {
+  mn_tuoi: 0,
+  mn_kho: 0,
+  ct_tuoi: 0,
+  ct_kho: 0,
+  dct_tuoi: 0,
+  dct_kho: 0,
+  dkt_tuoi: 0,
+  dkt_kho: 0,
+  dt_tuoi: 0,
+  dt_kho: 0,
+}
+
 // ── Write-back tổng hợp KL từ production_records → dispatch_entries.rows[] ──
 // Gọi sau khi import hoặc lưu/xóa thủ công để dispatch luôn phản ánh sản lượng thực tế.
 export async function writeBackToDispatch(
@@ -158,13 +184,11 @@ export async function writeBackToDispatch(
     .select("so_xe,chuyen,mn_tuoi,mn_kho,ct_tuoi,ct_kho,dct_tuoi,dct_kho,dkt_tuoi,dkt_kho,dt_tuoi,dt_kho")
     .eq("factory_id", factoryId)
     .eq("ngay", ngay)
-  if (!prods?.length) return
 
-  type KG = { mn_tuoi: number; mn_kho: number; ct_tuoi: number; ct_kho: number; dct_tuoi: number; dct_kho: number; dkt_tuoi: number; dkt_kho: number; dt_tuoi: number; dt_kho: number }
-  const groups = new Map<string, KG>()
+  const groups = new Map<string, DispatchKg>()
   for (const p of prods as Array<Record<string, number>>) {
     const key = `${p.so_xe}:${p.chuyen}`
-    const g = groups.get(key) ?? { mn_tuoi: 0, mn_kho: 0, ct_tuoi: 0, ct_kho: 0, dct_tuoi: 0, dct_kho: 0, dkt_tuoi: 0, dkt_kho: 0, dt_tuoi: 0, dt_kho: 0 }
+    const g = groups.get(key) ?? { ...ZERO_KG }
     g.mn_tuoi  += p.mn_tuoi  ?? 0; g.mn_kho  += p.mn_kho  ?? 0
     g.ct_tuoi  += p.ct_tuoi  ?? 0; g.ct_kho  += p.ct_kho  ?? 0
     g.dct_tuoi += p.dct_tuoi ?? 0; g.dct_kho += p.dct_kho ?? 0
@@ -185,6 +209,13 @@ export async function writeBackToDispatch(
   // 3. Ghi ngược KL vào các dispatch row khớp xe + chuyến
   const fmt = (n: number) => String(Math.round(n * 100) / 100)
   const wdrc = (kho: number, tuoi: number) => tuoi > 0 ? String(Math.round(kho / tuoi * 10000) / 100) : "0"
+  const buildDispatchPayload = (g: DispatchKg) => ({
+    kl_mn:  fmt(g.mn_tuoi),  kl_mnk: fmt(g.mn_kho),  drc_mn: wdrc(g.mn_kho,  g.mn_tuoi),
+    kl_ct:  fmt(g.ct_tuoi),  kl_ck:  fmt(g.ct_kho),  drc_c:  wdrc(g.ct_kho,  g.ct_tuoi),
+    kl_dct: fmt(g.dct_tuoi), kl_dck: fmt(g.dct_kho), drc_dc: wdrc(g.dct_kho, g.dct_tuoi),
+    kl_dkt: fmt(g.dkt_tuoi), kl_dkk: fmt(g.dkt_kho), drc_dk: wdrc(g.dkt_kho, g.dkt_tuoi),
+    kl_dt:  fmt(g.dt_tuoi),  kl_dk:  fmt(g.dt_kho),  drc_d:  wdrc(g.dt_kho,  g.dt_tuoi),
+  })
 
   for (const entry of entries as Array<{ id: string; rows: Array<Record<string, unknown>> }>) {
     let changed = false
@@ -192,16 +223,28 @@ export async function writeBackToDispatch(
       const dxSoXe = parseVehicleCode(String(row.so_xe ?? "")).base_xe
       const dxChuyen = Number(row.chuyen ?? 1)
       const key = `${dxSoXe}:${dxChuyen}`
-      const g = groups.get(key)
-      if (!g) return row
+      const nextPayload = buildDispatchPayload(groups.get(key) ?? ZERO_KG)
+      const samePayload =
+        String(row.kl_mn ?? "0") === nextPayload.kl_mn &&
+        String(row.kl_mnk ?? "0") === nextPayload.kl_mnk &&
+        String(row.drc_mn ?? "0") === nextPayload.drc_mn &&
+        String(row.kl_ct ?? "0") === nextPayload.kl_ct &&
+        String(row.kl_ck ?? "0") === nextPayload.kl_ck &&
+        String(row.drc_c ?? "0") === nextPayload.drc_c &&
+        String(row.kl_dct ?? "0") === nextPayload.kl_dct &&
+        String(row.kl_dck ?? "0") === nextPayload.kl_dck &&
+        String(row.drc_dc ?? "0") === nextPayload.drc_dc &&
+        String(row.kl_dkt ?? "0") === nextPayload.kl_dkt &&
+        String(row.kl_dkk ?? "0") === nextPayload.kl_dkk &&
+        String(row.drc_dk ?? "0") === nextPayload.drc_dk &&
+        String(row.kl_dt ?? "0") === nextPayload.kl_dt &&
+        String(row.kl_dk ?? "0") === nextPayload.kl_dk &&
+        String(row.drc_d ?? "0") === nextPayload.drc_d
+      if (samePayload) return row
       changed = true
       return {
         ...row,
-        kl_mn:  fmt(g.mn_tuoi),  kl_mnk: fmt(g.mn_kho),  drc_mn: wdrc(g.mn_kho,  g.mn_tuoi),
-        kl_ct:  fmt(g.ct_tuoi),  kl_ck:  fmt(g.ct_kho),  drc_c:  wdrc(g.ct_kho,  g.ct_tuoi),
-        kl_dct: fmt(g.dct_tuoi), kl_dck: fmt(g.dct_kho), drc_dc: wdrc(g.dct_kho, g.dct_tuoi),
-        kl_dkt: fmt(g.dkt_tuoi), kl_dkk: fmt(g.dkt_kho), drc_dk: wdrc(g.dkt_kho, g.dkt_tuoi),
-        kl_dt:  fmt(g.dt_tuoi),  kl_dk:  fmt(g.dt_kho),  drc_d:  wdrc(g.dt_kho,  g.dt_tuoi),
+        ...nextPayload,
       }
     })
     if (changed) {
@@ -220,17 +263,9 @@ export async function writeBackToDispatch(
 
     await Promise.all((physicalRows ?? []).map(async (row: { id: string; so_xe: string; chuyen: number }) => {
       const key = `${parseVehicleCode(String(row.so_xe ?? "")).base_xe}:${Number(row.chuyen ?? 1)}`
-      const g = groups.get(key)
-      if (!g) return
       await supabase
         .from("dispatch_entry_rows")
-        .update({
-          kl_mn: fmt(g.mn_tuoi), kl_mnk: fmt(g.mn_kho), drc_mn: wdrc(g.mn_kho, g.mn_tuoi),
-          kl_ct: fmt(g.ct_tuoi), kl_ck: fmt(g.ct_kho), drc_c: wdrc(g.ct_kho, g.ct_tuoi),
-          kl_dct: fmt(g.dct_tuoi), kl_dck: fmt(g.dct_kho), drc_dc: wdrc(g.dct_kho, g.dct_tuoi),
-          kl_dkt: fmt(g.dkt_tuoi), kl_dkk: fmt(g.dkt_kho), drc_dk: wdrc(g.dkt_kho, g.dkt_tuoi),
-          kl_dt: fmt(g.dt_tuoi), kl_dk: fmt(g.dt_kho), drc_d: wdrc(g.dt_kho, g.dt_tuoi),
-        })
+        .update(buildDispatchPayload(groups.get(key) ?? ZERO_KG))
         .eq("id", row.id)
         .eq("factory_id", factoryId)
     }))

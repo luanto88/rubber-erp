@@ -29,10 +29,21 @@ type DepartmentOption = {
   sort_order: number
 }
 
+const LOGIN_BOOT_TIMEOUT_MS = 8000
+
 const REASON_MESSAGES: Record<string, string> = {
   pending: "Tài khoản đã đăng nhập nhưng đang chờ admin phê duyệt.",
   disabled: "Tài khoản đã bị khóa. Vui lòng liên hệ admin.",
   no_factory: "Tài khoản chưa được gán nhà máy.",
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
+  return Promise.race<T>([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs)
+    }),
+  ])
 }
 
 function LoginPageContent() {
@@ -48,6 +59,7 @@ function LoginPageContent() {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState<"login" | "register">("login")
   const [fullName, setFullName] = useState("")
+  const [email, setEmail] = useState("")
   const [dept, setDept] = useState("")
   const [deptOpen, setDeptOpen] = useState(false)
   const deptRef = useRef<HTMLDivElement>(null)
@@ -69,52 +81,80 @@ function LoginPageContent() {
     let alive = true
 
     const bootstrap = async () => {
-      const [{ data: factoryData }, { data: deptData }] = await Promise.all([
-        supabase.from("factories").select("id, code, name, prefix").order("name"),
-        supabase.from("departments").select("id, code, name, sort_order").eq("is_active", true).order("sort_order"),
-      ])
-
-      if (alive) {
-        const nextFactories = (factoryData || []) as FactoryOption[]
-        setFactories(nextFactories)
-        setDepartments((deptData || []) as DepartmentOption[])
-        if (nextFactories.length && !factoryId) {
-          const preferred =
-            nextFactories.find(
-              (f) =>
-                f.prefix === "CSR" ||
-                f.name.toLowerCase().includes("kampong"),
-            ) ?? nextFactories[0]
-          setFactoryId(preferred.id)
-        }
-      }
-
       try {
-        const { user } = await hydrateActiveSession()
-        const blockReason = authBlockReason(user)
+        const [factoryResult, deptResult, sessionResult] = await Promise.allSettled([
+          withTimeout(
+            supabase.from("factories").select("id, code, name, prefix").order("name"),
+            LOGIN_BOOT_TIMEOUT_MS,
+            "load factories",
+          ),
+          withTimeout(
+            supabase
+              .from("departments")
+              .select("id, code, name, sort_order")
+              .eq("is_active", true)
+              .order("sort_order"),
+            LOGIN_BOOT_TIMEOUT_MS,
+            "load departments",
+          ),
+          withTimeout(hydrateActiveSession(), LOGIN_BOOT_TIMEOUT_MS, "hydrate session"),
+        ])
 
-        if (user && !blockReason) {
-          if (alive) router.replace("/dashboard")
-          return
+        if (!alive) return
+
+        if (factoryResult.status === "fulfilled") {
+          const nextFactories = ((factoryResult.value.data || []) as FactoryOption[]) || []
+          setFactories(nextFactories)
+          if (nextFactories.length && !factoryId) {
+            const preferred =
+              nextFactories.find((f) => f.prefix === "CSR" || f.name.toLowerCase().includes("kampong")) ??
+              nextFactories[0]
+            setFactoryId(preferred.id)
+          }
+        } else {
+          setFactories([])
         }
 
-        if (blockReason && blockReason !== "missing") {
-          await signOutEverywhere()
-          if (alive) setNotice(REASON_MESSAGES[blockReason] || "")
+        if (deptResult.status === "fulfilled") {
+          setDepartments(((deptResult.value.data || []) as DepartmentOption[]) || [])
+        } else {
+          setDepartments([])
+        }
+
+        if (sessionResult.status === "fulfilled") {
+          const { user } = sessionResult.value
+          const blockReason = authBlockReason(user)
+
+          if (user && !blockReason) {
+            router.replace("/dashboard")
+            return
+          }
+
+          if (blockReason && blockReason !== "missing") {
+            await signOutEverywhere()
+            if (alive) setNotice(REASON_MESSAGES[blockReason] || "")
+          }
+        } else {
+          clearLegacySession()
         }
       } catch {
-        clearLegacySession()
+        if (alive) {
+          setFactories([])
+          setDepartments([])
+          clearLegacySession()
+          setNotice("Không thể tải phiên đăng nhập tự động. Bạn vẫn có thể đăng nhập thủ công.")
+        }
       } finally {
         if (alive) setBooting(false)
       }
     }
 
-    bootstrap()
+    void bootstrap()
 
     return () => {
       alive = false
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -173,8 +213,15 @@ function LoginPageContent() {
     setNotice("")
 
     const normalizedUsername = normalizeUsername(username)
-    if (!normalizedUsername || !password || !fullName.trim() || !factoryId) {
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedUsername || !password || !fullName.trim() || !normalizedEmail || !factoryId) {
       setError("Vui lòng nhập đầy đủ thông tin bắt buộc")
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError("Vui lòng nhập email hợp lệ")
       return
     }
 
@@ -203,15 +250,14 @@ function LoginPageContent() {
         username: normalizedUsername,
         password,
         fullName,
+        email: normalizedEmail,
         department: dept,
         factoryId,
       })
 
       if (signupError) {
         setError(
-          signupError.message.includes("already")
-            ? "Tên đăng nhập đã tồn tại"
-            : signupError.message,
+          signupError.message.includes("already") ? "Tên đăng nhập đã tồn tại" : signupError.message,
         )
         setLoading(false)
         return
@@ -222,19 +268,12 @@ function LoginPageContent() {
       setNotice("Đăng ký thành công. Tài khoản đang ở trạng thái chờ phê duyệt.")
       setTab("login")
       setPassword("")
+      setEmail("")
     } catch {
       setError("Không thể đăng ký. Vui lòng thử lại.")
     }
 
     setLoading(false)
-  }
-
-  if (booting) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
-      </div>
-    )
   }
 
   return (
@@ -263,6 +302,13 @@ function LoginPageContent() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
+          {booting && (
+            <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+              <span>Đang kiểm tra phiên đăng nhập và tải dữ liệu ban đầu...</span>
+            </div>
+          )}
+
           <div className="mb-6 flex gap-2">
             {(["login", "register"] as const).map((item) => (
               <button
@@ -274,9 +320,7 @@ function LoginPageContent() {
                 }}
                 className={
                   "flex-1 rounded-full py-2.5 text-sm font-bold transition-all " +
-                  (tab === item
-                    ? "bg-emerald-600 text-white shadow-md"
-                    : "text-slate-500 hover:bg-emerald-50")
+                  (tab === item ? "bg-emerald-600 text-white shadow-md" : "text-slate-500 hover:bg-emerald-50")
                 }
               >
                 {item === "login" ? "Đăng nhập" : "Đăng ký"}
@@ -290,6 +334,7 @@ function LoginPageContent() {
               onChange={(e) => setFactoryId(e.target.value)}
               className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
             >
+              {factoryOptions.length === 0 && <option value="">Chọn nhà máy</option>}
               {factoryOptions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
@@ -305,38 +350,62 @@ function LoginPageContent() {
                   placeholder="Họ tên *"
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email cá nhân *"
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
+                />
                 <div ref={deptRef} className="relative">
                   <button
                     type="button"
-                    onClick={() => setDeptOpen(o => !o)}
-                    className={"w-full flex items-center justify-between rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 " + (dept ? "text-slate-800" : "text-slate-400")}
+                    onClick={() => setDeptOpen((open) => !open)}
+                    className={
+                      "flex w-full items-center justify-between rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 " +
+                      (dept ? "text-slate-800" : "text-slate-400")
+                    }
                   >
                     <span>
                       {dept
-                        ? departments.find(d => d.name === dept)
-                            ? `${dept} (${departments.find(d => d.name === dept)!.code})`
-                            : dept
+                        ? departments.find((d) => d.name === dept)
+                          ? `${dept} (${departments.find((d) => d.name === dept)?.code || ""})`
+                          : dept
                         : "Phòng ban"}
                     </span>
                     <ChevronDown size={16} className={"transition-transform " + (deptOpen ? "rotate-180" : "")} />
                   </button>
                   {deptOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
                       <button
                         type="button"
-                        onClick={() => { setDept(""); setDeptOpen(false) }}
-                        className={"w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " + (!dept ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-400")}
+                        onClick={() => {
+                          setDept("")
+                          setDeptOpen(false)
+                        }}
+                        className={
+                          "w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " +
+                          (!dept ? "bg-emerald-50 font-semibold text-emerald-700" : "text-slate-400")
+                        }
                       >
                         Phòng ban
                       </button>
-                      {departments.map(d => (
+                      {departments.map((department) => (
                         <button
-                          key={d.id}
+                          key={department.id}
                           type="button"
-                          onClick={() => { setDept(d.name); setDeptOpen(false) }}
-                          className={"w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " + (dept === d.name ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700")}
+                          onClick={() => {
+                            setDept(department.name)
+                            setDeptOpen(false)
+                          }}
+                          className={
+                            "w-full px-4 py-2.5 text-left text-sm hover:bg-emerald-50 " +
+                            (dept === department.name
+                              ? "bg-emerald-50 font-semibold text-emerald-700"
+                              : "text-slate-700")
+                          }
                         >
-                          {d.name} ({d.code})
+                          {department.name} ({department.code})
                         </button>
                       ))}
                     </div>
@@ -357,9 +426,11 @@ function LoginPageContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Mật khẩu *"
-              onKeyDown={(e) =>
-                e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())
-              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void (tab === "login" ? handleLogin() : handleRegister())
+                }
+              }}
               className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
             />
 
@@ -376,8 +447,8 @@ function LoginPageContent() {
             )}
 
             <button
-              onClick={tab === "login" ? handleLogin : handleRegister}
-              disabled={loading}
+              onClick={() => void (tab === "login" ? handleLogin() : handleRegister())}
+              disabled={loading || (tab === "register" && !factoryId)}
               className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
             >
               {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}

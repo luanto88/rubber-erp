@@ -198,13 +198,25 @@ Bước 1 yêu cầu người dùng ký qua `SignPlacementModal` trước khi g�
 3. **CloudConvert lỗi không block** `da_phe_duyet` — vẫn lưu file Office, vẫn chuyển trạng thái
 4. `SIGN_JWT_SECRET` fallback → `SUPABASE_SERVICE_ROLE_KEY` (đồng nhất với các route ký khác)
 
+### Nguyên tắc tag Office (DOCX/XLSX)
+
+- **Tag có trong file → thay** (text tag hoặc image tag như `{{CHU_KY_*}}`, `{{QR}}`)
+- **Tag không có trong file → bỏ qua**, không lỗi
+- **Người dùng đã điền thủ công thay vì dùng tag → bỏ qua** (tag không còn trong file nên tự động bỏ qua)
+
+Áp dụng cho tất cả loại file PDF, DOCX, XLSX và tất cả bước `soan_thao`, `xem_xet`, `phe_duyet`.
+
 ### Source file theo bước
 
-| Action | Source ưu tiên |
-|--------|--------------|
-| `soan_thao` | `instance.draft_file_url` |
-| `xem_xet` | `instance.soan_thao_signed_url` → `instance.draft_file_url` |
-| `phe_duyet` | `instance.final_pdf_url` → `instance.soan_thao_signed_url` → `instance.draft_file_url` |
+| Action | File PDF (`draftExt === "pdf"`) | File Office (DOCX/XLSX) |
+|--------|--------------------------------|------------------------|
+| `soan_thao` | `draft_file_url` | `draft_file_url` |
+| `xem_xet` | `soan_thao_signed_url` → `draft_file_url` | `soan_thao_signed_url` → `draft_file_url` |
+| `phe_duyet` | `final_pdf_url` → `soan_thao_signed_url` → `draft_file_url` | `soan_thao_signed_url` → `draft_file_url` |
+
+**Quan trọng**: `phe_duyet` cho file Office **không được dùng `final_pdf_url`** làm source — giá trị này có thể là stale từ lần test cũ. `draftExt` được tính từ `draft_file_url` (tên file thật) nên không bị ảnh hưởng.
+
+Backward compat: instance cũ có `soan_thao_signed_url` kết thúc `.pdf` (CloudConvert cũ) → `sourceIsPdf = true` → vẫn đi path `stampPdf` đúng.
 
 ### Xử lý theo loại file và action
 
@@ -231,6 +243,18 @@ Bước 1 yêu cầu người dùng ký qua `SignPlacementModal` trước khi g�
 - XLSX: quét các `xl/worksheets/sheet*.xml`
 - Tags không có trong file → bỏ qua (không lỗi)
 
+**DOCX image tag (`replaceDocxImageTag`) — kỹ thuật quan trọng:**
+- Signature nhận `ArrayBuffer | Uint8Array` (tương thích Buffer của Node.js)
+- Khi lưu file vào ZIP: `Buffer.isBuffer(buf) ? buf : Buffer.from(buf as ArrayBuffer)` — tránh copy bytes thừa từ pooled ArrayBuffer
+- QR buffer: truyền `qrBuffer` trực tiếp từ `QRCode.toBuffer()`, **không dùng `qrBuffer.buffer`** (`.buffer` trả về pooled ArrayBuffer lớn hơn data thật)
+- EMU size: **QR = `432000 × 432000` (~12mm vuông)**; chữ ký = `900000 × 450000` (~24×12mm)
+- `<wp:docPr id>` phải **unique** trong toàn document — tính bằng `max(existingIds) + 1`:
+  ```typescript
+  const existingDocPrIds = [...docXml.matchAll(/<wp:docPr[^>]*\bid="(\d+)"/g)].map(m => parseInt(m[1]))
+  const newDocPrId = existingDocPrIds.length > 0 ? Math.max(...existingDocPrIds) + 1 : 1
+  ```
+  Nếu không unique, Word từ chối hình ảnh thứ hai (QR hiện broken image)
+
 ### Tags Office theo bước
 
 | Bước | Text tag | Image tag |
@@ -254,9 +278,12 @@ Bước 1 yêu cầu người dùng ký qua `SignPlacementModal` trước khi g�
 
 | Action | Fields cập nhật |
 |--------|----------------|
-| `soan_thao` | `trang_thai`, `soan_thao`, `soan_thao_placement`, `soan_thao_signed_url`, `ky_soan_thao_at` |
+| `soan_thao` (PDF) | `trang_thai`, `soan_thao`, `soan_thao_placement`, `soan_thao_signed_url`, `ky_soan_thao_at`, `final_pdf_url` |
+| `soan_thao` (Office) | `trang_thai`, `soan_thao`, `soan_thao_placement`, `soan_thao_signed_url`, `ky_soan_thao_at`, **`final_pdf_url = null`**, **`final_office_url = null`** |
 | `xem_xet` | `trang_thai = cho_phe_duyet`, `xem_xet`, `xem_xet_placement`, `ky_xem_xet_at` |
 | `phe_duyet` | `trang_thai = da_phe_duyet`, `phe_duyet`, `phe_duyet_placement`, `ky_phe_duyet_at`, `final_pdf_url` / `final_office_url` |
+
+**Lý do xóa `final_pdf_url = null` khi `soan_thao` Office**: Ngăn bước `phe_duyet` bị dẫn vào path `stampPdf` do đọc giá trị stale từ lần test cũ (code cũ từng tạo PDF tại soan_thao). Sau khi clear, server và UI đều đọc đúng `soan_thao_signed_url` làm source.
 
 ---
 
@@ -389,6 +416,22 @@ Các nút hành động nằm **cùng hàng với `WorkflowStepper`** trong mộ
 </div>
 ```
 
+### Source file trong `openPheDuyetModal`
+
+Khi mở modal phê duyệt, phải kiểm tra loại file gốc trước khi chọn source URL:
+
+```typescript
+const isDraftPdf = instance.draft_file_type === "pdf"
+const src = isDraftPdf
+  ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
+  : (instance.soan_thao_signed_url || instance.draft_file_url)
+```
+
+- File PDF: `final_pdf_url` là kết quả thật từ bước trước → dùng được
+- File Office: **bỏ qua `final_pdf_url`** — giá trị này có thể là stale từ code cũ → dùng `soan_thao_signed_url` trực tiếp
+
+Không dùng `urlIsPdf(src)` để quyết định source, vì URL stale có thể trỏ đến `.pdf` không thuộc file hiện tại.
+
 ### Quy tắc quyền `canReturn`
 
 Chỉ người được giao đúng bước mới được bấm "Trả về" — không phải bất kỳ user nào đăng nhập:
@@ -520,6 +563,30 @@ Gọi fire-and-forget sau mỗi action thành công. Lỗi thông báo không bl
 
 ---
 
+## Bài học phiên 2026-06-08
+
+### OTP đổi PIN / chữ ký / mật khẩu
+
+- Luồng OTP cho thao tác nhạy cảm **phụ thuộc vào `maintenance_staff.email`**, không dùng `profiles.auth_email`
+- Tài khoản cũ chưa có email thật trong `maintenance_staff.email` sẽ **không đổi được PIN/chữ ký/mật khẩu qua OTP** cho đến khi được bổ sung email
+- Khi tạo tài khoản mới, cần lưu email thật ngay từ bước đăng ký và gắn vào `maintenance_staff` theo `profile_id`
+- Khi tra email OTP qua `maintenance_staff`, **ưu tiên match theo `profile_id`**; chỉ fallback theo `ten` nếu có đúng 1 hồ sơ chưa liên kết
+- Nếu có **nhiều hồ sơ nhân sự trùng họ tên** chưa liên kết, phải trả lỗi rõ ràng để admin xử lý; **không được** tự gán bừa email vào sai người
+
+### Form đăng nhập vs đăng ký
+
+- `Đăng nhập` **không được** validate hay yêu cầu email
+- `Email` chỉ bắt buộc ở `Đăng ký` và các flow xác thực OTP
+- Nếu thấy lỗi kiểu "Vui lòng nhập email hợp lệ" ở tab `Đăng nhập`, đó là bug UI chứ không liên quan tới việc tài khoản cũ thiếu email
+- Nếu giao diện login hiện tiếng Việt bị lỗi dấu hoặc bị đổi sang không dấu, coi đó là **bug UI/encoding**, không phải thay đổi nghiệp vụ
+
+### Migration liên quan
+
+- `20260608_security_otp_challenges.sql`: bảng challenge OTP ngắn hạn cho các thao tác nhạy cảm
+- `20260608_maintenance_staff_email.sql`: thêm cột `maintenance_staff.email` để làm đích nhận OTP
+
+---
+
 ## UI: Upload file trong forms/[id]/page.tsx
 
 ### Hành vi upload (đã cập nhật 2026-06-07)
@@ -641,6 +708,9 @@ Mỗi dòng: tiêu đề, role label (Cần ký & gửi / Cần xem xét / Cần
 - [x] Feature: `openSendModal` async auto-save config trước khi mở SignPlacementModal; xóa nút "Lưu cài đặt" (2026-06-08)
 - [x] Feature: Card gộp "Tiến trình & Lịch sử" thay thế 2 section riêng (2026-06-08)
 - [x] Feature: Badge action trong danh sách instances lớn hơn ~30%, cột tiêu đề giới hạn width (2026-06-08)
+- [x] Fix: DOCX QR broken image — unique `docPr id`, EMU 432000×432000 (12mm vuông), Buffer trực tiếp không qua `.buffer` (2026-06-09)
+- [x] Fix: Modal phê duyệt hiện "Không tải được PDF" — `openPheDuyetModal` dùng `isDraftPdf` check, bỏ qua `final_pdf_url` cho file Office (2026-06-09)
+- [x] Fix: Tags `{{CHU_KY_PHE_DUYET}}` / `{{TEN_PHE_DUYET}}` không được thay — `soan_thao` Office clear `final_pdf_url = null`; server `phe_duyet` không dùng `final_pdf_url` stale làm source cho DOCX (2026-06-09)
 - [x] Migration 1: `20260607_iso_forms_embedding.sql` ✅ Đã chạy
 - [x] Migration 2: `20260607_iso_form_instances.sql` ✅ Đã chạy
 - [x] Migration 3: `20260608_iso_forms_soan_thao_placement.sql` ✅ Đã chạy

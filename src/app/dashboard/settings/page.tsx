@@ -118,6 +118,20 @@ type UserEditor = {
 }
 
 type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban"
+type SensitiveActionKind = "change_pin" | "change_signature" | "change_password"
+type SensitiveActionModal = {
+  actionType: SensitiveActionKind
+  title: string
+  submitLabel: string
+  challengeId: string | null
+  maskedEmail: string | null
+  currentPassword: string
+  currentPin: string
+  otp: string
+  newPin?: string
+  newPassword?: string
+  file?: File
+}
 
 type SystemTab = "users" | "permissions" | "personnel"
 
@@ -735,6 +749,12 @@ export default function SettingsPage() {
   const [pinMsg, setPinMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [sigMsg, setSigMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [hasPinSet, setHasPinSet] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ password: "", confirm: "", show: false })
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordMsg, setPasswordMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [sensitiveActionModal, setSensitiveActionModal] = useState<SensitiveActionModal | null>(null)
+  const [sensitiveActionLoading, setSensitiveActionLoading] = useState(false)
+  const [sensitiveActionError, setSensitiveActionError] = useState("")
   const signatureInputRef = useRef<HTMLInputElement>(null)
 
   const loadSuffixes = useCallback(async (fid: string) => {
@@ -1295,11 +1315,10 @@ export default function SettingsPage() {
     setConfigError("")
     try {
       const geojson = JSON.parse(await file.text())
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const features: any[] = geojson?.features ?? []
+      const features: Array<{ properties?: Record<string, unknown> | null }> = geojson?.features ?? []
       if (!features.length) { setConfigError("File GeoJSON không có features"); return }
       const seen = new Set<string>()
-      const rows = features.flatMap((f: any) => {
+      const rows = features.flatMap((f) => {
         const p = f?.properties || {}
         const ten = String(p.Ten || "").trim()
         if (!ten || seen.has(ten)) return []
@@ -1988,10 +2007,198 @@ export default function SettingsPage() {
     void loadMasterRequiredNotes(factoryId)
   }
 
+  const getAccessToken = async () => {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (!token) {
+      throw new Error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+    }
+    return token
+  }
+
+  const closeSensitiveActionModal = () => {
+    setSensitiveActionModal(null)
+    setSensitiveActionError("")
+    setSensitiveActionLoading(false)
+  }
+
+  const beginSensitiveAction = (action: Omit<SensitiveActionModal, "challengeId" | "maskedEmail" | "currentPassword" | "currentPin" | "otp">) => {
+    setSensitiveActionError("")
+    setSensitiveActionModal({
+      ...action,
+      challengeId: null,
+      maskedEmail: null,
+      currentPassword: "",
+      currentPin: "",
+      otp: "",
+    })
+  }
+
+  const requestSensitiveOtp = async () => {
+    if (!user || !sensitiveActionModal) return
+    if (!sensitiveActionModal.currentPassword || !sensitiveActionModal.currentPin) {
+      setSensitiveActionError("Vui lòng nhập mật khẩu hiện tại và PIN cũ")
+      return
+    }
+
+    setSensitiveActionLoading(true)
+    setSensitiveActionError("")
+    try {
+      const accessToken = await getAccessToken()
+      const res = await fetch("/api/account/request-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          actionType: sensitiveActionModal.actionType,
+          currentPassword: sensitiveActionModal.currentPassword,
+          currentPin: sensitiveActionModal.currentPin,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setSensitiveActionError(json.error || "Không gửi được OTP")
+        return
+      }
+
+      setSensitiveActionModal((prev) => prev ? {
+        ...prev,
+        challengeId: json.challengeId || null,
+        maskedEmail: json.maskedEmail || null,
+      } : prev)
+    } catch (error) {
+      setSensitiveActionError(error instanceof Error ? error.message : "Không gửi được OTP")
+    } finally {
+      setSensitiveActionLoading(false)
+    }
+  }
+
+  const confirmSensitiveAction = async () => {
+    if (!user || !sensitiveActionModal?.challengeId) return
+    if (!sensitiveActionModal.otp.trim()) {
+      setSensitiveActionError("Vui lòng nhập mã OTP")
+      return
+    }
+
+    setSensitiveActionLoading(true)
+    setSensitiveActionError("")
+    try {
+      const accessToken = await getAccessToken()
+      const verifyRes = await fetch("/api/account/verify-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          actionType: sensitiveActionModal.actionType,
+          challengeId: sensitiveActionModal.challengeId,
+          otp: sensitiveActionModal.otp,
+        }),
+      })
+      const verifyJson = await verifyRes.json()
+      if (!verifyRes.ok) {
+        setSensitiveActionError(verifyJson.error || "OTP không hợp lệ")
+        return
+      }
+
+      const actionToken = String(verifyJson.actionToken || "")
+      if (!actionToken) {
+        setSensitiveActionError("Không lấy được xác thực thay đổi")
+        return
+      }
+
+      if (sensitiveActionModal.actionType === "change_pin") {
+        const res = await fetch("/api/sign/set-pin", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            pin: sensitiveActionModal.newPin,
+            actionToken,
+          }),
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          setSensitiveActionError(json.error || "Không đổi được PIN")
+          return
+        }
+        setHasPinSet(true)
+        setPinForm({ pin: "", pinConfirm: "", showPin: false })
+        setPinMsg({ ok: true, text: "Đã đổi PIN ký duyệt thành công" })
+      } else if (sensitiveActionModal.actionType === "change_signature") {
+        if (!sensitiveActionModal.file) {
+          setSensitiveActionError("Chưa có file chữ ký để cập nhật")
+          return
+        }
+
+        const formData = new FormData()
+        formData.append("userId", user.id)
+        formData.append("actionToken", actionToken)
+        formData.append("file", sensitiveActionModal.file)
+
+        const res = await fetch("/api/account/update-signature", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData,
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          setSensitiveActionError(json.error || "Không đổi được chữ ký")
+          return
+        }
+        setSignatureUrl(`${json.publicUrl}?t=${Date.now()}`)
+        setSigMsg({ ok: true, text: "Đã cập nhật chữ ký cá nhân" })
+      } else {
+        const res = await fetch("/api/account/change-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            newPassword: sensitiveActionModal.newPassword,
+            actionToken,
+          }),
+        })
+        const json = await res.json()
+        if (!res.ok) {
+          setSensitiveActionError(json.error || "Không đổi được mật khẩu")
+          return
+        }
+        setPasswordForm({ password: "", confirm: "", show: false })
+        setPasswordMsg({ ok: true, text: "Đã đổi mật khẩu thành công" })
+      }
+
+      closeSensitiveActionModal()
+    } catch (error) {
+      setSensitiveActionError(error instanceof Error ? error.message : "Xác thực thay đổi thất bại")
+    } finally {
+      setSensitiveActionLoading(false)
+    }
+  }
+
   const handleSignatureUpload = async (file: File) => {
     if (!user || !factoryId) return
-    if (!file.type.startsWith("image/")) {
-      setSigMsg({ ok: false, text: "Vui lòng chọn file ảnh (PNG, JPG, ...)" })
+    if (file.type !== "image/png") {
+      setSigMsg({ ok: false, text: "Vui lòng chọn file chữ ký định dạng PNG" })
+      return
+    }
+    if (signatureUrl) {
+      beginSensitiveAction({
+        actionType: "change_signature",
+        title: "Xác thực đổi chữ ký cá nhân",
+        submitLabel: "Đổi chữ ký",
+        file,
+      })
       return
     }
     setSignatureUploading(true)
@@ -2020,12 +2227,25 @@ export default function SettingsPage() {
       setPinMsg({ ok: false, text: "PIN phải là 4–6 chữ số" })
       return
     }
+    if (hasPinSet) {
+      beginSensitiveAction({
+        actionType: "change_pin",
+        title: "Xác thực đổi PIN ký duyệt",
+        submitLabel: "Đổi PIN",
+        newPin: pinForm.pin,
+      })
+      return
+    }
     setPinSaving(true)
     setPinMsg(null)
     try {
+      const accessToken = await getAccessToken()
       const res = await fetch("/api/sign/set-pin", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ userId: user.id, pin: pinForm.pin }),
       })
       const json = await res.json()
@@ -2036,6 +2256,32 @@ export default function SettingsPage() {
     } finally {
       setPinSaving(false)
     }
+  }
+
+  const handleChangePassword = async () => {
+    if (!user) return
+    if (!hasPinSet) {
+      setPasswordMsg({ ok: false, text: "Bạn cần thiết lập PIN ký duyệt trước khi đổi mật khẩu" })
+      return
+    }
+    if (passwordForm.password !== passwordForm.confirm) {
+      setPasswordMsg({ ok: false, text: "Xác nhận mật khẩu mới không khớp" })
+      return
+    }
+    if (passwordForm.password.length < 6) {
+      setPasswordMsg({ ok: false, text: "Mật khẩu mới phải có ít nhất 6 ký tự" })
+      return
+    }
+
+    setPasswordSaving(true)
+    setPasswordMsg(null)
+    beginSensitiveAction({
+      actionType: "change_password",
+      title: "Xác thực đổi mật khẩu",
+      submitLabel: "Đổi mật khẩu",
+      newPassword: passwordForm.password,
+    })
+    setPasswordSaving(false)
   }
 
   const pendingUsers = profiles.filter((item) => item.status === "pending")
@@ -2272,6 +2518,7 @@ export default function SettingsPage() {
                 <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
                   <div className="text-xs font-bold uppercase tracking-wide text-sky-700">Hồ sơ chưa liên kết</div>
                   <div className="mt-1 text-2xl font-extrabold text-sky-900">{staffWithoutProfile.length}</div>
+                  {/* eslint-disable-next-line react/no-unescaped-entities */}
                   <div className="text-xs text-sky-700/80">Dùng filter "Chưa liên kết" để rà soát nhanh các hồ sơ này.</div>
                 </div>
               </div>
@@ -4797,7 +5044,7 @@ export default function SettingsPage() {
                     Ảnh chữ ký
                   </h3>
                   <p className="text-xs text-slate-500 mb-4">
-                    Tải lên ảnh chữ ký tay của bạn (PNG/JPG, nền trắng hoặc trong suốt). Ảnh này sẽ được nhúng vào tài liệu khi bạn ký duyệt.
+                    Tải lên ảnh chữ ký tay của bạn dạng PNG, nền trắng hoặc trong suốt. Ảnh này sẽ được nhúng vào tài liệu khi bạn ký duyệt.
                   </p>
 
                   <div className="flex items-start gap-6">
@@ -4822,7 +5069,7 @@ export default function SettingsPage() {
                       <input
                         ref={signatureInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/png"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0]
@@ -4838,7 +5085,7 @@ export default function SettingsPage() {
                         <ImagePlus size={14} />
                         {signatureUploading ? "Đang tải lên..." : signatureUrl ? "Thay đổi ảnh chữ ký" : "Tải lên ảnh chữ ký"}
                       </button>
-                      <p className="text-xs text-slate-400">Định dạng: PNG, JPG · Nên dùng nền trắng</p>
+                      <p className="text-xs text-slate-400">Định dạng: PNG · Nên dùng nền trắng hoặc trong suốt</p>
                     </div>
                   </div>
 
@@ -4923,8 +5170,179 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </div>
+                <div className="border-t border-slate-100" />
+
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-700 mb-1 flex items-center gap-2">
+                    <Lock size={15} className="text-violet-500" />
+                    Đổi mật khẩu đăng nhập
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-4">
+                    Khi đổi mật khẩu, hệ thống sẽ yêu cầu nhập mật khẩu hiện tại, PIN cũ và xác nhận thêm bằng OTP gửi qua email cá nhân.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Mật khẩu mới</label>
+                      <input
+                        type={passwordForm.show ? "text" : "password"}
+                        value={passwordForm.password}
+                        onChange={(e) => setPasswordForm((p) => ({ ...p, password: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                        placeholder="Tối thiểu 6 ký tự"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Xác nhận mật khẩu mới</label>
+                      <input
+                        type={passwordForm.show ? "text" : "password"}
+                        value={passwordForm.confirm}
+                        onChange={(e) => setPasswordForm((p) => ({ ...p, confirm: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                        placeholder="Nhập lại mật khẩu mới"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="mt-3 inline-flex items-center gap-2 cursor-pointer text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={passwordForm.show}
+                      onChange={(e) => setPasswordForm((p) => ({ ...p, show: e.target.checked }))}
+                      className="w-4 h-4 rounded accent-violet-600"
+                    />
+                    Hiện mật khẩu mới
+                  </label>
+
+                  {passwordMsg && (
+                    <div className={`mt-3 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 max-w-lg ${passwordMsg.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                      {passwordMsg.ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                      {passwordMsg.text}
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                    <button
+                      onClick={() => void handleChangePassword()}
+                      disabled={passwordSaving || !passwordForm.password || !passwordForm.confirm}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
+                    >
+                      <Lock size={14} />
+                      {passwordSaving ? "Đang chuẩn bị..." : "Đổi mật khẩu"}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {sensitiveActionModal && (
+        <div className="fixed inset-0 z-[80] bg-slate-950/50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-800">{sensitiveActionModal.title}</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  {sensitiveActionModal.challengeId
+                    ? `Nhập OTP đã gửi đến ${sensitiveActionModal.maskedEmail || "email cá nhân"} để tiếp tục.`
+                    : "Xác minh bằng mật khẩu hiện tại, PIN cũ và OTP email trước khi hệ thống cho phép thay đổi."}
+                </p>
+              </div>
+              <button
+                onClick={closeSensitiveActionModal}
+                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {!sensitiveActionModal.challengeId ? (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Mật khẩu hiện tại</label>
+                    <input
+                      type="password"
+                      value={sensitiveActionModal.currentPassword}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setSensitiveActionModal((prev) => prev ? { ...prev, currentPassword: value } : prev)
+                        setSensitiveActionError("")
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                      placeholder="Nhập mật khẩu hiện tại"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN cũ</label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={sensitiveActionModal.currentPin}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/\D/g, "")
+                        setSensitiveActionModal((prev) => prev ? { ...prev, currentPin: value } : prev)
+                        setSensitiveActionError("")
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 font-mono tracking-widest"
+                      placeholder="Nhập PIN cũ"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã OTP</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={sensitiveActionModal.otp}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, "")
+                      setSensitiveActionModal((prev) => prev ? { ...prev, otp: value } : prev)
+                      setSensitiveActionError("")
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 font-mono tracking-[0.35em]"
+                    placeholder="6 chữ số"
+                  />
+                </div>
+              )}
+
+              {sensitiveActionError && (
+                <div className="px-4 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
+                  <AlertTriangle size={14} />
+                  {sensitiveActionError}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3 bg-slate-50">
+              <button
+                onClick={closeSensitiveActionModal}
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-white rounded-xl"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => void (sensitiveActionModal.challengeId ? confirmSensitiveAction() : requestSensitiveOtp())}
+                disabled={
+                  sensitiveActionLoading ||
+                  (!sensitiveActionModal.challengeId
+                    ? !sensitiveActionModal.currentPassword || !sensitiveActionModal.currentPin
+                    : !sensitiveActionModal.otp)
+                }
+                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50"
+              >
+                {sensitiveActionLoading
+                  ? "Đang xử lý..."
+                  : sensitiveActionModal.challengeId
+                    ? sensitiveActionModal.submitLabel
+                    : "Gửi OTP"}
+              </button>
+            </div>
           </div>
         </div>
       )}

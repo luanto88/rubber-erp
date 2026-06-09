@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 import bcrypt from "bcryptjs"
 import { SignJWT } from "jose"
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
+import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.SIGN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -14,13 +9,17 @@ const JWT_SECRET = new TextEncoder().encode(
 
 export async function POST(req: NextRequest) {
   try {
+    const authUser = await requireAuthUser(req)
     const { userId, pin, docId, docType } = await req.json()
 
     if (!userId || !pin || !docId || !docType) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
-    // Lấy pin_hash từ DB
+    if (authUser.id !== userId) {
+      return NextResponse.json({ error: "Không có quyền thực hiện thao tác này" }, { status: 403 })
+    }
+
     const { data: pinRow, error } = await supabaseAdmin
       .from("sign_pins")
       .select("pin_hash")
@@ -29,17 +28,16 @@ export async function POST(req: NextRequest) {
 
     if (error || !pinRow) {
       return NextResponse.json(
-        { error: "Chưa thiết lập PIN ký duyệt. Vào Cài đặt → Chữ ký cá nhân để tạo PIN." },
+        { error: "Chưa thiết lập PIN ký duyệt. Vào Cài đặt để tạo PIN." },
         { status: 404 },
       )
     }
 
-    const valid = await bcrypt.compare(pin, pinRow.pin_hash)
+    const valid = await bcrypt.compare(pin, pinRow.pin_hash as string)
     if (!valid) {
       return NextResponse.json({ error: "PIN không đúng" }, { status: 401 })
     }
 
-    // Tạo JWT ngắn hạn 5 phút, scope = docId
     const token = await new SignJWT({ userId, docId, docType })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
@@ -50,7 +48,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },
-      { status: 500 },
+      { status: 400 },
     )
   }
 }

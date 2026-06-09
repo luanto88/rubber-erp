@@ -163,7 +163,7 @@ function SignPlacementModal({
   onConfirm: (pin: string, placement: FullPlacement) => void
   onClose: () => void
 }) {
-  const isPdf = fileType === "pdf" || autoConvertPdf || urlIsPdf(sourceFileUrl)
+  const isPdf = fileType === "pdf" || urlIsPdf(sourceFileUrl)
   const showCanvas = isPdf && !!sourceFileUrl
 
   const [pin, setPin] = useState("")
@@ -310,7 +310,9 @@ function SignPlacementModal({
             <p className="text-xs text-slate-400 mt-0.5">
               {showCanvas
                 ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
-                : "Tag trong file Office sẽ được thay tự động khi ký"}
+                : autoConvertPdf
+                  ? "Tag chữ ký sẽ được thay tại mỗi bước; file sẽ convert sang PDF khi phê duyệt"
+                  : "Tag trong file Office sẽ được thay tự động khi ký"}
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
@@ -465,6 +467,14 @@ function SignPlacementModal({
                 )}
               </div>
             </div>
+          ) : autoConvertPdf ? (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-sm font-bold text-amber-800 mb-2">File Office — ký theo tag, convert PDF khi phê duyệt</p>
+              <ul className="text-xs text-amber-700 space-y-1 list-disc list-inside">
+                <li>Mỗi bước ký sẽ thay thế tag chữ ký tương ứng trong file</li>
+                <li>Sau bước phê duyệt cuối, CloudConvert sẽ tạo PDF từ file đã ký</li>
+              </ul>
+            </div>
           ) : (
             <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl">
               <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
@@ -601,14 +611,14 @@ export default function IsoFormInstancePage() {
     void bootstrap()
   }, [])
 
-  const loadInstance = useCallback(async (fid: string) => {
+  const loadInstance = useCallback(async (fid: string): Promise<IsoFormInstance | null> => {
     const { data: inst } = await supabase
       .from("iso_form_instances")
       .select("*")
       .eq("id", instanceId)
       .eq("factory_id", fid)
       .single()
-    if (!inst) return
+    if (!inst) return null
 
     const row = inst as IsoFormInstance
     setInstance(row)
@@ -631,6 +641,7 @@ export default function IsoFormInstancePage() {
       .eq("instance_id", instanceId)
       .order("created_at", { ascending: false })
     setLogs((logData ?? []) as LogRow[])
+    return row
   }, [instanceId])
 
   const loadProfiles = useCallback(async (fid: string) => {
@@ -719,9 +730,9 @@ export default function IsoFormInstancePage() {
     if (!instance || !factoryId) return
     if (cap_tl === "Cấp 1" && !xemXetUserId) { setActionError("Vui lòng chọn người xem xét"); return }
     if (!pheDuyetUserId) { setActionError("Vui lòng chọn người phê duyệt"); return }
-    const draftFileUrl = instance.draft_file_url
     setSaving(true)
     setActionError(null)
+    let reloaded: IsoFormInstance | null = null
     try {
       const updates: Record<string, unknown> = {
         cap_tl,
@@ -739,14 +750,16 @@ export default function IsoFormInstancePage() {
       }
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
       if (error) { setActionError(error.message); return }
-      await loadInstance(factoryId)
+      reloaded = await loadInstance(factoryId)
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Lỗi lưu cài đặt")
       return
     } finally {
       setSaving(false)
     }
-    setSignModal({ action: "soan_thao", sourceFileUrl: draftFileUrl })
+    // Dùng URL từ kết quả reload (fresh) thay vì closure cũ để tránh URL cũ (VD: .pdf) khi user vừa thay file
+    const freshFileUrl = reloaded?.draft_file_url ?? instance.draft_file_url
+    setSignModal({ action: "soan_thao", sourceFileUrl: freshFileUrl })
   }
 
   const openXemXetModal = () => {
@@ -757,7 +770,10 @@ export default function IsoFormInstancePage() {
 
   const openPheDuyetModal = () => {
     if (!instance) return
-    const src = instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url
+    const isDraftPdf = instance.draft_file_type === "pdf"
+    const src = isDraftPdf
+      ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
+      : (instance.soan_thao_signed_url || instance.draft_file_url)
     setSignModal({ action: "phe_duyet", sourceFileUrl: src })
   }
 
@@ -814,10 +830,19 @@ export default function IsoFormInstancePage() {
     setSignLoading(true)
     setActionError(null)
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        setActionError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+        return
+      }
       // 1. Verify PIN
       const verifyRes = await fetch("/api/sign/verify", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ userId, pin, docId: instanceId, docType: "iso_form" }),
       })
       const verifyJson = await verifyRes.json() as { token?: string; error?: string }

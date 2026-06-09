@@ -1,22 +1,39 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 import bcrypt from "bcryptjs"
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
+import {
+  requireAuthUser,
+  supabaseAdmin,
+  verifySensitiveActionToken,
+} from "@/app/api/account/_lib/security"
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, pin } = await req.json()
+    const authUser = await requireAuthUser(req)
+    const { userId, pin, actionToken } = await req.json()
 
     if (!userId || !pin) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
+    if (authUser.id !== userId) {
+      return NextResponse.json({ error: "Không có quyền thực hiện thao tác này" }, { status: 403 })
+    }
+
     if (!/^\d{4,6}$/.test(pin)) {
-      return NextResponse.json({ error: "PIN phải là 4–6 chữ số" }, { status: 400 })
+      return NextResponse.json({ error: "PIN phải là 4-6 chữ số" }, { status: 400 })
+    }
+
+    const { data: existingPin } = await supabaseAdmin
+      .from("sign_pins")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle()
+
+    if (existingPin) {
+      if (!actionToken) {
+        return NextResponse.json({ error: "Thiếu xác thực OTP cho thao tác đổi PIN" }, { status: 403 })
+      }
+      await verifySensitiveActionToken(String(actionToken), userId, "change_pin")
     }
 
     const pin_hash = await bcrypt.hash(pin, 12)
@@ -34,7 +51,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },
-      { status: 500 },
+      { status: 400 },
     )
   }
 }
