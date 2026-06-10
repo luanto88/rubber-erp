@@ -42,3 +42,25 @@ Error: Command "npm run build" exited with 1
 - Cảnh báo trùng dữ liệu ở bước preview import là bắt buộc để người dùng biết dòng nào sẽ ghi đè dữ liệu cũ.
 - Sau mọi thao tác import, thêm, sửa hoặc xóa ở module Sản lượng, phải chạy write-back để cập nhật lại khối lượng trên `dispatch_entries.rows` và `dispatch_entry_rows`.
 - Không chấp nhận trạng thái Điều xe nhỏ hơn Sản lượng chỉ vì dữ liệu trùng ở `production_records`.
+## Cập nhật 2026-06-10: lọc loại nguyên liệu và UI thống kê
+
+- Bộ lọc `Loại nguyên liệu` ở `/dashboard/dispatch` là `multi-select`, không còn `single select`.
+- Bộ lọc `Loại nguyên liệu` phải hoạt động đồng thời với `Ghi chú`, `Đội`, `Xe`, `Từ ngày`, `Đến ngày`.
+- Khi người dùng chọn nhiều loại nguyên liệu, dữ liệu `Danh sách`, `Thống kê`, `PDF tổng`, `PDF đội`, `PDF xe`, `PDF ngày` đều phải chỉ lấy các chuyến có ít nhất một loại khớp với tập đã chọn.
+- `Tab Thống kê` phải hiển thị được các KPI:
+  - `Tổng bảng phân xe`
+  - `Tổng chuyến xe`
+  - `Tổng km di chuyển`
+  - `Khối lượng tươi theo loại`
+  - `Khối lượng khô theo loại`
+- Không được render trùng 2 cụm KPI giống nhau khi đang ở tab `Thống kê`.
+  - Cụm KPI đầu trang chỉ hiển thị ở tab `Danh sách`.
+  - Cụm KPI trong tab `Thống kê` là cụm duy nhất khi người dùng đang xem thống kê.
+- Nếu có thay đổi text/filter UI ở `dispatch/page.tsx`, phải rà lại hiển thị tiếng Việt thực tế trên giao diện.
+  - Không để placeholder hoặc label hiện dạng escape như `T\\u1ea5t...`
+  - Không để text mojibake như `Má»§`, `ChĂ©n`, `KhĂ´ng`
+
+## Handoff bổ sung cho session tiếp theo
+
+- Nếu sửa tiếp `src/app/dashboard/dispatch/page.tsx`, ưu tiên giữ text hiển thị bằng tiếng Việt Unicode bình thường.
+- Khi thêm component dùng chung cho filter, phải kiểm tra cả text trong chính component đó, không chỉ text ở nơi gọi.

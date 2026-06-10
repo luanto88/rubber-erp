@@ -185,3 +185,24 @@ Sau khi xử lý xong tất cả lô trong một phiên, insert 1 bản ghi vào
 - Sau khi import hoặc sửa/xóa thủ công trong module Sản lượng, vẫn phải gọi write-back để đồng bộ lại khối lượng sang Điều xe; không để Điều xe nhỏ hơn Sản lượng chỉ vì dữ liệu trùng.
 - Các thao tác thêm/sửa/xóa từng dòng sản lượng trên UI chỉ dành cho tài khoản `admin`.
 - Nút `Thêm mới` và các action sửa/xóa từng dòng phải ẩn với user không phải `admin`, đồng thời handler cũng phải chặn ở tầng logic để tránh lách bằng UI cũ.
+## Cập nhật 2026-06-10: UI lọc và thống kê mới
+
+### Điều xe
+
+- `Điều xe/Danh sách` và `Điều xe/Thống kê` có thêm bộ lọc `Loại nguyên liệu` dạng `multi-select`.
+- Bộ lọc này phải kết hợp được với `Ghi chú`.
+- `Điều xe/Thống kê` hiển thị:
+  - `Tổng bảng phân xe`
+  - `Tổng chuyến xe`
+  - `Tổng km di chuyển`
+  - `Khối lượng tươi theo loại`
+  - `Khối lượng khô theo loại`
+- Không được để trùng 2 header thống kê giống nhau khi ở tab `Thống kê`.
+- Mọi text hiển thị của `Điều xe` phải dùng tiếng Việt Unicode bình thường, không dùng text bị escape hoặc mojibake.
+
+### Sản lượng
+
+- `Sản lượng/Danh sách` và `Sản lượng/Thống kê` có thêm bộ lọc `Loại nguyên liệu` dạng `multi-select`.
+- `Sản lượng/Danh sách` hiển thị theo `ngày`, bấm mở rộng mới hiện chi tiết từng dòng.
+- Dòng header ngày phải chứa tổng `Tươi/Khô` và action của ngày.
+- `Sản lượng/Thống kê` phải hiển thị được khối lượng các loại nguyên liệu tươi/khô.

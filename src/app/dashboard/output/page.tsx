@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import type { ProductionRecord, OutputFormState } from "./_components/output-types"
 import {
-  totalTuoi, totalKho, WARN_LABELS, WARN_SEVERITY, parseVehicleCode, buildProductionRecordKey,
+  WARN_LABELS, WARN_SEVERITY, parseVehicleCode, buildProductionRecordKey,
   writeBackToDispatch,
   type WarnCode,
 } from "./_components/output-types"
@@ -32,6 +32,24 @@ interface DeliveryPoint { ma_lo: string; doi: number }
 const LATEX_FILTER_OPTIONS = ["Mủ nước", "Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây"] as const
 type LatexFilterOption = typeof LATEX_FILTER_OPTIONS[number]
 
+const MATERIAL_DEFS = [
+  { label: "Mủ nước", shortLabel: "Nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
+  { label: "Mủ chén", shortLabel: "Chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
+  { label: "Mủ đông chén", shortLabel: "ĐChén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
+  { label: "Mủ đông khối", shortLabel: "ĐKhối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
+  { label: "Mủ dây", shortLabel: "Dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
+] as const satisfies ReadonlyArray<{
+  label: LatexFilterOption
+  shortLabel: string
+  tuoiKey: keyof ProductionRecord
+  khoKey: keyof ProductionRecord
+}>
+
+function getActiveMaterialDefs(selected: string[]) {
+  if (selected.length === 0) return MATERIAL_DEFS
+  return MATERIAL_DEFS.filter((def) => selected.includes(def.label))
+}
+
 function getMaterialFlags(record: ProductionRecord) {
   return {
     "Mủ nước": (record.mn_tuoi ?? 0) > 0 || (record.mn_kho ?? 0) > 0,
@@ -42,14 +60,27 @@ function getMaterialFlags(record: ProductionRecord) {
   } as const
 }
 
-function getMaterialSummary(record: ProductionRecord) {
-  const parts: string[] = []
-  if (record.mn_tuoi > 0) parts.push(`Nước ${fmtNum(record.mn_tuoi)}`)
-  if (record.ct_tuoi > 0) parts.push(`Chén ${fmtNum(record.ct_tuoi)}`)
-  if (record.dct_tuoi > 0) parts.push(`ĐChén ${fmtNum(record.dct_tuoi)}`)
-  if (record.dkt_tuoi > 0) parts.push(`ĐKhối ${fmtNum(record.dkt_tuoi)}`)
-  if (record.dt_tuoi > 0) parts.push(`Dây ${fmtNum(record.dt_tuoi)}`)
-  return parts
+function getMaterialSummary(record: ProductionRecord, selected: string[] = []) {
+  return getActiveMaterialDefs(selected)
+    .map((def) => {
+      const tuoi = Number(record[def.tuoiKey] ?? 0)
+      const kho = Number(record[def.khoKey] ?? 0)
+      if (tuoi <= 0 && kho <= 0) return null
+      const pieces: string[] = []
+      if (tuoi > 0) pieces.push(`tươi ${fmtNum(tuoi)}`)
+      if (kho > 0) pieces.push(`khô ${fmtNum(kho)}`)
+      return `${def.shortLabel} ${pieces.join(" / ")}`
+    })
+    .filter((part): part is string => Boolean(part))
+}
+
+function getFilteredTotals(record: ProductionRecord, selected: string[]) {
+  const totals = { tuoi: 0, kho: 0 }
+  for (const def of getActiveMaterialDefs(selected)) {
+    totals.tuoi += Number(record[def.tuoiKey] ?? 0)
+    totals.kho += Number(record[def.khoKey] ?? 0)
+  }
+  return totals
 }
 
 function matchesMaterialFilter(record: ProductionRecord, selected: string[]) {
@@ -59,23 +90,15 @@ function matchesMaterialFilter(record: ProductionRecord, selected: string[]) {
 }
 
 function formatMaterialBreakdown(records: ProductionRecord[], field: "tuoi" | "kho") {
-  const totals = {
-    "Mủ nước": 0,
-    "Mủ chén": 0,
-    "Mủ đông chén": 0,
-    "Mủ đông khối": 0,
-    "Mủ dây": 0,
-  }
+  const totals = Object.fromEntries(LATEX_FILTER_OPTIONS.map((label) => [label, 0])) as Record<LatexFilterOption, number>
 
   for (const record of records) {
-    totals["Mủ nước"] += field === "tuoi" ? record.mn_tuoi ?? 0 : record.mn_kho ?? 0
-    totals["Mủ chén"] += field === "tuoi" ? record.ct_tuoi ?? 0 : record.ct_kho ?? 0
-    totals["Mủ đông chén"] += field === "tuoi" ? record.dct_tuoi ?? 0 : record.dct_kho ?? 0
-    totals["Mủ đông khối"] += field === "tuoi" ? record.dkt_tuoi ?? 0 : record.dkt_kho ?? 0
-    totals["Mủ dây"] += field === "tuoi" ? record.dt_tuoi ?? 0 : record.dt_kho ?? 0
+    for (const def of MATERIAL_DEFS) {
+      totals[def.label] += field === "tuoi" ? Number(record[def.tuoiKey] ?? 0) : Number(record[def.khoKey] ?? 0)
+    }
   }
 
-  return LATEX_FILTER_OPTIONS.map((label) => `${label.replace("Mủ ", "")} ${fmtNum(totals[label], 0)} kg`).join(" · ")
+  return MATERIAL_DEFS.map((def) => `${def.shortLabel} ${fmtNum(totals[def.label], 0)} kg`).join(" · ")
 }
 // ────────────────────────────────────────────────────────────────
 // Helpers
@@ -311,18 +334,18 @@ export default function OutputPage() {
         if (xeCompare !== 0) return xeCompare
         return a.chuyen - b.chuyen
       }),
-      totalTuoi: dayRecords.reduce((sum, record) => sum + totalTuoi(record), 0),
-      totalKho: dayRecords.reduce((sum, record) => sum + totalKho(record), 0),
+      totalTuoi: dayRecords.reduce((sum, record) => sum + getFilteredTotals(record, filterLoai).tuoi, 0),
+      totalKho: dayRecords.reduce((sum, record) => sum + getFilteredTotals(record, filterLoai).kho, 0),
     }))
 
-  const totalT = statsFiltered.reduce((s, r) => s + totalTuoi(r), 0)
-  const totalK = statsFiltered.reduce((s, r) => s + totalKho(r), 0)
+  const totalT = statsFiltered.reduce((s, r) => s + getFilteredTotals(r, filterLoai).tuoi, 0)
+  const totalK = statsFiltered.reduce((s, r) => s + getFilteredTotals(r, filterLoai).kho, 0)
   const warnCount = statsFiltered.filter(r => r.warn_codes.length > 0).length
 
   // KL khô theo đội
   const byDoi = new Map<number, number>()
   for (const r of statsFiltered) {
-    const kho = totalKho(r)
+    const kho = getFilteredTotals(r, filterLoai).kho
     byDoi.set(r.doi, (byDoi.get(r.doi) ?? 0) + kho)
   }
 
@@ -330,19 +353,20 @@ export default function OutputPage() {
   const byXe = new Map<string, { doi: number; tai_xe: string; chuyen_count: number; tuoi: number; kho: number; loaiSet: Set<string> }>()
   for (const r of statsFiltered) {
     const key = `${r.doi}:${r.so_xe}:${r.chuyen}`
-    const materials = getMaterialSummary(r).map((part) => part.split(" ")[0])
+    const materials = getMaterialSummary(r, filterLoai)
+    const filteredTotals = getFilteredTotals(r, filterLoai)
     const existing = byXe.get(key)
     if (existing) {
-      existing.tuoi += totalTuoi(r)
-      existing.kho  += totalKho(r)
+      existing.tuoi += filteredTotals.tuoi
+      existing.kho  += filteredTotals.kho
       for (const material of materials) existing.loaiSet.add(material)
     } else {
       byXe.set(key, {
         doi: r.doi,
         tai_xe: r.tai_xe ?? "",
         chuyen_count: r.chuyen,
-        tuoi: totalTuoi(r),
-        kho: totalKho(r),
+        tuoi: filteredTotals.tuoi,
+        kho: filteredTotals.kho,
         loaiSet: new Set(materials),
       })
     }
@@ -528,6 +552,13 @@ export default function OutputPage() {
                   <input type="text" value={filterXe} onChange={e => setFilterXe(e.target.value)}
                     placeholder="Tìm số xe..." className="pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 w-36" />
                 </div>
+                <FilterMultiSelect
+                  options={LATEX_FILTER_OPTIONS}
+                  selected={filterLoai}
+                  onChange={setFilterLoai}
+                  placeholder="Tất cả nguyên liệu"
+                  className="min-w-64"
+                />
               </>
             )}
             {tab === "stats" && (
@@ -693,7 +724,7 @@ export default function OutputPage() {
                               <th className="px-3 py-3 text-left font-bold text-slate-600">Tài xế</th>
                               <th className="px-3 py-3 text-right font-bold text-slate-600">Tươi (kg)</th>
                               <th className="px-3 py-3 text-right font-bold text-slate-600">Khô (kg)</th>
-                              <th className="px-3 py-3 text-left font-bold text-slate-600">Loại mủ</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Nguyên liệu</th>
                               <th className="px-3 py-3 text-left font-bold text-slate-600">Cảnh báo</th>
                               <th className="px-3 py-3 text-left font-bold text-slate-600">Ghi chú</th>
                               {isEditingDay && <th className="px-3 py-3 w-16"></th>}
@@ -705,6 +736,7 @@ export default function OutputPage() {
                               const hasAmb = !hasRed && record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "amber")
                               const rowCls = hasRed ? "bg-red-50" : hasAmb ? "bg-amber-50/40" : index % 2 === 0 ? "" : "bg-slate-50/50"
                               const latexParts = getMaterialSummary(record)
+                              const filteredTotals = getFilteredTotals(record, filterLoai)
 
                               return (
                                 <tr key={record.id} className={`border-t border-slate-100 transition-colors duration-150 hover:bg-slate-50 ${rowCls}`}>
@@ -722,8 +754,8 @@ export default function OutputPage() {
                                   <td className="px-3 py-2 font-mono font-bold text-slate-800">{record.so_xe}</td>
                                   <td className="px-3 py-2 text-center text-slate-600">{record.chuyen}</td>
                                   <td className="px-3 py-2 text-slate-600">{record.tai_xe || <span className="text-slate-300">—</span>}</td>
-                                  <td className="px-3 py-2 text-right text-slate-700">{fmtNum(totalTuoi(record))}</td>
-                                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtNum(totalKho(record))}</td>
+                                  <td className="px-3 py-2 text-right text-slate-700">{fmtNum(filteredTotals.tuoi)}</td>
+                                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtNum(filteredTotals.kho)}</td>
                                   <td className="px-3 py-2 text-slate-500 text-xs">{latexParts.join(" · ") || "—"}</td>
                                   <td className="px-3 py-2">
                                     <div className="flex flex-wrap gap-0.5">
@@ -807,7 +839,7 @@ export default function OutputPage() {
                     <th className="px-3 py-2 text-left font-bold text-slate-600">Số xe</th>
                     <th className="px-3 py-2 text-center font-bold text-slate-600">Chuyến</th>
                     <th className="px-3 py-2 text-left font-bold text-slate-600">Tài xế</th>
-                    <th className="px-3 py-2 text-left font-bold text-slate-600">Loại nguyên liệu</th>
+                    <th className="px-3 py-2 text-left font-bold text-slate-600">Nguyên liệu</th>
                     <th className="px-3 py-2 text-right font-bold text-slate-600">Tươi (kg)</th>
                     <th className="px-3 py-2 text-right font-bold text-slate-600">Khô (kg)</th>
                   </tr>

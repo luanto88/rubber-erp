@@ -316,3 +316,31 @@ const loadDispatches = useCallback(async (fid: string) => {
 - Upsert `onConflict` phải khớp với unique constraint: `"factory_id,ngay,so_xe,chuyen,doi"`
 - `WarnBadge` hiển thị `WARN_LABELS[code]` (tiếng Việt), không phải `code.replace(/_/g, " ")`
 - Dispatch `ngay` có thể là "YYYY-MM-DD" hoặc "dd/mm/yyyy" — query phải dùng `.or()` để match cả 2
+## Cập nhật 2026-06-10: nhóm theo ngày và lọc loại nguyên liệu
+
+- `Danh sách` ở `/dashboard/output` phải hiển thị theo nhóm ngày.
+- Mặc định mỗi ngày chỉ hiển thị `header ngày`; bấm mở rộng mới thấy các dòng con.
+- Header ngày phải chứa:
+  - ngày
+  - tổng số dòng trong ngày
+  - tổng tươi
+  - tổng khô
+  - cụm action của ngày
+- Cụm action ở header ngày:
+  - `Thêm`: mở form nổi và truyền sẵn `ngày`
+  - `Sửa`: bật chế độ sửa cho các dòng con trong ngày
+  - `Xóa`: bật chế độ tick chọn các dòng con trong ngày để xóa theo lô
+- `Loại nguyên liệu` là `multi-select`, không còn `single select`.
+- Bộ lọc `Loại nguyên liệu` phải chạy cùng `Ghi chú`, `Đội`, `Xe`, `Chỉ cảnh báo`.
+- KPI của tab `Thống kê` phải hiển thị thêm khối lượng tươi/khô theo từng loại nguyên liệu, không chỉ tổng cộng.
+- Với tài khoản không phải `admin`, không hiển thị action thêm/sửa/xóa theo ngày hoặc theo dòng.
+
+## Lưu ý UI
+
+- Form sửa nổi vẫn dùng `OutputForm`, nhưng phải nhận được `initialDate` khi mở từ header ngày.
+- Nếu đổi layout danh sách theo ngày, phải rà lại các state:
+  - `expandedDays`
+  - `editingDay`
+  - `deleteDay`
+  - `selectedDeleteIds`
+  để tránh xung đột giữa chế độ sửa và xóa.
