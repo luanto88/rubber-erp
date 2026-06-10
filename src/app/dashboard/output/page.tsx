@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import {
   BarChart3, Plus, Upload, Search, Trash2, Edit2, AlertTriangle, X,
   ChevronDown, ChevronUp, Filter,
 } from "lucide-react"
 import type { ProductionRecord, OutputFormState } from "./_components/output-types"
 import {
-  totalTuoi, totalKho, WARN_LABELS, WARN_SEVERITY, parseVehicleCode,
+  totalTuoi, totalKho, WARN_LABELS, WARN_SEVERITY, parseVehicleCode, buildProductionRecordKey,
   writeBackToDispatch,
   type WarnCode,
 } from "./_components/output-types"
@@ -96,12 +96,21 @@ function renderSortIcon(col: "ngay" | "doi" | "so_xe", sortCol: "ngay" | "doi" |
   return sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />
 }
 
+function compareProductionRecordPriority(a: ProductionRecord, b: ProductionRecord) {
+  const aStamp = a.updated_at || a.created_at || ""
+  const bStamp = b.updated_at || b.created_at || ""
+  if (aStamp !== bStamp) return bStamp.localeCompare(aStamp)
+  if (a.created_at !== b.created_at) return b.created_at.localeCompare(a.created_at)
+  return b.id.localeCompare(a.id)
+}
+
 // ────────────────────────────────────────────────────────────────
 // Main page
 // ────────────────────────────────────────────────────────────────
 export default function OutputPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
 
   // Data
   const [records, setRecords] = useState<ProductionRecord[]>([])
@@ -114,6 +123,7 @@ export default function OutputPage() {
   const [editRecord, setEditRecord] = useState<ProductionRecord | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false)
 
   // Filters
   const [filterFrom, setFilterFrom] = useState(() => {
@@ -131,6 +141,7 @@ export default function OutputPage() {
   // Sort
   const [sortCol, setSortCol] = useState<"ngay" | "doi" | "so_xe">("ngay")
   const [sortAsc, setSortAsc] = useState(false)
+  const isAdmin = currentUser?.role === "admin"
 
   // ── Load data ───────────────────────────────────────────────
   const loadRecords = useCallback(async (fid: string) => {
@@ -162,7 +173,11 @@ export default function OutputPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const fid = await getActiveFactoryId()
+      const [fid, authState] = await Promise.all([
+        getActiveFactoryId(),
+        hydrateActiveSession().catch(() => ({ session: null, user: null })),
+      ])
+      setCurrentUser((authState.user as SessionUser | null) ?? null)
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
       await loadSupportData(fid)
@@ -230,6 +245,17 @@ export default function OutputPage() {
       return sortAsc ? cmp : -cmp
     })
 
+  const duplicateBuckets = new Map<string, ProductionRecord[]>()
+  for (const record of records) {
+    const key = buildProductionRecordKey(record)
+    const bucket = duplicateBuckets.get(key)
+    if (bucket) bucket.push(record)
+    else duplicateBuckets.set(key, [record])
+  }
+  const duplicateGroups = Array.from(duplicateBuckets.values()).filter((bucket) => bucket.length > 1)
+  const redundantRecords = duplicateGroups.flatMap((bucket) => [...bucket].sort(compareProductionRecordPriority).slice(1))
+  const redundantRecordCount = redundantRecords.length
+
   // ── Stats aggregation ─────────────────────────────────────────
   const statsFiltered = records.filter((r) => {
     if (!matchesNoteFilter(r.ghi_chu, filterGhiChu)) return false
@@ -279,6 +305,10 @@ export default function OutputPage() {
 
   const handleSave = async (form: OutputFormState) => {
     if (!factoryId) return
+    if (!isAdmin) {
+      setSaveError("Chỉ tài khoản admin mới được thêm hoặc sửa từng dòng sản lượng.")
+      return
+    }
     setSaveError(null)
     const payload = {
       factory_id: factoryId,
@@ -309,11 +339,33 @@ export default function OutputPage() {
 
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    if (!isAdmin) {
+      setSaveError("Chỉ tài khoản admin mới được xóa từng dòng sản lượng.")
+      return
+    }
     const rec = records.find(r => r.id === id)
     await supabase.from("production_records").delete().eq("id", id)
     setDelConfirm(null)
     void loadRecords(factoryId)
     if (rec) void writeBackToDispatch(factoryId, rec.ngay, supabase).catch(() => {})
+  }
+
+  const handleCleanupDuplicates = async () => {
+    if (!factoryId || !isAdmin || redundantRecordCount === 0) return
+    setCleaningDuplicates(true)
+    setSaveError(null)
+    try {
+      const deleteIds = redundantRecords.map((record) => record.id)
+      const affectedDates = [...new Set(redundantRecords.map((record) => record.ngay))]
+      const { error } = await supabase.from("production_records").delete().in("id", deleteIds)
+      if (error) throw new Error(error.message)
+      await Promise.all(affectedDates.map((ngay) => writeBackToDispatch(factoryId, ngay, supabase)))
+      await loadRecords(factoryId)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Khong the don cac dong san luong thua.")
+    } finally {
+      setCleaningDuplicates(false)
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────
@@ -334,12 +386,14 @@ export default function OutputPage() {
           >
             <Upload size={15} />Import file
           </button>
+          {isAdmin && (
           <button
             onClick={() => { setEditRecord(null); setShowForm(true) }}
             className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
           >
             <Plus size={16} />Thêm mới
           </button>
+          )}
         </div>
       </div>
 
@@ -421,7 +475,17 @@ export default function OutputPage() {
             )}
           </>
         )}
-        <span className="ml-auto text-xs text-slate-400">{records.length} bản ghi trong kỳ</span>
+        {isAdmin && redundantRecordCount > 0 && (
+          <button
+            onClick={() => void handleCleanupDuplicates()}
+            disabled={cleaningDuplicates}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <AlertTriangle size={12} />
+            {cleaningDuplicates ? "Đang dọn..." : `Dọn ${redundantRecordCount} dòng thừa`}
+          </button>
+        )}
+        <span className={`${isAdmin && redundantRecordCount > 0 ? "" : "ml-auto "}text-xs text-slate-400`}>{records.length} bản ghi trong kỳ</span>
       </div>
 
       {/* ── Tab: Danh sách ── */}
@@ -483,16 +547,18 @@ export default function OutputPage() {
                             </div>
                           </td>
                           <td className="px-3 py-2">
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => { setEditRecord(r); setShowForm(true) }}
-                                className="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700">
-                                <Edit2 size={13} />
-                              </button>
-                              <button onClick={() => setDelConfirm(r.id)}
-                                className="p-1 hover:bg-red-100 rounded-lg text-slate-400 hover:text-red-600">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                            {isAdmin && (
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => { setEditRecord(r); setShowForm(true) }}
+                                  className="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700">
+                                  <Edit2 size={13} />
+                                </button>
+                                <button onClick={() => setDelConfirm(r.id)}
+                                  className="p-1 hover:bg-red-100 rounded-lg text-slate-400 hover:text-red-600">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )

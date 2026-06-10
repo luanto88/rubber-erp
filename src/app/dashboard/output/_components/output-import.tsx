@@ -3,7 +3,13 @@
 import { useState, useRef, useCallback } from "react"
 import { Upload, AlertTriangle, CheckCircle, FileSpreadsheet, X, ChevronRight } from "lucide-react"
 import type { MatchedSlRow, ParsedSlRow, WarnCode } from "./output-types"
-import { parseVehicleCode, WARN_LABELS, WARN_SEVERITY, writeBackToDispatch } from "./output-types"
+import {
+  buildProductionRecordKey,
+  parseVehicleCode,
+  WARN_LABELS,
+  WARN_SEVERITY,
+  writeBackToDispatch,
+} from "./output-types"
 
 // ────────────────────────────────────────────────────────────────
 // Excel helpers
@@ -85,10 +91,56 @@ interface DispatchEntry {
 
 interface DeliveryPoint { ma_lo: string; doi: number }
 
+interface ExistingProductionRecord {
+  id: string
+  ngay: string
+  doi: number
+  so_xe: string
+  chuyen: number
+  created_at: string
+  updated_at: string
+}
+
+function getMatchedKey(row: Pick<ParsedSlRow, "ngay" | "doi" | "base_xe" | "chuyen">) {
+  return buildProductionRecordKey({
+    ngay: row.ngay,
+    doi: row.doi,
+    so_xe: row.base_xe,
+    chuyen: row.chuyen,
+  })
+}
+
+async function loadExistingRecords(
+  supabase: import("@supabase/supabase-js").SupabaseClient,
+  factoryId: string,
+  parsed: ParsedSlRow[],
+) {
+  const uniqueDates = [...new Set(parsed.map((row) => row.ngay))]
+  if (uniqueDates.length === 0) return [] as ExistingProductionRecord[]
+
+  const { data, error } = await supabase
+    .from("production_records")
+    .select("id, ngay, doi, so_xe, chuyen, created_at, updated_at")
+    .eq("factory_id", factoryId)
+    .in("ngay", uniqueDates)
+
+  if (error) throw new Error(error.message)
+  return (data as ExistingProductionRecord[]) || []
+}
+
+function compareExistingRecordPriority(a: ExistingProductionRecord, b: ExistingProductionRecord) {
+  const aStamp = a.updated_at || a.created_at || ""
+  const bStamp = b.updated_at || b.created_at || ""
+  if (aStamp !== bStamp) return bStamp.localeCompare(aStamp)
+  if (a.created_at !== b.created_at) return b.created_at.localeCompare(a.created_at)
+  return b.id.localeCompare(a.id)
+}
+
 export function matchRows(
   parsed: ParsedSlRow[],
   dispatches: DispatchEntry[],
   deliveryPoints: DeliveryPoint[],
+  existingKeyCounts?: Map<string, number>,
 ): MatchedSlRow[] {
   // doi lookup
   const doiByMaLo = new Map<string, number>(deliveryPoints.map(p => [p.ma_lo, p.doi]))
@@ -118,7 +170,7 @@ export function matchRows(
 
   return parsed.map(row => {
     const warns: WarnCode[] = []
-    const fileKey = `${row.ngay}:${row.base_xe}:${row.chuyen}:${row.doi}`
+    const fileKey = getMatchedKey(row)
     seen.set(fileKey, (seen.get(fileKey) ?? 0) + 1)
 
     let dispatch_entry_id: string | null = null
@@ -156,9 +208,13 @@ export function matchRows(
       }
     }
 
+    if ((existingKeyCounts?.get(fileKey) ?? 0) > 0) {
+      warns.push("DUPLICATE_IN_SYSTEM")
+    }
+
     return { ...row, dispatch_entry_id, tai_xe, warn_codes: warns }
   }).map(row => {
-    const fileKey = `${row.ngay}:${row.base_xe}:${row.chuyen}:${row.doi}`
+    const fileKey = getMatchedKey(row)
     if ((seen.get(fileKey) ?? 0) > 1 && !row.warn_codes.includes("DUPLICATE_IN_FILE")) {
       return { ...row, warn_codes: [...row.warn_codes, "DUPLICATE_IN_FILE" as WarnCode] }
     }
@@ -203,7 +259,13 @@ export function OutputImport({
   const [matched, setMatched] = useState<MatchedSlRow[]>([])
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
-  const [importResult, setImportResult] = useState<{ ok: number; warn: number } | null>(null)
+  const [importResult, setImportResult] = useState<{
+    ok: number
+    inserted: number
+    updated: number
+    deduped: number
+    warn: number
+  } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFile = useCallback(async (file: File) => {
@@ -211,14 +273,20 @@ export function OutputImport({
     try {
       const parsed = await parseSlFile(file)
       if (!parsed.length) { setImportError("Không tìm thấy dữ liệu hợp lệ trong file."); return }
-      const result = matchRows(parsed, dispatches, deliveryPoints)
+      const existingRows = await loadExistingRecords(supabase, factoryId, parsed)
+      const existingKeyCounts = new Map<string, number>()
+      for (const row of existingRows) {
+        const key = buildProductionRecordKey(row)
+        existingKeyCounts.set(key, (existingKeyCounts.get(key) ?? 0) + 1)
+      }
+      const result = matchRows(parsed, dispatches, deliveryPoints, existingKeyCounts)
       setMatched(result)
       setFileName(file.name)
       setStep(2)
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Lỗi đọc file")
     }
-  }, [dispatches, deliveryPoints])
+  }, [deliveryPoints, dispatches, factoryId, supabase])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -230,6 +298,11 @@ export function OutputImport({
     setImporting(true)
     setImportError(null)
     try {
+      const duplicateInFileCount = matched.filter((row) => row.warn_codes.includes("DUPLICATE_IN_FILE")).length
+      if (duplicateInFileCount > 0) {
+        throw new Error(`File đang có ${duplicateInFileCount} dòng trùng khóa ngày + đội + xe + chuyến. Vui lòng xử lý file trước khi import.`)
+      }
+
       const batchId = crypto.randomUUID()
       const rows = matched.map(r => ({
         factory_id: factoryId,
@@ -248,12 +321,63 @@ export function OutputImport({
         import_batch_id: batchId,
         ghi_chu: r.ghi_chu || null,
       }))
-      const { error } = await supabase
-        .from("production_records")
-        .upsert(rows, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" })
-      if (error) throw new Error(error.message)
+      const existingRows = await loadExistingRecords(supabase, factoryId, matched)
+      const existingByKey = new Map<string, ExistingProductionRecord[]>()
+      for (const row of existingRows) {
+        const key = buildProductionRecordKey(row)
+        const bucket = existingByKey.get(key)
+        if (bucket) bucket.push(row)
+        else existingByKey.set(key, [row])
+      }
+      for (const bucket of existingByKey.values()) bucket.sort(compareExistingRecordPriority)
+
+      const insertRows: typeof rows = []
+      const updateRows: Array<(typeof rows)[number] & { id: string }> = []
+      const deleteIds: string[] = []
+      let inserted = 0
+      let updated = 0
+      let deduped = 0
+
+      for (const row of rows) {
+        const key = buildProductionRecordKey(row)
+        const existing = existingByKey.get(key) ?? []
+        if (existing.length === 0) {
+          insertRows.push(row)
+          inserted += 1
+          continue
+        }
+
+        const [primary, ...duplicates] = existing
+        updateRows.push({ ...row, id: primary.id })
+        updated += 1
+
+        if (duplicates.length > 0) {
+          deleteIds.push(...duplicates.map((item) => item.id))
+          deduped += duplicates.length
+        }
+      }
+
+      if (deleteIds.length > 0) {
+        const { error } = await supabase.from("production_records").delete().in("id", deleteIds)
+        if (error) throw new Error(error.message)
+      }
+
+      if (insertRows.length > 0) {
+        const { error } = await supabase.from("production_records").insert(insertRows)
+        if (error) throw new Error(error.message)
+      }
+
+      for (const row of updateRows) {
+        const { id, ...payload } = row
+        const { error } = await supabase.from("production_records").update(payload).eq("id", id)
+        if (error) throw new Error(error.message)
+      }
+
       setImportResult({
         ok: rows.length,
+        inserted,
+        updated,
+        deduped,
         warn: rows.filter(r => r.warn_codes.length > 0).length,
       })
       setStep(3)

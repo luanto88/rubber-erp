@@ -7,6 +7,7 @@ export type WarnCode =
   | "DOI_MISMATCH"
   | "ZERO_KL"
   | "DUPLICATE_IN_FILE"
+  | "DUPLICATE_IN_SYSTEM"
 
 export interface ProductionRecord {
   id: string
@@ -105,6 +106,15 @@ export function parseVehicleCode(raw: string): { base_xe: string; chuyen: number
   return { base_xe: m[1], chuyen: m[2] ? parseInt(m[2]) : 1 }
 }
 
+export function buildProductionRecordKey(input: {
+  ngay: string
+  doi: number
+  so_xe: string
+  chuyen: number
+}) {
+  return `${input.ngay}__${input.doi}__${input.so_xe.trim().toUpperCase()}__${input.chuyen}`
+}
+
 // Tổng KL tươi của một record
 export function totalTuoi(r: Pick<ProductionRecord, "mn_tuoi"|"ct_tuoi"|"dct_tuoi"|"dkt_tuoi"|"dt_tuoi">): number {
   return (r.mn_tuoi ?? 0) + (r.ct_tuoi ?? 0) + (r.dct_tuoi ?? 0) + (r.dkt_tuoi ?? 0) + (r.dt_tuoi ?? 0)
@@ -115,7 +125,7 @@ export function totalKho(r: Pick<ProductionRecord, "mn_kho"|"ct_kho"|"dct_kho"|"
   return (r.mn_kho ?? 0) + (r.ct_kho ?? 0) + (r.dct_kho ?? 0) + (r.dkt_kho ?? 0) + (r.dt_kho ?? 0)
 }
 
-export const WARN_LABELS: Record<WarnCode, string> = {
+export const WARN_LABELS: Record<string, string> = {
   NO_DISPATCH_DATE:  "Không có bảng điều xe ngày này",
   VEHICLE_NOT_FOUND: "Xe không có trong điều xe",
   CHUYEN_NOT_FOUND:  "Không tìm thấy chuyến này trong điều xe",
@@ -124,7 +134,7 @@ export const WARN_LABELS: Record<WarnCode, string> = {
   DUPLICATE_IN_FILE: "Trùng xe+chuyến trong cùng file",
 }
 
-export const WARN_SEVERITY: Record<WarnCode, "red" | "amber" | "slate"> = {
+export const WARN_SEVERITY: Record<string, "red" | "amber" | "slate"> = {
   NO_DISPATCH_DATE:  "red",
   VEHICLE_NOT_FOUND: "red",
   CHUYEN_NOT_FOUND:  "amber",
@@ -132,6 +142,9 @@ export const WARN_SEVERITY: Record<WarnCode, "red" | "amber" | "slate"> = {
   ZERO_KL:           "slate",
   DUPLICATE_IN_FILE: "amber",
 }
+
+WARN_LABELS.DUPLICATE_IN_SYSTEM = "Da co san luong trung trong he thong"
+WARN_SEVERITY.DUPLICATE_IN_SYSTEM = "amber"
 
 // Ánh xạ kl_* của dispatch row sang tươi/khô theo loại nguyên liệu (đồng bộ với storage page)
 function getNganKL(row: Record<string, number>, loai_nl: string): { tuoi: number; kho: number } {

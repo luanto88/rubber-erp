@@ -170,3 +170,18 @@ Sau khi xử lý xong tất cả lô trong một phiên, insert 1 bản ghi vào
 - `skToPallet` là `string[]` — pallet mới có thể chọn nhiều giá trị từ `PALLET_OPTS`
 - `getBocsForLoaiCSR(dc, loai_csr)` dùng để lấy danh sách bọc hợp lệ cho tab Thay bọc
 - Toàn bộ logic nằm trong `src/app/dashboard/product/page.tsx` — không thêm file hay package mới
+## Cập nhật 2026-06-10: chống import trùng sản lượng
+
+- Module Sản lượng (`production_records`) phải coi khóa nghiệp vụ chuẩn là `factory_id + ngay + doi + so_xe + chuyen`.
+- Preview import file sản lượng phải kiểm tra cả 2 nhóm trùng:
+  - Trùng ngay trong cùng file import.
+  - Trùng với dữ liệu đã có sẵn trong hệ thống.
+- Khi preview phát hiện trùng với dữ liệu đang có, phải gắn cảnh báo rõ ràng để người dùng biết dòng đó sẽ ghi đè dữ liệu cũ nếu tiếp tục import.
+- Không được `upsert` mù chỉ dựa vào giả định database luôn sạch. Import phải chủ động đọc trước các dòng hiện có theo ngày trong file, rồi:
+  - `insert` cho dòng chưa tồn tại.
+  - `update` cho dòng đã tồn tại đúng khóa nghiệp vụ.
+  - dọn bớt các bản ghi trùng cũ nếu lịch sử dữ liệu đã bị lỗi tạo 2 dòng cùng khóa.
+- Nếu file import tự chứa nhiều dòng trùng cùng khóa `ngày + đội + xe + chuyến`, phải chặn xác nhận import và yêu cầu người dùng sửa file trước.
+- Sau khi import hoặc sửa/xóa thủ công trong module Sản lượng, vẫn phải gọi write-back để đồng bộ lại khối lượng sang Điều xe; không để Điều xe nhỏ hơn Sản lượng chỉ vì dữ liệu trùng.
+- Các thao tác thêm/sửa/xóa từng dòng sản lượng trên UI chỉ dành cho tài khoản `admin`.
+- Nút `Thêm mới` và các action sửa/xóa từng dòng phải ẩn với user không phải `admin`, đồng thời handler cũng phải chặn ở tầng logic để tránh lách bằng UI cũ.

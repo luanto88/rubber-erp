@@ -98,6 +98,28 @@ type ProfileRow = {
   disabled_at: string | null
 }
 
+function isMaintenanceProfileLinkConstraintError(message: string) {
+  return /uniq_maintenance_staff_profile_id|duplicate key value violates unique constraint/i.test(message)
+}
+
+function getMaintenanceProfileLinkConflictMessage(staffName?: string | null) {
+  const suffix = staffName?.trim() ? `voi nhan su "${staffName.trim()}"` : "voi mot nhan su khac"
+  return `Tai khoan nay da duoc lien ket ${suffix}. Vui long go lien ket o ho so cu truoc khi lien ket lai.`
+}
+
+function isPersonnelGroupsUnavailableError(message: string) {
+  return /personnel_groups|personnel_group_members|does not exist|could not find the table|schema cache|permission denied|relation .* does not exist/i.test(message)
+}
+
+function formatPersonnelGroupsIssue(groupsError?: string, membersError?: string) {
+  const issues = [
+    groupsError?.trim() ? `personnel_groups: ${groupsError.trim()}` : "",
+    membersError?.trim() ? `personnel_group_members: ${membersError.trim()}` : "",
+  ].filter(Boolean)
+
+  return issues[0] || "Tính năng nhóm chưa sẵn sàng."
+}
+
 type PermissionOption = {
   code: string
   label: string
@@ -185,6 +207,16 @@ type PersonnelGroupRow = {
   is_system: boolean
   is_active: boolean
   sort_order: number
+}
+
+type PersonnelGroupMemberRow = {
+  staff_id: string
+  group_id: string
+  personnel_groups: Array<{
+    id: string
+    name: string | null
+    code: string | null
+  }> | null
 }
 
 type PersonnelGroupForm = {
@@ -687,6 +719,8 @@ export default function SettingsPage() {
   const [maintAssets, setMaintAssets] = useState<MaintenanceAssetRow[]>([])
   const [maintStaff, setMaintStaff] = useState<MaintenanceStaffRow[]>([])
   const [personnelGroups, setPersonnelGroups] = useState<PersonnelGroupRow[]>([])
+  const [personnelGroupsAvailable, setPersonnelGroupsAvailable] = useState(false)
+  const [personnelGroupsIssue, setPersonnelGroupsIssue] = useState("")
   const [maintExtMats, setMaintExtMats] = useState<MaintenanceExtMaterialRow[]>([])
   const [maintLoading, setMaintLoading] = useState(false)
   const [maintLoaded, setMaintLoaded] = useState(false)
@@ -859,9 +893,46 @@ export default function SettingsPage() {
         supabase.from("dispatch_vehicle_driver_assignments").select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note").eq("factory_id", fid).order("is_current", { ascending: false }).order("effective_from", { ascending: false }),
       ])
       setMaintAssets((aRes.data || []) as MaintenanceAssetRow[])
-      setPersonnelGroups((gRes.data || []) as PersonnelGroupRow[])
+
+      const personnelGroupsError = gRes.error?.message || ""
+      const personnelGroupMembersError = gmRes.error?.message || ""
+      const groupsUnavailable = (!!personnelGroupsError && isPersonnelGroupsUnavailableError(personnelGroupsError))
+        || (!!personnelGroupMembersError && isPersonnelGroupsUnavailableError(personnelGroupMembersError))
+
+      console.info("[settings] personnel groups query", {
+        factoryId: fid,
+        personnel_groups: {
+          status: gRes.status,
+          count: gRes.data?.length || 0,
+          error: gRes.error ? { message: gRes.error.message, code: gRes.error.code } : null,
+        },
+        personnel_group_members: {
+          status: gmRes.status,
+          count: gmRes.data?.length || 0,
+          error: gmRes.error ? { message: gmRes.error.message, code: gmRes.error.code } : null,
+        },
+      })
+
+      if (groupsUnavailable) {
+        setPersonnelGroups([])
+        setPersonnelGroupsAvailable(false)
+        setPersonnelGroupsIssue(formatPersonnelGroupsIssue(personnelGroupsError, personnelGroupMembersError))
+      } else {
+        setPersonnelGroups((gRes.data || []) as PersonnelGroupRow[])
+        setPersonnelGroupsAvailable(true)
+        setPersonnelGroupsIssue("")
+      }
+
+      if (gRes.error && !groupsUnavailable) {
+        setMaintError(gRes.error.message)
+      }
+
+      if (gmRes.error && !groupsUnavailable) {
+        setMaintError(gmRes.error.message)
+      }
+
       const groupMap = new Map<string, { group_ids: string[]; group_names: string[] }>()
-      for (const row of (gmRes.data || []) as Array<{ staff_id: string; group_id: string; personnel_groups: Array<{ id: string; name: string | null; code: string | null }> | null }>) {
+      for (const row of (groupsUnavailable ? [] : (gmRes.data || [])) as PersonnelGroupMemberRow[]) {
         const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [] }
         if (row.group_id && !existing.group_ids.includes(row.group_id)) existing.group_ids.push(row.group_id)
         const groupName = row.personnel_groups?.[0]?.name?.trim()
@@ -900,6 +971,29 @@ export default function SettingsPage() {
     } finally {
       setMaintLoading(false)
     }
+  }, [])
+
+  const ensureMaintenanceProfileAvailable = useCallback(async (profileId: string, currentStaffId?: string | null) => {
+    let query = supabase
+      .from("maintenance_staff")
+      .select("id, ten")
+      .eq("profile_id", profileId)
+      .limit(1)
+
+    if (currentStaffId) {
+      query = query.neq("id", currentStaffId)
+    }
+
+    const { data, error } = await query.maybeSingle()
+    if (error && error.code !== "PGRST116") {
+      return { ok: false as const, error: error.message }
+    }
+
+    if (data) {
+      return { ok: false as const, error: getMaintenanceProfileLinkConflictMessage(data.ten) }
+    }
+
+    return { ok: true as const }
   }, [])
 
   const loadCustomers = useCallback(async (fid: string) => {
@@ -944,9 +1038,15 @@ export default function SettingsPage() {
     if (!staffForm.ten.trim()) { setMaintError("Tên không được để trống"); return }
     setMaintSaving(true); setMaintError("")
     try {
+        const nextProfileId = staffForm.profile_id || null
+        if (nextProfileId) {
+          const profileAvailability = await ensureMaintenanceProfileAvailable(nextProfileId, maintEditId)
+          if (!profileAvailability.ok) { setMaintError(profileAvailability.error); return }
+        }
+
         const payload = {
           factory_id: factoryId,
-          profile_id: staffForm.profile_id || null,
+          profile_id: nextProfileId,
           ten: staffForm.ten.trim(),
           chuc_vu: staffForm.chuc_vu.trim() || null,
           gioi_tinh: staffForm.gioi_tinh || null,
@@ -958,9 +1058,12 @@ export default function SettingsPage() {
       const result = maintEditId
         ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
         : await supabase.from("maintenance_staff").insert(payload).select("id").single()
-      if (result.error) { setMaintError(result.error.message); return }
+      if (result.error) {
+        setMaintError(isMaintenanceProfileLinkConstraintError(result.error.message) ? getMaintenanceProfileLinkConflictMessage() : result.error.message)
+        return
+      }
       const savedStaffId = result.data?.id
-      if (savedStaffId) {
+      if (savedStaffId && personnelGroupsAvailable) {
         const deleteMembershipRes = await supabase.from("personnel_group_members").delete().eq("factory_id", factoryId).eq("staff_id", savedStaffId)
         if (deleteMembershipRes.error && !/personnel_group_members|does not exist|Could not find the table/i.test(deleteMembershipRes.error.message)) {
           setMaintError(deleteMembershipRes.error.message)
@@ -985,6 +1088,7 @@ export default function SettingsPage() {
 
   const savePersonnelGroup = async () => {
     if (!factoryId) return
+    if (!personnelGroupsAvailable) { setMaintError(personnelGroupsIssue || "Tính năng nhóm chưa sẵn sàng trên hệ thống này."); return }
     if (!personnelGroupForm.name.trim()) { setMaintError("Tên nhóm không được để trống"); return }
     setMaintSaving(true); setMaintError("")
     try {
@@ -1511,10 +1615,29 @@ export default function SettingsPage() {
   }, [tab, factoryId, configLoaded, configLoading, loadConfigData])
 
   useEffect(() => {
-    if (tab === "maintenance" && factoryId && !maintLoaded && !maintLoading) {
+    if (!factoryId) return
+
+    setMaintLoaded(false)
+    setMaintAssets([])
+    setMaintStaff([])
+    setPersonnelGroups([])
+    setPersonnelGroupsAvailable(false)
+    setPersonnelGroupsIssue("")
+    setMaintExtMats([])
+    setDispatchDrivers([])
+    setDispatchVehicles([])
+    setDispatchVehicleAssignments([])
+    setMaintError("")
+  }, [factoryId])
+
+  useEffect(() => {
+    const shouldLoadMaintenanceData =
+      tab === "maintenance" || (tab === "system" && systemTab === "personnel")
+
+    if (shouldLoadMaintenanceData && factoryId && !maintLoaded && !maintLoading) {
       void loadMaintenanceData(factoryId)
     }
-  }, [tab, factoryId, maintLoaded, maintLoading, loadMaintenanceData])
+  }, [tab, systemTab, factoryId, maintLoaded, maintLoading, loadMaintenanceData])
 
   useEffect(() => {
     if (tab === "master-data" && masterDataTab === "customers" && factoryId && !customerLoaded && !customerLoading) {
@@ -1687,13 +1810,19 @@ export default function SettingsPage() {
     setMaintSaving(true)
     setMaintError("")
     try {
+      const profileAvailability = await ensureMaintenanceProfileAvailable(personnelLinkModal.profileId, personnelLinkModal.staffId)
+      if (!profileAvailability.ok) {
+        setMaintError(profileAvailability.error)
+        return
+      }
+
       const result = await supabase
         .from("maintenance_staff")
         .update({ profile_id: personnelLinkModal.profileId })
         .eq("id", personnelLinkModal.staffId)
         .eq("factory_id", factoryId)
       if (result.error) {
-        setMaintError(result.error.message)
+        setMaintError(isMaintenanceProfileLinkConstraintError(result.error.message) ? getMaintenanceProfileLinkConflictMessage() : result.error.message)
         return
       }
       setPersonnelLinkModal(null)
@@ -1703,7 +1832,7 @@ export default function SettingsPage() {
     } finally {
       setMaintSaving(false)
     }
-  }, [factoryId, loadMaintenanceData, personnelLinkModal])
+  }, [ensureMaintenanceProfileAvailable, factoryId, loadMaintenanceData, personnelLinkModal])
 
   const handleSaveFactory = async () => {
     if (!factoryId || !canManageSettings) return
@@ -2662,7 +2791,7 @@ export default function SettingsPage() {
                     <h3 className="text-sm font-extrabold text-slate-700">Nhóm</h3>
                     <p className="text-xs text-slate-500">Danh mục nhóm dùng chung cho Nhân sự, Bảo trì và các module sau này.</p>
                   </div>
-                  {canManageSettings && (
+                  {canManageSettings && personnelGroupsAvailable && (
                     <button
                       onClick={() => {
                         setMaintEditId(null)
@@ -2686,7 +2815,9 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {personnelGroups.length === 0 ? (
+                      {!personnelGroupsAvailable ? (
+                        <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{personnelGroupsIssue || "Tính năng nhóm chưa sẵn sàng trên môi trường này."}</td></tr>
+                      ) : personnelGroups.length === 0 ? (
                         <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có nhóm nào</td></tr>
                       ) : personnelGroups.map((group) => (
                         <tr key={group.id} className="row-hover">
@@ -3894,9 +4025,17 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm</label>
-                {personnelGroups.length === 0 ? (
+                {!maintLoaded ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                    Chưa có danh mục nhóm. Chạy migration `personnel_groups` để bật tính năng này.
+                    Đang tải danh mục nhóm...
+                  </div>
+                ) : !personnelGroupsAvailable ? (
+                  <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    {personnelGroupsIssue || "Tính năng nhóm chưa sẵn sàng trên hệ thống này."}
+                  </div>
+                ) : personnelGroups.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                    Chưa có danh mục nhóm cho nhà máy này. Hãy thêm nhóm đầu tiên để bắt đầu.
                   </div>
                 ) : (
                   <div className="max-h-40 space-y-2 overflow-auto rounded-xl border border-slate-300 px-3 py-2">
