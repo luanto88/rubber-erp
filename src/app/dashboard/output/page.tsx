@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import {
-  BarChart3, Plus, Upload, Search, Trash2, Edit2, AlertTriangle, X,
+  BarChart3, Plus, Upload, Search, AlertTriangle, X,
   ChevronDown, ChevronUp, Filter,
 } from "lucide-react"
 import type { ProductionRecord, OutputFormState } from "./_components/output-types"
@@ -17,6 +17,7 @@ import { OutputImport } from "./_components/output-import"
 import { OutputForm } from "./_components/output-form"
 import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
+import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 
 // ────────────────────────────────────────────────────────────────
 // Types for dispatch data used in matching
@@ -29,6 +30,7 @@ interface DispatchEntry {
 interface DeliveryPoint { ma_lo: string; doi: number }
 
 const LATEX_FILTER_OPTIONS = ["Mủ nước", "Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây"] as const
+type LatexFilterOption = typeof LATEX_FILTER_OPTIONS[number]
 
 function getMaterialFlags(record: ProductionRecord) {
   return {
@@ -48,6 +50,32 @@ function getMaterialSummary(record: ProductionRecord) {
   if (record.dkt_tuoi > 0) parts.push(`ĐKhối ${fmtNum(record.dkt_tuoi)}`)
   if (record.dt_tuoi > 0) parts.push(`Dây ${fmtNum(record.dt_tuoi)}`)
   return parts
+}
+
+function matchesMaterialFilter(record: ProductionRecord, selected: string[]) {
+  if (selected.length === 0) return true
+  const flags = getMaterialFlags(record)
+  return selected.some((material) => flags[material as LatexFilterOption])
+}
+
+function formatMaterialBreakdown(records: ProductionRecord[], field: "tuoi" | "kho") {
+  const totals = {
+    "Mủ nước": 0,
+    "Mủ chén": 0,
+    "Mủ đông chén": 0,
+    "Mủ đông khối": 0,
+    "Mủ dây": 0,
+  }
+
+  for (const record of records) {
+    totals["Mủ nước"] += field === "tuoi" ? record.mn_tuoi ?? 0 : record.mn_kho ?? 0
+    totals["Mủ chén"] += field === "tuoi" ? record.ct_tuoi ?? 0 : record.ct_kho ?? 0
+    totals["Mủ đông chén"] += field === "tuoi" ? record.dct_tuoi ?? 0 : record.dct_kho ?? 0
+    totals["Mủ đông khối"] += field === "tuoi" ? record.dkt_tuoi ?? 0 : record.dkt_kho ?? 0
+    totals["Mủ dây"] += field === "tuoi" ? record.dt_tuoi ?? 0 : record.dt_kho ?? 0
+  }
+
+  return LATEX_FILTER_OPTIONS.map((label) => `${label.replace("Mủ ", "")} ${fmtNum(totals[label], 0)} kg`).join(" · ")
 }
 // ────────────────────────────────────────────────────────────────
 // Helpers
@@ -91,11 +119,6 @@ function StatCard({ label, value, sub, color = "emerald" }: {
   )
 }
 
-function renderSortIcon(col: "ngay" | "doi" | "so_xe", sortCol: "ngay" | "doi" | "so_xe", sortAsc: boolean) {
-  if (sortCol !== col) return null
-  return sortAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />
-}
-
 function compareProductionRecordPriority(a: ProductionRecord, b: ProductionRecord) {
   const aStamp = a.updated_at || a.created_at || ""
   const bStamp = b.updated_at || b.created_at || ""
@@ -121,9 +144,15 @@ export default function OutputPage() {
   const [showImport, setShowImport] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [editRecord, setEditRecord] = useState<ProductionRecord | null>(null)
+  const [formInitialDate, setFormInitialDate] = useState<string | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false)
+  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({})
+  const [editingDay, setEditingDay] = useState<string | null>(null)
+  const [deleteDay, setDeleteDay] = useState<string | null>(null)
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState<string[]>([])
+  const [deletingDay, setDeletingDay] = useState(false)
 
   // Filters
   const [filterFrom, setFilterFrom] = useState(() => {
@@ -134,13 +163,13 @@ export default function OutputPage() {
   const [filterDoi, setFilterDoi] = useState("")
   const [filterXe, setFilterXe] = useState("")
   const [filterGhiChu, setFilterGhiChu] = useState("")
-  const [filterLoai, setFilterLoai] = useState("")
+  const [filterLoai, setFilterLoai] = useState<string[]>([])
   const [filterWarnOnly, setFilterWarnOnly] = useState(false)
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   // Sort
-  const [sortCol, setSortCol] = useState<"ngay" | "doi" | "so_xe">("ngay")
-  const [sortAsc, setSortAsc] = useState(false)
+  const [sortCol] = useState<"ngay" | "doi" | "so_xe">("ngay")
+  const [sortAsc] = useState(false)
   const isAdmin = currentUser?.role === "admin"
 
   // ── Load data ───────────────────────────────────────────────
@@ -234,6 +263,7 @@ export default function OutputPage() {
       if (filterDoi && r.doi !== parseInt(filterDoi)) return false
       if (filterXe && !r.so_xe.toUpperCase().includes(filterXe.toUpperCase())) return false
       if (!matchesNoteFilter(r.ghi_chu, filterGhiChu)) return false
+      if (!matchesMaterialFilter(r, filterLoai)) return false
       if (filterWarnOnly && r.warn_codes.length === 0) return false
       return true
     })
@@ -260,9 +290,30 @@ export default function OutputPage() {
   const statsFiltered = records.filter((r) => {
     if (!matchesNoteFilter(r.ghi_chu, filterGhiChu)) return false
     if (filterDoi && r.doi !== parseInt(filterDoi)) return false
-    if (filterLoai && !getMaterialFlags(r)[filterLoai as keyof ReturnType<typeof getMaterialFlags>]) return false
+    if (!matchesMaterialFilter(r, filterLoai)) return false
     return true
   })
+
+  const groupedByDate = filtered.reduce((acc, record) => {
+    const bucket = acc.get(record.ngay)
+    if (bucket) bucket.push(record)
+    else acc.set(record.ngay, [record])
+    return acc
+  }, new Map<string, ProductionRecord[]>())
+
+  const groupedDates = Array.from(groupedByDate.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([ngay, dayRecords]) => ({
+      ngay,
+      records: [...dayRecords].sort((a, b) => {
+        if (a.doi !== b.doi) return a.doi - b.doi
+        const xeCompare = a.so_xe.localeCompare(b.so_xe)
+        if (xeCompare !== 0) return xeCompare
+        return a.chuyen - b.chuyen
+      }),
+      totalTuoi: dayRecords.reduce((sum, record) => sum + totalTuoi(record), 0),
+      totalKho: dayRecords.reduce((sum, record) => sum + totalKho(record), 0),
+    }))
 
   const totalT = statsFiltered.reduce((s, r) => s + totalTuoi(r), 0)
   const totalK = statsFiltered.reduce((s, r) => s + totalKho(r), 0)
@@ -298,11 +349,6 @@ export default function OutputPage() {
   }
 
   // ── Handlers ─────────────────────────────────────────────────
-  const toggleSort = (col: typeof sortCol) => {
-    if (sortCol === col) setSortAsc(a => !a)
-    else { setSortCol(col); setSortAsc(true) }
-  }
-
   const handleSave = async (form: OutputFormState) => {
     if (!factoryId) return
     if (!isAdmin) {
@@ -368,6 +414,50 @@ export default function OutputPage() {
     }
   }
 
+  const openCreateForDate = (ngay: string) => {
+    setEditRecord(null)
+    setFormInitialDate(ngay)
+    setShowForm(true)
+  }
+
+  const openEditRecord = (record: ProductionRecord) => {
+    setFormInitialDate(record.ngay)
+    setEditRecord(record)
+    setShowForm(true)
+  }
+
+  const toggleDayExpanded = (ngay: string) => {
+    setExpandedDays((current) => ({ ...current, [ngay]: !current[ngay] }))
+  }
+
+  const beginDeleteDay = (ngay: string) => {
+    setDeleteDay((current) => current === ngay ? null : ngay)
+    setSelectedDeleteIds([])
+    setEditingDay((current) => current === ngay ? null : current)
+    setExpandedDays((current) => ({ ...current, [ngay]: true }))
+  }
+
+  const toggleDeleteSelection = (id: string) => {
+    setSelectedDeleteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  const handleDeleteSelectedDay = async () => {
+    if (!factoryId || !isAdmin || !deleteDay || selectedDeleteIds.length === 0) return
+    setDeletingDay(true)
+    try {
+      const { error } = await supabase.from("production_records").delete().in("id", selectedDeleteIds)
+      if (error) throw new Error(error.message)
+      await loadRecords(factoryId)
+      await writeBackToDispatch(factoryId, deleteDay, supabase)
+      setDeleteDay(null)
+      setSelectedDeleteIds([])
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Khong the xoa cac dong san luong da chon.")
+    } finally {
+      setDeletingDay(false)
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
@@ -388,7 +478,7 @@ export default function OutputPage() {
           </button>
           {isAdmin && (
           <button
-            onClick={() => { setEditRecord(null); setShowForm(true) }}
+            onClick={() => { setEditRecord(null); setFormInitialDate(null); setShowForm(true) }}
             className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
           >
             <Plus size={16} />Thêm mới
@@ -449,11 +539,13 @@ export default function OutputPage() {
                     <option key={d} value={d}>Đội {d}</option>
                   ))}
                 </select>
-                <select value={filterLoai} onChange={e => setFilterLoai(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                  <option value="">Tất cả loại nguyên liệu</option>
-                  {LATEX_FILTER_OPTIONS.map(loai => <option key={loai} value={loai}>{loai}</option>)}
-                </select>
+                <FilterMultiSelect
+                  options={LATEX_FILTER_OPTIONS}
+                  selected={filterLoai}
+                  onChange={setFilterLoai}
+                  placeholder="Tất cả loại nguyên liệu"
+                  className="min-w-64"
+                />
               </>
             )}
             <div className="flex items-center gap-2">
@@ -485,6 +577,22 @@ export default function OutputPage() {
             {cleaningDuplicates ? "Đang dọn..." : `Dọn ${redundantRecordCount} dòng thừa`}
           </button>
         )}
+        {(filterFrom || filterTo || filterDoi || filterXe || filterGhiChu || filterLoai.length > 0 || filterWarnOnly) && (
+          <button
+            onClick={() => {
+              setFilterFrom("")
+              setFilterTo("")
+              setFilterDoi("")
+              setFilterXe("")
+              setFilterGhiChu("")
+              setFilterLoai([])
+              setFilterWarnOnly(false)
+            }}
+            className="text-xs font-bold text-slate-500 hover:text-red-600"
+          >
+            Xóa lọc
+          </button>
+        )}
         <span className={`${isAdmin && redundantRecordCount > 0 ? "" : "ml-auto "}text-xs text-slate-400`}>{records.length} bản ghi trong kỳ</span>
       </div>
 
@@ -493,93 +601,156 @@ export default function OutputPage() {
         <>
           {loading ? (
             <div className="p-12 text-center text-slate-400">Đang tải...</div>
-          ) : filtered.length === 0 ? (
+          ) : groupedDates.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <BarChart3 size={40} className="mx-auto mb-3 opacity-30" />
               <p>Không có dữ liệu sản lượng trong kỳ này</p>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th onClick={() => toggleSort("ngay")} className="px-3 py-3 text-left font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1">Ngày {renderSortIcon("ngay", sortCol, sortAsc)}</span>
-                      </th>
-                      <th onClick={() => toggleSort("doi")} className="px-3 py-3 text-center font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1 justify-center">Đội {renderSortIcon("doi", sortCol, sortAsc)}</span>
-                      </th>
-                      <th onClick={() => toggleSort("so_xe")} className="px-3 py-3 text-left font-bold text-slate-600 cursor-pointer hover:text-emerald-700 select-none">
-                        <span className="flex items-center gap-1">Số xe {renderSortIcon("so_xe", sortCol, sortAsc)}</span>
-                      </th>
-                      <th className="px-3 py-3 text-center font-bold text-slate-600">Chuyến</th>
-                      <th className="px-3 py-3 text-left font-bold text-slate-600">Tài xế</th>
-                      <th className="px-3 py-3 text-right font-bold text-slate-600">Tươi (kg)</th>
-                      <th className="px-3 py-3 text-right font-bold text-slate-600">Khô (kg)</th>
-                      <th className="px-3 py-3 text-left font-bold text-slate-600">Loại mủ</th>
-                      <th className="px-3 py-3 text-left font-bold text-slate-600">Cảnh báo</th>
-                      <th className="px-3 py-3 w-16"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((r, i) => {
-                      const hasRed  = r.warn_codes.some(c => WARN_SEVERITY[c as WarnCode] === "red")
-                      const hasAmb  = !hasRed && r.warn_codes.some(c => WARN_SEVERITY[c as WarnCode] === "amber")
-                      const rowCls  = hasRed ? "bg-red-50" : hasAmb ? "bg-amber-50/40" : i % 2 === 0 ? "" : "bg-slate-50/50"
-                      const tTuoi   = totalTuoi(r)
-                      const tKho    = totalKho(r)
-                      const latexParts = getMaterialSummary(r)
+            <div className="space-y-4">
+              {groupedDates.map(({ ngay, records: dayRecords, totalTuoi: dayTuoi, totalKho: dayKho }) => {
+                const expanded = !!expandedDays[ngay]
+                const isEditingDay = editingDay === ngay
+                const isDeleteDay = deleteDay === ngay
+                const selectedCount = dayRecords.filter((record) => selectedDeleteIds.includes(record.id)).length
 
-                      return (
-                        <tr key={r.id} className={`border-t border-slate-100 transition-colors duration-150 hover:bg-slate-50 ${rowCls}`}>
-                          <td className="px-3 py-2 text-slate-700">{fmtDate(r.ngay)}</td>
-                          <td className="px-3 py-2 text-center font-bold text-slate-700">{r.doi}</td>
-                          <td className="px-3 py-2 font-mono font-bold text-slate-800">{r.so_xe}</td>
-                          <td className="px-3 py-2 text-center text-slate-600">{r.chuyen}</td>
-                          <td className="px-3 py-2 text-slate-600">{r.tai_xe || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-3 py-2 text-right text-slate-700">{fmtNum(tTuoi)}</td>
-                          <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtNum(tKho)}</td>
-                          <td className="px-3 py-2 text-slate-500 text-xs">{latexParts.join(" · ") || "—"}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-0.5">
-                              {(r.warn_codes as WarnCode[]).map(c => <WarnBadge key={c} code={c} />)}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2">
-                            {isAdmin && (
-                              <div className="flex items-center gap-1">
-                                <button onClick={() => { setEditRecord(r); setShowForm(true) }}
-                                  className="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700">
-                                  <Edit2 size={13} />
-                                </button>
-                                <button onClick={() => setDelConfirm(r.id)}
-                                  className="p-1 hover:bg-red-100 rounded-lg text-slate-400 hover:text-red-600">
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                  <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-                    <tr>
-                      <td colSpan={5} className="px-3 py-2 text-xs font-bold text-slate-500">
-                        Tổng {filtered.length} dòng đã lọc
-                      </td>
-                      <td className="px-3 py-2 text-right font-bold text-slate-700">
-                        {fmtNum(filtered.reduce((s, r) => s + totalTuoi(r), 0))}
-                      </td>
-                      <td className="px-3 py-2 text-right font-bold text-emerald-700">
-                        {fmtNum(filtered.reduce((s, r) => s + totalKho(r), 0))}
-                      </td>
-                      <td colSpan={3}></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+                return (
+                  <div key={ngay} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleDayExpanded(ngay)}
+                        className="flex items-center gap-2 rounded-xl px-2 py-1 text-left text-slate-700 transition-colors hover:bg-slate-100"
+                      >
+                        {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        <span className="text-lg font-extrabold">{fmtDate(ngay)}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">{dayRecords.length} dòng</span>
+                      </button>
+
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="rounded-full bg-blue-50 px-3 py-1 font-bold text-blue-700">Tươi {fmtNum(dayTuoi, 0)} kg</span>
+                        <span className="rounded-full bg-emerald-50 px-3 py-1 font-bold text-emerald-700">Khô {fmtNum(dayKho, 0)} kg</span>
+                      </div>
+
+                      {isAdmin && (
+                        <div className="ml-auto flex flex-wrap items-center gap-2">
+                          {isDeleteDay && (
+                            <span className="text-xs font-bold text-amber-700">{selectedCount} dòng đã chọn</span>
+                          )}
+                          {isDeleteDay ? (
+                            <>
+                              <button
+                                onClick={() => void handleDeleteSelectedDay()}
+                                disabled={selectedDeleteIds.length === 0 || deletingDay}
+                                className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {deletingDay ? "Đang xóa..." : `Xóa ${selectedCount || ""}`.trim()}
+                              </button>
+                              <button
+                                onClick={() => { setDeleteDay(null); setSelectedDeleteIds([]) }}
+                                className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                              >
+                                Hủy
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => openCreateForDate(ngay)}
+                                className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                + Thêm
+                              </button>
+                              <button
+                                onClick={() => { setEditingDay((current) => current === ngay ? null : ngay); setDeleteDay(null); setExpandedDays((current) => ({ ...current, [ngay]: true })) }}
+                                className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                                  isEditingDay ? "bg-blue-600 text-white" : "border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                }`}
+                              >
+                                Sửa
+                              </button>
+                              <button
+                                onClick={() => beginDeleteDay(ngay)}
+                                className="rounded-xl border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                              >
+                                Xóa
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {expanded && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                              {isDeleteDay && <th className="w-12 px-3 py-3"></th>}
+                              <th className="px-3 py-3 text-center font-bold text-slate-600">Đội</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Số xe</th>
+                              <th className="px-3 py-3 text-center font-bold text-slate-600">Chuyến</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Tài xế</th>
+                              <th className="px-3 py-3 text-right font-bold text-slate-600">Tươi (kg)</th>
+                              <th className="px-3 py-3 text-right font-bold text-slate-600">Khô (kg)</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Loại mủ</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Cảnh báo</th>
+                              <th className="px-3 py-3 text-left font-bold text-slate-600">Ghi chú</th>
+                              {isEditingDay && <th className="px-3 py-3 w-16"></th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayRecords.map((record, index) => {
+                              const hasRed = record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "red")
+                              const hasAmb = !hasRed && record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "amber")
+                              const rowCls = hasRed ? "bg-red-50" : hasAmb ? "bg-amber-50/40" : index % 2 === 0 ? "" : "bg-slate-50/50"
+                              const latexParts = getMaterialSummary(record)
+
+                              return (
+                                <tr key={record.id} className={`border-t border-slate-100 transition-colors duration-150 hover:bg-slate-50 ${rowCls}`}>
+                                  {isDeleteDay && (
+                                    <td className="px-3 py-2 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedDeleteIds.includes(record.id)}
+                                        onChange={() => toggleDeleteSelection(record.id)}
+                                        className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500"
+                                      />
+                                    </td>
+                                  )}
+                                  <td className="px-3 py-2 text-center font-bold text-slate-700">{record.doi}</td>
+                                  <td className="px-3 py-2 font-mono font-bold text-slate-800">{record.so_xe}</td>
+                                  <td className="px-3 py-2 text-center text-slate-600">{record.chuyen}</td>
+                                  <td className="px-3 py-2 text-slate-600">{record.tai_xe || <span className="text-slate-300">—</span>}</td>
+                                  <td className="px-3 py-2 text-right text-slate-700">{fmtNum(totalTuoi(record))}</td>
+                                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtNum(totalKho(record))}</td>
+                                  <td className="px-3 py-2 text-slate-500 text-xs">{latexParts.join(" · ") || "—"}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex flex-wrap gap-0.5">
+                                      {(record.warn_codes as WarnCode[]).map((code) => <WarnBadge key={code} code={code} />)}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-500">{record.ghi_chu || "—"}</td>
+                                  {isEditingDay && (
+                                    <td className="px-3 py-2">
+                                      <button
+                                        onClick={() => openEditRecord(record)}
+                                        className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                                      >
+                                        Sửa
+                                      </button>
+                                    </td>
+                                  )}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </>
@@ -589,11 +760,13 @@ export default function OutputPage() {
       {tab === "stats" && (
         <div className="space-y-5">
           {/* KPI */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
             <StatCard label="Tổng KL tươi" value={`${fmtNum(totalT, 0)} kg`} color="blue" />
             <StatCard label="Tổng KL khô" value={`${fmtNum(totalK, 0)} kg`} color="emerald" />
             <StatCard label="Số bản ghi" value={String(statsFiltered.length)} color="blue" />
             <StatCard label="Cảnh báo" value={String(warnCount)} sub={warnCount > 0 ? "Cần kiểm tra" : "Tất cả OK"} color={warnCount > 0 ? "amber" : "emerald"} />
+            <StatCard label="Tươi theo loại" value={`${filterLoai.length || LATEX_FILTER_OPTIONS.length} loại`} sub={formatMaterialBreakdown(statsFiltered, "tuoi")} color="blue" />
+            <StatCard label="Khô theo loại" value={`${filterLoai.length || LATEX_FILTER_OPTIONS.length} loại`} sub={formatMaterialBreakdown(statsFiltered, "kho")} color="emerald" />
           </div>
 
           {/* KL khô theo đội */}
@@ -745,8 +918,9 @@ export default function OutputPage() {
         <OutputForm
           record={editRecord}
           factoryId={factoryId}
+          initialDate={formInitialDate}
           onSave={handleSave}
-          onClose={() => { setShowForm(false); setEditRecord(null) }}
+          onClose={() => { setShowForm(false); setEditRecord(null); setFormInitialDate(null) }}
         />
       )}
 

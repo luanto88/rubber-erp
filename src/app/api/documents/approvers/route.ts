@@ -8,6 +8,7 @@ type ProfileRow = {
   full_name: string | null
   username: string | null
   role: string | null
+  department: string | null
 }
 
 export async function GET(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
   // 2. Users có role admin/manager trong factory (role_permissions cấp mặc định)
   const { data: adminRows } = await supabaseAdmin
     .from("profiles")
-    .select("id, full_name, username, role")
+    .select("id, full_name, username, role, department")
     .eq("factory_id", factoryId)
     .eq("status", "active")
     .in("role", ["admin", "manager"])
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
   // Lấy profile của các user đã gộp (lọc theo factory để chắc chắn)
   const { data: profiles } = await supabaseAdmin
     .from("profiles")
-    .select("id, full_name, username, role")
+    .select("id, full_name, username, role, department")
     .eq("factory_id", factoryId)
     .eq("status", "active")
     .in("id", allIds)
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
     full_name: p.full_name || p.username || "",
     username: p.username || "",
     role: p.role || "",
+    department: p.department || "",
   }))
 
   return NextResponse.json(result)

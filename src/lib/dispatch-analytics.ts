@@ -62,6 +62,16 @@ export type DispatchAnalytics = {
   byVehicle: DispatchGroupSummary[]
 }
 
+export const DISPATCH_MATERIAL_OPTIONS = [
+  "Mủ nước",
+  "Mủ chén",
+  "Mủ đông chén",
+  "Mủ đông khối",
+  "Mủ dây",
+] as const
+
+export type DispatchMaterialOption = typeof DISPATCH_MATERIAL_OPTIONS[number]
+
 const emptyMaterials = (): DispatchMaterialTotals => ({
   mnTuoi: 0,
   mnKho: 0,
@@ -133,6 +143,17 @@ export function getTripTotals(row: LegacyDispatchRow) {
   return { materials, totalTuoi, totalKho }
 }
 
+export function getTripMaterialFlags(row: LegacyDispatchRow) {
+  const materials = getTripMaterials(row)
+  return {
+    "Mủ nước": materials.mnTuoi > 0 || materials.mnKho > 0,
+    "Mủ chén": materials.ctTuoi > 0 || materials.ctKho > 0,
+    "Mủ đông chén": materials.dctTuoi > 0 || materials.dctKho > 0,
+    "Mủ đông khối": materials.dktTuoi > 0 || materials.dktKho > 0,
+    "Mủ dây": materials.dtTuoi > 0 || materials.dtKho > 0,
+  } as const
+}
+
 function addMaterials(target: DispatchMaterialTotals, source: DispatchMaterialTotals) {
   target.mnTuoi += source.mnTuoi
   target.mnKho += source.mnKho
@@ -173,11 +194,12 @@ function addTrip(summary: DispatchGroupSummary, trip: DispatchFlatTrip) {
 export function buildDispatchAnalytics(
   entries: DispatchAnalyticsEntry[],
   deliveryPoints: DiemGN[],
-  filters?: { doi?: string; vehicle?: string; note?: string },
+  filters?: { doi?: string; vehicle?: string; note?: string; materials?: string[] },
 ): DispatchAnalytics {
   const vehicleNeedle = (filters?.vehicle || "").trim().toLowerCase()
   const doiFilter = filters?.doi ? Number(filters.doi) : 0
   const noteFilter = (filters?.note || "").trim()
+  const selectedMaterials = filters?.materials || []
   const trips: DispatchFlatTrip[] = []
   const vehicles = new Set<string>()
   const drivers = new Set<string>()
@@ -198,6 +220,10 @@ export function buildDispatchAnalytics(
       if (!matchesNoteFilter(row.ghi_chu, noteFilter)) continue
       if (doiFilter && !dois.includes(doiFilter)) continue
       if (vehicleNeedle && !(row.so_xe || "").toLowerCase().includes(vehicleNeedle)) continue
+      if (selectedMaterials.length > 0) {
+        const flags = getTripMaterialFlags(row)
+        if (!selectedMaterials.some((material) => flags[material as DispatchMaterialOption])) continue
+      }
 
       const { materials, totalTuoi, totalKho } = getTripTotals(row)
       const trip: DispatchFlatTrip = {

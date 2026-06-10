@@ -10,6 +10,7 @@ import { emptyOutputForm, parseVehicleCode } from "./output-types"
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
   factoryId: string
+  initialDate?: string | null
   onSave: (form: OutputFormState) => Promise<void>
   onClose: () => void
 }
@@ -36,7 +37,7 @@ interface DispatchVehicle {
   tai_xe: string
 }
 
-export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormProps) {
+export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: OutputFormProps) {
   const [form, setForm] = useState<OutputFormState>(emptyOutputForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,6 +65,14 @@ export function OutputForm({ record, factoryId, onSave, onClose }: OutputFormPro
       })
     }
   }, [record])
+
+  useEffect(() => {
+    if (record) return
+    setForm({
+      ...emptyOutputForm(),
+      ngay: initialDate || new Date().toISOString().slice(0, 10),
+    })
+  }, [initialDate, record])
 
   // Fetch dispatch entries + existing records khi ngày thay đổi
   useEffect(() => {

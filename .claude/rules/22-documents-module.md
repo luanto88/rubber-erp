@@ -1,7 +1,3 @@
----
-description: Module Văn bản Nội bộ — workflow ký duyệt theo phòng ban, phân loại Thường/Mật, stamp file
----
-
 # Module Văn bản Nội bộ (`/dashboard/documents/`)
 
 ## Phạm vi
@@ -18,8 +14,9 @@ Permissions: `documents.view`, `documents.create`, `documents.edit`, `documents.
 | File | Nội dung | Trạng thái |
 |---|---|---|
 | `20260610_van_ban_types_sequences.sql` | Bảng `van_ban_document_types`, `van_ban_sequences`, function `get_next_van_ban_so` | Cần chạy |
-| `20260610_van_ban_documents_extend.sql` | Mở rộng `van_ban_documents` — workflow columns, file columns, embedding | Cần chạy |
-| `20260610_van_ban_phan_loai.sql` | Thêm cột `phan_loai TEXT DEFAULT 'Thuong'` | Cần chạy |
+| `20260610_van_ban_documents_extend.sql` | Mở rộng `van_ban_documents` — workflow columns, file columns, `embedding vector(768)`, `mo_ta_tim_kiem` | Cần chạy |
+| `20260610_van_ban_phan_loai.sql` | Thêm cột `phan_loai TEXT NOT NULL DEFAULT 'Thuong'` | Cần chạy |
+| `20260610_van_ban_search_rpc.sql` | Function `match_van_ban_documents` (pgvector semantic search) | Cần chạy sau khi `extend` đã chạy |
 
 **Lỗi đã biết khi chạy `types_sequences`**: `policy "van_ban_sequences_factory_read" already exists` → đã sửa bằng `DROP POLICY IF EXISTS` trước `CREATE POLICY`.
 
@@ -33,7 +30,7 @@ Cột quan trọng (thêm vào schema gốc từ 20260522):
 loai_van_ban TEXT,              -- DN | TTR | BC | KH | BB
 so_van_ban TEXT,                -- "01" — text
 nam INTEGER,
-phan_loai TEXT DEFAULT 'Thuong',  -- 'Thuong' | 'Mat'
+phan_loai TEXT NOT NULL DEFAULT 'Thuong',  -- 'Thuong' | 'Mat'
 thu_tu_ky_json JSONB DEFAULT '[]',
 buoc_hien_tai INTEGER DEFAULT 0,
 so_buoc_tong INTEGER DEFAULT 0,
@@ -50,8 +47,8 @@ auto_convert_pdf BOOLEAN DEFAULT false,
 is_uploaded BOOLEAN DEFAULT false,
 phong_ban_ky_display TEXT[],
 nguoi_soan_thao_display TEXT,
-embedding vector(768),
-mo_ta_tim_kiem TEXT
+embedding vector(768),     -- pgvector; NULL = chưa index AI
+mo_ta_tim_kiem TEXT        -- mô tả bổ sung để tăng độ chính xác tìm kiếm AI
 ```
 
 ---
@@ -89,6 +86,69 @@ type ThuTuKyStep = {
 - `getNextRecipients()`: `recipientUserIds = [step.mat_recipient_user_id]`
 - Chỉ gửi đến 1 người đó
 
+### Dropdown người nhận Mật
+
+- `loadDeptLeaders(factoryId, phong_ban_code)` gọi `GET /api/documents/dept-users?leadership=false` — trả về **tất cả** user active trong phòng ban (không lọc chỉ admin/manager), để Phó GĐ và các chức danh khác cũng xuất hiện.
+- Không dùng `leadership=true` cho dropdown Mật.
+
+---
+
+## Mã văn bản
+
+### Format
+`{SO}/{KY_HIEU}-{PHONG_BAN}` — VD: `01/BC-NMCB`
+
+### Quy tắc mã editable
+- Mã VB được **tự sinh** khi chọn loại + phòng ban, nhưng user **có thể sửa trực tiếp** (input không read-only).
+- Khi user chưa sửa (`maVanBanEdited = false`): lưu gọi API atomic `number` để lấy số tiếp theo.
+- Khi user đã sửa (`maVanBanEdited = true`): parse `so` từ mã user nhập rồi dùng trực tiếp, không gọi API.
+- **Banner cảnh báo nhảy số** (amber): hiện khi số trong mã ≠ số tiếp theo từ DB preview (`nextSoPreview`).
+- **Banner trùng mã** (đỏ): hiện khi query Supabase phát hiện mã đã tồn tại trong factory. Check debounced 300ms sau khi user ngừng gõ.
+- Nút `Lưu` bị `disabled` khi `maVanBanExists = true` (mã trùng đang xác nhận).
+
+### Peek số tiếp theo
+- `loadNextSo` đọc `van_van_sequences.last_so + 1` trực tiếp để preview — **không gọi** `get_next_van_ban_so` ở bước peek (tránh tiêu thụ số).
+
+---
+
+## Người phê duyệt và bước ký phòng ban
+
+- `GET /api/documents/approvers` trả về danh sách users có quyền `documents.phe_duyet`, kèm field `department`.
+- Khi đã chọn `phe_duyet_user_id`, hệ thống tính `approverDept = approvers.find(a => a.id === phe_duyet_user_id)?.department`.
+- Dropdown chọn phòng ban trong step builder filter: `PHONG_BAN_VAN_BAN_OPTIONS.filter(pb => pb !== approverDept)` — áp dụng cho **cả Thường lẫn Mật**.
+- Lý do: tránh văn bản đi qua phòng ban của người phê duyệt hai lần (bước ký + phê duyệt cuối).
+- Nếu bước đã chọn phòng ban đó trước khi chọn approver: hiển thị warning inline.
+
+---
+
+## AI Semantic Search
+
+### Kiến trúc
+- Model embed: `gemini-embedding-001` (768 dimensions) — REST fetch, không dùng SDK `@google/generative-ai`
+- Embed text = `[ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, mo_ta_tim_kiem].filter(Boolean).join(" ")`
+- RPC: `match_van_ban_documents(query_embedding, match_threshold, match_count, p_factory_id)`
+- Chỉ tìm trong văn bản `trang_thai = 'da_phe_duyet'` có `embedding IS NOT NULL`
+
+### Trigger embed
+Sau khi action `phe_duyet` thành công trong `[id]/page.tsx` → fire-and-forget `POST /api/documents/embed-doc`. Lỗi embed không block workflow.
+
+### API Routes
+| Route | Mô tả |
+|---|---|
+| `POST /api/documents/embed-doc` | Embed 1 văn bản sau khi phê duyệt |
+| `POST /api/documents/search` | Semantic search qua RPC |
+
+### UI (`page.tsx`)
+- Nút toggle "Tìm AI" / "AI đang bật" (violet) cạnh filter bar.
+- Khi bật: ẩn filter thường, hiển thị input AI + nút "Tìm kiếm".
+- Kết quả hiện trong bảng riêng với cột "Độ phù hợp" (badge màu: emerald ≥75%, blue ≥60%, amber dưới đó).
+- Thông báo: AI chỉ tìm văn bản đã phê duyệt; văn bản draft không được index.
+
+### Biến môi trường
+```
+GEMINI_API_KEY=<Google AI Studio key>  # đã có trong .env.local từ ISO forms module
+```
+
 ---
 
 ## API Routes
@@ -99,8 +159,10 @@ type ThuTuKyStep = {
 | `/api/documents/sign` | POST | Workflow ký: `gui_ky`, `ky_buoc`, `phe_duyet`, `tra_ve` |
 | `/api/documents/notify` | POST | 3 kênh thông báo: in-app + Telegram + Email |
 | `/api/documents/dept-code` | GET | Resolve dept code của user (bypass RLS) |
-| `/api/documents/approvers` | GET | Danh sách users có quyền `documents.phe_duyet` |
-| `/api/documents/dept-users` | GET | Trưởng/phó phòng ban (leadership=true) hoặc tất cả |
+| `/api/documents/approvers` | GET | Danh sách users có quyền `documents.phe_duyet` + trả `department` |
+| `/api/documents/dept-users` | GET | Tất cả user active theo phòng ban (`leadership=false`) hoặc chỉ admin/manager (`leadership=true`) |
+| `/api/documents/embed-doc` | POST | Embed 1 văn bản vào `embedding` sau phe_duyet |
+| `/api/documents/search` | POST | Semantic search `{ query, factoryId }` → kết quả + similarity |
 
 Tất cả routes dùng `supabaseAdmin` để bypass RLS khi cần list users.
 
@@ -120,14 +182,30 @@ draft → cho_phe_duyet → da_phe_duyet
      ↘ tra_ve
 ```
 
-### Số văn bản
-Format: `{SO}/{KY_HIEU}-{PHONG_BAN}` — VD: `01/BC-NMCB`
-Atomic qua function `get_next_van_ban_so(factory_id, loai, phong_ban, nam)`.
-
 ---
 
 ## Email lookup
 Luôn dùng `maintenance_staff.email` theo `profile_id` — **KHÔNG** dùng `profiles.auth_email` (email auth có dạng nội bộ `username@auth.rubber-erp.example.com`).
+
+---
+
+## Form soạn thảo (`new/page.tsx`)
+
+### Thứ tự các section (từ trên xuống dưới)
+1. **Phân loại** (Thường/Mật) — nút to, icon Shield/Lock, border nổi bật
+2. Loại văn bản
+3. Phòng ban
+4. Năm, Mã văn bản (editable + banner cảnh báo)
+5. Tên / Trích yếu nội dung
+6. Cấp tài liệu
+7. Người phê duyệt
+8. Các bước ký (step builder — phòng ban của approver bị loại)
+9. File đính kèm
+10. Mô tả tìm kiếm AI (`mo_ta_tim_kiem`) — optional
+11. Ghi chú
+
+### Auto-fill từ tên file
+Khi upload file, nếu `form.ten_van_ban` đang trống → auto-fill từ tên file (bỏ extension, thay `_-` thành dấu cách).
 
 ---
 
@@ -148,10 +226,10 @@ Luôn dùng `maintenance_staff.email` theo `profile_id` — **KHÔNG** dùng `pr
 
 ```
 src/app/dashboard/documents/
-  page.tsx                    -- danh sách + filter
-  new/page.tsx                -- form soạn thảo (Thường/Mật, dropdown approver, steps builder)
+  page.tsx                    -- danh sách + filter + AI search toggle
+  new/page.tsx                -- form soạn thảo (phân loại đầu form, mã editable, AI desc)
   new/upload/page.tsx         -- upload văn bản ký tay
-  [id]/page.tsx               -- chi tiết + badge Mật + PIN modal + ký duyệt
+  [id]/page.tsx               -- chi tiết + badge Mật + PIN modal + ký duyệt + embed trigger
   my-tasks/page.tsx           -- việc cần xử lý
   _components/
     documents-shell.tsx
@@ -162,8 +240,10 @@ src/app/api/documents/
   sign/route.ts
   notify/route.ts
   dept-code/route.ts
-  approvers/route.ts
-  dept-users/route.ts
+  approvers/route.ts             (trả về department)
+  dept-users/route.ts            (hỗ trợ leadership=false)
+  embed-doc/route.ts             (POST: embed 1 văn bản sau phe_duyet)
+  search/route.ts                (POST: semantic search)
 ```
 
 ---
@@ -172,4 +252,4 @@ src/app/api/documents/
 
 **Toàn bộ code là untracked files, chưa commit/push → 404 trên production.**
 
-Xem deploy checklist trong memory `project_documents_module.md`.
+Chi tiết deploy checklist xem memory `project_documents_module.md`.

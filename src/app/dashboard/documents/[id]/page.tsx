@@ -178,6 +178,12 @@ export default function DocumentDetailPage() {
       setPin("")
       setActionOk("Phê duyệt thành công!")
       setTimeout(() => setActionOk(null), 3000)
+      // Bug 6c: Cập nhật AI embedding sau khi phê duyệt (fire-and-forget)
+      void fetch("/api/documents/embed-doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: doc.id, factoryId }),
+      }).catch(() => {})
       void loadDoc(factoryId)
     } catch (err) {
       setPinError(err instanceof Error ? err.message : "Lỗi không xác định")
