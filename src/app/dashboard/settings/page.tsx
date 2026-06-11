@@ -157,7 +157,16 @@ type SensitiveActionModal = {
 
 type SystemTab = "users" | "permissions" | "personnel"
 
-type MasterDataTab = "suffixes" | "company" | "customers" | "required-notes"
+type MasterDataTab = "suffixes" | "company" | "customers" | "required-notes" | "van-ban-types"
+
+type VanBanDocumentTypeRow = {
+  id: string
+  code: string
+  name: string
+  ky_hieu: string
+  sort_order: number
+  is_active: boolean
+}
 
 type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots"
 
@@ -774,6 +783,17 @@ export default function SettingsPage() {
   const [requiredNoteError, setRequiredNoteError] = useState("")
   const [requiredNoteDelConfirm, setRequiredNoteDelConfirm] = useState<{ id: string; label: string } | null>(null)
 
+  // Loại văn bản state
+  const [vanBanTypes, setVanBanTypes] = useState<VanBanDocumentTypeRow[]>([])
+  const [vbtLoading, setVbtLoading] = useState(false)
+  const [vbtLoaded, setVbtLoaded] = useState(false)
+  const [vbtModal, setVbtModal] = useState<"add" | "edit" | null>(null)
+  const [vbtEditId, setVbtEditId] = useState<string | null>(null)
+  const [vbtForm, setVbtForm] = useState({ code: "", name: "", ky_hieu: "", sort_order: "0", is_active: true })
+  const [vbtSaving, setVbtSaving] = useState(false)
+  const [vbtError, setVbtError] = useState("")
+  const [vbtDelConfirm, setVbtDelConfirm] = useState<{ id: string; label: string } | null>(null)
+
   // ISO & Văn bản tab state
   const [isoVanBanTab, setIsoVanBanTab] = useState<"chu-ky">("chu-ky")
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
@@ -1014,6 +1034,36 @@ export default function SettingsPage() {
       setRequiredNotesLoaded(true)
     } finally {
       setRequiredNotesLoading(false)
+    }
+  }, [])
+
+  const loadVanBanTypes = useCallback(async (fid: string) => {
+    setVbtLoading(true)
+    try {
+      const { data } = await supabase
+        .from("van_ban_document_types")
+        .select("id, code, name, ky_hieu, sort_order, is_active")
+        .eq("factory_id", fid)
+        .order("sort_order")
+      if (data && data.length > 0) {
+        setVanBanTypes(data as VanBanDocumentTypeRow[])
+      } else {
+        // Seed mặc định nếu chưa có dữ liệu
+        const defaults = [
+          { code: "DN", name: "Đề nghị", ky_hieu: "ĐN", sort_order: 1 },
+          { code: "TTR", name: "Tờ trình", ky_hieu: "Ttr", sort_order: 2 },
+          { code: "BC", name: "Báo cáo", ky_hieu: "BC", sort_order: 3 },
+          { code: "KH", name: "Kế hoạch", ky_hieu: "KH", sort_order: 4 },
+          { code: "BB", name: "Biên bản", ky_hieu: "BB", sort_order: 5 },
+        ]
+        const { data: inserted } = await supabase.from("van_ban_document_types")
+          .insert(defaults.map((d) => ({ ...d, factory_id: fid, is_active: true })))
+          .select("id, code, name, ky_hieu, sort_order, is_active")
+        setVanBanTypes((inserted || []) as VanBanDocumentTypeRow[])
+      }
+      setVbtLoaded(true)
+    } finally {
+      setVbtLoading(false)
     }
   }, [])
 
@@ -1652,6 +1702,12 @@ export default function SettingsPage() {
   }, [tab, masterDataTab, factoryId, requiredNotesLoaded, requiredNotesLoading, loadMasterRequiredNotes])
 
   useEffect(() => {
+    if (tab === "master-data" && masterDataTab === "van-ban-types" && factoryId && !vbtLoaded && !vbtLoading) {
+      void loadVanBanTypes(factoryId)
+    }
+  }, [tab, masterDataTab, factoryId, vbtLoaded, vbtLoading, loadVanBanTypes])
+
+  useEffect(() => {
     if (tab === "iso-vanban" && user && factoryId) {
       const loadSignInfo = async () => {
         // Kiểm tra đã có ảnh chữ ký chưa
@@ -2134,6 +2190,57 @@ export default function SettingsPage() {
       .eq("factory_id", factoryId)
     setRequiredNoteDelConfirm(null)
     void loadMasterRequiredNotes(factoryId)
+  }
+
+  const saveVanBanType = async () => {
+    if (!factoryId) return
+    if (!vbtForm.code.trim()) { setVbtError("Mã loại không được để trống"); return }
+    if (!vbtForm.name.trim()) { setVbtError("Tên loại không được để trống"); return }
+    if (!vbtForm.ky_hieu.trim()) { setVbtError("Ký hiệu mã không được để trống"); return }
+    setVbtSaving(true)
+    setVbtError("")
+    try {
+      const payload = {
+        factory_id: factoryId,
+        code: vbtForm.code.trim().toUpperCase(),
+        name: vbtForm.name.trim(),
+        ky_hieu: vbtForm.ky_hieu.trim(),
+        sort_order: Number(vbtForm.sort_order) || 0,
+        is_active: vbtForm.is_active,
+      }
+      if (vbtEditId) {
+        const { error: e } = await supabase.from("van_ban_document_types").update(payload).eq("id", vbtEditId).eq("factory_id", factoryId)
+        if (e) { setVbtError(e.message); return }
+      } else {
+        const { error: e } = await supabase.from("van_ban_document_types").insert(payload)
+        if (e) { setVbtError(e.message); return }
+      }
+      setVbtModal(null)
+      setVbtEditId(null)
+      setVbtForm({ code: "", name: "", ky_hieu: "", sort_order: "0", is_active: true })
+      void loadVanBanTypes(factoryId)
+    } catch (e) {
+      setVbtError(e instanceof Error ? e.message : "Lỗi")
+    } finally {
+      setVbtSaving(false)
+    }
+  }
+
+  const deleteVanBanType = async () => {
+    if (!factoryId || !vbtDelConfirm) return
+    // Kiểm tra xem có văn bản nào đang dùng loại này không
+    const { count } = await supabase.from("van_ban_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("factory_id", factoryId)
+      .eq("loai_van_ban", vanBanTypes.find((t) => t.id === vbtDelConfirm.id)?.code || "")
+    if ((count ?? 0) > 0) {
+      setVbtError(`Không thể xóa vì đang có văn bản sử dụng loại này`)
+      setVbtDelConfirm(null)
+      return
+    }
+    await supabase.from("van_ban_document_types").delete().eq("id", vbtDelConfirm.id).eq("factory_id", factoryId)
+    setVbtDelConfirm(null)
+    void loadVanBanTypes(factoryId)
   }
 
   const getAccessToken = async () => {
@@ -3307,6 +3414,7 @@ export default function SettingsPage() {
                 { key: "company" as const, label: "Thông tin công ty", icon: Building2 },
                 { key: "customers" as const, label: "Khách hàng", icon: ShoppingBag },
                 { key: "required-notes" as const, label: "Ghi chú bắt buộc", icon: FileText },
+                { key: "van-ban-types" as const, label: "Loại văn bản", icon: FileText },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -3638,6 +3746,98 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+              )}
+            </div>
+          </div>
+          )}
+
+          {masterDataTab === "van-ban-types" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-blue-600" />
+                <span className="font-extrabold text-slate-700">Loại văn bản</span>
+                <span className="text-xs text-slate-400 ml-1">({vanBanTypes.length} loại)</span>
+              </div>
+              {canManageSettings && (
+                <button
+                  onClick={() => {
+                    setVbtEditId(null)
+                    setVbtForm({ code: "", name: "", ky_hieu: "", sort_order: String(vanBanTypes.length + 1), is_active: true })
+                    setVbtError("")
+                    setVbtModal("add")
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
+                >
+                  <Plus size={13} /> Thêm loại
+                </button>
+              )}
+            </div>
+
+            <div className="p-4">
+              {vbtLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+              ) : vanBanTypes.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <FileText size={32} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Chưa có loại văn bản nào</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Mã loại", "Tên loại", "Ký hiệu mã", "Thứ tự", "Trạng thái", ""].map((head) => (
+                        <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          {head}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {vanBanTypes.map((item) => (
+                      <tr key={item.id} className="row-hover">
+                        <td className="px-4 py-3 font-mono font-bold text-slate-700">{item.code}</td>
+                        <td className="px-4 py-3 text-slate-700 font-medium">{item.name}</td>
+                        <td className="px-4 py-3 font-mono text-slate-600">{item.ky_hieu}</td>
+                        <td className="px-4 py-3 text-slate-500">{item.sort_order}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${item.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {item.is_active ? "Đang dùng" : "Ẩn"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {canManageSettings && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setVbtEditId(item.id)
+                                  setVbtForm({ code: item.code, name: item.name, ky_hieu: item.ky_hieu, sort_order: String(item.sort_order), is_active: item.is_active })
+                                  setVbtError("")
+                                  setVbtModal("edit")
+                                }}
+                                className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setVbtDelConfirm({ id: item.id, label: `${item.code} — ${item.name}` })}
+                                className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {vbtError && !vbtModal && (
+                <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                  <AlertTriangle size={14} />
+                  {vbtError}
+                </div>
               )}
             </div>
           </div>
@@ -4379,6 +4579,81 @@ export default function SettingsPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setRequiredNoteDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteRequiredNote} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vbtModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <h2 className="text-lg font-extrabold text-slate-800">{vbtModal === "add" ? "Thêm loại văn bản" : "Sửa loại văn bản"}</h2>
+              <button onClick={() => { setVbtModal(null); setVbtError("") }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {vbtError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{vbtError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã loại *</label>
+                  <input
+                    value={vbtForm.code}
+                    onChange={e => setVbtForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono outline-none focus:border-blue-500"
+                    placeholder="VD: BC"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký hiệu mã *</label>
+                  <input
+                    value={vbtForm.ky_hieu}
+                    onChange={e => setVbtForm(p => ({ ...p, ky_hieu: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono outline-none focus:border-blue-500"
+                    placeholder="VD: BC"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên loại *</label>
+                <input
+                  value={vbtForm.name}
+                  onChange={e => setVbtForm(p => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  placeholder="VD: Báo cáo"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
+                  <input
+                    value={vbtForm.sort_order}
+                    onChange={e => setVbtForm(p => ({ ...p, sort_order: e.target.value.replace(/\D/g, "") }))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="flex items-center gap-2 pt-7">
+                  <input type="checkbox" id="vbt-active" checked={vbtForm.is_active} onChange={e => setVbtForm(p => ({ ...p, is_active: e.target.checked }))} className="rounded" />
+                  <label htmlFor="vbt-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
+                </div>
+              </div>
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+              <button onClick={() => { setVbtModal(null); setVbtError("") }} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveVanBanType} disabled={vbtSaving} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{vbtSaving ? "Đang lưu..." : "Lưu"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vbtDelConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
+            <p className="text-sm text-slate-600 mb-6">Xóa loại văn bản <span className="font-bold text-red-600">&quot;{vbtDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+            {vbtError && <p className="text-sm text-red-600 mb-4">{vbtError}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setVbtDelConfirm(null); setVbtError("") }} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={deleteVanBanType} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
             </div>
           </div>
         </div>

@@ -818,6 +818,9 @@ export default function NewDocumentPage() {
             )}
           </div>
 
+          {/* Hướng dẫn tag template */}
+          <TagGuidePanel />
+
           {/* Nút lưu */}
           <div className="flex flex-col gap-2">
             <button
@@ -843,5 +846,80 @@ export default function NewDocumentPage() {
         </div>
       </div>
     </DocumentsShell>
+  )
+}
+
+// ─── TagGuidePanel ────────────────────────────────────────────────────────────
+
+function TagGuidePanel() {
+  const [open, setOpen] = useState(false)
+
+  const groups = [
+    {
+      label: "Metadata văn bản",
+      tags: [
+        { tag: "{{SO_VAN_BAN}}", desc: "Số văn bản (VD: 01)" },
+        { tag: "{{MA_VAN_BAN}}", desc: "Mã đầy đủ (VD: 01/BC-NMCB)" },
+        { tag: "{{LOAI_VAN_BAN}}", desc: "Loại văn bản (VD: Báo cáo)" },
+        { tag: "{{QR}}", desc: "Mã QR trỏ về trang chi tiết" },
+      ],
+    },
+    {
+      label: "Chữ ký từng bước (thay N = 1, 2, 3...)",
+      tags: [
+        { tag: "{{TEN_BUOC_N}}", desc: "Tên người ký bước N" },
+        { tag: "{{CHU_KY_BUOC_N}}", desc: "Ảnh chữ ký bước N" },
+        { tag: "{{CHUC_VU_BUOC_N}}", desc: "Chức vụ người ký bước N" },
+        { tag: "{{NGAY_KY_BUOC_N}}", desc: "Ngày ký bước N" },
+      ],
+    },
+    {
+      label: "Phê duyệt cuối",
+      tags: [
+        { tag: "{{TEN_PHE_DUYET}}", desc: "Tên người phê duyệt" },
+        { tag: "{{CHU_KY_PHE_DUYET}}", desc: "Ảnh chữ ký người phê duyệt" },
+        { tag: "{{CHUC_VU_PHE_DUYET}}", desc: "Chức vụ người phê duyệt" },
+        { tag: "{{NGAY_BAN_HANH}}", desc: "Ngày ban hành (phê duyệt)" },
+      ],
+    },
+  ]
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-all text-left"
+        type="button"
+      >
+        <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+          Hướng dẫn đặt tag trong file DOCX / XLSX
+        </span>
+        <span className="text-slate-400 text-xs">{open ? "▲ Thu gọn" : "▼ Xem tag"}</span>
+      </button>
+
+      {open && (
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-slate-500">
+            Đặt các tag sau vào file DOCX / XLSX. Hệ thống tự thay thế khi ký duyệt.
+            Tag đúng nhưng không có trong file → bỏ qua. Tag sai cú pháp → hệ thống cảnh báo yêu cầu sửa template.
+          </p>
+          {groups.map((g) => (
+            <div key={g.label}>
+              <p className="text-xs font-bold text-slate-500 mb-2">{g.label}</p>
+              <div className="space-y-1">
+                {g.tags.map(({ tag, desc }) => (
+                  <div key={tag} className="flex items-center gap-3 text-xs">
+                    <code className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded font-mono shrink-0">
+                      {tag}
+                    </code>
+                    <span className="text-slate-500">{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

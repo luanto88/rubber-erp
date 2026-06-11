@@ -28,10 +28,14 @@ import {
   ArrowLeft,
   PenLine,
   ShieldCheck,
+  Printer,
+  Share2,
+  Loader2,
 } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
 
 type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string }
+type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
 
 export default function DocumentDetailPage() {
   const params = useParams()
@@ -56,6 +60,14 @@ export default function DocumentDetailPage() {
   // Trả về modal
   const [traVeModal, setTraVeModal] = useState(false)
   const [traVeLyDo, setTraVeLyDo] = useState("")
+
+  // Distribution modal
+  const [distModal, setDistModal] = useState(false)
+  const [distUsers, setDistUsers] = useState<DistUser[]>([])
+  const [distLoading, setDistLoading] = useState(false)
+  const [distSelected, setDistSelected] = useState<Set<string>>(new Set())
+  const [distGhiChu, setDistGhiChu] = useState("")
+  const [distSending, setDistSending] = useState(false)
 
   // Fetch department code via admin API
   const resolveUserDeptCode = useCallback(async (uid: string) => {
@@ -197,6 +209,50 @@ export default function DocumentDetailPage() {
     setTraVeLyDo("")
   })
 
+  const openDistModal = useCallback(async () => {
+    if (!factoryId || !doc) return
+    setDistModal(true)
+    setDistLoading(true)
+    setDistSelected(new Set())
+    setDistGhiChu("")
+    try {
+      const res = await fetch(`/api/documents/distribute?factoryId=${factoryId}&docIds=${doc.id}`)
+      const json = (await res.json()) as { users?: DistUser[] }
+      setDistUsers(json.users || [])
+    } catch { setDistUsers([]) }
+    finally { setDistLoading(false) }
+  }, [factoryId, doc])
+
+  const handleDistSend = async () => {
+    if (!factoryId || !doc || !user || distSelected.size === 0) return
+    setDistSending(true)
+    try {
+      const res = await fetch("/api/documents/distribute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          factoryId,
+          distributedBy: user.id,
+          docIds: [doc.id],
+          recipientUserIds: [...distSelected],
+          ghiChu: distGhiChu || undefined,
+        }),
+      })
+      if (res.ok || res.status === 207) {
+        setDistModal(false)
+        setActionOk(`Đã phân phối đến ${distSelected.size} người nhận!`)
+        setTimeout(() => setActionOk(null), 3000)
+      } else {
+        const json = (await res.json()) as { error?: string }
+        setActionError(json.error || "Lỗi phân phối")
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setDistSending(false)
+    }
+  }
+
   if (loading) {
     return (
       <DocumentsShell>
@@ -247,6 +303,8 @@ export default function DocumentDetailPage() {
   const canTraVe =
     (doc.trang_thai === "cho_ky_phong_ban" && (canKyBuoc || isAdmin || hasPermission(user, "documents.phe_duyet"))) ||
     (doc.trang_thai === "cho_phe_duyet" && (isAdmin || hasPermission(user, "documents.phe_duyet")))
+
+  const canDistribute = doc.trang_thai === "da_phe_duyet" && hasPermission(user, "documents.distribute")
 
   const fileUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
 
@@ -302,6 +360,24 @@ export default function DocumentDetailPage() {
               <Eye size={15} />
               Xem file
             </a>
+          )}
+          <a
+            href={`/dashboard/documents/print/?docId=${doc.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-all"
+          >
+            <Printer size={15} />
+            In
+          </a>
+          {canDistribute && (
+            <button
+              onClick={() => void openDistModal()}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all"
+            >
+              <Share2 size={15} />
+              Phân phối
+            </button>
           )}
           {canGuiKy && (
             <button
@@ -478,6 +554,116 @@ export default function DocumentDetailPage() {
               <button
                 onClick={() => { setPinModal(null); setPin(""); setPinError(null) }}
                 disabled={acting}
+                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Hủy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Distribution Modal */}
+      {distModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: "90vh" }}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div>
+                <h3 className="font-bold text-slate-800">Phân phối văn bản</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{doc.ma_van_ban} — {doc.ten_van_ban}</p>
+              </div>
+              <button onClick={() => setDistModal(false)} className="text-slate-400 hover:text-slate-700 p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {distLoading ? (
+                <div className="flex items-center justify-center py-10 text-slate-400 gap-2">
+                  <Loader2 size={18} className="animate-spin" />
+                  <span className="text-sm">Đang tải danh sách...</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-slate-700">
+                      Đã chọn {distSelected.size}/{distUsers.filter(u => !u.alreadyReceived.includes(doc.id)).length} người chưa nhận
+                    </span>
+                    <button
+                      onClick={() => {
+                        const eligible = distUsers.filter(u => !u.alreadyReceived.includes(doc.id)).map(u => u.id)
+                        setDistSelected(new Set(eligible))
+                      }}
+                      className="text-xs text-blue-600 hover:underline font-bold"
+                    >
+                      Chọn tất cả
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {distUsers.map(u => {
+                      const hasAlready = u.alreadyReceived.includes(doc.id)
+                      const selected = distSelected.has(u.id)
+                      return (
+                        <label
+                          key={u.id}
+                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${hasAlready ? "opacity-50 cursor-default border-slate-100 bg-slate-50" : selected ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:border-blue-200 hover:bg-blue-50/50"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            disabled={hasAlready}
+                            checked={selected}
+                            onChange={() => {
+                              if (hasAlready) return
+                              setDistSelected(prev => {
+                                const next = new Set(prev)
+                                if (next.has(u.id)) next.delete(u.id)
+                                else next.add(u.id)
+                                return next
+                              })
+                            }}
+                            className="rounded"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-700 truncate">{u.full_name || u.id}</p>
+                            <p className="text-xs text-slate-400">{u.department || u.role}</p>
+                          </div>
+                          {hasAlready && (
+                            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold shrink-0">Đã nhận</span>
+                          )}
+                        </label>
+                      )
+                    })}
+                    {distUsers.length === 0 && (
+                      <p className="text-sm text-slate-400 text-center py-6">Không có người dùng nào</p>
+                    )}
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú kèm theo (tùy chọn)</label>
+                <textarea
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+                  rows={2}
+                  placeholder="Ghi chú..."
+                  value={distGhiChu}
+                  onChange={e => setDistGhiChu(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="p-5 border-t border-slate-100 flex gap-2">
+              <button
+                onClick={() => void handleDistSend()}
+                disabled={distSending || distSelected.size === 0}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-all"
+              >
+                {distSending ? (
+                  <><Loader2 size={14} className="animate-spin" />Đang gửi...</>
+                ) : (
+                  <><Share2 size={14} />Phân phối ({distSelected.size})</>
+                )}
+              </button>
+              <button
+                onClick={() => setDistModal(false)}
+                disabled={distSending}
                 className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
                 Hủy

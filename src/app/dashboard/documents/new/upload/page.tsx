@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
@@ -34,9 +34,17 @@ export default function UploadVanBanPage() {
     ghi_chu: "",
   })
 
+  // Mã văn bản editable — giống new/page.tsx
+  const [maVanBan, setMaVanBan] = useState("")
+  const [maVanBanEdited, setMaVanBanEdited] = useState(false)
+  const [maVanBanExists, setMaVanBanExists] = useState(false)
+  const [nextSoPreview, setNextSoPreview] = useState<number | null>(null)
+
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  const dupCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadTypes = useCallback(async () => {
     const { data } = await supabase
@@ -46,7 +54,6 @@ export default function UploadVanBanPage() {
       .order("sort_order")
     if (data?.length) setDocTypes(data as VanBanDocumentType[])
     else {
-      // Fallback nếu DB chưa có dữ liệu
       setDocTypes(
         LOAI_VAN_BAN_OPTIONS.map((code, i) => ({
           id: code,
@@ -71,10 +78,56 @@ export default function UploadVanBanPage() {
     void bootstrap()
   }, [loadTypes])
 
+  // Peek số tiếp theo khi loại + phòng ban thay đổi
+  const loadNextSo = useCallback(async (fid: string, loai: string, phongBan: string) => {
+    if (!loai || !phongBan) return
+    const { data } = await supabase
+      .from("van_ban_sequences")
+      .select("last_so")
+      .eq("factory_id", fid)
+      .eq("loai", loai)
+      .eq("phong_ban", phongBan)
+      .single()
+    const nextSo = (data?.last_so ?? 0) + 1
+    setNextSoPreview(nextSo)
+    setMaVanBanEdited((prev) => {
+      if (!prev) {
+        const kyHieu = docTypes.find((t) => t.code === loai)?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[loai] || loai
+        setMaVanBan(buildMaVanBan(nextSo, kyHieu, phongBan))
+      }
+      return prev
+    })
+  }, [docTypes])
+
+  useEffect(() => {
+    if (factoryId && form.loai_van_ban && form.phong_ban) {
+      void loadNextSo(factoryId, form.loai_van_ban, form.phong_ban)
+    }
+  }, [factoryId, form.loai_van_ban, form.phong_ban, loadNextSo])
+
+  // Debounced duplicate check — 300ms
+  useEffect(() => {
+    if (dupCheckRef.current) clearTimeout(dupCheckRef.current)
+    if (!factoryId || !maVanBan.trim()) { setMaVanBanExists(false); return }
+    dupCheckRef.current = setTimeout(async () => {
+      const { count } = await supabase
+        .from("van_ban_documents")
+        .select("id", { count: "exact", head: true })
+        .eq("factory_id", factoryId)
+        .eq("ma_van_ban", maVanBan.trim())
+      setMaVanBanExists((count ?? 0) > 0)
+    }, 300)
+    return () => { if (dupCheckRef.current) clearTimeout(dupCheckRef.current) }
+  }, [maVanBan, factoryId])
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
     setFile(f)
+    if (!form.ten_van_ban.trim()) {
+      const base = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim()
+      setForm((prev) => ({ ...prev, ten_van_ban: base }))
+    }
     setPreviewUrl(URL.createObjectURL(f))
   }
 
@@ -82,6 +135,14 @@ export default function UploadVanBanPage() {
     if (!factoryId) return
     if (!form.loai_van_ban || !form.phong_ban || !form.ten_van_ban.trim()) {
       setSaveError("Vui lòng điền đầy đủ thông tin bắt buộc: Loại văn bản, Phòng ban, Tên văn bản.")
+      return
+    }
+    if (!maVanBan.trim()) {
+      setSaveError("Mã văn bản không được để trống.")
+      return
+    }
+    if (maVanBanExists) {
+      setSaveError("Mã văn bản đã tồn tại trong hệ thống. Vui lòng chọn mã khác.")
       return
     }
     if (!file) {
@@ -92,25 +153,33 @@ export default function UploadVanBanPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      // 1. Lấy số thứ tự tiếp theo
-      const nam = new Date().getFullYear()
-      const numRes = await fetch("/api/documents/number", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ factoryId, loai: form.loai_van_ban, phong_ban: form.phong_ban, nam }),
-      })
-      if (!numRes.ok) {
-        const err = (await numRes.json()) as { error?: string }
-        throw new Error(err.error || "Không lấy được số văn bản")
+      let finalMa = maVanBan.trim()
+      let soStr = "01"
+
+      if (maVanBanEdited) {
+        // Dùng mã user đã nhập — parse số từ phần đầu
+        const parsed = parseInt(finalMa.split("/")[0])
+        soStr = isNaN(parsed) ? "01" : String(parsed).padStart(2, "0")
+      } else {
+        // Lấy số atomic từ API (không race condition)
+        const nam = new Date().getFullYear()
+        const numRes = await fetch("/api/documents/number", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ factoryId, loai: form.loai_van_ban, phong_ban: form.phong_ban, nam }),
+        })
+        if (!numRes.ok) {
+          const err = (await numRes.json()) as { error?: string }
+          throw new Error(err.error || "Không lấy được số văn bản")
+        }
+        const { so } = (await numRes.json()) as { so: number }
+        const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
+        const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
+        finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
+        soStr = String(so).padStart(2, "0")
       }
-      const { so } = (await numRes.json()) as { so: number }
 
-      // 2. Xây dựng mã văn bản
-      const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
-      const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
-      const maVanBan = buildMaVanBan(so, kyHieu, form.phong_ban)
-
-      // 3. Upload file lên Storage
+      // Upload file lên Storage
       setUploading(true)
       const ext = file.name.split(".").pop() || "pdf"
       const filePath = `${factoryId}/vanban/uploads/${Date.now()}_${file.name.replace(/\s+/g, "_")}`
@@ -123,14 +192,14 @@ export default function UploadVanBanPage() {
       const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath)
       const fileUrl = urlData.publicUrl
 
-      // 4. Insert bản ghi
+      const nam = new Date().getFullYear()
       const payload = {
         factory_id: factoryId,
-        ma_van_ban: maVanBan,
+        ma_van_ban: finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
         loai_van_ban: form.loai_van_ban,
         phong_ban: form.phong_ban,
-        so_van_ban: String(so).padStart(2, "0"),
+        so_van_ban: soStr,
         nam,
         trang_thai: "da_phe_duyet",
         is_uploaded: true,
@@ -159,6 +228,10 @@ export default function UploadVanBanPage() {
       </DocumentsShell>
     )
   }
+
+  // Kiểm tra có nhảy số không
+  const parsedSoFromInput = maVanBan ? parseInt(maVanBan.split("/")[0]) : NaN
+  const hasSoJump = maVanBanEdited && nextSoPreview !== null && !isNaN(parsedSoFromInput) && parsedSoFromInput !== nextSoPreview
 
   return (
     <DocumentsShell>
@@ -198,7 +271,10 @@ export default function UploadVanBanPage() {
             <select
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
               value={form.loai_van_ban}
-              onChange={(e) => setForm((f) => ({ ...f, loai_van_ban: e.target.value }))}
+              onChange={(e) => {
+                setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
+                setMaVanBanEdited(false)
+              }}
             >
               <option value="">— Chọn loại văn bản —</option>
               {docTypes.map((t) => (
@@ -217,7 +293,10 @@ export default function UploadVanBanPage() {
             <select
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
               value={form.phong_ban}
-              onChange={(e) => setForm((f) => ({ ...f, phong_ban: e.target.value }))}
+              onChange={(e) => {
+                setForm((f) => ({ ...f, phong_ban: e.target.value }))
+                setMaVanBanEdited(false)
+              }}
             >
               <option value="">— Chọn phòng ban —</option>
               {PHONG_BAN_VAN_BAN_OPTIONS.map((pb) => (
@@ -226,22 +305,33 @@ export default function UploadVanBanPage() {
             </select>
           </div>
 
-          {/* Mã văn bản (preview) */}
-          {form.loai_van_ban && form.phong_ban && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl">
-              <FileText size={14} className="text-blue-600 shrink-0" />
-              <span className="text-sm text-blue-700">
-                Số văn bản sẽ được sinh tự động, ví dụ:{" "}
-                <strong className="font-mono">
-                  {buildMaVanBan(
-                    1,
-                    docTypes.find((t) => t.code === form.loai_van_ban)?.ky_hieu || form.loai_van_ban,
-                    form.phong_ban,
-                  )}
-                </strong>
-              </span>
-            </div>
-          )}
+          {/* Mã văn bản — editable */}
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              Mã văn bản <span className="text-red-500">*</span>
+            </label>
+            <input
+              className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-blue-500 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
+              placeholder="Ví dụ: 01/BC-NMCB"
+              value={maVanBan}
+              onChange={(e) => {
+                setMaVanBan(e.target.value.toUpperCase())
+                setMaVanBanEdited(true)
+              }}
+            />
+            {hasSoJump && (
+              <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-700">
+                <AlertTriangle size={12} />
+                Số này khác số tiếp theo ({nextSoPreview}). Hệ thống vẫn lưu đúng số bạn nhập.
+              </div>
+            )}
+            {maVanBanExists && (
+              <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-700">
+                <AlertTriangle size={12} />
+                Mã văn bản này đã tồn tại trong hệ thống.
+              </div>
+            )}
+          </div>
 
           {/* Tên văn bản */}
           <div>
@@ -331,7 +421,7 @@ export default function UploadVanBanPage() {
           <div className="flex items-center gap-3 pt-2">
             <button
               onClick={handleSave}
-              disabled={saving || uploading}
+              disabled={saving || uploading || maVanBanExists}
               className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all"
             >
               {saving || uploading ? (

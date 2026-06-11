@@ -8,14 +8,13 @@ import {
   LOAI_VAN_BAN_LABEL,
   LOAI_VAN_BAN_OPTIONS,
   PHONG_BAN_VAN_BAN_OPTIONS,
-  PHAN_LOAI_COLOR,
   TRANG_THAI_COLOR,
   TRANG_THAI_LABEL,
   fmtDate,
   type VanBanDocument,
   type VanBanTrangThai,
 } from "./_components/documents-types"
-import { FileText, Search, Eye, Sparkles, Loader2, X } from "lucide-react"
+import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2 } from "lucide-react"
 import Link from "next/link"
 
 type AiSearchResult = {
@@ -34,6 +33,7 @@ export default function DocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<VanBanDocument[]>([])
+  const [activeTab, setActiveTab] = useState<"list" | "stats">("list")
 
   const [search, setSearch] = useState("")
   const [filterLoai, setFilterLoai] = useState("")
@@ -142,8 +142,29 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Bộ lọc */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 space-y-3">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveTab("list")}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "list" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+        >
+          <FileText size={14} />
+          Danh sách
+        </button>
+        <button
+          onClick={() => setActiveTab("stats")}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "stats" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+        >
+          <BarChart2 size={14} />
+          Thống kê
+        </button>
+      </div>
+
+      {/* Tab Thống kê */}
+      {activeTab === "stats" && <VanBanStats docs={docs} loading={loading} />}
+
+      {/* Tab danh sách */}
+      {activeTab === "list" && (<><div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 space-y-3">
         <div className="flex flex-wrap gap-3 items-center">
           {/* Toggle AI / Text search */}
           <button
@@ -415,6 +436,169 @@ export default function DocumentsPage() {
           {filtered.length} / {docs.length} văn bản
         </p>
       )}
+      </>)}
     </DocumentsShell>
+  )
+}
+
+// ─── VanBanStats ─────────────────────────────────────────────────────────────
+
+function VanBanStats({ docs, loading }: { docs: VanBanDocument[]; loading: boolean }) {
+  if (loading) {
+    return <div className="p-12 text-center text-slate-400">Đang tải thống kê...</div>
+  }
+
+  const total = docs.length
+  const byStatus: Record<string, number> = {}
+  const byLoai: Record<string, number> = {}
+  const byPhongBan: Record<string, number> = {}
+  const byMonth: Record<string, number> = {}
+
+  for (const d of docs) {
+    byStatus[d.trang_thai] = (byStatus[d.trang_thai] || 0) + 1
+    const loai = d.loai_van_ban || "—"
+    byLoai[loai] = (byLoai[loai] || 0) + 1
+    const pb = d.phong_ban || "—"
+    byPhongBan[pb] = (byPhongBan[pb] || 0) + 1
+    if (d.created_at) {
+      const ym = d.created_at.substring(0, 7)
+      byMonth[ym] = (byMonth[ym] || 0) + 1
+    }
+  }
+
+  const daPheduyet = byStatus["da_phe_duyet"] || 0
+  const dangXuLy = (byStatus["cho_ky_phong_ban"] || 0) + (byStatus["cho_phe_duyet"] || 0)
+  const nhap = byStatus["draft"] || 0
+  const traVe = byStatus["tra_ve"] || 0
+
+  const kpiCards = [
+    { label: "Tổng văn bản", value: total, color: "bg-blue-50 text-blue-700 border-blue-200" },
+    { label: "Đã phê duyệt", value: daPheduyet, color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    { label: "Đang xử lý", value: dangXuLy, color: "bg-amber-50 text-amber-700 border-amber-200" },
+    { label: "Nháp", value: nhap, color: "bg-slate-50 text-slate-600 border-slate-200" },
+    { label: "Trả về", value: traVe, color: "bg-red-50 text-red-600 border-red-200" },
+  ]
+
+  const sortedMonths = Object.keys(byMonth).sort().reverse().slice(0, 6).reverse()
+  const maxMonth = Math.max(...sortedMonths.map((m) => byMonth[m]), 1)
+
+  return (
+    <div className="space-y-4">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {kpiCards.map((k) => (
+          <div key={k.label} className={`rounded-xl border p-4 ${k.color}`}>
+            <p className="text-xs font-bold opacity-70 mb-1">{k.label}</p>
+            <p className="text-3xl font-extrabold">{k.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Theo tháng */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
+            Văn bản theo tháng (6 gần nhất)
+          </p>
+          {sortedMonths.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4">Chưa có dữ liệu</p>
+          ) : (
+            <div className="space-y-2">
+              {sortedMonths.map((ym) => {
+                const pct = Math.round((byMonth[ym] / maxMonth) * 100)
+                const [y, m] = ym.split("-")
+                return (
+                  <div key={ym} className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 w-14 shrink-0">{m}/{y}</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-5 relative overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-slate-700 w-6 text-right">{byMonth[ym]}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Theo loại */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Theo loại văn bản</p>
+          <div className="space-y-1.5">
+            {Object.entries(byLoai)
+              .sort((a, b) => b[1] - a[1])
+              .map(([loai, count]) => (
+                <div key={loai} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-700">
+                    {LOAI_VAN_BAN_LABEL[loai] || loai}
+                  </span>
+                  <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-full text-xs">
+                    {count}
+                  </span>
+                </div>
+              ))}
+            {Object.keys(byLoai).length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-4">Chưa có dữ liệu</p>
+            )}
+          </div>
+        </div>
+
+        {/* Theo phòng ban */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Theo phòng ban</p>
+          <div className="space-y-1.5">
+            {Object.entries(byPhongBan)
+              .sort((a, b) => b[1] - a[1])
+              .map(([pb, count]) => (
+                <div key={pb} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-700">{pb}</span>
+                  <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-full text-xs">
+                    {count}
+                  </span>
+                </div>
+              ))}
+            {Object.keys(byPhongBan).length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-4">Chưa có dữ liệu</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Theo trạng thái - bảng đầy đủ */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Chi tiết theo trạng thái</p>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th className="text-left px-4 py-2 text-xs font-bold text-slate-500">Trạng thái</th>
+              <th className="text-right px-4 py-2 text-xs font-bold text-slate-500">Số lượng</th>
+              <th className="text-right px-4 py-2 text-xs font-bold text-slate-500">Tỷ lệ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {Object.entries(byStatus)
+              .sort((a, b) => b[1] - a[1])
+              .map(([st, cnt]) => (
+                <tr key={st}>
+                  <td className="px-4 py-2">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[st as VanBanTrangThai] || "bg-slate-100 text-slate-600"}`}>
+                      {TRANG_THAI_LABEL[st as VanBanTrangThai] || st}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right font-bold text-slate-800">{cnt}</td>
+                  <td className="px-4 py-2 text-right text-slate-500">
+                    {total > 0 ? `${Math.round((cnt / total) * 100)}%` : "—"}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
