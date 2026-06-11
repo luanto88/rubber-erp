@@ -51,7 +51,7 @@ CREATE TABLE dispatch_entries (
   ngay TEXT NOT NULL, -- dd/mm/yyyy
   chung_nhan TEXT,
   day_chuyen TEXT,
-  rows JSONB DEFAULT '[]',
+  rows JSONB DEFAULT '[]', -- deprecated legacy cache mirrored from dispatch_entry_rows
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

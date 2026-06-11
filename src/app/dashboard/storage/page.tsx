@@ -8,15 +8,18 @@ import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
+import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import {
   addDaysISO,
   buildStorageLookupPath,
   formatStorageDate,
   getKLFromTrip,
+  loadDispatchTripsByDateRange,
   loadDispatchTripsByUids,
   loadStorageDetail,
   loadStorageGeoJson,
   loadStorageLots,
+  resolveStorageNgansActualTotals,
   summarizeStorageLots,
   toISODate,
   type StorageNgan as Ngan,
@@ -172,6 +175,10 @@ export default function StoragePage() {
     () => mergeTripsByUid(linkedTrips, availableTrips),
     [linkedTrips, availableTrips],
   )
+  const visibleTripUidSet = useMemo(
+    () => new Set(dispatchTrips.map((trip) => trip.uid).filter(Boolean)),
+    [dispatchTrips],
+  )
   const groupedViewLots = useMemo(() => {
     const grouped = viewLots.reduce<Record<string, {
       key: string
@@ -222,20 +229,15 @@ export default function StoragePage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
     const assignedUIDs = new Set(allNgans.flatMap(n => n.trips || []))
-    const coveredRanges = allNgans
-      .filter(n => n.ngay_bd)
-      .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
-    const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
 
-    const { data } = await supabase
-      .from("dispatch_entries")
-      .select("rows,ngay")
-      .eq("factory_id", fid)
-      .order("ngay", { ascending: true })
+    const data = await loadDispatchEntriesWithResolvedRows(supabase, {
+      factoryId: fid,
+      select: "id,ngay,rows",
+      ascending: true,
+    })
     const byDate: Record<string, number> = {}
-    for (const entry of (data || [])) {
+    for (const entry of data) {
       const dateKey = toISODate(entry.ngay)
-      if (isDateCovered(dateKey)) continue
       for (const row of ((entry.rows || []) as { uid: string }[])) {
         if (!assignedUIDs.has(row.uid)) {
           byDate[dateKey] = (byDate[dateKey] || 0) + 1
@@ -262,13 +264,14 @@ export default function StoragePage() {
         xe_tu_ngay: ngan.xe_tu_ngay || addDaysISO(ngan.ngay_bd?.slice(0, 10) || "", 1),
         xe_den_ngay: ngan.xe_den_ngay || addDaysISO(ngan.ngay_kt?.slice(0, 10) || "", 1),
       }))
-      setNgans(loaded)
+      const resolved = await resolveStorageNgansActualTotals(fid, loaded, { persist: true })
+      setNgans(resolved)
       const ls: Record<string, number> = {}
       for (const l of lotsData || []) {
         if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
       }
       setLotStats(ls)
-      loadUnassigned(fid, loaded)
+      loadUnassigned(fid, resolved)
     } finally {
       setLoading(false)
     }
@@ -337,42 +340,12 @@ export default function StoragePage() {
     if (!ngay_bd || !ngay_kt || !factoryId) return []
     setLoadingTrips(true)
     try {
-      const { data } = await supabase
-        .from("dispatch_entries")
-        .select("rows,ngay")
-        .eq("factory_id", factoryId)
+      const data = await loadDispatchTripsByDateRange(factoryId, ngay_bd, ngay_kt)
       const editingId = overrideEditId ?? editId
       const otherNgans = ngans.filter(n => n.id !== editingId)
       const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
-      const coveredRanges = otherNgans
-        .filter(n => n.ngay_bd)
-        .map(n => ({ from: n.ngay_bd.slice(0, 10), to: (n.ngay_kt || n.ngay_bd).slice(0, 10) }))
-      const isDateCovered = (d: string) => coveredRanges.some(r => d >= r.from && d <= r.to)
       const trips: TripItem[] = (data || [])
-        .filter((entry: { ngay: string }) => {
-          const d = toISODate(entry.ngay)
-          return d >= ngay_bd && d <= ngay_kt
-        })
-        .flatMap((entry: { rows: Record<string, string>[]; ngay: string }) =>
-          (entry.rows || []).map((r: Record<string, string>) => ({
-            uid: r.uid,
-            _date: toISODate(entry.ngay),
-            so_xe: r.so_xe,
-            chuyen: Number(r.chuyen) || 1,
-            tai_xe: r.tai_xe,
-            kl_ct: +r.kl_ct || 0,
-            kl_ck: +r.kl_ck || 0,
-            kl_dct: +r.kl_dct || 0,
-            kl_dck: +r.kl_dck || 0,
-            kl_dkt: +r.kl_dkt || 0,
-            kl_dkk: +r.kl_dkk || 0,
-            kl_dt: +r.kl_dt || 0,
-            kl_dk: +r.kl_dk || 0,
-            kl_mn: +r.kl_mn || 0,
-            kl_mnk: +r.kl_mnk || 0,
-          })),
-        )
-        .filter(t => !assignedUIDs.has(t.uid) && !isDateCovered(t._date))
+        .filter(t => !assignedUIDs.has(t.uid))
       if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
       return trips
     } finally {
@@ -413,6 +386,17 @@ export default function StoragePage() {
       return next
     })
   }
+
+  const applyFetchedTrips = useCallback((trips: TripItem[], autoSelect: boolean) => {
+    setLinkedTrips([])
+    setAvailableTrips(trips)
+    if (autoSelect) {
+      setSelectedTrips(new Set(trips.map((trip) => trip.uid)))
+      return
+    }
+    const allowed = new Set(trips.map((trip) => trip.uid))
+    setSelectedTrips((prev) => new Set(Array.from(prev).filter((uid) => allowed.has(uid))))
+  }, [])
 
   const chungNhanOpts = factoryCode === "cuaparis" ? CHUNG_NHAN_BASE : ["PEFC CS", "Không"]
 
@@ -502,7 +486,7 @@ export default function StoragePage() {
         ngay_kt: form.ngay_kt || null,
         xe_tu_ngay: form.xe_tu_ngay || null,
         xe_den_ngay: form.xe_den_ngay || null,
-        trips: Array.from(selectedTrips),
+        trips: Array.from(selectedTrips).filter((uid) => visibleTripUidSet.has(uid)),
         ghi_chu: form.ghi_chu || null,
       }
       if (editId) {
@@ -1117,7 +1101,7 @@ export default function StoragePage() {
                     onChange={e => {
                       updateForm({ ngay_bd: e.target.value })
                       void fetchTrips(e.target.value, form.ngay_kt, modal === "add").then((trips) => {
-                        setAvailableTrips(trips)
+                        applyFetchedTrips(trips, modal === "add")
                       })
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -1128,7 +1112,7 @@ export default function StoragePage() {
                     onChange={e => {
                       updateForm({ ngay_kt: e.target.value })
                       void fetchTrips(form.ngay_bd, e.target.value, modal === "add").then((trips) => {
-                        setAvailableTrips(trips)
+                        applyFetchedTrips(trips, modal === "add")
                       })
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />

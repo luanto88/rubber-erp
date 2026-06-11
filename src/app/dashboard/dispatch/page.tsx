@@ -1,11 +1,11 @@
-﻿"use client"
+"use client"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
-import { dispatchDbRowToLegacy, replaceDispatchEntryRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
+import { dispatchDbRowToLegacy, replaceDispatchEntryRows, syncDispatchEntriesLegacyRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
@@ -13,7 +13,7 @@ import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText } from "lucide-react"
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 type DxRow = {
   uid: string
   _date: string
@@ -39,9 +39,9 @@ type DxRow = {
   kl_dt: string
   drc_d: string
   kl_dk: string
-  kl_mn: string    // Má»§ nÆ°á»›c tÆ°Æ¡i (kg) â€” dĂ¢y chuyá»n Má»§ nÆ°á»›c
-  drc_mn: string   // DRC% má»§ nÆ°á»›c
-  kl_mnk: string   // Má»§ nÆ°á»›c khĂ´ â€” AUTO-CALC
+  kl_mn: string    // Mủ nước tươi (kg) — dây chuyền Mủ nước
+  drc_mn: string   // DRC% mủ nước
+  kl_mnk: string   // Mủ nước khô — AUTO-CALC
   ngan_ref: string[]
   ghi_chu?: string
   doi?: number[]
@@ -56,7 +56,7 @@ type DispatchEntry = {
   factory_id: string
   ngay: string
   chung_nhan: string
-  day_chuyen?: string  // "Má»§ táº¡p" | "Má»§ nÆ°á»›c"
+  day_chuyen?: string  // "Mủ tạp" | "Mủ nước"
   rows: DxRow[]
   created_at?: string
   ma_dx?: string
@@ -81,50 +81,50 @@ type DispatchVehicleAssignment = {
   is_current: boolean
 }
 
-// â”€â”€â”€ Master Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Master data
 type VehicleInfo = { key: string; ten: string; loai: string; ma_hieu: string; tai_xe: string }
 const VEHICLES: VehicleInfo[] = [
-  { key:"xe001", ten:"Cozon ná»™i bá»™ 1B",      loai:"Cozon ná»™i bá»™",     ma_hieu:"1B",  tai_xe:"Sreng Seng Hoang" },
-  { key:"xe002", ten:"Cozon ná»™i bá»™ 2B",      loai:"Cozon ná»™i bá»™",     ma_hieu:"2B",  tai_xe:"Young Sok Khum" },
-  { key:"xe003", ten:"Cozon ná»™i bá»™ 3B",      loai:"Cozon ná»™i bá»™",     ma_hieu:"3B",  tai_xe:"Uk SaRath" },
-  { key:"xe004", ten:"Cozon váº­n chuyá»ƒn 4B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"4B",  tai_xe:"Mao Borey" },
-  { key:"xe005", ten:"Cozon váº­n chuyá»ƒn 5B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"5B",  tai_xe:"Seng Sam Nang" },
-  { key:"xe006", ten:"Cozon váº­n chuyá»ƒn 6B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"6B",  tai_xe:"Kum Dat" },
-  { key:"xe007", ten:"Cozon váº­n chuyá»ƒn 7B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"7B",  tai_xe:"Mao Borey" },
-  { key:"xe008", ten:"Cozon váº­n chuyá»ƒn 8B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"8B",  tai_xe:"Nut An" },
-  { key:"xe009", ten:"Cozon váº­n chuyá»ƒn 9B",  loai:"Cozon váº­n chuyá»ƒn", ma_hieu:"9B",  tai_xe:"Ren Makara" },
-  { key:"xe010", ten:"ISUZU 1A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"1A",  tai_xe:"Nut An" },
-  { key:"xe011", ten:"ISUZU 2A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"2A",  tai_xe:"Moa Morn" },
-  { key:"xe012", ten:"ISUZU 3A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"3A",  tai_xe:"Men Sam Nang" },
-  { key:"xe013", ten:"ISUZU 4A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"4A",  tai_xe:"Seng Chhun Ly" },
-  { key:"xe014", ten:"ISUZU 5A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"5A",  tai_xe:"Seng Sam Nang" },
-  { key:"xe015", ten:"ISUZU 6A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"6A",  tai_xe:"Yim Kun" },
-  { key:"xe016", ten:"ISUZU 7A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"7A",  tai_xe:"Vorn RoThy" },
-  { key:"xe017", ten:"ISUZU 8A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"8A",  tai_xe:"Vorn Rany" },
-  { key:"xe018", ten:"ISUZU 9A",  loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"9A",  tai_xe:"Yath Ry" },
-  { key:"xe019", ten:"ISUZU 10A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"10A", tai_xe:"Chhov Sok Khum" },
-  { key:"xe020", ten:"ISUZU 11A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"11A", tai_xe:"Say Chom Rong" },
-  { key:"xe021", ten:"ISUZU 12A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"12A", tai_xe:"Sok Thy" },
-  { key:"xe022", ten:"ISUZU 13A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"13A", tai_xe:"Yim Kun" },
-  { key:"xe023", ten:"ISUZU 14A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"14A", tai_xe:"Chhoun Khet" },
-  { key:"xe024", ten:"ISUZU 15A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"15A", tai_xe:"Ren Makara" },
-  { key:"xe025", ten:"ISUZU 16A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"16A", tai_xe:"Nhorm Pov PaNha" },
-  { key:"xe026", ten:"ISUZU 17A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"17A", tai_xe:"Phorn Khim" },
-  { key:"xe027", ten:"ISUZU 18A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"18A", tai_xe:"Choun Khea" },
-  { key:"xe028", ten:"ISUZU 19A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"19A", tai_xe:"Sun Seng Ly" },
-  { key:"xe029", ten:"ISUZU 20A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"20A", tai_xe:"Yoeng Nha" },
-  { key:"xe030", ten:"ISUZU 21A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"21A", tai_xe:"Chhun Khea" },
-  { key:"xe031", ten:"ISUZU 22A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"22A", tai_xe:"Seng Sam Nang" },
-  { key:"xe032", ten:"ISUZU 23A", loai:"Isuzu váº­n chuyá»ƒn", ma_hieu:"23A", tai_xe:"Phun Nang" },
-  { key:"xe033", ten:"XĂºc SX 01", loai:"XĂºc sáº£n xuáº¥t",     ma_hieu:"X01", tai_xe:"Uk SaRath" },
-  { key:"xe034", ten:"XĂºc SX 02", loai:"XĂºc sáº£n xuáº¥t",     ma_hieu:"X02", tai_xe:"Pheap Phin" },
-  { key:"xe035", ten:"XĂºc Biomass",loai:"XĂºc Biomass",     ma_hieu:"X03", tai_xe:"Anh 3 báº£o" },
-  { key:"xe036", ten:"NĂ¢ng 01",   loai:"NĂ¢ng sáº£n xuáº¥t",    ma_hieu:"N01", tai_xe:"Ban So Sieng" },
-  { key:"xe037", ten:"NĂ¢ng 02",   loai:"NĂ¢ng sáº£n xuáº¥t",    ma_hieu:"N02", tai_xe:"Keo Sarath" },
-  { key:"xe038", ten:"Ford",      loai:"Ford bĂ¡n táº£i",     ma_hieu:"XF",  tai_xe:"Bao Thea" },
+  { key:"xe001", ten:"Cozon nội bộ 1B",      loai:"Cozon nội bộ",     ma_hieu:"1B",  tai_xe:"Sreng Seng Hoang" },
+  { key:"xe002", ten:"Cozon nội bộ 2B",      loai:"Cozon nội bộ",     ma_hieu:"2B",  tai_xe:"Young Sok Khum" },
+  { key:"xe003", ten:"Cozon nội bộ 3B",      loai:"Cozon nội bộ",     ma_hieu:"3B",  tai_xe:"Uk SaRath" },
+  { key:"xe004", ten:"Cozon vận chuyển 4B",  loai:"Cozon vận chuyển", ma_hieu:"4B",  tai_xe:"Mao Borey" },
+  { key:"xe005", ten:"Cozon vận chuyển 5B",  loai:"Cozon vận chuyển", ma_hieu:"5B",  tai_xe:"Seng Sam Nang" },
+  { key:"xe006", ten:"Cozon vận chuyển 6B",  loai:"Cozon vận chuyển", ma_hieu:"6B",  tai_xe:"Kum Dat" },
+  { key:"xe007", ten:"Cozon vận chuyển 7B",  loai:"Cozon vận chuyển", ma_hieu:"7B",  tai_xe:"Mao Borey" },
+  { key:"xe008", ten:"Cozon vận chuyển 8B",  loai:"Cozon vận chuyển", ma_hieu:"8B",  tai_xe:"Nut An" },
+  { key:"xe009", ten:"Cozon vận chuyển 9B",  loai:"Cozon vận chuyển", ma_hieu:"9B",  tai_xe:"Ren Makara" },
+  { key:"xe010", ten:"ISUZU 1A",  loai:"Isuzu vận chuyển", ma_hieu:"1A",  tai_xe:"Nut An" },
+  { key:"xe011", ten:"ISUZU 2A",  loai:"Isuzu vận chuyển", ma_hieu:"2A",  tai_xe:"Moa Morn" },
+  { key:"xe012", ten:"ISUZU 3A",  loai:"Isuzu vận chuyển", ma_hieu:"3A",  tai_xe:"Men Sam Nang" },
+  { key:"xe013", ten:"ISUZU 4A",  loai:"Isuzu vận chuyển", ma_hieu:"4A",  tai_xe:"Seng Chhun Ly" },
+  { key:"xe014", ten:"ISUZU 5A",  loai:"Isuzu vận chuyển", ma_hieu:"5A",  tai_xe:"Seng Sam Nang" },
+  { key:"xe015", ten:"ISUZU 6A",  loai:"Isuzu vận chuyển", ma_hieu:"6A",  tai_xe:"Yim Kun" },
+  { key:"xe016", ten:"ISUZU 7A",  loai:"Isuzu vận chuyển", ma_hieu:"7A",  tai_xe:"Vorn RoThy" },
+  { key:"xe017", ten:"ISUZU 8A",  loai:"Isuzu vận chuyển", ma_hieu:"8A",  tai_xe:"Vorn Rany" },
+  { key:"xe018", ten:"ISUZU 9A",  loai:"Isuzu vận chuyển", ma_hieu:"9A",  tai_xe:"Yath Ry" },
+  { key:"xe019", ten:"ISUZU 10A", loai:"Isuzu vận chuyển", ma_hieu:"10A", tai_xe:"Chhov Sok Khum" },
+  { key:"xe020", ten:"ISUZU 11A", loai:"Isuzu vận chuyển", ma_hieu:"11A", tai_xe:"Say Chom Rong" },
+  { key:"xe021", ten:"ISUZU 12A", loai:"Isuzu vận chuyển", ma_hieu:"12A", tai_xe:"Sok Thy" },
+  { key:"xe022", ten:"ISUZU 13A", loai:"Isuzu vận chuyển", ma_hieu:"13A", tai_xe:"Yim Kun" },
+  { key:"xe023", ten:"ISUZU 14A", loai:"Isuzu vận chuyển", ma_hieu:"14A", tai_xe:"Chhoun Khet" },
+  { key:"xe024", ten:"ISUZU 15A", loai:"Isuzu vận chuyển", ma_hieu:"15A", tai_xe:"Ren Makara" },
+  { key:"xe025", ten:"ISUZU 16A", loai:"Isuzu vận chuyển", ma_hieu:"16A", tai_xe:"Nhorm Pov PaNha" },
+  { key:"xe026", ten:"ISUZU 17A", loai:"Isuzu vận chuyển", ma_hieu:"17A", tai_xe:"Phorn Khim" },
+  { key:"xe027", ten:"ISUZU 18A", loai:"Isuzu vận chuyển", ma_hieu:"18A", tai_xe:"Choun Khea" },
+  { key:"xe028", ten:"ISUZU 19A", loai:"Isuzu vận chuyển", ma_hieu:"19A", tai_xe:"Sun Seng Ly" },
+  { key:"xe029", ten:"ISUZU 20A", loai:"Isuzu vận chuyển", ma_hieu:"20A", tai_xe:"Yoeng Nha" },
+  { key:"xe030", ten:"ISUZU 21A", loai:"Isuzu vận chuyển", ma_hieu:"21A", tai_xe:"Chhun Khea" },
+  { key:"xe031", ten:"ISUZU 22A", loai:"Isuzu vận chuyển", ma_hieu:"22A", tai_xe:"Seng Sam Nang" },
+  { key:"xe032", ten:"ISUZU 23A", loai:"Isuzu vận chuyển", ma_hieu:"23A", tai_xe:"Phun Nang" },
+  { key:"xe033", ten:"Xúc SX 01", loai:"Xúc sản xuất",     ma_hieu:"X01", tai_xe:"Uk SaRath" },
+  { key:"xe034", ten:"Xúc SX 02", loai:"Xúc sản xuất",     ma_hieu:"X02", tai_xe:"Pheap Phin" },
+  { key:"xe035", ten:"Xúc Biomass",loai:"Xúc Biomass",     ma_hieu:"X03", tai_xe:"Anh 3 bảo" },
+  { key:"xe036", ten:"Nâng 01",   loai:"Nâng sản xuất",    ma_hieu:"N01", tai_xe:"Ban So Sieng" },
+  { key:"xe037", ten:"Nâng 02",   loai:"Nâng sản xuất",    ma_hieu:"N02", tai_xe:"Keo Sarath" },
+  { key:"xe038", ten:"Ford",      loai:"Ford bán tải",     ma_hieu:"XF",  tai_xe:"Bao Thea" },
 ]
 
-// Äiá»ƒm giao nháº­n with phiĂªn data
+// Điểm giao nhận with phiên data
 type DiemGN = { ma_lo: string; lat: number; lng: number; doi: number; phien_a: string[]; phien_b: string[]; phien_c: string[]; phien_d: string[] }
 const DIEM_GN: DiemGN[] = [
   { ma_lo:"B5",  doi:2,  lat:12.632736, lng:105.495549, phien_a:["A3","A4","A5","A6","A7","B4","B5","B6","B7","C4","C5D","C5T","D4","D5D","D5T","E4","E5"], phien_b:["B4","C4","D4","E4"], phien_c:["E5","D5D","C5D","C5T"], phien_d:["A3","A4","A5"] },
@@ -155,12 +155,12 @@ const DIEM_GN: DiemGN[] = [
   { ma_lo:"S15", doi:12, lat:12.555721, lng:105.541486, phien_a:["R15","R16","S14","S15","S16","T14","T15","T16"], phien_b:[], phien_c:[], phien_d:["R15","R16","S15","S16"] },
   { ma_lo:"S12", doi:12, lat:12.555755, lng:105.527695, phien_a:["O12","P12","Q11","Q12","Q13T","R11","R12","R13T","R14","S12","S13","T13"], phien_b:["O12","P12","Q11","Q12","Q13T","R11","R13D","R14"], phien_c:["R12","S12","S13","T13"], phien_d:[] },
   { ma_lo:"P14", doi:12, lat:12.569299, lng:105.536918, phien_a:["O13","O14","O15","O16","P13","P14","P15","P16","Q13D","Q14","Q15","Q16"], phien_b:[], phien_c:["O13","O14","P13","P14"], phien_d:["O15","O16","P15","P16"] },
-  { ma_lo:"H13", doi:7,  lat:12.605372, lng:105.532396, phien_a:["G13Ä","G14Ä","G14T","G13T","G15Ä","G15T","G16Ä","G16T"], phien_b:["G16T","G15Ä","G15T","H13Ä","H13T","H14Ä","H14T","H15T"], phien_c:["H15Ä","H15T","I-13Ä","I-13T","I-14Ä","I-14T","I-15Ä","I-15T"], phien_d:["I-13Ä","J15Ä","J15T","K13Ä","K13T","K14Ä","K14T"] },
+  { ma_lo:"H13", doi:7,  lat:12.605372, lng:105.532396, phien_a:["G13Đ","G14Đ","G14T","G13T","G15Đ","G15T","G16Đ","G16T"], phien_b:["G16T","G15Đ","G15T","H13Đ","H13T","H14Đ","H14T","H15T"], phien_c:["H15Đ","H15T","I-13Đ","I-13T","I-14Đ","I-14T","I-15Đ","I-15T"], phien_d:["I-13Đ","J15Đ","J15T","K13Đ","K13T","K14Đ","K14T"] },
 ]
 
 const DRIVERS = [...new Set(VEHICLES.map(v => v.tai_xe))].sort()
 
-// â”€â”€â”€ Manhattan distance calc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Manhattan distance calc
 function calcManhattanKm(stops: string[]) {
   if (stops.length === 0) return 0
   const coords: [number,number][] = []
@@ -171,13 +171,13 @@ function calcManhattanKm(stops: string[]) {
   if (coords.length === 0) return 0
 
   let total = 0
-  // Factory â†’ first stop
+  // Factory → first stop
   total += Math.abs(FACTORY_LAT - coords[0][0]) + Math.abs(FACTORY_LNG - coords[0][1])
   // Between stops
   for (let i = 1; i < coords.length; i++) {
     total += Math.abs(coords[i][0] - coords[i-1][0]) + Math.abs(coords[i][1] - coords[i-1][1])
   }
-  // Last stop â†’ factory
+  // Last stop → factory
   total += Math.abs(coords[coords.length-1][0] - FACTORY_LAT) + Math.abs(coords[coords.length-1][1] - FACTORY_LNG)
 
   return Math.round(total * 111.32 * 10) / 10  // degrees to km
@@ -189,7 +189,7 @@ function autoCalcKLK(kl_tuoi: string, drc: string): string {
   return (t * d / 100).toFixed(1)
 }
 
-// DD/MM/YYYY or YYYY-MM-DD â†’ YYYY-MM-DD
+// DD/MM/YYYY or YYYY-MM-DD → YYYY-MM-DD
 const toISO = (ngay: string) =>
   ngay.includes("/") ? ngay.split("/").reverse().join("-") : ngay
 
@@ -199,7 +199,7 @@ function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
     const d = DIEM_GN.find(g => g.ma_lo === dgn)
     if (!d) continue
     for (const p of phien) {
-      const key = `phien_${p.replace(/PhiĂªn\s*/i, "").toLowerCase()}` as keyof DiemGN
+      const key = `phien_${p.replace(/Phiên\s*/i, "").toLowerCase()}` as keyof DiemGN
       const pLots = d[key]
       if (Array.isArray(pLots)) lots.push(...(pLots as string[]))
     }
@@ -208,7 +208,7 @@ function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
 }
 
 function formatDoiLabel(dois: number[]) {
-  return dois.length > 0 ? dois.join(", ") : "â€”"
+  return dois.length > 0 ? dois.join(", ") : "—"
 }
 
 function getDispatchRowFresh(row: DxRow) {
@@ -310,7 +310,7 @@ function pickDispatchRowSource(entry: DispatchEntry, physicalRows: DxRow[]) {
   return physicalRows.length > 0 ? physicalRows : legacyRows
 }
 
-// â”€â”€â”€ MultiSelect inline dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// MultiSelect inline dropdown
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function MultiSelect({ options, selected, onChange, placeholder }: {
   options: string[]
@@ -360,7 +360,7 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
       <button ref={btnRef} type="button" onClick={handleToggle}
         className="w-full min-h-[30px] px-2 py-1 border border-slate-300 rounded-lg text-xs text-left bg-white flex flex-wrap gap-1 items-center hover:border-emerald-400 transition-colors">
         {selected.length === 0
-          ? <span className="text-slate-400">{placeholder || "Chá»n..."}</span>
+          ? <span className="text-slate-400">{placeholder || "Chọn..."}</span>
           : selected.map(s => <span key={s} className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-semibold">{s}</span>)
         }
       </button>
@@ -372,24 +372,24 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
           {/* Search */}
           <div className="p-2 border-b border-slate-100">
             <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="TĂ¬m kiáº¿m..." onClick={e => e.stopPropagation()}
+              placeholder="Tìm kiếm..." onClick={e => e.stopPropagation()}
               className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"/>
           </div>
           {/* Select all / Clear */}
           <div className="flex gap-1 px-2 py-1.5 border-b border-slate-100">
             <button type="button" onClick={() => onChange([...new Set([...selected, ...filtered])])}
               className="flex-1 text-[10px] font-bold text-emerald-600 hover:bg-emerald-50 rounded px-1 py-0.5 transition-colors">
-              {allSelected ? "âœ“ Táº¥t cáº£" : "+ Chá»n táº¥t cáº£"}
+              {allSelected ? "✓ Tất cả" : "+ Chọn tất cả"}
             </button>
             <button type="button" onClick={() => onChange(selected.filter(s => !filtered.includes(s)))}
               className="flex-1 text-[10px] font-bold text-slate-400 hover:bg-slate-50 rounded px-1 py-0.5 transition-colors">
-              Bá» chá»n
+              Bỏ chọn
             </button>
           </div>
           {/* Options */}
           <div className="max-h-52 overflow-y-auto p-1">
             {filtered.length === 0
-              ? <p className="text-xs text-slate-400 text-center py-3">KhĂ´ng tĂ¬m tháº¥y</p>
+              ? <p className="text-xs text-slate-400 text-center py-3">Không tìm thấy</p>
               : filtered.map(opt => (
                 <label key={opt} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer text-xs">
                   <input type="checkbox" checked={selected.includes(opt)}
@@ -406,7 +406,7 @@ function MultiSelect({ options, selected, onChange, placeholder }: {
   )
 }
 
-// â”€â”€â”€ Main component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Main component
 function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: {
   options: string[]
   selected: string[]
@@ -508,7 +508,7 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             {selected.length === 0 ? (
-              <span className="block truncate text-slate-400">{placeholder || "Chá»n..."}</span>
+              <span className="block truncate text-slate-400">{placeholder || "Chọn..."}</span>
             ) : (
               <div className="flex items-center gap-1.5">
                 <span className="truncate font-semibold text-slate-700">
@@ -557,19 +557,19 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
               onClick={() => onChange([...new Set([...selected, ...filtered])])}
               className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-600 transition-colors hover:bg-emerald-50"
             >
-              {allSelected ? "Giá»¯ nguyĂªn táº¥t cáº£" : "Chá»n táº¥t cáº£"}
+              {allSelected ? "Giữ nguyên tất cả" : "Chọn tất cả"}
             </button>
             <button
               type="button"
               onClick={() => onChange(selected.filter((item) => !filtered.includes(item)))}
               className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-50"
             >
-              Bá» chá»n
+              Bỏ chọn
             </button>
           </div>
           <div className="overflow-y-auto p-1.5" style={{ maxHeight: pos.maxHeight }}>
             {filtered.length === 0 ? (
-              <p className="py-5 text-center text-xs text-slate-400">KhĂ´ng tĂ¬m tháº¥y káº¿t quáº£ phĂ¹ há»£p</p>
+              <p className="py-5 text-center text-xs text-slate-400">Không tìm thấy kết quả phù hợp</p>
             ) : (
               filtered.map((option) => (
                 <label key={option} className="flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 text-xs hover:bg-amber-50">
@@ -632,7 +632,7 @@ export default function DispatchPage() {
 
   // KL modal, nhĂ  mĂ¡y, admin
   const [klModal, setKlModal]       = useState(false)
-  const [factoryName, setFactoryName] = useState("NMCB PhÆ°á»›c HĂ²a Kampong Thom")
+  const [factoryName, setFactoryName] = useState("NMCB Phước Hòa Kampong Thom")
   const [factoryCode, setFactoryCode] = useState("")
   const [isAdmin, setIsAdmin]       = useState(false)
   const [makerName, setMakerName]   = useState("")
@@ -647,15 +647,15 @@ export default function DispatchPage() {
   const driverOptions = drivers
   const handleAddRequiredNote = useCallback(async () => {
     if (!factoryId) return
-    const input = window.prompt("Nháº­p ghi chĂº má»›i")
+    const input = window.prompt("Nhập ghi chú mới")
     if (!input || !input.trim()) return
     try {
       await createRequiredNote(supabase, factoryId, input)
       const rows = await loadRequiredNotes(supabase, factoryId)
       setRequiredNotes(rows.map((row) => row.content))
-      showToast("ÄĂ£ thĂªm ghi chĂº má»›i")
+      showToast("Đã thêm ghi chú mới")
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "KhĂ´ng thĂªm Ä‘Æ°á»£c ghi chĂº")
+      showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
     }
   }, [factoryId])
 
@@ -669,7 +669,7 @@ export default function DispatchPage() {
       .order("ma_lo", { ascending: true })
 
     if (error) {
-      console.error("KhĂ´ng táº£i Ä‘Æ°á»£c Ä‘iá»ƒm giao nháº­n tá»« DB:", error)
+      console.error("Không tải được điểm giao nhận từ DB:", error)
       setDeliveryPoints(DIEM_GN)
       return
     }
@@ -727,14 +727,14 @@ export default function DispatchPage() {
   }, [deliveryPoints])
 
   const deliveryPointLabels = Object.fromEntries(
-    deliveryPoints.map((point) => [point.ma_lo, `${point.ma_lo} - Äá»™i ${point.doi}`]),
+    deliveryPoints.map((point) => [point.ma_lo, `${point.ma_lo} - Đội ${point.doi}`]),
   )
 
   const resolveSoKm = useCallback((stops: string[]) => {
     return calcManhattanKmFromPoints(stops, deliveryPoints)
   }, [deliveryPoints])
 
-  // â”€â”€ Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Load
   const loadData = useCallback(async (fid: string, points = deliveryPoints) => {
     setLoading(true)
     try {
@@ -834,7 +834,7 @@ export default function DispatchPage() {
     }
   }, [deliveryPoints, filterFrom, filterTo, resolveLoThuHoach])
 
-  // Bootstrap: chá»‰ cháº¡y 1 láº§n Ä‘á»ƒ láº¥y factoryId, khĂ´ng cĂ³ loadData trong deps
+  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadData trong deps
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
@@ -844,7 +844,7 @@ export default function DispatchPage() {
       supabase.from("factories").select("*").eq("id", fid).single().then(({ data: f }) => {
         if (f) {
           const fd = f as Record<string, unknown>
-          setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB PhÆ°á»›c HĂ²a Kampong Thom")
+          setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
           setFactoryCode((fd.code as string) || "")
         }
       })
@@ -863,7 +863,7 @@ export default function DispatchPage() {
     void bootstrap()
   }, [])
 
-  // Reload khi factoryId hoáº·c filter thay Ä‘á»•i
+  // Reload khi factoryId hoặc filter thay đổi
   useEffect(() => {
     if (!factoryId) return
     void loadDeliveryPoints(factoryId)
@@ -901,7 +901,7 @@ export default function DispatchPage() {
       .filter((entry) => (entry.rows?.length || 0) > 0)
     : entries
 
-  // â”€â”€ Filtered â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Filtered
   const filtered = entries.filter(e =>
     (
       !search || e.ngay?.includes(search) ||
@@ -913,7 +913,7 @@ export default function DispatchPage() {
     )
   )
 
-  // â”€â”€ Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Stats
   const stats = {
     total: exportableEntries.length,
     totalXe: exportableEntries.reduce((s,e) => s + (e.rows?.length||0), 0),
@@ -961,14 +961,14 @@ export default function DispatchPage() {
         makerName,
       })
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "KhĂ´ng táº¡o Ä‘Æ°á»£c PDF thá»‘ng kĂª")
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF thống kê")
     }
   }
 
   const exportTripPdf = async (entry: DispatchEntry, row: DxRow) => {
     try {
       const tripSummary = buildDispatchAnalytics([{ ...entry, rows: [row] }], deliveryPoints).trips[0]
-      if (!tripSummary) throw new Error("KhĂ´ng cĂ³ dá»¯ liá»‡u chuyáº¿n")
+      if (!tripSummary) throw new Error("Không có dữ liệu chuyến")
       await downloadDispatchTripPdf({
         ...row,
         entryId: entry.id,
@@ -982,11 +982,11 @@ export default function DispatchPage() {
         totalKm: Number(row.so_km) || 0,
       }, factoryName, makerName)
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "KhĂ´ng táº¡o Ä‘Æ°á»£c PDF chuyáº¿n")
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF chuyến")
     }
   }
 
-  // â”€â”€ PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // PDF
   const exportEntryPdf = async (entry: DispatchEntry) => {
     try {
       const exportEntry = {
@@ -998,7 +998,7 @@ export default function DispatchPage() {
         materials: filterLoai,
       })
       if (dayAnalytics.trips.length === 0) {
-        showToast("KhÄ‚Â´ng cÄ‚Â³ dĂ¡Â»Â¯ liĂ¡Â»â€¡u Ă„â€˜Ă¡Â»Æ’ xuĂ¡ÂºÂ¥t PDF")
+        showToast("Không có dữ liệu để xuất PDF")
         return
       }
       await downloadDispatchEntryPdf({
@@ -1008,11 +1008,11 @@ export default function DispatchPage() {
         makerName,
       })
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "KhĂ´ng táº¡o Ä‘Æ°á»£c PDF ngĂ y")
+      showToast(err instanceof Error ? err.message : "Không tạo được PDF ngày")
     }
   }
 
-  // â”€â”€ Open Add â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Open Add
   const openAdd = () => {
     // Default ngĂ y = max(entries) + 1
     const today = new Date().toISOString().slice(0,10)
@@ -1041,7 +1041,7 @@ export default function DispatchPage() {
     setView("add")
   }
 
-  // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Open Edit
   const openEdit = (entry: DispatchEntry) => {
     setEditId(entry.id)
     setFormNgay(entry.ngay ? toISO(entry.ngay) : new Date().toISOString().slice(0,10))
@@ -1051,7 +1051,7 @@ export default function DispatchPage() {
     setView("edit")
   }
 
-  // â”€â”€ Save (add or edit) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Save (add or edit)
   const handleSave = async () => {
     if (!factoryId) return
     setSaving(true)
@@ -1070,65 +1070,100 @@ export default function DispatchPage() {
           day_chuyen: formDayChuyen,
         })),
       }
+      const payloadRows = payload.rows
+      void payloadRows
       if (editId) {
-        const { error } = await supabase.from("dispatch_entries").update(payload).eq("id", editId)
+        const { error } = await supabase
+          .from("dispatch_entries")
+          .update({
+            factory_id: factoryId,
+            ngay: formNgay,
+            chung_nhan: formCN,
+            day_chuyen: formDayChuyen,
+          })
+          .eq("id", editId)
         if (error) { showToast(error.message); return }
         await replaceDispatchEntryRows(supabase, {
           factoryId,
           dispatchEntryId: editId,
           ngay: formNgay,
           dayChuyen: formDayChuyen,
-          rows: payload.rows,
+          rows: formRows.map((r,i) => ({
+            ...r,
+            xu_ly: "XÄ‚Â©",
+            doi: resolveAllowedDoi(r.diem_gn || []),
+            uid: r.uid || `r_${i}_${Date.now()}`,
+            _date: formNgay,
+            day_chuyen: formDayChuyen,
+          })),
           deliveryPoints,
         })
-        showToast("ÄĂ£ cáº­p nháº­t báº£ng phĂ¢n xe")
+        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [editId] })
+        showToast("Đã cập nhật bảng phân xe")
       } else {
-        const { data: inserted, error } = await supabase.from("dispatch_entries").insert(payload).select("id").single()
+        const { data: inserted, error } = await supabase
+          .from("dispatch_entries")
+          .insert({
+            factory_id: factoryId,
+            ngay: formNgay,
+            chung_nhan: formCN,
+            day_chuyen: formDayChuyen,
+          })
+          .select("id")
+          .single()
         if (error) { showToast(error.message); return }
         await replaceDispatchEntryRows(supabase, {
           factoryId,
           dispatchEntryId: inserted.id,
           ngay: formNgay,
           dayChuyen: formDayChuyen,
-          rows: payload.rows,
+          rows: formRows.map((r,i) => ({
+            ...r,
+            xu_ly: "XÄ‚Â©",
+            doi: resolveAllowedDoi(r.diem_gn || []),
+            uid: r.uid || `r_${i}_${Date.now()}`,
+            _date: formNgay,
+            day_chuyen: formDayChuyen,
+          })),
           deliveryPoints,
         })
-        showToast("ÄĂ£ thĂªm báº£ng phĂ¢n xe má»›i")
+        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [inserted.id] })
+        showToast("Đã thêm bảng phân xe mới")
       }
       setView("list")
       setEditId(null)
       setFormRows([emptyRow()])
       void loadData(factoryId)
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Lá»—i khĂ´ng xĂ¡c Ä‘á»‹nh")
+      showToast(err instanceof Error ? err.message : "Lỗi không xác định")
     } finally {
       setSaving(false)
     }
   }
 
-  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Delete
   const handleDelete = async (id: string) => {
     if (!factoryId) return
     await supabase.from("dispatch_entries").delete().eq("id", id)
     setDelConfirm(null)
-    showToast("ÄĂ£ xĂ³a báº£ng phĂ¢n xe")
+    showToast("Đã xóa bảng phân xe")
     loadData(factoryId)
   }
 
-  // â”€â”€ Update row field with auto-calc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Update row field with auto-calc
   const updateRow = (idx: number, field: keyof DxRow, val: unknown) => {
     setFormRows(prev => prev.map((r, i) => {
       if (i !== idx) return r
       const next = { ...r, [field]: val }
 
-      // Auto-fill tĂ i xáº¿ + auto-assign chuyáº¿n khi chá»n xe
+      // Auto-fill tài xế + auto-assign chuyến khi chọn xe
       if (field === "so_xe") {
         const v = vehicleOptions.find(x => x.ma_hieu === val)
         if (v) next.tai_xe = v.tai_xe
         if (val) {
           const sameXe = prev.filter((r2, i2) => i2 !== idx && r2.so_xe === val)
           next.chuyen = sameXe.length + 1
-          next._warn = sameXe.length >= 2 ? `Xe ${val} Ä‘Ă£ cĂ³ ${sameXe.length} chuyáº¿n trong ngĂ y nĂ y!` : undefined
+          next._warn = sameXe.length >= 2 ? `Xe ${val} đã có ${sameXe.length} chuyến trong ngày này!` : undefined
         }
       }
 
@@ -1148,7 +1183,7 @@ export default function DispatchPage() {
         }
       }
 
-      // Khi Äiá»ƒm GN thay Ä‘á»•i: lá»c lá»™ trĂ¬nh theo Ä‘á»™i
+      // Khi Điểm GN thay đổi: lọc lộ trình theo đội
       if (field === "diem_gn") {
         const allowed = resolveAllowedDoi(val as string[])
         next.doi = allowed
@@ -1160,7 +1195,7 @@ export default function DispatchPage() {
         }
       }
 
-      // Auto-calc khoáº£ng cĂ¡ch Manhattan khi lá»™ trĂ¬nh / Ä‘iá»ƒm GN thay Ä‘á»•i
+      // Auto-calc khoảng cách Manhattan khi lộ trình / điểm GN thay đổi
       if (field === "lo_trinh" || field === "diem_gn") {
         const stops = field === "lo_trinh" ? val as string[] : next.lo_trinh
         next.so_km = resolveSoKm(stops.length > 0 ? stops : (next.diem_gn || []))
@@ -1177,7 +1212,7 @@ export default function DispatchPage() {
     }))
   }
 
-  // â”€â”€ Download CSV template â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Download CSV template
   const downloadTemplate = () => {
     const header = "ngay;so_xe;chuyen;tai_xe;diem_giao_nhan;phien_boc;xu_ly;lo_trinh;so_km;kl_ct;drc_c;kl_dct;drc_dc;kl_dkt;drc_dk;kl_dt;drc_d"
     const rows = formRows.map(r => [
@@ -1194,10 +1229,10 @@ export default function DispatchPage() {
     URL.revokeObjectURL(url)
   }
 
-  // â”€â”€ Download GeoJSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Download GeoJSON
   const downloadGeoJSON = async () => {
     const allLots = [...new Set(formRows.flatMap(r => r.lo_thu_hoach || []))]
-    if (allLots.length === 0) { showToast("KhĂ´ng cĂ³ lĂ´ thu hoáº¡ch Ä‘á»ƒ xuáº¥t GeoJSON"); return }
+    if (allLots.length === 0) { showToast("Không có lô thu hoạch để xuất GeoJSON"); return }
     try {
       const res = await fetch("/geojson/Lo%20cao%20su%20-%202026_Full.geojson")
       const gj = await res.json()
@@ -1209,11 +1244,11 @@ export default function DispatchPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a"); a.href = url; a.download = `dieu_xe_${formNgay}.geojson`; a.click()
       URL.revokeObjectURL(url)
-      showToast(`ÄĂ£ xuáº¥t GeoJSON ${features.length} lĂ´`)
-    } catch { showToast("Lá»—i táº£i GeoJSON") }
+      showToast(`Đã xuất GeoJSON ${features.length} lô`)
+    } catch { showToast("Lỗi tải GeoJSON") }
   }
 
-  // â”€â”€ Parse rows from CSV lines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Parse rows from CSV lines
   const parseCSVLines = (lines: string[]): Record<string, DxRow[]> => {
     const byDate: Record<string, DxRow[]> = {}
     let uidCounter = Date.now()
@@ -1237,7 +1272,7 @@ export default function DispatchPage() {
         chuyen: parseInt(chuyen) || 1, tai_xe: tai_xe.trim(),
         diem_gn: dgns,
         phien: phiens,
-        lo_thu_hoach: buildLoThuHoach(dgns, phiens), xu_ly: xu_ly.trim() || "XĂ©",
+        lo_thu_hoach: buildLoThuHoach(dgns, phiens), xu_ly: xu_ly.trim() || "Xé",
         lo_trinh: lo_trinh_raw.split(",").map(s => s.trim()).filter(Boolean),
         so_km: parseFloat(so_km) || calcManhattanKm(dgns),
         kl_ct, drc_c, kl_ck: autoCalcKLK(kl_ct, drc_c),
@@ -1253,7 +1288,7 @@ export default function DispatchPage() {
     return byDate
   }
 
-  // â”€â”€ Import CSV / XLSX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Import CSV / XLSX
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file || !factoryId) return
     setImporting(true)
@@ -1275,7 +1310,7 @@ export default function DispatchPage() {
       const { data: existing } = await supabase.from("dispatch_entries")
         .select("id").eq("factory_id", factoryId).eq("ngay", ngay).single()
       if (existing) {
-        await supabase.from("dispatch_entries").update({ rows, chung_nhan: "PEFC CS", day_chuyen: dayChuyen }).eq("id", existing.id)
+        await supabase.from("dispatch_entries").update({ chung_nhan: "PEFC CS", day_chuyen: dayChuyen }).eq("id", existing.id)
         await replaceDispatchEntryRows(supabase, {
           factoryId,
           dispatchEntryId: existing.id,
@@ -1284,10 +1319,11 @@ export default function DispatchPage() {
           rows,
           deliveryPoints,
         })
+        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [existing.id] })
       } else {
         const { data: inserted, error } = await supabase
           .from("dispatch_entries")
-          .insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", day_chuyen: dayChuyen, rows })
+          .insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", day_chuyen: dayChuyen })
           .select("id")
           .single()
         if (error) throw error
@@ -1299,28 +1335,29 @@ export default function DispatchPage() {
           rows,
           deliveryPoints,
         })
+        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [inserted.id] })
       }
     }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Import lá»—i")
+      showToast(err instanceof Error ? err.message : "Import lỗi")
       setImporting(false)
       e.target.value = ""
       return
     }
     setImporting(false)
-    showToast(`Import ${Object.keys(byDate).length} ngĂ y thĂ nh cĂ´ng`)
+    showToast(`Import ${Object.keys(byDate).length} ngày thành công`)
     loadData(factoryId)
     e.target.value = ""
   }
 
-  // â”€â”€ Toast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Toast
   const ToastNotification = () => toast ? (
     <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-[fadeInUp_0.3s_ease-out]">
       <Check size={16}/> {toast}
     </div>
   ) : null
 
-  // â”€â”€ Render: LIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Render: LIST
   if (view === "list") return (
     <div>
       <ToastNotification/>
@@ -1544,7 +1581,7 @@ export default function DispatchPage() {
                   <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
                     <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500"
                       onClick={() => { setSelected(entry); setView("detail") }}>
-                      {entry.ma_dx || "â€”"}
+                      {entry.ma_dx || "—"}
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-700"
                       onClick={() => { setSelected(entry); setView("detail") }}>
@@ -1620,7 +1657,7 @@ export default function DispatchPage() {
     </div>
   )
 
-  // â”€â”€ Render: DETAIL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Render: DETAIL
   if (view === "detail" && selected) return (
     <div>
       <ToastNotification/>
@@ -1702,7 +1739,7 @@ export default function DispatchPage() {
     </div>
   )
 
-  // â”€â”€ Render: ADD / EDIT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Render: ADD / EDIT
   return (
     <div>
       <ToastNotification/>
@@ -1716,7 +1753,7 @@ export default function DispatchPage() {
         </h1>
       </div>
 
-      {/* DĂ¢y chuyá»n â€” luĂ´n Ä‘áº·t Ä‘áº§u tiĂªn */}
+      {/* Dây chuyền — luôn đặt đầu tiên */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-3">
         <label className="text-xs font-bold text-slate-600 block mb-2">Dây chuyền <span className="text-red-500">*</span></label>
         <div className="flex gap-3 items-center">
@@ -1734,7 +1771,7 @@ export default function DispatchPage() {
         </div>
       </div>
 
-      {/* Header form â€” 3 columns */}
+      {/* Header form — 3 columns */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-3">
         <div className="grid grid-cols-3 gap-4">
           <div>
@@ -1757,7 +1794,7 @@ export default function DispatchPage() {
         </div>
       </div>
 
-      {/* Toolbar â€” info bar + action buttons */}
+      {/* Toolbar — info bar + action buttons */}
       <div className="flex items-center justify-between mb-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
         <p className="text-xs text-amber-700 flex items-center gap-1.5">
           <Info size={14}/> Lộ trình: chọn từng điểm theo đội.
@@ -1794,7 +1831,7 @@ export default function DispatchPage() {
           </button>
           <button onClick={() => setFormRows(r => [...r, emptyRow()])}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors">
-            <Plus size={12}/> ThĂªm xe
+            <Plus size={12}/> Thêm xe
           </button>
         </div>
       </div>
@@ -1824,7 +1861,7 @@ export default function DispatchPage() {
                   </select>
                 </td>
 
-                {/* Chuyáº¿n â€” read-only badge */}
+                {/* Chuyến — read-only badge */}
                 <td className="px-2 py-1.5">
                   <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                     row.chuyen === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
@@ -1832,7 +1869,7 @@ export default function DispatchPage() {
                   {row._warn && <span className="ml-1 text-red-500 text-[10px]" title={row._warn}>⚠</span>}
                 </td>
 
-                {/* TĂ i xáº¿ â€” dropdown */}
+                {/* Tài xế — dropdown */}
                 <td className="px-2 py-1.5">
                   {row.locked
                     ? <span className="text-slate-600 text-xs">{row.tai_xe}</span>
@@ -1844,16 +1881,16 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Äiá»ƒm GN */}
+                {/* Điểm GN */}
                 <td className="px-2 py-1.5 min-w-[140px]">
                   {row.locked
-                    ? <span className="text-slate-600">{row.diem_gn.join(", ") || "â€”"}</span>
+                    ? <span className="text-slate-600">{row.diem_gn.join(", ") || "—"}</span>
                     : <SmartMultiSelect options={deliveryPoints.map(d => d.ma_lo)} selected={row.diem_gn} labels={deliveryPointLabels}
                         onChange={val => updateRow(idx,"diem_gn",val)} placeholder="Chọn điểm..."/>
                   }
                 </td>
 
-                {/* Äá»™i */}
+                {/* Đội */}
                 <td className="px-2 py-1.5 text-slate-600 font-semibold whitespace-nowrap">
                   {formatDoiLabel(resolveAllowedDoi(row.diem_gn))}
                 </td>
@@ -1861,7 +1898,7 @@ export default function DispatchPage() {
                 {/* PhiĂªn */}
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
-                    ? <span className="text-slate-600">{row.phien.join(", ") || "â€”"}</span>
+                    ? <span className="text-slate-600">{row.phien.join(", ") || "—"}</span>
                     : <SmartMultiSelect
                         options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
                         selected={row.phien}
@@ -1870,7 +1907,7 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* LĂ´ thu hoáº¡ch â€” chip list */}
+                {/* Lô thu hoạch — chip list */}
                 <td className="px-2 py-1.5 max-w-[130px]">
                   {(row.lo_thu_hoach?.length ?? 0) > 0
                     ? <div className="flex flex-wrap gap-0.5">
@@ -1883,10 +1920,10 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Lá»™ trĂ¬nh â€” lá»c theo Ä‘á»™i cá»§a Äiá»ƒm GN */}
+                {/* Lộ trình — lọc theo đội của Điểm GN */}
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
-                    ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "â€”"}</span>
+                    ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "—"}</span>
                     : (() => {
                         const allowed = resolveAllowedDoi(row.diem_gn)
                         const opts = allowed.length > 0
@@ -1953,7 +1990,7 @@ export default function DispatchPage() {
         </button>
       </div>
 
-      {/* Modal Nháº­p KL */}
+      {/* Modal Nhập KL */}
       {klModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1964,7 +2001,7 @@ export default function DispatchPage() {
               <button onClick={() => setKlModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={18}/></button>
             </div>
             <div className="p-4 overflow-x-auto">
-              {/* KL badge dĂ¢y chuyá»n */}
+              {/* KL badge dây chuyền */}
               <div className="mb-3 flex items-center gap-2">
                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                   formDayChuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
@@ -1994,7 +2031,7 @@ export default function DispatchPage() {
                 <tbody className="divide-y divide-slate-100">
                   {formRows.map((row, idx) => (
                     <tr key={row.uid} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "â€”"}</td>
+                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
                       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_ct} onChange={e => updateRow(idx,"kl_ct",e.target.value)}
@@ -2004,7 +2041,7 @@ export default function DispatchPage() {
                         <input value={row.drc_c} onChange={e => updateRow(idx,"drc_c",e.target.value)}
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-2 py-2 font-semibold text-lime-700 whitespace-nowrap">{row.kl_ck || "â€”"}</td>
+                      <td className="px-2 py-2 font-semibold text-lime-700 whitespace-nowrap">{row.kl_ck || "—"}</td>
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dct} onChange={e => updateRow(idx,"kl_dct",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -2013,7 +2050,7 @@ export default function DispatchPage() {
                         <input value={row.drc_dc} onChange={e => updateRow(idx,"drc_dc",e.target.value)}
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-2 py-2 font-semibold text-amber-700 whitespace-nowrap">{row.kl_dck || "â€”"}</td>
+                      <td className="px-2 py-2 font-semibold text-amber-700 whitespace-nowrap">{row.kl_dck || "—"}</td>
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dkt} onChange={e => updateRow(idx,"kl_dkt",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -2022,7 +2059,7 @@ export default function DispatchPage() {
                         <input value={row.drc_dk} onChange={e => updateRow(idx,"drc_dk",e.target.value)}
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_dkk || "â€”"}</td>
+                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_dkk || "—"}</td>
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_dt} onChange={e => updateRow(idx,"kl_dt",e.target.value)}
                           placeholder="0" className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
@@ -2031,7 +2068,7 @@ export default function DispatchPage() {
                         <input value={row.drc_d} onChange={e => updateRow(idx,"drc_d",e.target.value)}
                           placeholder="65" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-2 py-2 font-semibold text-emerald-700 whitespace-nowrap">{row.kl_dk || "â€”"}</td>
+                      <td className="px-2 py-2 font-semibold text-emerald-700 whitespace-nowrap">{row.kl_dk || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2053,7 +2090,7 @@ export default function DispatchPage() {
                 <tbody className="divide-y divide-slate-100">
                   {formRows.map((row, idx) => (
                     <tr key={row.uid} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "â€”"}</td>
+                      <td className="px-3 py-2 font-bold text-emerald-700 whitespace-nowrap">{row.so_xe || "—"}</td>
                       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.tai_xe}</td>
                       <td className="px-2 py-2 border-l border-slate-100">
                         <input value={row.kl_mn} onChange={e => updateRow(idx,"kl_mn",e.target.value)}
@@ -2063,7 +2100,7 @@ export default function DispatchPage() {
                         <input value={row.drc_mn} onChange={e => updateRow(idx,"drc_mn",e.target.value)}
                           placeholder="0" className="w-14 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
                       </td>
-                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_mnk || "â€”"}</td>
+                      <td className="px-2 py-2 font-semibold text-blue-700 whitespace-nowrap">{row.kl_mnk || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -119,7 +119,8 @@ Chung con duoc **cap nhat lai tu dong** moi khi san luong thay doi, thong qua ha
 ```
 production_records thay doi (import / save / delete)
   → writeBackToDispatch(factoryId, ngay, supabase)
-    → cap nhat dispatch_entries.rows[] (kl_* / drc_*)
+    → cap nhat dispatch_entry_rows truoc (kl_* / drc_*)
+    → sync lai dispatch_entries.rows[] neu con bat cache legacy
     → tim ngan co trips[] chua bat ky uid nao thuoc ngay do
     → load lai toan bo dispatch (moi ngay) de build uid→KL map chinh xac
     → tinh lai tong_tuoi / tong_kho cho tung ngan bi anh huong

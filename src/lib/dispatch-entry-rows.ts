@@ -75,6 +75,12 @@ export type DispatchEntryRowRecord = {
   sort_order: number | null
 }
 
+export type DispatchEntryWithResolvedRows<TExtra extends Record<string, unknown> = Record<string, never>> = TExtra & {
+  id: string
+  ngay: string
+  rows: LegacyDispatchRow[]
+}
+
 const NUM_FIELDS = [
   "kl_ct", "drc_c", "kl_ck",
   "kl_dct", "drc_dc", "kl_dck",
@@ -96,6 +102,14 @@ function stringifyNum(value: unknown) {
 
 function arr<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
+}
+
+function stripRowsFromSelect(select: string) {
+  return select
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "rows")
+    .join(",")
 }
 
 export function toISODate(ngay: string) {
@@ -216,4 +230,123 @@ export async function replaceDispatchEntryRows(
 
   const { error: insertError } = await supabase.from("dispatch_entry_rows").insert(payload)
   if (insertError) throw insertError
+}
+
+export async function loadDispatchEntriesWithResolvedRows<TExtra extends Record<string, unknown> = Record<string, never>>(
+  supabase: SupabaseClient,
+  params: {
+    factoryId: string
+    select?: string
+    fromDate?: string
+    toDate?: string
+    entryIds?: string[]
+    ascending?: boolean
+  },
+): Promise<Array<DispatchEntryWithResolvedRows<TExtra>>> {
+  const headerSelect = stripRowsFromSelect(params.select || "id,ngay")
+  // Luôn fetch "rows" (JSONB) để fallback cho dữ liệu trước migration 2026-06-01
+  const fullSelect = headerSelect ? `${headerSelect},rows` : "id,ngay,rows"
+  let query = supabase
+    .from("dispatch_entries")
+    .select(fullSelect)
+    .eq("factory_id", params.factoryId)
+    .order("ngay", { ascending: params.ascending ?? true })
+
+  if (params.entryIds && params.entryIds.length > 0) query = query.in("id", params.entryIds)
+
+  const { data: entries, error: entriesError } = await query
+  if (entriesError) throw entriesError
+
+  const rawEntries = ((entries || []) as unknown) as Array<TExtra & { id: string; ngay: string; rows?: unknown }>
+  const entryIds = rawEntries.map((entry) => entry.id).filter(Boolean)
+  if (entryIds.length === 0) {
+    return rawEntries.map((entry) => ({
+      ...entry,
+      rows: [],
+    }))
+  }
+
+  let physicalRowsQuery = supabase
+    .from("dispatch_entry_rows")
+    .select("*")
+    .eq("factory_id", params.factoryId)
+    .in("dispatch_entry_id", entryIds)
+    .order("ngay", { ascending: params.ascending ?? true })
+    .order("sort_order", { ascending: true })
+
+  if (params.fromDate) physicalRowsQuery = physicalRowsQuery.gte("ngay", params.fromDate)
+  if (params.toDate) physicalRowsQuery = physicalRowsQuery.lte("ngay", params.toDate)
+
+  const { data: physicalRows, error: physicalError } = await physicalRowsQuery
+  if (physicalError) throw physicalError
+
+  const physicalRowsByEntry = new Map<string, LegacyDispatchRow[]>()
+  for (const row of (physicalRows || []) as DispatchEntryRowRecord[]) {
+    const list = physicalRowsByEntry.get(row.dispatch_entry_id) || []
+    list.push(dispatchDbRowToLegacy(row))
+    physicalRowsByEntry.set(row.dispatch_entry_id, list)
+  }
+
+  const filteredEntries =
+    params.fromDate || params.toDate
+      ? rawEntries.filter((entry) => {
+          if (physicalRowsByEntry.has(entry.id)) return true
+          // Fallback: kiểm tra date range cho entries chỉ có JSONB rows (pre-migration)
+          const entryDate = toISODate(typeof entry.ngay === "string" ? entry.ngay : "")
+          if (!entryDate) return false
+          if (params.fromDate && entryDate < params.fromDate) return false
+          if (params.toDate && entryDate > params.toDate) return false
+          return Array.isArray(entry.rows) && (entry.rows as unknown[]).length > 0
+        })
+      : rawEntries
+
+  return filteredEntries.map((entry) => {
+    const physical = physicalRowsByEntry.get(entry.id)
+    if (physical && physical.length > 0) return { ...entry, rows: physical }
+    // Fallback: dùng JSONB rows cho entries chưa có bản ghi vật lý (trước migration)
+    const jsonbRows = Array.isArray(entry.rows)
+      ? (entry.rows as LegacyDispatchRow[]).filter(
+          (r): r is LegacyDispatchRow => Boolean(r && typeof r === "object"),
+        )
+      : []
+    return { ...entry, rows: jsonbRows }
+  })
+}
+
+export async function syncDispatchEntriesLegacyRows(
+  supabase: SupabaseClient,
+  params: {
+    factoryId: string
+    entryIds: string[]
+  },
+) {
+  const entryIds = [...new Set(params.entryIds.filter(Boolean))]
+  if (entryIds.length === 0) return
+
+  const { data: physicalRows, error: physicalError } = await supabase
+    .from("dispatch_entry_rows")
+    .select("*")
+    .eq("factory_id", params.factoryId)
+    .in("dispatch_entry_id", entryIds)
+    .order("ngay", { ascending: true })
+    .order("sort_order", { ascending: true })
+
+  if (physicalError) throw physicalError
+
+  const rowsByEntry = new Map<string, LegacyDispatchRow[]>()
+  for (const row of (physicalRows || []) as DispatchEntryRowRecord[]) {
+    const list = rowsByEntry.get(row.dispatch_entry_id) || []
+    list.push(dispatchDbRowToLegacy(row))
+    rowsByEntry.set(row.dispatch_entry_id, list)
+  }
+
+  await Promise.all(entryIds.map(async (entryId) => {
+    const rows = rowsByEntry.get(entryId) || []
+    const { error } = await supabase
+      .from("dispatch_entries")
+      .update({ rows })
+      .eq("factory_id", params.factoryId)
+      .eq("id", entryId)
+    if (error) throw error
+  }))
 }

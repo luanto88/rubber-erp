@@ -57,7 +57,7 @@ Riêng danh mục điểm giao nhận của module điều xe:
 
 - Master data được lưu trong bảng `dispatch_delivery_points`
 - Dữ liệu phải filter theo `factory_id`
-- `dispatch_entries.rows[].diem_gn` chỉ lưu các mã điểm đã chọn cho từng chuyến, không thay thế bảng master
+- `dispatch_entry_rows.diem_gn` là nơi lưu chính các mã điểm đã chọn cho từng chuyến; `dispatch_entries.rows[].diem_gn` nếu còn tồn tại chỉ là cache legacy mirrored, không thay thế bảng master
 
 ## Quy tắc lô tròn
 
@@ -113,3 +113,7 @@ Module nghiệp vụ có thể giữ nút thêm nhanh, nhưng dữ liệu tạo 
 - `iso`: Quản lý tài liệu ISO (workflow ký duyệt kỹ thuật số)
 - `documents`: Văn bản nội bộ (vòng ký phòng ban)
 - `settings`: Quản trị danh mục, cấu hình, user, phân quyền
+## Update 2026-06-11: dispatch diem_gn
+
+- Noi luu chinh cho cac ma diem cua tung chuyen la `dispatch_entry_rows.diem_gn`.
+- `dispatch_entries.rows[].diem_gn` neu con ton tai chi la cache legacy mirrored, khong phai source of truth.

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
 import {
   AlertTriangle,
   BarChart3,
@@ -35,7 +36,13 @@ import { downloadOutputDayPdf } from "@/lib/output-pdf"
 interface DispatchEntry {
   id: string
   ngay: string
-  rows: Array<{ uid: string; so_xe: string; chuyen: number; tai_xe: string; diem_gn: string[] }>
+  rows: Array<{
+    uid: string
+    so_xe: string
+    chuyen: number
+    tai_xe: string
+    diem_gn: string[]
+  }>
 }
 
 interface DeliveryPoint {
@@ -242,12 +249,30 @@ export default function OutputPage() {
             .order("ngay", { ascending: false })
             .order("so_xe")
             .order("chuyen"),
-          supabase.from("dispatch_entries").select("id, ngay, rows").eq("factory_id", factoryId),
+          loadDispatchEntriesWithResolvedRows<Pick<DispatchEntry, "id" | "ngay">>(supabase, {
+            factoryId,
+            select: "id,ngay,rows",
+            ascending: true,
+          }),
           loadRequiredNotes(supabase, factoryId),
         ])
         if (!active) return
         setRecords((recordsResult.data as ProductionRecord[]) || [])
-        setDispatches((dispatchResult.data as DispatchEntry[]) || [])
+        setDispatches(
+          (dispatchResult || []).map((entry) => ({
+            id: entry.id,
+            ngay: entry.ngay,
+            rows: Array.isArray(entry.rows)
+              ? entry.rows.map((row: Pick<LegacyDispatchRow, "uid" | "so_xe" | "chuyen" | "tai_xe" | "diem_gn">) => ({
+                  uid: String(row.uid ?? ""),
+                  so_xe: String(row.so_xe ?? ""),
+                  chuyen: Number(row.chuyen ?? 1),
+                  tai_xe: String(row.tai_xe ?? ""),
+                  diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item)) : [],
+                }))
+              : [],
+          })) as DispatchEntry[],
+        )
         setRequiredNotes(noteRows.map((row) => row.content))
       } catch {
         if (!active) return

@@ -17,6 +17,7 @@ Permissions: `documents.view`, `documents.create`, `documents.edit`, `documents.
 | `20260610_van_ban_documents_extend.sql` | Mở rộng `van_ban_documents` — workflow columns, file columns, `embedding vector(768)`, `mo_ta_tim_kiem` | Cần chạy |
 | `20260610_van_ban_phan_loai.sql` | Thêm cột `phan_loai TEXT NOT NULL DEFAULT 'Thuong'` | Cần chạy |
 | `20260610_van_ban_search_rpc.sql` | Function `match_van_ban_documents` (pgvector semantic search) | Cần chạy sau khi `extend` đã chạy |
+| `20260611_van_ban_distribution.sql` | Bảng `van_ban_distribution_batches`, `van_ban_distribution_recipients`; RLS; seed permission `documents.distribute` cho admin/manager | Cần chạy |
 
 **Lỗi đã biết khi chạy `types_sequences`**: `policy "van_ban_sequences_factory_read" already exists` → đã sửa bằng `DROP POLICY IF EXISTS` trước `CREATE POLICY`.
 
@@ -163,6 +164,8 @@ GEMINI_API_KEY=<Google AI Studio key>  # đã có trong .env.local từ ISO form
 | `/api/documents/dept-users` | GET | Tất cả user active theo phòng ban (`leadership=false`) hoặc chỉ admin/manager (`leadership=true`) |
 | `/api/documents/embed-doc` | POST | Embed 1 văn bản vào `embedding` sau phe_duyet |
 | `/api/documents/search` | POST | Semantic search `{ query, factoryId }` → kết quả + similarity |
+| `/api/documents/distribute` | GET | Danh sách user active trong factory kèm `alreadyReceived[]` per doc |
+| `/api/documents/distribute` | POST | Tạo batch phân phối + 3-channel notify (in-app, Telegram, Email) |
 
 Tất cả routes dùng `supabaseAdmin` để bypass RLS khi cần list users.
 
@@ -186,6 +189,96 @@ draft → cho_phe_duyet → da_phe_duyet
 
 ## Email lookup
 Luôn dùng `maintenance_staff.email` theo `profile_id` — **KHÔNG** dùng `profiles.auth_email` (email auth có dạng nội bộ `username@auth.rubber-erp.example.com`).
+
+---
+
+## Trang in văn bản
+
+Route: `/dashboard/documents/print/?docId={uuid}`
+
+- Layout bypass sidebar: `dashboard/layout.tsx` kiểm tra `pathname.includes("/print")` → render `{children}` trực tiếp, không có sidebar.
+- Load `van_ban_documents` theo `docId` từ query param.
+- Nội dung trang in:
+  - Header "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"
+  - QRCodeSVG (size=80), URL: `{APP_URL}/dashboard/documents/{docId}`
+  - Số văn bản, tên văn bản
+  - Bảng metadata: Loại, Phòng ban, Ngày phê duyệt, Người phê duyệt, Phân loại (Thường/Mật)
+  - Bảng tiến trình ký: các bước đã ký kèm tên + ngày
+- **Watermark Mật**: khi `phan_loai = 'Mat'` — `position: fixed`, `opacity: 0.07`, `transform: rotate(-45deg)`, `font-size: 120px`, `color: #dc2626`, centered trên toàn trang
+- Auto-print: `setTimeout(() => window.print(), 800)` sau khi doc load
+- CSS in: `@page { size: A4; margin: 20mm 15mm; }`
+- Nút In trên `[id]/page.tsx`: thẻ `<a>` mở `_blank`, luôn hiển thị khi doc đã load, không phụ thuộc trạng thái
+
+---
+
+## Phân phối văn bản
+
+### Bảng dữ liệu
+
+- `van_ban_distribution_batches`: mỗi lần bấm "Phân phối" tạo 1 batch — `id`, `factory_id`, `distributed_by` (UUID auth.users), `distributed_at`, `ghi_chu`, `created_at`
+- `van_ban_distribution_recipients`: mỗi row = 1 văn bản × 1 người nhận — `id`, `batch_id`, `van_ban_document_id`, `factory_id`, `recipient_user_id`, `first_viewed_at`, `first_downloaded_at`, `created_at`
+
+### Permission
+
+- `documents.distribute` — cấp mặc định cho `admin` và `manager`
+- Guard tại UI (nút Phân phối chỉ hiện khi `trang_thai = 'da_phe_duyet'` và `canDistribute`) và API route
+
+### API GET `/api/documents/distribute`
+
+Query params: `factoryId`, `docIds` (comma-separated)
+
+- Query `profiles` active trong factory qua `supabaseAdmin` (bypass RLS)
+- Tính `alreadyReceived: string[]` per user = danh sách docId user đã nhận
+- Trả về `{ users: DistUser[] }` — `DistUser: { id, full_name, department, role, alreadyReceived }`
+
+### API POST `/api/documents/distribute`
+
+Body: `{ factoryId, distributedBy, docIds[], recipientUserIds[], ghiChu? }`
+
+1. Insert `van_ban_distribution_batches` → lấy `batchId`
+2. Insert `van_ban_distribution_recipients` (docId × userId cross-product)
+3. **In-app**: insert vào `notifications` với `doc_type: "van_ban"`, `type: "van_ban_phan_phoi"`
+4. **Telegram**: gửi đến `ISO_TELEGRAM_BOT_TOKEN` + `ISO_TELEGRAM_CHAT_ID` (group chung với ISO)
+5. **Email**: tra `maintenance_staff.email` theo `profile_id` — gửi qua Gmail SMTP
+6. HTTP 207 khi có lỗi một phần, kèm `errors[]`. Các kênh độc lập nhau.
+
+### Modal phân phối trong `[id]/page.tsx`
+
+- Nút "Phân phối" (indigo) chỉ hiện khi `canDistribute = trang_thai === 'da_phe_duyet' && hasPermission(user, 'documents.distribute')`
+- `openDistModal` async: gọi `GET /api/documents/distribute?factoryId=...&docIds=...`, load danh sách users
+- Danh sách user: người đã nhận văn bản này (`alreadyReceived.includes(docId)`) hiển thị mờ + badge "Đã nhận", checkbox disabled
+- Nút "Chọn tất cả" chỉ chọn người chưa nhận
+- Textarea ghi chú (optional)
+- Nút "Phân phối (N người)" với spinner khi đang gửi
+- Sau thành công: đóng modal + toast xanh "Đã phân phối đến N người nhận!"
+
+---
+
+## Thống kê văn bản
+
+Tab "Thống kê" trong `page.tsx`, component `VanBanStats`:
+
+- **5 KPI cards**: Tổng số (slate), Đã phê duyệt (emerald), Đang xử lý (amber), Nháp (slate mờ), Trả về (rose)
+- **Bar chart theo tháng**: 6 tháng gần nhất, tính client-side từ dữ liệu đã load, thanh width normalize theo max
+- **Bảng phân loại theo `loai_van_ban`**: Loại | Tổng | Đã PD | Đang xử lý
+- **Bảng phân loại theo `phong_ban`**: Phòng ban | Tổng | Đã PD | Đang xử lý
+- **Bảng trạng thái đầy đủ**: Trạng thái | Số lượng | Tỉ lệ %
+
+Dữ liệu dùng lại từ `docs` state đã load trong `page.tsx` — không có query riêng cho stats.
+
+---
+
+## Hướng dẫn tag Office
+
+Component `TagGuidePanel` trong `new/page.tsx`:
+
+- Đặt **trước** section nút Lưu (cuối form)
+- Toggle collapse: "▼ Xem hướng dẫn tag" / "▲ Thu gọn"
+- 3 nhóm tag:
+  1. **Metadata văn bản**: `{{SO_VAN_BAN}}`, `{{MA_VAN_BAN}}`, `{{LOAI_VAN_BAN}}`, `{{QR}}`
+  2. **Chữ ký từng bước** (N = số thứ tự bước): `{{TEN_BUOC_N}}`, `{{CHU_KY_BUOC_N}}`, `{{CHUC_VU_BUOC_N}}`, `{{NGAY_KY_BUOC_N}}`
+  3. **Phê duyệt cuối**: `{{TEN_PHE_DUYET}}`, `{{CHU_KY_PHE_DUYET}}`, `{{CHUC_VU_PHE_DUYET}}`, `{{NGAY_BAN_HANH}}`
+- Tag sai/gần giống dạng `{{...}}` trong file template → chặn và báo lỗi yêu cầu sửa file
 
 ---
 
@@ -226,11 +319,12 @@ Khi upload file, nếu `form.ten_van_ban` đang trống → auto-fill từ tên 
 
 ```
 src/app/dashboard/documents/
-  page.tsx                    -- danh sách + filter + AI search toggle
-  new/page.tsx                -- form soạn thảo (phân loại đầu form, mã editable, AI desc)
+  page.tsx                    -- danh sách + filter + AI search toggle + tab Thống kê (VanBanStats)
+  new/page.tsx                -- form soạn thảo (phân loại, mã editable, TagGuidePanel, AI desc)
   new/upload/page.tsx         -- upload văn bản ký tay
-  [id]/page.tsx               -- chi tiết + badge Mật + PIN modal + ký duyệt + embed trigger
+  [id]/page.tsx               -- chi tiết + badge Mật + PIN modal + ký duyệt + nút In + nút Phân phối + DistModal
   my-tasks/page.tsx           -- việc cần xử lý
+  print/page.tsx              -- trang in (bypass sidebar, A4, QR, watermark Mật, auto-print)
   _components/
     documents-shell.tsx
     documents-types.ts
@@ -244,6 +338,7 @@ src/app/api/documents/
   dept-users/route.ts            (hỗ trợ leadership=false)
   embed-doc/route.ts             (POST: embed 1 văn bản sau phe_duyet)
   search/route.ts                (POST: semantic search)
+  distribute/route.ts            (GET: danh sách users+alreadyReceived; POST: tạo batch + 3-channel notify)
 ```
 
 ---
@@ -253,3 +348,31 @@ src/app/api/documents/
 **Toàn bộ code là untracked files, chưa commit/push → 404 trên production.**
 
 Chi tiết deploy checklist xem memory `project_documents_module.md`.
+
+---
+
+## Ghi chú kỹ thuật quan trọng
+
+### Supabase `.catch()` không tồn tại trên `PostgrestFilterBuilder`
+
+Khi dùng Supabase JS v2, không được chain `.catch()` trực tiếp sau `insert()` / `update()` / `select()`:
+
+```typescript
+// SAI — PostgrestFilterBuilder không có .catch()
+await supabaseAdmin.from("notifications").insert(rows).catch(...)
+
+// ĐÚNG — destructure error
+const { error } = await supabaseAdmin.from("notifications").insert(rows)
+if (error) handleError(error.message)
+```
+
+### `DistUser` type phải khai báo ở module level
+
+Không khai báo type bên trong React component function — sẽ gây lỗi khi dùng trong `useCallback` deps hoặc rebuild mỗi render:
+
+```typescript
+// Khai báo trước component function
+type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
+
+export default function DocumentDetailPage() { ... }
+```

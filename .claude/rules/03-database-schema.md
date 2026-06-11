@@ -76,7 +76,7 @@ sign_pins (không có factory_id — theo auth.users)
 ## Cập nhật schema điều xe 2026-06-01
 
 - Migration đã chạy: `supabase/migrations/20260601_dispatch_entry_rows.sql`.
-- `dispatch_entries` có thêm `day_chuyen TEXT` và tiếp tục giữ `rows JSONB` để tương thích legacy.
+- `dispatch_entries` có thêm `day_chuyen TEXT`; `rows JSONB` chỉ còn là cache legacy để tương thích tạm thời.
 - Bảng mới `dispatch_entry_rows` lưu vật lý từng chuyến điều xe:
   - khóa chính `id`
   - `factory_id`, `dispatch_entry_id`
@@ -86,7 +86,7 @@ sign_pins (không có factory_id — theo auth.users)
   - sản lượng: `kl_ct/drc_c/kl_ck`, `kl_dct/drc_dc/kl_dck`, `kl_dkt/drc_dk/kl_dkk`, `kl_dt/drc_d/kl_dk`, `kl_mn/drc_mn/kl_mnk`
   - `ngan_ref[]`, `ghi_chu`, `locked`, `sort_order`
   - unique `(dispatch_entry_id, uid_legacy)`
-- Tính năng mới nên query `dispatch_entry_rows`; chỉ dùng `dispatch_entries.rows` khi cần fallback/legacy.
+- Tính năng mới phải query `dispatch_entry_rows` hoặc helper resolve rows dùng chung; không đọc/ghi trực tiếp `dispatch_entries.rows` trong code mới.
 - Mọi query vẫn phải filter theo `factory_id`.
 
 ## Schema auth / profile
@@ -130,7 +130,7 @@ disabled_at     TIMESTAMPTZ
 
 ```sql
 id UUID PK, factory_id UUID,
-ngay TEXT, chung_nhan TEXT, rows JSONB,
+ngay TEXT, chung_nhan TEXT, rows JSONB, -- deprecated legacy cache
 created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ
 ```
 
@@ -286,3 +286,8 @@ Quy định chi tiết về:
 xem tại:
 
 - `.claude/rules/04-settings-master-data.md`
+## Update 2026-06-11: dispatch rows
+
+- `dispatch_entries.rows` da bi ha xuong vai tro cache legacy mirrored tu `dispatch_entry_rows`.
+- Tinh nang moi phai query `dispatch_entry_rows` hoac helper resolve rows dung chung; khong doc/ghi truc tiep `dispatch_entries.rows` trong code moi.
+- Neu sau nay chay migration drop cot `rows`, code dung chuan helper se khong doi nghia vu.

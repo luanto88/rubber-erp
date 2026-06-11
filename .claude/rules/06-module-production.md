@@ -18,9 +18,9 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - `dispatch_entries` hiện là header/chứng từ; chi tiết từng chuyến đã có bảng vật lý `dispatch_entry_rows`.
 - Migration đã chạy: `supabase/migrations/20260601_dispatch_entry_rows.sql`.
 - `dispatch_entry_rows` là nguồn chính cho các tính năng mới cần query/thống kê/PDF theo ngày, đội, xe, tài xế, km, sản lượng.
-- `dispatch_entries.rows` vẫn được giữ và cập nhật song song như lớp legacy/cache để các module cũ (`storage`, `output`, `eudr`) chưa bị vỡ.
-- Khi thêm/sửa/import điều xe trong `src/app/dashboard/dispatch/page.tsx`, phải ghi cả `dispatch_entries` (`day_chuyen`, `rows`) và `dispatch_entry_rows` qua helper `replaceDispatchEntryRows`.
-- Khi đọc ở module điều xe, ưu tiên `dispatch_entry_rows`; nếu bảng vật lý chưa có dữ liệu thì fallback `dispatch_entries.rows`.
+- `dispatch_entries.rows` chỉ còn là cache legacy tạm thời trong giai đoạn chuyển tiếp; mã nguồn mới không được đọc hay ghi trực tiếp cột này.
+- Khi thêm/sửa/import điều xe trong `src/app/dashboard/dispatch/page.tsx`, chỉ ghi chi tiết vào `dispatch_entry_rows`; header `dispatch_entries` chỉ giữ metadata chứng từ.
+- Khi đọc ở module điều xe, `dispatch_entry_rows` là nguồn duy nhất cho chi tiết từng chuyến.
 - Helper mapping đặt tại `src/lib/dispatch-entry-rows.ts`.
 - Helper thống kê đặt tại `src/lib/dispatch-analytics.ts`; helper PDF đặt tại `src/lib/dispatch-pdf.ts`.
 - Mỗi dòng điều xe có `ghi_chu`; với dữ liệu vật lý lưu ở `dispatch_entry_rows.ghi_chu`, với legacy lưu trong `rows[].ghi_chu`.
@@ -49,8 +49,8 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - `chuyen` được auto-assign theo xe trong ngày
 - `lo_trinh` chỉ hiển thị các điểm cùng `đội` với `diem_gn` đã chọn
 - Danh mục `diem_gn` dùng bảng `dispatch_delivery_points`, filter theo `factory_id`
-- `dispatch_entries.rows[].diem_gn` chỉ lưu các mã điểm được chọn cho từng chuyến
-- `dispatch_entries.rows[].lo_thu_hoach` phải được suy ra từ `diem_gn + phiên`
+- `dispatch_entry_rows.diem_gn` lưu các mã điểm được chọn cho từng chuyến.
+- `dispatch_entry_rows.lo_thu_hoach` phải được suy ra từ `diem_gn + phiên`.
 - Nếu nhà máy chưa có master data mới, hệ thống chỉ được fallback tạm thời để tránh gãy màn hình
 
 ### Master data xe và tài xế

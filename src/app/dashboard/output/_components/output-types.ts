@@ -1,4 +1,8 @@
-import { toISODate } from "@/lib/dispatch-entry-rows"
+import {
+  syncDispatchEntriesLegacyRows,
+  toISODate,
+  type DispatchEntryRowRecord,
+} from "@/lib/dispatch-entry-rows"
 
 export type WarnCode =
   | "NO_DISPATCH_DATE"
@@ -184,8 +188,8 @@ const ZERO_KG: DispatchKg = {
   dt_kho: 0,
 }
 
-// ── Write-back tổng hợp KL từ production_records → dispatch_entries.rows[] ──
-// Gọi sau khi import hoặc lưu/xóa thủ công để dispatch luôn phản ánh sản lượng thực tế.
+// ── Write-back tổng hợp KL từ production_records → dispatch_entry_rows ──
+// Sau khi cập nhật bảng vật lý, helper sẽ sync lại dispatch_entries.rows như cache legacy.
 export async function writeBackToDispatch(
   factoryId: string,
   ngay: string,
@@ -230,66 +234,36 @@ export async function writeBackToDispatch(
     kl_dt:  fmt(g.dt_tuoi),  kl_dk:  fmt(g.dt_kho),  drc_d:  wdrc(g.dt_kho,  g.dt_tuoi),
   })
 
-  for (const entry of entries as Array<{ id: string; rows: Array<Record<string, unknown>> }>) {
-    let changed = false
-    const newRows = (entry.rows ?? []).map(row => {
-      const dxSoXe = parseVehicleCode(String(row.so_xe ?? "")).base_xe
-      const dxChuyen = Number(row.chuyen ?? 1)
-      const key = `${dxSoXe}:${dxChuyen}`
-      const nextPayload = buildDispatchPayload(groups.get(key) ?? ZERO_KG)
-      const samePayload =
-        String(row.kl_mn ?? "0") === nextPayload.kl_mn &&
-        String(row.kl_mnk ?? "0") === nextPayload.kl_mnk &&
-        String(row.drc_mn ?? "0") === nextPayload.drc_mn &&
-        String(row.kl_ct ?? "0") === nextPayload.kl_ct &&
-        String(row.kl_ck ?? "0") === nextPayload.kl_ck &&
-        String(row.drc_c ?? "0") === nextPayload.drc_c &&
-        String(row.kl_dct ?? "0") === nextPayload.kl_dct &&
-        String(row.kl_dck ?? "0") === nextPayload.kl_dck &&
-        String(row.drc_dc ?? "0") === nextPayload.drc_dc &&
-        String(row.kl_dkt ?? "0") === nextPayload.kl_dkt &&
-        String(row.kl_dkk ?? "0") === nextPayload.kl_dkk &&
-        String(row.drc_dk ?? "0") === nextPayload.drc_dk &&
-        String(row.kl_dt ?? "0") === nextPayload.kl_dt &&
-        String(row.kl_dk ?? "0") === nextPayload.kl_dk &&
-        String(row.drc_d ?? "0") === nextPayload.drc_d
-      if (samePayload) return row
-      changed = true
-      return {
-        ...row,
-        ...nextPayload,
-      }
-    })
-    if (changed) {
-      await supabase.from("dispatch_entries").update({ rows: newRows }).eq("id", entry.id)
-    }
-  }
-
   const entryIds = (entries as Array<{ id: string }>).map(entry => entry.id)
+  const uidsThisDate = new Set<string>()
   if (entryIds.length > 0) {
     const { data: physicalRows } = await supabase
       .from("dispatch_entry_rows")
-      .select("id, so_xe, chuyen")
+      .select("id, uid_legacy, so_xe, chuyen")
       .eq("factory_id", factoryId)
       .eq("ngay", toISODate(ngay))
       .in("dispatch_entry_id", entryIds)
 
-    await Promise.all((physicalRows ?? []).map(async (row: { id: string; so_xe: string; chuyen: number }) => {
+    await Promise.all((physicalRows ?? []).map(async (row: { id: string; uid_legacy?: string | null; so_xe: string; chuyen: number }) => {
       const key = `${parseVehicleCode(String(row.so_xe ?? "")).base_xe}:${Number(row.chuyen ?? 1)}`
+      if (row.uid_legacy) uidsThisDate.add(String(row.uid_legacy))
       await supabase
         .from("dispatch_entry_rows")
         .update(buildDispatchPayload(groups.get(key) ?? ZERO_KG))
         .eq("id", row.id)
         .eq("factory_id", factoryId)
     }))
+
+    await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds })
   }
 
   // 4. Đồng bộ KL ngăn lưu — cập nhật tong_tuoi/tong_kho cho ngăn có chuyến từ ngày này
-  const uidsThisDate = new Set<string>()
-  for (const entry of entries as Array<{ rows: Array<Record<string, unknown>> }>) {
-    for (const row of entry.rows ?? []) {
-      const uid = String(row.uid ?? "")
-      if (uid) uidsThisDate.add(uid)
+  if (!uidsThisDate.size) {
+    for (const entry of entries as Array<{ rows: Array<Record<string, unknown>> }>) {
+      for (const row of entry.rows ?? []) {
+        const uid = String(row.uid ?? "")
+        if (uid) uidsThisDate.add(uid)
+      }
     }
   }
   if (!uidsThisDate.size) return
@@ -308,17 +282,37 @@ export async function writeBackToDispatch(
   const allUids = new Set<string>()
   for (const n of affected) for (const uid of (n as { trips?: string[] }).trips ?? []) allUids.add(uid)
 
-  // Load toàn bộ dispatch để build uid→KL map (sau khi đã update ở bước 3, DB đã có giá trị mới)
-  const { data: allDx } = await supabase
-    .from("dispatch_entries")
-    .select("rows")
-    .eq("factory_id", factoryId)
-
   const uidKL = new Map<string, Record<string, number>>()
-  for (const d of allDx ?? []) {
-    for (const row of (d.rows ?? []) as Array<Record<string, string | number>>) {
-      const uid = String(row.uid ?? "")
-      if (allUids.has(uid)) {
+  const uidList = Array.from(allUids)
+  const { data: physicalRows } = await supabase
+    .from("dispatch_entry_rows")
+    .select("*")
+    .eq("factory_id", factoryId)
+    .in("uid_legacy", uidList)
+
+  for (const row of (physicalRows ?? []) as DispatchEntryRowRecord[]) {
+    const uid = String(row.uid_legacy ?? "")
+    if (!uid) continue
+    uidKL.set(uid, {
+      kl_mn: +(row.kl_mn ?? 0), kl_mnk: +(row.kl_mnk ?? 0),
+      kl_ct: +(row.kl_ct ?? 0), kl_ck: +(row.kl_ck ?? 0),
+      kl_dct: +(row.kl_dct ?? 0), kl_dck: +(row.kl_dck ?? 0),
+      kl_dkt: +(row.kl_dkt ?? 0), kl_dkk: +(row.kl_dkk ?? 0),
+      kl_dt: +(row.kl_dt ?? 0), kl_dk: +(row.kl_dk ?? 0),
+    })
+  }
+
+  const missingUids = uidList.filter((uid) => !uidKL.has(uid))
+  if (missingUids.length > 0) {
+    const { data: allDx } = await supabase
+      .from("dispatch_entries")
+      .select("rows")
+      .eq("factory_id", factoryId)
+
+    for (const d of allDx ?? []) {
+      for (const row of (d.rows ?? []) as Array<Record<string, string | number>>) {
+        const uid = String(row.uid ?? "")
+        if (!uid || uidKL.has(uid) || !allUids.has(uid)) continue
         uidKL.set(uid, {
           kl_mn:  +row.kl_mn  || 0, kl_mnk: +row.kl_mnk || 0,
           kl_ct:  +row.kl_ct  || 0, kl_ck:  +row.kl_ck  || 0,

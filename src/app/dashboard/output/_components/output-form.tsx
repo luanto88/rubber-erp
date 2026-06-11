@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { X, AlertTriangle, CheckCircle } from "lucide-react"
+import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import type { ProductionRecord, OutputFormState } from "./output-types"
@@ -87,12 +88,14 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
         // dispatch_entries.ngay có thể là "YYYY-MM-DD" hoặc "dd/mm/yyyy"
         const iso = form.ngay
         const ddmm = `${iso.slice(8)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
-        const { data: dxData } = await supabase
-          .from("dispatch_entries")
-          .select("rows")
-          .eq("factory_id", factoryId)
-          .or(`ngay.eq.${iso},ngay.eq.${ddmm}`)
-        const rows: DispatchVehicle[] = (dxData ?? []).flatMap((e: { rows?: unknown[] }) =>
+        const dxData = await loadDispatchEntriesWithResolvedRows(supabase, {
+          factoryId,
+          select: "id,ngay,rows",
+          ascending: true,
+        })
+        const rows: DispatchVehicle[] = dxData
+          .filter((entry) => entry.ngay === iso || entry.ngay === ddmm)
+          .flatMap((e) =>
           (e.rows ?? []).map((r) => {
             const row = r as { so_xe?: string; chuyen?: number; tai_xe?: string }
             return {

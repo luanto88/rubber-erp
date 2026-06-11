@@ -40,7 +40,7 @@ Error: Command "npm run build" exited with 1
 - Dữ liệu Điều xe và Sản lượng phải luôn khớp theo cùng khóa nghiệp vụ `ngày + đội + số xe + chuyến` trong phạm vi `factory_id`.
 - Khi module Sản lượng import lại file đã có dữ liệu cũ, hệ thống phải cập nhật lại đúng dòng hiện có thay vì tạo thêm bản ghi trùng; nếu lịch sử đã có nhiều dòng cùng khóa thì phải dọn trùng trước khi write-back sang Điều xe.
 - Cảnh báo trùng dữ liệu ở bước preview import là bắt buộc để người dùng biết dòng nào sẽ ghi đè dữ liệu cũ.
-- Sau mọi thao tác import, thêm, sửa hoặc xóa ở module Sản lượng, phải chạy write-back để cập nhật lại khối lượng trên `dispatch_entries.rows` và `dispatch_entry_rows`.
+- Sau mọi thao tác import, thêm, sửa hoặc xóa ở module Sản lượng, phải chạy write-back để cập nhật lại khối lượng trên `dispatch_entry_rows` trước; `dispatch_entries.rows` chỉ được sync lại như cache legacy nếu hệ thống còn giữ cột này.
 - Không chấp nhận trạng thái Điều xe nhỏ hơn Sản lượng chỉ vì dữ liệu trùng ở `production_records`.
 ## Cập nhật 2026-06-10: lọc loại nguyên liệu và UI thống kê
 
@@ -64,3 +64,8 @@ Error: Command "npm run build" exited with 1
 
 - Nếu sửa tiếp `src/app/dashboard/dispatch/page.tsx`, ưu tiên giữ text hiển thị bằng tiếng Việt Unicode bình thường.
 - Khi thêm component dùng chung cho filter, phải kiểm tra cả text trong chính component đó, không chỉ text ở nơi gọi.
+## Update 2026-06-11: dispatch source of truth
+
+- `dispatch_entry_rows` la source of truth cho chi tiet dieu xe.
+- Sau moi thao tac import/them/sua/xoa o module San luong, `writeBackToDispatch` phai cap nhat `dispatch_entry_rows` truoc.
+- `dispatch_entries.rows` neu con ton tai chi duoc sync lai nhu cache legacy; code moi khong duoc xem cot nay la nguon chinh.

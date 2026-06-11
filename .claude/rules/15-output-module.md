@@ -66,7 +66,7 @@ function parseVehicleCode(raw: string): { base_xe: string; chuyen: number } {
 ### Đội (doi) và điểm giao nhận
 
 - Trong file Excel: cột B là số nguyên 1–12 (số đội)
-- Trong `dispatch_entries.rows[].diem_gn`: mảng mã điểm giao nhận như "E1", "G3"
+- Trong `dispatch_entry_rows.diem_gn` hoặc tập rows đã được resolve qua helper dùng chung: mảng mã điểm giao nhận như "E1", "G3"
 - Trong `dispatch_delivery_points`: mỗi điểm có trường `doi` (số đội tương ứng)
 - **DOI_MISMATCH**: khi `doi` trong file ≠ `doi` của bất kỳ điểm giao nhận nào trong dispatch của xe đó
 
@@ -108,7 +108,7 @@ Bản ghi có cảnh báo vẫn được lưu — `warn_codes` là metadata đ�
 
 ### Matching algorithm
 
-1. Build `dispatchIndex: Map<"YYYY-MM-DD", Map<"baseXe:chuyen", { entryId, tai_xe, diem_gn[] }>>` từ `dispatch_entries`
+1. Build `dispatchIndex: Map<"YYYY-MM-DD", Map<"baseXe:chuyen", { entryId, tai_xe, diem_gn[] }>>` từ `loadDispatchEntriesWithResolvedRows(...)`
 2. Build `doiByMaLo: Map<ma_lo, doi>` từ `dispatch_delivery_points`
 3. Với mỗi dòng Excel: lookup dispatch → assign `dispatch_entry_id`, `tai_xe`, `warn_codes`
 4. Duplicate detection: key = `ngay:base_xe:chuyen:doi`
@@ -141,7 +141,7 @@ Upsert idempotent — upload cùng file 2 lần không tạo duplicate.
 
 ## Form thêm mới thủ công
 
-- Chọn ngày → form tự fetch `dispatch_entries` cho ngày đó (xử lý cả format "YYYY-MM-DD" và "dd/mm/yyyy")
+- Chọn ngày → form tự fetch dispatch đã resolve rows cho ngày đó (xử lý cả format "YYYY-MM-DD" và "dd/mm/yyyy")
 - Dropdown **Số xe** chỉ hiển thị xe từ điều xe của ngày đã chọn — **không fallback** sang `dispatch_vehicles` hay master data nào khác
   - Khi tạo mới mà ngày chưa có điều xe: dropdown bị disabled, placeholder `"-- Chưa có điều xe --"`, nút Lưu bị disabled
   - Khi sửa record đã tồn tại mà ngày không có dispatch: hiển thị xe đã lưu của record đó (read-only về danh sách, vẫn cho lưu)
@@ -153,7 +153,7 @@ Upsert idempotent — upload cùng file 2 lần không tạo duplicate.
   - Emerald: tất cả xe từ điều xe đã nhập
   - Slate: không có điều xe ngày đó (chỉ khi sửa record cũ)
 
-Banner đếm đúng theo dispatch: so sánh `dispatch_entries.rows` với `production_records` ngày đó theo key `so_xe:chuyen`.
+Banner đếm đúng theo dispatch: so sánh tập rows đã resolve từ `dispatch_entry_rows` với `production_records` ngày đó theo key `so_xe:chuyen`.
 
 **Nguyên tắc**: Sản lượng chỉ được nhập cho xe đã có trong bảng điều xe ngày đó. `page.tsx` không cần load `dispatch_vehicles` master data vì form không dùng nữa.
 
@@ -181,14 +181,12 @@ supabase/migrations/
 
 ### Cập nhật 2026-06-01
 
-- Sau migration `20260601_dispatch_entry_rows.sql`, write-back phải cập nhật song song:
-  - legacy `dispatch_entries.rows[]`
-  - bảng vật lý `dispatch_entry_rows`
-- Hàm `writeBackToDispatch` trong `src/app/dashboard/output/_components/output-types.ts` đã cập nhật cả hai nơi.
+- Sau migration `20260601_dispatch_entry_rows.sql`, write-back phải cập nhật bảng vật lý `dispatch_entry_rows` trước.
+- Nếu hệ thống vẫn còn giữ cache legacy, hàm `writeBackToDispatch` sẽ sync lại `dispatch_entries.rows[]` sau khi update bảng vật lý.
 - `dispatch_entry_rows.ngay` là `DATE`; khi match ngày dùng helper `toISODate()` từ `src/lib/dispatch-entry-rows.ts`.
 - Các module cũ vẫn có thể đọc `dispatch_entries.rows`, nhưng thống kê/PDF điều xe mới dùng dữ liệu vật lý đã hydrate từ `dispatch_entry_rows`.
 
-Sau khi import Excel hoặc lưu / xóa thủ công, hệ thống tự động tổng hợp sản lượng từ `production_records` và ghi ngược vào các trường KL của `dispatch_entries.rows[]`.
+Sau khi import Excel hoặc lưu / xóa thủ công, hệ thống tự động tổng hợp sản lượng từ `production_records`, ghi ngược vào `dispatch_entry_rows`, rồi sync cache legacy nếu cần.
 
 ### Hàm `writeBackToDispatch`
 
@@ -206,19 +204,20 @@ export async function writeBackToDispatch(
 1. Fetch toàn bộ `production_records` cho `(factory_id, ngay)`
 2. Group theo `(so_xe, chuyen)`, **cộng gộp KL qua tất cả `doi`**
    - Ví dụ: xe 2A ch1 đi đội E1 (2350 kg) + đội J7 (1350 kg) → tổng 3700 kg ghi vào 1 dòng dispatch
-3. Fetch `dispatch_entries` cho ngày đó — dùng `.or()` để match cả 2 format ngày
-4. Với mỗi `dispatch_entries.rows[]`:
+3. Fetch `dispatch_entries` header cho ngày đó và `dispatch_entry_rows` vật lý tương ứng
+4. Với mỗi row đã resolve từ `dispatch_entry_rows`:
    - Normalize `row.so_xe` qua `parseVehicleCode()` để lấy `base_xe`
    - Lookup group `"${base_xe}:${chuyen}"` → nếu có, ghi các trường KL; nếu không có, giữ nguyên dòng
-5. Chỉ `UPDATE` nếu có ít nhất 1 dòng thay đổi (`changed = true`)
-6. Tập hợp tất cả `uid` của các dispatch rows thuộc ngày đó → tìm ngăn lưu có `trips[]` chứa bất kỳ uid nào
-7. Tải lại toàn bộ dispatch (mọi ngày) để build `uid → KL map` chính xác → tính lại `tong_tuoi/tong_kho` cho từng ngăn bị ảnh hưởng và `UPDATE ngans`
+5. Chỉ `UPDATE` bảng vật lý nếu có ít nhất 1 dòng thay đổi (`changed = true`)
+6. Sau khi update bảng vật lý, sync lại `dispatch_entries.rows[]` nếu cache legacy vẫn còn bật
+7. Tập hợp tất cả `uid` của các dispatch rows thuộc ngày đó → tìm ngăn lưu có `trips[]` chứa bất kỳ uid nào
+8. Tải lại toàn bộ dispatch đã resolve rows (mọi ngày) để build `uid → KL map` chính xác → tính lại `tong_tuoi/tong_kho` cho từng ngăn bị ảnh hưởng và `UPDATE ngans`
 
 **Lý do load toàn bộ dispatch ở bước 7**: ngăn lưu tích lũy KL từ nhiều ngày. Cần tổng KL qua tất cả trips của ngăn (không chỉ ngày hiện tại). Load sau bước 5 đảm bảo DB đã có giá trị mới nhất cho ngày vừa cập nhật.
 
 ### Mapping trường
 
-| `production_records` (tổng) | `dispatch_entries.rows[]` |
+| `production_records` (tổng) | `dispatch_entry_rows` |
 |---|---|
 | `mn_tuoi` | `kl_mn` |
 | `mn_kho` | `kl_mnk` |
@@ -344,3 +343,9 @@ const loadDispatches = useCallback(async (fid: string) => {
   - `deleteDay`
   - `selectedDeleteIds`
   để tránh xung đột giữa chế độ sửa và xóa.
+## Update 2026-06-11: output reads resolved dispatch rows
+
+- Output module phai doc dispatch thong qua `loadDispatchEntriesWithResolvedRows(...)` hoac helper resolve rows tuong duong.
+- `dispatch_entry_rows` la source of truth cho chi tiet dieu xe, gom `diem_gn`, `tai_xe`, `so_xe`, `chuyen` va cac truong KL/DRC.
+- `dispatch_entries.rows` chi con la cache legacy. Neu he thong van con giu cot nay, write-back cap nhat `dispatch_entry_rows` truoc roi moi sync lai cache.
+- Banner doi soat, form manual, thong ke va PDF phai so sanh tren tap rows da resolve tu `dispatch_entry_rows`, khong duoc coi `dispatch_entries.rows` la nguon chinh.
