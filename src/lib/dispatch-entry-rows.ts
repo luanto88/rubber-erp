@@ -301,15 +301,23 @@ export async function loadDispatchEntriesWithResolvedRows<TExtra extends Record<
       : rawEntries
 
   return filteredEntries.map((entry) => {
-    const physical = physicalRowsByEntry.get(entry.id)
-    if (physical && physical.length > 0) return { ...entry, rows: physical }
-    // Fallback: dùng JSONB rows cho entries chưa có bản ghi vật lý (trước migration)
+    const physical = physicalRowsByEntry.get(entry.id) || []
     const jsonbRows = Array.isArray(entry.rows)
       ? (entry.rows as LegacyDispatchRow[]).filter(
           (r): r is LegacyDispatchRow => Boolean(r && typeof r === "object"),
         )
       : []
-    return { ...entry, rows: jsonbRows }
+
+    if (physical.length === 0) {
+      // Không có physical — dùng JSONB fallback (entries trước migration 2026-06-01)
+      return { ...entry, rows: jsonbRows }
+    }
+
+    // Có physical — MERGE: bổ sung JSONB rows có uid chưa xuất hiện trong physical
+    const physicalUids = new Set(physical.map((r) => r.uid).filter(Boolean))
+    const extraJsonb = jsonbRows.filter((r) => r.uid && !physicalUids.has(r.uid))
+    if (extraJsonb.length === 0) return { ...entry, rows: physical }
+    return { ...entry, rows: [...physical, ...extraJsonb] }
   })
 }
 

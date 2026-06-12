@@ -254,6 +254,38 @@ export async function writeBackToDispatch(
         .eq("factory_id", factoryId)
     }))
 
+    // INSERT/upsert rows mới cho xe/chuyến từ production chưa có row vật lý tương ứng.
+    // Xảy ra khi dispatch được re-save với ít dòng hơn sau migration 2026-06-01,
+    // làm mất các dòng gốc ở cả physical lẫn JSONB.
+    const physicalKeys = new Set<string>(
+      (physicalRows ?? []).map((row: { so_xe: string; chuyen: number }) =>
+        `${parseVehicleCode(String(row.so_xe ?? "")).base_xe}:${Number(row.chuyen ?? 1)}`
+      )
+    )
+    const missingPairs = [...groups.entries()].filter(([key]) => !physicalKeys.has(key))
+    if (missingPairs.length > 0 && entryIds.length > 0) {
+      const firstEntryId = entryIds[0]
+      const isoNgay = toISODate(ngay)
+      const newRows = missingPairs.map(([key, kg]) => {
+        const [base_xe, chuyen_str] = key.split(":")
+        return {
+          factory_id: factoryId,
+          dispatch_entry_id: firstEntryId,
+          uid_legacy: `wb_${isoNgay}_${key.replace(":", "_")}`,
+          ngay: isoNgay,
+          so_xe: base_xe,
+          chuyen: Number(chuyen_str),
+          ...buildDispatchPayload(kg),
+        }
+      })
+      await supabase.from("dispatch_entry_rows").upsert(newRows, {
+        onConflict: "dispatch_entry_id,uid_legacy",
+      })
+      for (const row of newRows) {
+        if (row.uid_legacy) uidsThisDate.add(row.uid_legacy)
+      }
+    }
+
     await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds })
   }
 
