@@ -3149,7 +3149,11 @@ export default function ProductPage() {
                       </div>
 
                       <div className="space-y-4">
-                        {[firstLot, middleCount > 0 ? "middle" : null, lastLot && lastLot.num !== firstLot?.num ? lastLot : null].map((entry, sectionIdx) => {
+                        {([
+                          firstLot,
+                          middleCount > 0 ? "middle" : null,
+                          lastLot && lastLot.num !== firstLot?.num ? lastLot : null,
+                        ] satisfies Array<LotDraft | "middle" | null>).map((entry, sectionIdx) => {
                           if (!entry) return null;
                           if (entry === "middle") {
                             return (
