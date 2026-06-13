@@ -413,6 +413,28 @@ function fmtKg(kg: number): string {
   return Math.round(kg).toLocaleString("vi-VN") + " kg";
 }
 
+function compareLotRecency(
+  a: Pick<Lot, "ngay_sx" | "ca" | "updated_at" | "created_at">,
+  b: Pick<Lot, "ngay_sx" | "ca" | "updated_at" | "created_at">,
+) {
+  if (b.ngay_sx !== a.ngay_sx) return b.ngay_sx.localeCompare(a.ngay_sx);
+  const caDiff = (CA_ORDER_MAP[b.ca] || 0) - (CA_ORDER_MAP[a.ca] || 0);
+  if (caDiff !== 0) return caDiff;
+  const bStamp = b.updated_at || b.created_at || "";
+  const aStamp = a.updated_at || a.created_at || "";
+  return bStamp.localeCompare(aStamp);
+}
+
+function joinUniqueValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function formatShiftDetailLabel(label: string, values: string[]) {
+  if (values.length === 0) return "";
+  if (values.length === 1) return `${label} ${values[0]}`;
+  return `${label} ${values.join(", ")}`;
+}
+
 const CA_ORDER_MAP: Record<string, number> = { A: 1, B: 2, C: 3, D: 4 };
 
 function isSameLotSeries(
@@ -1128,6 +1150,71 @@ export default function ProductPage() {
     return map;
   }, [contributions]);
 
+  const bagSuggestionMap = useMemo(() => {
+    const exact = new Map<string, string>();
+    const byLoai = new Map<string, string>();
+    const sortedLots = [...lots].sort(compareLotRecency);
+
+    sortedLots.forEach((lot) => {
+      const normalizedDc = normalizeDayChuyen(lot.day_chuyen);
+      const exactKey = [normalizedDc, lot.loai_csr, Number(lot.loai_banh)].join("::");
+      const loaiKey = [normalizedDc, lot.loai_csr].join("::");
+      if (!exact.has(exactKey) && lot.boc) exact.set(exactKey, lot.boc);
+      if (!byLoai.has(loaiKey) && lot.boc) byLoai.set(loaiKey, lot.boc);
+    });
+
+    return { exact, byLoai };
+  }, [lots]);
+
+  const getSuggestedBoc = (
+    dayChuyenVal: string,
+    loaiCsr: string,
+    loaiBanh: number,
+    fallback = "",
+  ) => {
+    const normalizedDc = normalizeDayChuyen(dayChuyenVal);
+    const bocOptions = getBocsForLoaiCSR(dayChuyenVal, loaiCsr);
+    const exactKey = [normalizedDc, loaiCsr, Number(loaiBanh)].join("::");
+    const loaiKey = [normalizedDc, loaiCsr].join("::");
+    const historyMatch =
+      bagSuggestionMap.exact.get(exactKey) || bagSuggestionMap.byLoai.get(loaiKey) || "";
+
+    if (historyMatch && bocOptions.includes(historyMatch)) return historyMatch;
+    return bocOptions[1] || bocOptions[0] || fallback;
+  };
+
+  const latestLotByNganId = useMemo(() => {
+    const map = new Map<string, Lot>();
+    const sortedLots = [...lots].sort(compareLotRecency);
+    sortedLots.forEach((lot) => {
+      if (!lot.ngan_id || map.has(lot.ngan_id)) return;
+      map.set(lot.ngan_id, lot);
+    });
+    return map;
+  }, [lots]);
+
+  const compareProductNgans = useCallback((a: Ngan, b: Ngan) => {
+    const aInProduction = normalizeStorageStatus(a.trang_thai) === STORAGE_STATUS_IN_PRODUCTION;
+    const bInProduction = normalizeStorageStatus(b.trang_thai) === STORAGE_STATUS_IN_PRODUCTION;
+    if (aInProduction !== bInProduction) return aInProduction ? -1 : 1;
+
+    const latestA = latestLotByNganId.get(a.id);
+    const latestB = latestLotByNganId.get(b.id);
+    if (latestA && latestB) {
+      const recencyDiff = compareLotRecency(latestA, latestB);
+      if (recencyDiff !== 0) return recencyDiff;
+    } else if (latestA || latestB) {
+      return latestA ? -1 : 1;
+    }
+
+    const aStandard = getStandardNganNumber(a);
+    const bStandard = getStandardNganNumber(b);
+    if (aStandard !== null && bStandard !== null) return aStandard - bStandard;
+    if (aStandard !== null) return -1;
+    if (bStandard !== null) return 1;
+    return `${a.ten_ngan} ${a.ma_ngan}`.localeCompare(`${b.ten_ngan} ${b.ma_ngan}`, "vi");
+  }, [latestLotByNganId]);
+
   const productNganOptions = useMemo(() => {
     const validLoaiNl = getValidLoaiNlOptions(session.day_chuyen);
 
@@ -1137,15 +1224,8 @@ export default function ProductPage() {
         if (Number(n.tong_kho || 0) <= 0) return false;
         return isProductSelectableStorageStatus(n.trang_thai);
       })
-      .sort((a, b) => {
-        const aStandard = getStandardNganNumber(a);
-        const bStandard = getStandardNganNumber(b);
-        if (aStandard !== null && bStandard !== null) return aStandard - bStandard;
-        if (aStandard !== null) return -1;
-        if (bStandard !== null) return 1;
-        return `${a.ten_ngan} ${a.ma_ngan}`.localeCompare(`${b.ten_ngan} ${b.ma_ngan}`, "vi");
-      });
-  }, [ngans, session.day_chuyen]);
+      .sort(compareProductNgans);
+  }, [ngans, session.day_chuyen, compareProductNgans]);
 
   const filteredProductNgans = useMemo(() => {
     const query = foldText(nganManualQuery);
@@ -1157,6 +1237,7 @@ export default function ProductPage() {
   }, [productNganOptions, nganManualQuery]);
 
   const selectedNgan = ngans.find((n) => n.id === session.ngan_id);
+  const suggestedNganId = productNganOptions[0]?.id || "";
   const allDorDangLots = lots.filter(
     (l) =>
       normalizeLotStatus(l.trang_thai) === "Dở dang" &&
@@ -1399,14 +1480,7 @@ export default function ProductPage() {
         if (Number(n.tong_kho || 0) <= 0) return false;
         return isProductSelectableStorageStatus(n.trang_thai);
       })
-      .sort((a, b) => {
-        const aStandard = getStandardNganNumber(a);
-        const bStandard = getStandardNganNumber(b);
-        if (aStandard !== null && bStandard !== null) return aStandard - bStandard;
-        if (aStandard !== null) return -1;
-        if (bStandard !== null) return 1;
-        return `${a.ten_ngan} ${a.ma_ngan}`.localeCompare(`${b.ten_ngan} ${b.ma_ngan}`, "vi");
-      });
+      .sort(compareProductNgans);
     return available[0]?.id || "";
   };
 
@@ -1421,14 +1495,14 @@ export default function ProductPage() {
         next.loai_csr = csrOpts[0] || "";
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
         next.loai_banh = cfg.loai_banh;
-        next.boc = getBocsForLoaiCSR(patch.day_chuyen, next.loai_csr)[1] || "";
+        next.boc = getSuggestedBoc(patch.day_chuyen, next.loai_csr, next.loai_banh, next.boc);
         next.ngan_id = autoSelectNganId(patch.day_chuyen);
         next.so_ca = 2;
       }
       if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
         next.loai_banh = cfg.loai_banh;
-        next.boc = getBocsForLoaiCSR(next.day_chuyen, next.loai_csr)[1] || "";
+        next.boc = getSuggestedBoc(next.day_chuyen, next.loai_csr, next.loai_banh, next.boc);
       }
       return next;
     });
@@ -1456,10 +1530,12 @@ export default function ProductPage() {
                 nextBlock.loai_csr = csrOpts[0] || nextBlock.loai_csr;
                 const cfg = getLoaiBanhConfig(nextBlock.loai_csr, nextBlock.loai_banh);
                 nextBlock.loai_banh = cfg.loai_banh;
-                nextBlock.boc =
-                  getBocsForLoaiCSR(patch.day_chuyen, nextBlock.loai_csr)[1] ||
-                  getBocsForLoaiCSR(patch.day_chuyen, nextBlock.loai_csr)[0] ||
-                  nextBlock.boc;
+                nextBlock.boc = getSuggestedBoc(
+                  patch.day_chuyen,
+                  nextBlock.loai_csr,
+                  nextBlock.loai_banh,
+                  nextBlock.boc,
+                );
               }
               if (
                 ci === 0 &&
@@ -1560,13 +1636,16 @@ export default function ProductPage() {
             nextBlock.loai_banh = cfg.loai_banh;
           }
           const previousBlock = getPreviousBlock(prev, caIdx, blockIdx);
-          if (patch.loai_csr !== undefined) {
-            nextBlock.boc =
-              patch.boc ??
-              getBocsForLoaiCSR(session.day_chuyen, nextBlock.loai_csr)[1] ??
-              getBocsForLoaiCSR(session.day_chuyen, nextBlock.loai_csr)[0] ??
-              nextBlock.boc;
-          }
+            if (patch.loai_csr !== undefined) {
+              nextBlock.boc =
+                patch.boc ??
+                getSuggestedBoc(
+                  session.day_chuyen,
+                  nextBlock.loai_csr,
+                  nextBlock.loai_banh,
+                  nextBlock.boc,
+                );
+            }
           if (!affectsLotDrafts) {
             return nextBlock;
           }
@@ -1872,9 +1951,7 @@ export default function ProductPage() {
       loai_csr: defaultCsr,
       loai_banh: cfg.loai_banh,
       boc:
-        getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[1] ||
-        getBocsForLoaiCSR(DAY_CHUYEN_TAP, defaultCsr)[0] ||
-        "",
+        getSuggestedBoc(DAY_CHUYEN_TAP, defaultCsr, cfg.loai_banh),
       tham: "cũ",
       chi_thi: lastChiThi,
     pallet: ["Sắt đế gỗ"],
@@ -2567,6 +2644,12 @@ export default function ProductPage() {
     const shiftSummaries = caSections.map((cs) => {
       const summary = cs.blocks.reduce(
         (acc, block) => {
+          const blockBanh = block.lots.reduce((sum, lot) => sum + getLotDraftAddedBanh(lot), 0);
+          if (blockBanh <= 0) return acc;
+
+          acc.loaiBanh.push(String(block.loai_banh));
+          if (block.boc) acc.bocs.push(block.boc);
+          acc.pallets.push(...block.pallet);
           block.lots.forEach((lot) => {
             const addedBanh = getLotDraftAddedBanh(lot);
             acc.banh += addedBanh;
@@ -2574,12 +2657,23 @@ export default function ProductPage() {
           });
           return acc;
         },
-        { banh: 0, kg: 0 },
+        { banh: 0, kg: 0, loaiBanh: [] as string[], bocs: [] as string[], pallets: [] as string[] },
       );
+      const loaiBanhValues = joinUniqueValues(summary.loaiBanh);
+      const bocValues = joinUniqueValues(summary.bocs);
+      const palletValues = joinUniqueValues(summary.pallets);
+      const detailParts = [
+        formatShiftDetailLabel("Bành", loaiBanhValues),
+        formatShiftDetailLabel("Bọc", bocValues),
+        formatShiftDetailLabel("Pallet", palletValues),
+      ].filter(Boolean);
       return {
         ...cs,
         totalBanh: summary.banh,
         totalKg: Math.round(summary.kg * 100) / 100,
+        detailParts,
+        footerText: detailParts.join(" · "),
+        compactFooterText: detailParts.join(" / "),
       };
     });
 
@@ -2881,6 +2975,8 @@ export default function ProductPage() {
                           filteredProductNgans.map((n) => {
                             const kgUsed = nganKgMap[n.id] || 0;
                             const selected = session.ngan_id === n.id;
+                            const isSuggested = n.id === suggestedNganId;
+                            const latestLot = latestLotByNganId.get(n.id);
                             return (
                               <button
                                 key={n.id}
@@ -2895,9 +2991,21 @@ export default function ProductPage() {
                                 <div className="truncate text-xs font-extrabold text-slate-800">
                                   {n.ma_ngan || n.ten_ngan}
                                 </div>
+                                {isSuggested && (
+                                  <div className="mt-1">
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">
+                                      Gợi ý gần nhất
+                                    </span>
+                                  </div>
+                                )}
                                 <div className="mt-0.5 truncate text-[10px] text-slate-500">
                                   {n.ten_ngan} · {n.trang_thai} · Còn {fmtKg(Math.max(n.tong_kho - kgUsed, 0))}
                                 </div>
+                                {latestLot && (
+                                  <div className="mt-0.5 truncate text-[10px] text-slate-400">
+                                    TP gần nhất: {new Date(`${latestLot.ngay_sx}T00:00:00`).toLocaleDateString("vi-VN")} · Ca {latestLot.ca}
+                                  </div>
+                                )}
                               </button>
                             );
                           })
@@ -2941,6 +3049,11 @@ export default function ProductPage() {
                 <span className="text-xs font-bold text-slate-600">
                   {cs.totalBanh} bành · {fmtKg(cs.totalKg)}
                 </span>
+                {cs.footerText && (
+                  <span className="text-xs font-semibold text-slate-500">
+                    {cs.footerText}
+                  </span>
+                )}
                 <button
                   onClick={() => addCaBlock(caIdx)}
                   disabled={nganBlocked}
@@ -3334,6 +3447,14 @@ export default function ProductPage() {
                   <span className="text-sm font-extrabold text-blue-800">
                     {Math.round(cs.totalKg).toLocaleString("vi-VN")} kg
                   </span>
+                  {cs.footerText && (
+                    <>
+                      <span className="text-xs text-blue-400">·</span>
+                      <span className="text-xs font-bold text-blue-700">
+                        {cs.footerText}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -3402,6 +3523,7 @@ export default function ProductPage() {
                       className="px-2.5 py-1 bg-blue-100 text-blue-700 text-[11px] font-bold rounded-full whitespace-nowrap"
                     >
                       Ca {cs.ca}: {Math.round(cs.totalKg).toLocaleString("vi-VN")} kg
+                      {cs.compactFooterText ? ` / ${cs.compactFooterText}` : ""}
                     </span>
                   ) : null,
                 )}
