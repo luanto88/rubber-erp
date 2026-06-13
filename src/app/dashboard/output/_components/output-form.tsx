@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import type { ProductionRecord, OutputFormState } from "./output-types"
 import { emptyOutputForm, parseVehicleCode } from "./output-types"
+import { formatDateDisplay, getTodayISODate, normalizeDateInput } from "@/lib/date-utils"
+import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
@@ -27,9 +29,7 @@ const LATEX_TYPES = [
 type LatexKey = typeof LATEX_TYPES[number]["key"]
 
 function fmtDate(iso: string) {
-  if (!iso) return ""
-  const [y, m, d] = iso.split("-")
-  return `${d}/${m}/${y}`
+  return formatDateDisplay(iso)
 }
 
 interface DispatchVehicle {
@@ -71,7 +71,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     if (record) return
     setForm({
       ...emptyOutputForm(),
-      ngay: initialDate || new Date().toISOString().slice(0, 10),
+      ngay: initialDate || getTodayISODate(),
     })
   }, [initialDate, record])
 
@@ -86,15 +86,13 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
       setDispatchLoading(true)
       try {
         // dispatch_entries.ngay có thể là "YYYY-MM-DD" hoặc "dd/mm/yyyy"
-        const iso = form.ngay
-        const ddmm = `${iso.slice(8)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
         const dxData = await loadDispatchEntriesWithResolvedRows(supabase, {
           factoryId,
           select: "id,ngay,rows",
           ascending: true,
         })
         const rows: DispatchVehicle[] = dxData
-          .filter((entry) => entry.ngay === iso || entry.ngay === ddmm)
+          .filter((entry) => normalizeDateInput(entry.ngay) === form.ngay)
           .flatMap((e) =>
           (e.rows ?? []).map((r) => {
             const row = r as { so_xe?: string; chuyen?: number; tai_xe?: string }
@@ -233,10 +231,9 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày *</label>
-              <input
-                type="date"
+              <DateTextInput
                 value={form.ngay}
-                onChange={e => setField("ngay", e.target.value)}
+                onChange={(value) => setField("ngay", value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
               />
             </div>

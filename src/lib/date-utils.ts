@@ -1,0 +1,70 @@
+export function getTodayISODate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function isLeapYear(year: number) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+}
+
+function isValidDateParts(year: number, month: number, day: number) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false
+  if (year < 1900 || year > 9999) return false
+  if (month < 1 || month > 12) return false
+  const daysInMonth = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ]
+  return day >= 1 && day <= daysInMonth[month - 1]
+}
+
+export function normalizeDateInput(value: string | null | undefined) {
+  const raw = String(value ?? "").trim()
+  if (!raw) return ""
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (isoMatch) {
+    const year = Number(isoMatch[1])
+    const month = Number(isoMatch[2])
+    const day = Number(isoMatch[3])
+    if (!isValidDateParts(year, month, day)) return ""
+    return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
+  }
+
+  const displayMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (displayMatch) {
+    const day = Number(displayMatch[1])
+    const month = Number(displayMatch[2])
+    const year = Number(displayMatch[3])
+    if (!isValidDateParts(year, month, day)) return ""
+    return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
+  }
+
+  return ""
+}
+
+export function formatDateDisplay(value: string | null | undefined) {
+  const iso = normalizeDateInput(value)
+  if (!iso) return ""
+  const [year, month, day] = iso.split("-")
+  return `${day}/${month}/${year}`
+}
+
+export function isDateInRange(date: string, fromDate?: string | null, toDate?: string | null) {
+  const iso = normalizeDateInput(date)
+  const from = normalizeDateInput(fromDate)
+  const to = normalizeDateInput(toDate)
+  if (!iso) return false
+  if (from && iso < from) return false
+  if (to && iso > to) return false
+  return true
+}

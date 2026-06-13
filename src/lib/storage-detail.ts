@@ -2,6 +2,7 @@
 
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
+import { normalizeDateInput } from "@/lib/date-utils"
 
 export type StorageNgan = {
   id: string
@@ -25,11 +26,17 @@ export type StorageNgan = {
 }
 
 export type StorageTripItem = {
+  ref: string
   uid: string
+  row_id?: string
+  dispatch_entry_id?: string
   _date: string
   so_xe: string
   chuyen: number
   tai_xe: string
+  diem_gn: string[]
+  phien: string[]
+  lo_thu_hoach: string[]
   kl_ct: number
   kl_ck: number
   kl_dct: number
@@ -81,12 +88,26 @@ export type StorageGeoJsonCollection = {
 }
 
 export function toISODate(value: string) {
-  if (!value) return value
-  if (value.includes("/")) {
-    const [d, m, y] = value.split("/")
-    return `${y}-${(m || "").padStart(2, "0")}-${(d || "").padStart(2, "0")}`
-  }
-  return value.slice(0, 10)
+  return normalizeDateInput(value) || value
+}
+
+export function buildDispatchTripRef(parts: {
+  dispatchEntryId?: string | null
+  rowId?: string | null
+  uid?: string | null
+}) {
+  const dispatchEntryId = String(parts.dispatchEntryId || "").trim()
+  const rowId = String(parts.rowId || parts.uid || "").trim()
+  if (dispatchEntryId && rowId) return `${dispatchEntryId}::${rowId}`
+  return String(parts.uid || "").trim()
+}
+
+function parseDispatchTripRef(value: string) {
+  const raw = String(value || "").trim()
+  if (!raw) return { raw: "", dispatchEntryId: "", rowId: "", uid: "" }
+  if (!raw.includes("::")) return { raw, dispatchEntryId: "", rowId: "", uid: raw }
+  const [dispatchEntryId, rowId] = raw.split("::", 2)
+  return { raw, dispatchEntryId, rowId, uid: "" }
 }
 
 export function formatStorageDate(value?: string | null) {
@@ -134,17 +155,25 @@ export function getKLFromTrip(trip: StorageTripItem, loaiNl: string) {
   }
 }
 
-function mapTripRow(row: Record<string, string>, ngay: string): StorageTripItem {
+function mapTripRow(row: Record<string, string>, ngay: string, dispatchEntryId?: string): StorageTripItem {
   const date =
     row._date && /^\d{4}-\d{2}-\d{2}/.test(row._date)
       ? row._date.slice(0, 10)
       : toISODate(ngay)
+  const uid = row.uid || ""
+  const rowId = row.row_id || uid || ""
   return {
-    uid: row.uid || "",
+    ref: buildDispatchTripRef({ dispatchEntryId, rowId, uid }),
+    uid,
+    row_id: rowId || undefined,
+    dispatch_entry_id: dispatchEntryId || row.dispatch_entry_id || undefined,
     _date: date,
     so_xe: row.so_xe || "",
     chuyen: Number(row.chuyen) || 1,
     tai_xe: row.tai_xe || "",
+    diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    phien: Array.isArray(row.phien) ? row.phien.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    lo_thu_hoach: Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.map((item) => String(item || "").trim()).filter(Boolean) : [],
     kl_ct: Number(row.kl_ct) || 0,
     kl_ck: Number(row.kl_ck) || 0,
     kl_dct: Number(row.kl_dct) || 0,
@@ -168,41 +197,87 @@ function sortTrips(trips: StorageTripItem[]) {
   })
 }
 
-export async function loadDispatchTripsByUids(factoryId: string, tripUids: string[]) {
-  if (!factoryId || tripUids.length === 0) return []
-  const uidSet = new Set(tripUids)
-  const tripsByUid = new Map<string, StorageTripItem>()
+function resolveLegacyTripCandidateRefs(
+  tripToken: string,
+  entries: Array<{ id: string; ngay: string; rows: Record<string, string>[] }>,
+  dateBounds?: { fromDate?: string | null; toDate?: string | null },
+) {
+  const parsed = parseDispatchTripRef(tripToken)
+  if (!parsed.uid) return []
+
+  const fromDate = normalizeDateInput(dateBounds?.fromDate)
+  const toDate = normalizeDateInput(dateBounds?.toDate)
+  const refs: string[] = []
+
+  for (const entry of entries) {
+    const entryDate = toISODate(entry.ngay)
+    if (fromDate && entryDate < fromDate) continue
+    if (toDate && entryDate > toDate) continue
+
+    for (const row of entry.rows) {
+      if (String(row.uid || "") !== parsed.uid) continue
+      refs.push(
+        buildDispatchTripRef({
+          dispatchEntryId: entry.id,
+          rowId: row.row_id || row.uid,
+          uid: row.uid,
+        }),
+      )
+    }
+  }
+
+  return [...new Set(refs.filter(Boolean))]
+}
+
+export async function loadDispatchTripsByUids(
+  factoryId: string,
+  tripRefs: string[],
+  options?: { fromDate?: string | null; toDate?: string | null },
+) {
+  if (!factoryId || tripRefs.length === 0) return []
+  const requestedRefs = new Set(tripRefs.filter(Boolean))
+  const tripsByRef = new Map<string, StorageTripItem>()
   const entries = await loadDispatchEntriesWithResolvedRows(supabase, {
     factoryId,
     select: "id,ngay,rows",
+    fromDate: options?.fromDate || undefined,
+    toDate: options?.toDate || undefined,
     ascending: true,
   })
+
+  const normalizedEntries = entries.map((entry) => ({
+    id: entry.id,
+    ngay: typeof entry.ngay === "string" ? entry.ngay : "",
+    rows: Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : [],
+  }))
+  const legacyCandidateRefs = new Map(
+    tripRefs
+      .map((tripRef) => [
+        tripRef,
+        resolveLegacyTripCandidateRefs(tripRef, normalizedEntries, options),
+      ] as const),
+  )
 
   for (const entry of entries) {
     const ngay = typeof entry.ngay === "string" ? entry.ngay : ""
     const rows = Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : []
     for (const row of rows) {
-      if (!uidSet.has(row.uid || "")) continue
-      if (tripsByUid.has(row.uid || "")) continue
-      const trip = mapTripRow(row, ngay)
-      if (!trip.uid) continue
-      tripsByUid.set(trip.uid, trip)
+      const trip = mapTripRow(row, ngay, entry.id)
+      const matchesRequestedRef = requestedRefs.has(trip.ref)
+      const matchesLegacyRef = tripRefs.some((tripRef) =>
+        legacyCandidateRefs.get(tripRef)?.includes(trip.ref),
+      )
+      if (!matchesRequestedRef && !matchesLegacyRef) continue
+      if (tripsByRef.has(trip.ref)) continue
+      tripsByRef.set(trip.ref, trip)
     }
   }
 
-  return sortTrips(Array.from(tripsByUid.values()))
+  return sortTrips(Array.from(tripsByRef.values()))
 }
 
 function almostEqualStorageWeight(a: number, b: number) {
   return Math.abs((a || 0) - (b || 0)) < 0.0001
-}
-
-function isTripWithinNganRange(ngan: Pick<StorageNgan, "ngay_bd" | "ngay_kt">, trip: Pick<StorageTripItem, "_date">) {
-  const from = (ngan.ngay_bd || "").slice(0, 10)
-  const to = ((ngan.ngay_kt || ngan.ngay_bd || "")).slice(0, 10)
-  const date = (trip._date || "").slice(0, 10)
-  if (!from || !to || !date) return false
-  return date >= from && date <= to
 }
 
 export async function resolveStorageNgansActualTotals(
@@ -220,17 +295,35 @@ export async function resolveStorageNgansActualTotals(
     ),
   )
 
+  const entries = await loadDispatchEntriesWithResolvedRows(supabase, {
+    factoryId,
+    select: "id,ngay,rows",
+    ascending: true,
+  })
+  const normalizedEntries = entries.map((entry) => ({
+    id: entry.id,
+    ngay: typeof entry.ngay === "string" ? entry.ngay : "",
+    rows: Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : [],
+  }))
   const trips = await loadDispatchTripsByUids(factoryId, allTripUids)
-  const tripsByUid = new Map(trips.map((trip) => [trip.uid, trip] as const))
+  const tripsByRef = new Map(trips.map((trip) => [trip.ref, trip] as const))
   const updates: Array<{ id: string; tong_tuoi: number; tong_kho: number; trips: string[] }> = []
 
   const resolved = ngans.map((ngan) => {
-    const normalizedTrips = (Array.isArray(ngan.trips) ? ngan.trips : [])
-      .map((uid) => tripsByUid.get(uid))
+    const currentTripRefs = Array.isArray(ngan.trips) ? ngan.trips.filter(Boolean) : []
+    const persistedTripRefs = currentTripRefs.flatMap((tripRef) => {
+      const parsed = parseDispatchTripRef(tripRef)
+      if (parsed.dispatchEntryId && parsed.rowId) return [tripRef]
+      return resolveLegacyTripCandidateRefs(tripRef, normalizedEntries, {
+        fromDate: ngan.ngay_bd,
+        toDate: ngan.ngay_kt || ngan.ngay_bd,
+      })
+    })
+    const normalizedTrips = persistedTripRefs
+      .map((tripRef) => tripsByRef.get(tripRef))
       .filter((trip): trip is StorageTripItem => Boolean(trip))
-      .filter((trip) => isTripWithinNganRange(ngan, trip))
 
-    const normalizedTripUids = normalizedTrips.map((trip) => trip.uid)
+    const normalizedTripUids = normalizedTrips.map((trip) => trip.ref)
     const summary = summarizeStorageTrips(
       { ...ngan, trips: normalizedTripUids },
       normalizedTrips,
@@ -238,7 +331,7 @@ export async function resolveStorageNgansActualTotals(
 
     const tong_tuoi = Math.round(summary.tuoi * 100) / 100
     const tong_kho = Math.round(summary.kho * 100) / 100
-    const currentTripUids = Array.isArray(ngan.trips) ? ngan.trips.filter(Boolean) : []
+    const currentTripUids = currentTripRefs
     const tripsChanged =
       currentTripUids.length !== normalizedTripUids.length ||
       currentTripUids.some((uid, index) => uid !== normalizedTripUids[index])
@@ -289,10 +382,9 @@ export async function loadDispatchTripsByDateRange(factoryId: string, fromDate: 
     const ngay = typeof entry.ngay === "string" ? toISODate(entry.ngay) : ""
     const rows = Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : []
     for (const row of rows) {
-      if (tripsByUid.has(row.uid || "")) continue
-      const trip = mapTripRow(row, ngay)
-      if (!trip.uid) continue
-      tripsByUid.set(trip.uid, trip)
+      const trip = mapTripRow(row, ngay, entry.id)
+      if (!trip.ref || tripsByUid.has(trip.ref)) continue
+      tripsByUid.set(trip.ref, trip)
     }
   }
 
@@ -317,20 +409,29 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
   }
 
   const { data: dispatchRows, error: dispatchError } = await supabase
-    .from("dispatch_entry_rows")
-    .select("uid_legacy,lo_thu_hoach")
+    .from("dispatch_entries")
+    .select("id,ngay,rows")
     .eq("factory_id", factoryId)
-    .in("uid_legacy", tripUids)
 
   if (dispatchError) throw new Error(dispatchError.message)
 
-  const plotCodes = [...new Set(
-    (dispatchRows || []).flatMap((row) =>
-      Array.isArray(row.lo_thu_hoach)
-        ? row.lo_thu_hoach.map((code) => String(code || "").trim()).filter(Boolean)
-        : [],
-    ),
-  )]
+  const tripUidSet = new Set(tripUids)
+  const plotCodes = [...new Set((dispatchRows || []).flatMap((entry) =>
+    Array.isArray(entry.rows)
+      ? entry.rows.flatMap((row) => {
+          const typedRow = row as Record<string, unknown>
+          const tripRef = buildDispatchTripRef({
+            dispatchEntryId: String((entry as { id?: string }).id || ""),
+            rowId: String(typedRow.row_id ?? typedRow.uid ?? ""),
+            uid: String(typedRow.uid ?? ""),
+          })
+          if (!tripUidSet.has(tripRef) && !tripUidSet.has(String(typedRow.uid ?? ""))) return []
+          return Array.isArray(typedRow.lo_thu_hoach)
+            ? typedRow.lo_thu_hoach.map((code) => String(code || "").trim()).filter(Boolean)
+            : []
+        })
+      : [],
+  ))]
 
   if (plotCodes.length === 0) {
     return {
@@ -418,7 +519,14 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
   if (!ngan) throw new Error("Không tìm thấy ngăn lưu")
 
   const [trips, lots] = await Promise.all([
-    loadDispatchTripsByUids(factoryId, Array.isArray(ngan.trips) ? (ngan.trips as string[]) : []),
+    loadDispatchTripsByUids(
+      factoryId,
+      Array.isArray(ngan.trips) ? (ngan.trips as string[]) : [],
+      {
+        fromDate: (ngan.ngay_bd as string | null) || undefined,
+        toDate: (ngan.ngay_kt as string | null) || (ngan.ngay_bd as string | null) || undefined,
+      },
+    ),
     loadStorageLots(factoryId, nganId),
   ])
 
@@ -427,28 +535,12 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
       ...(ngan as StorageNgan),
       trips: Array.isArray(ngan.trips) ? (ngan.trips as string[]) : [],
     },
-    trips.filter((trip) =>
-      isTripWithinNganRange(
-        {
-          ngay_bd: (ngan.ngay_bd as string) || "",
-          ngay_kt: (ngan.ngay_kt as string | null) || null,
-        },
-        trip,
-      ),
-    ),
+    trips,
   )
   const tong_tuoi = Math.round(tripSummary.tuoi * 100) / 100
   const tong_kho = Math.round(tripSummary.kho * 100) / 100
-  const normalizedTrips = trips.filter((trip) =>
-    isTripWithinNganRange(
-      {
-        ngay_bd: (ngan.ngay_bd as string) || "",
-        ngay_kt: (ngan.ngay_kt as string | null) || null,
-      },
-      trip,
-    ),
-  )
-  const normalizedTripUids = normalizedTrips.map((trip) => trip.uid)
+  const normalizedTrips = trips
+  const normalizedTripUids = normalizedTrips.map((trip) => trip.ref)
   const currentTripUids = Array.isArray(ngan.trips) ? (ngan.trips as string[]).filter(Boolean) : []
   const tripsChanged =
     currentTripUids.length !== normalizedTripUids.length ||

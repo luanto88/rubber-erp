@@ -5,11 +5,13 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
-import { dispatchDbRowToLegacy, replaceDispatchEntryRows, syncDispatchEntriesLegacyRows, type DispatchEntryRowRecord } from "@/lib/dispatch-entry-rows"
+import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
+import { getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText } from "lucide-react"
 
@@ -283,31 +285,6 @@ function inferDayChuyenFromRows(rows: DxRow[] | undefined, fallback = "Mủ tạ
     Boolean((r.kl_mnk || "").trim())
   )
   return hasMuNuoc ? "Mủ nước" : fallback
-}
-
-function getDispatchRowKey(row: Partial<DxRow>) {
-  return `${row.uid || ""}|${row.so_xe || ""}|${Number(row.chuyen || 1)}`
-}
-
-function shouldRepairPhysicalRows(entry: DispatchEntry, physicalRows: DxRow[]) {
-  const legacyRows = entry.rows || []
-  if (legacyRows.length === 0) return false
-  if (physicalRows.length === 0) return true
-  if (physicalRows.length !== legacyRows.length) return true
-
-  const legacyKeys = legacyRows.map(getDispatchRowKey).sort()
-  const physicalKeys = physicalRows.map(getDispatchRowKey).sort()
-  return legacyKeys.join("||") !== physicalKeys.join("||")
-}
-
-function pickDispatchRowSource(entry: DispatchEntry, physicalRows: DxRow[]) {
-  const legacyRows = entry.rows || []
-  if (shouldRepairPhysicalRows(entry, physicalRows)) {
-    if (legacyRows.length > physicalRows.length) return legacyRows
-    if (physicalRows.length > legacyRows.length) return physicalRows
-    return legacyRows
-  }
-  return physicalRows.length > 0 ? physicalRows : legacyRows
 }
 
 // MultiSelect inline dropdown
@@ -620,7 +597,7 @@ export default function DispatchPage() {
   const [selected, setSelected]   = useState<DispatchEntry|null>(null)
 
   // Add/Edit form
-  const [formNgay, setFormNgay]         = useState(new Date().toISOString().slice(0,10))
+  const [formNgay, setFormNgay]         = useState(getTodayISODate())
   const [formCN, setFormCN]             = useState("PEFC CS")
   const [formDayChuyen, setFormDayChuyen] = useState("Mủ tạp")
   const [formRows, setFormRows]         = useState<DxRow[]>([emptyRow()])
@@ -738,69 +715,19 @@ export default function DispatchPage() {
   const loadData = useCallback(async (fid: string, points = deliveryPoints) => {
     setLoading(true)
     try {
-      let q = supabase.from("dispatch_entries")
+      const q = supabase.from("dispatch_entries")
         .select("*")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
-      if (filterFrom) q = q.gte("ngay", filterFrom)
-      if (filterTo)   q = q.lte("ngay", filterTo)
       const { data } = await q
-      const raw = (data || []) as DispatchEntry[]
-      const entryIds = raw.map(e => e.id).filter(Boolean)
-      const physicalRowsByEntry = new Map<string, DxRow[]>()
-      const repairQueue: Array<{ entry: DispatchEntry; rows: DxRow[]; dayChuyen: string }> = []
+      const raw = ((data || []) as DispatchEntry[]).filter((entry) =>
+        isDateInRange(entry.ngay, filterFrom, filterTo),
+      )
 
-      if (entryIds.length > 0) {
-        const { data: physicalRows, error: physicalRowsError } = await supabase
-          .from("dispatch_entry_rows")
-          .select("*")
-          .eq("factory_id", fid)
-          .in("dispatch_entry_id", entryIds)
-          .order("sort_order", { ascending: true })
-
-        if (physicalRowsError) {
-          console.warn("Khong tai duoc dispatch_entry_rows, fallback rows JSONB:", physicalRowsError)
-        } else {
-          for (const row of (physicalRows || []) as DispatchEntryRowRecord[]) {
-            const legacy = dispatchDbRowToLegacy(row) as DxRow
-            const list = physicalRowsByEntry.get(row.dispatch_entry_id) || []
-            list.push(legacy)
-            physicalRowsByEntry.set(row.dispatch_entry_id, list)
-          }
-        }
-      }
-
-      for (const entry of raw) {
-        const physicalRows = physicalRowsByEntry.get(entry.id) || []
-        if (!shouldRepairPhysicalRows(entry, physicalRows)) continue
-        const rowsForRepair = pickDispatchRowSource(entry, physicalRows)
-        if (rowsForRepair.length === 0) continue
-        repairQueue.push({
-          entry,
-          rows: rowsForRepair,
-          dayChuyen: entry.day_chuyen || inferDayChuyenFromRows(rowsForRepair),
-        })
-      }
-
-      if (repairQueue.length > 0) {
-        await Promise.allSettled(repairQueue.map(async ({ entry, rows, dayChuyen }) => {
-          await replaceDispatchEntryRows(supabase, {
-            factoryId: fid,
-            dispatchEntryId: entry.id,
-            ngay: toISO(entry.ngay),
-            dayChuyen,
-            rows,
-            deliveryPoints: points,
-          })
-          physicalRowsByEntry.set(entry.id, rows)
-        }))
-      }
-
-    // Re-hydrate lo_thu_hoach for legacy rows saved before auto-fill was implemented
-    const rehydrated = raw.map(e => ({
+      const rehydrated = raw.map(e => ({
       ...e,
       day_chuyen: e.day_chuyen || inferDayChuyenFromRows(e.rows),
-      rows: pickDispatchRowSource(e, physicalRowsByEntry.get(e.id) || []).map(r => ({
+      rows: (e.rows || []).map(r => ({
         ...r,
         day_chuyen: r.day_chuyen || e.day_chuyen || inferDayChuyenFromRows(e.rows),
         lo_thu_hoach: r.lo_thu_hoach?.length
@@ -816,18 +743,18 @@ export default function DispatchPage() {
       return (b.created_at || "") > (a.created_at || "") ? 1 : -1
     })
 
-    const byDate: Record<string, DispatchEntry[]> = {}
-    for (const e of rehydrated) { const k = toISO(e.ngay); if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
-    const withCode = rehydrated.map(e => {
-      const key = toISO(e.ngay)
-      const group = [...(byDate[key] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
-      const seq = group.findIndex(x => x.id === e.id) + 1
-      const d = new Date(key)
-      const dd = String(d.getDate()).padStart(2,"0")
-      const mm = String(d.getMonth()+1).padStart(2,"0")
-      const yy = String(d.getFullYear()).slice(-2)
-      return { ...e, ma_dx: `DX-${dd}${mm}${yy}/${seq}` }
-    })
+      const byDate: Record<string, DispatchEntry[]> = {}
+      for (const e of rehydrated) { const k = toISO(e.ngay); if (!byDate[k]) byDate[k] = []; byDate[k].push(e) }
+      const withCode = rehydrated.map(e => {
+        const key = toISO(e.ngay)
+        const group = [...(byDate[key] || [])].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+        const seq = group.findIndex(x => x.id === e.id) + 1
+        const d = new Date(key)
+        const dd = String(d.getDate()).padStart(2,"0")
+        const mm = String(d.getMonth()+1).padStart(2,"0")
+        const yy = String(d.getFullYear()).slice(-2)
+        return { ...e, ma_dx: `DX-${dd}${mm}${yy}/${seq}` }
+      })
       setEntries(withCode)
     } finally {
       setLoading(false)
@@ -1084,7 +1011,6 @@ export default function DispatchPage() {
           .eq("id", editId)
         if (error) { showToast(error.message); return }
         await replaceDispatchEntryRows(supabase, {
-          factoryId,
           dispatchEntryId: editId,
           ngay: formNgay,
           dayChuyen: formDayChuyen,
@@ -1098,7 +1024,6 @@ export default function DispatchPage() {
           })),
           deliveryPoints,
         })
-        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [editId] })
         showToast("Đã cập nhật bảng phân xe")
       } else {
         const { data: inserted, error } = await supabase
@@ -1113,7 +1038,6 @@ export default function DispatchPage() {
           .single()
         if (error) { showToast(error.message); return }
         await replaceDispatchEntryRows(supabase, {
-          factoryId,
           dispatchEntryId: inserted.id,
           ngay: formNgay,
           dayChuyen: formDayChuyen,
@@ -1127,7 +1051,6 @@ export default function DispatchPage() {
           })),
           deliveryPoints,
         })
-        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [inserted.id] })
         showToast("Đã thêm bảng phân xe mới")
       }
       setView("list")
@@ -1312,14 +1235,12 @@ export default function DispatchPage() {
       if (existing) {
         await supabase.from("dispatch_entries").update({ chung_nhan: "PEFC CS", day_chuyen: dayChuyen }).eq("id", existing.id)
         await replaceDispatchEntryRows(supabase, {
-          factoryId,
           dispatchEntryId: existing.id,
           ngay,
           dayChuyen,
           rows,
           deliveryPoints,
         })
-        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [existing.id] })
       } else {
         const { data: inserted, error } = await supabase
           .from("dispatch_entries")
@@ -1328,14 +1249,12 @@ export default function DispatchPage() {
           .single()
         if (error) throw error
         await replaceDispatchEntryRows(supabase, {
-          factoryId,
           dispatchEntryId: inserted.id,
           ngay,
           dayChuyen,
           rows,
           deliveryPoints,
         })
-        await syncDispatchEntriesLegacyRows(supabase, { factoryId, entryIds: [inserted.id] })
       }
     }
     } catch (err) {
@@ -1415,10 +1334,10 @@ export default function DispatchPage() {
             placeholder="Tìm ngày, xe, tài xế..."
             className="flex-1 text-sm outline-none"/>
         </div>
-        <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
+        <DateTextInput value={filterFrom} onChange={setFilterFrom}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
         <span className="text-slate-400 text-sm">{"\u2192"}</span>
-        <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
+        <DateTextInput value={filterTo} onChange={setFilterTo}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
         <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
@@ -1776,7 +1695,7 @@ export default function DispatchPage() {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày vận chuyển</label>
-            <input type="date" value={formNgay} onChange={e => setFormNgay(e.target.value)}
+            <DateTextInput value={formNgay} onChange={setFormNgay}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"/>
           </div>
           <div>

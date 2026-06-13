@@ -32,6 +32,8 @@ import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-sele
 import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { downloadOutputDayPdf } from "@/lib/output-pdf"
+import { formatDateDisplay, getTodayISODate } from "@/lib/date-utils"
+import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 
 interface DispatchEntry {
   id: string
@@ -88,9 +90,7 @@ function matchesMaterialFilter(record: ProductionRecord, selected: string[]) {
 }
 
 function fmtDate(iso: string) {
-  if (!iso) return ""
-  const [y, m, d] = iso.split("-")
-  return `${d}/${m}/${y}`
+  return formatDateDisplay(iso)
 }
 
 function fmtNum(n: number | null | undefined, decimals = 1) {
@@ -178,7 +178,7 @@ export default function OutputPage() {
     d.setDate(1)
     return d.toISOString().slice(0, 10)
   })
-  const [filterTo, setFilterTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [filterTo, setFilterTo] = useState(() => getTodayISODate())
   const [filterDoi, setFilterDoi] = useState("")
   const [filterXe, setFilterXe] = useState("")
   const [filterGhiChu, setFilterGhiChu] = useState("")
@@ -466,8 +466,8 @@ export default function OutputPage() {
 
     setShowForm(false)
     setEditRecord(null)
+    await writeBackToDispatch(factoryId, form.ngay, supabase)
     await loadRecords(factoryId)
-    await writeBackToDispatch(factoryId, form.ngay, supabase).catch(() => {})
   }
 
   const handleDelete = async (id: string) => {
@@ -475,8 +475,8 @@ export default function OutputPage() {
     const record = records.find((item) => item.id === id)
     await supabase.from("production_records").delete().eq("id", id)
     setDelConfirm(null)
+    if (record) await writeBackToDispatch(factoryId, record.ngay, supabase)
     await loadRecords(factoryId)
-    if (record) await writeBackToDispatch(factoryId, record.ngay, supabase).catch(() => {})
   }
 
   const handleDeleteSelectedRows = async () => {
@@ -563,9 +563,9 @@ export default function OutputPage() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <CalendarDays size={15} />
-            <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
             <span className="text-slate-300">→</span>
-            <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <DateTextInput value={filterTo} onChange={setFilterTo} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
           </div>
 
           {(tab === "list" || tab === "stats") && (

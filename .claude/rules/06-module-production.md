@@ -6,74 +6,23 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 
 ## 1. Rule chung
 
-- Mọi query phải filter theo `factory_id`
-- Mọi form CRUD phải có field `day_chuyen` đặt ở đầu form khi nghiệp vụ phụ thuộc dây chuyền
-- Các dropdown phụ thuộc phải reset khi đổi `day_chuyen`
-- Các option sản phẩm phải lấy từ matrix cấu hình nhà máy, không hard-code rải rác
+- Mọi query phải filter theo `factory_id`.
+- Mọi form CRUD phải có field `day_chuyen` đặt ở đầu form khi nghiệp vụ phụ thuộc dây chuyền.
+- Các dropdown phụ thuộc phải reset khi đổi `day_chuyen`.
+- Các option sản phẩm phải lấy từ matrix cấu hình nhà máy, không hard-code rải rác.
 
-## 2. Module Điều xe (`dispatch_entries`)
+## 2. Điều xe
 
-### Cập nhật 2026-06-01: tách dòng điều xe vật lý
+- `dispatch_entries` là header/chứng từ.
+- `dispatch_entry_rows` là nguồn dữ liệu vật lý chính cho từng chuyến.
+- Không đọc/ghi trực tiếp `dispatch_entries.rows` cho logic mới, chỉ xem như cache legacy tạm thời.
+- Khi thêm/sửa/import điều xe, chi tiết phải đi qua `dispatch_entry_rows`.
+- Khối lượng khô phải auto-calc từ khối lượng tươi và DRC.
+- `chuyen` được auto-assign theo xe trong ngày.
+- Danh mục `diem_gn` dùng `dispatch_delivery_points`, có filter `factory_id`.
+- `lo_thu_hoach` của chuyến phải suy ra từ `diem_gn + phiên`.
 
-- `dispatch_entries` hiện là header/chứng từ; chi tiết từng chuyến đã có bảng vật lý `dispatch_entry_rows`.
-- Migration đã chạy: `supabase/migrations/20260601_dispatch_entry_rows.sql`.
-- `dispatch_entry_rows` là nguồn chính cho các tính năng mới cần query/thống kê/PDF theo ngày, đội, xe, tài xế, km, sản lượng.
-- `dispatch_entries.rows` chỉ còn là cache legacy tạm thời trong giai đoạn chuyển tiếp; mã nguồn mới không được đọc hay ghi trực tiếp cột này.
-- Khi thêm/sửa/import điều xe trong `src/app/dashboard/dispatch/page.tsx`, chỉ ghi chi tiết vào `dispatch_entry_rows`; header `dispatch_entries` chỉ giữ metadata chứng từ.
-- Khi đọc ở module điều xe, `dispatch_entry_rows` là nguồn duy nhất cho chi tiết từng chuyến.
-- Helper mapping đặt tại `src/lib/dispatch-entry-rows.ts`.
-- Helper thống kê đặt tại `src/lib/dispatch-analytics.ts`; helper PDF đặt tại `src/lib/dispatch-pdf.ts`.
-- Mỗi dòng điều xe có `ghi_chu`; với dữ liệu vật lý lưu ở `dispatch_entry_rows.ghi_chu`, với legacy lưu trong `rows[].ghi_chu`.
-- Tab `Thống kê` trong `/dashboard/dispatch` có lọc theo đội/xe và xuất PDF tổng/theo đội/theo xe.
-- Màn hình chi tiết ngày điều xe có nút xuất PDF từng chuyến.
-
-### Schema chính
-
-```ts
-{
-  id: UUID,
-  factory_id: UUID,
-  ngay: string,
-  chung_nhan: string,
-  rows: DxRow[],
-  created_at: string,
-  ma_dx?: string,
-}
-```
-
-### Rule quan trọng
-
-- `ma_dx` format: `DX-ddmmyy/N`
-- `chung_nhan` chỉ được là `PEFC CS`, `PEFC FM`, `Không`
-- KL khô phải auto-calc từ KL tươi và DRC
-- `chuyen` được auto-assign theo xe trong ngày
-- `lo_trinh` chỉ hiển thị các điểm cùng `đội` với `diem_gn` đã chọn
-- Danh mục `diem_gn` dùng bảng `dispatch_delivery_points`, filter theo `factory_id`
-- `dispatch_entry_rows.diem_gn` lưu các mã điểm được chọn cho từng chuyến.
-- `dispatch_entry_rows.lo_thu_hoach` phải được suy ra từ `diem_gn + phiên`.
-- Nếu nhà máy chưa có master data mới, hệ thống chỉ được fallback tạm thời để tránh gãy màn hình
-
-### Master data xe và tài xế
-
-Phần quy định chi tiết về:
-
-- xe
-- tài xế
-- tài xế chính theo xe
-- dữ liệu thêm nhanh trong `Cài đặt / Cấu hình nhà máy`
-
-xem tại:
-
-- `.claude/rules/04-settings-master-data.md`
-
-### Logic trên màn Điều xe
-
-- Khi chọn xe, hệ thống phải tự điền `tài_xế` theo tài xế chính hiện hành của xe
-- Người dùng vẫn được phép đổi sang tài xế khác trên từng dòng điều xe
-- Việc đổi tài xế trên chứng từ chỉ thay đổi snapshot của chuyến đó, không được tự động thay master assignment
-- Chứng từ lịch sử phải tiếp tục giữ giá trị `so_xe` và `tai_xe` đã lưu
-
-## 3. Module Kho nguyên liệu (`ngans`)
+## 3. Kho nguyên liệu (`ngans`)
 
 ### Trạng thái hợp lệ
 
@@ -83,126 +32,98 @@ xem tại:
 - `Đang sản xuất`
 - `Đã sản xuất`
 
-### Rule quan trọng
+### Rule trạng thái
 
-- Không có trạng thái `Hoàn thành` cho ngăn
-- Ngăn đủ 21 ngày mới chuyển sang `Chờ sản xuất`
-- Chỉ ngăn `Chờ sản xuất` mới được chọn trong `Thành phẩm`
-- Chọn ngăn trong `Thành phẩm` -> cập nhật ngay sang `Đang sản xuất`
-- Bấm `Lưu và đánh dấu đã sản xuất` -> cập nhật ngăn sang `Đã sản xuất`
+- Không có trạng thái `Hoàn thành` cho ngăn.
+- Nếu đã có `Từ ngày` nhưng chưa có `Đến ngày` thì trạng thái là `Đang nhận`.
+- Nếu đã có cả `Từ ngày` và `Đến ngày` thì trạng thái nền là `Đóng`.
+- Nếu đã có cả `Từ ngày` và `Đến ngày`, đồng thời `ngày hiện tại - Từ ngày >= 21` thì tự động chuyển `Chờ sản xuất`.
+- Admin được chuyển tay từ `Đóng` sang `Chờ sản xuất` khi `ngày lưu >= 6`.
+- Nút đổi trạng thái ngăn nằm ở hàng icon header của card ngăn trong `src/app/dashboard/storage/page.tsx`.
+- Không đặt nút đổi trạng thái trong vùng chọn ngăn của module Thành phẩm.
 
-## 4. Module Thành phẩm (`lots`)
+### Rule tạo/sửa ngăn
 
-- `lots` là bảng master tổng hợp theo `ma_lo`
-- `lot_transactions` là lịch sử chi tiết theo từng ca / từng ngày / từng ngăn
-- Một `ma_lo` có thể có nhiều dòng `lot_transactions`
-- Trong cùng `factory_id`, chỉ được 1 dòng `lots` cho mỗi `ma_lo`
-- `ma_lo` là định danh nghiệp vụ duy nhất trong cùng `factory_id`
-- `tong_banh = kien_a + kien_b + kien_c + kien_d`
-- `tong_kg = tong_banh * loai_banh`
-- `ma_lo = ${num}${suffix}/${year}`
+- Được phép tạo ngăn rỗng để giữ chỗ và cập nhật nguyên liệu sau.
+- Khi nhập `Ngày bắt đầu`, hệ thống phải lọc chuyến xe ngay, không chờ `Ngày kết thúc`.
+- Vẫn cho phép lưu khi chỉ có `Ngày bắt đầu`.
+- Chuyển `Đóng -> Chờ sản xuất` là thao tác chỉ dành cho admin.
+- Chuyển `Đã sản xuất -> Đang sản xuất` để mở lại cho nhập tiếp cũng chỉ dành cho admin.
 
-## 4.1 Sang kiện / Thay bọc
+## 4. Thành phẩm (`lots`)
 
-Tính năng cho phép chuyển pallet hoặc đổi bọc cho nhiều lô `Hoàn thành` cùng lúc từ overlay panel trong module Thành phẩm.
+- `lots` là bảng master tổng hợp theo `ma_lo`.
+- `lot_transactions` là lịch sử chi tiết theo từng ca / ngày / ngăn.
+- Trong cùng `factory_id`, chỉ được 1 dòng `lots` cho mỗi `ma_lo`.
+- `ma_lo` là định danh nghiệp vụ duy nhất trong cùng `factory_id`.
+- `tong_banh = kien_a + kien_b + kien_c + kien_d`.
+- `tong_kg = tong_banh * loai_banh`.
+- `ma_lo = ${num}${suffix}/${year}`.
 
-### Hai loại thao tác
+### Rule chọn ngăn cho Thành phẩm
 
-| Loại | Trường thay đổi | Bảng lịch sử |
-|------|----------------|--------------|
-| **Sang kiện** | `lots.pallet[]` | `sk_history` |
-| **Thay bọc** | `lots.boc` | `sk_history` |
+- Picker ngăn ở `src/app/dashboard/product/page.tsx` hiển thị chung một danh sách.
+- Các mã chuẩn `N1-N24` và mã nhập tay như `BN`, `10.2`, `MN` không tách khu riêng.
+- Chỉ hiển thị ngăn có trạng thái `Chờ sản xuất` hoặc `Đang sản xuất`.
+- Ngăn `Đã sản xuất`, `Đóng`, `Đang nhận` không được hiện trong form nhập thành phẩm.
+- Chỉ hiển thị ngăn có nguyên liệu thực sự, tức có baseline nguyên liệu như `tong_kho > 0`.
+- Ngăn rỗng tuyệt đối không được dùng để tạo thành phẩm.
+- Ngăn chỉ xuất hiện lại trong form khi admin chuyển tay từ `Đã sản xuất` về `Đang sản xuất`.
+- Không tự chuyển trạng thái ngăn sang `Đang sản xuất` chỉ vì người dùng vừa chọn ngăn trong form.
 
-### Flow xử lý
+### Rule lưu thành phẩm và trạng thái ngăn
 
-1. Người dùng mở overlay → chọn lô từ panel trái (chỉ lô `Hoàn thành`)
-2. Click lô → lô xuất hiện ở panel phải với số bành từng kiện (A/B/C/D) điền sẵn bằng max
-3. Người dùng chỉnh số bành từng kiện nếu cần sang một phần
-4. Xác nhận → `handleSkSave` chạy cho từng lô trong hàng chờ
+- Khi ngăn ở `Chờ sản xuất`, người dùng được chọn để nhập thành phẩm.
+- Khi tỷ lệ đạt trong khoảng `100% - 110%`, form được phép hiển thị cả:
+  - `Lưu`
+  - `Lưu & đánh dấu đã sản xuất`
+- `Lưu`: lưu phiếu và giữ ngăn ở luồng nhập tiếp.
+- `Lưu & đánh dấu đã sản xuất`: lưu phiếu và chuyển ngăn sang `Đã sản xuất`, từ đó ngăn không còn xuất hiện trong form nhập thành phẩm nữa.
+- Save-time phải chặn cứng nếu:
+  - ngăn không có nguyên liệu
+  - tỷ lệ sau lưu vượt `110%`
+- Nếu ngăn đang là `Đang sản xuất` và tỷ lệ nằm trong `100% - 110%`, admin có thể chuyển tay sang `Đã sản xuất`.
+- Nếu ngăn đang là `Đã sản xuất` và dữ liệu đồng bộ làm tỷ lệ xuống dưới `100%`, hệ thống tự chuyển về `Đang sản xuất`.
+- Nếu ngăn đang là `Đã sản xuất` và tỷ lệ sau đồng bộ vẫn trong `100% - 110%`, giữ nguyên `Đã sản xuất`.
+- Không tự trả về `Đang sản xuất` chỉ vì user bấm nhầm `Lưu & đánh dấu đã sản xuất` sớm nhưng tỷ lệ vẫn còn trong `100% - 110%`; case này admin xử lý tay.
+- Sau khi nhập/sửa/xóa thành phẩm, việc đồng bộ trạng thái ngăn phải tuân theo logic của module Kho nguyên liệu, không dùng rule cũ mâu thuẫn.
 
-### Rule sang một phần (partial conversion)
+## 5. Kiểm nghiệm và Xuất hàng
 
-Khi số bành chuyển < số bành hiện có của lô gốc:
+- Luồng chính phải giữ:
+  - `Tròn lô -> Kiểm nghiệm`
+  - `Kiểm nghiệm Đạt hạng -> Xuất hàng`
+  - `Xuất hàng -> Không cho sửa lô`
+  - `Ngăn có nguyên liệu -> Mới tạo Thành phẩm`
+- Lô `Xuất hàng` không được phép sửa/xóa theo luồng thành phẩm.
+- Logic `Xuất hàng` phải reconcile theo snapshot `export_orders` đọc lại từ DB, không tin snapshot cục bộ.
 
-- **Lô gốc**: cập nhật `kien_a/b/c/d`, `tong_banh`, `tong_kg`, `boc`/`pallet` sang giá trị mới
-- **Lô tồn dư**: tạo mới với:
-  - `suffix = lot.suffix + "r"` (VD: `05cs` → `05csr`)
-  - `ma_lo = buildMaLo(num, suffix + "r", year)` (VD: `05csr/26`)
-  - `kien_*` = phần còn lại (`lot.kien_* - converted_kien_*`)
-  - `boc`, `pallet` = giá trị **cũ** của lô gốc
-  - `trang_thai = "Hoàn thành"`
-- Trước khi insert lô tồn dư: kiểm tra uniqueness qua Supabase query — nếu `ma_lo` đã tồn tại thì bỏ qua insert (edge case)
+## 6. Sản lượng
 
-### Rule sang toàn bộ (full conversion)
+- Khóa nghiệp vụ chuẩn của `production_records` là `factory_id + ngay + doi + so_xe + chuyen`.
+- Preview import phải cảnh báo:
+  - trùng trong cùng file
+  - trùng với dữ liệu đã có trong hệ thống
+- Nếu file tự chứa nhiều dòng trùng cùng khóa thì phải chặn import.
+- Import phải chủ động đọc trước dữ liệu hiện có để:
+  - `insert` dòng chưa tồn tại
+  - `update` dòng đã tồn tại đúng khóa
+  - dọn bản ghi trùng cũ nếu lịch sử dữ liệu đã bị lỗi
+- Sau import/sửa/xóa thủ công, phải write-back sang Điều xe.
+- Thêm/sửa/xóa thủ công trong Sản lượng chỉ dành cho `admin`.
 
-Khi tất cả `kien_*` chuyển bằng `lot.kien_*`:
-- Chỉ UPDATE lô gốc — không tạo lô tồn dư
-
-### Lịch sử (`sk_history`)
-
-Sau khi xử lý xong tất cả lô trong một phiên, insert 1 bản ghi vào `sk_history`:
-
-```ts
-{
-  factory_id,
-  ngay: "YYYY-MM-DD",
-  loai: "Sang kiện" | "Thay bọc",
-  chung_loai: skFilterLoai || skPending[0].lot.loai_csr,
-  from_boc: null | string,       // Thay bọc: bọc cũ (từ filter hoặc lot đầu tiên)
-  to_boc:   null | string,       // Thay bọc: bọc mới
-  from_pallet: null | string,    // Sang kiện: pallet cũ (từ filter hoặc null)
-  to_pallet:   null | string,    // Sang kiện: pallet mới (join ", ")
-  lots: [{ id, ma_lo, converted: { a, b, c, d } }],  // JSONB
-}
-```
-
-### Quan hệ với Xuất hàng
-
-- Sang kiện / Thay bọc xảy ra **trước** khi xuất hàng
-- Sau khi sang kiện, `lots.pallet` đã được cập nhật → Xuất hàng đọc giá trị mới trực tiếp
-- Lô tồn dư tự động xuất hiện trong danh sách Thành phẩm với `trang_thai = "Hoàn thành"`
-- Không cần sync thêm — chỉ cần `loadData(factoryId)` sau khi lưu
-
-### Ràng buộc kỹ thuật
-
-- Chỉ thao tác trên lô có `trang_thai = "Hoàn thành"` (qua `normalizeLotStatus`)
-- Lô đang xử lý (trong hàng chờ panel phải) bị ẩn khỏi panel trái trong cùng phiên
-- `skToPallet` là `string[]` — pallet mới có thể chọn nhiều giá trị từ `PALLET_OPTS`
-- `getBocsForLoaiCSR(dc, loai_csr)` dùng để lấy danh sách bọc hợp lệ cho tab Thay bọc
-- Toàn bộ logic nằm trong `src/app/dashboard/product/page.tsx` — không thêm file hay package mới
-## Cập nhật 2026-06-10: chống import trùng sản lượng
-
-- Module Sản lượng (`production_records`) phải coi khóa nghiệp vụ chuẩn là `factory_id + ngay + doi + so_xe + chuyen`.
-- Preview import file sản lượng phải kiểm tra cả 2 nhóm trùng:
-  - Trùng ngay trong cùng file import.
-  - Trùng với dữ liệu đã có sẵn trong hệ thống.
-- Khi preview phát hiện trùng với dữ liệu đang có, phải gắn cảnh báo rõ ràng để người dùng biết dòng đó sẽ ghi đè dữ liệu cũ nếu tiếp tục import.
-- Không được `upsert` mù chỉ dựa vào giả định database luôn sạch. Import phải chủ động đọc trước các dòng hiện có theo ngày trong file, rồi:
-  - `insert` cho dòng chưa tồn tại.
-  - `update` cho dòng đã tồn tại đúng khóa nghiệp vụ.
-  - dọn bớt các bản ghi trùng cũ nếu lịch sử dữ liệu đã bị lỗi tạo 2 dòng cùng khóa.
-- Nếu file import tự chứa nhiều dòng trùng cùng khóa `ngày + đội + xe + chuyến`, phải chặn xác nhận import và yêu cầu người dùng sửa file trước.
-- Sau khi import hoặc sửa/xóa thủ công trong module Sản lượng, vẫn phải gọi write-back để đồng bộ lại khối lượng sang Điều xe; không để Điều xe nhỏ hơn Sản lượng chỉ vì dữ liệu trùng.
-- Các thao tác thêm/sửa/xóa từng dòng sản lượng trên UI chỉ dành cho tài khoản `admin`.
-- Nút `Thêm mới` và các action sửa/xóa từng dòng phải ẩn với user không phải `admin`, đồng thời handler cũng phải chặn ở tầng logic để tránh lách bằng UI cũ.
-## Cập nhật 2026-06-10: UI lọc và thống kê mới
+## 7. UI filter và thống kê
 
 ### Điều xe
 
-- `Điều xe/Danh sách` và `Điều xe/Thống kê` có thêm bộ lọc `Loại nguyên liệu` dạng `multi-select`.
-- Bộ lọc này phải kết hợp được với `Ghi chú`.
-- `Điều xe/Thống kê` hiển thị:
-  - `Tổng bảng phân xe`
-  - `Tổng chuyến xe`
-  - `Tổng km di chuyển`
-  - `Khối lượng tươi theo loại`
-  - `Khối lượng khô theo loại`
-- Không được để trùng 2 header thống kê giống nhau khi ở tab `Thống kê`.
-- Mọi text hiển thị của `Điều xe` phải dùng tiếng Việt Unicode bình thường, không dùng text bị escape hoặc mojibake.
+- Danh sách và Thống kê có filter `Loại nguyên liệu` dạng `multi-select`.
+- Filter này phải kết hợp được với `Ghi chú`.
+- Thống kê phải hiển thị tổng bảng phân xe, tổng chuyến, tổng km, khối lượng tươi/khô theo loại.
+- Không để text mojibake; mọi text phải là Unicode tiếng Việt bình thường.
 
 ### Sản lượng
 
-- `Sản lượng/Danh sách` và `Sản lượng/Thống kê` có thêm bộ lọc `Loại nguyên liệu` dạng `multi-select`.
-- `Sản lượng/Danh sách` hiển thị theo `ngày`, bấm mở rộng mới hiện chi tiết từng dòng.
-- Dòng header ngày phải chứa tổng `Tươi/Khô` và action của ngày.
-- `Sản lượng/Thống kê` phải hiển thị được khối lượng các loại nguyên liệu tươi/khô.
+- Danh sách và Thống kê có filter `Loại nguyên liệu` dạng `multi-select`.
+- Danh sách hiển thị theo ngày, bấm mở rộng mới thấy chi tiết từng dòng.
+- Header ngày phải có tổng `Tươi/Khô` và action của ngày.
+- Thống kê phải hiển thị được khối lượng các loại nguyên liệu tươi/khô.

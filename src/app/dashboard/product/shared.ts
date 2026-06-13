@@ -20,27 +20,28 @@ function foldText(value?: string | null) {
 }
 
 export function normalizeLotStatus(status?: string | null): NormalizedLotStatus {
-  const folded = foldText(status);
-  if (folded.includes("xuat") && folded.includes("hang")) return "Xuất hàng";
-  if (folded.includes("hoan") && folded.includes("thanh")) return "Hoàn thành";
+  const folded = foldText(status).replace(/\s+/g, "");
+  if (folded === "xuathang") return "Xuất hàng";
+  if (folded === "hoanthanh") return "Hoàn thành";
   return "Dở dang";
 }
 
 export function pickCanonicalLot<T extends LotLike>(lots: T[]): T {
   return [...lots].sort((a, b) => {
-    const statusDiff =
-      getStatusRank(normalizeLotStatus(b.trang_thai)) -
-      getStatusRank(normalizeLotStatus(a.trang_thai));
-    if (statusDiff !== 0) return statusDiff;
-
-    const quantityDiff = Number(b.tong_banh || 0) - Number(a.tong_banh || 0);
-    if (quantityDiff !== 0) return quantityDiff;
+    const timestampDiff = getLotTimestamp(b) - getLotTimestamp(a);
+    if (timestampDiff !== 0) return timestampDiff;
 
     const txCountDiff =
       (b.lot_transactions?.length || 0) - (a.lot_transactions?.length || 0);
     if (txCountDiff !== 0) return txCountDiff;
 
-    return getLotTimestamp(b) - getLotTimestamp(a);
+    const quantityDiff = Number(b.tong_banh || 0) - Number(a.tong_banh || 0);
+    if (quantityDiff !== 0) return quantityDiff;
+
+    return (
+      getStatusRank(normalizeLotStatus(b.trang_thai)) -
+      getStatusRank(normalizeLotStatus(a.trang_thai))
+    );
   })[0];
 }
 

@@ -3,7 +3,7 @@ import Link from "next/link"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
@@ -11,6 +11,7 @@ import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import {
   addDaysISO,
+  buildDispatchTripRef,
   buildStorageLookupPath,
   formatStorageDate,
   getKLFromTrip,
@@ -26,7 +27,19 @@ import {
   type StorageProducedLot as ProducedLot,
   type StorageTripItem as TripItem,
 } from "@/lib/storage-detail"
+import {
+  canManuallyMoveClosedToWaiting,
+  deriveStorageStatus,
+  getStorageAgingDays,
+  normalizeStorageStatus,
+  STORAGE_STATUS_CLOSED,
+  STORAGE_STATUS_IN_PRODUCTION,
+  STORAGE_STATUS_PRODUCED,
+  STORAGE_STATUS_RECEIVING,
+  STORAGE_STATUS_WAITING,
+} from "@/lib/storage-status"
 import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
+import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
@@ -43,7 +56,13 @@ const ALL_POSITIONS = [
 const NGUON_GOC_OPTS  = ["NT","M","GCA"]
 const XU_LY_OPTS      = ["Xé","Không xé","Hỗn hợp"]
 const CHUNG_NHAN_BASE = ["PEFC CS","PEFC FM","Không"]
-const TRANG_THAI_OPTS = ["Đang nhận (Cần cập nhật)","Chờ sản xuất","Đang sản xuất","Đã sản xuất"]
+const TRANG_THAI_OPTS = [
+  STORAGE_STATUS_RECEIVING,
+  STORAGE_STATUS_CLOSED,
+  STORAGE_STATUS_WAITING,
+  STORAGE_STATUS_IN_PRODUCTION,
+  STORAGE_STATUS_PRODUCED,
+]
 
 const NL_ABBR: Record<string, string> = {
   "Mủ chén": "MC", "Mủ đông chén": "ĐC", "Mủ đông khối": "ĐK",
@@ -64,7 +83,7 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
   ngay_kt: "",
   xe_tu_ngay: addDaysISO(new Date().toISOString().slice(0, 10), 1),
   xe_den_ngay: "",
-  trang_thai: "Đang nhận (Cần cập nhật)",
+  trang_thai: STORAGE_STATUS_RECEIVING,
   tong_tuoi: 0, tong_kho: 0,
   lo_nguon_goc: "",
   ghi_chu: "",
@@ -73,26 +92,21 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
 type StorageForm = ReturnType<typeof emptyForm>
 
 const headerStyle = (tt: string) => {
-  if (tt === "Đang sản xuất")            return { grad: "from-emerald-50 to-teal-50",   icon: "text-emerald-600" }
-  if (tt === "Đã sản xuất")              return { grad: "from-blue-50 to-cyan-50",       icon: "text-blue-600" }
-  if (tt === "Chờ sản xuất")             return { grad: "from-amber-50 to-yellow-50",    icon: "text-amber-500" }
-  if (tt === "Đang nhận (Cần cập nhật)") return { grad: "from-slate-50 to-gray-100",    icon: "text-slate-400" }
+  if (tt === STORAGE_STATUS_IN_PRODUCTION) return { grad: "from-emerald-50 to-teal-50", icon: "text-emerald-600" }
+  if (tt === STORAGE_STATUS_PRODUCED) return { grad: "from-blue-50 to-cyan-50", icon: "text-blue-600" }
+  if (tt === STORAGE_STATUS_WAITING) return { grad: "from-amber-50 to-yellow-50", icon: "text-amber-500" }
+  if (tt === STORAGE_STATUS_CLOSED) return { grad: "from-rose-50 to-orange-50", icon: "text-rose-500" }
+  if (tt === STORAGE_STATUS_RECEIVING) return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
   return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
 }
 
 const badgeClass = (tt: string) => {
-  if (tt === "Đang sản xuất")            return "bg-emerald-100 text-emerald-700"
-  if (tt === "Đã sản xuất")              return "bg-blue-100 text-blue-700"
-  if (tt === "Chờ sản xuất")             return "bg-amber-100 text-amber-700"
-  if (tt === "Đang nhận (Cần cập nhật)") return "bg-slate-100 text-slate-500"
+  if (tt === STORAGE_STATUS_IN_PRODUCTION) return "bg-emerald-100 text-emerald-700"
+  if (tt === STORAGE_STATUS_PRODUCED) return "bg-blue-100 text-blue-700"
+  if (tt === STORAGE_STATUS_WAITING) return "bg-amber-100 text-amber-700"
+  if (tt === STORAGE_STATUS_CLOSED) return "bg-rose-100 text-rose-700"
+  if (tt === STORAGE_STATUS_RECEIVING) return "bg-slate-100 text-slate-500"
   return "bg-slate-100 text-slate-600"
-}
-
-const deriveTrangThai = (ngay_bd: string, ngay_kt: string, current: string): string => {
-  if (current === "Đang sản xuất" || current === "Đã sản xuất") return current
-  if (ngay_bd && ngay_kt) return "Chờ sản xuất"
-  if (ngay_bd) return "Đang nhận (Cần cập nhật)"
-  return current
 }
 
 const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
@@ -115,8 +129,8 @@ const mergeTripsByUid = (...tripGroups: TripItem[][]): TripItem[] => {
   const byUid = new Map<string, TripItem>()
   for (const trips of tripGroups) {
     for (const trip of trips) {
-      if (!trip.uid) continue
-      byUid.set(trip.uid, trip)
+      if (!trip.ref) continue
+      byUid.set(trip.ref, trip)
     }
   }
   return Array.from(byUid.values()).sort((a, b) =>
@@ -136,6 +150,7 @@ export default function StoragePage() {
   const [loading, setLoading]           = useState(true)
   const [factoryId, setFactoryId]       = useState<string | null>(null)
   const [factoryCode, setFactoryCode]   = useState("")
+  const [currentUser, setCurrentUser]   = useState<SessionUser | null>(null)
 
   // filters
   const [search, setSearch]     = useState("")
@@ -162,6 +177,7 @@ export default function StoragePage() {
   const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
   const [todayMs] = useState(() => Date.now())
+  const isAdmin = currentUser?.role === "admin"
 
   // unassigned summary
   const [unassignedSummary, setUnassignedSummary] = useState<{ total: number; byDate: Record<string, number> }>({ total: 0, byDate: {} })
@@ -176,7 +192,7 @@ export default function StoragePage() {
     [linkedTrips, availableTrips],
   )
   const visibleTripUidSet = useMemo(
-    () => new Set(dispatchTrips.map((trip) => trip.uid).filter(Boolean)),
+    () => new Set(dispatchTrips.map((trip) => trip.ref).filter(Boolean)),
     [dispatchTrips],
   )
   const groupedViewLots = useMemo(() => {
@@ -238,8 +254,13 @@ export default function StoragePage() {
     const byDate: Record<string, number> = {}
     for (const entry of data) {
       const dateKey = toISODate(entry.ngay)
-      for (const row of ((entry.rows || []) as { uid: string }[])) {
-        if (!assignedUIDs.has(row.uid)) {
+      for (const row of ((entry.rows || []) as Array<{ uid: string; row_id?: string }>)) {
+        const tripRef = buildDispatchTripRef({
+          dispatchEntryId: entry.id,
+          rowId: row.row_id || row.uid,
+          uid: row.uid,
+        })
+        if (!assignedUIDs.has(tripRef) && !assignedUIDs.has(row.uid)) {
           byDate[dateKey] = (byDate[dateKey] || 0) + 1
         }
       }
@@ -251,36 +272,68 @@ export default function StoragePage() {
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
     try {
-      let q = supabase.from("ngans").select("*")
+      const q = supabase.from("ngans").select("*")
         .eq("factory_id", fid)
         .order("ten_ngan", { ascending: true })
-      if (filterTT) q = q.eq("trang_thai", filterTT)
       const [{ data }, { data: lotsData }] = await Promise.all([
         q,
         supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
       ])
       const loaded = ((data || []) as Ngan[]).map((ngan) => ({
         ...ngan,
+        trang_thai: normalizeStorageStatus(ngan.trang_thai),
         xe_tu_ngay: ngan.xe_tu_ngay || addDaysISO(ngan.ngay_bd?.slice(0, 10) || "", 1),
         xe_den_ngay: ngan.xe_den_ngay || addDaysISO(ngan.ngay_kt?.slice(0, 10) || "", 1),
       }))
       const resolved = await resolveStorageNgansActualTotals(fid, loaded, { persist: true })
-      setNgans(resolved)
+      const resolvedWithStatus = resolved.map((ngan) => ({
+        ...ngan,
+        trang_thai: deriveStorageStatus({
+          ngayBd: ngan.ngay_bd,
+          ngayKt: ngan.ngay_kt,
+          current: ngan.trang_thai,
+          nowMs: todayMs,
+        }),
+      }))
+      const statusUpdates = resolvedWithStatus
+        .filter((ngan, index) => ngan.trang_thai !== resolved[index]?.trang_thai)
+        .map((ngan) => ({ id: ngan.id, trang_thai: ngan.trang_thai }))
+      if (statusUpdates.length > 0) {
+        await Promise.all(
+          statusUpdates.map((update) =>
+            supabase
+              .from("ngans")
+              .update({ trang_thai: update.trang_thai })
+              .eq("factory_id", fid)
+              .eq("id", update.id),
+          ),
+        )
+      }
+      setNgans(
+        filterTT
+          ? resolvedWithStatus.filter((ngan) => ngan.trang_thai === filterTT)
+          : resolvedWithStatus,
+      )
       const ls: Record<string, number> = {}
       for (const l of lotsData || []) {
         if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
       }
       setLotStats(ls)
-      loadUnassigned(fid, resolved)
+      loadUnassigned(fid, resolvedWithStatus)
     } finally {
       setLoading(false)
     }
-  }, [filterTT, loadUnassigned])
+  }, [filterTT, loadUnassigned, todayMs])
 
   // Bootstrap chỉ chạy 1 lần khi mount để lấy factory ID
   useEffect(() => {
     const bootstrap = async () => {
-      const fid = await getActiveFactoryId()
+      const authState = await hydrateActiveSession().catch(() => ({
+        session: null,
+        user: null as SessionUser | null,
+      }))
+      setCurrentUser(authState.user)
+      const fid = authState.user?.factory_id || await getActiveFactoryId()
       if (!fid) {
         setLoading(false)
         return
@@ -334,19 +387,24 @@ export default function StoragePage() {
   const fetchTrips = useCallback(async (
     ngay_bd: string,
     ngay_kt: string,
+    loaiNL: string,
     autoSelect = false,
     overrideEditId?: string | null,
   ): Promise<TripItem[]> => {
-    if (!ngay_bd || !ngay_kt || !factoryId) return []
+    if (!ngay_bd || !factoryId) return []
     setLoadingTrips(true)
     try {
-      const data = await loadDispatchTripsByDateRange(factoryId, ngay_bd, ngay_kt)
+      const data = await loadDispatchTripsByDateRange(factoryId, ngay_bd, ngay_kt || ngay_bd)
       const editingId = overrideEditId ?? editId
       const otherNgans = ngans.filter(n => n.id !== editingId)
       const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
       const trips: TripItem[] = (data || [])
-        .filter(t => !assignedUIDs.has(t.uid))
-      if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.uid)))
+        .filter(t => !assignedUIDs.has(t.ref) && !assignedUIDs.has(t.uid))
+        .filter(t => {
+          const kl = getKLFromTrip(t, loaiNL)
+          return kl.tuoi > 0 || kl.kho > 0
+        })
+      if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.ref)))
       return trips
     } finally {
       setLoadingTrips(false)
@@ -357,7 +415,7 @@ export default function StoragePage() {
   const formLoaiNL = form.loai_nl
   useEffect(() => {
     if (selectedTrips.size > 0 && dispatchTrips.length === 0) return
-    const sel = dispatchTrips.filter(t => selectedTrips.has(t.uid))
+    const sel = dispatchTrips.filter(t => selectedTrips.has(t.ref))
     const { tuoi, kho } = sel.reduce(
       (acc, t) => {
         const kl = getKLFromTrip(t, formLoaiNL)
@@ -391,10 +449,10 @@ export default function StoragePage() {
     setLinkedTrips([])
     setAvailableTrips(trips)
     if (autoSelect) {
-      setSelectedTrips(new Set(trips.map((trip) => trip.uid)))
+      setSelectedTrips(new Set(trips.map((trip) => trip.ref)))
       return
     }
-    const allowed = new Set(trips.map((trip) => trip.uid))
+    const allowed = new Set(trips.map((trip) => trip.ref))
     setSelectedTrips((prev) => new Set(Array.from(prev).filter((uid) => allowed.has(uid))))
   }, [])
 
@@ -403,10 +461,15 @@ export default function StoragePage() {
   const busyPositions = new Set(
     ngans
       .filter(n =>
-        (n.trang_thai === "Đang sản xuất" || n.trang_thai === "Chờ sản xuất" || n.trang_thai === "Đang nhận (Cần cập nhật)") &&
+        (
+          n.trang_thai === STORAGE_STATUS_IN_PRODUCTION ||
+          n.trang_thai === STORAGE_STATUS_WAITING ||
+          n.trang_thai === STORAGE_STATUS_RECEIVING ||
+          n.trang_thai === STORAGE_STATUS_CLOSED
+        ) &&
         (!editId || n.id !== editId)
       )
-      .map(n => n.ten_ngan)
+      .map(n => (n.ten_ngan || "").trim().toUpperCase())
   )
   const availablePositions = ALL_POSITIONS.filter(p => !busyPositions.has(p))
 
@@ -454,12 +517,12 @@ export default function StoragePage() {
   ]
 
   const curingDays = (ngay_bd: string) => {
-    if (!ngay_bd) return null
-    return Math.floor((todayMs - new Date(ngay_bd).getTime()) / 86400000)
+    return getStorageAgingDays(ngay_bd, todayMs)
   }
 
   // ── Save / Delete ─────────────────────────────────────────────────────────
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [nganStatusSavingId, setNganStatusSavingId] = useState<string | null>(null)
   const handleAddRequiredNote = async () => {
     if (!factoryId) return
     const input = window.prompt("Nhập ghi chú mới")
@@ -478,15 +541,46 @@ export default function StoragePage() {
     setSaving(true)
     setSaveError(null)
     try {
-      const trangThai = deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)
+      const normalizedPosition = (form.ten_ngan || "").trim().toUpperCase()
+      if (!normalizedPosition) {
+        setSaveError(`Vị trí ${subTerm.toLowerCase()} không được để trống`)
+        return
+      }
+      if (busyPositions.has(normalizedPosition)) {
+        setSaveError(`Vị trí ${normalizedPosition} đang được sử dụng`)
+        return
+      }
+      const trangThai = deriveStorageStatus({
+        ngayBd: form.ngay_bd,
+        ngayKt: form.ngay_kt,
+        current: form.trang_thai,
+        nowMs: todayMs,
+      })
+      const selectedTripList = dispatchTrips.filter((trip) =>
+        selectedTrips.has(trip.ref) && visibleTripUidSet.has(trip.ref),
+      )
+      const selectedTripUids = selectedTripList.map((trip) => trip.ref)
+      const totals = selectedTripList.reduce(
+        (acc, trip) => {
+          const kl = getKLFromTrip(trip, form.loai_nl)
+          return {
+            tuoi: acc.tuoi + kl.tuoi,
+            kho: acc.kho + kl.kho,
+          }
+        },
+        { tuoi: 0, kho: 0 },
+      )
       const payload = {
         ...form,
+        ten_ngan: normalizedPosition,
         trang_thai: trangThai,
         factory_id: factoryId,
         ngay_kt: form.ngay_kt || null,
         xe_tu_ngay: form.xe_tu_ngay || null,
         xe_den_ngay: form.xe_den_ngay || null,
-        trips: Array.from(selectedTrips).filter((uid) => visibleTripUidSet.has(uid)),
+        tong_tuoi: Math.round(totals.tuoi * 100) / 100,
+        tong_kho: Math.round(totals.kho * 100) / 100,
+        trips: selectedTripUids,
         ghi_chu: form.ghi_chu || null,
       }
       if (editId) {
@@ -532,7 +626,7 @@ export default function StoragePage() {
       ngay_kt: n.ngay_kt?.slice(0, 10) || "",
       xe_tu_ngay: n.xe_tu_ngay?.slice(0, 10) || addDaysISO(n.ngay_bd?.slice(0, 10) || "", 1),
       xe_den_ngay: n.xe_den_ngay?.slice(0, 10) || addDaysISO(n.ngay_kt?.slice(0, 10) || "", 1),
-      trang_thai: n.trang_thai || "Đang nhận (Cần cập nhật)",
+      trang_thai: normalizeStorageStatus(n.trang_thai) || STORAGE_STATUS_RECEIVING,
       tong_tuoi: n.tong_tuoi || 0, tong_kho: n.tong_kho || 0,
       lo_nguon_goc: n.lo_nguon_goc || "",
       ghi_chu: n.ghi_chu || "",
@@ -545,12 +639,15 @@ export default function StoragePage() {
     setModal("edit")
     if (!factoryId) return
     void (async () => {
-      const [storedTrips, tripsInRange] = await Promise.all([
-        (n.trips || []).length > 0
-          ? loadDispatchTripsByUids(factoryId, n.trips || []).catch(() => [])
+        const [storedTrips, tripsInRange] = await Promise.all([
+          (n.trips || []).length > 0
+          ? loadDispatchTripsByUids(factoryId, n.trips || [], {
+              fromDate: n.ngay_bd || undefined,
+              toDate: n.ngay_kt || n.ngay_bd || undefined,
+            }).catch(() => [])
           : Promise.resolve([]),
-        f.ngay_bd && f.ngay_kt
-          ? fetchTrips(f.ngay_bd, f.ngay_kt, false, n.id).catch(() => [])
+        f.ngay_bd
+          ? fetchTrips(f.ngay_bd, f.ngay_kt, f.loai_nl, false, n.id).catch(() => [])
           : Promise.resolve([]),
       ])
       setLinkedTrips(storedTrips)
@@ -688,6 +785,31 @@ export default function StoragePage() {
     }
   }
 
+  const handleNganStatusToggle = async (
+    nganId: string,
+    nextStatus: "Chờ sản xuất" | "Đang sản xuất" | "Đã sản xuất",
+  ) => {
+    if (!isAdmin) {
+      setSaveError("Chỉ admin mới được đổi trạng thái ngăn.")
+      return
+    }
+    setNganStatusSavingId(nganId)
+    try {
+      const { error } = await supabase
+        .from("ngans")
+        .update({ trang_thai: nextStatus })
+        .eq("id", nganId)
+      if (error) throw new Error(error.message)
+      setNgans((prev) =>
+        prev.map((ngan) => (ngan.id === nganId ? { ...ngan, trang_thai: nextStatus } : ngan)),
+      )
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không cập nhật được trạng thái ngăn")
+    } finally {
+      setNganStatusSavingId(null)
+    }
+  }
+
   const toggleProductKey = (key: string) => {
     setExpandedProductKeys(prev => {
       const next = new Set(prev)
@@ -816,19 +938,17 @@ export default function StoragePage() {
             <div className="flex flex-wrap items-end gap-2.5">
               <div className="min-w-[150px]">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
-                <input
-                  type="date"
+                <DateTextInput
                   value={reportFrom}
-                  onChange={e => setReportFrom(e.target.value)}
+                  onChange={setReportFrom}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
               </div>
               <div className="min-w-[150px]">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Đến ngày</label>
-                <input
-                  type="date"
+                <DateTextInput
                   value={reportTo}
-                  onChange={e => setReportTo(e.target.value)}
+                  onChange={setReportTo}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
               </div>
@@ -877,6 +997,21 @@ export default function StoragePage() {
               const hs      = headerStyle(n.trang_thai)
               const tpKg    = lotStats[n.id] || 0
               const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+              const canCloseForProduction =
+                n.trang_thai === STORAGE_STATUS_CLOSED &&
+                canManuallyMoveClosedToWaiting(n.ngay_bd, todayMs)
+              const canMarkProduced =
+                n.trang_thai === STORAGE_STATUS_IN_PRODUCTION &&
+                tpPct >= 100 &&
+                tpPct <= 110
+              const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
+              const nextManualStatus = canCloseForProduction
+                ? STORAGE_STATUS_WAITING
+                : canMarkProduced
+                  ? STORAGE_STATUS_PRODUCED
+                  : canReturnToDraft
+                    ? STORAGE_STATUS_IN_PRODUCTION
+                    : null
               const lookupPath = buildStorageLookupPath(n.id)
               const lookupUrl = typeof window !== "undefined" ? `${window.location.origin}${lookupPath}` : lookupPath
 
@@ -892,6 +1027,35 @@ export default function StoragePage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
+                      {nextManualStatus && isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => void handleNganStatusToggle(n.id, nextManualStatus)}
+                          disabled={nganStatusSavingId === n.id}
+                          className={`rounded-lg border px-2 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            nextManualStatus === STORAGE_STATUS_PRODUCED
+                              ? "border-blue-200 bg-white/80 text-blue-700 hover:bg-white"
+                              : nextManualStatus === STORAGE_STATUS_WAITING
+                                ? "border-amber-200 bg-white/80 text-amber-700 hover:bg-white"
+                                : "border-emerald-200 bg-white/80 text-emerald-700 hover:bg-white"
+                          }`}
+                          title={
+                            nextManualStatus === STORAGE_STATUS_PRODUCED
+                              ? `Đánh dấu đã sản xuất (${tpPct.toFixed(1)}%)`
+                              : nextManualStatus === STORAGE_STATUS_WAITING
+                                ? `Chuyển sang chờ sản xuất (${days ?? 0} ngày lưu)`
+                                : `Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`
+                          }
+                        >
+                          {nganStatusSavingId === n.id
+                            ? "Đang cập nhật..."
+                            : nextManualStatus === STORAGE_STATUS_PRODUCED
+                              ? "Đã SX"
+                              : nextManualStatus === STORAGE_STATUS_WAITING
+                                ? "Chờ SX"
+                                : "Về đang SX"}
+                        </button>
+                      )}
                       <Link
                         href={lookupPath}
                         className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
@@ -1051,13 +1215,16 @@ export default function StoragePage() {
                   <input
                     list="positions-list"
                     value={form.ten_ngan}
-                    onChange={e => updateForm({ ten_ngan: e.target.value.slice(0, 10) })}
+                    onChange={e => updateForm({ ten_ngan: e.target.value.toUpperCase().slice(0, 10) })}
                     placeholder="-- Chọn --"
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   />
                   <datalist id="positions-list">
                     {availablePositions.map(p => <option key={p} value={p} />)}
                   </datalist>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Có thể chọn nhanh N1-N24 hoặc nhập tay mã ngoài dải chuẩn như BN, 10.2, MN.
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại nguyên liệu</label>
@@ -1097,10 +1264,10 @@ export default function StoragePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày bắt đầu (bắt buộc)</label>
-                  <input type="date" value={form.ngay_bd}
-                    onChange={e => {
-                      updateForm({ ngay_bd: e.target.value })
-                      void fetchTrips(e.target.value, form.ngay_kt, modal === "add").then((trips) => {
+                  <DateTextInput value={form.ngay_bd}
+                    onChange={(nextNgayBd) => {
+                      updateForm({ ngay_bd: nextNgayBd })
+                      void fetchTrips(nextNgayBd, form.ngay_kt, form.loai_nl, modal === "add").then((trips) => {
                         applyFetchedTrips(trips, modal === "add")
                       })
                     }}
@@ -1108,10 +1275,10 @@ export default function StoragePage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày kết thúc (tùy chọn)</label>
-                  <input type="date" value={form.ngay_kt}
-                    onChange={e => {
-                      updateForm({ ngay_kt: e.target.value })
-                      void fetchTrips(form.ngay_bd, e.target.value, modal === "add").then((trips) => {
+                  <DateTextInput value={form.ngay_kt}
+                    onChange={(nextNgayKt) => {
+                      updateForm({ ngay_kt: nextNgayKt })
+                      void fetchTrips(form.ngay_bd, nextNgayKt, form.loai_nl, modal === "add").then((trips) => {
                         applyFetchedTrips(trips, modal === "add")
                       })
                     }}
@@ -1122,37 +1289,35 @@ export default function StoragePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Xé từ ngày</label>
-                  <input
-                    type="date"
+                  <DateTextInput
                     value={form.xe_tu_ngay}
-                    onChange={e => updateForm({ xe_tu_ngay: e.target.value })}
+                    onChange={(value) => updateForm({ xe_tu_ngay: value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Xé đến ngày</label>
-                  <input
-                    type="date"
+                  <DateTextInput
                     value={form.xe_den_ngay}
-                    onChange={e => updateForm({ xe_den_ngay: e.target.value })}
+                    onChange={(value) => updateForm({ xe_den_ngay: value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
               {/* Trips from Điều xe */}
-              {form.ngay_bd && form.ngay_kt && (
+              {form.ngay_bd && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
                   <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between border-b border-slate-200">
                     <div className="flex items-center gap-2">
                       <Truck size={14} className="text-slate-500" />
                       <span className="text-xs font-bold text-slate-700">
-                        Chuyến xe từ Điều xe ({fmtDate(form.ngay_bd)} → {fmtDate(form.ngay_kt)})
+                        Chuyến xe từ Điều xe ({fmtDate(form.ngay_bd)} → {fmtDate(form.ngay_kt || form.ngay_bd)})
                       </span>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setSelectedTrips(new Set(dispatchTrips.map(t => t.uid)))}
+                        onClick={() => setSelectedTrips(new Set(dispatchTrips.map(t => t.ref)))}
                         className="text-xs px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors">
                         Chọn tất cả
                       </button>
@@ -1186,15 +1351,15 @@ export default function StoragePage() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {dispatchTrips.map(t => {
-                            const checked = selectedTrips.has(t.uid)
+                            const checked = selectedTrips.has(t.ref)
                             const kl = getKLFromTrip(t, form.loai_nl)
                             return (
-                              <tr key={t.uid}
+                              <tr key={t.ref}
                                 onClick={() => {
                                   setSelectedTrips(prev => {
                                     const next = new Set(prev)
-                                    if (checked) next.delete(t.uid)
-                                    else next.add(t.uid)
+                                    if (checked) next.delete(t.ref)
+                                    else next.add(t.ref)
                                     return next
                                   })
                                 }}
@@ -1272,8 +1437,8 @@ export default function StoragePage() {
               {/* Trạng thái (read-only, tự tính từ ngày) */}
               <div className="bg-slate-50 rounded-xl px-4 py-3 flex items-center gap-2">
                 <span className="text-xs text-slate-500">Trạng thái:</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${badgeClass(deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai))}`}>
-                  {deriveTrangThai(form.ngay_bd, form.ngay_kt, form.trang_thai)}
+                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${badgeClass(deriveStorageStatus({ ngayBd: form.ngay_bd, ngayKt: form.ngay_kt, current: form.trang_thai, nowMs: todayMs }))}`}>
+                  {deriveStorageStatus({ ngayBd: form.ngay_bd, ngayKt: form.ngay_kt, current: form.trang_thai, nowMs: todayMs })}
                 </span>
                 <span className="text-xs text-slate-400">(tự động)</span>
               </div>

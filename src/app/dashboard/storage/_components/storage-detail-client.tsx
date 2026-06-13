@@ -165,7 +165,7 @@ export function StorageDetailClient({ nganId }: { nganId: string }) {
               detail.trips.map((trip) => {
                 const kl = getKLFromTrip(trip, detail.ngan.loai_nl)
                 return (
-                  <div key={trip.uid} className="rounded-2xl border border-slate-200 px-4 py-3">
+                  <div key={trip.ref || trip.uid} className="rounded-2xl border border-slate-200 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-bold text-slate-800">{trip.so_xe || "—"} · C{trip.chuyen || 1}</div>

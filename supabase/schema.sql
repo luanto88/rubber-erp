@@ -48,14 +48,16 @@ CREATE TABLE suffixes (
 CREATE TABLE dispatch_entries (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   factory_id UUID REFERENCES factories(id),
-  ngay TEXT NOT NULL, -- dd/mm/yyyy
+  ngay TEXT NOT NULL, -- ISO yyyy-mm-dd in runtime; legacy dd/mm/yyyy rows may still exist historically
   chung_nhan TEXT,
   day_chuyen TEXT,
-  rows JSONB DEFAULT '[]', -- deprecated legacy cache mirrored from dispatch_entry_rows
+  rows JSONB DEFAULT '[]', -- SOURCE OF TRUTH for dispatch trip rows in application runtime
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Transitional legacy table kept only for historical migration/backfill.
+-- Application runtime should not read/write this table directly anymore.
 CREATE TABLE dispatch_entry_rows (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   factory_id UUID REFERENCES factories(id) ON DELETE CASCADE NOT NULL,

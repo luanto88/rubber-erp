@@ -10,6 +10,7 @@ import {
   WARN_SEVERITY,
   writeBackToDispatch,
 } from "./output-types"
+import { normalizeDateInput } from "@/lib/date-utils"
 
 // ────────────────────────────────────────────────────────────────
 // Excel helpers
@@ -20,7 +21,7 @@ function excelSerialToISO(serial: number): string {
   const ms = (serial - 25569) * 86400 * 1000
   const d = new Date(ms)
   if (isNaN(d.getTime()) || d.getFullYear() < 2000) return ""
-  return d.toISOString().slice(0, 10)
+  return normalizeDateInput(d.toISOString().slice(0, 10))
 }
 
 function toNum(v: unknown): number {
@@ -41,7 +42,9 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
     const colC = String(row[2] ?? "").trim()
     if (!colC) return
 
-    const ngay = typeof row[0] === "number" ? excelSerialToISO(row[0]) : ""
+    const ngay = typeof row[0] === "number"
+      ? excelSerialToISO(row[0])
+      : normalizeDateInput(String(row[0] ?? ""))
     if (!ngay) return
 
     const doi = parseInt(String(row[1] ?? "0"))
@@ -373,6 +376,8 @@ export function OutputImport({
         if (error) throw new Error(error.message)
       }
 
+      const uniqueNgays = [...new Set(rows.map(r => r.ngay))]
+      await Promise.all(uniqueNgays.map((ngay) => writeBackToDispatch(factoryId, ngay, supabase)))
       setImportResult({
         ok: rows.length,
         inserted,
@@ -382,9 +387,6 @@ export function OutputImport({
       })
       setStep(3)
       onImported()
-      // Ghi ngược KL vào dispatch (fire-and-forget, không block bước hoàn thành)
-      const uniqueNgays = [...new Set(rows.map(r => r.ngay))]
-      void Promise.all(uniqueNgays.map(ngay => writeBackToDispatch(factoryId, ngay, supabase).catch(() => {})))
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Lỗi nhập dữ liệu")
     } finally {

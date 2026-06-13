@@ -508,6 +508,16 @@ export default function ExportPage() {
       .filter((l) => l.rem_a + l.rem_b + l.rem_c + l.rem_d > 0);
   }, [lotsRaw, orders, editId]);
 
+  const exportedLotIds = useMemo(
+    () =>
+      new Set(
+        lotsRaw
+          .filter((lot) => normalizeLotStatus(lot.trang_thai) === "Xuất hàng")
+          .map((lot) => lot.id),
+      ),
+    [lotsRaw],
+  );
+
   const latestQcByLotId = useMemo(() => {
     const byId = new Map<string, QcResult>();
     const byCode = new Map<string, QcResult>();
@@ -646,8 +656,20 @@ export default function ExportPage() {
     tongXe: orders.reduce((s, o) => s + (o.vehicles?.length || 0), 0),
   };
 
+  const isOrderLocked = useCallback(
+    (order: Pick<ExportOrder, "assignments">) =>
+      (order.assignments || []).some((assignment) =>
+        exportedLotIds.has(assignment.lot_id),
+      ),
+    [exportedLotIds],
+  );
+
   // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openEdit = (order: ExportOrder) => {
+    if (isOrderLocked(order)) {
+      showToast("Đơn có lô đã xuất hàng, không thể chỉnh sửa.", "error");
+      return;
+    }
     setForm({
       ma_don: order.ma_don || "",
       ngay: order.ngay?.slice(0, 10) || new Date().toISOString().slice(0, 10),
@@ -865,19 +887,40 @@ export default function ExportPage() {
       orderSnapshot: Array<{ id?: string; assignments?: Assignment[] }>,
     ) => {
       const uniqueLotIds = [...new Set(affectedLotIds)].filter(Boolean);
-      for (const lotId of uniqueLotIds) {
-        const lot = lotsRaw.find((item) => item.id === lotId);
-        if (!lot) continue;
+      if (uniqueLotIds.length === 0 || !factoryId) return;
+
+      const { data: affectedLots, error: lotsError } = await supabase
+        .from("lots")
+        .select("id,tong_banh,trang_thai")
+        .eq("factory_id", factoryId)
+        .in("id", uniqueLotIds);
+
+      if (lotsError) throw new Error(lotsError.message);
+
+      for (const lot of affectedLots || []) {
+        const lotId = lot.id;
         const assigned = orderSnapshot.reduce(
           (sum, order) => sum + getOrderAssignedCount(order, lotId),
           0,
         );
-        const remaining = Number(lot.tong_banh || 0) - assigned;
-        const nextStatus = remaining <= 0 ? "Xuất hàng" : "Hoàn thành";
-        await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lotId);
+        const nextStatus =
+          assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+            ? "Xuất hàng"
+            : "Hoàn thành";
+
+        if (normalizeLotStatus(lot.trang_thai) === normalizeLotStatus(nextStatus)) {
+          continue;
+        }
+
+        const { error: updateError } = await supabase
+          .from("lots")
+          .update({ trang_thai: nextStatus })
+          .eq("id", lotId);
+
+        if (updateError) throw new Error(updateError.message);
       }
     },
-    [lotsRaw],
+    [factoryId],
   );
 
   // â”€â”€ Yeu cau chi tieu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -942,10 +985,18 @@ export default function ExportPage() {
           showToast(error.message, "error");
           return;
         }
-        const nextOrders = orders.map((order) =>
-          order.id === editId ? { ...order, assignments: form.assignments } : order,
+        const { data: latestOrders, error: snapshotError } = await supabase
+          .from("export_orders")
+          .select("id,assignments")
+          .eq("factory_id", factoryId);
+        if (snapshotError) {
+          showToast(snapshotError.message, "error");
+          return;
+        }
+        await reconcileLotStatuses(
+          [...oldLotIds, ...newLotIds],
+          (latestOrders || []) as Array<{ id?: string; assignments?: Assignment[] }>,
         );
-        await reconcileLotStatuses([...oldLotIds, ...newLotIds], nextOrders);
         showToast("Đã cập nhật đơn xuất hàng");
       } else {
         const { error } = await supabase.from("export_orders").insert(payload);
@@ -953,8 +1004,18 @@ export default function ExportPage() {
           showToast(error.message, "error");
           return;
         }
-        const nextOrders = [...orders, { assignments: form.assignments }];
-        await reconcileLotStatuses(newLotIds, nextOrders);
+        const { data: latestOrders, error: snapshotError } = await supabase
+          .from("export_orders")
+          .select("id,assignments")
+          .eq("factory_id", factoryId);
+        if (snapshotError) {
+          showToast(snapshotError.message, "error");
+          return;
+        }
+        await reconcileLotStatuses(
+          newLotIds,
+          (latestOrders || []) as Array<{ id?: string; assignments?: Assignment[] }>,
+        );
         showToast("Đã tạo đơn xuất hàng mới");
       }
       setView("list");
@@ -977,6 +1038,10 @@ export default function ExportPage() {
   const handleDelete = async (id: string) => {
     if (!factoryId) return;
     const order = orders.find((o) => o.id === id);
+    if (order && isOrderLocked(order)) {
+      showToast("Đơn có lô đã xuất hàng, không thể xóa.", "error");
+      return;
+    }
     const affectedLotIds = order?.assignments?.length
       ? [...new Set(order.assignments.map((a: Assignment) => a.lot_id))]
       : [];
@@ -992,8 +1057,18 @@ export default function ExportPage() {
     }
 
     if (affectedLotIds.length > 0) {
-      const remainingOrders = orders.filter((o) => o.id !== id);
-      await reconcileLotStatuses(affectedLotIds, remainingOrders);
+      const { data: latestOrders, error: snapshotError } = await supabase
+        .from("export_orders")
+        .select("id,assignments")
+        .eq("factory_id", factoryId);
+      if (snapshotError) {
+        showToast(snapshotError.message, "error");
+        return;
+      }
+      await reconcileLotStatuses(
+        affectedLotIds,
+        (latestOrders || []) as Array<{ id?: string; assignments?: Assignment[] }>,
+      );
     }
 
     setDelConfirm(null);
@@ -1245,13 +1320,22 @@ export default function ExportPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
+                          {(() => {
+                            const locked = isOrderLocked(order);
+                            return (
+                              <>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               openEdit(order);
                             }}
-                            className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
-                            title="Sửa"
+                            disabled={locked}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              locked
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "hover:bg-blue-50 text-blue-500"
+                            }`}
+                            title={locked ? "Đơn có lô đã xuất hàng" : "Sửa"}
                           >
                             <Edit2 size={14} />
                           </button>
@@ -1260,11 +1344,19 @@ export default function ExportPage() {
                               e.stopPropagation();
                               setDelConfirm(order.id);
                             }}
-                            className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
-                            title="Xóa"
+                            disabled={locked}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              locked
+                                ? "text-slate-300 cursor-not-allowed"
+                                : "hover:bg-red-50 text-red-400"
+                            }`}
+                            title={locked ? "Đơn có lô đã xuất hàng" : "Xóa"}
                           >
                             <Trash2 size={14} />
                           </button>
+                              </>
+                            );
+                          })()}
                           {expandedId === order.id ? (
                             <ChevronUp size={16} className="text-slate-400" />
                           ) : (

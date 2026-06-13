@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatch-master"
+import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
+import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -26,6 +28,19 @@ type ExportOrder = {
   vehicles: { id:string; loai_xe:string; bien_truoc:string; bien_sau:string }[]
   files: { name: string; url: string; size?: number }[]
   customers?: { ma_kh:string; ten_kh_en:string; quoc_gia:string; dia_chi:string; email:string; nguoi_lien_he:string }
+}
+
+type TraceLot = {
+  id: string
+  ngan_id: string | null
+}
+
+type TraceNgan = {
+  id: string
+  trips: string[] | null
+  chung_nhan: string | null
+  ngay_bd: string | null
+  ngay_kt: string | null
 }
 
 // ─── Team colors ──────────────────────────────────────────────────────────────
@@ -123,7 +138,8 @@ export default function EudrClient() {
         .select("id,ma_lo,ngay_sx,loai_banh,kien_a,kien_b,kien_c,kien_d,ngan_id")
         .in("id", lotIds)
       setLotDetails(lotsFull || [])
-      const nganIds = [...new Set((lotsFull||[]).map((l:any)=>l.ngan_id).filter(Boolean))]
+      const typedLots = (lotsFull || []) as TraceLot[]
+      const nganIds = [...new Set(typedLots.map((lot) => lot.ngan_id).filter((value): value is string => Boolean(value)))]
       if (!nganIds.length) {
         setTraceInfo({ lots: lotsFull?.length||0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
@@ -132,25 +148,48 @@ export default function EudrClient() {
       // 2. Get ngans → trips + chung_nhan
       const { data: ngans } = await supabase.from("ngans")
         .select("id,trips,chung_nhan,ngay_bd,ngay_kt").in("id", nganIds)
+      const typedNgans = (ngans || []) as TraceNgan[]
 
       // Build lot→certification map from ngan.chung_nhan
       const certMap: Record<string,string> = {}
-      for (const lot of (lotsFull||[])) {
-        const ngan = (ngans||[]).find((n:any) => n.id === lot.ngan_id)
+      for (const lot of typedLots) {
+        const ngan = typedNgans.find((item) => item.id === lot.ngan_id)
         certMap[lot.id] = ngan?.chung_nhan ?? ""
       }
       setLotCertMap(certMap)
 
       const allTripUids = new Set<string>()
-      ;(ngans||[]).forEach((n:any) => (n.trips||[]).forEach((uid:string) => allTripUids.add(uid)))
+      typedNgans.forEach((ngan) => (ngan.trips || []).forEach((uid) => allTripUids.add(uid)))
       if (!allTripUids.size) {
         setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
-      // 3. Get dispatch_entries for this factory (include ngay for extraction dates)
-      const { data: dispatches } = await supabase.from("dispatch_entries")
-        .select("ngay,rows").eq("factory_id", ord.factory_id)
+      // 3. Resolve trips through shared helper so stable refs and legacy uid tokens both work.
+      const nganTrips = await Promise.all(
+        typedNgans.map(async (ngan) => {
+          const trips = await loadDispatchTripsByUids(
+            ord.factory_id,
+            Array.isArray(ngan.trips) ? ngan.trips : [],
+            {
+              fromDate: typeof ngan.ngay_bd === "string" ? ngan.ngay_bd : undefined,
+              toDate:
+                typeof ngan.ngay_kt === "string"
+                  ? ngan.ngay_kt
+                  : typeof ngan.ngay_bd === "string"
+                    ? ngan.ngay_bd
+                    : undefined,
+            },
+          )
+          return [ngan.id as string, trips] as const
+        }),
+      )
+      const tripsByNganId = new globalThis.Map<string, StorageTripItem[]>(nganTrips)
+      const resolvedTrips = [...new globalThis.Map(
+        nganTrips
+          .flatMap(([, trips]) => trips)
+          .map((trip: StorageTripItem) => [trip.ref, trip] as const),
+      ).values()]
       const { data: pointRows } = await supabase.from("dispatch_delivery_points")
         .select("ma_lo, lat, lng, doi, phien_a, phien_b, phien_c, phien_d")
         .eq("factory_id", ord.factory_id)
@@ -158,89 +197,60 @@ export default function EudrClient() {
         .order("sort_order", { ascending: true })
         .order("ma_lo", { ascending: true })
       const deliveryPoints = normalizeDeliveryPoints(pointRows) || DIEM_GN
-      // Normalize DD/MM/YYYY → YYYY-MM-DD (dispatch_entries.ngay từ CSV import dùng format này)
-      const toISO = (d: string) => d?.includes("/") ? d.split("/").reverse().join("-") : (d || "")
 
-      // Build lookup maps từ dispatches (key luôn là ISO)
-      const dateToRows: Record<string, any[]> = {}
-      const uidToRow:   Record<string, any>   = {}
-      ;(dispatches||[]).forEach((d:any) => {
-        const isoNgay = toISO(d.ngay)
-        const rows = d.rows || []
-        dateToRows[isoNgay] = [...(dateToRows[isoNgay]||[]), ...rows]
-        rows.forEach((r:any) => { if (r.uid) uidToRow[r.uid] = r })
-      })
-
-      const extractPlots = (row: any): string[] =>
-        (row.lo_thu_hoach||[]).length
-          ? row.lo_thu_hoach
-          : buildLoThuHoach(row.diem_gn || [], row.phien || [], deliveryPoints)
+      const extractPlots = (trip: Pick<StorageTripItem, "lo_thu_hoach" | "diem_gn" | "phien">): string[] =>
+        trip.lo_thu_hoach.length
+          ? trip.lo_thu_hoach
+          : buildLoThuHoach(trip.diem_gn, trip.phien, deliveryPoints)
 
       const diemGn = new Set<string>()
-      let matchedRows = 0
-      const processedDates = new Set<string>()
-
-      for (const uid of allTripUids) {
-        if (uid in uidToRow) {
-          // Format hiện tại: UUID khớp chính xác
-          matchedRows++
-          extractPlots(uidToRow[uid]).forEach((c:string) => diemGn.add(c))
-        } else {
-          // Format cũ: "DX-ddmmyy_N" → giải mã ngày, lấy tất cả rows của ngày đó
-          const m = uid.match(/^DX-(\d{2})(\d{2})(\d{2})_\d+$/)
-          if (m) {
-            const isoDate = `20${m[3]}-${m[2]}-${m[1]}`
-            if (!processedDates.has(isoDate)) {
-              processedDates.add(isoDate)
-              ;(dateToRows[isoDate] || []).forEach((row:any) => {
-                matchedRows++
-                extractPlots(row).forEach((c:string) => diemGn.add(c))
-              })
-            }
-          }
-        }
+      let matchedRows = resolvedTrips.length
+      for (const trip of resolvedTrips) {
+        extractPlots(trip).forEach((code) => diemGn.add(code))
       }
 
-      // Fallback cuối: khi không nhận ra format UID → dùng khoảng ngày ngăn
+      // Fallback cuối: khi trip tokens cũ không resolve được → dùng khoảng ngày ngăn
       let usedDateFallback = false
       if (matchedRows === 0 && allTripUids.size > 0) {
         usedDateFallback = true
+        const dispatches = await loadDispatchEntriesWithResolvedRows(supabase, {
+          factoryId: ord.factory_id,
+          select: "id,ngay,rows",
+          ascending: true,
+        })
         const today = new Date().toISOString().split("T")[0]
-        for (const ngan of (ngans||[])) {
+        for (const ngan of typedNgans) {
           if (!ngan.ngay_bd) continue
-          const bd = ngan.ngay_bd as string
-          const kt = (ngan.ngay_kt as string) || today
-          ;(dispatches||[]).forEach((d:any) => {
-            const dn = toISO(d.ngay)
+          const bd = ngan.ngay_bd
+          const kt = ngan.ngay_kt || today
+          for (const dispatch of dispatches) {
+            const dn = String(dispatch.ngay || "")
             if (dn >= bd && dn <= kt) {
-              ;(d.rows||[]).forEach((row:any) => {
+              for (const row of dispatch.rows || []) {
                 matchedRows++
-                extractPlots(row).forEach((c:string) => diemGn.add(c))
-              })
+                const fallbackTrip = {
+                  lo_thu_hoach: Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.map((item: unknown) => String(item || "")) : [],
+                  diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item: unknown) => String(item || "")) : [],
+                  phien: Array.isArray(row.phien) ? row.phien.map((item: unknown) => String(item || "")) : [],
+                }
+                extractPlots(fallbackTrip).forEach((c:string) => diemGn.add(c))
+              }
             }
-          })
+          }
         }
       }
       setDiemGnSet(diemGn)
 
       // Build extraction date map: lot_id → ngày điều xe sớm nhất của ngăn
       const edMap: Record<string,string> = {}
-      for (const lot of (lotsFull||[])) {
-        const ngan = (ngans||[]).find((n:any) => n.id === lot.ngan_id)
+      for (const lot of typedLots) {
+        const ngan = typedNgans.find((item) => item.id === lot.ngan_id)
         if (!ngan) continue
-        // Thử exact UID match trước
-        const tripSet = new Set(ngan.trips||[])
-        const exactDates = (dispatches||[])
-          .filter((d:any) => (d.rows||[]).some((r:any) => tripSet.has(r.uid)))
-          .map((d:any) => d.ngay as string).filter(Boolean).sort()
-        if (exactDates.length) { edMap[lot.id] = exactDates[0]; continue }
-        // Fallback: giải mã "DX-ddmmyy_N" → lấy ngày sớm nhất
-        const legacyDates: string[] = []
-        ;(ngan.trips||[]).forEach((uid:string) => {
-          const m = uid.match(/^DX-(\d{2})(\d{2})(\d{2})_\d+$/)
-          if (m) legacyDates.push(`20${m[3]}-${m[2]}-${m[1]}`)
-        })
-        edMap[lot.id] = legacyDates.length ? legacyDates.sort()[0] : (ngan.ngay_bd as string)||""
+        const tripDates = (tripsByNganId.get(ngan.id) || [])
+          .map((trip: StorageTripItem) => trip._date)
+          .filter(Boolean)
+          .sort()
+        edMap[lot.id] = tripDates[0] || ngan.ngay_bd || ""
       }
       setExtractionDates(edMap)
 
@@ -331,8 +341,8 @@ export default function EudrClient() {
         ? await generateDDS1(order, geoData, factory, lotCertMap)
         : await generateDDS2(order, lotDetails, extractionDates, factory)
       saveAs(blob, `${order.ma_don}_DDS_${n === 1 ? "Plantation" : "Shipment"}.pdf`)
-    } catch (e: any) {
-      showToast("Lỗi tạo PDF: " + e.message, false)
+    } catch (error: unknown) {
+      showToast("Lỗi tạo PDF: " + (error instanceof Error ? error.message : "Unknown error"), false)
     }
   }
 
@@ -375,8 +385,8 @@ export default function EudrClient() {
       const blob = await zip.generateAsync({ type: "blob" })
       saveAs(blob, `EUDR_${order.ma_don}.zip`)
       showToast("Đã tải về " + order.ma_don + ".zip")
-    } catch (e: any) {
-      showToast("Lỗi: " + e.message, false)
+    } catch (error: unknown) {
+      showToast("Lỗi: " + (error instanceof Error ? error.message : "Unknown error"), false)
     }
     setDownloading(false)
   }
@@ -442,7 +452,7 @@ export default function EudrClient() {
             Tra cứu
           </button>
         </div>
-        {notFound && <div className="mt-2 text-sm text-red-500 flex items-center gap-2"><AlertTriangle size={14}/> Không tìm thấy đơn hàng "{query}"</div>}
+        {notFound && <div className="mt-2 text-sm text-red-500 flex items-center gap-2"><AlertTriangle size={14}/> Không tìm thấy đơn hàng &quot;{query}&quot;</div>}
       </div>
 
       {/* Main content */}
