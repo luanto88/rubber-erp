@@ -236,6 +236,8 @@ type SkPendingLot = {
   kien_d: number;
 };
 
+type ErrorWithDigest = Error & { digest?: string };
+
 // â"€â"€â"€ Constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const CA_OPTS = ["A", "B", "C"];
 const THAM_OPTS = ["c\u0169", "M\u1edbi"];
@@ -364,17 +366,6 @@ function autoTrangThai(
   return "D\u1edf dang";
 }
 
-function getLotCompletionDate(
-  trang_thai: string,
-  currentNgaySX: string,
-  previousNgayHT?: string | null,
-): string | null {
-  if (trang_thai === "Ho\u00e0n th\u00e0nh" || trang_thai === "Xu\u1ea5t h\u00e0ng") {
-    return currentNgaySX || previousNgayHT || null;
-  }
-  return null;
-}
-
 function calcDraftTotals(
   draft: LotDraft,
   loai_banh: number,
@@ -411,6 +402,15 @@ function normalizeLotYear(year: string, fallback?: string): string {
 
 function fmtKg(kg: number): string {
   return Math.round(kg).toLocaleString("vi-VN") + " kg";
+}
+
+function getErrorMessage(error: unknown, fallback = "Lỗi không xác định") {
+  if (error instanceof Error) {
+    const digest = (error as ErrorWithDigest).digest;
+    return digest ? `${error.message} [digest: ${digest}]` : error.message;
+  }
+  if (typeof error === "string") return error;
+  return fallback;
 }
 
 function compareLotRecency(
@@ -1895,7 +1895,7 @@ export default function ProductPage() {
       setSkConfirm(false);
       void loadData(factoryId);
     } catch (e) {
-      setSkError(e instanceof Error ? e.message : "Lỗi không xác định");
+      setSkError(getErrorMessage(e));
     } finally {
       setSkSaving(false);
     }
@@ -2080,7 +2080,7 @@ export default function ProductPage() {
         if (hasError) break;
       }
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(getErrorMessage(err));
       hasError = true;
     }
     if (!hasError) {
@@ -2260,7 +2260,7 @@ export default function ProductPage() {
       setEditDateModal(null);
       setDateEditHeader(null);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -2426,7 +2426,7 @@ export default function ProductPage() {
       const deltaD = editForm.kien_d - prevD;
       const deltaBanh = deltaA + deltaB + deltaC + deltaD;
 
-      await saveLotTransaction({
+      const saveResult = await saveLotTransaction({
         lot: {
           factory_id: factoryId,
           ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
@@ -2460,6 +2460,8 @@ export default function ProductPage() {
         },
       });
 
+      const syncedSnapshot = saveResult.snapshot;
+
       const { error: updateError } = await supabase
         .from("lots")
         .update({
@@ -2467,12 +2469,16 @@ export default function ProductPage() {
           year: lotYear,
           ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
           factory_id: factoryId,
-          ngan_id: editForm.ngan_id || null,
-          ngay_ht: getLotCompletionDate(
-            editForm.trang_thai,
-            editForm.ngay_sx,
-            dbLot.ngay_ht,
-          ),
+          kien_a: syncedSnapshot.kien_a,
+          kien_b: syncedSnapshot.kien_b,
+          kien_c: syncedSnapshot.kien_c,
+          kien_d: syncedSnapshot.kien_d,
+          tong_banh: syncedSnapshot.tong_banh,
+          tong_kg: syncedSnapshot.tong_kg,
+          trang_thai: syncedSnapshot.trang_thai,
+          ca: syncedSnapshot.ca || editForm.ca,
+          ngan_id: syncedSnapshot.ngan_id || null,
+          ngay_ht: syncedSnapshot.ngay_ht,
           is_manual_edit: true,
         })
         .eq("id", editId);
@@ -2491,7 +2497,7 @@ export default function ProductPage() {
       setSaveError(null);
     } catch (err) {
       setSaveError(
-        `L\u1ed7i c\u1eadp nh\u1eadt ng\u0103n l\u01b0u: ${err instanceof Error ? err.message : String(err)}`,
+        `L\u1ed7i c\u1eadp nh\u1eadt ng\u0103n l\u01b0u: ${getErrorMessage(err)}`,
       );
     } finally {
       setSaving(false);
@@ -2542,7 +2548,7 @@ export default function ProductPage() {
           await syncNganStatusAfterLotEdit(nganId);
         }
       } catch (err) {
-        setSaveError(err instanceof Error ? err.message : String(err));
+        setSaveError(getErrorMessage(err));
         setDelConfirm(null);
         return;
       }
@@ -5102,6 +5108,3 @@ export default function ProductPage() {
     </div>
   );
 }
-
-
-

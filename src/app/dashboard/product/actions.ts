@@ -49,6 +49,26 @@ type DeleteLotTransactionInput = {
   transactionId: string;
 };
 
+function logProductActionError(
+  action: string,
+  context: Record<string, unknown>,
+  error: unknown,
+) {
+  const details =
+    error instanceof Error
+      ? {
+          message: error.message,
+          digest: (error as Error & { digest?: string }).digest,
+          stack: error.stack,
+        }
+      : { message: String(error) };
+
+  console.error(`[product/actions] ${action} failed`, {
+    ...context,
+    ...details,
+  });
+}
+
 function parseLotCode(maLo: string) {
   const normalized = maLo.trim().toLowerCase();
   const match = normalized.match(/^(\d+)([a-z]*)\/(\d{2,4})$/i);
@@ -111,173 +131,199 @@ async function syncLotMasterSnapshot(lotId: string) {
 }
 
 export async function saveLotTransaction(input: SaveLotTransactionInput) {
-  const supabase = getSupabaseAdmin();
   const { lot, transaction } = input;
   const maLo = lot.ma_lo.trim();
-  if (!maLo) throw new Error("Thieu ma lo.");
+  const isEditingExistingTransaction = Boolean(transaction.id);
 
-  const parsedLotCode = parseLotCode(maLo);
-  const kienA = transaction.kien_a ?? 0;
-  const kienB = transaction.kien_b ?? 0;
-  const kienC = transaction.kien_c ?? 0;
-  const kienD = transaction.kien_d ?? 0;
+  try {
+    const supabase = getSupabaseAdmin();
+    if (!maLo) throw new Error("Thieu ma lo.");
 
-  const { data: matchingLots, error: findLotError } = await supabase
-    .from("lots")
-    .select("id, factory_id, ma_lo, trang_thai, tong_banh, created_at, updated_at")
-    .eq("factory_id", lot.factory_id)
-    .eq("ma_lo", maLo);
+    const parsedLotCode = parseLotCode(maLo);
+    const kienA = transaction.kien_a ?? 0;
+    const kienB = transaction.kien_b ?? 0;
+    const kienC = transaction.kien_c ?? 0;
+    const kienD = transaction.kien_d ?? 0;
 
-  if (findLotError) throw new Error(`Khong tim duoc lo ${maLo}: ${findLotError.message}`);
-
-  const existingLot =
-    matchingLots && matchingLots.length > 0
-      ? pickCanonicalLot(
-          matchingLots.map((item) => ({
-            ...item,
-            trang_thai: normalizeLotStatus(item.trang_thai),
-          })),
-        )
-      : null;
-
-  let lotId = existingLot?.id;
-
-  if (!existingLot) {
-    const { data: insertedLot, error: insertLotError } = await supabase
+    const { data: matchingLots, error: findLotError } = await supabase
       .from("lots")
-      .insert({
-        factory_id: lot.factory_id,
-        ma_lo: maLo,
-        num: lot.num ?? parsedLotCode.num,
-        suffix: lot.suffix ?? parsedLotCode.suffix,
-        year: lot.year ?? parsedLotCode.year,
-        ngay_sx: lot.ngay_sx,
-        ca: lot.ca,
-        ngan_id: lot.ngan_id ?? transaction.ngan_id,
-        loai_csr: lot.loai_csr,
-        loai_banh: lot.loai_banh,
-        tong_banh: 0,
-        tong_kg: 0,
-        trang_thai: "Dở dang",
-        ghi_chu: lot.ghi_chu ?? "",
-        ...(lot.day_chuyen !== undefined ? { day_chuyen: lot.day_chuyen } : {}),
-        ...(lot.boc !== undefined ? { boc: lot.boc } : {}),
-        ...(lot.tham !== undefined ? { tham: lot.tham } : {}),
-        ...(lot.pallet !== undefined ? { pallet: lot.pallet } : {}),
-        ...(lot.chi_thi !== undefined ? { chi_thi: lot.chi_thi } : {}),
-        ...(lot.image_url_1 !== undefined ? { image_url_1: lot.image_url_1 } : {}),
-        ...(lot.image_url_2 !== undefined ? { image_url_2: lot.image_url_2 } : {}),
-      })
-      .select("id")
+      .select("id, factory_id, ma_lo, trang_thai, tong_banh, created_at, updated_at")
+      .eq("factory_id", lot.factory_id)
+      .eq("ma_lo", maLo);
+
+    if (findLotError) throw new Error(`Khong tim duoc lo ${maLo}: ${findLotError.message}`);
+
+    const existingLot =
+      matchingLots && matchingLots.length > 0
+        ? pickCanonicalLot(
+            matchingLots.map((item) => ({
+              ...item,
+              trang_thai: normalizeLotStatus(item.trang_thai),
+            })),
+          )
+        : null;
+
+    let lotId = existingLot?.id;
+
+    if (!existingLot) {
+      const { data: insertedLot, error: insertLotError } = await supabase
+        .from("lots")
+        .insert({
+          factory_id: lot.factory_id,
+          ma_lo: maLo,
+          num: lot.num ?? parsedLotCode.num,
+          suffix: lot.suffix ?? parsedLotCode.suffix,
+          year: lot.year ?? parsedLotCode.year,
+          ngay_sx: lot.ngay_sx,
+          ca: lot.ca,
+          ngan_id: lot.ngan_id ?? transaction.ngan_id,
+          loai_csr: lot.loai_csr,
+          loai_banh: lot.loai_banh,
+          tong_banh: 0,
+          tong_kg: 0,
+          trang_thai: "Dở dang",
+          ghi_chu: lot.ghi_chu ?? "",
+          ...(lot.day_chuyen !== undefined ? { day_chuyen: lot.day_chuyen } : {}),
+          ...(lot.boc !== undefined ? { boc: lot.boc } : {}),
+          ...(lot.tham !== undefined ? { tham: lot.tham } : {}),
+          ...(lot.pallet !== undefined ? { pallet: lot.pallet } : {}),
+          ...(lot.chi_thi !== undefined ? { chi_thi: lot.chi_thi } : {}),
+          ...(lot.image_url_1 !== undefined ? { image_url_1: lot.image_url_1 } : {}),
+          ...(lot.image_url_2 !== undefined ? { image_url_2: lot.image_url_2 } : {}),
+        })
+        .select("id")
+        .single();
+
+      if (insertLotError || !insertedLot) {
+        throw new Error(`Khong tao duoc lo ${maLo}: ${insertLotError?.message}`);
+      }
+      lotId = insertedLot.id;
+    } else {
+      const normalizedStatus = normalizeLotStatus(existingLot.trang_thai);
+      if (isEditingExistingTransaction) {
+        // Allow editing the latest transaction on in-progress and completed lots.
+      } else
+      if (normalizedStatus !== "Dở dang") {
+        throw new Error(
+          `Lo ${maLo} dang o trang thai "${existingLot.trang_thai}", khong the nhap them giao dich.`,
+        );
+      }
+    }
+
+    if (transaction.id) {
+      const { data: latestTransaction, error: latestTransactionError } = await supabase
+        .from("lot_transactions")
+        .select("id")
+        .eq("lot_id", lotId)
+        .order("ngay_nhap", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestTransactionError) {
+        throw new Error(
+          `Khong xac dinh duoc giao dich moi nhat cua lo ${maLo}: ${latestTransactionError.message}`,
+        );
+      }
+      if (latestTransaction && latestTransaction.id !== transaction.id) {
+        throw new Error("Chi duoc sua transaction cuoi cung cua lo do dang.");
+      }
+    }
+
+    const { data: savedTransaction, error: saveTransactionError } = await supabase
+      .from("lot_transactions")
+      .upsert(
+        {
+          ...(transaction.id ? { id: transaction.id } : {}),
+          lot_id: lotId,
+          ngan_id: transaction.ngan_id,
+          ca: transaction.ca,
+          ngay_nhap: transaction.ngay_nhap,
+          kien_a: kienA,
+          kien_b: kienB,
+          kien_c: kienC,
+          kien_d: kienD,
+          so_banh: transaction.so_banh,
+          so_kg: transaction.so_kg,
+          ...(transaction.created_by ? { created_by: transaction.created_by } : {}),
+        },
+        { onConflict: "id" },
+      )
+      .select("id, lot_id, ngan_id, so_banh, so_kg")
       .single();
 
-    if (insertLotError || !insertedLot) {
-      throw new Error(`Khong tao duoc lo ${maLo}: ${insertLotError?.message}`);
+    if (saveTransactionError) {
+      throw new Error(`Khong luu duoc giao dich cua lo ${maLo}: ${saveTransactionError.message}`);
     }
-    lotId = insertedLot.id;
-  } else {
-    const normalizedStatus = normalizeLotStatus(existingLot.trang_thai);
-    if (normalizedStatus !== "Dở dang") {
-      throw new Error(
-        `Lo ${maLo} dang o trang thai "${existingLot.trang_thai}", khong the nhap them giao dich.`,
-      );
-    }
+
+    const snapshot = await syncLotMasterSnapshot(lotId);
+    revalidateLotScreens();
+    return { success: true, lotId, snapshot, transaction: savedTransaction };
+  } catch (error) {
+    logProductActionError("saveLotTransaction", {
+      factoryId: lot.factory_id,
+      maLo,
+      lotNganId: lot.ngan_id,
+      transactionId: transaction.id,
+      transactionNganId: transaction.ngan_id,
+      ca: transaction.ca,
+      ngayNhap: transaction.ngay_nhap,
+      soBanh: transaction.so_banh,
+      soKg: transaction.so_kg,
+    }, error);
+    throw error;
   }
-
-  if (transaction.id) {
-    const { data: latestTransaction, error: latestTransactionError } = await supabase
-      .from("lot_transactions")
-      .select("id")
-      .eq("lot_id", lotId)
-      .order("ngay_nhap", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (latestTransactionError) {
-      throw new Error(
-        `Khong xac dinh duoc giao dich moi nhat cua lo ${maLo}: ${latestTransactionError.message}`,
-      );
-    }
-    if (latestTransaction && latestTransaction.id !== transaction.id) {
-      throw new Error("Chi duoc sua transaction cuoi cung cua lo do dang.");
-    }
-  }
-
-  const { data: savedTransaction, error: saveTransactionError } = await supabase
-    .from("lot_transactions")
-    .upsert(
-      {
-        ...(transaction.id ? { id: transaction.id } : {}),
-        lot_id: lotId,
-        ngan_id: transaction.ngan_id,
-        ca: transaction.ca,
-        ngay_nhap: transaction.ngay_nhap,
-        kien_a: kienA,
-        kien_b: kienB,
-        kien_c: kienC,
-        kien_d: kienD,
-        so_banh: transaction.so_banh,
-        so_kg: transaction.so_kg,
-        ...(transaction.created_by ? { created_by: transaction.created_by } : {}),
-      },
-      { onConflict: "id" },
-    )
-    .select("id, lot_id, ngan_id, so_banh, so_kg")
-    .single();
-
-  if (saveTransactionError) {
-    throw new Error(`Khong luu duoc giao dich cua lo ${maLo}: ${saveTransactionError.message}`);
-  }
-
-  const snapshot = await syncLotMasterSnapshot(lotId);
-  revalidateLotScreens();
-  return { success: true, lotId, snapshot, transaction: savedTransaction };
 }
 
 export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
-  const supabase = getSupabaseAdmin();
   const { transactionId } = input;
 
-  const { data: targetTx, error: findError } = await supabase
-    .from("lot_transactions")
-    .select("id, lot_id, ngan_id")
-    .eq("id", transactionId)
-    .single();
+  try {
+    const supabase = getSupabaseAdmin();
 
-  if (findError || !targetTx) {
-    throw new Error(`Khong tim thay giao dich can xoa: ${findError?.message ?? transactionId}`);
+    const { data: targetTx, error: findError } = await supabase
+      .from("lot_transactions")
+      .select("id, lot_id, ngan_id")
+      .eq("id", transactionId)
+      .single();
+
+    if (findError || !targetTx) {
+      throw new Error(`Khong tim thay giao dich can xoa: ${findError?.message ?? transactionId}`);
+    }
+
+    const { error: deleteError } = await supabase
+      .from("lot_transactions")
+      .delete()
+      .eq("id", transactionId);
+    if (deleteError) throw new Error(`Khong xoa duoc giao dich: ${deleteError.message}`);
+
+    const { count, error: countError } = await supabase
+      .from("lot_transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("lot_id", targetTx.lot_id);
+
+    if (countError) throw new Error(`Khong dem duoc giao dich con lai: ${countError.message}`);
+
+    let snapshot = null;
+    if ((count ?? 0) > 0) {
+      snapshot = await syncLotMasterSnapshot(targetTx.lot_id);
+    } else {
+      const { error: deleteLotError } = await supabase.from("lots").delete().eq("id", targetTx.lot_id);
+      if (deleteLotError) throw new Error(`Khong xoa duoc lo tong: ${deleteLotError.message}`);
+    }
+
+    revalidateLotScreens();
+
+    return {
+      success: true,
+      deletedTransactionId: transactionId,
+      lotId: targetTx.lot_id,
+      affectedNganId: targetTx.ngan_id,
+      remainingTransactions: count ?? 0,
+      snapshot,
+    };
+  } catch (error) {
+    logProductActionError("deleteLotTransaction", { transactionId }, error);
+    throw error;
   }
-
-  const { error: deleteError } = await supabase
-    .from("lot_transactions")
-    .delete()
-    .eq("id", transactionId);
-  if (deleteError) throw new Error(`Khong xoa duoc giao dich: ${deleteError.message}`);
-
-  const { count, error: countError } = await supabase
-    .from("lot_transactions")
-    .select("id", { count: "exact", head: true })
-    .eq("lot_id", targetTx.lot_id);
-
-  if (countError) throw new Error(`Khong dem duoc giao dich con lai: ${countError.message}`);
-
-  let snapshot = null;
-  if ((count ?? 0) > 0) {
-    snapshot = await syncLotMasterSnapshot(targetTx.lot_id);
-  } else {
-    const { error: deleteLotError } = await supabase.from("lots").delete().eq("id", targetTx.lot_id);
-    if (deleteLotError) throw new Error(`Khong xoa duoc lo tong: ${deleteLotError.message}`);
-  }
-
-  revalidateLotScreens();
-
-  return {
-    success: true,
-    deletedTransactionId: transactionId,
-    lotId: targetTx.lot_id,
-    affectedNganId: targetTx.ngan_id,
-    remainingTransactions: count ?? 0,
-    snapshot,
-  };
 }
