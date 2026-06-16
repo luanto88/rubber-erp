@@ -77,9 +77,7 @@ export function InventoryQrCard({
           </div>
         )}
       </div>
-      <div className="mt-3 break-all text-center text-[11px] font-semibold text-slate-500">
-        {valueText}
-      </div>
+      <div className="mt-3 break-all text-center text-[11px] font-semibold text-slate-500">{valueText}</div>
       <div className="mt-2 text-center text-xs text-slate-500">{caption}</div>
       {hrefPath ? (
         <div className="mt-3 text-center">

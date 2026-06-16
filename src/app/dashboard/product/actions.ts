@@ -133,7 +133,8 @@ async function syncLotMasterSnapshot(lotId: string) {
 export async function saveLotTransaction(input: SaveLotTransactionInput) {
   const { lot, transaction } = input;
   const maLo = lot.ma_lo.trim();
-  const isEditingExistingTransaction = Boolean(transaction.id);
+  const editingTransactionId = transaction.id ?? null;
+  const isEditingExistingTransaction = Boolean(editingTransactionId);
 
   try {
     const supabase = getSupabaseAdmin();
@@ -201,7 +202,7 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
     } else {
       const normalizedStatus = normalizeLotStatus(existingLot.trang_thai);
       if (isEditingExistingTransaction) {
-        // Allow editing the latest transaction on in-progress and completed lots.
+        // Allow editing an existing transaction on in-progress and completed lots.
       } else
       if (normalizedStatus !== "Dở dang") {
         throw new Error(
@@ -210,23 +211,23 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
       }
     }
 
-    if (transaction.id) {
-      const { data: latestTransaction, error: latestTransactionError } = await supabase
+    if (editingTransactionId) {
+      const { data: existingTransaction, error: existingTransactionError } = await supabase
         .from("lot_transactions")
-        .select("id")
-        .eq("lot_id", lotId)
-        .order("ngay_nhap", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(1)
+        .select("id, lot_id")
+        .eq("id", editingTransactionId)
         .maybeSingle();
 
-      if (latestTransactionError) {
+      if (existingTransactionError) {
         throw new Error(
-          `Khong xac dinh duoc giao dich moi nhat cua lo ${maLo}: ${latestTransactionError.message}`,
+          `Khong xac dinh duoc giao dich dang sua cua lo ${maLo}: ${existingTransactionError.message}`,
         );
       }
-      if (latestTransaction && latestTransaction.id !== transaction.id) {
-        throw new Error("Chi duoc sua transaction cuoi cung cua lo do dang.");
+      if (!existingTransaction) {
+        throw new Error("Khong tim thay transaction can sua.");
+      }
+      if (existingTransaction.lot_id !== lotId) {
+        throw new Error("Transaction dang sua khong thuoc lo hien tai.");
       }
     }
 

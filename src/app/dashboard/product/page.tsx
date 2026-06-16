@@ -207,6 +207,20 @@ type DateEditHeaderForm = {
   image_url_2: string;
 };
 
+type EditTransactionContext = {
+  transactionId: string;
+  before_a: number;
+  before_b: number;
+  before_c: number;
+  before_d: number;
+  before_banh: number;
+  after_a: number;
+  after_b: number;
+  after_c: number;
+  after_d: number;
+  after_banh: number;
+};
+
 type LotContribution = Lot & {
   uid: string;
   transaction_id?: string;
@@ -234,6 +248,53 @@ type SkPendingLot = {
   kien_b: number;
   kien_c: number;
   kien_d: number;
+};
+
+type SkLotBreakdown = {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tong_banh: number;
+  tong_kg: number;
+};
+
+type SkLotSnapshot = {
+  id?: string | null;
+  ma_lo: string;
+  boc: string | null;
+  pallet: string[];
+  kien: SkLotBreakdown;
+  trang_thai?: string | null;
+};
+
+type SkHistoryLotDetail = {
+  id?: string;
+  ma_lo: string;
+  converted?: { a?: number; b?: number; c?: number; d?: number };
+  source_snapshot?: SkLotSnapshot | null;
+  moved_snapshot?: SkLotSnapshot | null;
+  residual_snapshot?: SkLotSnapshot | null;
+  moved_breakdown?: SkLotBreakdown | null;
+  residual_breakdown?: SkLotBreakdown | null;
+  split?: boolean;
+  residual_action?: "created" | "existing" | "none";
+  actor_id?: string | null;
+  actor_name?: string | null;
+  actor_username?: string | null;
+};
+
+type SkHistoryRow = {
+  id: string;
+  ngay: string;
+  loai: string | null;
+  chung_loai: string | null;
+  from_boc: string | null;
+  to_boc: string | null;
+  from_pallet: string | null;
+  to_pallet: string | null;
+  lots: SkHistoryLotDetail[];
+  created_at: string | null;
 };
 
 type ErrorWithDigest = Error & { digest?: string };
@@ -386,6 +447,11 @@ function calcDraftTotals(
 
 function buildMaLo(num: number, suffix: string, year: string): string {
   return suffix === "" ? `${num}/${year}` : `${num}${suffix}/${year}`;
+}
+
+function isLotCompletedForCreate(status: string) {
+  const normalized = normalizeLotStatus(status);
+  return normalized === "Hoàn thành" || normalized === "Xuất hàng";
 }
 
 function yearFromDate(dateStr: string): string {
@@ -762,6 +828,95 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function createSkBreakdown(a: number, b: number, c: number, d: number, loaiBanh: number): SkLotBreakdown {
+  const tongBanh = a + b + c + d;
+  return {
+    a,
+    b,
+    c,
+    d,
+    tong_banh: tongBanh,
+    tong_kg: Math.round(tongBanh * loaiBanh * 100) / 100,
+  };
+}
+
+function createSkSnapshot(
+  id: string | null | undefined,
+  maLo: string,
+  boc: string | null | undefined,
+  pallet: string[] | null | undefined,
+  breakdown: SkLotBreakdown,
+  trangThai?: string | null,
+): SkLotSnapshot {
+  return {
+    id: id ?? null,
+    ma_lo: maLo,
+    boc: boc ?? null,
+    pallet: [...(pallet || [])],
+    kien: breakdown,
+    trang_thai: trangThai ?? null,
+  };
+}
+
+function normalizeSkHistoryLots(value: unknown): SkHistoryLotDetail[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    return {
+      id: typeof row.id === "string" ? row.id : undefined,
+      ma_lo: typeof row.ma_lo === "string" ? row.ma_lo : "",
+      converted:
+        row.converted && typeof row.converted === "object"
+          ? (row.converted as SkHistoryLotDetail["converted"])
+          : undefined,
+      source_snapshot:
+        row.source_snapshot && typeof row.source_snapshot === "object"
+          ? (row.source_snapshot as SkLotSnapshot)
+          : null,
+      moved_snapshot:
+        row.moved_snapshot && typeof row.moved_snapshot === "object"
+          ? (row.moved_snapshot as SkLotSnapshot)
+          : null,
+      residual_snapshot:
+        row.residual_snapshot && typeof row.residual_snapshot === "object"
+          ? (row.residual_snapshot as SkLotSnapshot)
+          : null,
+      moved_breakdown:
+        row.moved_breakdown && typeof row.moved_breakdown === "object"
+          ? (row.moved_breakdown as SkLotBreakdown)
+          : null,
+      residual_breakdown:
+        row.residual_breakdown && typeof row.residual_breakdown === "object"
+          ? (row.residual_breakdown as SkLotBreakdown)
+          : null,
+      split: Boolean(row.split),
+      residual_action:
+        row.residual_action === "created" ||
+        row.residual_action === "existing" ||
+        row.residual_action === "none"
+          ? row.residual_action
+          : undefined,
+      actor_id: typeof row.actor_id === "string" ? row.actor_id : null,
+      actor_name: typeof row.actor_name === "string" ? row.actor_name : null,
+      actor_username: typeof row.actor_username === "string" ? row.actor_username : null,
+    };
+  });
+}
+
+function formatSkTimestamp(value: string | null | undefined) {
+  if (!value) return "Chưa rõ thời gian";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("vi-VN", {
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
   const defaultCsr = `${prefix}10`;
   return {
@@ -842,9 +997,10 @@ function emptyEditForm(): EditForm {
 // â"€â"€â"€ Main Component â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
+  const [skHistory, setSkHistory] = useState<SkHistoryRow[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
   const [, setLoading] = useState(true);
-  const [, setCurrentUser] = useState<SessionUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [factoryId, setFactoryId] = useState<string | null>(null);
   const [factory, setFactory] = useState<{ id: string; name: string } | null>(
     null,
@@ -874,6 +1030,8 @@ export default function ProductPage() {
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditForm>(emptyEditForm());
   const [editId, setEditId] = useState<string | null>(null);
+  const [editTransactionId, setEditTransactionId] = useState<string | null>(null);
+  const [editContext, setEditContext] = useState<EditTransactionContext | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
@@ -900,6 +1058,7 @@ export default function ProductPage() {
   const [skSaving, setSkSaving] = useState(false);
   const [skError, setSkError] = useState<string | null>(null);
   const [skDone, setSkDone] = useState<Set<string>>(new Set());
+  const [skHistoryLoading, setSkHistoryLoading] = useState(false);
   const [nganPickerCollapsed, setNganPickerCollapsed] = useState(false);
   const [nganManualQuery, setNganManualQuery] = useState("");
 
@@ -912,6 +1071,7 @@ export default function ProductPage() {
   // â"€â"€ Load data â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const loadData = useCallback(async (fid: string) => {
     setLoading(true);
+    setSkHistoryLoading(true);
     try {
       const q = supabase
         .from("lots")
@@ -922,7 +1082,7 @@ export default function ProductPage() {
         .order("ngay_sx", { ascending: false })
         .order("created_at", { ascending: false });
 
-      const [{ data: lotsData }, { data: ngansData }] = await Promise.all([
+      const [{ data: lotsData }, { data: ngansData }, { data: historyData }] = await Promise.all([
         q,
         supabase
           .from("ngans")
@@ -930,6 +1090,12 @@ export default function ProductPage() {
             "id,ten_ngan,ma_ngan,tong_kho,trang_thai,ngay_bd,loai_nl,chung_nhan,ngay_kt",
           )
           .eq("factory_id", fid),
+        supabase
+          .from("sk_history")
+          .select("id, ngay, loai, chung_loai, from_boc, to_boc, from_pallet, to_pallet, lots, created_at")
+          .eq("factory_id", fid)
+          .order("created_at", { ascending: false })
+          .limit(50),
       ]);
       const normalizedLots = (lotsData || []).map((lot) => ({
         ...lot,
@@ -951,8 +1117,22 @@ export default function ProductPage() {
           trang_thai: getResolvedProductNganStatus(ngan),
         })),
       );
+      const normalizedHistory = ((historyData || []) as Array<Record<string, unknown>>).map((row) => ({
+        id: String(row.id || ""),
+        ngay: String(row.ngay || ""),
+        loai: typeof row.loai === "string" ? row.loai : null,
+        chung_loai: typeof row.chung_loai === "string" ? row.chung_loai : null,
+        from_boc: typeof row.from_boc === "string" ? row.from_boc : null,
+        to_boc: typeof row.to_boc === "string" ? row.to_boc : null,
+        from_pallet: typeof row.from_pallet === "string" ? row.from_pallet : null,
+        to_pallet: typeof row.to_pallet === "string" ? row.to_pallet : null,
+        lots: normalizeSkHistoryLots(row.lots),
+        created_at: typeof row.created_at === "string" ? row.created_at : null,
+      }));
+      setSkHistory(normalizedHistory);
     } finally {
       setLoading(false);
+      setSkHistoryLoading(false);
     }
   }, []);
 
@@ -1277,8 +1457,44 @@ export default function ProductPage() {
   const selectedNganHasMaterial = Number(selectedNgan?.tong_kho || 0) > 0;
   const nganBlocked = nganPct > 110;
   const showMarkDoneActions = nganPct >= 100 && nganPct <= 110;
+  const sessionYear = normalizeLotYear(yearFromDate(session.ngay_sx));
+  const createRangeConflicts = useMemo(() => {
+    return caSections.flatMap((cs) =>
+      cs.blocks.flatMap((block, blockIdx) => {
+        const completedLots = lots.filter(
+          (lot) =>
+            lot.num >= block.from_num &&
+            lot.num <= block.to_num &&
+            isSameLotSeries(lot, {
+              loai_csr: block.loai_csr,
+              loai_banh: block.loai_banh,
+              year: sessionYear,
+            }) &&
+            isLotCompletedForCreate(lot.trang_thai),
+        );
+
+        if (completedLots.length === 0) return [];
+
+        return [
+          {
+            blockId: block.id,
+            ca: cs.ca,
+            blockIndex: blockIdx,
+            lotCodes: completedLots.map((lot) => lot.ma_lo),
+          },
+        ];
+      }),
+    );
+  }, [caSections, lots, sessionYear]);
+  const createRangeConflictByBlockId = useMemo(
+    () => new Map(createRangeConflicts.map((issue) => [issue.blockId, issue])),
+    [createRangeConflicts],
+  );
   const canSaveCurrentSession =
-    Boolean(session.ngan_id) && selectedNganHasMaterial && !nganBlocked;
+    Boolean(session.ngan_id) &&
+    selectedNganHasMaterial &&
+    !nganBlocked &&
+    createRangeConflicts.length === 0;
   const sessionTotals = useMemo(() => {
     let lots_count = 0,
       banh = 0;
@@ -1294,7 +1510,6 @@ export default function ProductPage() {
     return { lots_count, banh };
   }, [caSections]);
 
-  const sessionYear = normalizeLotYear(yearFromDate(session.ngay_sx));
   const jumpLotNums = useMemo(() => {
     const missing = new Set<number>();
     const plannedBySeries = new Map<string, number[]>();
@@ -1809,6 +2024,9 @@ export default function ProductPage() {
     setSkSaving(true); setSkError(null);
     try {
       const convertedIds: string[] = [];
+      const historyLots: SkHistoryLotDetail[] = [];
+      const actorName = currentUser?.full_name || currentUser?.username || null;
+      const actorUsername = currentUser?.username || null;
 
       for (const p of skPending) {
         const { lot, kien_a, kien_b, kien_c, kien_d } = p;
@@ -1816,14 +2034,22 @@ export default function ProductPage() {
           kien_a === lot.kien_a && kien_b === lot.kien_b &&
           kien_c === lot.kien_c && kien_d === lot.kien_d;
 
-        const tong_banh = kien_a + kien_b + kien_c + kien_d;
-        const tong_kg = Math.round(tong_banh * lot.loai_banh * 100) / 100;
+        const movedBreakdown = createSkBreakdown(kien_a, kien_b, kien_c, kien_d, lot.loai_banh);
         const newBoc = skTab === "thay_boc" ? skToBoc : lot.boc;
         const newPallet = skTab === "sang_kien" ? skToPallet : lot.pallet;
+        const sourceSnapshot = createSkSnapshot(
+          lot.id,
+          lot.ma_lo,
+          lot.boc,
+          lot.pallet,
+          createSkBreakdown(lot.kien_a, lot.kien_b, lot.kien_c, lot.kien_d, lot.loai_banh),
+          lot.trang_thai,
+        );
 
         const { error: e1 } = await supabase.from("lots").update({
           kien_a, kien_b, kien_c, kien_d,
-          tong_banh, tong_kg,
+          tong_banh: movedBreakdown.tong_banh,
+          tong_kg: movedBreakdown.tong_kg,
           boc: newBoc,
           pallet: newPallet,
           updated_at: new Date().toISOString(),
@@ -1831,13 +2057,25 @@ export default function ProductPage() {
         if (e1) { setSkError(e1.message); return; }
         convertedIds.push(lot.id);
 
+        const movedSnapshot = createSkSnapshot(
+          lot.id,
+          lot.ma_lo,
+          newBoc,
+          newPallet,
+          movedBreakdown,
+          lot.trang_thai,
+        );
+
+        let residualSnapshot: SkLotSnapshot | null = null;
+        let residualBreakdown: SkLotBreakdown | null = null;
+        let residualAction: "created" | "existing" | "none" = "none";
+
         if (!isFullConvert) {
           const rem_a = lot.kien_a - kien_a;
           const rem_b = lot.kien_b - kien_b;
           const rem_c = lot.kien_c - kien_c;
           const rem_d = lot.kien_d - kien_d;
-          const rem_banh = rem_a + rem_b + rem_c + rem_d;
-          const rem_kg = Math.round(rem_banh * lot.loai_banh * 100) / 100;
+          residualBreakdown = createSkBreakdown(rem_a, rem_b, rem_c, rem_d, lot.loai_banh);
           const residualSuffix = lot.suffix + "r";
           const residualMaLo = buildMaLo(lot.num, residualSuffix, lot.year);
 
@@ -1863,14 +2101,41 @@ export default function ProductPage() {
               pallet: lot.pallet,
               chi_thi: lot.chi_thi,
               kien_a: rem_a, kien_b: rem_b, kien_c: rem_c, kien_d: rem_d,
-              tong_banh: rem_banh,
-              tong_kg: rem_kg,
+              tong_banh: residualBreakdown.tong_banh,
+              tong_kg: residualBreakdown.tong_kg,
               trang_thai: "Hoàn thành",
               ghi_chu: `Tồn dư từ ${lot.ma_lo}`,
             });
             if (e2) { setSkError(e2.message); return; }
+            residualAction = "created";
+          } else {
+            residualAction = "existing";
           }
+
+          residualSnapshot = createSkSnapshot(
+            existing?.id ?? null,
+            residualMaLo,
+            lot.boc,
+            lot.pallet,
+            residualBreakdown,
+            "Hoàn thành",
+          );
         }
+
+        historyLots.push({
+          id: lot.id,
+          ma_lo: lot.ma_lo,
+          source_snapshot: sourceSnapshot,
+          moved_snapshot: movedSnapshot,
+          residual_snapshot: residualSnapshot,
+          moved_breakdown: movedBreakdown,
+          residual_breakdown: residualBreakdown,
+          split: !isFullConvert,
+          residual_action: residualAction,
+          actor_id: currentUser?.id ?? null,
+          actor_name: actorName,
+          actor_username: actorUsername,
+        });
       }
 
       const { error: eH } = await supabase.from("sk_history").insert({
@@ -1882,11 +2147,7 @@ export default function ProductPage() {
         to_boc: skTab === "thay_boc" ? skToBoc : null,
         from_pallet: skTab === "sang_kien" ? (skFilterPallet || null) : null,
         to_pallet: skTab === "sang_kien" ? skToPallet.join(", ") : null,
-        lots: skPending.map((p) => ({
-          id: p.lot.id,
-          ma_lo: p.lot.ma_lo,
-          converted: { a: p.kien_a, b: p.kien_b, c: p.kien_c, d: p.kien_d },
-        })),
+        lots: historyLots,
       });
       if (eH) { setSkError(eH.message); return; }
 
@@ -1994,6 +2255,13 @@ export default function ProductPage() {
       setSaveError(`Tỷ lệ thành phẩm sẽ là ${nganPct.toFixed(1)}%, vượt 110%.`);
       return;
     }
+    if (createRangeConflicts.length > 0) {
+      const firstConflict = createRangeConflicts[0];
+      setSaveError(
+        `Khoảng lô đang chọn có lô đã hoàn thành: ${firstConflict.lotCodes.join(", ")}. Hãy đổi lại Từ lô/Đến lô trước khi lưu.`,
+      );
+      return;
+    }
     if (markNganDone && !showMarkDoneActions) {
       setSaveError("Chỉ được đánh dấu đã sản xuất khi tỷ lệ nằm trong khoảng 100% đến 110%.");
       return;
@@ -2096,19 +2364,40 @@ export default function ProductPage() {
       setSaving(false);
     }
   };
-  const openEdit = (lot: Lot) => {
+  const openEdit = (lot: Lot, transactionId?: string) => {
     if (normalizeLotStatus(lot.trang_thai) === "Xuất hàng") {
       setSaveError("Lô đã xuất hàng, không thể sửa.");
       return;
     }
+    const transactions = lot.lot_transactions || [];
+    const targetIndex = transactionId
+      ? transactions.findIndex((tx) => tx.id === transactionId)
+      : transactions.length - 1;
+    const targetTx = targetIndex >= 0 ? transactions[targetIndex] : null;
+    const previousTransactions =
+      targetIndex >= 0 ? transactions.slice(0, targetIndex) : [];
+    const laterTransactions =
+      targetIndex >= 0 ? transactions.slice(targetIndex + 1) : [];
+    const beforeA = previousTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
+    const beforeB = previousTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
+    const beforeC = previousTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
+    const beforeD = previousTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+    const beforeBanh = previousTransactions.reduce((sum, tx) => sum + (tx.so_banh || 0), 0);
+    const afterA = laterTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
+    const afterB = laterTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
+    const afterC = laterTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
+    const afterD = laterTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+    const afterBanh = laterTransactions.reduce((sum, tx) => sum + (tx.so_banh || 0), 0);
+    const loTron = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh).lo_tron;
+    const derivedStatus = autoTrangThai(lot.tong_banh, loTron, lot.trang_thai);
     setEditForm({
       ma_lo: lot.ma_lo,
       num: lot.num,
       suffix: lot.suffix,
       year: lot.year,
-      ngay_sx: lot.ngay_sx?.slice(0, 10) || "",
-      ca: lot.ca,
-      ngan_id: lot.ngan_id || "",
+      ngay_sx: (targetTx?.ngay_nhap || lot.ngay_sx)?.slice(0, 10) || "",
+      ca: targetTx?.ca || lot.ca,
+      ngan_id: targetTx?.ngan_id || lot.ngan_id || "",
       day_chuyen: normalizeDayChuyen(lot.day_chuyen) || DAY_CHUYEN_TAP,
       loai_csr: lot.loai_csr,
       loai_banh: lot.loai_banh || 35,
@@ -2116,16 +2405,34 @@ export default function ProductPage() {
       tham: lot.tham,
       pallet: lot.pallet || [],
       chi_thi: lot.chi_thi,
-      kien_a: lot.kien_a,
-      kien_b: lot.kien_b,
-      kien_c: lot.kien_c,
-      kien_d: lot.kien_d,
-      tong_banh: lot.tong_banh,
-      tong_kg: lot.tong_kg,
-      trang_thai: lot.trang_thai,
+      kien_a: targetTx ? targetTx.kien_a : lot.kien_a,
+      kien_b: targetTx ? targetTx.kien_b : lot.kien_b,
+      kien_c: targetTx ? targetTx.kien_c : lot.kien_c,
+      kien_d: targetTx ? targetTx.kien_d : lot.kien_d,
+      tong_banh: targetTx ? targetTx.so_banh : lot.tong_banh,
+      tong_kg: targetTx ? targetTx.so_kg : lot.tong_kg,
+      trang_thai: targetTx ? derivedStatus : lot.trang_thai,
       ghi_chu: lot.ghi_chu || "",
     });
     setEditId(lot.id);
+    setEditTransactionId(targetTx?.id || null);
+    setEditContext(
+      targetTx
+        ? {
+            transactionId: targetTx.id,
+            before_a: beforeA,
+            before_b: beforeB,
+            before_c: beforeC,
+            before_d: beforeD,
+            before_banh: beforeBanh,
+            after_a: afterA,
+            after_b: afterB,
+            after_c: afterC,
+            after_d: afterD,
+            after_banh: afterBanh,
+          }
+        : null,
+    );
     setEditModal(true);
   };
 
@@ -2202,6 +2509,22 @@ export default function ProductPage() {
     try {
       for (const lot of editableLots) {
         const nextMaLo = buildMaLo(lot.num, dateEditHeader.suffix, nextYear);
+        const updatedTransactions = (lot.lot_transactions || [])
+          .map((tx) =>
+            tx.ngay_nhap === editDateModal
+              ? {
+                  ...tx,
+                  ngan_id: dateEditHeader.ngan_id,
+                  ngay_nhap: dateEditHeader.ngay_sx,
+                }
+              : tx,
+          )
+          .sort((a, b) => {
+            const cmp = (a.ngay_nhap || "").localeCompare(b.ngay_nhap || "");
+            if (cmp !== 0) return cmp;
+            return (a.created_at || "").localeCompare(b.created_at || "");
+          });
+        const latestTxAfterHeaderEdit = updatedTransactions[updatedTransactions.length - 1];
         const duplicatedOutsideDate = lots.find(
           (item) =>
             item.id !== lot.id &&
@@ -2219,7 +2542,8 @@ export default function ProductPage() {
               ngan_id: dateEditHeader.ngan_id,
               ngay_nhap: dateEditHeader.ngay_sx,
             })
-            .eq("lot_id", lot.id);
+            .eq("lot_id", lot.id)
+            .eq("ngay_nhap", editDateModal);
           if (txError) throw new Error(txError.message);
         }
 
@@ -2230,7 +2554,7 @@ export default function ProductPage() {
             suffix: dateEditHeader.suffix,
             year: nextYear,
             ngay_sx: dateEditHeader.ngay_sx,
-            ngan_id: dateEditHeader.ngan_id,
+            ngan_id: latestTxAfterHeaderEdit?.ngan_id || dateEditHeader.ngan_id,
             chi_thi: dateEditHeader.chi_thi,
             ghi_chu: dateEditHeader.ghi_chu,
             image_url_1: dateEditHeader.image_url_1 || null,
@@ -2274,18 +2598,36 @@ export default function ProductPage() {
         next.loai_banh = cfg.loai_banh;
       }
       const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
+      const maxA = Math.max(
+        0,
+        cfg.max_per_kien - (editContext?.before_a || 0) - (editContext?.after_a || 0),
+      );
+      const maxB = Math.max(
+        0,
+        cfg.max_per_kien - (editContext?.before_b || 0) - (editContext?.after_b || 0),
+      );
+      const maxC = Math.max(
+        0,
+        cfg.max_per_kien - (editContext?.before_c || 0) - (editContext?.after_c || 0),
+      );
+      const maxD = Math.max(
+        0,
+        cfg.max_per_kien - (editContext?.before_d || 0) - (editContext?.after_d || 0),
+      );
       if (patch.kien_a !== undefined)
-        next.kien_a = Math.min(Math.max(0, next.kien_a), cfg.max_per_kien);
+        next.kien_a = Math.min(Math.max(0, next.kien_a), maxA);
       if (patch.kien_b !== undefined)
-        next.kien_b = Math.min(Math.max(0, next.kien_b), cfg.max_per_kien);
+        next.kien_b = Math.min(Math.max(0, next.kien_b), maxB);
       if (patch.kien_c !== undefined)
-        next.kien_c = Math.min(Math.max(0, next.kien_c), cfg.max_per_kien);
+        next.kien_c = Math.min(Math.max(0, next.kien_c), maxC);
       if (patch.kien_d !== undefined)
-        next.kien_d = Math.min(Math.max(0, next.kien_d), cfg.max_per_kien);
+        next.kien_d = Math.min(Math.max(0, next.kien_d), maxD);
       const tb = next.kien_a + next.kien_b + next.kien_c + next.kien_d;
+      const projectedBanh =
+        tb + (editContext?.before_banh || 0) + (editContext?.after_banh || 0);
       next.tong_banh = tb;
       next.tong_kg = Math.round(tb * next.loai_banh * 100) / 100;
-      next.trang_thai = autoTrangThai(tb, cfg.lo_tron, next.trang_thai);
+      next.trang_thai = autoTrangThai(projectedBanh, cfg.lo_tron, next.trang_thai);
 
       if (
         patch.num !== undefined ||
@@ -2298,17 +2640,6 @@ export default function ProductPage() {
       }
       return next;
     });
-  };
-
-  const getProjectedNganPct = (nganId: string, excludeLotId?: string) => {
-    const ngan = ngans.find((item) => item.id === nganId);
-    if (!ngan || !ngan.tong_kho) return 0;
-
-    const totalKg = lots
-      .filter((lot) => lot.ngan_id === nganId && lot.id !== excludeLotId)
-      .reduce((sum, lot) => sum + (lot.tong_kg || 0), 0);
-
-    return ((totalKg + (editForm.tong_kg || 0)) / ngan.tong_kho) * 100;
   };
 
   const syncNganStatusAfterLotEdit = async (nganId: string) => {
@@ -2380,51 +2711,66 @@ export default function ProductPage() {
         return;
       }
 
-      const targetNganId = editForm.ngan_id || "";
-      const isIncreasingSameNganLoad =
-        targetNganId === dbLot.ngan_id &&
-        (editForm.tong_kg || 0) > (dbLot.tong_kg || 0);
-      if (targetNganId && (targetNganId !== dbLot.ngan_id || isIncreasingSameNganLoad)) {
-        const projectedPct =
-          targetNganId === dbLot.ngan_id
-            ? getProjectedNganPct(targetNganId, editId)
-            : getProjectedNganPct(targetNganId);
-        if (projectedPct > 110) {
-          setSaveError(
-            `Kh\u00f4ng th\u1ec3 chuy\u1ec3n sang ng\u0103n n\u00e0y v\u00ec t\u1ef7 l\u1ec7 l\u1ea5p \u0111\u1ea7y s\u1ebd l\u00e0 ${projectedPct.toFixed(1)}%, v\u01b0\u1ee3t 110%.`,
-          );
-          return;
-        }
-      }
-
       const transactions = dbLot.lot_transactions || [];
-      const latestTx = transactions[transactions.length - 1];
-      if (!latestTx) {
+      const fallbackTx = transactions[transactions.length - 1];
+      const targetTxId = editTransactionId || fallbackTx?.id;
+      const targetTxIndex = transactions.findIndex((tx) => tx.id === targetTxId);
+      const targetTx = targetTxIndex >= 0 ? transactions[targetTxIndex] : fallbackTx;
+      if (!targetTx) {
         setSaveError("L\u00f4 n\u00e0y ch\u01b0a c\u00f3 giao d\u1ecbch \u0111\u1ec3 s\u1eeda.");
         return;
       }
 
-      const previousTransactions = transactions.slice(0, -1);
-      const prevA = previousTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
-      const prevB = previousTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
-      const prevC = previousTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
-      const prevD = previousTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+      const otherTransactions = transactions.filter((tx) => tx.id !== targetTx.id);
+      const otherA = otherTransactions.reduce((sum, tx) => sum + (tx.kien_a || 0), 0);
+      const otherB = otherTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
+      const otherC = otherTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
+      const otherD = otherTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
+      const otherBanh = otherTransactions.reduce((sum, tx) => sum + (tx.so_banh || 0), 0);
+      const cfg = getLoaiBanhConfig(editForm.loai_csr, editForm.loai_banh);
+      const maxA = Math.max(0, cfg.max_per_kien - otherA);
+      const maxB = Math.max(0, cfg.max_per_kien - otherB);
+      const maxC = Math.max(0, cfg.max_per_kien - otherC);
+      const maxD = Math.max(0, cfg.max_per_kien - otherD);
 
       if (
-        editForm.kien_a < prevA ||
-        editForm.kien_b < prevB ||
-        editForm.kien_c < prevC ||
-        editForm.kien_d < prevD
+        editForm.kien_a > maxA ||
+        editForm.kien_b > maxB ||
+        editForm.kien_c > maxC ||
+        editForm.kien_d > maxD
       ) {
-        setSaveError("Kh\u00f4ng th\u1ec3 gi\u1ea3m s\u1ed1 ki\u1ec7n nh\u1ecf h\u01a1n t\u1ed5ng c\u1ee7a c\u00e1c ca tr\u01b0\u1edbc.");
+        setSaveError(
+          "Số kiện của ca đang sửa vượt phần còn lại của lô. Vui lòng giảm về đúng sản lượng ca này.",
+        );
         return;
       }
 
-      const deltaA = editForm.kien_a - prevA;
-      const deltaB = editForm.kien_b - prevB;
-      const deltaC = editForm.kien_c - prevC;
-      const deltaD = editForm.kien_d - prevD;
-      const deltaBanh = deltaA + deltaB + deltaC + deltaD;
+      const nextLotBanh = otherBanh + editForm.tong_banh;
+      const nextTransactionKg = Math.round(editForm.tong_banh * editForm.loai_banh * 100) / 100;
+
+      const targetNganId = editForm.ngan_id || "";
+      if (targetNganId) {
+        const ngan = ngans.find((item) => item.id === targetNganId);
+        if (ngan?.tong_kho) {
+          const totalKg = lots.reduce((sum, lot) => {
+            const lotTransactions = lot.lot_transactions || [];
+            return (
+              sum +
+              lotTransactions.reduce((inner, tx) => {
+                if (tx.id === targetTx.id) return inner;
+                return inner + (tx.ngan_id === targetNganId ? Number(tx.so_kg || 0) : 0);
+              }, 0)
+            );
+          }, 0);
+          const projectedPct = ((totalKg + nextTransactionKg) / ngan.tong_kho) * 100;
+          if (projectedPct > 110) {
+            setSaveError(
+              `Kh\u00f4ng th\u1ec3 chuy\u1ec3n sang ng\u0103n n\u00e0y v\u00ec t\u1ef7 l\u1ec7 l\u1ea5p \u0111\u1ea7y s\u1ebd l\u00e0 ${projectedPct.toFixed(1)}%, v\u01b0\u1ee3t 110%.`,
+            );
+            return;
+          }
+        }
+      }
 
       const saveResult = await saveLotTransaction({
         lot: {
@@ -2444,19 +2790,19 @@ export default function ProductPage() {
           chi_thi: editForm.chi_thi,
           pallet: editForm.pallet,
           ghi_chu: editForm.ghi_chu,
-          trang_thai: editForm.trang_thai,
+          trang_thai: autoTrangThai(nextLotBanh, cfg.lo_tron, dbLot.trang_thai),
         },
         transaction: {
-          id: latestTx.id,
-          ngan_id: editForm.ngan_id || latestTx.ngan_id,
+          id: targetTx.id,
+          ngan_id: editForm.ngan_id || targetTx.ngan_id,
           ca: editForm.ca,
           ngay_nhap: editForm.ngay_sx,
-          kien_a: deltaA,
-          kien_b: deltaB,
-          kien_c: deltaC,
-          kien_d: deltaD,
-          so_banh: deltaBanh,
-          so_kg: Math.round(deltaBanh * editForm.loai_banh * 100) / 100,
+          kien_a: editForm.kien_a,
+          kien_b: editForm.kien_b,
+          kien_c: editForm.kien_c,
+          kien_d: editForm.kien_d,
+          so_banh: editForm.tong_banh,
+          so_kg: nextTransactionKg,
         },
       });
 
@@ -2487,12 +2833,14 @@ export default function ProductPage() {
         return;
       }
       const affectedNganIds = Array.from(
-        new Set([dbLot.ngan_id, editForm.ngan_id].filter(Boolean) as string[]),
+        new Set([dbLot.ngan_id, targetTx.ngan_id, editForm.ngan_id].filter(Boolean) as string[]),
       );
       for (const nganId of affectedNganIds) {
         await syncNganStatusAfterLotEdit(nganId);
       }
       setEditModal(false);
+      setEditTransactionId(null);
+      setEditContext(null);
       loadData(factoryId);
       setSaveError(null);
     } catch (err) {
@@ -2940,6 +3288,30 @@ export default function ProductPage() {
                   </div>
                 )}
 
+                {hasNgan && createRangeConflicts.length > 0 && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
+                    <div className="flex items-center gap-2 text-xs font-bold text-red-700">
+                      <AlertTriangle size={13} className="text-red-600" />
+                      Có lô đã hoàn thành trong khoảng đang chọn ({createRangeConflicts.length} block)
+                    </div>
+                    <p className="mt-1 text-[11px] text-red-600">
+                      Hãy đổi lại khoảng lô. Các lô đã hoàn thành sẽ bị chặn ngay trên form và không được lưu đè.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {createRangeConflicts.flatMap((issue) =>
+                        issue.lotCodes.map((maLo) => (
+                          <span
+                            key={`${issue.blockId}-${maLo}`}
+                            className="rounded-lg bg-red-100 px-2 py-1 text-[11px] font-bold text-red-700"
+                          >
+                            Ca {issue.ca} · Block {issue.blockIndex + 1} · {maLo}
+                          </span>
+                        )),
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {productNganOptions.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-slate-400">
                     <Warehouse size={24} className="mx-auto mb-2 opacity-30" />
@@ -3084,11 +3456,14 @@ export default function ProductPage() {
                   const middleLots = block.lots.filter((lot) => lot.role === "giua");
                   const middleCount = middleLots.length;
                   const middleKg = Math.round(middleCount * cfg.lo_tron * block.loai_banh * 100) / 100;
+                  const blockConflict = createRangeConflictByBlockId.get(block.id);
 
                   return (
                     <div
                       key={block.id}
-                      className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm"
+                      className={`rounded-[28px] border bg-white p-4 shadow-sm ${
+                        blockConflict ? "border-red-300" : "border-slate-200"
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-3 mb-4">
                         <div>
@@ -3234,6 +3609,12 @@ export default function ProductPage() {
                             {block.lots.length} lô
                           </span>
                         </div>
+                        {blockConflict && (
+                          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700">
+                            Khoảng lô này đang chạm vào lô đã hoàn thành: {blockConflict.lotCodes.join(", ")}.
+                            Đổi lại `Từ lô/Đến lô` trước khi nhập tiếp.
+                          </div>
+                        )}
                       </div>
 
                       <div className="mb-3">
@@ -4131,7 +4512,11 @@ export default function ProductPage() {
                 Sửa lô {editForm.ma_lo}
               </h2>
               <button
-                onClick={() => setEditModal(false)}
+                onClick={() => {
+                  setEditModal(false);
+                  setEditTransactionId(null);
+                  setEditContext(null);
+                }}
                 className="p-2 hover:bg-slate-100 rounded-xl"
               >
                 <X size={18} />
@@ -4297,7 +4682,28 @@ export default function ProductPage() {
                   editForm.loai_csr,
                   editForm.loai_banh,
                 );
-                const maxK = cfg2.max_per_kien;
+                const maxByKien = [
+                  Math.max(
+                    0,
+                    cfg2.max_per_kien - (editContext?.before_a || 0) - (editContext?.after_a || 0),
+                  ),
+                  Math.max(
+                    0,
+                    cfg2.max_per_kien - (editContext?.before_b || 0) - (editContext?.after_b || 0),
+                  ),
+                  Math.max(
+                    0,
+                    cfg2.max_per_kien - (editContext?.before_c || 0) - (editContext?.after_c || 0),
+                  ),
+                  Math.max(
+                    0,
+                    cfg2.max_per_kien - (editContext?.before_d || 0) - (editContext?.after_d || 0),
+                  ),
+                ];
+                const lotTongSauLuu =
+                  editForm.tong_banh +
+                  (editContext?.before_banh || 0) +
+                  (editContext?.after_banh || 0);
                 return (
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
@@ -4305,14 +4711,21 @@ export default function ProductPage() {
                         Số bành kiện (A / B / C / D)
                       </label>
                       <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-bold">
-                        Max {maxK} bành · Lô tròn = {cfg2.lo_tron} bành
+                        Đang sửa đúng phần của ca này · Lô tròn = {cfg2.lo_tron} bành
                       </span>
                     </div>
+                    {editContext && (
+                      <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+                        Ca trước đã có {editContext.before_banh} bành, ca sau đang giữ {editContext.after_banh} bành.
+                        Mỗi ô chỉ sửa phần còn lại của transaction hiện tại.
+                      </div>
+                    )}
                     <div className="grid grid-cols-4 gap-2">
                       {(["kien_a", "kien_b", "kien_c", "kien_d"] as const).map(
                         (k, i) => {
                           const val = editForm[k];
-                          const isLocked = val >= maxK;
+                          const maxK = maxByKien[i];
+                          const isLocked = maxK === 0 || val >= maxK;
                           return (
                             <div key={k} className="relative">
                               <span
@@ -4350,19 +4763,23 @@ export default function ProductPage() {
                     </div>
                     <div className="mt-2 flex gap-4 text-xs text-slate-500">
                       <span>
-                        Tổng bành:{" "}
+                        Ca này:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_banh}
                         </strong>
                       </span>
                       <span>
-                        Tổng kg:{" "}
+                        Kg ca này:{" "}
                         <strong className="text-slate-700">
                           {editForm.tong_kg.toLocaleString()}
                         </strong>
                       </span>
                       <span>
-                        Trạng thái:{" "}
+                        Toàn lô sau lưu:{" "}
+                        <strong className="text-slate-700">{lotTongSauLuu} bành</strong>
+                      </span>
+                      <span>
+                        Trạng thái lô:{" "}
                         <strong
                           className={normalizeLotStatus(editForm.trang_thai) === "Hoàn thành"
                             ? "text-emerald-600"
@@ -4379,7 +4796,11 @@ export default function ProductPage() {
             </div>
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button
-                onClick={() => setEditModal(false)}
+                onClick={() => {
+                  setEditModal(false);
+                  setEditTransactionId(null);
+                  setEditContext(null);
+                }}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
                 Hủy
@@ -4578,15 +4999,9 @@ export default function ProductPage() {
                         </div>
                         {grouped[ca].map((c) => {
                           const lot = lots.find((l) => l.id === c.id);
-                          const latestTransactionId =
-                            lot?.lot_transactions?.[lot.lot_transactions.length - 1]?.id;
-                          const isLatestContribution =
-                            !c.transaction_id || c.transaction_id === latestTransactionId;
                           const isExported =
                             normalizeLotStatus(c.trang_thai) === "Xuất hàng";
-                          const canEdit =
-                            isLatestContribution &&
-                            !isExported;
+                          const canEdit = !isExported;
                           return (
                             <div
                               key={c.uid}
@@ -4610,7 +5025,7 @@ export default function ProductPage() {
                                 <button
                                   onClick={() => {
                                     setEditDateModal(null);
-                                    openEdit(lot);
+                                    openEdit(lot, c.transaction_id);
                                   }}
                                   className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                                 >
@@ -4618,7 +5033,7 @@ export default function ProductPage() {
                                 </button>
                               ) : (
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  {isExported ? "Đã xuất hàng" : "Chỉ sửa dòng cuối"}
+                                  {isExported ? "Đã xuất hàng" : "Không thể sửa"}
                                 </span>
                               )}
                             </div>
@@ -5013,6 +5428,129 @@ export default function ProductPage() {
                         );
                       })
                     )}
+                  </div>
+
+                  <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 shrink-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <h3 className="text-sm font-extrabold text-slate-700">Lịch sử sang kiện / thay bọc</h3>
+                        <p className="text-[11px] text-slate-400">
+                          Truy vết lô đã chuyển, phần tồn dư và người thực hiện.
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-400">
+                        {skHistory.length} bản ghi
+                      </span>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {skHistoryLoading ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                          Đang tải lịch sử...
+                        </div>
+                      ) : skHistory.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                          Chưa có lịch sử sang kiện / thay bọc.
+                        </div>
+                      ) : (
+                        skHistory.map((row) => {
+                          const firstLot = row.lots[0];
+                          const actor = firstLot?.actor_name || firstLot?.actor_username || "Không rõ";
+                          return (
+                            <div key={row.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">
+                                      {row.loai || "Chuyển lô"}
+                                    </span>
+                                    {row.chung_loai && (
+                                      <span className="text-[10px] font-bold text-slate-400">{row.chung_loai}</span>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 text-[11px] text-slate-500">
+                                    {actor} · {formatSkTimestamp(row.created_at || row.ngay)}
+                                  </p>
+                                </div>
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  {row.lots.length} lô
+                                </span>
+                              </div>
+
+                              {(row.to_boc || row.to_pallet) && (
+                                <p className="mt-2 text-[11px] text-slate-500">
+                                  {row.to_boc ? `Bọc: ${row.from_boc || "—"} → ${row.to_boc}` : ""}
+                                  {row.to_boc && row.to_pallet ? " · " : ""}
+                                  {row.to_pallet ? `Pallet: ${row.from_pallet || "—"} → ${row.to_pallet}` : ""}
+                                </p>
+                              )}
+
+                              <div className="mt-2 space-y-2">
+                                {row.lots.map((detail, index) => {
+                                  const moved =
+                                    detail.moved_breakdown ||
+                                    (detail.converted
+                                      ? createSkBreakdown(
+                                          Number(detail.converted.a || 0),
+                                          Number(detail.converted.b || 0),
+                                          Number(detail.converted.c || 0),
+                                          Number(detail.converted.d || 0),
+                                          detail.moved_snapshot?.kien.tong_banh
+                                            ? detail.moved_snapshot.kien.tong_kg / detail.moved_snapshot.kien.tong_banh
+                                            : detail.source_snapshot?.kien.tong_banh
+                                              ? detail.source_snapshot.kien.tong_kg / detail.source_snapshot.kien.tong_banh
+                                              : 0,
+                                        )
+                                      : null);
+                                  const residual = detail.residual_breakdown;
+                                  return (
+                                    <div key={`${row.id}-${detail.id || detail.ma_lo || index}`} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-extrabold text-slate-700">
+                                          {detail.ma_lo || detail.source_snapshot?.ma_lo || "Lô không rõ"}
+                                        </span>
+                                        {detail.split && (
+                                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                            Tách một phần
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="mt-1 text-[11px] text-slate-500">
+                                        Trước:
+                                        {" "}
+                                        {detail.source_snapshot
+                                          ? `A=${detail.source_snapshot.kien.a} B=${detail.source_snapshot.kien.b} C=${detail.source_snapshot.kien.c} D=${detail.source_snapshot.kien.d}`
+                                          : "Không có snapshot cũ"}
+                                      </p>
+                                      <p className="text-[11px] text-slate-600">
+                                        Sau chuyển:
+                                        {" "}
+                                        {detail.moved_snapshot
+                                          ? `${detail.moved_snapshot.ma_lo} · A=${detail.moved_snapshot.kien.a} B=${detail.moved_snapshot.kien.b} C=${detail.moved_snapshot.kien.c} D=${detail.moved_snapshot.kien.d}`
+                                          : moved
+                                            ? `A=${moved.a} B=${moved.b} C=${moved.c} D=${moved.d}`
+                                            : "Không rõ"}
+                                      </p>
+                                      {detail.moved_snapshot && (
+                                        <p className="text-[11px] text-slate-400">
+                                          {detail.moved_snapshot.boc || "Chưa có bọc"} · {(detail.moved_snapshot.pallet || []).join(" · ") || "Chưa có pallet"}
+                                        </p>
+                                      )}
+                                      {detail.split && residual && detail.residual_snapshot && (
+                                        <p className="mt-1 text-[11px] font-medium text-amber-700">
+                                          Tồn dư: {detail.residual_snapshot.ma_lo} · A={residual.a} B={residual.b} C={residual.c} D={residual.d}
+                                          {detail.residual_action === "existing" ? " · đã có sẵn" : ""}
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
 
                   {/* Bottom action bar */}

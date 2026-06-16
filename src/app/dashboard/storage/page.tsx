@@ -1012,7 +1012,7 @@ export default function StoragePage() {
                   : canReturnToDraft
                     ? STORAGE_STATUS_IN_PRODUCTION
                     : null
-              const lookupPath = buildStorageLookupPath(n.id)
+              const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
               const lookupUrl = typeof window !== "undefined" ? `${window.location.origin}${lookupPath}` : lookupPath
 
               return (
@@ -1514,7 +1514,7 @@ export default function StoragePage() {
                   compact
                   title="QR ngăn"
                   caption="Quét để mở trang chi tiết ngăn lưu trên web."
-                  hrefPath={buildStorageLookupPath(viewNgan.id)}
+                  hrefPath={buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)}
                   valueText={viewNgan.ma_ngan || viewNgan.ten_ngan}
                 />
               </div>

@@ -5,6 +5,7 @@ import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
 import { getActiveFactoryId } from "@/lib/auth"
+import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
@@ -238,11 +239,20 @@ function calcGrade(
 }
 
 function formatPKN(pkn: number, ngayKN: string, fCode: string): string {
-  const d = new Date(ngayKN)
-  const dd = String(d.getUTCDate()).padStart(2,"0")
-  const mm = String(d.getUTCMonth()+1).padStart(2,"0")
-  const yy = String(d.getUTCFullYear()).slice(2)
+  const parts = getDateParts(ngayKN)
+  if (!parts) return `PKN-${fCode}-000000/${pkn}`
+  const dd = parts.day
+  const mm = parts.month
+  const yy = parts.year.slice(2)
   return `PKN-${fCode}-${dd}${mm}${yy}/${pkn}`
+}
+
+function normalizeQcResultDates<T extends { ngay_kn: string; ngay_sx: string }>(row: T): T {
+  return {
+    ...row,
+    ngay_kn: normalizeDateInput(row.ngay_kn) || row.ngay_kn,
+    ngay_sx: normalizeDateInput(row.ngay_sx) || row.ngay_sx,
+  }
 }
 
 function getLoaiCSR(chungLoai: string, fCode: string): string {
@@ -290,11 +300,11 @@ function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: st
   const sorted = [...batchResults].sort((a,b)=>(a.lo_kn||0)-(b.lo_kn||0))
   const r0 = sorted[0]
   const pknCode = formatPKN(r0.pkn, r0.ngay_kn, fCode)
-  const ngaySXStr = new Date(r0.ngay_sx).toLocaleDateString("vi-VN")
-  const ngayInStr = (() => {
-    const d = new Date(r0.ngay_kn)
-    return `ngày ${d.getUTCDate()} tháng ${d.getUTCMonth()+1} năm ${d.getUTCFullYear()}`
-  })()
+  const ngaySXStr = formatDateDisplay(r0.ngay_sx) || r0.ngay_sx || "--"
+  const ngayKnParts = getDateParts(r0.ngay_kn)
+  const ngayInStr = ngayKnParts
+    ? `ngay ${ngayKnParts.dayNumber} thang ${ngayKnParts.monthNumber} nam ${ngayKnParts.yearNumber}`
+    : (r0.ngay_kn || "--")
 
   // Stats helpers
   const nums = (arr: (string|number)[]|undefined) => (arr||[]).map(Number).filter(v=>!isNaN(v)&&v>0)
@@ -588,7 +598,7 @@ export default function QualityPage() {
     if (filterFrom) q = q.gte("ngay_kn",  filterFrom)
     if (filterTo)   q = q.lte("ngay_kn",  filterTo)
     const { data } = await q
-    setResults(data || [])
+    setResults((data || []).map(normalizeQcResultDates))
     setLoading(false)
   }, [filterLoai, filterTT, filterFrom, filterTo])
 
@@ -601,7 +611,7 @@ export default function QualityPage() {
     if (filterFrom) q = q.gte("ngay_kn", filterFrom)
     if (filterTo)   q = q.lte("ngay_kn", filterTo)
     const { data } = await q
-    setStatsResults(data || [])
+    setStatsResults((data || []).map(normalizeQcResultDates))
   }, [filterLoai, filterFrom, filterTo])
 
   // ── Load custom standards ────────────────────────────────────────────────────
@@ -1028,7 +1038,7 @@ export default function QualityPage() {
     }
     setSaving(true)
     try {
-    const year = new Date(createForm.ngay_kn).getFullYear()
+    const year = getDateParts(createForm.ngay_kn)?.yearNumber ?? new Date().getFullYear()
     const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
     const customLimits = customStds.find(s=>s.id===createForm.tieu_chuan)?.limits
     const user = JSON.parse(localStorage.getItem("erp_user")||"{}")
@@ -2152,7 +2162,7 @@ export default function QualityPage() {
                           <span className="font-extrabold text-slate-800">Lô {r.ma_lo}</span>
                           <span className="text-xs text-slate-500">{formatPKN(r.pkn, r.ngay_kn, factoryCode)}</span>
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
-                          <span className="text-xs text-slate-400">KN: {new Date(r.ngay_kn).toLocaleDateString("vi-VN")}</span>
+                          <span className="text-xs text-slate-400">KN: {formatDateDisplay(r.ngay_kn) || r.ngay_kn}</span>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                             {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
                           </span>

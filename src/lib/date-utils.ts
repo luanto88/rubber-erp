@@ -31,6 +31,15 @@ export function normalizeDateInput(value: string | null | undefined) {
   const raw = String(value ?? "").trim()
   if (!raw) return ""
 
+  const isoDateTimeMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T\s].*$/)
+  if (isoDateTimeMatch) {
+    const year = Number(isoDateTimeMatch[1])
+    const month = Number(isoDateTimeMatch[2])
+    const day = Number(isoDateTimeMatch[3])
+    if (!isValidDateParts(year, month, day)) return ""
+    return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
+  }
+
   const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
   if (isoMatch) {
     const year = Number(isoMatch[1])
@@ -52,11 +61,25 @@ export function normalizeDateInput(value: string | null | undefined) {
   return ""
 }
 
-export function formatDateDisplay(value: string | null | undefined) {
+export function getDateParts(value: string | null | undefined) {
   const iso = normalizeDateInput(value)
-  if (!iso) return ""
+  if (!iso) return null
   const [year, month, day] = iso.split("-")
-  return `${day}/${month}/${year}`
+  return {
+    iso,
+    year,
+    month,
+    day,
+    yearNumber: Number(year),
+    monthNumber: Number(month),
+    dayNumber: Number(day),
+  }
+}
+
+export function formatDateDisplay(value: string | null | undefined) {
+  const parts = getDateParts(value)
+  if (!parts) return ""
+  return `${parts.day}/${parts.month}/${parts.year}`
 }
 
 export function isDateInRange(date: string, fromDate?: string | null, toDate?: string | null) {

@@ -123,7 +123,7 @@ export async function downloadStorageDetailPdf(detail: StorageDetailData) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
 
-  const qrUrl = buildStorageLookupUrl(detail.ngan.id)
+  const qrUrl = buildStorageLookupUrl(detail.ngan.id, detail.ngan.ma_ngan)
   const lotSummary = summarizeStorageLots(detail.lots)
   const ratioPct = detail.ngan.tong_kho > 0 ? (lotSummary.thanhPhamKg / detail.ngan.tong_kho) * 100 : null
 

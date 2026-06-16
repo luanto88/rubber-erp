@@ -3,7 +3,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
-import { normalizeLotStatus } from "@/app/dashboard/product/shared";
+import {
+  dedupeLotsByMaLo,
+  normalizeLotCode,
+  normalizeLotStatus,
+} from "@/app/dashboard/product/shared";
 import {
   FileOutput,
   Plus,
@@ -64,7 +68,7 @@ type ExportOrder = {
   assignments: Assignment[];
   tong_banh: number;
   yeu_cau_chi_tieu: ChiTieuReq[];
-  files: { name: string; url: string }[];
+  files: { name: string; url: string; path?: string; size?: number }[];
   customers?: {
     ma_kh: string;
     ten_kh_en: string;
@@ -78,6 +82,7 @@ type ExportOrder = {
 type LotRaw = {
   id: string;
   ma_lo: string;
+  factory_id?: string | null;
   loai_csr: string;
   loai_banh: number;
   boc?: string | null;
@@ -88,6 +93,8 @@ type LotRaw = {
   tong_banh: number;
   tong_kg: number;
   trang_thai: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 type LotExt = LotRaw & {
   rem_a: number;
@@ -245,14 +252,6 @@ function normalizeText(value?: string | null) {
     .toLowerCase();
 }
 
-function normalizeLotCode(maLo?: string | null) {
-  return String(maLo || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/\\/g, "/");
-}
-
 function getQcMetricValue(grade?: QcGrade | null) {
   if (!grade) return null;
   if (typeof grade.tb === "number" && !Number.isNaN(grade.tb)) return grade.tb;
@@ -384,7 +383,7 @@ export default function ExportPage() {
     const { data } = await supabase
       .from("lots")
       .select(
-        "id,ma_lo,loai_csr,loai_banh,boc,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai",
+        "id,factory_id,ma_lo,loai_csr,loai_banh,boc,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai,created_at,updated_at",
       )
       .eq("factory_id", fid)
       .order("num", { ascending: false });
@@ -479,11 +478,39 @@ export default function ExportPage() {
   }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers]);
 
   // â”€â”€ Compute remaining per lot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const lotById = useMemo(
+    () => new Map(lotsRaw.map((lot) => [lot.id, lot] as const)),
+    [lotsRaw],
+  );
+
+  const canonicalLotByCode = useMemo(
+    () =>
+      new Map(
+        dedupeLotsByMaLo(lotsRaw).map(
+          (lot) => [normalizeLotCode(lot.ma_lo), lot] as const,
+        ),
+      ),
+    [lotsRaw],
+  );
+
+  const resolveAssignmentLot = useCallback(
+    (assignment: Pick<Assignment, "lot_id" | "ma_lo">) =>
+      canonicalLotByCode.get(normalizeLotCode(assignment.ma_lo)) ||
+      lotById.get(assignment.lot_id) ||
+      null,
+    [canonicalLotByCode, lotById],
+  );
+
   const lotsExt = useMemo<LotExt[]>(() => {
     const pastAssignments = orders
       .filter((o) => o.id !== editId)
-      .flatMap((o) => o.assignments || []);
-    return lotsRaw
+      .flatMap((o) =>
+        (o.assignments || []).map((assignment) => {
+          const resolvedLot = resolveAssignmentLot(assignment);
+          return resolvedLot ? { ...assignment, lot_id: resolvedLot.id } : assignment;
+        }),
+      );
+    return dedupeLotsByMaLo(lotsRaw)
       .map((lot) => {
         const expA = pastAssignments
           .filter((a) => a.lot_id === lot.id)
@@ -506,12 +533,12 @@ export default function ExportPage() {
         };
       })
       .filter((l) => l.rem_a + l.rem_b + l.rem_c + l.rem_d > 0);
-  }, [lotsRaw, orders, editId]);
+  }, [lotsRaw, orders, editId, resolveAssignmentLot]);
 
   const exportedLotIds = useMemo(
     () =>
       new Set(
-        lotsRaw
+        dedupeLotsByMaLo(lotsRaw)
           .filter((lot) => normalizeLotStatus(lot.trang_thai) === "Xuất hàng")
           .map((lot) => lot.id),
       ),
@@ -658,10 +685,11 @@ export default function ExportPage() {
 
   const isOrderLocked = useCallback(
     (order: Pick<ExportOrder, "assignments">) =>
-      (order.assignments || []).some((assignment) =>
-        exportedLotIds.has(assignment.lot_id),
-      ),
-    [exportedLotIds],
+      (order.assignments || []).some((assignment) => {
+        const resolvedLot = resolveAssignmentLot(assignment);
+        return resolvedLot ? exportedLotIds.has(resolvedLot.id) : false;
+      }),
+    [exportedLotIds, resolveAssignmentLot],
   );
 
   // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -687,7 +715,12 @@ export default function ExportPage() {
         ? order.vehicles.map((v) => ({ ...v }))
         : [emptyVehicle()],
       assignments: order.assignments?.length
-        ? order.assignments.map((a) => ({ ...a }))
+        ? order.assignments.map((assignment) => {
+            const resolvedLot = resolveAssignmentLot(assignment);
+            return resolvedLot
+              ? { ...assignment, lot_id: resolvedLot.id, ma_lo: resolvedLot.ma_lo }
+              : { ...assignment };
+          })
         : [],
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
     });

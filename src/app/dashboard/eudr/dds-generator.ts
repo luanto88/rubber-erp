@@ -1,9 +1,12 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import QRCode from "qrcode"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
+const DDS_QR_SIZE_MM = 12
 let fontBase64Promise: Promise<string> | null = null
 
 type PdfWithTable = jsPDF & {
@@ -150,6 +153,21 @@ function computeOrderCert(
   return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]
 }
 
+function buildOrderLookupUrl(orderCode: string) {
+  return `${APP_URL}/dashboard/eudr?order=${encodeURIComponent(orderCode)}`
+}
+
+async function addOrderQr(doc: jsPDF, orderCode: string) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const x = pageW - 14 - DDS_QR_SIZE_MM
+  const y = 12
+  const qrDataUrl = await QRCode.toDataURL(buildOrderLookupUrl(orderCode), {
+    width: 240,
+    margin: 1,
+  })
+  doc.addImage(qrDataUrl, "PNG", x, y, DDS_QR_SIZE_MM, DDS_QR_SIZE_MM)
+}
+
 function buildDDSHeader(
   doc: jsPDF,
   title: string,
@@ -217,6 +235,7 @@ export async function generateDDS1(
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
+  await addOrderQr(doc, order.ma_don)
 
   const startY = buildDDSHeader(doc, "RUBBER PLANTATION LOCATION DECLARATION", order, factory)
   const orderCert = normalizePdfText(computeOrderCert(order.assignments, lotCertMap))
@@ -273,6 +292,7 @@ export async function generateDDS2(
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
+  await addOrderQr(doc, order.ma_don)
 
   const startY = buildDDSHeader(doc, "SHIPMENT LOT DECLARATION", order, factory)
 

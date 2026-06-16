@@ -128,14 +128,60 @@ export function addDaysISO(value?: string | null, days = 1) {
   return `${nextYear}-${nextMonth}-${nextDay}`
 }
 
-export function buildStorageLookupPath(nganId: string) {
-  return `/dashboard/storage/${encodeURIComponent(nganId)}`
+function normalizeStorageLookupValue(value?: string | null) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch {
+    return raw
+  }
 }
 
-export function buildStorageLookupUrl(nganId: string) {
-  const path = buildStorageLookupPath(nganId)
+export function buildStorageLookupPath(nganId?: string | null, nganCode?: string | null) {
+  const params = new URLSearchParams()
+  const normalizedId = normalizeStorageLookupValue(nganId)
+  const normalizedCode = normalizeStorageLookupValue(nganCode)
+  if (normalizedId) params.set("id", normalizedId)
+  if (normalizedCode) params.set("code", normalizedCode)
+  const query = params.toString()
+  return query ? `/storage?${query}` : "/storage"
+}
+
+export function buildStorageLookupUrl(nganId?: string | null, nganCode?: string | null) {
+  const path = buildStorageLookupPath(nganId, nganCode)
   const origin = typeof window !== "undefined" ? window.location.origin : ""
   return origin ? `${origin}${path}` : path
+}
+
+export async function resolveStorageLookupTarget(params: {
+  nganId?: string | null
+  nganCode?: string | null
+}) {
+  const nganId = normalizeStorageLookupValue(params.nganId)
+  const nganCode = normalizeStorageLookupValue(params.nganCode)
+
+  if (nganId) {
+    const { data, error } = await supabase
+      .from("ngans")
+      .select("id,factory_id,ma_ngan,ten_ngan")
+      .eq("id", nganId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (data) return data as Pick<StorageNgan, "id" | "factory_id" | "ma_ngan" | "ten_ngan">
+  }
+
+  if (nganCode) {
+    const { data, error } = await supabase
+      .from("ngans")
+      .select("id,factory_id,ma_ngan,ten_ngan")
+      .eq("ma_ngan", nganCode)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (data) return data as Pick<StorageNgan, "id" | "factory_id" | "ma_ngan" | "ten_ngan">
+  }
+
+  throw new Error("Khong tim thay ngan luu phu hop voi ma tra cuu.")
 }
 
 export function getKLFromTrip(trip: StorageTripItem, loaiNl: string) {
@@ -570,6 +616,14 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
     trips: normalizedTrips,
     lots,
   }
+}
+
+export async function loadStorageDetailByLookup(params: {
+  nganId?: string | null
+  nganCode?: string | null
+}) {
+  const target = await resolveStorageLookupTarget(params)
+  return loadStorageDetail(target.factory_id, target.id)
 }
 
 export function summarizeStorageLots(lots: StorageProducedLot[]) {

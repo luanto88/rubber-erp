@@ -113,6 +113,7 @@ const NAV: NavItem[] = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
+  const isPublicStorageLookup = pathname.startsWith("/dashboard/storage/")
   const [user, setUser] = useState<SessionUser | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ production: true })
@@ -128,6 +129,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const unreadCount = notifications.filter((n) => !n.is_read).length
 
   useEffect(() => {
+    if (isPublicStorageLookup) {
+      setLoading(false)
+      return
+    }
+
     let alive = true
     let syncing = false
     let lastSyncTime = 0
@@ -252,10 +258,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.removeEventListener("focus", handleVisibilityOrFocus)
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
     }
-  }, [])
+  }, [isPublicStorageLookup])
 
   // Load notifications when user is available
   useEffect(() => {
+    if (isPublicStorageLookup) return
     if (!user?.id || !user?.factory_id) return
     const load = async () => {
       const { data } = await supabase
@@ -268,10 +275,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setNotifications((data ?? []) as AppNotification[])
     }
     void load()
-  }, [user?.id, user?.factory_id])
+  }, [isPublicStorageLookup, user?.id, user?.factory_id])
 
   // Realtime: append new notifications live
   useEffect(() => {
+    if (isPublicStorageLookup) return
     if (!user?.id) return
     const channel = supabase
       .channel(`notif-${user.id}`)
@@ -284,7 +292,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
-  }, [user?.id])
+  }, [isPublicStorageLookup, user?.id])
 
   const visibleNav: NavItem[] = NAV.flatMap((item) => {
     if (isNavGroup(item)) {
@@ -306,6 +314,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   useEffect(() => {
+    if (isPublicStorageLookup) return
     const handleClickOutside = (e: MouseEvent) => {
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
         setUserDropdownOpen(false)
@@ -316,15 +325,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
+  }, [isPublicStorageLookup])
 
   // Khi bootstrap xong nhưng không có user (lỗi mạng tạm thời / session hết hạn không phải auth error)
   // → redirect về login thay vì để spinner treo vô hạn
   useEffect(() => {
+    if (isPublicStorageLookup) return
     if (!loading && !user) {
       window.location.replace("/login")
     }
-  }, [loading, user])
+  }, [isPublicStorageLookup, loading, user])
+
+  if (isPublicStorageLookup) {
+    return <>{children}</>
+  }
 
   if (loading || !user) {
     return (

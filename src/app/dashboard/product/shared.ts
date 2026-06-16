@@ -19,6 +19,10 @@ function foldText(value?: string | null) {
     .toLowerCase();
 }
 
+export function normalizeLotCode(value?: string | null) {
+  return foldText(value).replace(/\s+/g, "").replace(/\\/g, "/");
+}
+
 export function normalizeLotStatus(status?: string | null): NormalizedLotStatus {
   const folded = foldText(status).replace(/\s+/g, "");
   if (folded === "xuathang") return "Xuất hàng";
@@ -49,7 +53,7 @@ export function dedupeLotsByMaLo<T extends LotLike>(lots: T[]): T[] {
   const grouped = new Map<string, T[]>();
 
   lots.forEach((lot) => {
-    const key = `${lot.factory_id || ""}::${foldText(lot.ma_lo)}`;
+    const key = `${lot.factory_id || ""}::${normalizeLotCode(lot.ma_lo)}`;
     const items = grouped.get(key) || [];
     items.push(lot);
     grouped.set(key, items);

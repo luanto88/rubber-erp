@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
+import { dedupeLotsByMaLo, normalizeLotCode } from "@/app/dashboard/product/shared"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -26,13 +27,54 @@ type ExportOrder = {
   so_thong_bao: string; so_hoa_don: string; so_hop_dong: string
   assignments: { lot_id: string; ma_lo: string; vehicleIdx: number; kien_a:number; kien_b:number; kien_c:number; kien_d:number }[]
   vehicles: { id:string; loai_xe:string; bien_truoc:string; bien_sau:string }[]
-  files: { name: string; url: string; size?: number }[]
+  files: { name: string; url: string; path?: string; size?: number }[]
   customers?: { ma_kh:string; ten_kh_en:string; quoc_gia:string; dia_chi:string; email:string; nguoi_lien_he:string }
+}
+
+type ExportOrderFile = ExportOrder["files"][number]
+
+type AttachmentDebugRow = {
+  index: number
+  name: string
+  url: string
+  path: string | null
+  resolvedPath: string | null
+  size: number | null
+  source: string
+  downloadStatus?: "pending" | "ok" | "error"
+  downloadError?: string | null
+  blobSize?: number | null
+  zipEntryName?: string | null
+}
+
+type AttachmentDebugState = {
+  stage: "idle" | "after-upload" | "before-zip" | "after-zip"
+  updatedAt: string
+  orderId: string | null
+  orderCode: string | null
+  currentFiles: AttachmentDebugRow[]
+  latestFiles: AttachmentDebugRow[]
+  filesForZip: AttachmentDebugRow[]
+  uploadFiles: AttachmentDebugRow[]
+  dbAfterUpload: AttachmentDebugRow[]
+  attachmentResults: AttachmentDebugRow[]
+  attachmentErrors: string[]
+  note?: string
 }
 
 type TraceLot = {
   id: string
+  ma_lo: string
+  factory_id?: string | null
   ngan_id: string | null
+  ngay_sx?: string | null
+  loai_banh?: number | null
+  kien_a?: number | null
+  kien_b?: number | null
+  kien_c?: number | null
+  kien_d?: number | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 type TraceNgan = {
@@ -41,6 +83,93 @@ type TraceNgan = {
   chung_nhan: string | null
   ngay_bd: string | null
   ngay_kt: string | null
+}
+
+const DDS_FILES = [
+  { n: 1 as const, suffix: "Plantation", desc: "Lô vườn" },
+  { n: 2 as const, suffix: "Shipment", desc: "Lô thành phẩm" },
+] as const
+
+function resolveEudrStoragePath(fileUrl?: string | null) {
+  if (!fileUrl) return null
+  try {
+    const url = new URL(fileUrl)
+    const markers = [
+      "/storage/v1/object/public/eudr-files/",
+      "/storage/v1/object/sign/eudr-files/",
+      "/storage/v1/object/authenticated/eudr-files/",
+    ]
+
+    for (const marker of markers) {
+      const markerIndex = url.pathname.indexOf(marker)
+      if (markerIndex >= 0) {
+        return decodeURIComponent(url.pathname.slice(markerIndex + marker.length))
+      }
+    }
+
+    const bucketIndex = url.pathname.indexOf("/eudr-files/")
+    if (bucketIndex >= 0) {
+      return decodeURIComponent(url.pathname.slice(bucketIndex + "/eudr-files/".length))
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+function normalizeExportOrderFiles(files: unknown): ExportOrderFile[] {
+  if (!Array.isArray(files)) return []
+  return files.filter((file): file is ExportOrderFile => (
+    !!file &&
+    typeof file === "object" &&
+    typeof file.name === "string" &&
+    typeof file.url === "string"
+  ))
+}
+
+function getUniqueZipEntryName(name: string, usedNames: Set<string>) {
+  const trimmed = name.trim() || "attachment"
+  if (!usedNames.has(trimmed)) {
+    usedNames.add(trimmed)
+    return trimmed
+  }
+
+  const dotIndex = trimmed.lastIndexOf(".")
+  const base = dotIndex > 0 ? trimmed.slice(0, dotIndex) : trimmed
+  const ext = dotIndex > 0 ? trimmed.slice(dotIndex) : ""
+
+  let index = 2
+  let candidate = `${base} (${index})${ext}`
+  while (usedNames.has(candidate)) {
+    index += 1
+    candidate = `${base} (${index})${ext}`
+  }
+  usedNames.add(candidate)
+  return candidate
+}
+
+function mergeExportOrderFiles(primary: ExportOrderFile[], fallback: ExportOrderFile[]) {
+  const merged = new globalThis.Map<string, ExportOrderFile>()
+
+  for (const file of [...primary, ...fallback]) {
+    const key = file.path || file.url || `${file.name}:${file.size ?? ""}`
+    if (!merged.has(key)) merged.set(key, file)
+  }
+
+  return [...merged.values()]
+}
+
+function toAttachmentDebugRows(files: ExportOrderFile[], source: string): AttachmentDebugRow[] {
+  return files.map((file, index) => ({
+    index,
+    name: file.name,
+    url: file.url,
+    path: file.path ?? null,
+    resolvedPath: file.path || resolveEudrStoragePath(file.url),
+    size: typeof file.size === "number" ? file.size : null,
+    source,
+  }))
 }
 
 // ─── Team colors ──────────────────────────────────────────────────────────────
@@ -90,6 +219,19 @@ export default function EudrClient() {
   const [uploading, setUploading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [toast, setToast]        = useState<{msg:string;ok:boolean}|null>(null)
+  const [attachmentDebug, setAttachmentDebug] = useState<AttachmentDebugState>({
+    stage: "idle",
+    updatedAt: "",
+    orderId: null,
+    orderCode: null,
+    currentFiles: [],
+    latestFiles: [],
+    filesForZip: [],
+    uploadFiles: [],
+    dbAfterUpload: [],
+    attachmentResults: [],
+    attachmentErrors: [],
+  })
   const fileInputRef             = useRef<HTMLInputElement>(null)
 
   const showToast = (msg: string, ok = true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),3500) }
@@ -119,9 +261,23 @@ export default function EudrClient() {
       .single()
     setSearching(false)
     if (!data) { setNotFound(true); return }
-    setOrder(data)
+    setOrder({
+      ...(data as ExportOrder),
+      files: normalizeExportOrderFiles((data as ExportOrder).files),
+    })
     traceGeoChain(data)
   }, [factoryId])
+
+  const fetchLatestOrderFiles = useCallback(async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("export_orders")
+      .select("files")
+      .eq("id", orderId)
+      .single()
+
+    if (error) throw error
+    return normalizeExportOrderFiles(data?.files)
+  }, [])
 
   // ── Trace supply chain → GeoJSON ──────────────────────────────────────────
   const traceGeoChain = async (ord: ExportOrder) => {
@@ -134,14 +290,51 @@ export default function EudrClient() {
       }
 
       // 1. Get lots → full details + ngan_ids
-      const { data: lotsFull } = await supabase.from("lots")
-        .select("id,ma_lo,ngay_sx,loai_banh,kien_a,kien_b,kien_c,kien_d,ngan_id")
+      const { data: lotsById } = await supabase.from("lots")
+        .select("id,factory_id,ma_lo,ngay_sx,loai_banh,kien_a,kien_b,kien_c,kien_d,ngan_id,created_at,updated_at")
         .in("id", lotIds)
-      setLotDetails(lotsFull || [])
-      const typedLots = (lotsFull || []) as TraceLot[]
+      const lotsByIdMap = new globalThis.Map(((lotsById || []) as TraceLot[]).map((lot) => [lot.id, lot] as const))
+      const missingLotCodes = [...new Set(
+        ord.assignments
+          .filter((assignment) => !lotsByIdMap.has(assignment.lot_id))
+          .map((assignment) => assignment.ma_lo)
+          .filter(Boolean),
+      )]
+      const { data: lotsByCode } = missingLotCodes.length
+        ? await supabase
+            .from("lots")
+            .select("id,factory_id,ma_lo,ngay_sx,loai_banh,kien_a,kien_b,kien_c,kien_d,ngan_id,created_at,updated_at")
+            .eq("factory_id", ord.factory_id)
+            .in("ma_lo", missingLotCodes)
+        : { data: [] }
+      const canonicalLotsByCode = new globalThis.Map(
+        dedupeLotsByMaLo((lotsByCode || []) as TraceLot[]).map(
+          (lot) => [normalizeLotCode(lot.ma_lo), lot] as const,
+        ),
+      )
+      const resolvedAssignments = ord.assignments.map((assignment) => {
+        const resolvedLot =
+          lotsByIdMap.get(assignment.lot_id) ||
+          canonicalLotsByCode.get(normalizeLotCode(assignment.ma_lo))
+        return resolvedLot
+          ? { ...assignment, lot_id: resolvedLot.id, ma_lo: resolvedLot.ma_lo }
+          : assignment
+      })
+      const typedLotsMap = new globalThis.Map<string, TraceLot>()
+      resolvedAssignments.forEach((assignment) => {
+        const resolvedLot =
+          lotsByIdMap.get(assignment.lot_id) ||
+          canonicalLotsByCode.get(normalizeLotCode(assignment.ma_lo))
+        if (resolvedLot) typedLotsMap.set(resolvedLot.id, resolvedLot)
+      })
+      const typedLots = Array.from(typedLotsMap.values())
+      setLotDetails(typedLots as LotDetail[])
+      if (resolvedAssignments.some((assignment, index) => assignment.lot_id !== ord.assignments[index]?.lot_id)) {
+        setOrder((current) => current?.id === ord.id ? { ...current, assignments: resolvedAssignments } : current)
+      }
       const nganIds = [...new Set(typedLots.map((lot) => lot.ngan_id).filter((value): value is string => Boolean(value)))]
       if (!nganIds.length) {
-        setTraceInfo({ lots: lotsFull?.length||0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
+        setTraceInfo({ lots: typedLots.length, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
@@ -161,7 +354,7 @@ export default function EudrClient() {
       const allTripUids = new Set<string>()
       typedNgans.forEach((ngan) => (ngan.trips || []).forEach((uid) => allTripUids.add(uid)))
       if (!allTripUids.size) {
-        setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
+        setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 })
         setLoadingGeo(false); return
       }
 
@@ -292,7 +485,7 @@ export default function EudrClient() {
         }
       }
 
-      setTraceInfo({ lots: lotsFull?.length||0, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
+      setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
       setGeoData(filtered)
     } catch (e) {
       console.error(e)
@@ -306,17 +499,61 @@ export default function EudrClient() {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
     setUploading(true)
-    const newFiles = [...(order.files || [])]
+    const previousFiles = normalizeExportOrderFiles(order.files)
+    const newFiles = [...previousFiles]
     for (const file of files) {
       const path = `${factoryId}/${order.ma_don}/${Date.now()}_${file.name}`
       const { data, error } = await supabase.storage.from("eudr-files").upload(path, file, { upsert: true })
       if (error) { showToast(`Lỗi: ${error.message}`, false); continue }
       const { data: urlData } = supabase.storage.from("eudr-files").getPublicUrl(data.path)
-      newFiles.push({ name: file.name, url: urlData.publicUrl, size: file.size })
+      newFiles.push({ name: file.name, url: urlData.publicUrl, path: data.path, size: file.size })
     }
-    const { error } = await supabase.from("export_orders").update({ files: newFiles }).eq("id", order.id)
+    const normalizedNewFiles = normalizeExportOrderFiles(newFiles)
+    const { error } = await supabase.from("export_orders").update({ files: normalizedNewFiles }).eq("id", order.id)
     if (error) { showToast(error.message, false) } else {
-      setOrder(prev => prev ? { ...prev, files: newFiles } : prev)
+      const dbAfterUpload = await fetchLatestOrderFiles(order.id).catch((fetchError: unknown) => {
+        console.error("Failed to reload export order files right after upload", fetchError)
+        return []
+      })
+      const effectiveFiles = dbAfterUpload.length > 0 || normalizedNewFiles.length === 0
+        ? mergeExportOrderFiles(dbAfterUpload, normalizedNewFiles)
+        : normalizedNewFiles
+
+      setAttachmentDebug({
+        stage: "after-upload",
+        updatedAt: new Date().toISOString(),
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
+        latestFiles: [],
+        filesForZip: [],
+        uploadFiles: toAttachmentDebugRows(normalizedNewFiles, "upload-payload"),
+        dbAfterUpload: toAttachmentDebugRows(dbAfterUpload, "db-after-upload"),
+        attachmentResults: [],
+        attachmentErrors: [],
+        note: dbAfterUpload.length !== normalizedNewFiles.length
+          ? "So luong file trong DB sau upload khac voi payload vua save."
+          : "DB da tra ve cung so luong file voi payload vua save.",
+      })
+
+      console.info("EUDR upload verification", {
+        orderId: order.id,
+        orderCode: order.ma_don,
+        previousFiles,
+        normalizedNewFiles,
+        dbAfterUpload,
+        effectiveFiles,
+      })
+      setOrder(prev => prev ? { ...prev, files: effectiveFiles } : prev)
+      if (dbAfterUpload.length !== normalizedNewFiles.length) {
+        console.warn("EUDR upload DB mismatch after save", {
+          orderId: order.id,
+          orderCode: order.ma_don,
+          normalizedNewFiles,
+          dbAfterUpload,
+        })
+        showToast(`Upload xong nhung DB dang tra ve ${dbAfterUpload.length}/${normalizedNewFiles.length} file. Xem panel debug.`, false)
+      }
       showToast(`Đã đính kèm ${files.length} file`)
     }
     setUploading(false)
@@ -326,7 +563,7 @@ export default function EudrClient() {
   // ── Delete attached file ──────────────────────────────────────────────────
   const handleDeleteFile = async (url: string) => {
     if (!order) return
-    const newFiles = (order.files||[]).filter(f => f.url !== url)
+    const newFiles = normalizeExportOrderFiles(order.files).filter(f => f.url !== url)
     await supabase.from("export_orders").update({ files: newFiles }).eq("id", order.id)
     setOrder(prev => prev ? { ...prev, files: newFiles } : prev)
     showToast("Đã xóa file")
@@ -349,42 +586,191 @@ export default function EudrClient() {
   // ── Download all (zip) ────────────────────────────────────────────────────
   const handleDownloadAll = async () => {
     if (!order) return
+    if (!factory) {
+      showToast("Chưa có thông tin công ty để tạo 2 file DDS.", false)
+      return
+    }
     setDownloading(true)
     const zip = new JSZip()
     const folder = zip.folder(order.ma_don) || zip
+    const usedEntryNames = new Set<string>()
 
     try {
-      // Generated DDS PDFs (dynamic per order)
-      if (factory) {
-        const { generateDDS1, generateDDS2 } = await import("./dds-generator")
-        folder.file(`${order.ma_don}_DDS_Plantation.pdf`, await generateDDS1(order, geoData, factory, lotCertMap))
-        folder.file(`${order.ma_don}_DDS_Shipment.pdf`,   await generateDDS2(order, lotDetails, extractionDates, factory))
-      } else {
-        // Fallback: static templates if factory info not set up yet
-        for (const [name, path] of [
-          ["EUDR_DDS_Template_1.pdf", "/mau_eudr_1.pdf"],
-          ["EUDR_DDS_Template_2.pdf", "/mau_eudr2.pdf"],
-        ] as [string,string][]) {
-          try { const res = await fetch(path); if (res.ok) folder.file(name, await res.blob()) } catch {}
+      const { generateDDS1, generateDDS2 } = await import("./dds-generator")
+      const plantationName = `${order.ma_don}_DDS_Plantation.pdf`
+      const shipmentName = `${order.ma_don}_DDS_Shipment.pdf`
+      const geojsonName = `${order.ma_don}_supply_chain.geojson`
+
+      usedEntryNames.add(plantationName)
+      usedEntryNames.add(shipmentName)
+      usedEntryNames.add(geojsonName)
+
+      folder.file(plantationName, await generateDDS1(order, geoData, factory, lotCertMap))
+      folder.file(shipmentName, await generateDDS2(order, lotDetails, extractionDates, factory))
+
+      if (geoData) {
+        folder.file(geojsonName, JSON.stringify(geoData, null, 2))
+      }
+
+      const currentFiles = normalizeExportOrderFiles(order.files)
+      const latestFiles = await fetchLatestOrderFiles(order.id).catch((error: unknown) => {
+        console.error("Failed to refresh export order files before ZIP download", error)
+        return currentFiles
+      })
+      const filesForZip = mergeExportOrderFiles(
+        latestFiles.length >= currentFiles.length ? latestFiles : currentFiles,
+        latestFiles.length >= currentFiles.length ? currentFiles : latestFiles,
+      )
+
+      setAttachmentDebug({
+        stage: "before-zip",
+        updatedAt: new Date().toISOString(),
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles: toAttachmentDebugRows(currentFiles, "state-before-zip"),
+        latestFiles: toAttachmentDebugRows(latestFiles, "db-before-zip"),
+        filesForZip: toAttachmentDebugRows(filesForZip, "zip-input"),
+        uploadFiles: attachmentDebug.uploadFiles,
+        dbAfterUpload: attachmentDebug.dbAfterUpload,
+        attachmentResults: [],
+        attachmentErrors: [],
+        note: "Snapshot truoc khi tao ZIP.",
+      })
+
+      console.info("EUDR ZIP file snapshot", {
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles,
+        latestFiles,
+        filesForZip,
+      })
+
+      if (latestFiles.length !== currentFiles.length) {
+        console.warn("EUDR attachment count mismatch between DB refresh and client state", {
+          orderId: order.id,
+          currentFiles,
+          latestFiles,
+          filesForZip,
+        })
+      }
+
+      const attachmentErrors: string[] = []
+      const attachmentResults: AttachmentDebugRow[] = []
+
+      // Uploaded files are extra attachments outside the 2 DDS PDFs.
+      for (const [index, f] of filesForZip.entries()) {
+        const storagePath = f.path || resolveEudrStoragePath(f.url)
+        try {
+          let fileBlob: Blob | null = null
+
+          console.info("EUDR ZIP attachment start", {
+            index,
+            name: f.name,
+            url: f.url,
+            path: f.path ?? null,
+            resolvedPath: storagePath,
+            size: f.size ?? null,
+          })
+
+          if (storagePath) {
+            const { data, error } = await supabase.storage.from("eudr-files").download(storagePath)
+            console.info("EUDR ZIP storage.download result", {
+              index,
+              name: f.name,
+              path: storagePath,
+              hasData: Boolean(data),
+              blobSize: data?.size ?? null,
+              error: error?.message ?? null,
+            })
+            if (error) throw error
+            fileBlob = data
+          } else {
+            const res = await fetch(f.url)
+            console.info("EUDR ZIP fetch fallback result", {
+              index,
+              name: f.name,
+              url: f.url,
+              ok: res.ok,
+              status: res.status,
+              statusText: res.statusText,
+            })
+            if (!res.ok) {
+              throw new Error(`HTTP ${res.status} ${res.statusText}`.trim())
+            }
+            fileBlob = await res.blob()
+          }
+
+          if (!fileBlob || fileBlob.size <= 0) {
+            throw new Error("Downloaded attachment is empty")
+          }
+
+          const entryName = getUniqueZipEntryName(f.name, usedEntryNames)
+          folder.file(entryName, fileBlob)
+          attachmentResults.push({
+            index,
+            name: f.name,
+            url: f.url,
+            path: f.path ?? null,
+            resolvedPath: storagePath,
+            size: typeof f.size === "number" ? f.size : null,
+            source: "zip-result",
+            downloadStatus: "ok",
+            downloadError: null,
+            blobSize: fileBlob.size,
+            zipEntryName: entryName,
+          })
+          console.info("EUDR ZIP attachment added", {
+            index,
+            name: f.name,
+            path: storagePath,
+            blobSize: fileBlob.size,
+            zipEntryName: entryName,
+          })
+        } catch (error: unknown) {
+          const reason = error instanceof Error ? error.message : "Unknown error"
+          const label = f.name || f.url || "Unnamed attachment"
+          attachmentErrors.push(`${label}: ${reason}`)
+          attachmentResults.push({
+            index,
+            name: f.name,
+            url: f.url,
+            path: f.path ?? null,
+            resolvedPath: storagePath,
+            size: typeof f.size === "number" ? f.size : null,
+            source: "zip-result",
+            downloadStatus: "error",
+            downloadError: reason,
+            blobSize: null,
+            zipEntryName: null,
+          })
+          console.error("Failed to add EUDR attachment to ZIP", { file: f, error })
         }
       }
 
-      // GeoJSON
-      if (geoData) {
-        folder.file(`${order.ma_don}_supply_chain.geojson`, JSON.stringify(geoData, null, 2))
-      }
-
-      // Uploaded files
-      for (const f of (order.files || [])) {
-        try {
-          const res = await fetch(f.url)
-          if (res.ok) folder.file(f.name, await res.blob())
-        } catch {}
-      }
+      setAttachmentDebug({
+        stage: "after-zip",
+        updatedAt: new Date().toISOString(),
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles: toAttachmentDebugRows(currentFiles, "state-before-zip"),
+        latestFiles: toAttachmentDebugRows(latestFiles, "db-before-zip"),
+        filesForZip: toAttachmentDebugRows(filesForZip, "zip-input"),
+        uploadFiles: attachmentDebug.uploadFiles,
+        dbAfterUpload: attachmentDebug.dbAfterUpload,
+        attachmentResults,
+        attachmentErrors,
+        note: "Ket qua sau khi thu add tung file dinh kem vao ZIP.",
+      })
 
       const blob = await zip.generateAsync({ type: "blob" })
       saveAs(blob, `EUDR_${order.ma_don}.zip`)
-      showToast("Đã tải về " + order.ma_don + ".zip")
+      if (attachmentErrors.length > 0) {
+        showToast(`ZIP thiếu ${attachmentErrors.length} file đính kèm. Xem console để biết chi tiết.`, false)
+      } else if (filesForZip.length === 0) {
+        showToast("ZIP chỉ có 2 DDS và GeoJSON vì hệ thống chưa thấy file đính kèm nào trên đơn này.", false)
+      } else {
+        showToast(`Đã tải gộp 2 DDS, GeoJSON và ${filesForZip.length} file đính kèm`)
+      }
     } catch (error: unknown) {
       showToast("Lỗi: " + (error instanceof Error ? error.message : "Unknown error"), false)
     }
@@ -553,14 +939,11 @@ export default function EudrClient() {
               </div>
               <div className="p-3 space-y-1.5">
                 {/* DDS files — generated dynamically per order */}
-                {([
-                  { n: 1 as const, label: `${order.ma_don}_DDS_Plantation.pdf`, desc: "Lô vườn" },
-                  { n: 2 as const, label: `${order.ma_don}_DDS_Shipment.pdf`,   desc: "Lô thành phẩm" },
-                ] as const).map(f => (
+                {DDS_FILES.map(f => (
                   <div key={f.n} className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
                     <FileText size={13} className="text-blue-500 shrink-0"/>
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-slate-700 truncate">{f.label}</div>
+                      <div className="text-xs text-slate-700 truncate">{`${order.ma_don}_DDS_${f.suffix}.pdf`}</div>
                       <div className="text-[10px] text-slate-400">DDS {f.desc}</div>
                     </div>
                     <button onClick={() => handleDownloadDDS(f.n)}
@@ -597,7 +980,7 @@ export default function EudrClient() {
                   <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload}/>
                   <button onClick={()=>fileInputRef.current?.click()} disabled={uploading}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-lg text-xs text-slate-500 hover:text-emerald-600 transition-all disabled:opacity-50">
-                    {uploading ? <><Loader2 size={13} className="animate-spin"/> Đang tải lên...</> : <><Upload size={13}/> Đính kèm file</>}
+                    {uploading ? <><Loader2 size={13} className="animate-spin"/> Đang tải lên...</> : <><Upload size={13}/> Đính kèm file ngoài 2 DDS</>}
                   </button>
                 </div>
               </div>
