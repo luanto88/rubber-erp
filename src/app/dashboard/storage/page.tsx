@@ -304,12 +304,13 @@ export default function StoragePage() {
         if (!dateKey) continue
         const isCoveredByDateRange = coveredRanges.some((range) => isDateInRange(dateKey, range.from, range.to))
         if (isCoveredByDateRange) continue
+        const rowUid = String(row.uid || "").trim()
         const tripRef = buildDispatchTripRef({
           dispatchEntryId: entry.id,
-          rowId: row.row_id || row.uid,
-          uid: row.uid,
+          rowId: row.row_id || rowUid,
+          uid: rowUid,
         })
-        if (!assignedUIDs.has(tripRef) && !assignedUIDs.has(row.uid)) {
+        if (!assignedUIDs.has(tripRef) && !assignedUIDs.has(rowUid)) {
           byDate[dateKey] = (byDate[dateKey] || 0) + 1
         }
       }
