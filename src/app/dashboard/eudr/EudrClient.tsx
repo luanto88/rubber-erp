@@ -733,25 +733,27 @@ export default function EudrClient() {
         ((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const),
       )
 
+      const filteredFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
+        const dbPlot = dbPlotMap.get(plotCode)
+        const staticPlot = staticPlotMap.get(plotCode)
+        const geometry =
+          (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) ||
+          staticPlot?.geometry
+
+        if (!geometry) return acc
+
+        acc.push({
+          type: "Feature",
+          properties: mergePlotProperties(plotCode, dbPlot, staticPlot),
+          geometry,
+        })
+
+        return acc
+      }, [])
+
       const filtered: FeatureCollection = {
         type: "FeatureCollection",
-        features: tenList
-          .map((plotCode) => {
-            const dbPlot = dbPlotMap.get(plotCode)
-            const staticPlot = staticPlotMap.get(plotCode)
-            const geometry =
-              (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) ||
-              staticPlot?.geometry
-
-            if (!geometry) return null
-
-            return {
-              type: "Feature" as const,
-              properties: mergePlotProperties(plotCode, dbPlot, staticPlot),
-              geometry,
-            }
-          })
-          .filter((feature): feature is FeatureCollection["features"][number] => Boolean(feature)),
+        features: filteredFeatures,
       }
 
       setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })

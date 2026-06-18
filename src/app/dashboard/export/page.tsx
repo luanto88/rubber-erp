@@ -762,7 +762,10 @@ export default function ExportPage() {
   );
 
   const canDeleteOrder = useCallback(
-    () => currentUser?.role === "admin",
+    (order: ExportOrder) => {
+      void order;
+      return currentUser?.role === "admin";
+    },
     [currentUser],
   );
 
