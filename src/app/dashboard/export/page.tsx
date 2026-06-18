@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
@@ -69,6 +69,10 @@ type ExportOrder = {
   tong_banh: number;
   yeu_cau_chi_tieu: ChiTieuReq[];
   files: { name: string; url: string; path?: string; size?: number }[];
+  trang_thai?: string | null;
+  created_by?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
   customers?: {
     ma_kh: string;
     ten_kh_en: string;
@@ -161,6 +165,12 @@ const CHI_TIEU_KEY: Record<string, string> = {
   "Độ nhớt": "mooney",
 };
 const EXPORT_DRAFT_SESSION_KEY = "export_order_draft_v1";
+const EXPORT_ORDER_STATUS_PENDING = "cho_phe_duyet";
+const EXPORT_ORDER_STATUS_APPROVED = "da_phe_duyet";
+const EXPORT_ORDER_APPROVER_TITLES = new Set([
+  "giam doc nha may",
+  "pho giam doc nha may",
+]);
 
 const emptyVehicle = (): Vehicle => ({
   id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -210,6 +220,18 @@ type ExportDraftSnapshot = {
   pendingRetest: Omit<PendingRetestAttach, "passed">;
 };
 
+type SessionUserLite = {
+  id: string;
+  role?: string | null;
+  full_name?: string | null;
+  username?: string | null;
+};
+
+type MaintenanceStaffApproverRow = {
+  ten: string | null;
+  chuc_vu_chinh_quyen: string | null;
+};
+
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getLoaiBanhOptions(chung_loai: string): number[] {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(chung_loai))
@@ -252,6 +274,22 @@ function normalizeText(value?: string | null) {
     .toLowerCase();
 }
 
+function getExportOrderStatus(order?: Pick<ExportOrder, "trang_thai"> | null) {
+  return order?.trang_thai || EXPORT_ORDER_STATUS_APPROVED;
+}
+
+function getExportOrderStatusLabel(status?: string | null) {
+  return getExportOrderStatus({ trang_thai: status }) === EXPORT_ORDER_STATUS_PENDING
+    ? "Chờ phê duyệt"
+    : "Đã phê duyệt";
+}
+
+function getExportOrderStatusClasses(status?: string | null) {
+  return getExportOrderStatus({ trang_thai: status }) === EXPORT_ORDER_STATUS_PENDING
+    ? "bg-amber-100 text-amber-700"
+    : "bg-emerald-100 text-emerald-700";
+}
+
 function getQcMetricValue(grade?: QcGrade | null) {
   if (!grade) return null;
   if (typeof grade.tb === "number" && !Number.isNaN(grade.tb)) return grade.tb;
@@ -286,6 +324,8 @@ export default function ExportPage() {
   const [factory, setFactory] = useState<{ id: string; name: string } | null>(
     null,
   );
+  const [currentUser, setCurrentUser] = useState<SessionUserLite | null>(null);
+  const [canApproveOrders, setCanApproveOrders] = useState(false);
   const isNMCP = useMemo(
     () => factory?.name?.toLowerCase().includes("cuaparis") ?? false,
     [factory],
@@ -422,6 +462,45 @@ export default function ExportPage() {
         return;
       }
       setFactoryId(fid);
+      const rawUser =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("erp_user")
+          : null;
+      const parsedUser = rawUser ? (JSON.parse(rawUser) as SessionUserLite) : null;
+      setCurrentUser(parsedUser);
+      if (parsedUser?.role === "admin") {
+        setCanApproveOrders(true);
+      } else if (parsedUser?.id) {
+        const fullName = parsedUser.full_name?.trim() || "";
+        const [staffByProfileRes, staffByNameRes] = await Promise.all([
+          supabase
+            .from("maintenance_staff")
+            .select("ten,chuc_vu_chinh_quyen")
+            .eq("factory_id", fid)
+            .eq("active", true)
+            .eq("profile_id", parsedUser.id)
+            .maybeSingle(),
+          fullName
+            ? supabase
+                .from("maintenance_staff")
+                .select("ten,chuc_vu_chinh_quyen")
+                .eq("factory_id", fid)
+                .eq("active", true)
+                .eq("ten", fullName)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+        const staffRow =
+          (staffByProfileRes.data as MaintenanceStaffApproverRow | null) ||
+          (staffByNameRes.data as MaintenanceStaffApproverRow | null);
+        setCanApproveOrders(
+          EXPORT_ORDER_APPROVER_TITLES.has(
+            normalizeText(staffRow?.chuc_vu_chinh_quyen),
+          ),
+        );
+      } else {
+        setCanApproveOrders(false);
+      }
       supabase
         .from("factories")
         .select("id,name")
@@ -534,16 +613,6 @@ export default function ExportPage() {
       })
       .filter((l) => l.rem_a + l.rem_b + l.rem_c + l.rem_d > 0);
   }, [lotsRaw, orders, editId, resolveAssignmentLot]);
-
-  const exportedLotIds = useMemo(
-    () =>
-      new Set(
-        dedupeLotsByMaLo(lotsRaw)
-          .filter((lot) => normalizeLotStatus(lot.trang_thai) === "Xuất hàng")
-          .map((lot) => lot.id),
-      ),
-    [lotsRaw],
-  );
 
   const latestQcByLotId = useMemo(() => {
     const byId = new Map<string, QcResult>();
@@ -683,19 +752,24 @@ export default function ExportPage() {
     tongXe: orders.reduce((s, o) => s + (o.vehicles?.length || 0), 0),
   };
 
-  const isOrderLocked = useCallback(
-    (order: Pick<ExportOrder, "assignments">) =>
-      (order.assignments || []).some((assignment) => {
-        const resolvedLot = resolveAssignmentLot(assignment);
-        return resolvedLot ? exportedLotIds.has(resolvedLot.id) : false;
-      }),
-    [exportedLotIds, resolveAssignmentLot],
+  const canEditOrder = useCallback(
+    (order: ExportOrder) =>
+      currentUser?.role === "admin" ||
+      (Boolean(currentUser?.id) &&
+        order.created_by === currentUser?.id &&
+        getExportOrderStatus(order) === EXPORT_ORDER_STATUS_PENDING),
+    [currentUser],
+  );
+
+  const canDeleteOrder = useCallback(
+    () => currentUser?.role === "admin",
+    [currentUser],
   );
 
   // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openEdit = (order: ExportOrder) => {
-    if (isOrderLocked(order)) {
-      showToast("Đơn có lô đã xuất hàng, không thể chỉnh sửa.", "error");
+    if (!canEditOrder(order)) {
+      showToast("Bạn không có quyền sửa đơn này.", "error");
       return;
     }
     setForm({
@@ -917,7 +991,11 @@ export default function ExportPage() {
   const reconcileLotStatuses = useCallback(
     async (
       affectedLotIds: string[],
-      orderSnapshot: Array<{ id?: string; assignments?: Assignment[] }>,
+      orderSnapshot: Array<{
+        id?: string;
+        assignments?: Assignment[];
+        trang_thai?: string | null;
+      }>,
     ) => {
       const uniqueLotIds = [...new Set(affectedLotIds)].filter(Boolean);
       if (uniqueLotIds.length === 0 || !factoryId) return;
@@ -933,7 +1011,11 @@ export default function ExportPage() {
       for (const lot of affectedLots || []) {
         const lotId = lot.id;
         const assigned = orderSnapshot.reduce(
-          (sum, order) => sum + getOrderAssignedCount(order, lotId),
+          (sum, order) =>
+            getExportOrderStatus({ trang_thai: order.trang_thai }) ===
+            EXPORT_ORDER_STATUS_APPROVED
+              ? sum + getOrderAssignedCount(order, lotId)
+              : sum,
           0,
         );
         const nextStatus =
@@ -1007,12 +1089,22 @@ export default function ExportPage() {
       const newLotIds = [...new Set(form.assignments.map((a) => a.lot_id))];
       if (editId) {
         const oldOrder = orders.find((o) => o.id === editId);
+        if (!oldOrder || !canEditOrder(oldOrder)) {
+          showToast("Bạn không có quyền sửa đơn này.", "error");
+          return;
+        }
         const oldLotIds = oldOrder?.assignments?.length
           ? [...new Set(oldOrder.assignments.map((a: Assignment) => a.lot_id))]
           : [];
         const { error } = await supabase
           .from("export_orders")
-          .update(payload)
+          .update({
+            ...payload,
+            trang_thai: getExportOrderStatus(oldOrder),
+            created_by: oldOrder.created_by || currentUser?.id || null,
+            approved_by: oldOrder.approved_by || null,
+            approved_at: oldOrder.approved_at || null,
+          })
           .eq("id", editId);
         if (error) {
           showToast(error.message, "error");
@@ -1020,7 +1112,7 @@ export default function ExportPage() {
         }
         const { data: latestOrders, error: snapshotError } = await supabase
           .from("export_orders")
-          .select("id,assignments")
+          .select("id,assignments,trang_thai")
           .eq("factory_id", factoryId);
         if (snapshotError) {
           showToast(snapshotError.message, "error");
@@ -1032,14 +1124,23 @@ export default function ExportPage() {
         );
         showToast("Đã cập nhật đơn xuất hàng");
       } else {
-        const { error } = await supabase.from("export_orders").insert(payload);
+        const insertPayload = {
+          ...payload,
+          trang_thai: EXPORT_ORDER_STATUS_PENDING,
+          created_by: currentUser?.id || null,
+          approved_by: null,
+          approved_at: null,
+        };
+        const { error } = await supabase
+          .from("export_orders")
+          .insert(insertPayload);
         if (error) {
           showToast(error.message, "error");
           return;
         }
         const { data: latestOrders, error: snapshotError } = await supabase
           .from("export_orders")
-          .select("id,assignments")
+          .select("id,assignments,trang_thai")
           .eq("factory_id", factoryId);
         if (snapshotError) {
           showToast(snapshotError.message, "error");
@@ -1071,8 +1172,9 @@ export default function ExportPage() {
   const handleDelete = async (id: string) => {
     if (!factoryId) return;
     const order = orders.find((o) => o.id === id);
-    if (order && isOrderLocked(order)) {
-      showToast("Đơn có lô đã xuất hàng, không thể xóa.", "error");
+    if (!order) return;
+    if (!canDeleteOrder(order)) {
+      showToast("Bạn không có quyền xóa đơn này.", "error");
       return;
     }
     const affectedLotIds = order?.assignments?.length
@@ -1092,7 +1194,7 @@ export default function ExportPage() {
     if (affectedLotIds.length > 0) {
       const { data: latestOrders, error: snapshotError } = await supabase
         .from("export_orders")
-        .select("id,assignments")
+        .select("id,assignments,trang_thai")
         .eq("factory_id", factoryId);
       if (snapshotError) {
         showToast(snapshotError.message, "error");
@@ -1106,6 +1208,59 @@ export default function ExportPage() {
 
     setDelConfirm(null);
     showToast("Đã xóa đơn xuất hàng");
+    void loadData(factoryId);
+    void loadLots(factoryId);
+    void loadQcResults(factoryId);
+  };
+
+  const handleApproveOrder = async (order: ExportOrder) => {
+    if (!factoryId || !currentUser?.id) return;
+    if (!canApproveOrders) {
+      showToast("Bạn không có quyền phê duyệt đơn này.", "error");
+      return;
+    }
+    if (getExportOrderStatus(order) !== EXPORT_ORDER_STATUS_PENDING) {
+      showToast("Đơn này đã được phê duyệt.", "error");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("export_orders")
+      .update({
+        trang_thai: EXPORT_ORDER_STATUS_APPROVED,
+        approved_by: currentUser.id,
+        approved_at: new Date().toISOString(),
+      })
+      .eq("id", order.id);
+
+    if (error) {
+      showToast(error.message, "error");
+      return;
+    }
+
+    const affectedLotIds = order.assignments?.length
+      ? [...new Set(order.assignments.map((assignment) => assignment.lot_id))]
+      : [];
+    if (affectedLotIds.length > 0) {
+      const { data: latestOrders, error: snapshotError } = await supabase
+        .from("export_orders")
+        .select("id,assignments,trang_thai")
+        .eq("factory_id", factoryId);
+      if (snapshotError) {
+        showToast(snapshotError.message, "error");
+        return;
+      }
+      await reconcileLotStatuses(
+        affectedLotIds,
+        (latestOrders || []) as Array<{
+          id?: string;
+          assignments?: Assignment[];
+          trang_thai?: string | null;
+        }>,
+      );
+    }
+
+    showToast("Đã phê duyệt đơn xuất hàng");
     void loadData(factoryId);
     void loadLots(factoryId);
     void loadQcResults(factoryId);
@@ -1312,10 +1467,16 @@ export default function ExportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((order) => (
-                  <>
+                {filtered.map((order) => {
+                  const orderStatus = getExportOrderStatus(order);
+                  const allowEdit = canEditOrder(order);
+                  const allowDelete = canDeleteOrder(order);
+                  const allowApprove =
+                    canApproveOrders && orderStatus === EXPORT_ORDER_STATUS_PENDING;
+
+                  return (
+                  <Fragment key={order.id}>
                     <tr
-                      key={order.id}
                       className="hover:bg-slate-50 cursor-pointer transition-colors"
                       onClick={() =>
                         setExpandedId(expandedId === order.id ? null : order.id)
@@ -1338,9 +1499,16 @@ export default function ExportPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
-                          {order.chung_loai}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold w-fit">
+                            {order.chung_loai}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[11px] font-bold w-fit ${getExportOrderStatusClasses(orderStatus)}`}
+                          >
+                            {getExportOrderStatusLabel(orderStatus)}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {order.vehicles?.length || 0} xe
@@ -1353,43 +1521,42 @@ export default function ExportPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          {(() => {
-                            const locked = isOrderLocked(order);
-                            return (
-                              <>
+                              {allowApprove && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleApproveOrder(order);
+                                  }}
+                                  className="p-1.5 rounded-lg transition-colors hover:bg-emerald-50 text-emerald-600"
+                                  title="Phê duyệt"
+                                >
+                                  <Check size={14} />
+                                </button>
+                              )}
+                              {allowEdit && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               openEdit(order);
                             }}
-                            disabled={locked}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              locked
-                                ? "text-slate-300 cursor-not-allowed"
-                                : "hover:bg-blue-50 text-blue-500"
-                            }`}
-                            title={locked ? "Đơn có lô đã xuất hàng" : "Sửa"}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-blue-50 text-blue-500"
+                            title="Sửa"
                           >
                             <Edit2 size={14} />
                           </button>
+                              )}
+                              {allowDelete && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setDelConfirm(order.id);
                             }}
-                            disabled={locked}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              locked
-                                ? "text-slate-300 cursor-not-allowed"
-                                : "hover:bg-red-50 text-red-400"
-                            }`}
-                            title={locked ? "Đơn có lô đã xuất hàng" : "Xóa"}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-red-50 text-red-400"
+                            title="Xóa"
                           >
                             <Trash2 size={14} />
                           </button>
-                              </>
-                            );
-                          })()}
+                              )}
                           {expandedId === order.id ? (
                             <ChevronUp size={16} className="text-slate-400" />
                           ) : (
@@ -1399,7 +1566,7 @@ export default function ExportPage() {
                       </td>
                     </tr>
                     {expandedId === order.id && (
-                      <tr key={order.id + "_exp"}>
+                      <tr>
                         <td
                           colSpan={8}
                           className="px-4 py-4 bg-slate-50 border-t border-slate-100"
@@ -1434,6 +1601,16 @@ export default function ExportPage() {
                                 </div>
                               )}
                               <div className="pt-2 space-y-0.5 border-t border-slate-200 mt-2">
+                                <div className="flex gap-2">
+                                  <span className="text-slate-400 w-24">
+                                    Trạng thái:
+                                  </span>
+                                  <span
+                                    className={`inline-flex px-2 py-0.5 rounded-full font-bold ${getExportOrderStatusClasses(orderStatus)}`}
+                                  >
+                                    {getExportOrderStatusLabel(orderStatus)}
+                                  </span>
+                                </div>
                                 <div className="flex gap-2">
                                   <span className="text-slate-400 w-24">
                                     Số thông báo:
@@ -1621,8 +1798,8 @@ export default function ExportPage() {
                         </td>
                       </tr>
                     )}
-                  </>
-                ))}
+                  </Fragment>
+                )})}
               </tbody>
             </table>
           )}

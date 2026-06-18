@@ -14,7 +14,8 @@ import JSZip from "jszip"
 import { saveAs } from "file-saver"
 import {
   Search, FileDown, Upload, Trash2, Map, Shield, Package,
-  AlertTriangle, Check, X, FileText, Globe, Download, Loader2
+  AlertTriangle, Check, X, FileText, Globe, Download, Loader2,
+  Users, Building2, Sprout, Ruler, CalendarDays, Trees, Route, Mountain, MapPin, Layers3
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,6 +34,14 @@ type ExportOrder = {
 
 type ExportOrderFile = ExportOrder["files"][number]
 
+type EudrUploadedFile = {
+  name: string
+  url: string
+  path: string
+  size: number
+  source: "client" | "server-fallback"
+}
+
 type AttachmentDebugRow = {
   index: number
   name: string
@@ -48,16 +57,19 @@ type AttachmentDebugRow = {
 }
 
 type AttachmentDebugState = {
-  stage: "idle" | "after-upload" | "before-zip" | "after-zip"
+  stage: "idle" | "after-upload" | "before-zip" | "after-zip" | "manual-refresh"
   updatedAt: string
   orderId: string | null
   orderCode: string | null
+  selectedUploadFiles: AttachmentDebugRow[]
   currentFiles: AttachmentDebugRow[]
   latestFiles: AttachmentDebugRow[]
   filesForZip: AttachmentDebugRow[]
   uploadFiles: AttachmentDebugRow[]
+  uploadResults: AttachmentDebugRow[]
   dbAfterUpload: AttachmentDebugRow[]
   attachmentResults: AttachmentDebugRow[]
+  uploadErrors: string[]
   attachmentErrors: string[]
   note?: string
 }
@@ -90,6 +102,47 @@ const DDS_FILES = [
   { n: 2 as const, suffix: "Shipment", desc: "Lô thành phẩm" },
 ] as const
 
+type ForestPlotRow = {
+  ten: string
+  ma_lo_full: string | null
+  geometry: unknown
+  nong_truong: string | null
+  doi: number | null
+  giong: string | null
+  dien_tich_ha: number | null
+  nam_trong: number | null
+  nam_cao_up: number | null
+}
+
+type EudrPlotProperties = {
+  ID?: string
+  Ma_lo_2026?: string
+  Ten?: string
+  Nong_truong?: string
+  Doi_2026?: string | number | null
+  Doi_nho?: string
+  Giong?: string
+  Dtich2026_ha?: string | number | null
+  Nam_trong?: string | number | null
+  Nam_mo_cao?: string | number | null
+  Tuoi_cao?: string | number | null
+  Tong_so_cay_KK?: string | number | null
+  Mat_cao_2026?: string
+  CD_cao_2026?: string
+  ToadoX?: string | number | null
+  ToadoY?: string | number | null
+  Khoang_cach_m?: string
+  Hang_dat?: string
+  Ma_lo?: string
+  Cao_trinh_min_m?: string | number | null
+  Cao_trinh_max_m?: string | number | null
+  Phuong_phap?: string
+  ma_lo_full?: string
+  [key: string]: unknown
+}
+
+const EUDR_DEBUG_ENABLED = process.env.NEXT_PUBLIC_EUDR_DEBUG === "1"
+
 function resolveEudrStoragePath(fileUrl?: string | null) {
   if (!fileUrl) return null
   try {
@@ -115,6 +168,93 @@ function resolveEudrStoragePath(fileUrl?: string | null) {
     return null
   } catch {
     return null
+  }
+}
+
+function isStorageConfigError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  return /bucket.*not found|row-level security|permission denied|unauthorized|403/i.test(message)
+}
+
+function sanitizeEudrPathSegment(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9_-]/g, "_")
+}
+
+function sanitizeEudrFilename(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_")
+}
+
+function buildEudrStoragePath(factoryId: string, orderCode: string, fileName: string) {
+  return `${sanitizeEudrPathSegment(factoryId)}/${sanitizeEudrPathSegment(orderCode)}/${Date.now()}_${sanitizeEudrFilename(fileName)}`
+}
+
+async function uploadEudrFile(params: {
+  factoryId: string
+  orderCode: string
+  file: File
+}): Promise<EudrUploadedFile> {
+  const path = buildEudrStoragePath(params.factoryId, params.orderCode, params.file.name)
+  const uploadResult = await supabase.storage.from("eudr-files").upload(path, params.file, { upsert: true })
+
+  if (!uploadResult.error) {
+    const { data } = supabase.storage.from("eudr-files").getPublicUrl(uploadResult.data.path)
+    return {
+      name: params.file.name,
+      url: data.publicUrl,
+      path: uploadResult.data.path,
+      size: params.file.size,
+      source: "client",
+    }
+  }
+
+  if (!isStorageConfigError(uploadResult.error)) {
+    throw uploadResult.error
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+  if (sessionError) throw sessionError
+  if (!sessionData.session?.access_token) {
+    throw new Error("Phien dang nhap da het han. Vui long dang nhap lai.")
+  }
+
+  const body = new FormData()
+  body.append("factoryId", params.factoryId)
+  body.append("orderCode", params.orderCode)
+  body.append("file", params.file)
+
+  const response = await fetch("/api/eudr/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sessionData.session.access_token}`,
+    },
+    body,
+  })
+
+  const payload = (await response.json().catch(() => null)) as {
+    error?: string
+    name?: string
+    size?: number
+    path?: string
+    publicUrl?: string
+  } | null
+
+  if (!response.ok || !payload?.path || !payload.publicUrl) {
+    throw new Error(payload?.error || uploadResult.error.message || "Khong tai duoc file EUDR len may chu.")
+  }
+
+  console.warn("EUDR upload used server fallback after storage policy failure", {
+    orderCode: params.orderCode,
+    fileName: params.file.name,
+    initialError: uploadResult.error.message,
+    path: payload.path,
+  })
+
+  return {
+    name: payload.name || params.file.name,
+    url: payload.publicUrl,
+    path: payload.path,
+    size: typeof payload.size === "number" ? payload.size : params.file.size,
+    source: "server-fallback",
   }
 }
 
@@ -172,6 +312,84 @@ function toAttachmentDebugRows(files: ExportOrderFile[], source: string): Attach
   }))
 }
 
+function toSelectedFileDebugRows(files: File[], source: string): AttachmentDebugRow[] {
+  return files.map((file, index) => ({
+    index,
+    name: file.name,
+    url: "",
+    path: null,
+    resolvedPath: null,
+    size: file.size,
+    source,
+  }))
+}
+
+function formatAttachmentDebugTimestamp(value: string) {
+  if (!value) return "Chua co"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString("vi-VN")
+}
+
+function getAttachmentDebugBadgeTone(status?: AttachmentDebugRow["downloadStatus"]) {
+  if (status === "ok") return "bg-emerald-100 text-emerald-700 border-emerald-200"
+  if (status === "error") return "bg-red-100 text-red-700 border-red-200"
+  return "bg-slate-100 text-slate-600 border-slate-200"
+}
+
+function toDisplayText(value: unknown, fallback = "—") {
+  if (value === null || value === undefined) return fallback
+  const text = String(value).trim()
+  return text ? text : fallback
+}
+
+function toDisplayNumber(value: unknown, digits = 0, fallback = "—") {
+  const number = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return digits > 0 ? number.toFixed(digits) : number.toLocaleString("vi-VN")
+}
+
+function parseFiniteNumber(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function buildStaticPlotFeatureMap(full: FeatureCollection | null) {
+  const mapped = new globalThis.Map<string, FeatureCollection["features"][number]>()
+  for (const feature of full?.features || []) {
+    const key = String((feature.properties as EudrPlotProperties | undefined)?.Ten || "").trim()
+    if (key) mapped.set(key, feature)
+  }
+  return mapped
+}
+
+function mergePlotProperties(
+  plotCode: string,
+  dbRow?: ForestPlotRow | null,
+  reference?: FeatureCollection["features"][number] | null,
+): EudrPlotProperties {
+  const refProps = ((reference?.properties as EudrPlotProperties | undefined) || {})
+  const normalizedArea = dbRow?.dien_tich_ha ?? refProps.Dtich2026_ha ?? null
+  const normalizedTeam = dbRow?.doi ?? refProps.Doi_2026 ?? null
+  const normalizedPlantYear = dbRow?.nam_trong ?? refProps.Nam_trong ?? null
+  const normalizedOpenYear = dbRow?.nam_cao_up ?? refProps.Nam_mo_cao ?? null
+  const areaNumber = parseFiniteNumber(normalizedArea)
+
+  return {
+    ...refProps,
+    Ten: plotCode || refProps.Ten || refProps.Ma_lo_2026 || refProps.Ma_lo,
+    Ma_lo: toDisplayText(refProps.Ma_lo, dbRow?.ma_lo_full || plotCode),
+    Ma_lo_2026: toDisplayText(refProps.Ma_lo_2026, dbRow?.ma_lo_full || plotCode),
+    Nong_truong: toDisplayText(dbRow?.nong_truong, refProps.Nong_truong || ""),
+    Doi_2026: normalizedTeam,
+    Giong: toDisplayText(dbRow?.giong, refProps.Giong || ""),
+    Dtich2026_ha: areaNumber ?? normalizedArea,
+    Nam_trong: normalizedPlantYear,
+    Nam_mo_cao: normalizedOpenYear,
+    ma_lo_full: dbRow?.ma_lo_full || refProps.ma_lo_full || refProps.Ma_lo_2026 || "",
+  }
+}
+
 // ─── Team colors ──────────────────────────────────────────────────────────────
 const TEAM_COLORS: Record<string, string> = {
   "1":"#ef4444","2":"#f97316","3":"#eab308","4":"#22c55e","5":"#14b8a6",
@@ -203,6 +421,7 @@ export default function EudrClient() {
   const [factoryId, setFactoryId] = useState<string|null>(null)
 
   const [geoData, setGeoData]   = useState<FeatureCollection|null>(null)
+  const [selectedPlot, setSelectedPlot] = useState<EudrPlotProperties | null>(null)
   const [diemGnSet, setDiemGnSet] = useState<Set<string>>(new Set())
   const [loadingGeo, setLoadingGeo] = useState(false)
 
@@ -219,17 +438,21 @@ export default function EudrClient() {
   const [uploading, setUploading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [toast, setToast]        = useState<{msg:string;ok:boolean}|null>(null)
+  const [showAttachmentDebug, setShowAttachmentDebug] = useState(false)
   const [attachmentDebug, setAttachmentDebug] = useState<AttachmentDebugState>({
     stage: "idle",
     updatedAt: "",
     orderId: null,
     orderCode: null,
+    selectedUploadFiles: [],
     currentFiles: [],
     latestFiles: [],
     filesForZip: [],
     uploadFiles: [],
+    uploadResults: [],
     dbAfterUpload: [],
     attachmentResults: [],
+    uploadErrors: [],
     attachmentErrors: [],
   })
   const fileInputRef             = useRef<HTMLInputElement>(null)
@@ -250,6 +473,22 @@ export default function EudrClient() {
   }, [])
 
   // ── Search order ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!geoData?.features.length) {
+      setSelectedPlot(null)
+      return
+    }
+
+    const currentTen = selectedPlot?.Ten
+    if (!currentTen) return
+
+    const nextSelected = geoData.features.find(
+      (feature) => String((feature.properties as EudrPlotProperties | undefined)?.Ten || "") === currentTen,
+    )?.properties as EudrPlotProperties | undefined
+
+    if (!nextSelected) setSelectedPlot(null)
+  }, [geoData, selectedPlot?.Ten])
+
   const searchOrder = useCallback(async (ma: string, fid?: string) => {
     const f = fid ?? factoryId
     if (!ma.trim()) return
@@ -278,6 +517,34 @@ export default function EudrClient() {
     if (error) throw error
     return normalizeExportOrderFiles(data?.files)
   }, [])
+
+  const refreshAttachmentDebug = useCallback(async () => {
+    if (!order) return
+    try {
+      const currentFiles = normalizeExportOrderFiles(order.files)
+      const latestFiles = await fetchLatestOrderFiles(order.id)
+      setAttachmentDebug(prev => ({
+        ...prev,
+        stage: "manual-refresh",
+        updatedAt: new Date().toISOString(),
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles: toAttachmentDebugRows(currentFiles, "state-manual-refresh"),
+        latestFiles: toAttachmentDebugRows(latestFiles, "db-manual-refresh"),
+        note: `Lam moi DB thu cong. DB dang co ${latestFiles.length} file, state dang co ${currentFiles.length} file.`,
+      }))
+      setShowAttachmentDebug(true)
+      console.info("EUDR debug manual refresh", {
+        orderId: order.id,
+        orderCode: order.ma_don,
+        currentFiles,
+        latestFiles,
+      })
+    } catch (error: unknown) {
+      console.error("Failed to refresh EUDR attachment debug panel", error)
+      showToast("Khong the lam moi debug files tu DB.", false)
+    }
+  }, [fetchLatestOrderFiles, order])
 
   // ── Trace supply chain → GeoJSON ──────────────────────────────────────────
   const traceGeoChain = async (ord: ExportOrder) => {
@@ -447,42 +714,44 @@ export default function EudrClient() {
       }
       setExtractionDates(edMap)
 
-      // 4. Lấy polygon lô vườn — ưu tiên DB (forest_plots), fallback file GeoJSON tĩnh
-      let filtered: FeatureCollection
-
+      // 4. Lấy polygon lô vườn và ghép metadata đầy đủ từ GeoJSON chuẩn
       const tenList = [...diemGn]
+      const fullResponse = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
+      const full: FeatureCollection | null = fullResponse.ok ? await fullResponse.json() : null
+      const staticPlotMap = buildStaticPlotFeatureMap(full)
+
       const { data: plotRows } = tenList.length
         ? await supabase
             .from("forest_plots")
-            .select("ten, geometry, nong_truong, doi, dien_tich_ha")
+            .select("ten, ma_lo_full, geometry, nong_truong, doi, giong, dien_tich_ha, nam_trong, nam_cao_up")
             .eq("factory_id", ord.factory_id)
             .eq("is_active", true)
             .in("ten", tenList)
         : { data: null }
 
-      if (plotRows && plotRows.length > 0) {
-        // DB có dữ liệu — dùng trực tiếp
-        filtered = {
-          type: "FeatureCollection",
-          features: (plotRows as { ten: string; geometry: unknown; nong_truong: string | null; doi: number | null; dien_tich_ha: number | null }[]).map(p => ({
-            type: "Feature" as const,
-            properties: {
-              Ten: p.ten,
-              Nong_truong: p.nong_truong ?? "",
-              Doi_2026: p.doi ?? null,
-              Dtich2026_ha: p.dien_tich_ha ?? null,
-            },
-            geometry: p.geometry as FeatureCollection["features"][0]["geometry"],
-          })),
-        }
-      } else {
-        // Fallback: file GeoJSON tĩnh (dùng khi chưa seed DB)
-        const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
-        const full: FeatureCollection = await res.json()
-        filtered = {
-          type: "FeatureCollection",
-          features: full.features.filter(f => diemGn.has(f.properties?.Ten)),
-        }
+      const dbPlotMap = new globalThis.Map(
+        ((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const),
+      )
+
+      const filtered: FeatureCollection = {
+        type: "FeatureCollection",
+        features: tenList
+          .map((plotCode) => {
+            const dbPlot = dbPlotMap.get(plotCode)
+            const staticPlot = staticPlotMap.get(plotCode)
+            const geometry =
+              (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) ||
+              staticPlot?.geometry
+
+            if (!geometry) return null
+
+            return {
+              type: "Feature" as const,
+              properties: mergePlotProperties(plotCode, dbPlot, staticPlot),
+              geometry,
+            }
+          })
+          .filter((feature): feature is FeatureCollection["features"][number] => Boolean(feature)),
       }
 
       setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
@@ -494,13 +763,16 @@ export default function EudrClient() {
   }
 
   // ── Upload file ───────────────────────────────────────────────────────────
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  /*
     if (!order || !factoryId) return
     const files = Array.from(e.target.files || [])
     if (!files.length) return
     setUploading(true)
     const previousFiles = normalizeExportOrderFiles(order.files)
     const newFiles = [...previousFiles]
+    const selectedUploadFiles = toSelectedFileDebugRows(files, "selected-for-upload")
+    const uploadResults: AttachmentDebugRow[] = []
+    const uploadErrors: string[] = []
     for (const file of files) {
       const path = `${factoryId}/${order.ma_don}/${Date.now()}_${file.name}`
       const { data, error } = await supabase.storage.from("eudr-files").upload(path, file, { upsert: true })
@@ -524,17 +796,21 @@ export default function EudrClient() {
         updatedAt: new Date().toISOString(),
         orderId: order.id,
         orderCode: order.ma_don,
+        selectedUploadFiles,
         currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
         latestFiles: [],
         filesForZip: [],
         uploadFiles: toAttachmentDebugRows(normalizedNewFiles, "upload-payload"),
+        uploadResults,
         dbAfterUpload: toAttachmentDebugRows(dbAfterUpload, "db-after-upload"),
         attachmentResults: [],
+        uploadErrors,
         attachmentErrors: [],
         note: dbAfterUpload.length !== normalizedNewFiles.length
           ? "So luong file trong DB sau upload khac voi payload vua save."
           : "DB da tra ve cung so luong file voi payload vua save.",
       })
+      setShowAttachmentDebug(true)
 
       console.info("EUDR upload verification", {
         orderId: order.id,
@@ -561,6 +837,131 @@ export default function EudrClient() {
   }
 
   // ── Delete attached file ──────────────────────────────────────────────────
+  */
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!order || !factoryId) return
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+
+    setUploading(true)
+    const previousFiles = normalizeExportOrderFiles(order.files)
+    const newFiles = [...previousFiles]
+    const selectedUploadFiles = toSelectedFileDebugRows(files, "selected-for-upload")
+    const uploadResults: AttachmentDebugRow[] = []
+    const uploadErrors: string[] = []
+
+    for (const file of files) {
+      try {
+        const uploaded = await uploadEudrFile({ factoryId, orderCode: order.ma_don, file })
+        newFiles.push({ name: uploaded.name, url: uploaded.url, path: uploaded.path, size: uploaded.size })
+        uploadResults.push({
+          index: uploadResults.length,
+          name: uploaded.name,
+          url: uploaded.url,
+          path: uploaded.path,
+          resolvedPath: uploaded.path,
+          size: uploaded.size,
+          source: uploaded.source === "client" ? "upload-result" : "upload-result-server-fallback",
+          downloadStatus: "ok",
+          downloadError: null,
+          blobSize: uploaded.size,
+          zipEntryName: null,
+        })
+      } catch (uploadError) {
+        const message = uploadError instanceof Error ? uploadError.message : "Unknown upload error"
+        const path = buildEudrStoragePath(factoryId, order.ma_don, file.name)
+        uploadErrors.push(`${file.name}: ${message}`)
+        uploadResults.push({
+          index: uploadResults.length,
+          name: file.name,
+          url: "",
+          path,
+          resolvedPath: path,
+          size: file.size,
+          source: "upload-result",
+          downloadStatus: "error",
+          downloadError: message,
+          blobSize: null,
+          zipEntryName: null,
+        })
+        console.error("EUDR upload failed before DB save", { fileName: file.name, path, error: uploadError })
+      }
+    }
+
+    const normalizedNewFiles = normalizeExportOrderFiles(newFiles)
+    const { error } = await supabase.from("export_orders").update({ files: normalizedNewFiles }).eq("id", order.id)
+
+    if (error) {
+      showToast(error.message, false)
+    } else {
+      const dbAfterUpload = await fetchLatestOrderFiles(order.id).catch((fetchError: unknown) => {
+        console.error("Failed to reload export order files right after upload", fetchError)
+        return []
+      })
+      const effectiveFiles = dbAfterUpload.length > 0 || normalizedNewFiles.length === 0
+        ? mergeExportOrderFiles(dbAfterUpload, normalizedNewFiles)
+        : normalizedNewFiles
+      const successfulUploads = uploadResults.filter(row => row.downloadStatus === "ok").length
+
+      setAttachmentDebug({
+        stage: "after-upload",
+        updatedAt: new Date().toISOString(),
+        orderId: order.id,
+        orderCode: order.ma_don,
+        selectedUploadFiles,
+        currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
+        latestFiles: [],
+        filesForZip: [],
+        uploadFiles: toAttachmentDebugRows(normalizedNewFiles, "upload-payload"),
+        uploadResults,
+        dbAfterUpload: toAttachmentDebugRows(dbAfterUpload, "db-after-upload"),
+        attachmentResults: [],
+        uploadErrors,
+        attachmentErrors: [],
+        note:
+          successfulUploads === 0
+            ? "Khong co file nao upload thanh cong len storage. Kiem tra bang 'Ket qua upload tung file'."
+            : dbAfterUpload.length !== normalizedNewFiles.length
+              ? "So luong file trong DB sau upload khac voi payload vua save."
+              : "DB da tra ve cung so luong file voi payload vua save.",
+      })
+      setShowAttachmentDebug(true)
+
+      console.info("EUDR upload verification", {
+        orderId: order.id,
+        orderCode: order.ma_don,
+        previousFiles,
+        selectedUploadFiles,
+        uploadResults,
+        uploadErrors,
+        normalizedNewFiles,
+        dbAfterUpload,
+        effectiveFiles,
+      })
+
+      setOrder(prev => prev ? { ...prev, files: effectiveFiles } : prev)
+
+      if (successfulUploads === 0) {
+        showToast("Khong co file nao upload thanh cong. Xem panel debug.", false)
+      } else if (dbAfterUpload.length !== normalizedNewFiles.length) {
+        console.warn("EUDR upload DB mismatch after save", {
+          orderId: order.id,
+          orderCode: order.ma_don,
+          normalizedNewFiles,
+          dbAfterUpload,
+        })
+        showToast(`Upload xong nhung DB dang tra ve ${dbAfterUpload.length}/${normalizedNewFiles.length} file. Xem panel debug.`, false)
+      } else if (successfulUploads < files.length) {
+        showToast(`Chi upload thanh cong ${successfulUploads}/${files.length} file. Xem panel debug.`, false)
+      } else {
+        showToast(`Da dinh kem ${successfulUploads} file`)
+      }
+    }
+
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
   const handleDeleteFile = async (url: string) => {
     if (!order) return
     const newFiles = normalizeExportOrderFiles(order.files).filter(f => f.url !== url)
@@ -627,15 +1028,19 @@ export default function EudrClient() {
         updatedAt: new Date().toISOString(),
         orderId: order.id,
         orderCode: order.ma_don,
+        selectedUploadFiles: attachmentDebug.selectedUploadFiles,
         currentFiles: toAttachmentDebugRows(currentFiles, "state-before-zip"),
         latestFiles: toAttachmentDebugRows(latestFiles, "db-before-zip"),
         filesForZip: toAttachmentDebugRows(filesForZip, "zip-input"),
         uploadFiles: attachmentDebug.uploadFiles,
+        uploadResults: attachmentDebug.uploadResults,
         dbAfterUpload: attachmentDebug.dbAfterUpload,
         attachmentResults: [],
+        uploadErrors: attachmentDebug.uploadErrors,
         attachmentErrors: [],
         note: "Snapshot truoc khi tao ZIP.",
       })
+      setShowAttachmentDebug(true)
 
       console.info("EUDR ZIP file snapshot", {
         orderId: order.id,
@@ -752,15 +1157,19 @@ export default function EudrClient() {
         updatedAt: new Date().toISOString(),
         orderId: order.id,
         orderCode: order.ma_don,
+        selectedUploadFiles: attachmentDebug.selectedUploadFiles,
         currentFiles: toAttachmentDebugRows(currentFiles, "state-before-zip"),
         latestFiles: toAttachmentDebugRows(latestFiles, "db-before-zip"),
         filesForZip: toAttachmentDebugRows(filesForZip, "zip-input"),
         uploadFiles: attachmentDebug.uploadFiles,
+        uploadResults: attachmentDebug.uploadResults,
         dbAfterUpload: attachmentDebug.dbAfterUpload,
         attachmentResults,
+        uploadErrors: attachmentDebug.uploadErrors,
         attachmentErrors,
         note: "Ket qua sau khi thu add tung file dinh kem vao ZIP.",
       })
+      setShowAttachmentDebug(true)
 
       const blob = await zip.generateAsync({ type: "blob" })
       saveAs(blob, `EUDR_${order.ma_don}.zip`)
@@ -778,13 +1187,36 @@ export default function EudrClient() {
   }
 
   // ── GeoJSON style ─────────────────────────────────────────────────────────
-  const geoStyle = (feature?: Feature) => {
+  const geoStyle = useCallback((feature?: Feature) => {
     const team = feature?.properties?.Doi_2026 ?? "0"
     return { fillColor: TEAM_COLORS[String(team)] ?? "#6b7280", weight: 1.5, color: "#fff", fillOpacity: 0.7 }
-  }
+  }, [])
 
-  const onEachFeature = (feature: Feature, layer: L.Layer) => {
-    const p = feature.properties || {}
+  const onEachFeature = useCallback((feature: Feature, layer: L.Layer) => {
+    const p = (feature.properties || {}) as EudrPlotProperties
+    const plotName = toDisplayText(p.Ten || p.Ma_lo_2026 || p.Ma_lo, "?")
+    const areaText = toDisplayNumber(p.Dtich2026_ha, 2)
+    const teamText = toDisplayText(p.Doi_2026)
+    const varietyText = toDisplayText(p.Giong)
+    const plantationText = toDisplayText(p.Nong_truong)
+    layer.bindTooltip(
+      `<div style="font-size:12px;font-weight:600">${plotName}</div>
+       <div style="font-size:11px;color:#666">Đội ${teamText} · ${varietyText} · ${areaText} ha</div>`,
+      { sticky: true, className: "lot-tooltip" },
+    )
+    layer.bindPopup(`
+      <div class="text-xs leading-5">
+        <div class="font-bold text-slate-800 mb-1">${plotName}</div>
+        <div>Nông trường: <strong>${plantationText}</strong></div>
+        <div>Đội: <strong>${teamText}</strong></div>
+        <div>Diện tích: <strong>${areaText} ha</strong></div>
+        <div>Giống: <strong>${varietyText}</strong></div>
+        <div>Năm trồng: <strong>${toDisplayText(p.Nam_trong)}</strong></div>
+        <div>Năm mở cạo: <strong>${toDisplayText(p.Nam_mo_cao)}</strong></div>
+      </div>
+    `, { maxWidth: 240 })
+    layer.on("click", () => setSelectedPlot(p))
+    /* legacy popup
     layer.bindPopup(`
       <div class="text-xs leading-5">
         <div class="font-bold text-slate-800 mb-1">${p.Ma_lo_2026 ?? p.Ma_lo ?? "?"}</div>
@@ -793,8 +1225,8 @@ export default function EudrClient() {
         <div>Giống: <strong>${p.Giong ?? "—"}</strong></div>
         <div>Năm trồng: <strong>${p.Nam_trong ?? "—"}</strong></div>
       </div>
-    `, { maxWidth: 220 })
-  }
+    `, { maxWidth: 220 }) */
+  }, [])
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   const cust = order?.customers
@@ -985,6 +1417,150 @@ export default function EudrClient() {
                 </div>
               </div>
             </div>
+
+            {EUDR_DEBUG_ENABLED && (
+            <div className="bg-slate-950 text-slate-100 rounded-xl border border-slate-800 shadow-md overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Package size={15} className="text-amber-300"/>
+                    <span className="font-bold text-sm">Debug file dinh kem EUDR</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">
+                    Stage: <span className="text-slate-200">{attachmentDebug.stage}</span> · Updated: <span className="text-slate-200">{formatAttachmentDebugTimestamp(attachmentDebug.updatedAt)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={refreshAttachmentDebug}
+                    disabled={!order}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-[11px] font-semibold hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    Lam moi DB
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(JSON.stringify(attachmentDebug, null, 2))
+                        showToast("Da copy debug JSON")
+                      } catch (error: unknown) {
+                        console.error("Failed to copy EUDR debug JSON", error)
+                        showToast("Khong copy duoc debug JSON.", false)
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-[11px] font-semibold hover:bg-slate-800"
+                  >
+                    Copy JSON
+                  </button>
+                  <button
+                    onClick={() => setShowAttachmentDebug(prev => !prev)}
+                    className="px-2.5 py-1.5 rounded-lg bg-amber-400 text-slate-950 text-[11px] font-bold hover:bg-amber-300"
+                  >
+                    {showAttachmentDebug ? "An panel" : "Mo panel"}
+                  </button>
+                </div>
+              </div>
+
+              {showAttachmentDebug && (
+                <div className="p-3 space-y-3 text-[11px]">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">File da chon</div>
+                      <div className="text-lg font-bold">{attachmentDebug.selectedUploadFiles.length}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">State hien tai</div>
+                      <div className="text-lg font-bold">{attachmentDebug.currentFiles.length}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">DB moi nhat</div>
+                      <div className="text-lg font-bold">{attachmentDebug.latestFiles.length || attachmentDebug.dbAfterUpload.length}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">Ket qua upload</div>
+                      <div className="text-lg font-bold">{attachmentDebug.uploadResults.length}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">Input tao ZIP</div>
+                      <div className="text-lg font-bold">{attachmentDebug.filesForZip.length}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2">
+                      <div className="text-slate-400">Ket qua add ZIP</div>
+                      <div className="text-lg font-bold">{attachmentDebug.attachmentResults.length}</div>
+                    </div>
+                  </div>
+
+                  {attachmentDebug.note && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-100">
+                      {attachmentDebug.note}
+                    </div>
+                  )}
+
+                  {[
+                    { title: "File da chon upload", rows: attachmentDebug.selectedUploadFiles },
+                    { title: "Payload sau upload", rows: attachmentDebug.uploadFiles },
+                    { title: "Ket qua upload tung file", rows: attachmentDebug.uploadResults },
+                    { title: "DB sau upload", rows: attachmentDebug.dbAfterUpload },
+                    { title: "State truoc ZIP", rows: attachmentDebug.currentFiles },
+                    { title: "DB truoc ZIP", rows: attachmentDebug.latestFiles },
+                    { title: "Files dua vao ZIP", rows: attachmentDebug.filesForZip },
+                    { title: "Ket qua tung attachment", rows: attachmentDebug.attachmentResults },
+                  ].map(section => (
+                    <div key={section.title} className="rounded-xl border border-slate-800 overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-900 font-semibold text-slate-200">
+                        {section.title} ({section.rows.length})
+                      </div>
+                      <div className="divide-y divide-slate-800">
+                        {section.rows.length === 0 ? (
+                          <div className="px-3 py-2 text-slate-500">Chua co du lieu.</div>
+                        ) : section.rows.map(row => (
+                          <div key={`${section.title}-${row.index}-${row.url}`} className="px-3 py-2 space-y-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-100 break-all">{row.name || "(khong ten)"}</div>
+                                <div className="text-slate-400 break-all">{row.url}</div>
+                              </div>
+                              <div className={`shrink-0 rounded-full border px-2 py-0.5 ${getAttachmentDebugBadgeTone(row.downloadStatus)}`}>
+                                {row.downloadStatus || row.source}
+                              </div>
+                            </div>
+                            <div className="text-slate-400 break-all">
+                              path: {row.path || "(rong)"} | resolved: {row.resolvedPath || "(khong resolve)"} | size: {row.size ?? "?"} | blob: {row.blobSize ?? "?"} | zip: {row.zipEntryName || "(chua add)"}
+                            </div>
+                            {row.downloadError && (
+                              <div className="text-red-300 break-all">error: {row.downloadError}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  {attachmentDebug.uploadErrors.length > 0 && (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+                      <div className="font-semibold text-red-200 mb-1">Loi upload ({attachmentDebug.uploadErrors.length})</div>
+                      <div className="space-y-1 text-red-100">
+                        {attachmentDebug.uploadErrors.map((error, index) => (
+                          <div key={`${error}-${index}`} className="break-all">{error}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {attachmentDebug.attachmentErrors.length > 0 && (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+                      <div className="font-semibold text-red-200 mb-1">Loi khi add ZIP ({attachmentDebug.attachmentErrors.length})</div>
+                      <div className="space-y-1 text-red-100">
+                        {attachmentDebug.attachmentErrors.map((error, index) => (
+                          <div key={`${error}-${index}`} className="break-all">{error}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            )}
           </div>
 
           {/* RIGHT: Map */}
@@ -1051,6 +1627,48 @@ export default function EudrClient() {
                 </>
               )}
             </MapContainer>
+            {selectedPlot && (
+              <div className="absolute top-4 right-4 z-[400] w-80 max-w-[calc(100%-2rem)] bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-black text-slate-800">{toDisplayText(selectedPlot.Ten || selectedPlot.Ma_lo_2026 || selectedPlot.Ma_lo)}</div>
+                    <div className="text-xs text-slate-500 font-mono">{toDisplayText(selectedPlot.ma_lo_full || selectedPlot.Ma_lo_2026 || selectedPlot.Ma_lo)}</div>
+                  </div>
+                  <button onClick={() => setSelectedPlot(null)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="p-3 space-y-2 text-sm max-h-[70vh] overflow-y-auto">
+                  {[
+                    { label: "Đội", value: `Đội ${toDisplayText(selectedPlot.Doi_2026)}`, icon: Users },
+                    { label: "Đội nhỏ", value: toDisplayText(selectedPlot.Doi_nho), icon: Layers3 },
+                    { label: "Nông trường", value: toDisplayText(selectedPlot.Nong_truong), icon: Building2 },
+                    { label: "Giống", value: toDisplayText(selectedPlot.Giong), icon: Sprout },
+                    { label: "Diện tích", value: `${toDisplayNumber(selectedPlot.Dtich2026_ha, 2)} ha`, icon: Ruler },
+                    { label: "Năm trồng", value: toDisplayText(selectedPlot.Nam_trong), icon: CalendarDays },
+                    { label: "Năm mở cạo", value: toDisplayText(selectedPlot.Nam_mo_cao), icon: CalendarDays },
+                    { label: "Tuổi cạo", value: selectedPlot.Tuoi_cao ? `${toDisplayText(selectedPlot.Tuoi_cao)} năm` : "—", icon: Route },
+                    { label: "Tổng cây KK", value: toDisplayNumber(selectedPlot.Tong_so_cay_KK), icon: Trees },
+                    { label: "Mặt cạo", value: toDisplayText(selectedPlot.Mat_cao_2026), icon: FileText },
+                    { label: "Chế độ cạo", value: toDisplayText(selectedPlot.CD_cao_2026), icon: Package },
+                    { label: "Hạng đất", value: toDisplayText(selectedPlot.Hang_dat), icon: Map },
+                    { label: "Khoảng cách", value: toDisplayText(selectedPlot.Khoang_cach_m), icon: Ruler },
+                    { label: "Cao trình", value: (selectedPlot.Cao_trinh_min_m || selectedPlot.Cao_trinh_max_m) ? `${toDisplayText(selectedPlot.Cao_trinh_min_m)}-${toDisplayText(selectedPlot.Cao_trinh_max_m)} m` : "—", icon: Mountain },
+                    { label: "Tọa độ", value: (selectedPlot.ToadoY || selectedPlot.ToadoX) ? `${toDisplayText(selectedPlot.ToadoY)}, ${toDisplayText(selectedPlot.ToadoX)}` : "—", icon: MapPin },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl bg-slate-50 px-3 py-2 flex items-start gap-3">
+                      <div className="mt-0.5 rounded-lg bg-white p-2 text-slate-500 shadow-sm">
+                        <item.icon size={15} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.label}</div>
+                        <div className="font-semibold text-slate-700">{item.value}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Map legend */}
             {geoData && geoData.features.length > 0 && (

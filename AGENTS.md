@@ -21,3 +21,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Khi ngăn đang là `Đang sản xuất` và tỷ lệ nằm trong khoảng `100%` đến `110%`, admin có thể chuyển tay sang `Đã sản xuất`.
 - Chỉ khi admin chuyển tay ngăn từ `Đã sản xuất` về `Đang sản xuất` thì ngăn mới xuất hiện lại trong danh sách chọn của phiếu thành phẩm.
 - Cảnh báo “nhảy lô” cho các dải giữ code hợp lệ như `347CS/26` đến `351CS/26` vẫn chưa được xử lý dứt điểm.
+
+## Quy ước EUDR hiện tại
+
+- Luồng upload file EUDR phải giữ fix `sanitize` cho path/tên file. Ký tự có dấu, khoảng trắng hoặc ký tự đặc biệt không được đẩy nguyên trạng lên storage key.
+- Route fallback server upload ở `src/app/api/eudr/upload/route.ts` vẫn được giữ để dự phòng khi policy bucket `eudr-files` lệch giữa các môi trường.
+- Panel debug file đính kèm trong `src/app/dashboard/eudr/EudrClient.tsx` không hiển thị mặc định. Chỉ bật khi có cờ `NEXT_PUBLIC_EUDR_DEBUG=1`.
+- Dữ liệu lô vườn trên màn EUDR phải ưu tiên `forest_plots` cho geometry và metadata đã seed trong DB, nhưng vẫn cần ghép thêm thuộc tính từ GeoJSON chuẩn `Lo cao su - 2026_Full.geojson` theo mã `Ten` để không mất các field như giống, năm trồng, năm mở cạo, đội nhỏ, tổng cây KK, mặt cạo, tọa độ.
+- Popup và thẻ chi tiết lô trên map EUDR phải dùng bộ field đã merge nói trên để hiển thị gần tương đương module `ban_do_lo`.
+- Không render thẻ overlay HTML thường bên trong cây con của `MapContainer`. Các panel như legend, chi tiết lô, trạng thái tải phải nằm ngoài `MapContainer` để tránh lỗi runtime kiểu Leaflet `appendChild`.
+- Các callback truyền vào `GeoJSON` như `style` và `onEachFeature` nên giữ ổn định bằng `useCallback` nếu state UI bên ngoài map có thể thay đổi khi click/chọn lô.
