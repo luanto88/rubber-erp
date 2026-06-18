@@ -50,8 +50,7 @@ if (typeof globalThis.DOMMatrix === "undefined") {
 // Preload pdf.worker vào globalThis để Vercel nft trace file vào Lambda bundle.
 // pdfjs v5 PDFWorker._setupFakeWorkerGlobal kiểm tra globalThis.pdfjsWorker?.WorkerMessageHandler
 // TRƯỚC khi gọi dynamic import — nếu đã có thì bỏ qua dynamic import hoàn toàn.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-;(globalThis as Record<string, unknown>).pdfjsWorker = require("pdfjs-dist/legacy/build/pdf.worker.mjs")
+let pdfjsWorkerPreloadPromise: Promise<unknown> | null = null
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -620,6 +619,13 @@ function getMismatchPatterns(chonQuyTrinh: string | null) {
 }
 
 async function loadPdfjs() {
+  if (!(globalThis as Record<string, unknown>).pdfjsWorker) {
+    pdfjsWorkerPreloadPromise ||= import("pdfjs-dist/legacy/build/pdf.worker.mjs").then((workerModule) => {
+      ;(globalThis as Record<string, unknown>).pdfjsWorker = workerModule
+      return workerModule
+    })
+    await pdfjsWorkerPreloadPromise
+  }
   return await import("pdfjs-dist/legacy/build/pdf.mjs")
 }
 

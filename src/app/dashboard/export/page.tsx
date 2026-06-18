@@ -1,5 +1,6 @@
 ﻿"use client";
 import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getActiveFactoryId } from "@/lib/auth";
@@ -1523,20 +1524,21 @@ export default function ExportPage() {
                         {order.so_hop_dong || "-"}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                              {allowApprove && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void handleApproveOrder(order);
-                                  }}
-                                  className="p-1.5 rounded-lg transition-colors hover:bg-emerald-50 text-emerald-600"
-                                  title="Phê duyệt"
-                                >
-                                  <Check size={14} />
-                                </button>
-                              )}
-                              {allowEdit && (
+                        <div className="flex items-center justify-end gap-2">
+                          {allowApprove && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleApproveOrder(order);
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 hover:border-emerald-300"
+                              title="Phê duyệt đơn"
+                            >
+                              <Check size={13} />
+                              <span>Duyệt</span>
+                            </button>
+                          )}
+                          {allowEdit && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1547,8 +1549,8 @@ export default function ExportPage() {
                           >
                             <Edit2 size={14} />
                           </button>
-                              )}
-                              {allowDelete && (
+                          )}
+                          {allowDelete && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1559,7 +1561,7 @@ export default function ExportPage() {
                           >
                             <Trash2 size={14} />
                           </button>
-                              )}
+                          )}
                           {expandedId === order.id ? (
                             <ChevronUp size={16} className="text-slate-400" />
                           ) : (
@@ -1694,9 +1696,12 @@ export default function ExportPage() {
                                             title="Xem ảnh lớn"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
-                                            <img
+                                            <Image
                                               src={v.image_url_1}
                                               alt="Biển số"
+                                              width={64}
+                                              height={64}
+                                              unoptimized
                                               className="w-full h-full object-cover"
                                             />
                                           </a>
@@ -1709,9 +1714,12 @@ export default function ExportPage() {
                                             title="Xem ảnh lớn"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
-                                            <img
+                                            <Image
                                               src={v.image_url_2}
                                               alt="Niêm phong"
+                                              width={64}
+                                              height={64}
+                                              unoptimized
                                               className="w-full h-full object-cover"
                                             />
                                           </a>
@@ -1724,9 +1732,12 @@ export default function ExportPage() {
                                             title="Xem ảnh lớn"
                                             className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
                                           >
-                                            <img
+                                            <Image
                                               src={v.image_url_3}
                                               alt="Chứng từ"
+                                              width={64}
+                                              height={64}
+                                              unoptimized
                                               className="w-full h-full object-cover"
                                             />
                                           </a>

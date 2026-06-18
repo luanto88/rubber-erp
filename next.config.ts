@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  serverExternalPackages: ["pdfjs-dist"],
   outputFileTracingIncludes: {
     "/api/sign/generate-pdf": [
       "./node_modules/pdfjs-dist/cmaps/**/*",

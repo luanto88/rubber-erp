@@ -40,6 +40,7 @@ import {
 } from "@/lib/storage-status"
 import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
+import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
@@ -138,6 +139,41 @@ const mergeTripsByUid = (...tripGroups: TripItem[][]): TripItem[] => {
     a.so_xe.localeCompare(b.so_xe, "vi", { numeric: true, sensitivity: "base" }) ||
     a.chuyen - b.chuyen,
   )
+}
+
+type DispatchEntryRowLite = {
+  uid?: string
+  row_id?: string
+  _date?: string
+  day_chuyen?: string
+  kl_ct?: string | number
+  kl_ck?: string | number
+  kl_dct?: string | number
+  kl_dck?: string | number
+  kl_dkt?: string | number
+  kl_dkk?: string | number
+  kl_dt?: string | number
+  kl_dk?: string | number
+  kl_mn?: string | number
+  kl_mnk?: string | number
+}
+
+const hasPositiveWeight = (value: unknown) => Number(value || 0) > 0
+
+const rowMatchesDayChuyen = (row: DispatchEntryRowLite, dayChuyen: "Mủ tạp" | "Mủ nước") => {
+  const normalizedDayChuyen = String(row.day_chuyen || "").trim()
+  if (dayChuyen === "Mủ nước") {
+    return normalizedDayChuyen === "Mủ nước" || hasPositiveWeight(row.kl_mn) || hasPositiveWeight(row.kl_mnk)
+  }
+  return normalizedDayChuyen === "Mủ tạp" ||
+    hasPositiveWeight(row.kl_ct) ||
+    hasPositiveWeight(row.kl_ck) ||
+    hasPositiveWeight(row.kl_dct) ||
+    hasPositiveWeight(row.kl_dck) ||
+    hasPositiveWeight(row.kl_dkt) ||
+    hasPositiveWeight(row.kl_dkk) ||
+    hasPositiveWeight(row.kl_dt) ||
+    hasPositiveWeight(row.kl_dk)
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -245,6 +281,15 @@ export default function StoragePage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
     const assignedUIDs = new Set(allNgans.flatMap(n => n.trips || []))
+    const coveredRanges = allNgans
+      .filter((ngan) => loaiNLByDC(dayChuyen, factoryCode).includes(ngan.loai_nl))
+      .map((ngan) => {
+        const from = normalizeDateInput(ngan.ngay_bd)
+        const to = normalizeDateInput(ngan.ngay_kt || ngan.ngay_bd)
+        if (!from || !to) return null
+        return { from, to }
+      })
+      .filter((range): range is { from: string; to: string } => Boolean(range))
 
     const data = await loadDispatchEntriesWithResolvedRows(supabase, {
       factoryId: fid,
@@ -253,8 +298,12 @@ export default function StoragePage() {
     })
     const byDate: Record<string, number> = {}
     for (const entry of data) {
-      const dateKey = toISODate(entry.ngay)
-      for (const row of ((entry.rows || []) as Array<{ uid: string; row_id?: string }>)) {
+      for (const row of ((entry.rows || []) as DispatchEntryRowLite[])) {
+        if (!rowMatchesDayChuyen(row, dayChuyen)) continue
+        const dateKey = toISODate(row._date || entry.ngay)
+        if (!dateKey) continue
+        const isCoveredByDateRange = coveredRanges.some((range) => isDateInRange(dateKey, range.from, range.to))
+        if (isCoveredByDateRange) continue
         const tripRef = buildDispatchTripRef({
           dispatchEntryId: entry.id,
           rowId: row.row_id || row.uid,
@@ -267,7 +316,7 @@ export default function StoragePage() {
     }
     const total = Object.values(byDate).reduce((s, v) => s + v, 0)
     setUnassignedSummary({ total, byDate })
-  }, [])
+  }, [dayChuyen, factoryCode])
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -309,11 +358,7 @@ export default function StoragePage() {
           ),
         )
       }
-      setNgans(
-        filterTT
-          ? resolvedWithStatus.filter((ngan) => ngan.trang_thai === filterTT)
-          : resolvedWithStatus,
-      )
+      setNgans(resolvedWithStatus)
       const ls: Record<string, number> = {}
       for (const l of lotsData || []) {
         if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
@@ -323,7 +368,7 @@ export default function StoragePage() {
     } finally {
       setLoading(false)
     }
-  }, [filterTT, loadUnassigned, todayMs])
+  }, [loadUnassigned, todayMs])
 
   // Bootstrap chỉ chạy 1 lần khi mount để lấy factory ID
   useEffect(() => {
@@ -475,14 +520,22 @@ export default function StoragePage() {
 
   // ── Filter cards ──────────────────────────────────────────────────────────
   const dcLoaiNL = loaiNLByDC(dayChuyen, factoryCode)
+  const normalizedReportFrom = normalizeDateInput(reportFrom)
+  const normalizedReportTo = normalizeDateInput(reportTo)
   const filtered = ngans.filter(n => {
     if (!dcLoaiNL.includes(n.loai_nl)) return false
     if (filterTT && n.trang_thai !== filterTT) return false
+    if (reportLoaiNL && n.loai_nl !== reportLoaiNL) return false
     if (!matchesNoteFilter(n.ghi_chu, filterGhiChu)) return false
     if (search &&
       !n.ten_ngan?.toLowerCase().includes(search.toLowerCase()) &&
       !n.ma_ngan?.toLowerCase().includes(search.toLowerCase())
     ) return false
+    const nganFrom = normalizeDateInput(n.ngay_bd)
+    const nganTo = normalizeDateInput(n.ngay_kt || n.ngay_bd)
+    if ((normalizedReportFrom || normalizedReportTo) && (!nganFrom || !nganTo)) return false
+    if (normalizedReportFrom && nganFrom < normalizedReportFrom) return false
+    if (normalizedReportTo && nganTo > normalizedReportTo) return false
     return true
   })
 
@@ -926,8 +979,15 @@ export default function StoragePage() {
               <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
               {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
             </select>
-            {(search || filterTT || filterGhiChu) && (
-              <button onClick={() => { setSearch(""); setFilterTT(""); setFilterGhiChu("") }}
+            {(search || filterTT || filterGhiChu || reportFrom || reportTo || reportLoaiNL) && (
+              <button onClick={() => {
+                setSearch("")
+                setFilterTT("")
+                setFilterGhiChu("")
+                setReportFrom("")
+                setReportTo("")
+                setReportLoaiNL("")
+              }}
                 className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
                 <X size={14} /> Xóa lọc
               </button>
