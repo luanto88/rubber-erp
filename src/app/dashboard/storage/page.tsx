@@ -1,9 +1,9 @@
-﻿"use client"
+"use client"
 import Link from "next/link"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
@@ -20,6 +20,7 @@ import {
   loadStorageDetail,
   loadStorageGeoJson,
   loadStorageLots,
+  loadStorageLotsByNgans,
   resolveStorageNgansActualTotals,
   summarizeStorageLots,
   toISODate,
@@ -179,6 +180,8 @@ const rowMatchesDayChuyen = (row: DispatchEntryRowLite, dayChuyen: "Mủ tạp" 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function StoragePage() {
   const revealRef = useScrollReveal()
+  const loadDataRequestRef = useRef(0)
+  const storageDebugEnabled = process.env.NEXT_PUBLIC_STORAGE_DEBUG === "1"
 
   // data
   const [ngans, setNgans]               = useState<Ngan[]>([])
@@ -212,8 +215,13 @@ export default function StoragePage() {
   const [viewLotsLoading, setViewLotsLoading] = useState(false)
   const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
+  const [collapsedCardIds, setCollapsedCardIds] = useState<Set<string>>(new Set())
   const [todayMs] = useState(() => Date.now())
   const isAdmin = currentUser?.role === "admin"
+  const canViewStorage = hasPermission(currentUser, "storage.view")
+  const canCreateStorage = hasPermission(currentUser, "storage.create")
+  const canEditStorage = hasPermission(currentUser, "storage.create") || hasPermission(currentUser, "storage.edit")
+  const canDeleteStorage = hasPermission(currentUser, "storage.delete")
 
   // unassigned summary
   const [unassignedSummary, setUnassignedSummary] = useState<{ total: number; byDate: Record<string, number> }>({ total: 0, byDate: {} })
@@ -320,14 +328,15 @@ export default function StoragePage() {
   }, [dayChuyen, factoryCode])
 
   const loadData = useCallback(async (fid: string) => {
+    const requestId = loadDataRequestRef.current + 1
+    loadDataRequestRef.current = requestId
     setLoading(true)
     try {
       const q = supabase.from("ngans").select("*")
         .eq("factory_id", fid)
         .order("ten_ngan", { ascending: true })
-      const [{ data }, { data: lotsData }] = await Promise.all([
+      const [{ data }] = await Promise.all([
         q,
-        supabase.from("lots").select("ngan_id,tong_kg").eq("factory_id", fid).not("ngan_id", "is", null)
       ])
       const loaded = ((data || []) as Ngan[]).map((ngan) => ({
         ...ngan,
@@ -356,20 +365,45 @@ export default function StoragePage() {
               .update({ trang_thai: update.trang_thai })
               .eq("factory_id", fid)
               .eq("id", update.id),
-          ),
+            ),
         )
       }
+      if (requestId !== loadDataRequestRef.current) return
       setNgans(resolvedWithStatus)
+      const lotsByNgan = await loadStorageLotsByNgans(
+        fid,
+        resolvedWithStatus.map((ngan) => ngan.id),
+      )
       const ls: Record<string, number> = {}
-      for (const l of lotsData || []) {
-        if (l.ngan_id) ls[l.ngan_id] = (ls[l.ngan_id] || 0) + (l.tong_kg || 0)
+      Object.entries(lotsByNgan).forEach(([nganId, lots]) => {
+        ls[nganId] = summarizeStorageLots(lots).thanhPhamKg
+      })
+      if (storageDebugEnabled) {
+        console.debug("[storage] loadData lot stats", {
+          requestId,
+          factoryId: fid,
+          nganIds: resolvedWithStatus.map((ngan) => ngan.id),
+          lotsByNganKeys: Object.keys(lotsByNgan),
+          lotsByNganCounts: Object.fromEntries(
+            Object.entries(lotsByNgan).map(([nganId, lots]) => [nganId, lots.length]),
+          ),
+          lotStats: ls,
+        })
       }
+      if (requestId !== loadDataRequestRef.current) return
       setLotStats(ls)
-      loadUnassigned(fid, resolvedWithStatus)
+      void loadUnassigned(fid, resolvedWithStatus)
+    } catch (error) {
+      if (requestId === loadDataRequestRef.current) {
+        setLotStats({})
+      }
+      console.error("[storage] loadData failed", error)
     } finally {
-      setLoading(false)
+      if (requestId === loadDataRequestRef.current) {
+        setLoading(false)
+      }
     }
-  }, [loadUnassigned, todayMs])
+  }, [loadUnassigned, storageDebugEnabled, todayMs])
 
   // Bootstrap chỉ chạy 1 lần khi mount để lấy factory ID
   useEffect(() => {
@@ -411,6 +445,14 @@ export default function StoragePage() {
     }
     void run()
   }, [factoryId])
+
+  useEffect(() => {
+    if (!storageDebugEnabled) return
+    console.debug("[storage] lotStats state", {
+      keys: Object.keys(lotStats),
+      lotStats,
+    })
+  }, [lotStats, storageDebugEnabled])
 
   useEffect(() => {
     const candidates = ngans
@@ -595,6 +637,14 @@ export default function StoragePage() {
     setSaving(true)
     setSaveError(null)
     try {
+      if (editId && !canEditStorage) {
+        setSaveError(`Bạn không có quyền sửa ${subTerm.toLowerCase()}.`)
+        return
+      }
+      if (!editId && !canCreateStorage) {
+        setSaveError(`Bạn không có quyền tạo ${subTerm.toLowerCase()}.`)
+        return
+      }
       const normalizedPosition = (form.ten_ngan || "").trim().toUpperCase()
       if (!normalizedPosition) {
         setSaveError(`Vị trí ${subTerm.toLowerCase()} không được để trống`)
@@ -655,12 +705,20 @@ export default function StoragePage() {
 
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    if (!canDeleteStorage) {
+      setSaveError("Bạn không có quyền xóa ngăn.")
+      return
+    }
     await supabase.from("ngans").delete().eq("id", id)
     setDelConfirm(null)
     loadData(factoryId)
   }
 
   const openAdd = () => {
+    if (!canCreateStorage) {
+      setSaveError(`Bạn không có quyền tạo ${subTerm.toLowerCase()}.`)
+      return
+    }
     const loaiNL = dayChuyen === "Mủ nước" ? "Mủ nước" : "Mủ đông chén"
     const f = emptyForm(loaiNL)
     setForm({ ...f, ma_ngan: genMaNgan(f) })
@@ -672,6 +730,22 @@ export default function StoragePage() {
   }
 
   const openEdit = (n: Ngan) => {
+    const normalizedStatus = normalizeStorageStatus(n.trang_thai)
+    const canEditThisStatus =
+      normalizedStatus === STORAGE_STATUS_RECEIVING ||
+      normalizedStatus === STORAGE_STATUS_CLOSED ||
+      normalizedStatus === STORAGE_STATUS_WAITING
+
+    if (!canEditStorage) {
+      setSaveError(`Bạn không có quyền sửa ${subTerm.toLowerCase()}.`)
+      return
+    }
+
+    if (!canEditThisStatus) {
+      setSaveError(`${subTerm[0].toUpperCase()}${subTerm.slice(1)} đang ở trạng thái ${n.trang_thai}, không được sửa.`)
+      return
+    }
+
     const f = {
       ma_ngan: n.ma_ngan || "", ten_ngan: n.ten_ngan || "",
       loai_nl: n.loai_nl || "Mủ đông chén", nguon_goc: n.nguon_goc || "NT",
@@ -790,19 +864,7 @@ export default function StoragePage() {
       const nganIds = matchedNgans.map((ngan) => ngan.id)
       let lotMap: Record<string, ProducedLot[]> = {}
       if (nganIds.length > 0) {
-        const { data, error } = await supabase
-          .from("lots")
-          .select("id,ngan_id,ma_lo,ngay_sx,ca,loai_csr,loai_banh,boc,tong_banh,tong_kg,trang_thai")
-          .eq("factory_id", factoryId)
-          .in("ngan_id", nganIds)
-          .order("ngay_sx", { ascending: true })
-        if (error) throw new Error(error.message)
-        lotMap = ((data || []) as (ProducedLot & { ngan_id: string })[]).reduce<Record<string, ProducedLot[]>>((acc, lot) => {
-          const nganId = lot.ngan_id
-          if (!acc[nganId]) acc[nganId] = []
-          acc[nganId].push(lot)
-          return acc
-        }, {})
+        lotMap = await loadStorageLotsByNgans(factoryId, nganIds)
       }
 
       const rows = matchedNgans
@@ -888,13 +950,25 @@ export default function StoragePage() {
     })
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const toggleCardCollapsed = (nganId: string) => {
+    setCollapsedCardIds(prev => {
+      const next = new Set(prev)
+      if (next.has(nganId)) {
+        next.delete(nganId)
+      } else {
+        next.add(nganId)
+      }
+      return next
+    })
+  }
+
+  // ? Render ????
   return (
     <div>
-      {/* Dây chuyền selector */}
+      {/* Dây chuyến selector */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
         <label className="text-xs font-bold text-slate-600 block mb-1.5">
-          Dây chuyền <span className="text-red-500">*</span>
+          Dây chuyến <span className="text-red-500">*</span>
         </label>
         <div className="flex gap-3">
           {(["Mủ tạp", "Mủ nước"] as const).map(dc => (
@@ -941,10 +1015,12 @@ export default function StoragePage() {
             Quản lý {dayChuyen === "Mủ tạp" ? "ngăn lưu" : "hồ chứa"} mủ cao su
           </p>
         </div>
-        <button onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
-          <Plus size={16} /> Thêm {subTerm.toLowerCase()}
-        </button>
+        {canCreateStorage && (
+          <button onClick={openAdd}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
+            <Plus size={16} /> Thêm {subTerm.toLowerCase()}
+          </button>
+        )}
       </div>
 
       {/* Scrollable content */}
@@ -1051,7 +1127,7 @@ export default function StoragePage() {
             <p>Không có {subTerm.toLowerCase()} nào</p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="columns-1 gap-4 lg:columns-2 2xl:columns-3">
             {filtered.map(n => {
               const days  = curingDays(n.ngay_bd)
               const ready = days !== null && days >= 21
@@ -1075,9 +1151,19 @@ export default function StoragePage() {
                     : null
               const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
               const lookupUrl = typeof window !== "undefined" ? `${window.location.origin}${lookupPath}` : lookupPath
+              const isCollapsed = collapsedCardIds.has(n.id)
+              const normalizedStatus = normalizeStorageStatus(n.trang_thai)
+              const canEditThisNgan =
+                canEditStorage && (
+                  normalizedStatus === STORAGE_STATUS_RECEIVING ||
+                  normalizedStatus === STORAGE_STATUS_CLOSED ||
+                  normalizedStatus === STORAGE_STATUS_WAITING
+                )
+              const canDeleteThisNgan = canDeleteStorage
+              const canViewThisNgan = canViewStorage
 
               return (
-                <div key={n.id} className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden hover-lift">
+                <div key={n.id} className="mb-4 break-inside-avoid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md hover-lift">
                   {/* Card header */}
                   <div className={`bg-gradient-to-r ${hs.grad} px-4 py-3 border-b border-slate-200 flex items-center justify-between`}>
                     <div className="flex items-center gap-2 min-w-0">
@@ -1117,45 +1203,69 @@ export default function StoragePage() {
                                 : "Về đang SX"}
                         </button>
                       )}
-                      <Link
-                        href={lookupPath}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
-                        title="QR / Tra cứu"
-                      >
-                        <QrCode size={14} />
-                      </Link>
+                      {canViewThisNgan && (
+                        <Link
+                          href={lookupPath}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
+                          title="QR / Tra cứu"
+                        >
+                          <QrCode size={14} />
+                        </Link>
+                      )}
+                      {canViewThisNgan && (
+                        <button
+                          onClick={() => void handleExportDetailPdf(n.id)}
+                          disabled={exportingDetailId === n.id}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
+                          title="Xuất PDF"
+                        >
+                          <FileText size={14} />
+                        </button>
+                      )}
+                      {canViewThisNgan && (
+                        <button
+                          onClick={() => void handleExportGeoJson(n)}
+                          disabled={exportingGeoId === n.id}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
+                          title="Xuất GeoJSON"
+                        >
+                          <MapIcon size={14} />
+                        </button>
+                      )}
+                      {canViewThisNgan && (
+                        <button onClick={() => openView(n)}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
+                          title="Xem chi tiết">
+                          <Eye size={14} />
+                        </button>
+                      )}
+                      {canEditThisNgan && (
+                        <button onClick={() => openEdit(n)}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors"
+                          title="Sửa">
+                          <Edit2 size={14} />
+                        </button>
+                      )}
+                      {canDeleteThisNgan && (
+                        <button onClick={() => setDelConfirm(n.id)}
+                          className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors"
+                          title="Xóa">
+                          <X size={14} />
+                        </button>
+                      )}
                       <button
-                        onClick={() => void handleExportDetailPdf(n.id)}
-                        disabled={exportingDetailId === n.id}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
-                        title="Xuất PDF"
+                        type="button"
+                        onClick={() => toggleCardCollapsed(n.id)}
+                        className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
+                        title={isCollapsed ? "Mở rộng" : "Thu gọn"}
                       >
-                        <FileText size={14} />
-                      </button>
-                      <button
-                        onClick={() => void handleExportGeoJson(n)}
-                        disabled={exportingGeoId === n.id}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
-                        title="Xuất GeoJSON"
-                      >
-                        <MapIcon size={14} />
-                      </button>
-                      <button onClick={() => openView(n)}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors">
-                        <Eye size={14} />
-                      </button>
-                      <button onClick={() => openEdit(n)}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors">
-                        <Edit2 size={14} />
-                      </button>
-                      <button onClick={() => setDelConfirm(n.id)}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors">
                         <X size={14} />
                       </button>
                     </div>
                   </div>
 
                   {/* Card body */}
+                  {!isCollapsed && (
                   <div className="p-4 space-y-0">
                     <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
                       <Tag size={14} className="text-slate-400 shrink-0 mt-0.5" />
@@ -1246,6 +1356,7 @@ export default function StoragePage() {
                       </div>
                     </div>
                   </div>
+                  )}
                 </div>
               )
             })}
@@ -1516,7 +1627,7 @@ export default function StoragePage() {
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
               <button onClick={() => setModal(null)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hủy
+                Hồy
               </button>
               <button onClick={handleSave} disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
@@ -1707,7 +1818,7 @@ export default function StoragePage() {
             <div className="flex gap-3">
               <button onClick={() => setDelConfirm(null)}
                 className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hủy
+                Hồy
               </button>
               <button onClick={() => handleDelete(delConfirm)}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">
@@ -1720,3 +1831,4 @@ export default function StoragePage() {
     </div>
   )
 }
+

@@ -1,8 +1,14 @@
 "use client"
+/* eslint-disable @next/next/no-img-element */
 
 import { useRef, useState } from "react"
 import { ImagePlus, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+
+type UploadedImagePayload = {
+  publicUrl: string
+  fileName: string
+}
 
 type InventoryImageUploadProps = {
   factoryId: string | null
@@ -11,6 +17,19 @@ type InventoryImageUploadProps = {
   value: string
   onChange: (url: string) => void
   bucket?: string
+  helperText?: string
+  onUploadComplete?: (payload: UploadedImagePayload) => void
+}
+
+type InventoryImageUploadGroupProps = {
+  factoryId: string | null
+  documentType: string
+  label: string
+  values: [string, string]
+  onChange: (urls: [string, string]) => void
+  bucket?: string
+  helperText?: string
+  onUploadComplete?: (payloads: Array<UploadedImagePayload & { slot: 1 | 2 }>) => void
 }
 
 function sanitizeFilename(name: string) {
@@ -64,6 +83,31 @@ async function uploadViaServer(params: {
   return payload.publicUrl
 }
 
+export async function uploadInventoryImage(params: {
+  bucket?: string
+  documentType: string
+  factoryId: string
+  file: File
+}) {
+  const bucket = params.bucket || "inventory-files"
+  const path = `${params.factoryId}/${params.documentType}/${Date.now()}_${sanitizeFilename(params.file.name)}`
+  const uploadResult = await supabase.storage.from(bucket).upload(path, params.file, { upsert: true })
+
+  if (uploadResult.error) {
+    if (!isStorageConfigError(uploadResult.error)) throw uploadResult.error
+    const publicUrl = await uploadViaServer({
+      bucket,
+      documentType: params.documentType,
+      factoryId: params.factoryId,
+      file: params.file,
+    })
+    return { publicUrl }
+  }
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(uploadResult.data.path)
+  return { publicUrl: data.publicUrl }
+}
+
 export function InventoryImageUpload({
   factoryId,
   documentType,
@@ -71,6 +115,8 @@ export function InventoryImageUpload({
   value,
   onChange,
   bucket = "inventory-files",
+  helperText,
+  onUploadComplete,
 }: InventoryImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -93,20 +139,10 @@ export function InventoryImageUpload({
     setUploading(true)
     setError(null)
 
-    const path = `${factoryId}/${documentType}/${Date.now()}_${sanitizeFilename(file.name)}`
-
     try {
-      const uploadResult = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
-
-      if (uploadResult.error) {
-        if (!isStorageConfigError(uploadResult.error)) throw uploadResult.error
-        const publicUrl = await uploadViaServer({ bucket, documentType, factoryId, file })
-        onChange(publicUrl)
-        return
-      }
-
-      const { data } = supabase.storage.from(bucket).getPublicUrl(uploadResult.data.path)
-      onChange(data.publicUrl)
+      const { publicUrl } = await uploadInventoryImage({ bucket, documentType, factoryId, file })
+      onChange(publicUrl)
+      onUploadComplete?.({ publicUrl, fileName: file.name })
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Khong tai duoc anh.")
     } finally {
@@ -140,6 +176,7 @@ export function InventoryImageUpload({
         ) : null}
       </div>
       {error ? <div className="mt-1 text-xs text-red-600">{error}</div> : null}
+      {helperText ? <div className="mt-1 text-[11px] text-slate-400">{helperText}</div> : null}
       <input
         ref={inputRef}
         type="file"
@@ -150,3 +187,144 @@ export function InventoryImageUpload({
     </div>
   )
 }
+
+export function InventoryImageUploadGroup({
+  factoryId,
+  documentType,
+  label,
+  values,
+  onChange,
+  bucket = "inventory-files",
+  helperText,
+  onUploadComplete,
+}: InventoryImageUploadGroupProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const normalizedValues: [string, string] = [values[0] || "", values[1] || ""]
+  const filledCount = normalizedValues.filter(Boolean).length
+
+  const handlePick = () => {
+    inputRef.current?.click()
+  }
+
+  const handleRemove = (slot: 0 | 1) => {
+    const next = [...normalizedValues] as [string, string]
+    next[slot] = ""
+    onChange(next)
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ""
+    if (files.length === 0) return
+
+    if (!factoryId) {
+      setError("Chua xac dinh duoc nha may de tai anh.")
+      return
+    }
+
+    const emptySlots = normalizedValues
+      .map((value, index) => (value ? null : index))
+      .filter((value): value is 0 | 1 => value !== null)
+
+    if (emptySlots.length === 0) {
+      setError("Da du 2 anh. Vui long xoa bot anh cu de tai anh moi.")
+      return
+    }
+
+    if (files.length > emptySlots.length) {
+      setError(`Chi con the tai them ${emptySlots.length} anh.`)
+      return
+    }
+
+    setUploading(true)
+    setError(null)
+
+    try {
+      const uploads = await Promise.all(
+        files.map((file) =>
+          uploadInventoryImage({
+            bucket,
+            documentType,
+            factoryId,
+            file,
+          }).then(({ publicUrl }) => ({ publicUrl, fileName: file.name })),
+        ),
+      )
+
+      const next = [...normalizedValues] as [string, string]
+      const payloads: Array<UploadedImagePayload & { slot: 1 | 2 }> = []
+
+      uploads.forEach((upload, index) => {
+        const slot = emptySlots[index]
+        next[slot] = upload.publicUrl
+        payloads.push({
+          ...upload,
+          slot: (slot + 1) as 1 | 2,
+        })
+      })
+
+      onChange(next)
+      onUploadComplete?.(payloads)
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Khong tai duoc anh.")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-bold text-slate-600">{label}</label>
+      <div className="flex flex-wrap items-start gap-2">
+        {normalizedValues.map((value, index) =>
+          value ? (
+            <div
+              key={`${index}-${value}`}
+              className="group relative h-14 w-14 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm"
+            >
+              <img
+                src={value}
+                alt={`Anh phieu ${index + 1}`}
+                className="h-full w-full object-cover"
+              />
+              <button
+                type="button"
+                onClick={() => handleRemove(index as 0 | 1)}
+                className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm transition hover:bg-white"
+                aria-label={`Xoa anh ${index + 1}`}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ) : null,
+        )}
+
+        {filledCount < 2 ? (
+          <button
+            type="button"
+            onClick={handlePick}
+            disabled={uploading}
+            className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white text-slate-400 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+            title={uploading ? "Dang tai anh..." : "Chon toi da 2 anh"}
+          >
+            {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+          </button>
+        ) : null}
+      </div>
+      {error ? <div className="mt-1 text-xs text-red-600">{error}</div> : null}
+      {helperText ? <div className="mt-1 text-[11px] text-slate-400">{helperText}</div> : null}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
+    </div>
+  )
+}
+
+

@@ -51,6 +51,7 @@ export type StorageTripItem = {
 
 export type StorageProducedLot = {
   id: string
+  lot_id?: string
   ma_lo: string
   ngay_sx: string
   ca: string
@@ -544,14 +545,88 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
 
 export async function loadStorageLots(factoryId: string, nganId: string) {
   const { data, error } = await supabase
-    .from("lots")
-    .select("id,ma_lo,ngay_sx,ca,loai_csr,loai_banh,boc,tong_banh,tong_kg,trang_thai")
-    .eq("factory_id", factoryId)
+    .from("lot_transactions")
+    .select(`
+      id,
+      ngan_id,
+      ca,
+      ngay_nhap,
+      so_banh,
+      so_kg,
+      created_at,
+      lots!inner(
+        id,
+        ma_lo,
+        loai_csr,
+        loai_banh,
+        boc,
+        trang_thai
+      )
+    `)
     .eq("ngan_id", nganId)
-    .order("ngay_sx", { ascending: false })
-    .order("created_at", { ascending: false })
+    .eq("lots.factory_id", factoryId)
   if (error) throw new Error(error.message)
-  return (data || []) as StorageProducedLot[]
+
+  const rows = ((data || []) as unknown as Array<{
+    id: string
+    ngan_id: string
+    ca: string
+    ngay_nhap: string
+    so_banh: number
+    so_kg: number
+    created_at?: string | null
+    lots?: {
+      id: string
+      ma_lo: string
+      loai_csr: string
+      loai_banh: number
+      boc: string
+      trang_thai: string
+    } | null
+  }>)
+    .filter((tx) => Boolean(tx.lots))
+    .map((tx) => ({
+      id: tx.id,
+      lot_id: tx.lots?.id,
+      ma_lo: tx.lots?.ma_lo || "",
+      ngay_sx: tx.ngay_nhap,
+      ca: tx.ca,
+      loai_csr: tx.lots?.loai_csr || "",
+      loai_banh: Number(tx.lots?.loai_banh || 0),
+      boc: tx.lots?.boc || "",
+      tong_banh: Number(tx.so_banh || 0),
+      tong_kg: Number(tx.so_kg || 0),
+      trang_thai: tx.lots?.trang_thai || "",
+    }))
+
+  return rows.sort((a, b) =>
+    b.ngay_sx.localeCompare(a.ngay_sx) ||
+    a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }),
+  )
+}
+
+export async function loadStorageLotsByNgans(factoryId: string, nganIds: string[]) {
+  const uniqueNganIds = [...new Set(nganIds.filter(Boolean))]
+  if (!factoryId || uniqueNganIds.length === 0) return {} as Record<string, StorageProducedLot[]>
+  const grouped: Record<string, StorageProducedLot[]> = {}
+
+  const results = await Promise.allSettled(
+    uniqueNganIds.map(async (nganId) => ({
+      nganId,
+      lots: await loadStorageLots(factoryId, nganId),
+    })),
+  )
+
+  results.forEach((result) => {
+    if (result.status !== "fulfilled") {
+      console.error("[storage-detail] loadStorageLotsByNgans failed", result.reason)
+      return
+    }
+    if (result.value.lots.length === 0) return
+    grouped[result.value.nganId] = result.value.lots
+  })
+
+  return grouped
 }
 
 export async function loadStorageDetail(factoryId: string, nganId: string): Promise<StorageDetailData> {

@@ -28,6 +28,8 @@ type SaveLotTransactionInput = {
     ghi_chu?: string | null;
     image_url_1?: string | null;
     image_url_2?: string | null;
+    image_code_1?: string | null;
+    image_code_2?: string | null;
     trang_thai?: string | null;
   };
   transaction: {
@@ -191,6 +193,8 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
           ...(lot.chi_thi !== undefined ? { chi_thi: lot.chi_thi } : {}),
           ...(lot.image_url_1 !== undefined ? { image_url_1: lot.image_url_1 } : {}),
           ...(lot.image_url_2 !== undefined ? { image_url_2: lot.image_url_2 } : {}),
+          ...(lot.image_code_1 !== undefined ? { image_code_1: lot.image_code_1 } : {}),
+          ...(lot.image_code_2 !== undefined ? { image_code_2: lot.image_code_2 } : {}),
         })
         .select("id")
         .single();

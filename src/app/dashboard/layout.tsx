@@ -4,6 +4,7 @@ import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
+  Activity,
   BarChart3,
   Bell,
   ChevronDown,
@@ -96,6 +97,7 @@ const NAV: NavItem[] = [
       },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
       { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
+      { key: "/dashboard/process", label: "Kiểm soát quá trình", icon: Activity, permission: "process.view" },
     ],
   },
   {
