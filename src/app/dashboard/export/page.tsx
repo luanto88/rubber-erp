@@ -26,17 +26,19 @@ import {
   AlertTriangle,
   GripVertical,
   Printer,
+  ImagePlus,
 } from "lucide-react";
-import { InventoryImageUpload } from "@/app/dashboard/inventory/_components/inventory-image-upload";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Types -------------------------------------------------------------------
 type Vehicle = {
   id: string;
   loai_xe: string;
   bien_truoc: string;
   bien_sau: string;
   ghi_chu: string;
+  image_urls?: string[];
+  // backward-compat fields from old data
   image_url_1?: string;
   image_url_2?: string;
   image_url_3?: string;
@@ -137,7 +139,7 @@ type QcResult = {
   created_at?: string;
 };
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Constants ---------------------------------------------------------------
 const LOAI_XE_OPTS = [
   "Container 20ft",
   "Container 40ft",
@@ -179,9 +181,7 @@ const emptyVehicle = (): Vehicle => ({
   bien_truoc: "",
   bien_sau: "",
   ghi_chu: "",
-  image_url_1: "",
-  image_url_2: "",
-  image_url_3: "",
+  image_urls: [],
 });
 
 const emptyCustomerForm = () => ({
@@ -233,7 +233,7 @@ type MaintenanceStaffApproverRow = {
   chuc_vu_chinh_quyen: string | null;
 };
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Helpers -----------------------------------------------------------------
 function getLoaiBanhOptions(chung_loai: string): number[] {
   if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(chung_loai))
     return [35, 20];
@@ -313,7 +313,7 @@ function getOrderAssignedCount(order: { assignments?: Assignment[] }, lotId: str
     );
 }
 
-// â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Main --------------------------------------------------------------------
 export default function ExportPage() {
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<ExportOrder[]>([]);
@@ -333,7 +333,7 @@ export default function ExportPage() {
   );
   const csrOpts = useMemo(() => (isNMCP ? SVR_OPTS : CSR_OPTS), [isNMCP]);
 
-  // Pallet xuáº¥t: base list + custom options added at runtime
+  // Pallet xuất: base list + custom options added at runtime
   const [palletExtra, setPalletExtra] = useState<string[]>([]);
   const [newPalletInput, setNewPalletInput] = useState("");
   const palletOpts = useMemo(
@@ -360,6 +360,10 @@ export default function ExportPage() {
   // Drag state
   const [draggingLotId, setDraggingLotId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null); // vehicleIdx
+
+  // Vehicle image upload
+  const [uploadingVehicleIdx, setUploadingVehicleIdx] = useState<number | null>(null);
+  const [ocrConfirm, setOcrConfirm] = useState<{ plate: string; vehicleIdx: number } | null>(null);
 
   // Lot search
   const [lotSearch, setLotSearch] = useState("");
@@ -396,7 +400,7 @@ export default function ExportPage() {
     [editId, form],
   );
 
-  // â”€â”€ Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Load ------------------------------------------------------------------
   const loadData = useCallback(
     async (fid: string) => {
       setLoading(true);
@@ -454,7 +458,7 @@ export default function ExportPage() {
     setCustomers(data || []);
   }, []);
 
-  // Bootstrap: chá»‰ cháº¡y 1 láº§n Ä‘á»ƒ láº¥y factoryId, khĂ´ng cĂ³ loadXxx trong deps
+  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadXxx trong deps
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId();
@@ -548,7 +552,7 @@ export default function ExportPage() {
     window.history.replaceState({}, "", nextUrl);
   }, [searchParams]);
 
-  // Reload khi factoryId hoáº·c filter thay Ä‘á»•i
+  // Reload khi factoryId hoặc filter thay đổi
   useEffect(() => {
     if (!factoryId) return;
     void loadData(factoryId);
@@ -557,7 +561,7 @@ export default function ExportPage() {
     void loadCustomers(factoryId);
   }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers]);
 
-  // â”€â”€ Compute remaining per lot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Compute remaining per lot --------------------------------------------
   const lotById = useMemo(
     () => new Map(lotsRaw.map((lot) => [lot.id, lot] as const)),
     [lotsRaw],
@@ -645,7 +649,7 @@ export default function ExportPage() {
     return resolved;
   }, [lotsRaw, qcResults]);
 
-  // â”€â”€ Vehicle history suggestions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Vehicle history suggestions ------------------------------------------
   const vehicleSuggestions = useMemo(() => {
     const seen = new Set<string>();
     return orders
@@ -657,7 +661,7 @@ export default function ExportPage() {
       });
   }, [orders]);
 
-  // â”€â”€ Filter lots for picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Filter lots for picker -----------------------------------------------
   const availLots = useMemo(() => {
     let base = lotsExt.filter((l) => {
       if (l.loai_csr !== form.chung_loai) return false;
@@ -700,7 +704,7 @@ export default function ExportPage() {
     latestQcByLotId,
   ]);
 
-  // â”€â”€ Ma don auto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Ma don auto -----------------------------------------------------------
   useEffect(() => {
     if (editId) return; // don't recalculate in edit mode
     if (form.customer_id && form.so_thong_bao && form.ngay) {
@@ -746,7 +750,7 @@ export default function ExportPage() {
     orders,
   ]);
 
-  // â”€â”€ Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Stats -----------------------------------------------------------------
   const stats = {
     total: orders.length,
     tongBanh: orders.reduce((s, o) => s + (o.tong_banh || 0), 0),
@@ -770,7 +774,7 @@ export default function ExportPage() {
     [currentUser],
   );
 
-  // â”€â”€ Open Edit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Open Edit -------------------------------------------------------------
   const openEdit = (order: ExportOrder) => {
     if (!canEditOrder(order)) {
       showToast("Bạn không có quyền sửa đơn này.", "error");
@@ -790,7 +794,10 @@ export default function ExportPage() {
         order.loai_boc ||
         `Bọc nhãn 0,04 VRG ${order.chung_loai || (isNMCP ? "SVR10" : "CSR10")}`,
       vehicles: order.vehicles?.length
-        ? order.vehicles.map((v) => ({ ...v }))
+        ? order.vehicles.map((v) => ({
+            ...v,
+            image_urls: v.image_urls ?? [v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[],
+          }))
         : [emptyVehicle()],
       assignments: order.assignments?.length
         ? order.assignments.map((assignment) => {
@@ -812,7 +819,7 @@ export default function ExportPage() {
     setView("add");
   };
 
-  // â”€â”€ Assignment helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Assignment helpers ----------------------------------------------------
   const updateAssignment = (
     lot_id: string,
     vehicleIdx: number,
@@ -922,7 +929,7 @@ export default function ExportPage() {
     setPendingRetestAttach(null);
   }, [latestQcByLotId, lotsExt, pendingRetestAttach]);
 
-  // â”€â”€ Drag & Drop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Drag & Drop -----------------------------------------------------------
   const handleDragStart = (e: React.DragEvent, lotId: string) => {
     e.dataTransfer.setData("lot_id", lotId);
     setDraggingLotId(lotId);
@@ -1042,7 +1049,59 @@ export default function ExportPage() {
     [factoryId],
   );
 
-  // â”€â”€ Yeu cau chi tieu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Vehicle image upload --------------------------------------------------
+  const handleVehicleImageUpload = async (
+    vehicleIdx: number,
+    files: FileList | null,
+  ) => {
+    if (!files || !factoryId) return;
+    const vehicle = form.vehicles[vehicleIdx];
+    const currentUrls = vehicle.image_urls ?? [];
+    const remaining = 6 - currentUrls.length;
+    if (remaining <= 0) return;
+    const toUpload = Array.from(files).slice(0, remaining);
+    setUploadingVehicleIdx(vehicleIdx);
+    try {
+      const uploaded: string[] = [];
+      for (const file of toUpload) {
+        const ext = file.name.split(".").pop() ?? "jpg";
+        const path = `${factoryId}/vehicles/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        const { error } = await supabase.storage
+          .from("order-files")
+          .upload(path, file, { upsert: true });
+        if (error) continue;
+        const { data: urlData } = supabase.storage
+          .from("order-files")
+          .getPublicUrl(path);
+        uploaded.push(urlData.publicUrl);
+      }
+      if (uploaded.length > 0) {
+        setForm((p) => ({
+          ...p,
+          vehicles: p.vehicles.map((v, i) =>
+            i === vehicleIdx
+              ? { ...v, image_urls: [...(v.image_urls ?? []), ...uploaded] }
+              : v,
+          ),
+        }));
+        // OCR biển số từ ảnh đầu tiên vừa upload
+        void fetch("/api/export/ocr-plate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: uploaded[0] }),
+        })
+          .then((r) => r.json() as Promise<{ plate?: string | null }>)
+          .then(({ plate }) => {
+            if (plate) setOcrConfirm({ plate, vehicleIdx });
+          })
+          .catch(() => {});
+      }
+    } finally {
+      setUploadingVehicleIdx(null);
+    }
+  };
+
+  // -- Yeu cau chi tieu ------------------------------------------------------
   const toggleChiTieu = (ten: string) => {
     setForm((prev) => {
       const exists = prev.yeu_cau_chi_tieu.find((r) => r.ten === ten);
@@ -1066,7 +1125,7 @@ export default function ExportPage() {
     }));
   };
 
-  // â”€â”€ Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Save ------------------------------------------------------------------
   const handleSave = async () => {
     if (!factoryId) return;
     if (!form.ma_don) {
@@ -1185,7 +1244,7 @@ export default function ExportPage() {
     }
   };
 
-  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Delete ----------------------------------------------------------------
   const handleDelete = async (id: string) => {
     if (!factoryId) return;
     const order = orders.find((o) => o.id === id);
@@ -1283,7 +1342,7 @@ export default function ExportPage() {
     void loadQcResults(factoryId);
   };
 
-  // â”€â”€ Create customer inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Create customer inline ------------------------------------------------
   const handleCreateCustomer = async () => {
     if (!factoryId) return;
     if (!custForm.ma_kh || !custForm.ten_kh_en) {
@@ -1314,7 +1373,7 @@ export default function ExportPage() {
     }
   };
 
-  // â”€â”€ Filtered orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Filtered orders -------------------------------------------------------
   const filtered = orders.filter(
     (o) =>
       !search ||
@@ -1323,7 +1382,7 @@ export default function ExportPage() {
       o.customers?.ma_kh?.toLowerCase().includes(search.toLowerCase()),
   );
 
-  // â”€â”€ RENDER: Toast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- RENDER: Toast ---------------------------------------------------------
   const Toast = () =>
     toast ? (
       <div
@@ -1338,7 +1397,40 @@ export default function ExportPage() {
       </div>
     ) : null;
 
-  // â”€â”€ RENDER: LIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const OcrConfirmBar = () =>
+    ocrConfirm ? (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-slate-800 text-white rounded-2xl shadow-2xl">
+        <span className="text-sm">
+          Phát hiện:{" "}
+          <strong className="text-emerald-400">{ocrConfirm.plate}</strong> —
+          điền vào Biển trước?
+        </span>
+        <button
+          onClick={() => {
+            setForm((p) => ({
+              ...p,
+              vehicles: p.vehicles.map((v, i) =>
+                i === ocrConfirm.vehicleIdx
+                  ? { ...v, bien_truoc: ocrConfirm.plate }
+                  : v,
+              ),
+            }));
+            setOcrConfirm(null);
+          }}
+          className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-lg transition-colors"
+        >
+          Điền
+        </button>
+        <button
+          onClick={() => setOcrConfirm(null)}
+          className="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors"
+        >
+          Bỏ qua
+        </button>
+      </div>
+    ) : null;
+
+  // -- RENDER: LIST ----------------------------------------------------------
   if (view === "list")
     return (
       <div>
@@ -1697,66 +1789,37 @@ export default function ExportPage() {
                                       </span>
                                     </div>
                                     {/* Hiển thị hình ảnh đính kèm nếu có */}
-                                    {(v.image_url_1 ||
-                                      v.image_url_2 ||
-                                      v.image_url_3) && (
-                                      <div className="flex gap-3 pt-2 border-t border-slate-100">
-                                        {v.image_url_1 && (
-                                          <a
-                                            href={v.image_url_1}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            title="Xem ảnh lớn"
-                                            className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
-                                          >
-                                            <Image
-                                              src={v.image_url_1}
-                                              alt="Biển số"
-                                              width={64}
-                                              height={64}
-                                              unoptimized
-                                              className="w-full h-full object-cover"
-                                            />
-                                          </a>
-                                        )}
-                                        {v.image_url_2 && (
-                                          <a
-                                            href={v.image_url_2}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            title="Xem ảnh lớn"
-                                            className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
-                                          >
-                                            <Image
-                                              src={v.image_url_2}
-                                              alt="Niêm phong"
-                                              width={64}
-                                              height={64}
-                                              unoptimized
-                                              className="w-full h-full object-cover"
-                                            />
-                                          </a>
-                                        )}
-                                        {v.image_url_3 && (
-                                          <a
-                                            href={v.image_url_3}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            title="Xem ảnh lớn"
-                                            className="block w-16 h-16 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
-                                          >
-                                            <Image
-                                              src={v.image_url_3}
-                                              alt="Chứng từ"
-                                              width={64}
-                                              height={64}
-                                              unoptimized
-                                              className="w-full h-full object-cover"
-                                            />
-                                          </a>
-                                        )}
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const imgs = [
+                                        ...(v.image_urls ?? []),
+                                        ...(!v.image_urls?.length
+                                          ? ([v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[])
+                                          : []),
+                                      ];
+                                      return imgs.length > 0 ? (
+                                        <div className="flex gap-2 pt-2 border-t border-slate-100 flex-wrap">
+                                          {imgs.map((url, imgIdx) => (
+                                            <a
+                                              key={imgIdx}
+                                              href={url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              title="Xem ảnh lớn"
+                                              className="block w-14 h-14 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
+                                            >
+                                              <Image
+                                                src={url}
+                                                alt=""
+                                                width={56}
+                                                height={56}
+                                                unoptimized
+                                                className="w-full h-full object-cover"
+                                              />
+                                            </a>
+                                          ))}
+                                        </div>
+                                      ) : null;
+                                    })()}
                                   </div>
                                 ))}
                               </div>
@@ -1862,12 +1925,13 @@ export default function ExportPage() {
       </div>
     );
 
-  // â”€â”€ RENDER: ADD / EDIT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- RENDER: ADD / EDIT ----------------------------------------------------
   const selCust = customers.find((c) => c.id === form.customer_id);
 
   return (
     <div>
       <Toast />
+      <OcrConfirmBar />
 
       {/* Customer creation modal */}
       {custModal && (
@@ -1991,7 +2055,7 @@ export default function ExportPage() {
       </div>
 
       <div className="flex gap-4" style={{ height: "calc(100vh - 200px)" }}>
-        {/* â”€â”€â”€ LEFT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* --- LEFT PANEL ------------------------------------------------- */}
         <div className="w-1/2 overflow-y-auto pr-2 space-y-4">
           {/* Thông tin đơn */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -2428,53 +2492,87 @@ export default function ExportPage() {
                       </button>
                     </div>
 
-                    {/* áº¢nh xe */}
-                    <div className="grid grid-cols-3 gap-2 px-3 pb-3">
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        bucket="order-files"
-                        documentType="vehicles"
-                        label="Hình ảnh 1"
-                        value={v.image_url_1 || ""}
-                        onChange={(url) =>
-                          setForm((p) => ({
-                            ...p,
-                            vehicles: p.vehicles.map((vv, i) =>
-                              i === idx ? { ...vv, image_url_1: url } : vv,
-                            ),
-                          }))
+                    {/* Ảnh xe */}
+                    <div className="px-3 pb-3">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        id={`veh-img-${idx}`}
+                        className="hidden"
+                        onChange={(e) =>
+                          handleVehicleImageUpload(idx, e.target.files)
                         }
                       />
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        bucket="order-files"
-                        documentType="vehicles"
-                        label="Hình ảnh 2"
-                        value={v.image_url_2 || ""}
-                        onChange={(url) =>
-                          setForm((p) => ({
-                            ...p,
-                            vehicles: p.vehicles.map((vv, i) =>
-                              i === idx ? { ...vv, image_url_2: url } : vv,
-                            ),
-                          }))
-                        }
-                      />
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        bucket="order-files"
-                        documentType="vehicles"
-                        label="Hình ảnh 3"
-                        value={v.image_url_3 || ""}
-                        onChange={(url) =>
-                          setForm((p) => ({
-                            ...p,
-                            vehicles: p.vehicles.map((vv, i) =>
-                              i === idx ? { ...vv, image_url_3: url } : vv,
-                            ),
-                          }))
-                        }
-                      />
+                      {(v.image_urls ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {(v.image_urls ?? []).map((url, imgIdx) => (
+                            <div
+                              key={imgIdx}
+                              className="relative group w-14 h-14"
+                            >
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block w-full h-full"
+                              >
+                                <Image
+                                  src={url}
+                                  alt=""
+                                  fill
+                                  className="object-cover rounded-lg"
+                                  unoptimized
+                                />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setForm((p) => ({
+                                    ...p,
+                                    vehicles: p.vehicles.map((vv, i) =>
+                                      i === idx
+                                        ? {
+                                            ...vv,
+                                            image_urls: (
+                                              vv.image_urls ?? []
+                                            ).filter((_, j) => j !== imgIdx),
+                                          }
+                                        : vv,
+                                    ),
+                                  }))
+                                }
+                                className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <label
+                        htmlFor={`veh-img-${idx}`}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                          (v.image_urls ?? []).length >= 6
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                        }`}
+                        onClick={(e) => {
+                          if ((v.image_urls ?? []).length >= 6)
+                            e.preventDefault();
+                        }}
+                      >
+                        {uploadingVehicleIdx === idx ? (
+                          <span>Đang tải...</span>
+                        ) : (
+                          <>
+                            <ImagePlus size={13} />
+                            {(v.image_urls ?? []).length > 0
+                              ? `${(v.image_urls ?? []).length}/6 ảnh • Click ảnh để xem full`
+                              : "Thêm ảnh xe"}
+                          </>
+                        )}
+                      </label>
                     </div>
 
                     {/* Drop hint or assigned lots */}
@@ -2595,7 +2693,7 @@ export default function ExportPage() {
           </div>
         </div>
 
-        {/* â”€â”€â”€ RIGHT PANEL: Lot picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* --- RIGHT PANEL: Lot picker ------------------------------------ */}
         <div className="w-1/2 overflow-y-auto pl-2 space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-0 z-10">
             <h3 className="font-bold text-slate-700 mb-1">

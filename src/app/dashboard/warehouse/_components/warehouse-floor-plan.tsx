@@ -51,31 +51,18 @@ export default function WarehouseFloorPlan({
     filterOn ? lots.filter(l => isLotMatching(l, filter)).map(l => l.id) : []
   )
 
-  // Build lookup: slot_code → slot
-  const slotMap = new Map(slots.map(s => [s.slot_code, s]))
-
-  // Build placement lookup: slot_code → {active, exported}
-  const placementsBySlot = new Map<string, { active: WarehousePlacement[]; exported: WarehousePlacement[] }>()
-  for (const p of allPlacements) {
-    if (!placementsBySlot.has(p.slot_code)) {
-      placementsBySlot.set(p.slot_code, { active: [], exported: [] })
-    }
-    const b = placementsBySlot.get(p.slot_code)!
-    if (p.removed_at) b.exported.push(p); else b.active.push(p)
-  }
-
-  // Get all slots for a frame
+  // Get slots belonging to a frame — match by slot_code prefix to work even if frame_code is null in DB
   const getFrameSlots = (frameCode: string): WarehouseSlot[] =>
-    slots.filter(s => s.frame_code === frameCode)
+    slots.filter(s => s.slot_code.startsWith(`${frameCode}-R`))
 
   const getFrameActivePlacements = (frameCode: string): WarehousePlacement[] => {
-    const frameSlotsSet = new Set(slots.filter(s => s.frame_code === frameCode).map(s => s.slot_code))
-    return allPlacements.filter(p => !p.removed_at && frameSlotsSet.has(p.slot_code))
+    const prefix = `${frameCode}-R`
+    return allPlacements.filter(p => !p.removed_at && p.slot_code.startsWith(prefix))
   }
 
   const getFrameExportedPlacements = (frameCode: string): WarehousePlacement[] => {
-    const frameSlotsSet = new Set(slots.filter(s => s.frame_code === frameCode).map(s => s.slot_code))
-    return allPlacements.filter(p => p.removed_at && frameSlotsSet.has(p.slot_code))
+    const prefix = `${frameCode}-R`
+    return allPlacements.filter(p => !!p.removed_at && p.slot_code.startsWith(prefix))
   }
 
   // Render một hàng (A hoặc B)
