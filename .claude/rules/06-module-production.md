@@ -101,6 +101,39 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - `ca`, `bọc`, `pallet`, `thảm` nên là nhóm chọn nhanh dễ bấm, dễ đọc để người dùng không nhầm giữa header phiếu và dòng nhập.
 - Modal sửa nên hiển thị thêm thông tin tỷ lệ dự kiến của ngăn sau lưu để cảnh báo sớm trước khi bấm lưu.
 
+## 4.5. Sang kiện / Thay bọc (Atomic RPC — 2026-06-19)
+
+Kể từ migration `20260619_sk_atomic_rpc.sql`, **toàn bộ thao tác Sang kiện / Thay bọc phải gọi RPC `perform_sang_kien_thay_boc`** — không dùng lại 3 bước DB riêng biệt.
+
+### Quy tắc bắt buộc
+
+- `handleSkSave()` trong `product/page.tsx` gọi `supabase.rpc("perform_sang_kien_thay_boc", ...)`.
+- RPC nhận `p_factory_id`, `p_loai` ("Sang kiện" | "Thay bọc"), `p_lots` (JSONB array), `p_history_payload` (JSONB).
+- RPC tự thực thi trong 1 transaction: `FOR UPDATE` lock từng lô → validate → UPDATE lô gốc → INSERT lô tồn dư (nếu split) → INSERT `sk_history`.
+- **Không được tách ra 3 bước riêng** — nếu tách, mất tính atomic: lô gốc bị cắt nhưng lô tồn dư chưa tạo khi lỗi xảy ra giữa chừng.
+
+### Lô tồn dư khi split
+
+- `suffix = lot.suffix + "r"`, `ma_lo = buildMaLo(num, suffix+"r", year)`.
+- INSERT dùng `ON CONFLICT (factory_id, ma_lo) DO NOTHING` — **không DO UPDATE** để bảo vệ lô tồn dư đã có lịch sử xuất hàng riêng.
+- Client tính sẵn `has_residual`, `residual_ma_lo`, `res_kien_a/b/c/d`, `res_tong_banh`, `res_tong_kg` rồi truyền vào `p_lots`.
+
+### Payload client
+
+```typescript
+// Mỗi phần tử trong lotsPayload
+{
+  lot_id, new_kien_a, new_kien_b, new_kien_c, new_kien_d,
+  new_tong_banh, new_tong_kg,
+  new_boc,     // string | null (chỉ Thay bọc)
+  new_pallet,  // string[] | null (chỉ Sang kiện)
+  has_residual,
+  // nếu has_residual:
+  residual_ma_lo, res_kien_a, res_kien_b, res_kien_c, res_kien_d,
+  res_tong_banh, res_tong_kg,
+}
+```
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

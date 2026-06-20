@@ -2489,10 +2489,11 @@ export default function ProductPage() {
 
     setSkSaving(true); setSkError(null);
     try {
-      const convertedIds: string[] = [];
-      const historyLots: SkHistoryLotDetail[] = [];
       const actorName = currentUser?.full_name || currentUser?.username || null;
       const actorUsername = currentUser?.username || null;
+      const convertedIds: string[] = [];
+      const historyLots: SkHistoryLotDetail[] = [];
+      const lotsPayload: Record<string, unknown>[] = [];
 
       for (const p of skPending) {
         const { lot, kien_a, kien_b, kien_c, kien_d } = p;
@@ -2511,30 +2512,21 @@ export default function ProductPage() {
           createSkBreakdown(lot.kien_a, lot.kien_b, lot.kien_c, lot.kien_d, lot.loai_banh),
           lot.trang_thai,
         );
+        const movedSnapshot = createSkSnapshot(lot.id, lot.ma_lo, newBoc, newPallet, movedBreakdown, lot.trang_thai);
 
-        const { error: e1 } = await supabase.from("lots").update({
-          kien_a, kien_b, kien_c, kien_d,
-          tong_banh: movedBreakdown.tong_banh,
-          tong_kg: movedBreakdown.tong_kg,
-          boc: newBoc,
-          pallet: newPallet,
-          updated_at: new Date().toISOString(),
-        }).eq("id", lot.id);
-        if (e1) { setSkError(e1.message); return; }
-        convertedIds.push(lot.id);
-
-        const movedSnapshot = createSkSnapshot(
-          lot.id,
-          lot.ma_lo,
-          newBoc,
-          newPallet,
-          movedBreakdown,
-          lot.trang_thai,
-        );
+        const lotEntry: Record<string, unknown> = {
+          lot_id: lot.id,
+          new_kien_a: kien_a, new_kien_b: kien_b,
+          new_kien_c: kien_c, new_kien_d: kien_d,
+          new_tong_banh: movedBreakdown.tong_banh,
+          new_tong_kg: movedBreakdown.tong_kg,
+          new_boc: skTab === "thay_boc" ? skToBoc : null,
+          new_pallet: skTab === "sang_kien" ? skToPallet : null,
+          has_residual: !isFullConvert,
+        };
 
         let residualSnapshot: SkLotSnapshot | null = null;
         let residualBreakdown: SkLotBreakdown | null = null;
-        let residualAction: "created" | "existing" | "none" = "none";
 
         if (!isFullConvert) {
           const rem_a = lot.kien_a - kien_a;
@@ -2545,49 +2537,17 @@ export default function ProductPage() {
           const residualSuffix = lot.suffix + "r";
           const residualMaLo = buildMaLo(lot.num, residualSuffix, lot.year);
 
-          const { data: existing } = await supabase
-            .from("lots").select("id").eq("factory_id", factoryId).eq("ma_lo", residualMaLo).single();
+          lotEntry.residual_ma_lo = residualMaLo;
+          lotEntry.res_kien_a = rem_a; lotEntry.res_kien_b = rem_b;
+          lotEntry.res_kien_c = rem_c; lotEntry.res_kien_d = rem_d;
+          lotEntry.res_tong_banh = residualBreakdown.tong_banh;
+          lotEntry.res_tong_kg = residualBreakdown.tong_kg;
 
-          if (!existing) {
-            const { error: e2 } = await supabase.from("lots").insert({
-              factory_id: factoryId,
-              ma_lo: residualMaLo,
-              num: lot.num,
-              suffix: residualSuffix,
-              year: lot.year,
-              ngay_sx: lot.ngay_sx,
-              ngay_ht: lot.ngay_ht,
-              ca: lot.ca,
-              ngan_id: lot.ngan_id,
-              day_chuyen: lot.day_chuyen,
-              loai_csr: lot.loai_csr,
-              loai_banh: lot.loai_banh,
-              boc: lot.boc,
-              tham: lot.tham,
-              pallet: lot.pallet,
-              chi_thi: lot.chi_thi,
-              kien_a: rem_a, kien_b: rem_b, kien_c: rem_c, kien_d: rem_d,
-              tong_banh: residualBreakdown.tong_banh,
-              tong_kg: residualBreakdown.tong_kg,
-              trang_thai: "Hoàn thành",
-              ghi_chu: `Tồn dư từ ${lot.ma_lo}`,
-            });
-            if (e2) { setSkError(e2.message); return; }
-            residualAction = "created";
-          } else {
-            residualAction = "existing";
-          }
-
-          residualSnapshot = createSkSnapshot(
-            existing?.id ?? null,
-            residualMaLo,
-            lot.boc,
-            lot.pallet,
-            residualBreakdown,
-            "Hoàn thành",
-          );
+          residualSnapshot = createSkSnapshot(null, residualMaLo, lot.boc, lot.pallet, residualBreakdown, "Hoàn thành");
         }
 
+        lotsPayload.push(lotEntry);
+        convertedIds.push(lot.id);
         historyLots.push({
           id: lot.id,
           ma_lo: lot.ma_lo,
@@ -2597,25 +2557,30 @@ export default function ProductPage() {
           moved_breakdown: movedBreakdown,
           residual_breakdown: residualBreakdown,
           split: !isFullConvert,
-          residual_action: residualAction,
+          residual_action: !isFullConvert ? "created" : "none",
           actor_id: currentUser?.id ?? null,
           actor_name: actorName,
           actor_username: actorUsername,
         });
       }
 
-      const { error: eH } = await supabase.from("sk_history").insert({
-        factory_id: factoryId,
+      const historyPayload = {
         ngay: new Date().toISOString().slice(0, 10),
-        loai: skTab === "sang_kien" ? "Sang kiện" : "Thay bọc",
         chung_loai: skFilterLoai || skPending[0]?.lot.loai_csr || "",
         from_boc: skTab === "thay_boc" ? (skFilterBoc || skPending[0]?.lot.boc || null) : null,
         to_boc: skTab === "thay_boc" ? skToBoc : null,
         from_pallet: skTab === "sang_kien" ? (skFilterPallet || null) : null,
         to_pallet: skTab === "sang_kien" ? skToPallet.join(", ") : null,
         lots: historyLots,
+      };
+
+      const { error } = await supabase.rpc("perform_sang_kien_thay_boc", {
+        p_factory_id: factoryId,
+        p_loai: skTab === "sang_kien" ? "Sang kiện" : "Thay bọc",
+        p_lots: lotsPayload,
+        p_history_payload: historyPayload,
       });
-      if (eH) { setSkError(eH.message); return; }
+      if (error) { setSkError(error.message); return; }
 
       setSkDone((prev) => new Set([...prev, ...convertedIds]));
       setSkPending([]);

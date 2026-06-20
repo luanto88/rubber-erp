@@ -84,11 +84,35 @@ ma_don = `XH-${ma_kh}-${so_thong_bao}-${ddmmyy(ngay)}`;
 
 - Hiển thị lô có `trang_thai IN ("Hoàn thành", "Xuất hàng")`
 - Chỉ đưa lô vào panel nếu còn `remaining > 0`
-- `remaining` = tổng số kiện của lô - tổng đã gán trong các đơn khác
+- `remaining` = tổng số kiện của lô - tổng đã gán trong **TẤT CẢ** đơn khác (kể cả pending, không lọc chỉ approved)
+- `lotsExt` useMemo trong `export/page.tsx` tính remaining từ `orders.filter(o => o.id !== editId)` — **không có `.filter(isApproved)`**.
 - Nếu bộ lọc lot picker không ra lô, kiểm tra trước tiên:
   - chuỗi `trang_thai` của query có đúng tiếng Việt chuẩn
   - chuỗi `loai_boc`, `loai_pallet`, `chỉ tiêu` có bị sai chính tả hoặc lỗi mã hóa không
   - text tìm kiếm `ma_lo` có đang được normalize đúng không
+
+## Server-side validation khi lưu đơn (2026-06-19)
+
+Kể từ migration `20260619_export_validate_rpc.sql`, `handleSave()` trong `export/page.tsx` **phải gọi RPC `validate_export_assignments` trước khi upsert** `export_orders`.
+
+```typescript
+// Trong handleSave(), trước khi upsert
+if (form.assignments.length > 0) {
+  const { error: validErr } = await supabase.rpc("validate_export_assignments", {
+    p_factory_id: factoryId,
+    p_exclude_order_id: editId ?? null,
+    p_assignments: form.assignments,
+  })
+  if (validErr) { showToast(validErr.message, "error"); return }
+}
+```
+
+### Quy tắc RPC `validate_export_assignments`
+
+- Tham số: `p_factory_id UUID`, `p_exclude_order_id UUID` (null khi tạo mới), `p_assignments JSONB`.
+- Dùng `CROSS JOIN LATERAL jsonb_array_elements(eo.assignments)` để đếm kiện đã assign trong **tất cả** đơn còn lại (không chỉ approved).
+- Raise exception với message tiếng Việt rõ ràng nếu tổng (đã assign + đơn này) vượt `kien_X` của lô.
+- `SECURITY DEFINER` — `GRANT EXECUTE TO authenticated`.
 
 ## Quan hệ với Thành phẩm
 

@@ -1075,6 +1075,19 @@ export default function ExportPage() {
     }
     setSaving(true);
     try {
+      // Server-side validation: ngăn over-commit khi nhiều đơn cùng assign một lô
+      if (form.assignments.length > 0) {
+        const { error: validErr } = await supabase.rpc("validate_export_assignments", {
+          p_factory_id: factoryId,
+          p_exclude_order_id: editId ?? null,
+          p_assignments: form.assignments,
+        });
+        if (validErr) {
+          showToast(validErr.message, "error");
+          return;
+        }
+      }
+
       const payload = {
         factory_id: factoryId,
         ma_don: form.ma_don,
