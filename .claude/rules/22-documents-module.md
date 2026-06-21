@@ -18,6 +18,7 @@ Permissions: `documents.view`, `documents.create`, `documents.edit`, `documents.
 | `20260610_van_ban_phan_loai.sql` | Thêm cột `phan_loai TEXT NOT NULL DEFAULT 'Thuong'` | Cần chạy |
 | `20260610_van_ban_search_rpc.sql` | Function `match_van_ban_documents` (pgvector semantic search) | Cần chạy sau khi `extend` đã chạy |
 | `20260611_van_ban_distribution.sql` | Bảng `van_ban_distribution_batches`, `van_ban_distribution_recipients`; RLS; seed permission `documents.distribute` cho admin/manager | Cần chạy |
+| `20260621_van_ban_pham_vi.sql` | Thêm `pham_vi TEXT DEFAULT 'Cong_ty'` và `phe_duyet_is_kt BOOLEAN DEFAULT false` vào `van_ban_documents` | Cần chạy |
 
 **Lỗi đã biết khi chạy `types_sequences`**: `policy "van_ban_sequences_factory_read" already exists` → đã sửa bằng `DROP POLICY IF EXISTS` trước `CREATE POLICY`.
 
@@ -49,7 +50,9 @@ is_uploaded BOOLEAN DEFAULT false,
 phong_ban_ky_display TEXT[],
 nguoi_soan_thao_display TEXT,
 embedding vector(768),     -- pgvector; NULL = chưa index AI
-mo_ta_tim_kiem TEXT        -- mô tả bổ sung để tăng độ chính xác tìm kiếm AI
+mo_ta_tim_kiem TEXT,       -- mô tả bổ sung để tăng độ chính xác tìm kiếm AI
+pham_vi TEXT DEFAULT 'Cong_ty',       -- 'Cong_ty' | 'Don_vi' (migration 20260621)
+phe_duyet_is_kt BOOLEAN DEFAULT false -- true → thêm "KT." trước tên người phê duyệt (migration 20260621)
 ```
 
 ---
@@ -109,6 +112,46 @@ type ThuTuKyStep = {
 
 ### Peek số tiếp theo
 - `loadNextSo` đọc `van_van_sequences.last_so + 1` trực tiếp để preview — **không gọi** `get_next_van_ban_so` ở bước peek (tránh tiêu thụ số).
+
+---
+
+## Phạm vi văn bản — `pham_vi`
+
+Cột `pham_vi TEXT DEFAULT 'Cong_ty'` phân biệt 2 luồng vòng ký khác nhau trong form soạn thảo.
+
+| Giá trị | Tên hiển thị | Đặc điểm |
+|---------|-------------|----------|
+| `Cong_ty` | Nội bộ công ty | Step builder theo phòng ban, mỗi bước là `type: "phong_ban"` |
+| `Don_vi` | Nội bộ đơn vị | Chọn cá nhân trong một phòng ban, mỗi bước là `type: "ca_nhan"` |
+
+### `pham_vi = "Don_vi"` — Luồng ký xác nhận nội bộ đơn vị
+
+- User chọn phòng ban → UI gọi `GET /api/documents/dept-users?factoryId=...&dept={phong_ban}&leadership=false&permission=documents.ky_phong_ban`
+- Kết quả là danh sách tất cả user active trong phòng ban đó có quyền ký (không chỉ admin/manager)
+- User tick chọn nhiều người → thứ tự chọn = thứ tự ký
+- `thu_tu_ky_json` lưu mảng step với `type: "ca_nhan"`, `user_id`, `ten`
+- `sign/route.ts` đã hỗ trợ `ca_nhan` type: kiểm tra `step.user_id !== userId` để xác thực quyền ký, thông báo đến `step.user_id` đích danh
+
+### `phe_duyet_is_kt`
+
+- `true` khi Phó Giám đốc ký thay Giám đốc (Ký thừa uỷ quyền)
+- UI trang chi tiết thêm "KT. " prefix trước tên phê duyệt: `${doc.phe_duyet_is_kt ? "KT. " : ""}${doc.phe_duyet}`
+- Checkbox "Phó ký thay (thêm 'KT.' trước chức danh)" nằm ngay sau dropdown chọn người phê duyệt trong form soạn thảo
+
+### PIN modal title phân biệt step type
+
+Trong `[id]/page.tsx`, tiêu đề PIN modal phải phân nhánh theo `currentStep.type`:
+```tsx
+{pinModal === "ky_buoc"
+  ? currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"
+  : "Phê duyệt văn bản"}
+```
+Tương tự, description bên dưới tiêu đề cũng phân nhánh:
+```tsx
+{currentStep.type === "ca_nhan"
+  ? <>Bước {doc.buoc_hien_tai + 1}: Ký xác nhận — <strong>{currentStep.ten}</strong></>
+  : <>Bước {doc.buoc_hien_tai + 1}: Ký cho phòng ban <strong>{currentStep.phong_ban_code}</strong></>}
+```
 
 ---
 
@@ -173,10 +216,16 @@ Tất cả routes dùng `supabaseAdmin` để bypass RLS khi cần list users.
 
 ## Workflow
 
-### Cấp 1 (có vòng ký phòng ban)
+### Cấp 1 — Nội bộ công ty (`pham_vi = "Cong_ty"`)
 ```
-draft → cho_ky_phong_ban → cho_phe_duyet → da_phe_duyet
-                        ↘ tra_ve
+draft → cho_ky_phong_ban (steps type "phong_ban") → cho_phe_duyet → da_phe_duyet
+                                                 ↘ tra_ve
+```
+
+### Cấp 1 — Nội bộ đơn vị (`pham_vi = "Don_vi"`)
+```
+draft → cho_ky_phong_ban (steps type "ca_nhan") → cho_phe_duyet → da_phe_duyet
+                                               ↘ tra_ve
 ```
 
 ### Cấp 2 (gửi thẳng phê duyệt)
@@ -364,6 +413,56 @@ await supabaseAdmin.from("notifications").insert(rows).catch(...)
 // ĐÚNG — destructure error
 const { error } = await supabaseAdmin.from("notifications").insert(rows)
 if (error) handleError(error.message)
+```
+
+### Bug đã fix: `dept-users/route.ts` — danh sách ký xác nhận luôn rỗng (2026-06-21)
+
+Hai lỗi trong `dept-users/route.ts` gây danh sách user trả về rỗng khi có `permission=` query param:
+
+**Lỗi 1 — Tên cột sai**: `role_permissions` bảng có cột `"role"` nhưng code query `.select("role_code")` → `rolesWithPerm` luôn là Set rỗng → mọi user bị filter out.
+```typescript
+// SAI
+const { data: rolePermRows } = await supabaseAdmin.from("role_permissions").select("role_code")...
+const rolesWithPerm = new Set((rolePermRows || []).map((r: { role_code: string }) => r.role_code))
+
+// ĐÚNG — cột thật là "role"
+const { data: rolePermRows } = await supabaseAdmin.from("role_permissions").select("role")...
+const rolesWithPerm = new Set((rolePermRows || []).map((r: { role: string }) => r.role))
+```
+
+**Lỗi 2 — Thiếu `.eq("granted", true)`**: `user_permissions` có thể có dòng `granted = false` (quyền bị thu hồi) nhưng code không lọc → user bị thu hồi quyền vẫn được trả về.
+```typescript
+// SAI
+.from("user_permissions").select("user_id").eq("permission_code", permissionCode)
+
+// ĐÚNG
+.from("user_permissions").select("user_id").eq("permission_code", permissionCode).eq("granted", true)
+```
+
+### Bug đã fix: `approvers/route.ts` — thiếu `.eq("granted", true)` (2026-06-21)
+
+`approvers/route.ts` query `user_permissions` để lấy users có explicit `documents.phe_duyet` permission cũng thiếu `.eq("granted", true)` — dẫn đến user bị thu hồi quyền vẫn xuất hiện trong dropdown phê duyệt:
+```typescript
+// ĐÚNG — phải có granted = true
+const { data: permRows } = await supabaseAdmin
+  .from("user_permissions")
+  .select("user_id")
+  .eq("permission_code", "documents.phe_duyet")
+  .eq("granted", true)
+```
+
+### Bug đã fix: `new/page.tsx` — approver dropdown chỉ hiện admin (2026-06-21)
+
+`new/page.tsx` có đoạn filter thừa `filteredApprovers` cho luồng `Don_vi` lọc lại chỉ `role === "admin" || role === "manager"` — loại mất users có explicit permission nhưng role khác:
+```typescript
+// SAI — filter thừa, loại user có explicit perm nhưng role khác admin/manager
+const filteredApprovers =
+  form.pham_vi === "Don_vi"
+    ? approvers.filter((a) => a.role === "admin" || a.role === "manager")
+    : approvers
+
+// ĐÚNG — API /approvers đã filter đúng rồi, không cần filter lại
+const filteredApprovers = approvers
 ```
 
 ### `DistUser` type phải khai báo ở module level

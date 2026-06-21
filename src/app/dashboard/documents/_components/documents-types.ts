@@ -62,6 +62,8 @@ export type VanBanDocument = {
   soan_thao_user_id: string | null
   phe_duyet_user_id: string | null
   phe_duyet: string | null
+  pham_vi: string | null            // 'Cong_ty' | 'Don_vi'
+  phe_duyet_is_kt: boolean | null   // true → thêm "KT." trước tên phê duyệt
   ghi_chu: string | null
   created_at: string
   updated_at: string

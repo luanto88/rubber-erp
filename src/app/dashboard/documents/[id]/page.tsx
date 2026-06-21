@@ -464,7 +464,9 @@ export default function DocumentDetailPage() {
         {/* Timeline ký */}
         <div>
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h2 className="text-sm font-bold text-slate-700 mb-4">Tiến trình ký duyệt</h2>
+            <h2 className="text-sm font-bold text-slate-700 mb-4">
+              {doc.pham_vi === "Don_vi" ? "Tiến trình ký xác nhận & phê duyệt" : "Tiến trình ký duyệt"}
+            </h2>
             <div className="space-y-3">
               {/* Soạn thảo */}
               <TimelineStep
@@ -495,7 +497,7 @@ export default function DocumentDetailPage() {
                 label="Phê duyệt"
                 sublabel={
                   doc.trang_thai === "da_phe_duyet"
-                    ? doc.phe_duyet || "Đã phê duyệt"
+                    ? `${doc.phe_duyet_is_kt ? "KT. " : ""}${doc.phe_duyet || "Đã phê duyệt"}`
                     : doc.trang_thai === "cho_phe_duyet"
                       ? "Đang chờ phê duyệt..."
                       : doc.phe_duyet || "Chờ phê duyệt"
@@ -515,7 +517,9 @@ export default function DocumentDetailPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-slate-800">
-                {pinModal === "ky_buoc" ? "Ký phòng ban" : "Phê duyệt văn bản"}
+                {pinModal === "ky_buoc"
+                  ? currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"
+                  : "Phê duyệt văn bản"}
               </h3>
               <button onClick={() => { setPinModal(null); setPin(""); setPinError(null) }} className="text-slate-400 hover:text-slate-700">
                 <X size={18} />
@@ -523,7 +527,9 @@ export default function DocumentDetailPage() {
             </div>
             {pinModal === "ky_buoc" && currentStep && (
               <p className="text-sm text-slate-600 mb-4">
-                Bước {doc.buoc_hien_tai + 1}: Ký cho phòng ban <strong>{currentStep.phong_ban_code}</strong>
+                {currentStep.type === "ca_nhan"
+                  ? <>Bước {doc.buoc_hien_tai + 1}: Ký xác nhận — <strong>{currentStep.ten}</strong></>
+                  : <>Bước {doc.buoc_hien_tai + 1}: Ký cho phòng ban <strong>{currentStep.phong_ban_code}</strong></>}
               </p>
             )}
             <div>

@@ -9,16 +9,18 @@ type ProfileRow = {
   username: string | null
   role: string | null
   department: string | null
+  department_id: string | null
 }
 
-// GET ?factoryId=xxx&dept=KTNN&leadership=true
+// GET ?factoryId=xxx&dept=KTNN&leadership=true&permission=documents.create
 // leadership=true → chỉ trả về role IN ('admin','manager')
-// leadership=false/omit → tất cả active users của factory
+// permission=xxx  → lọc user có explicit grant hoặc role được cấp qua role_permissions
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const factoryId = searchParams.get("factoryId")
   const dept = searchParams.get("dept")
   const leadershipOnly = searchParams.get("leadership") === "true"
+  const permissionCode = searchParams.get("permission")
 
   if (!factoryId) {
     return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabaseAdmin
     .from("profiles")
-    .select("id, full_name, username, role, department")
+    .select("id, full_name, username, role, department, department_id")
     .eq("factory_id", factoryId)
     .eq("status", "active")
 
@@ -42,11 +44,48 @@ export async function GET(req: NextRequest) {
 
   let rows = (profiles || []) as ProfileRow[]
 
-  // Lọc theo phòng ban nếu có — so sánh department text (có thể là tên hoặc code)
+  // Lọc theo phòng ban (3-way match: department_id FK, tên đầy đủ, code text)
   if (dept) {
-    rows = rows.filter(
-      (p) => p.department === dept || p.department?.toUpperCase() === dept.toUpperCase(),
-    )
+    const deptUpper = dept.toUpperCase()
+
+    const { data: deptRow } = await supabaseAdmin
+      .from("departments")
+      .select("id, name, code")
+      .eq("code", deptUpper)
+      .maybeSingle()
+
+    rows = rows.filter((p) => {
+      if (deptRow?.id && p.department_id === deptRow.id) return true
+      if (deptRow?.name && p.department === deptRow.name) return true
+      if (p.department?.toUpperCase() === deptUpper) return true
+      return false
+    })
+  }
+
+  // Lọc theo permission (explicit grant hoặc role-based default)
+  if (permissionCode) {
+    // 1. Explicit user grants (cột là granted=true)
+    const { data: permRows } = await supabaseAdmin
+      .from("user_permissions")
+      .select("user_id")
+      .eq("permission_code", permissionCode)
+      .eq("granted", true)
+
+    const explicitUserIds = new Set((permRows || []).map((r: { user_id: string }) => r.user_id))
+
+    // 2. Role-based grants via role_permissions (cột là "role", không phải "role_code")
+    const { data: rolePermRows } = await supabaseAdmin
+      .from("role_permissions")
+      .select("role")
+      .eq("permission_code", permissionCode)
+
+    const rolesWithPerm = new Set((rolePermRows || []).map((r: { role: string }) => r.role))
+
+    rows = rows.filter((p) => {
+      if (explicitUserIds.has(p.id)) return true
+      if (p.role && rolesWithPerm.has(p.role)) return true
+      return false
+    })
   }
 
   const result = rows.map((p) => ({

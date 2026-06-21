@@ -71,10 +71,16 @@ export default function NewDocumentPage() {
     ten_van_ban: "",
     cap_tl: "Cấp 1",
     phan_loai: "Thuong",
+    pham_vi: "Cong_ty",        // 'Cong_ty' | 'Don_vi'
     phe_duyet_user_id: "",
+    phe_duyet_is_kt: false,    // true → thêm "KT." trước tên phê duyệt
     ghi_chu: "",
     mo_ta_tim_kiem: "",  // Bug 6e: AI search description
   })
+
+  // Nội bộ đơn vị — danh sách user trong đơn vị và người được chọn ký xác nhận
+  const [unitUsers, setUnitUsers] = useState<ApproverUser[]>([])
+  const [selectedUnitUserIds, setSelectedUnitUserIds] = useState<string[]>([])
 
   // Bug 2: editable mã văn bản
   const [maVanBan, setMaVanBan] = useState("")
@@ -132,6 +138,17 @@ export default function NewDocumentPage() {
       }
     } catch { /* bỏ qua */ }
   }, [deptLeaders])
+
+  // Nội bộ đơn vị: load user trong phòng ban có quyền documents.create
+  const loadUnitUsers = useCallback(async (fid: string, dept: string) => {
+    if (!dept) return
+    try {
+      const res = await fetch(
+        `/api/documents/dept-users?factoryId=${fid}&dept=${dept}&leadership=false&permission=documents.create`,
+      )
+      if (res.ok) setUnitUsers((await res.json()) as ApproverUser[])
+    } catch { /* bỏ qua */ }
+  }, [])
 
   // Bug 2: Peek next sequence number (không consume — đọc trực tiếp van_ban_sequences)
   const loadNextSo = useCallback(async (fid: string, loai: string, pb: string): Promise<number> => {
@@ -208,6 +225,15 @@ export default function NewDocumentPage() {
     return () => { if (maCheckTimerRef.current) clearTimeout(maCheckTimerRef.current) }
   }, [factoryId, maVanBan, checkMaExists])
 
+  // Load danh sách user đơn vị khi phong_ban thay đổi và pham_vi là Don_vi
+  useEffect(() => {
+    if (factoryId && form.pham_vi === "Don_vi" && form.phong_ban) {
+      void loadUnitUsers(factoryId, form.phong_ban)
+    } else {
+      setUnitUsers([])
+    }
+  }, [factoryId, form.phong_ban, form.pham_vi, loadUnitUsers])
+
   const addStep = () => {
     setSteps((prev) => [...prev, emptyStep(prev.length + 1)])
   }
@@ -264,20 +290,28 @@ export default function NewDocumentPage() {
       setSaveError("Vui lòng chọn Người phê duyệt cuối.")
       return
     }
-    if (form.cap_tl === "Cấp 1" && steps.length === 0) {
-      setSaveError("Cấp 1 cần ít nhất 1 bước ký phòng ban.")
-      return
-    }
-    for (const s of steps) {
-      if (!s.phong_ban_code) {
-        setSaveError("Vui lòng chọn phòng ban cho tất cả các bước ký.")
+    if (form.cap_tl === "Cấp 1") {
+      if (form.pham_vi === "Don_vi" && selectedUnitUserIds.length === 0) {
+        setSaveError("Cấp 1 Nội bộ đơn vị cần chọn ít nhất 1 người ký xác nhận.")
         return
       }
-      if (form.phan_loai === "Mat" && !s.mat_recipient_user_id) {
-        setSaveError(
-          `Văn bản Mật: vui lòng chọn đích danh người nhận cho bước ký phòng ban "${s.phong_ban_code}".`,
-        )
+      if (form.pham_vi === "Cong_ty" && steps.length === 0) {
+        setSaveError("Cấp 1 Nội bộ công ty cần ít nhất 1 bước ký phòng ban.")
         return
+      }
+    }
+    if (form.pham_vi === "Cong_ty") {
+      for (const s of steps) {
+        if (!s.phong_ban_code) {
+          setSaveError("Vui lòng chọn phòng ban cho tất cả các bước ký.")
+          return
+        }
+        if (form.phan_loai === "Mat" && !s.mat_recipient_user_id) {
+          setSaveError(
+            `Văn bản Mật: vui lòng chọn đích danh người nhận cho bước ký phòng ban "${s.phong_ban_code}".`,
+          )
+          return
+        }
       }
     }
     if (maVanBanExists) {
@@ -315,15 +349,29 @@ export default function NewDocumentPage() {
         finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
       }
 
-      const thuTuKyJson: ThuTuKyStep[] = steps.map((s, i) => ({
-        step: i + 1,
-        type: "phong_ban",
-        phong_ban_code: s.phong_ban_code,
-        phong_ban_name: s.phong_ban_code,
-        ...(form.phan_loai === "Mat" && s.mat_recipient_user_id
-          ? { mat_recipient_user_id: s.mat_recipient_user_id }
-          : {}),
-      }))
+      let thuTuKyJson: ThuTuKyStep[]
+      if (form.pham_vi === "Don_vi") {
+        thuTuKyJson = selectedUnitUserIds.map((uid, i) => {
+          const u = unitUsers.find((x) => x.id === uid)
+          return {
+            step: i + 1,
+            type: "ca_nhan" as const,
+            user_id: uid,
+            ten: u?.full_name || u?.username || "",
+            chuc_vu: "",
+          }
+        })
+      } else {
+        thuTuKyJson = steps.map((s, i) => ({
+          step: i + 1,
+          type: "phong_ban" as const,
+          phong_ban_code: s.phong_ban_code,
+          phong_ban_name: s.phong_ban_code,
+          ...(form.phan_loai === "Mat" && s.mat_recipient_user_id
+            ? { mat_recipient_user_id: s.mat_recipient_user_id }
+            : {}),
+        }))
+      }
       const soBuocTong = thuTuKyJson.length
 
       const approverUser = approvers.find((a) => a.id === form.phe_duyet_user_id)
@@ -361,6 +409,8 @@ export default function NewDocumentPage() {
         nguoi_soan_thao_display: userFullName,
         phe_duyet_user_id: form.phe_duyet_user_id || null,
         phe_duyet: pheDuyetName || null,
+        pham_vi: form.pham_vi,
+        phe_duyet_is_kt: form.phe_duyet_is_kt,
         ghi_chu: form.ghi_chu.trim() || null,
         mo_ta_tim_kiem: form.mo_ta_tim_kiem.trim() || null,
         file_goc_url: fileGocUrl,
@@ -393,6 +443,8 @@ export default function NewDocumentPage() {
   const selectedApprover = approvers.find((a) => a.id === form.phe_duyet_user_id)
   // Bug 3: phòng ban của người phê duyệt cuối → loại khỏi dropdown bước ký
   const approverDept = selectedApprover?.department || ""
+  // approvers API đã lọc đúng (admin/manager + explicit phe_duyet)
+  const filteredApprovers = approvers
 
   const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
   const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
@@ -579,9 +631,43 @@ export default function NewDocumentPage() {
                   value={form.cap_tl}
                   onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
                 >
-                  <option value="Cấp 1">Cấp 1 — Ký vòng phòng ban, sau đó phê duyệt</option>
+                  <option value="Cấp 1">Cấp 1 — Ký xác nhận/vòng ký, sau đó phê duyệt</option>
                   <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
+                <div className="flex rounded-xl overflow-hidden border border-slate-200">
+                  {[
+                    { val: "Cong_ty", label: "Nội bộ công ty" },
+                    { val: "Don_vi", label: "Nội bộ đơn vị" },
+                  ].map(({ val, label }) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={`flex-1 py-2 text-sm font-bold transition-all ${
+                        form.pham_vi === val
+                          ? "bg-blue-600 text-white"
+                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                      }`}
+                      onClick={() => {
+                        setForm((f) => ({ ...f, pham_vi: val }))
+                        setSelectedUnitUserIds([])
+                        if (val === "Don_vi" && factoryId && form.phong_ban) {
+                          void loadUnitUsers(factoryId, form.phong_ban)
+                        }
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {form.pham_vi === "Don_vi" && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    Văn bản chỉ lưu hành trong đơn vị. Người trong phòng ban ký xác nhận tuần tự.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -663,15 +749,17 @@ export default function NewDocumentPage() {
               onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
             >
               <option value="">— Chọn người phê duyệt —</option>
-              {approvers.map((a) => (
+              {filteredApprovers.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.full_name || a.username}
                 </option>
               ))}
             </select>
-            {approvers.length === 0 && (
+            {filteredApprovers.length === 0 && (
               <p className="text-xs text-slate-400 mt-1.5">
-                Chưa có người dùng nào có quyền phê duyệt.
+                {form.pham_vi === "Don_vi"
+                  ? "Chưa có Lãnh đạo nhà máy (Giám đốc, Phó Giám đốc) nào được thiết lập."
+                  : "Chưa có người dùng nào có quyền phê duyệt."}
               </p>
             )}
             {approverDept && (
@@ -681,140 +769,229 @@ export default function NewDocumentPage() {
                 {" "}— sẽ được loại khỏi danh sách bước ký
               </p>
             )}
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer mt-2">
+              <input
+                type="checkbox"
+                checked={!!form.phe_duyet_is_kt}
+                onChange={(e) => setForm((f) => ({ ...f, phe_duyet_is_kt: e.target.checked }))}
+                className="rounded"
+              />
+              Phó ký thay — thêm <strong className="font-mono text-slate-700">KT.</strong> trước chức danh
+            </label>
           </div>
 
-          {/* Vòng ký phòng ban */}
+          {/* Vòng ký / Ký xác nhận — phân nhánh theo pham_vi */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-slate-700">
-                Vòng ký phòng ban
-                {form.cap_tl === "Cấp 2" && (
-                  <span className="ml-2 text-xs font-normal text-slate-400">(bỏ qua với Cấp 2)</span>
-                )}
-              </h2>
-              {form.cap_tl === "Cấp 1" && (
-                <button
-                  onClick={addStep}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
-                >
-                  <Plus size={12} />
-                  Thêm bước
-                </button>
-              )}
-            </div>
-
-            {form.cap_tl === "Cấp 2" ? (
-              <div className="text-sm text-slate-400 text-center py-4">
-                Văn bản Cấp 2 chuyển thẳng lên phê duyệt.
-              </div>
-            ) : steps.length === 0 ? (
-              <div className="text-sm text-slate-400 text-center py-4">
-                Chưa có bước ký. Nhấn{" "}
-                <span className="font-bold text-blue-600">+ Thêm bước</span>.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {steps.map((s, i) => {
-                  // Bug 3: Warn if this step already has the approver's dept selected
-                  const isApproverDept = !!approverDept && s.phong_ban_code === approverDept
-                  return (
-                    <div
-                      key={s.id}
-                      className={`rounded-lg border p-2.5 space-y-2 ${
-                        isMat ? "border-red-200 bg-red-50/40" : "border-slate-200"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1.5 w-5 shrink-0 text-slate-300">
-                          <GripVertical size={14} />
-                        </div>
-                        <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
-                          {i + 1}
-                        </div>
-                        {/* Bug 3: Filter approverDept out of step dropdown */}
-                        <select
-                          className={`flex-1 px-2 py-1.5 border rounded-lg text-sm outline-none ${
-                            isApproverDept
-                              ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                              : "border-slate-300 focus:border-blue-500"
-                          }`}
-                          value={s.phong_ban_code}
-                          onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
-                        >
-                          <option value="">— Chọn phòng ban —</option>
-                          {PHONG_BAN_VAN_BAN_OPTIONS.filter((pb) => pb !== approverDept).map((pb) => (
-                            <option key={pb} value={pb}>{pb}</option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => removeStep(s.id)}
-                          className="p-1.5 text-slate-300 hover:text-red-500 rounded transition-all"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-
-                      {isApproverDept && (
-                        <div className="ml-7 flex items-center gap-1.5 text-xs text-amber-700">
-                          <AlertTriangle size={11} />
-                          Phòng ban này trùng với người phê duyệt cuối.
-                        </div>
-                      )}
-
-                      {/* Chọn đích danh khi Mật */}
-                      {isMat && (
-                        <div className="ml-7">
-                          <label className="text-[10px] font-bold text-red-600 block mb-1">
-                            Người nhận thông báo (đích danh) <span className="text-red-500">*</span>
-                          </label>
-                          <select
-                            className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
-                              isMat && !s.mat_recipient_user_id && s.phong_ban_code
-                                ? "border-red-300 bg-red-50 focus:border-red-400"
-                                : "border-slate-300 focus:border-red-400"
+            {form.pham_vi === "Don_vi" ? (
+              /* --- Nội bộ đơn vị: chọn người ký xác nhận --- */
+              <>
+                <h2 className="text-sm font-bold text-slate-700 mb-3">
+                  Ký xác nhận (Nội bộ đơn vị)
+                  {form.cap_tl === "Cấp 2" && (
+                    <span className="ml-2 text-xs font-normal text-slate-400">(bỏ qua với Cấp 2)</span>
+                  )}
+                </h2>
+                {form.cap_tl === "Cấp 2" ? (
+                  <div className="text-sm text-slate-400 text-center py-4">
+                    Văn bản Cấp 2 chuyển thẳng lên phê duyệt.
+                  </div>
+                ) : !form.phong_ban ? (
+                  <p className="text-sm text-amber-600 text-center py-4">
+                    Chọn Phòng ban trước để hiện danh sách người ký.
+                  </p>
+                ) : unitUsers.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4">
+                    Không tìm thấy người dùng trong phòng ban{" "}
+                    <strong>{form.phong_ban}</strong>.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                    {unitUsers
+                      .filter((u) => u.id !== form.phe_duyet_user_id)
+                      .map((u) => {
+                        const idx = selectedUnitUserIds.indexOf(u.id)
+                        const selected = idx >= 0
+                        return (
+                          <label
+                            key={u.id}
+                            className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
+                              selected
+                                ? "border-blue-300 bg-blue-50"
+                                : "border-slate-200 hover:bg-slate-50"
                             }`}
-                            value={s.mat_recipient_user_id}
-                            onChange={(e) => updateStepRecipient(s.id, e.target.value)}
-                            disabled={!s.phong_ban_code}
                           >
-                            <option value="">
-                              {s.phong_ban_code
-                                ? "— Chọn đích danh —"
-                                : "— Chọn phòng ban trước —"}
-                            </option>
-                            {(deptLeaders[s.phong_ban_code] || []).map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.full_name || u.username}
-                              </option>
-                            ))}
-                          </select>
-                          {s.phong_ban_code && !(deptLeaders[s.phong_ban_code]?.length) && (
-                            <p className="text-[10px] text-slate-400 mt-0.5">
-                              Không tìm thấy người dùng trong phòng {s.phong_ban_code}.
-                            </p>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                setSelectedUnitUserIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev, u.id]
+                                    : prev.filter((id) => id !== u.id),
+                                )
+                              }}
+                              className="rounded"
+                            />
+                            {selected && (
+                              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                                {idx + 1}
+                              </span>
+                            )}
+                            <span className="text-sm text-slate-700 flex-1">
+                              {u.full_name || u.username}
+                            </span>
+                            <span className="text-xs text-slate-400">{u.department}</span>
+                          </label>
+                        )
+                      })}
+                  </div>
+                )}
+                {form.cap_tl === "Cấp 1" && selectedUnitUserIds.length > 0 && selectedApprover && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+                    <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
+                      ✓
+                    </div>
+                    <span>
+                      Phê duyệt cuối:{" "}
+                      <strong className="text-slate-600">
+                        {selectedApprover.full_name || selectedApprover.username}
+                      </strong>
+                    </span>
+                  </div>
+                )}
+              </>
+            ) : (
+              /* --- Nội bộ công ty: vòng ký phòng ban --- */
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-bold text-slate-700">
+                    Vòng ký phòng ban
+                    {form.cap_tl === "Cấp 2" && (
+                      <span className="ml-2 text-xs font-normal text-slate-400">(bỏ qua với Cấp 2)</span>
+                    )}
+                  </h2>
+                  {form.cap_tl === "Cấp 1" && (
+                    <button
+                      onClick={addStep}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                    >
+                      <Plus size={12} />
+                      Thêm bước
+                    </button>
+                  )}
+                </div>
+
+                {form.cap_tl === "Cấp 2" ? (
+                  <div className="text-sm text-slate-400 text-center py-4">
+                    Văn bản Cấp 2 chuyển thẳng lên phê duyệt.
+                  </div>
+                ) : steps.length === 0 ? (
+                  <div className="text-sm text-slate-400 text-center py-4">
+                    Chưa có bước ký. Nhấn{" "}
+                    <span className="font-bold text-blue-600">+ Thêm bước</span>.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {steps.map((s, i) => {
+                      const isApproverDept = !!approverDept && s.phong_ban_code === approverDept
+                      return (
+                        <div
+                          key={s.id}
+                          className={`rounded-lg border p-2.5 space-y-2 ${
+                            isMat ? "border-red-200 bg-red-50/40" : "border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 w-5 shrink-0 text-slate-300">
+                              <GripVertical size={14} />
+                            </div>
+                            <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
+                              {i + 1}
+                            </div>
+                            <select
+                              className={`flex-1 px-2 py-1.5 border rounded-lg text-sm outline-none ${
+                                isApproverDept
+                                  ? "border-amber-400 bg-amber-50 focus:border-amber-500"
+                                  : "border-slate-300 focus:border-blue-500"
+                              }`}
+                              value={s.phong_ban_code}
+                              onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
+                            >
+                              <option value="">— Chọn phòng ban —</option>
+                              {PHONG_BAN_VAN_BAN_OPTIONS.filter((pb) => pb !== approverDept).map((pb) => (
+                                <option key={pb} value={pb}>{pb}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => removeStep(s.id)}
+                              className="p-1.5 text-slate-300 hover:text-red-500 rounded transition-all"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+
+                          {isApproverDept && (
+                            <div className="ml-7 flex items-center gap-1.5 text-xs text-amber-700">
+                              <AlertTriangle size={11} />
+                              Phòng ban này trùng với người phê duyệt cuối.
+                            </div>
+                          )}
+
+                          {isMat && (
+                            <div className="ml-7">
+                              <label className="text-[10px] font-bold text-red-600 block mb-1">
+                                Người nhận thông báo (đích danh) <span className="text-red-500">*</span>
+                              </label>
+                              <select
+                                className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
+                                  isMat && !s.mat_recipient_user_id && s.phong_ban_code
+                                    ? "border-red-300 bg-red-50 focus:border-red-400"
+                                    : "border-slate-300 focus:border-red-400"
+                                }`}
+                                value={s.mat_recipient_user_id}
+                                onChange={(e) => updateStepRecipient(s.id, e.target.value)}
+                                disabled={!s.phong_ban_code}
+                              >
+                                <option value="">
+                                  {s.phong_ban_code
+                                    ? "— Chọn đích danh —"
+                                    : "— Chọn phòng ban trước —"}
+                                </option>
+                                {(deptLeaders[s.phong_ban_code] || []).map((u) => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.full_name || u.username}
+                                  </option>
+                                ))}
+                              </select>
+                              {s.phong_ban_code && !(deptLeaders[s.phong_ban_code]?.length) && (
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                  Không tìm thấy người dùng trong phòng {s.phong_ban_code}.
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {form.cap_tl === "Cấp 1" && steps.length > 0 && selectedApprover && (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
-                    ✓
+                      )
+                    })}
                   </div>
-                  <span>
-                    Phê duyệt cuối:{" "}
-                    <strong className="text-slate-600">
-                      {selectedApprover.full_name || selectedApprover.username}
-                    </strong>
-                  </span>
-                </div>
-              </div>
+                )}
+
+                {form.cap_tl === "Cấp 1" && steps.length > 0 && selectedApprover && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
+                        ✓
+                      </div>
+                      <span>
+                        Phê duyệt cuối:{" "}
+                        <strong className="text-slate-600">
+                          {selectedApprover.full_name || selectedApprover.username}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

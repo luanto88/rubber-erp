@@ -17,11 +17,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
   }
 
-  // 1. Users có explicit permission documents.phe_duyet
+  // 1. Users có explicit permission documents.phe_duyet (granted = true)
   const { data: permRows } = await supabaseAdmin
     .from("user_permissions")
     .select("user_id")
     .eq("permission_code", "documents.phe_duyet")
+    .eq("granted", true)
 
   const permUserIds = (permRows || []).map((r: { user_id: string }) => r.user_id)
 
