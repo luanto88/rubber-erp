@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "./_components/iso-shell"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "./_components/iso-types"
 import { FileText, CheckCircle2, Clock, AlertTriangle, Plus } from "lucide-react"
@@ -45,6 +45,12 @@ export default function IsoOverviewPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      if (!hasPermission(cachedUser, "iso.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)

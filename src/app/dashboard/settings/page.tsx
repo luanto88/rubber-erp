@@ -521,22 +521,30 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   export: "Xuất hàng",
   inventory: "Kho vật tư",
   iso: "ISO",
+  maintenance: "Bảo trì",
+  output: "Sản lượng",
+  process: "Kiểm soát quá trình",
   product: "Thành phẩm",
   quality: "Kiểm nghiệm",
   settings: "Cài đặt",
-  storage: "Ngăn",
+  storage: "Ngăn lưu",
   suffixes: "Hậu tố",
   users: "Người dùng",
+  warehouse: "Kho thành phẩm",
 }
 
 const PERMISSION_ACTION_LABELS: Record<string, string> = {
   analytics: "thống kê",
   approve: "duyệt tài khoản",
+  cancel: "hủy phiếu",
   create: "tạo",
   delete: "xóa",
   delete_order: "xóa đơn",
+  distribute: "phân phối",
   edit: "sửa",
   edit_permission: "sửa quyền",
+  export_file: "xuất file",
+  forms: "thực hiện hồ sơ",
   import: "nhập",
   ky_phong_ban: "ký phòng ban",
   manage_config: "quản trị cấu hình",
@@ -551,6 +559,7 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   settings: "cấu hình",
   signature: "ký số",
   soat_xet: "soát xét",
+  upload_signed: "tải lên bản đã ký",
   view: "xem",
   xem_xet: "xem xét",
 }
@@ -1625,6 +1634,18 @@ export default function SettingsPage() {
 
     setFactoryId(fid)
     setUser(sessionUser)
+    if (
+      !hasPermission(sessionUser, "settings.manage_config") &&
+      !hasPermission(sessionUser, "users.view") &&
+      !hasPermission(sessionUser, "users.approve") &&
+      !hasPermission(sessionUser, "settings.master_data") &&
+      !hasPermission(sessionUser, "settings.maintenance_config") &&
+      !hasPermission(sessionUser, "iso.signature")
+    ) {
+      setLoading(false)
+      window.location.replace("/dashboard")
+      return
+    }
 
     await Promise.all([
       loadSuffixes(fid),
@@ -4765,7 +4786,7 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-3">Permissions *</label>
+                <label className="text-xs font-bold text-slate-600 block mb-3">Phân quyền *</label>
                 <div className="grid grid-cols-2 gap-4">
                   {Object.entries(groupedPermissions).map(([moduleName, options]) => (
                     <div key={moduleName} className="border border-slate-200 rounded-xl p-4">

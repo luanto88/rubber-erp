@@ -6,7 +6,7 @@ import {
   Legend, ResponsiveContainer,
 } from "recharts"
 import { Activity, ClipboardCheck, Thermometer } from "lucide-react"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { ProcessShell } from "./_components/process-shell"
 
@@ -127,6 +127,12 @@ export default function ProcessOverviewPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      if (!hasPermission(cachedUser, "process.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)

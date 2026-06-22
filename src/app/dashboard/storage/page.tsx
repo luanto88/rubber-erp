@@ -413,6 +413,11 @@ export default function StoragePage() {
         user: null as SessionUser | null,
       }))
       setCurrentUser(authState.user)
+      if (!hasPermission(authState.user, "storage.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = authState.user?.factory_id || await getActiveFactoryId()
       if (!fid) {
         setLoading(false)

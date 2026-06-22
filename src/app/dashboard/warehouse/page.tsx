@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import WarehouseKpi from "./_components/warehouse-kpi"
 import WarehouseFloorPlan from "./_components/warehouse-floor-plan"
 import LotPanel from "./_components/lot-panel"
@@ -44,6 +44,12 @@ export default function WarehousePage() {
   // Bootstrap
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      if (!hasPermission(cachedUser, "warehouse.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)

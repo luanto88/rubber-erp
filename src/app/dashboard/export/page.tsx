@@ -3,7 +3,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getActiveFactoryId } from "@/lib/auth";
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth";
 import {
   dedupeLotsByMaLo,
   normalizeLotCode,
@@ -363,6 +363,7 @@ export default function ExportPage() {
 
   // Vehicle image upload
   const [uploadingVehicleIdx, setUploadingVehicleIdx] = useState<number | null>(null);
+  const [ocrLoadingVehicleIdx, setOcrLoadingVehicleIdx] = useState<number | null>(null);
   const [ocrConfirm, setOcrConfirm] = useState<{ plate: string; vehicleIdx: number } | null>(null);
 
   // Lot search
@@ -461,6 +462,12 @@ export default function ExportPage() {
   // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadXxx trong deps
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null;
+      if (!hasPermission(cachedUser, "export.view")) {
+        setLoading(false);
+        window.location.replace("/dashboard");
+        return;
+      }
       const fid = await getActiveFactoryId();
       if (!fid) {
         setLoading(false);
@@ -866,6 +873,23 @@ export default function ExportPage() {
     0,
   );
 
+  const totalTan = (totalBanh * Number(form.loai_banh)) / 1000;
+
+  const vehicleStats = useMemo(
+    () =>
+      form.vehicles.map((_, idx) => {
+        const assigns = form.assignments.filter((a) => a.vehicleIdx === idx);
+        const banh = assigns.reduce(
+          (s, a) => s + (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0),
+          0,
+        );
+        const lo = new Set(assigns.map((a) => a.lot_id)).size;
+        const tan = (banh * Number(form.loai_banh)) / 1000;
+        return { banh, lo, tan };
+      }),
+    [form.vehicles, form.assignments, form.loai_banh],
+  );
+
   useEffect(() => {
     if (!pendingRetestAttach) return;
 
@@ -1085,6 +1109,7 @@ export default function ExportPage() {
           ),
         }));
         // OCR biển số từ ảnh đầu tiên vừa upload
+        setOcrLoadingVehicleIdx(vehicleIdx);
         void fetch("/api/export/ocr-plate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1092,9 +1117,18 @@ export default function ExportPage() {
         })
           .then((r) => r.json() as Promise<{ plate?: string | null }>)
           .then(({ plate }) => {
-            if (plate) setOcrConfirm({ plate, vehicleIdx });
+            if (plate) {
+              setOcrConfirm({ plate, vehicleIdx });
+            } else {
+              showToast("Không đọc được biển số từ ảnh", "error");
+            }
           })
-          .catch(() => {});
+          .catch(() => {
+            showToast("Không đọc được biển số từ ảnh", "error");
+          })
+          .finally(() => {
+            setOcrLoadingVehicleIdx(null);
+          });
       }
     } finally {
       setUploadingVehicleIdx(null);
@@ -1779,25 +1813,35 @@ export default function ExportPage() {
                                           </span>
                                         </>
                                       )}
-                                      <span className="ml-auto text-emerald-600 font-bold">
-                                        {
-                                          (order.assignments || []).filter(
-                                            (a) => a.vehicleIdx === i,
-                                          ).length
-                                        }{" "}
-                                        lô
-                                      </span>
                                     </div>
-                                    {/* Hiển thị hình ảnh đính kèm nếu có */}
+                                    {/* Thống kê xe + ảnh thumbnail */}
                                     {(() => {
+                                      const vAssignments = (order.assignments || []).filter(
+                                        (a) => a.vehicleIdx === i,
+                                      );
+                                      const totalLots = new Set(vAssignments.map((a) => a.lot_id)).size;
+                                      const totalBanh = vAssignments.reduce(
+                                        (s, a) => s + (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0),
+                                        0,
+                                      );
+                                      const totalTan = totalBanh * (order.loai_banh || 0) / 1000;
                                       const imgs = [
                                         ...(v.image_urls ?? []),
                                         ...(!v.image_urls?.length
                                           ? ([v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[])
                                           : []),
                                       ];
-                                      return imgs.length > 0 ? (
-                                        <div className="flex gap-2 pt-2 border-t border-slate-100 flex-wrap">
+                                      return (
+                                        <div className="flex items-center gap-3 pt-2 border-t border-slate-100 flex-wrap">
+                                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-lg">
+                                            {totalLots} lô
+                                          </span>
+                                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg">
+                                            {totalBanh.toLocaleString("vi-VN")} bành
+                                          </span>
+                                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg">
+                                            {totalTan.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 3 })} tấn
+                                          </span>
                                           {imgs.map((url, imgIdx) => (
                                             <a
                                               key={imgIdx}
@@ -1818,7 +1862,7 @@ export default function ExportPage() {
                                             </a>
                                           ))}
                                         </div>
-                                      ) : null;
+                                      );
                                     })()}
                                   </div>
                                 ))}
@@ -2492,6 +2536,20 @@ export default function ExportPage() {
                       </button>
                     </div>
 
+                    {/* Per-vehicle stats */}
+                    {vehicleStats[idx]?.banh > 0 && (
+                      <div className="mx-3 mb-2 flex items-center gap-4 px-3 py-2 bg-emerald-50 border border-emerald-100 rounded-lg text-xs">
+                        <span className="text-slate-500">Bành:</span>
+                        <span className="font-bold text-emerald-700">{vehicleStats[idx].banh.toLocaleString()}</span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-500">Tấn:</span>
+                        <span className="font-bold text-emerald-700">{vehicleStats[idx].tan.toFixed(3)}</span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-500">Lô:</span>
+                        <span className="font-bold text-emerald-700">{vehicleStats[idx].lo}</span>
+                      </div>
+                    )}
+
                     {/* Ảnh xe */}
                     <div className="px-3 pb-3">
                       <input
@@ -2564,6 +2622,8 @@ export default function ExportPage() {
                       >
                         {uploadingVehicleIdx === idx ? (
                           <span>Đang tải...</span>
+                        ) : ocrLoadingVehicleIdx === idx ? (
+                          <span className="text-violet-500">Đang đọc biển số...</span>
                         ) : (
                           <>
                             <ImagePlus size={13} />
@@ -2671,25 +2731,66 @@ export default function ExportPage() {
           </div>
 
           {/* Summary */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-500">Tổng bành</div>
-              <div className="text-2xl font-extrabold text-emerald-600">
-                {totalBanh.toLocaleString()}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs text-slate-500">Tổng bành</div>
+                <div className="text-2xl font-extrabold text-emerald-600">
+                  {totalBanh.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Tổng tấn</div>
+                <div className="text-2xl font-extrabold text-emerald-700">
+                  {totalTan.toFixed(3)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Tổng lô</div>
+                <div className="text-2xl font-extrabold text-slate-700">
+                  {[...new Set(form.assignments.map((a) => a.lot_id))].length}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Tổng xe</div>
+                <div className="text-2xl font-extrabold text-slate-700">
+                  {form.vehicles.length}
+                </div>
               </div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Tổng lô</div>
-              <div className="text-2xl font-extrabold text-slate-700">
-                {[...new Set(form.assignments.map((a) => a.lot_id))].length}
+            {form.vehicles.length > 0 && form.assignments.length > 0 && (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <div className="text-xs font-bold text-slate-500 mb-2">Chi tiết theo xe</div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400">
+                      <th className="text-left pb-1 font-medium">Xe</th>
+                      <th className="text-right pb-1 font-medium">Bành</th>
+                      <th className="text-right pb-1 font-medium">Tấn</th>
+                      <th className="text-right pb-1 font-medium">Lô</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.vehicles.map((v, idx) => (
+                      <tr key={v.id} className="border-t border-slate-50">
+                        <td className="py-0.5 text-slate-600 font-medium">
+                          {v.bien_truoc || `Xe ${idx + 1}`}
+                        </td>
+                        <td className="text-right text-slate-700">
+                          {vehicleStats[idx].banh.toLocaleString()}
+                        </td>
+                        <td className="text-right text-slate-700">
+                          {vehicleStats[idx].tan.toFixed(3)}
+                        </td>
+                        <td className="text-right text-slate-700">
+                          {vehicleStats[idx].lo}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-500">Tổng xe</div>
-              <div className="text-2xl font-extrabold text-slate-700">
-                {form.vehicles.length}
-              </div>
-            </div>
+            )}
           </div>
         </div>
 

@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
@@ -13,7 +13,7 @@ import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -603,6 +603,8 @@ export default function DispatchPage() {
   const [formRows, setFormRows]         = useState<DxRow[]>([emptyRow()])
   const [editId, setEditId]       = useState<string|null>(null)
   const [saving, setSaving]       = useState(false)
+  const [clonedFrom, setClonedFrom] = useState<string|null>(null)   // ngày phiếu đã nhân bản
+  const [recentEntries, setRecentEntries] = useState<DispatchEntry[]>([]) // gợi ý nhân bản
 
   // Delete
   const [delConfirm, setDelConfirm] = useState<string|null>(null)
@@ -764,6 +766,12 @@ export default function DispatchPage() {
   // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadData trong deps
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      if (!hasPermission(cachedUser, "dispatch.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
@@ -939,33 +947,92 @@ export default function DispatchPage() {
     }
   }
 
-  // Open Add
-  const openAdd = () => {
-    // Default ngĂ y = max(entries) + 1
-    const today = new Date().toISOString().slice(0,10)
-    const maxDate = entries.reduce((mx, e) => { const d = toISO(e.ngay); return d > mx ? d : mx }, today)
+  // Helper: clone rows template — copy xe/tài xế/điểm GN, xóa toàn bộ KL
+  const cloneRowsTemplate = (rows: DxRow[]) =>
+    rows.map(r => ({
+      ...r,
+      uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      kl_ct: "", drc_c: "", kl_ck: "",
+      kl_dct: "", drc_dc: "", kl_dck: "",
+      kl_dkt: "", drc_dk: "", kl_dkk: "",
+      kl_dt: "", kl_dk: "",
+      kl_mn: "", drc_mn: "", kl_mnk: "",
+      ghi_chu: "",
+      locked: false, _warn: undefined,
+    }))
+
+  // Open Add — luôn lấy phiếu gần nhất từ DB (bỏ qua filter ngày đang active)
+  const openAdd = async () => {
+    let recentFromDb: DispatchEntry[] = []
+    if (factoryId) {
+      const { data } = await supabase
+        .from("dispatch_entries")
+        .select("*")
+        .eq("factory_id", factoryId)
+        .order("ngay", { ascending: false })
+        .limit(5)
+      if (data?.length) {
+        recentFromDb = (data as DispatchEntry[]).map(e => ({
+          ...e,
+          day_chuyen: e.day_chuyen || inferDayChuyenFromRows(e.rows),
+        }))
+      }
+    }
+    recentFromDb.sort((a, b) => toISO(b.ngay).localeCompare(toISO(a.ngay)))
+    setRecentEntries(recentFromDb)
+
+    const latest = recentFromDb[0]
+    const today = new Date().toISOString().slice(0, 10)
+    const maxDate = latest ? toISO(latest.ngay) : today
     const nextDay = new Date(maxDate)
     nextDay.setDate(nextDay.getDate() + 1)
-    setFormNgay(nextDay.toISOString().slice(0,10))
-    const latest = entries.find(e => toISO(e.ngay) === maxDate)
+    setFormNgay(nextDay.toISOString().slice(0, 10))
+
     if (latest?.rows?.length) {
-      setFormRows(latest.rows.map(r => ({
-        ...r,
-        uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-        kl_ct: "", drc_c: "", kl_ck: "",
-        kl_dct: "", drc_dc: "", kl_dck: "",
-        kl_dkt: "", drc_dk: "", kl_dkk: "",
-        kl_dt: "", kl_dk: "",
-        ghi_chu: "",
-        locked: false, _warn: undefined,
-      })))
+      setFormRows(cloneRowsTemplate(latest.rows))
+      setClonedFrom(toISO(latest.ngay))
     } else {
       setFormRows([emptyRow()])
+      setClonedFrom(null)
     }
     setFormCN("PEFC CS")
     setFormDayChuyen(latest?.day_chuyen || inferDayChuyenFromRows(latest?.rows))
     setEditId(null)
     setView("add")
+  }
+
+  // Nhân bản từ phiếu cụ thể (nút Copy trong danh sách hoặc gợi ý)
+  const openClone = (entry: DispatchEntry) => {
+    const today = new Date().toISOString().slice(0, 10)
+    setFormNgay(today)
+    setFormCN(entry.chung_nhan || "PEFC CS")
+    setFormDayChuyen(entry.day_chuyen || inferDayChuyenFromRows(entry.rows))
+    setFormRows(entry.rows?.length ? cloneRowsTemplate(entry.rows) : [emptyRow()])
+    setClonedFrom(toISO(entry.ngay))
+    setRecentEntries([])
+    setEditId(null)
+    setView("add")
+  }
+
+  // Nhân bản 1 dòng xe trong form — chẳn ngay sau dòng nguồn, xóa KL
+  const cloneRow = (idx: number) => {
+    const src = formRows[idx]
+    const cloned: DxRow = {
+      ...src,
+      uid: `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      kl_ct: "", drc_c: "", kl_ck: "",
+      kl_dct: "", drc_dc: "", kl_dck: "",
+      kl_dkt: "", drc_dk: "", kl_dkk: "",
+      kl_dt: "", kl_dk: "",
+      kl_mn: "", drc_mn: "", kl_mnk: "",
+      ghi_chu: "",
+      locked: false, _warn: undefined,
+    }
+    setFormRows(r => [
+      ...r.slice(0, idx + 1),
+      cloned,
+      ...r.slice(idx + 1),
+    ])
   }
 
   // Open Edit
@@ -975,6 +1042,8 @@ export default function DispatchPage() {
     setFormCN(entry.chung_nhan || "PEFC CS")
     setFormDayChuyen(entry.day_chuyen || inferDayChuyenFromRows(entry.rows))
     setFormRows(entry.rows?.length ? entry.rows.map(r => ({ ...r })) : [emptyRow()])
+    setClonedFrom(null)
+    setRecentEntries([])
     setView("edit")
   }
 
@@ -990,7 +1059,7 @@ export default function DispatchPage() {
         day_chuyen: formDayChuyen,
         rows: formRows.map((r,i) => ({
           ...r,
-          xu_ly: "XĂ©",
+          xu_ly: r.xu_ly || "Xé",
           doi: resolveAllowedDoi(r.diem_gn || []),
           uid: r.uid || `r_${i}_${Date.now()}`,
           _date: formNgay,
@@ -1016,7 +1085,7 @@ export default function DispatchPage() {
           dayChuyen: formDayChuyen,
           rows: formRows.map((r,i) => ({
             ...r,
-            xu_ly: "XÄ‚Â©",
+            xu_ly: r.xu_ly || "Xé",
             doi: resolveAllowedDoi(r.diem_gn || []),
             uid: r.uid || `r_${i}_${Date.now()}`,
             _date: formNgay,
@@ -1043,7 +1112,7 @@ export default function DispatchPage() {
           dayChuyen: formDayChuyen,
           rows: formRows.map((r,i) => ({
             ...r,
-            xu_ly: "XÄ‚Â©",
+            xu_ly: r.xu_ly || "Xé",
             doi: resolveAllowedDoi(r.diem_gn || []),
             uid: r.uid || `r_${i}_${Date.now()}`,
             _date: formNgay,
@@ -1536,6 +1605,10 @@ export default function DispatchPage() {
                           className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF ngày">
                           <FileText size={14}/>
                         </button>
+                        <button onClick={(e) => { e.stopPropagation(); openClone(entry) }}
+                          className="p-1.5 hover:bg-violet-50 text-violet-500 rounded-lg transition-colors" title="Nhân bản phiếu này">
+                          <Copy size={14}/>
+                        </button>
                         <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
                           className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
                           <Edit2 size={14}/>
@@ -1670,7 +1743,30 @@ export default function DispatchPage() {
         <h1 className="text-xl font-extrabold text-slate-800">
           {editId ? "Sửa bảng phân xe" : "Bảng phân xe vận chuyển"}
         </h1>
+        {clonedFrom && !editId && (
+          <span className="px-2.5 py-0.5 bg-violet-100 text-violet-700 text-xs font-bold rounded-full">
+            Nhân bản từ {clonedFrom.split("-").reverse().join("/")}
+          </span>
+        )}
       </div>
+
+      {/* Gợi ý nhân bản từ phiếu gần đây */}
+      {!editId && recentEntries.length > 0 && (
+        <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-violet-600 shrink-0">Nhân bản từ:</span>
+          {recentEntries.map(e => (
+            <button key={e.id} onClick={() => openClone(e)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
+                clonedFrom === toISO(e.ngay)
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-violet-700 border-violet-300 hover:bg-violet-100"
+              }`}>
+              {toISO(e.ngay).split("-").reverse().join("/")}
+              {e.rows?.length ? ` (${e.rows.length} xe)` : ""}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Dây chuyền — luôn đặt đầu tiên */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-3">
@@ -1882,6 +1978,10 @@ export default function DispatchPage() {
                         <Lock size={14}/>
                       </button>
                     : <div className="flex gap-0.5">
+                        <button onClick={() => cloneRow(idx)}
+                          title="Nhân bản dòng" className="p-1.5 text-violet-400 hover:bg-violet-50 rounded-lg transition-colors">
+                          <Copy size={14}/>
+                        </button>
                         <button onClick={() => updateRow(idx,"locked",true)}
                           title="Khóa hàng" className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
                           <Unlock size={14}/>

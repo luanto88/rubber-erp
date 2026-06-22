@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
 import {
   AlertTriangle,
@@ -222,6 +222,11 @@ export default function OutputPage() {
         hydrateActiveSession().catch(() => ({ session: null, user: null })),
       ])
       setCurrentUser((authState.user as SessionUser | null) ?? null)
+      if (!hasPermission(authState.user as SessionUser | null, "output.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       if (!fid) {
         setLoading(false)
         return
@@ -514,7 +519,7 @@ export default function OutputPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-extrabold text-slate-800">
@@ -695,7 +700,7 @@ export default function OutputPage() {
 
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1080px] text-sm">
+                  <table className="w-full min-w-[960px] text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50">
                       <tr>
                         {isAdmin && (
@@ -708,7 +713,7 @@ export default function OutputPage() {
                             />
                           </th>
                         )}
-                        {["Xe", "Chuyến", "Đội", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ghi chú"].map((header) => (
+                        {["Xe", "Chuyến", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ghi chú"].map((header) => (
                           <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
                         ))}
                         {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Thao tác</th>}
@@ -736,7 +741,6 @@ export default function OutputPage() {
                             )}
                             <td className="px-4 py-3 font-bold text-emerald-700">{record.so_xe || "—"}</td>
                             <td className="px-4 py-3"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{record.chuyen}</span></td>
-                            <td className="px-4 py-3 font-semibold text-slate-700">Đội {record.doi}</td>
                             <td className="px-4 py-3 text-slate-700">{record.tai_xe || "—"}</td>
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-1">
@@ -774,28 +778,22 @@ export default function OutputPage() {
           ) : (
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1040px] text-sm">
+                <table className="w-full min-w-[900px] text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50">
                     <tr>
-                      {["Ngày", "Đội", "Số xe", "Ghi chú", "Cảnh báo", "Tổng KL tươi", "Tổng KL khô", "Thao tác"].map((header) => (
+                      {["Ngày", "Số xe", "Ghi chú", "Cảnh báo", "Tổng KL tươi", "Tổng KL khô", "Thao tác"].map((header) => (
                         <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {groupedDates.map(({ ngay, records: dayRecords, totalTuoi, totalKho }) => {
-                      const dois = [...new Set(dayRecords.map((record) => record.doi))].sort((a, b) => a - b)
                       const vehicleCount = [...new Set(dayRecords.map((record) => record.so_xe))].length
                       const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter(Boolean))]
                       const dayWarnCount = dayRecords.reduce((sum, record) => sum + record.warn_codes.length, 0)
                       return (
                         <tr key={ngay} className="cursor-pointer transition-colors hover:bg-slate-50">
                           <td className="px-4 py-3 font-bold text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtDate(ngay)}</td>
-                          <td className="px-4 py-3" onClick={() => openDayDetail(ngay)}>
-                            <div className="flex flex-wrap gap-1">
-                              {dois.map((doi) => <span key={doi} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">Đội {doi}</span>)}
-                            </div>
-                          </td>
                           <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{vehicleCount} xe / {dayRecords.length} dòng</td>
                           <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{notes.length > 0 ? notes.join(", ") : "—"}</td>
                           <td className="px-4 py-3" onClick={() => openDayDetail(ngay)}>

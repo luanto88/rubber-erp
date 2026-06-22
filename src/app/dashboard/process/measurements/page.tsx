@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  AlertTriangle, ChevronLeft, ClipboardCheck, Eye, Plus,
+  AlertTriangle, Camera, ChevronLeft, ClipboardCheck, Eye, Plus,
   Printer, Trash2, X, ImageIcon, Upload,
 } from "lucide-react"
 import { getActiveFactoryId } from "@/lib/auth"
@@ -46,6 +46,13 @@ function fmtCheDo(t1: number | null, t2: number | null, tg: number | null): stri
   return parts.join("-")
 }
 
+function shortNganStatus(trang_thai: string): string {
+  if (trang_thai.includes("Chờ")) return "Chờ SX"
+  if (trang_thai.includes("Đang")) return "Đang SX"
+  if (trang_thai.includes("Đã")) return "Đã SX"
+  return trang_thai.slice(0, 5)
+}
+
 export default function MeasurementsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SheetWithRows[]>([])
@@ -61,6 +68,7 @@ export default function MeasurementsPage() {
   // view
   const [view, setView] = useState<ViewMode>("list")
   const [selected, setSelected] = useState<SheetWithRows | null>(null)
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
 
   // create form
   const [formNgay, setFormNgay] = useState(new Date().toISOString().slice(0, 10))
@@ -75,6 +83,11 @@ export default function MeasurementsPage() {
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeRowRef = useRef<string | null>(null)
+
+  // OCR
+  const [ocrLoadingKey, setOcrLoadingKey] = useState<string | null>(null)
+  const ocrFileInputRef = useRef<HTMLInputElement>(null)
+  const ocrActiveRef = useRef<{ rowId: string; chiTieu: string } | null>(null)
 
   // Load sheets
   const loadSheets = useCallback(async (fid: string) => {
@@ -178,18 +191,42 @@ export default function MeasurementsPage() {
     isProductSelectableStorageStatus(n.trang_thai) && Number(n.tong_kho || 0) > 0
   )
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setFormNgay(new Date().toISOString().slice(0, 10))
     setFormDayChuyen("")
     setFormLoaiCsr("")
     setDefaultCheDo("")
-    setRows([emptyMeasurementRow(currentUserName)])
     setSaveError(null)
+
+    // Gợi ý ngăn từ lô gần nhất
+    let suggestedNganId = ""
+    if (factoryId) {
+      const { data: lotData } = await supabase
+        .from("lots")
+        .select("ngan_id")
+        .eq("factory_id", factoryId)
+        .not("ngan_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+      const candidateId = (lotData?.[0] as { ngan_id?: string } | undefined)?.ngan_id ?? ""
+      if (candidateId && selectableNgans.some(n => n.id === candidateId)) {
+        suggestedNganId = candidateId
+      }
+    }
+
+    const firstRow = emptyMeasurementRow(currentUserName)
+    if (suggestedNganId) {
+      const ngan = selectableNgans.find(n => n.id === suggestedNganId)
+      firstRow.ngan_id = suggestedNganId
+      firstRow.so_ngay_luu = ngan?.ngay_bd
+        ? calcSoNgayLuu(new Date().toISOString().slice(0, 10), ngan.ngay_bd)
+        : null
+    }
+    setRows([firstRow])
     setView("create")
   }
 
   const openView = async (sheet: SheetWithRows) => {
-    // reload rows
     const { data } = await supabase
       .from("quick_measurement_rows")
       .select("*")
@@ -211,17 +248,13 @@ export default function MeasurementsPage() {
     setRows(prev => prev.map(row => {
       if (row.id !== id) return row
       const next = { ...row, ...patch }
-      // auto-calc so_ngay_luu if ngan changes
       if (patch.ngan_id !== undefined) {
         const ngan = ngans.find(n => n.id === patch.ngan_id)
         next.so_ngay_luu = ngan?.ngay_bd ? calcSoNgayLuu(formNgay, ngan.ngay_bd) : null
       }
-      // clear ket_qua keys not in chi_tieu
       if (patch.chi_tieu !== undefined) {
         const newKQ: Record<string, string> = {}
-        patch.chi_tieu.forEach(ct => {
-          newKQ[ct] = next.ket_qua[ct] || ""
-        })
+        patch.chi_tieu.forEach(ct => { newKQ[ct] = next.ket_qua[ct] || "" })
         next.ket_qua = newKQ
       }
       return next
@@ -320,13 +353,82 @@ export default function MeasurementsPage() {
     }
   }
 
+  const handleOcrUpload = async (file: File, rowId: string, chiTieu: string) => {
+    if (!factoryId) return
+    const key = `${rowId}-${chiTieu}`
+    setOcrLoadingKey(key)
+    try {
+      // Đọc base64 từ file
+      const arrayBuffer = await file.arrayBuffer()
+      const uint8 = new Uint8Array(arrayBuffer)
+      let binary = ""
+      for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
+      const imageBase64 = btoa(binary)
+      const mimeType = file.type || "image/jpeg"
+
+      // Gọi Gemini OCR
+      const res = await fetch("/api/process/ocr-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64, mimeType, chiTieu }),
+      })
+      const json = await res.json() as { value?: number; error?: string }
+      if (json.error || json.value == null) return
+
+      // Upload ảnh lên Storage
+      const ext = file.name.split(".").pop() || "jpg"
+      const path = `${factoryId}/process/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+      const newUrls: string[] = []
+      const { error: uploadErr } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from("order-files").getPublicUrl(path)
+        newUrls.push(urlData.publicUrl)
+      }
+
+      // Điền kết quả và gắn ảnh
+      setRows(prev => prev.map(row => {
+        if (row.id !== rowId) return row
+        return {
+          ...row,
+          ket_qua: { ...row.ket_qua, [chiTieu]: String(json.value) },
+          image_urls: [...row.image_urls, ...newUrls].slice(0, 6),
+        }
+      }))
+    } finally {
+      setOcrLoadingKey(null)
+    }
+  }
+
   const chiTieuForCsr = formLoaiCsr ? (CHI_TIEU_BY_CSR[formLoaiCsr] || []) : []
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
 
+  // Lightbox phóng to ảnh — dùng chung cho mọi view
+  const lightbox = zoomImageUrl ? (
+    <div
+      className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center"
+      onClick={() => setZoomImageUrl(null)}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={zoomImageUrl}
+        alt="Phóng to"
+        className="max-w-[90vw] max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      />
+      <button
+        onClick={() => setZoomImageUrl(null)}
+        className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors"
+      >
+        <X size={20} />
+      </button>
+    </div>
+  ) : null
+
   if (view === "view" && selected) {
     return (
       <ProcessShell>
+        {lightbox}
         <div className="flex items-center gap-3 mb-4">
           <button onClick={() => setView("list")}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
@@ -414,10 +516,16 @@ export default function MeasurementsPage() {
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-1">
                           {(row.image_urls || []).map((url, j) => (
-                            <a key={j} href={url} target="_blank" rel="noreferrer">
+                            <button
+                              key={j}
+                              type="button"
+                              onClick={() => setZoomImageUrl(url)}
+                              className="shrink-0 focus:outline-none"
+                            >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={url} alt={`Ảnh ${j + 1}`} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
-                            </a>
+                              <img src={url} alt={`Ảnh ${j + 1}`}
+                                className="w-10 h-10 object-cover rounded-lg border border-slate-200 hover:opacity-80 transition-opacity" />
+                            </button>
                           ))}
                         </div>
                       </td>
@@ -435,6 +543,7 @@ export default function MeasurementsPage() {
   if (view === "create") {
     return (
       <ProcessShell>
+        {lightbox}
         {saveError && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
             <AlertTriangle size={16} className="shrink-0" />
@@ -498,6 +607,7 @@ export default function MeasurementsPage() {
               isMatTap={formDayChuyen === "Mủ tạp"}
               ngay={formNgay}
               uploadingRowId={uploadingRowId}
+              ocrLoadingKey={ocrLoadingKey}
               fileInputRef={fileInputRef}
               activeRowRef={activeRowRef}
               onChange={(patch) => updateRow(row.id, patch)}
@@ -506,10 +616,16 @@ export default function MeasurementsPage() {
                 activeRowRef.current = row.id
                 fileInputRef.current?.click()
               }}
+              onOcrImage={(chiTieu) => {
+                ocrActiveRef.current = { rowId: row.id, chiTieu }
+                ocrFileInputRef.current?.click()
+              }}
+              onZoomImage={setZoomImageUrl}
             />
           ))}
         </div>
 
+        {/* Hidden file inputs */}
         <input
           ref={fileInputRef}
           type="file"
@@ -519,6 +635,19 @@ export default function MeasurementsPage() {
           onChange={e => {
             if (e.target.files && activeRowRef.current) {
               void handleImageUpload(e.target.files, activeRowRef.current)
+              e.target.value = ""
+            }
+          }}
+        />
+        <input
+          ref={ocrFileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => {
+            const file = e.target.files?.[0]
+            if (file && ocrActiveRef.current) {
+              void handleOcrUpload(file, ocrActiveRef.current.rowId, ocrActiveRef.current.chiTieu)
               e.target.value = ""
             }
           }}
@@ -541,13 +670,14 @@ export default function MeasurementsPage() {
   // LIST VIEW
   return (
     <ProcessShell>
+      {lightbox}
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Đo nhanh chỉ tiêu</h1>
           <p className="text-sm text-slate-500 mt-0.5">Phiếu đo Po, Mooney tại dây chuyền</p>
         </div>
-        <button onClick={openCreate}
+        <button onClick={() => void openCreate()}
           className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-md transition-all">
           <Plus size={16} /> Tạo phiếu mới
         </button>
@@ -654,16 +784,19 @@ type MeasurementRowFormProps = {
   isMatTap: boolean
   ngay: string
   uploadingRowId: string | null
+  ocrLoadingKey: string | null
   fileInputRef: React.RefObject<HTMLInputElement | null>
-  activeRowRef: React.MutableRefObject<string | null>
+  activeRowRef: React.RefObject<string | null>
   onChange: (patch: Partial<MeasurementRowDraft>) => void
   onRemove: () => void
   onPickImage: () => void
+  onOcrImage: (chiTieu: string) => void
+  onZoomImage: (url: string) => void
 }
 
 function MeasurementRowForm({
   row, index, chiTieuOptions, selectableNgans, isMatTap,
-  uploadingRowId, onChange, onRemove, onPickImage
+  uploadingRowId, ocrLoadingKey, onChange, onRemove, onPickImage, onOcrImage, onZoomImage
 }: MeasurementRowFormProps) {
   const toggleCT = (ct: string) => {
     const current = row.chi_tieu || []
@@ -738,16 +871,31 @@ function MeasurementRowForm({
 
         {/* Row 2: ket_qua + ngan (if mat tap) */}
         <div className="flex flex-wrap gap-4 items-start">
-          {row.chi_tieu.map(ct => (
-            <div key={ct}>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Kết quả {ct}</label>
-              <input type="number" step="0.1"
-                value={row.ket_qua[ct] || ""}
-                onChange={e => onChange({ ket_qua: { ...row.ket_qua, [ct]: e.target.value } })}
-                placeholder={`${ct}...`}
-                className="w-24 px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
-            </div>
-          ))}
+          {row.chi_tieu.map(ct => {
+            const ocrKey = `${row.id}-${ct}`
+            const isOcrLoading = ocrLoadingKey === ocrKey
+            return (
+              <div key={ct}>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Kết quả {ct}</label>
+                <div className="flex items-center gap-1">
+                  <input type="number" step="0.1"
+                    value={row.ket_qua[ct] || ""}
+                    onChange={e => onChange({ ket_qua: { ...row.ket_qua, [ct]: e.target.value } })}
+                    placeholder={`${ct}...`}
+                    className="w-24 px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
+                  <button
+                    type="button"
+                    title={`Chụp ảnh OCR ${ct}`}
+                    disabled={isOcrLoading}
+                    onClick={() => onOcrImage(ct)}
+                    className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors disabled:opacity-40"
+                  >
+                    <Camera size={14} className={isOcrLoading ? "animate-pulse text-teal-500" : ""} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
           {isMatTap && (
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngăn lưu (Mủ tạp)</label>
@@ -756,7 +904,7 @@ function MeasurementRowForm({
                 <option value="">— Chọn ngăn —</option>
                 {selectableNgans.map(n => (
                   <option key={n.id} value={n.id}>
-                    {n.ma_ngan} – {n.ten_ngan}
+                    {n.ma_ngan} – {n.ten_ngan} ({shortNganStatus(n.trang_thai)} · {Number(n.tong_kho || 0).toLocaleString("vi-VN")} kg)
                   </option>
                 ))}
               </select>
@@ -783,8 +931,11 @@ function MeasurementRowForm({
           <div className="flex flex-wrap gap-2 items-center">
             {row.image_urls.map((url, j) => (
               <div key={j} className="relative group">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt={`Ảnh ${j + 1}`} className="w-14 h-14 object-cover rounded-xl border border-slate-200" />
+                <button type="button" onClick={() => onZoomImage(url)} className="focus:outline-none">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt={`Ảnh ${j + 1}`}
+                    className="w-14 h-14 object-cover rounded-xl border border-slate-200 hover:opacity-80 transition-opacity" />
+                </button>
                 <button
                   onClick={() => onChange({ image_urls: row.image_urls.filter((_, k) => k !== j) })}
                   className="absolute -top-1.5 -right-1.5 p-0.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"

@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useRef, useState } from "react"
-import { ImagePlus, Loader2, X } from "lucide-react"
+import { ImagePlus, Loader2, X, ZoomIn } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 type UploadedImagePayload = {
@@ -38,9 +38,9 @@ function sanitizeFilename(name: string) {
 
 function extractFilename(url: string) {
   try {
-    return decodeURIComponent(url.split("/").pop() || "Anh da tai")
+    return decodeURIComponent(url.split("/").pop() || "Ảnh đã tải")
   } catch {
-    return "Anh da tai"
+    return "Ảnh đã tải"
   }
 }
 
@@ -58,7 +58,7 @@ async function uploadViaServer(params: {
   const { data, error } = await supabase.auth.getSession()
   if (error) throw error
   if (!data.session?.access_token) {
-    throw new Error("Phien dang nhap da het han. Vui long dang nhap lai.")
+    throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")
   }
 
   const body = new FormData()
@@ -77,7 +77,7 @@ async function uploadViaServer(params: {
 
   const payload = (await response.json().catch(() => null)) as { error?: string; publicUrl?: string } | null
   if (!response.ok || !payload?.publicUrl) {
-    throw new Error(payload?.error || "Khong tai duoc anh len may chu.")
+    throw new Error(payload?.error || "Không tải được ảnh lên máy chủ.")
   }
 
   return payload.publicUrl
@@ -108,6 +108,30 @@ export async function uploadInventoryImage(params: {
   return { publicUrl: data.publicUrl }
 }
 
+function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute right-4 top-4 rounded-full bg-white/20 p-2 text-white transition hover:bg-white/40"
+        aria-label="Đóng"
+      >
+        <X size={20} />
+      </button>
+      <img
+        src={url}
+        alt="Xem ảnh"
+        className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
 export function InventoryImageUpload({
   factoryId,
   documentType,
@@ -121,6 +145,7 @@ export function InventoryImageUpload({
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   const handlePick = () => {
     inputRef.current?.click()
@@ -131,7 +156,7 @@ export function InventoryImageUpload({
     if (!file) return
 
     if (!factoryId) {
-      setError("Chua xac dinh duoc nha may de tai anh.")
+      setError("Chưa xác định được nhà máy để tải ảnh.")
       event.target.value = ""
       return
     }
@@ -144,7 +169,7 @@ export function InventoryImageUpload({
       onChange(publicUrl)
       onUploadComplete?.({ publicUrl, fileName: file.name })
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Khong tai duoc anh.")
+      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
     } finally {
       setUploading(false)
       event.target.value = ""
@@ -154,27 +179,49 @@ export function InventoryImageUpload({
   return (
     <div>
       <label className="mb-1.5 block text-xs font-bold text-slate-600">{label}</label>
-      <div className="flex items-center gap-2">
+      {value ? (
+        <div className="flex items-center gap-2">
+          <div
+            className="group relative h-14 w-14 cursor-zoom-in overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm"
+            onClick={() => setLightboxUrl(value)}
+            title="Nhấn để xem ảnh lớn"
+          >
+            <img src={value} alt="Ảnh đã tải" className="h-full w-full object-cover" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/20">
+              <ZoomIn size={16} className="text-white opacity-0 transition group-hover:opacity-100" />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={handlePick}
+              disabled={uploading}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
+              {uploading ? "Đang tải..." : "Thay ảnh"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50"
+            >
+              <X size={12} />
+              Xóa ảnh
+            </button>
+          </div>
+        </div>
+      ) : (
         <button
           type="button"
           onClick={handlePick}
           disabled={uploading}
-          className="flex min-h-[42px] flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-sm font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+          className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-sm font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
         >
           {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-          {uploading ? "Dang tai..." : value ? extractFilename(value) : "Chon anh"}
+          {uploading ? "Đang tải..." : "Chọn ảnh"}
         </button>
-        {value ? (
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            className="rounded-xl border border-slate-200 p-2 text-slate-500 hover:bg-slate-100"
-            aria-label="Xoa anh"
-          >
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
+      )}
       {error ? <div className="mt-1 text-xs text-red-600">{error}</div> : null}
       {helperText ? <div className="mt-1 text-[11px] text-slate-400">{helperText}</div> : null}
       <input
@@ -184,6 +231,7 @@ export function InventoryImageUpload({
         className="hidden"
         onChange={handleFileChange}
       />
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
     </div>
   )
 }
@@ -201,6 +249,7 @@ export function InventoryImageUploadGroup({
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const normalizedValues: [string, string] = [values[0] || "", values[1] || ""]
   const filledCount = normalizedValues.filter(Boolean).length
 
@@ -220,7 +269,7 @@ export function InventoryImageUploadGroup({
     if (files.length === 0) return
 
     if (!factoryId) {
-      setError("Chua xac dinh duoc nha may de tai anh.")
+      setError("Chưa xác định được nhà máy để tải ảnh.")
       return
     }
 
@@ -229,12 +278,12 @@ export function InventoryImageUploadGroup({
       .filter((value): value is 0 | 1 => value !== null)
 
     if (emptySlots.length === 0) {
-      setError("Da du 2 anh. Vui long xoa bot anh cu de tai anh moi.")
+      setError("Đã đủ 2 ảnh. Vui lòng xóa bớt ảnh cũ để tải ảnh mới.")
       return
     }
 
     if (files.length > emptySlots.length) {
-      setError(`Chi con the tai them ${emptySlots.length} anh.`)
+      setError(`Chỉ còn thể tải thêm ${emptySlots.length} ảnh.`)
       return
     }
 
@@ -268,7 +317,7 @@ export function InventoryImageUploadGroup({
       onChange(next)
       onUploadComplete?.(payloads)
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Khong tai duoc anh.")
+      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
     } finally {
       setUploading(false)
     }
@@ -286,14 +335,21 @@ export function InventoryImageUploadGroup({
             >
               <img
                 src={value}
-                alt={`Anh phieu ${index + 1}`}
-                className="h-full w-full object-cover"
+                alt={`Ảnh phiếu ${index + 1}`}
+                className="h-full w-full cursor-zoom-in object-cover"
+                onClick={() => setLightboxUrl(value)}
+                title="Nhấn để xem ảnh lớn"
               />
+              <div
+                className="pointer-events-none absolute inset-0 flex items-end justify-center bg-black/0 pb-0.5 transition group-hover:bg-black/10"
+              >
+                <ZoomIn size={12} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
+              </div>
               <button
                 type="button"
                 onClick={() => handleRemove(index as 0 | 1)}
                 className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm transition hover:bg-white"
-                aria-label={`Xoa anh ${index + 1}`}
+                aria-label={`Xóa ảnh ${index + 1}`}
               >
                 <X size={10} />
               </button>
@@ -307,7 +363,7 @@ export function InventoryImageUploadGroup({
             onClick={handlePick}
             disabled={uploading}
             className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white text-slate-400 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-            title={uploading ? "Dang tai anh..." : "Chon toi da 2 anh"}
+            title={uploading ? "Đang tải ảnh..." : "Chọn ảnh (tối đa 2 ảnh)"}
           >
             {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
           </button>
@@ -323,8 +379,7 @@ export function InventoryImageUploadGroup({
         className="hidden"
         onChange={handleFileChange}
       />
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
     </div>
   )
 }
-
-

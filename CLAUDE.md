@@ -370,6 +370,14 @@ Vi du:
 - 2 file phu soat xet (`file_phieu_yeu_cau_thay_doi_*`, `file_de_nghi_soat_xet_*`) chi hien/cho dat QR o buoc `soan_thao`; buoc `xem_xet` va `phe_duyet` khong hien lai QR draggable.
 - Tinh nang `Nhan ban chu ky` cho file phu phai nhan ban ca o ten nguoi ky; o ten ban sao phai drag/resize duoc va luu dung vi tri user dat.
 
+## Ghi chú Permission Guard (2026-06-22)
+
+- Tất cả trang dashboard đã có permission guard trong bootstrap, sử dụng `hasPermission(user, "module.view")`.
+- Pattern chuẩn: gọi `hasPermission` ngay sau `setCurrentUser(...)`, trước khi fetch `factoryId` hay load data. Nếu không đủ quyền: `setLoading(false); window.location.replace("/dashboard"); return`.
+- `EudrClient.tsx` đã chuyển sang `hydrateActiveSession()` + `export.view` guard — KHÔNG còn đọc `localStorage.getItem("erp_factory")` trực tiếp.
+- `inventory/layout.tsx` là client layout guard bảo vệ toàn bộ sub-routes `/dashboard/inventory/*`.
+- Quy tắc chi tiết guard theo trang: `.claude/rules/12-settings-permissions.md` mục "Permission guard theo trang".
+
 ## Nho ky
 
 - Khong xoa file hay xoa du lieu khi chua duoc xac nhan

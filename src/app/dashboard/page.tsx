@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase"
 import { Package, Warehouse, ClipboardCheck, FileOutput, Truck, Plus, Map, TrendingUp, ArrowRight } from "lucide-react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { useRouter } from "next/navigation"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -51,11 +51,14 @@ export default function DashboardPage() {
   const [monthlyData, setMonthlyData] = useState<{ month: string; orders: number; banh: number }[]>([])
   const [recentLots, setRecentLots] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const revealRef = useScrollReveal()
 
   useEffect(() => {
     const load = async () => {
-      const fid = await getActiveFactoryId()
+      const { user } = await hydrateActiveSession().catch(() => ({ user: null as SessionUser | null }))
+      setCurrentUser(user)
+      const fid = user?.factory_id || await getActiveFactoryId()
       if (!fid) {
         setLoading(false)
         return
@@ -193,12 +196,14 @@ export default function DashboardPage() {
           >
             <Map size={16} /> Bản đồ lô
           </button>
-          <button
-            onClick={() => router.push("/dashboard/product")}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm shadow-md transition-all"
-          >
-            <Plus size={16} /> Tạo lô mới
-          </button>
+          {hasPermission(currentUser, "product.create") && (
+            <button
+              onClick={() => router.push("/dashboard/product")}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm shadow-md transition-all"
+            >
+              <Plus size={16} /> Tạo lô mới
+            </button>
+          )}
         </div>
       </div>
 

@@ -177,6 +177,61 @@ Mô hình quyền:
 - Nhưng phải có guard ở logic thao tác, không chỉ ẩn UI
 - Mọi action nhạy cảm như xóa, import, duyệt, sửa config phải check quyền thật
 
+## Permission guard theo trang (Pattern A — bootstrap guard)
+
+Các trang sau dùng `hydrateActiveSession()` trong bootstrap và phải check quyền ngay sau `setCurrentUser(...)`, trước khi load data:
+
+| Trang | Guard permission |
+|---|---|
+| `storage/page.tsx` | `storage.view` |
+| `output/page.tsx` | `output.view` |
+| `product/page.tsx` | `product.view` |
+| `warehouse/page.tsx` | `warehouse.view` |
+| `dispatch/page.tsx` | `dispatch.view` |
+| `quality/page.tsx` | `quality.view` |
+| `export/page.tsx` | `export.view` |
+| `iso/page.tsx` (và con) | `iso.view` |
+| `documents/page.tsx` (và con) | `documents.view` |
+| `process/page.tsx` (và con) | `process.view` |
+| `maintenance/page.tsx` (và con) | `maintenance.view` |
+| `eudr/EudrClient.tsx` | `export.view` |
+
+### Settings page — guard đặc biệt
+
+`settings/page.tsx` kiểm tra **BẤT KỲ** quyền nào trong danh sách sau (redirect nếu không có quyền nào):
+
+```typescript
+if (
+  !hasPermission(sessionUser, "settings.manage_config") &&
+  !hasPermission(sessionUser, "users.view") &&
+  !hasPermission(sessionUser, "users.approve") &&
+  !hasPermission(sessionUser, "settings.master_data") &&
+  !hasPermission(sessionUser, "settings.maintenance_config") &&
+  !hasPermission(sessionUser, "iso.signature")
+) {
+  setLoading(false)
+  window.location.replace("/dashboard")
+  return
+}
+```
+
+### Inventory layout guard
+
+`src/app/dashboard/inventory/layout.tsx` là client layout bảo vệ **toàn bộ** sub-routes `/dashboard/inventory/*`:
+- Dùng `hydrateActiveSession()` + `hasPermission(user, "inventory.view")`
+- Trả về `null` (trắng trang) trong khi kiểm tra
+- Redirect `/dashboard` nếu không đủ quyền
+
+Pattern chuẩn của guard trong bootstrap:
+
+```typescript
+if (!hasPermission(authState.user, "module.view")) {
+  setLoading(false)
+  window.location.replace("/dashboard")
+  return
+}
+```
+
 ## Gợi ý role tổng quát
 
 - `admin`: toàn quyền

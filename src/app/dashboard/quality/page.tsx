@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import {
@@ -868,6 +868,13 @@ export default function QualityPage() {
   // ── Bootstrap — chỉ chạy 1 lần khi mount để lấy factory ID ─────────────────
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      if (!hasPermission(cachedUser, "quality.view")) {
+        setLoading(false)
+        setLotsLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       const fid = await getActiveFactoryId()
       if (!fid) {
         setLoading(false)

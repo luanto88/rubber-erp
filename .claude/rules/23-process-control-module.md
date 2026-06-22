@@ -183,6 +183,14 @@ src/app/dashboard/process/
 2. Thêm dòng đo: toggle chỉ tiêu → nhập kết quả động theo chỉ tiêu đã chọn.
 3. Lưu: insert header vào `quick_measurements` trước, rồi insert tất cả rows vào `quick_measurement_rows`.
 
+### UX nâng cao (2026-06-22)
+
+- **Dropdown ngăn lưu**: helper `shortNganStatus(trang_thai)` hiển thị trạng thái rút gọn (Chờ SX, Đang SX, Đã SX). Option text: `{ma_ngan} – {ten_ngan} ({shortNganStatus} · {tong_kho} kg)`.
+- **Gợi ý ngăn gần nhất**: `openCreate()` là async — query `lots.ngan_id` lấy lô tạo gần nhất của nhà máy, pre-fill `rows[0].ngan_id` nếu ngăn đó còn trong `selectableNgans`.
+- **OCR Camera Po/Mo**: nút Camera lucide cạnh mỗi input kết quả thuộc chỉ tiêu `Po` hoặc `Mo`. Click → trigger hidden `<input type="file" accept="image/*">` qua `ocrFileInputRef`. Upload ảnh → đọc base64 → POST `/api/process/ocr-image` → auto-fill giá trị + upload ảnh vào Storage bucket `order-files`. State `ocrLoadingKey: string | null` (key = `rowId-chiTieu`) hiện spinner animation khi đang OCR.
+- **Lightbox ảnh**: click thumbnail bất kỳ (cả view mode lẫn create mode) → `zoomImageUrl` state → overlay `fixed inset-0 z-[100] bg-black/80` phóng to ảnh toàn màn hình; click ngoài hoặc nút × để đóng.
+- **OCR API route**: `src/app/api/process/ocr-image/route.ts` — POST `{ imageBase64, mimeType, chiTieu }` → Gemini `gemini-1.5-flash` Vision → `{ value: number }`. Cần `GEMINI_API_KEY` trong env.
+
 ### MeasurementRowDraft
 
 UI dùng `MeasurementRowDraft` (dùng `ket_qua: Record<string, string>` để lưu input string trước khi parse float khi save).

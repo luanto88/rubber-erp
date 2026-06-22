@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession } from "@/lib/auth"
 import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
@@ -460,15 +461,22 @@ export default function EudrClient() {
   const showToast = (msg: string, ok = true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),3500) }
 
   useEffect(() => {
-    const fid = localStorage.getItem("erp_factory")
-    if (fid) {
+    const bootstrap = async () => {
+      const { user } = await hydrateActiveSession().catch(() => ({ user: null }))
+      if (!hasPermission(user, "export.view")) {
+        window.location.replace("/dashboard")
+        return
+      }
+      const fid = user?.factory_id || await getActiveFactoryId()
+      if (!fid) return
       setFactoryId(fid)
       supabase.from("factories")
         .select("id,full_name_en,address_en,contact_person,contact_email,website,country_en")
         .eq("id", fid).single()
         .then(({ data }) => { if (data) setFactory(data as FactoryProfile) })
+      if (initOrder) searchOrder(initOrder, fid)
     }
-    if (initOrder) searchOrder(initOrder, fid ?? "")
+    void bootstrap()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

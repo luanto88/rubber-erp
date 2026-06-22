@@ -17,6 +17,10 @@ localStorage.setItem("erp_factory", factoryId)
 
 Khong dung `localStorage` de luu data nghiep vu.
 
+**Ví dụ vi phạm đã được fix**: `EudrClient.tsx` trước đây dùng `localStorage.getItem("erp_factory")` trực tiếp để lấy `factoryId` mà không qua auth session — đây là lỗ hổng bảo mật cho phép người dùng chưa xác thực truy cập trang. Đã được sửa để dùng `hydrateActiveSession()` + `getActiveFactoryId()`.
+
+Khi tìm thấy bất kỳ trang nào còn đọc `localStorage.getItem("erp_factory")` trực tiếp trong bootstrap mà không qua `hydrateActiveSession()` hoặc `getActiveFactoryId()` — đó là bug bảo mật cần fix.
+
 ## Session cache va session that
 
 - `localStorage` chi la lop cache UI, khong phai source of truth cuoi cung

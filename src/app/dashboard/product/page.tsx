@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   getActiveFactoryId,
+  hasPermission,
   hydrateActiveSession,
   type SessionUser,
 } from "@/lib/auth";
@@ -1303,6 +1304,11 @@ export default function ProductPage() {
         user: null as SessionUser | null,
       }));
       setCurrentUser(authState.user);
+      if (!hasPermission(authState.user, "product.view")) {
+        setLoading(false);
+        window.location.replace("/dashboard");
+        return;
+      }
 
       const fid = authState.user?.factory_id || (await getActiveFactoryId());
       if (!fid) {
@@ -5039,7 +5045,7 @@ export default function ProductPage() {
       </div>
 
       {editModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
               <div>
@@ -5748,7 +5754,6 @@ export default function ProductPage() {
                               {canEdit && lot ? (
                                 <button
                                   onClick={() => {
-                                    setEditDateModal(null);
                                     openEdit(lot, c.transaction_id);
                                   }}
                                   className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
