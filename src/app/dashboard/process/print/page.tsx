@@ -87,9 +87,10 @@ export default function ProcessPrintPage() {
 
       // Lần 1: useCORS=true, không allowTaint → canvas sạch, ảnh load nếu có CORS header
       // Nếu ảnh không có CORS header thì ảnh xuất hiện trắng nhưng toBlob() vẫn chạy được
-      // Tailwind v4 dùng oklch()/lab() trong CSS custom properties mà html2canvas
-      // không parse được → xóa các stylesheet đó khỏi bản clone trước khi chụp.
-      // Phiếu dùng inline styles là chính nên không ảnh hưởng layout.
+      // Tailwind v4 dùng oklch()/lab() — html2canvas không parse được → xóa stylesheet đó.
+      // Sau đó inject lại các utility class cần thiết với hex an toàn + bỏ overflow
+      // để capture toàn bộ bảng (không bị cắt trên mobile).
+      // font-feature-settings: normal tắt ligature phân số khiến "6/0" bị render sai glyph.
       const patchClone = (clonedDoc: Document) => {
         Array.from(clonedDoc.querySelectorAll("style")).forEach(s => {
           if (s.textContent?.includes("oklch") || s.textContent?.includes("lab(")) {
@@ -97,8 +98,40 @@ export default function ProcessPrintPage() {
           }
         })
         Array.from(clonedDoc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).forEach(l => l.remove())
+
+        const safe = clonedDoc.createElement("style")
+        safe.textContent = `
+          * { font-feature-settings: normal !important; font-variant-numeric: normal !important; }
+          .overflow-hidden { overflow: visible !important; }
+          .overflow-x-auto { overflow: visible !important; width: auto !important; }
+          .bg-white { background-color: #ffffff !important; }
+          .bg-slate-50 { background-color: #f8fafc !important; }
+          .flex { display: flex !important; }
+          .flex-wrap { flex-wrap: wrap !important; }
+          .items-start { align-items: flex-start !important; }
+          .justify-between { justify-content: space-between !important; }
+          .gap-2 { gap: 0.5rem !important; }
+          .gap-x-5 { column-gap: 1.25rem !important; }
+          .gap-y-1 { row-gap: 0.25rem !important; }
+          .px-3 { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+          .py-2 { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+          .px-4 { padding-left: 1rem !important; padding-right: 1rem !important; }
+          .pt-4 { padding-top: 1rem !important; }
+          .pb-6 { padding-bottom: 1.5rem !important; }
+          .border-b { border-bottom-width: 1px !important; border-bottom-style: solid !important; }
+          .border-slate-200 { border-color: #e2e8f0 !important; }
+          .text-sm { font-size: 0.875rem !important; }
+          .font-bold { font-weight: 700 !important; }
+          .text-right { text-align: right !important; }
+          .whitespace-nowrap { white-space: nowrap !important; }
+          .rounded-lg { border-radius: 0.5rem !important; }
+          .mx-auto { margin-left: auto !important; margin-right: auto !important; }
+          .shadow-md { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important; }
+        `
+        clonedDoc.head.appendChild(safe)
       }
 
+      // windowWidth: 900 → viewport đủ rộng để table 480px không bị constrain
       let blob: Blob | null = null
       try {
         const canvas = await html2canvas(sheetRef.current, {
@@ -106,6 +139,7 @@ export default function ProcessPrintPage() {
           scale: 2,
           backgroundColor: "#ffffff",
           logging: false,
+          windowWidth: 900,
           ignoreElements: (el) => el.classList.contains("no-print"),
           onclone: patchClone,
         })
@@ -123,6 +157,7 @@ export default function ProcessPrintPage() {
           scale: 2,
           backgroundColor: "#ffffff",
           logging: false,
+          windowWidth: 900,
           ignoreElements: (el) =>
             el.classList.contains("no-print") || el.tagName === "IMG",
           onclone: patchClone,
