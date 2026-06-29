@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
-import { Printer, Share2, Download, X, ZoomIn } from "lucide-react"
+import { Printer, Share2, Download, X, ZoomIn, AlertTriangle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { QuickMeasurementSheet, QuickMeasurementRow } from "../_components/process-types"
 
@@ -31,6 +31,7 @@ export default function ProcessPrintPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sharing, setSharing] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
   const [zoomUrl, setZoomUrl] = useState<string | null>(null)
 
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -80,20 +81,61 @@ export default function ProcessPrintPage() {
   const handleShare = async () => {
     if (!sheetRef.current || sharing) return
     setSharing(true)
+    setShareError(null)
     try {
       const html2canvas = (await import("html2canvas")).default
-      const canvas = await html2canvas(sheetRef.current, {
-        useCORS: true,
-        allowTaint: true,
-        scale: 2,
-        backgroundColor: "#ffffff",
-        logging: false,
-      })
 
-      const blob = await new Promise<Blob | null>(resolve =>
-        canvas.toBlob(resolve, "image/png", 1.0)
-      )
-      if (!blob) return
+      // Lần 1: useCORS=true, không allowTaint → canvas sạch, ảnh load nếu có CORS header
+      // Nếu ảnh không có CORS header thì ảnh xuất hiện trắng nhưng toBlob() vẫn chạy được
+      // Tailwind v4 dùng oklch()/lab() trong CSS custom properties mà html2canvas
+      // không parse được → xóa các stylesheet đó khỏi bản clone trước khi chụp.
+      // Phiếu dùng inline styles là chính nên không ảnh hưởng layout.
+      const patchClone = (clonedDoc: Document) => {
+        Array.from(clonedDoc.querySelectorAll("style")).forEach(s => {
+          if (s.textContent?.includes("oklch") || s.textContent?.includes("lab(")) {
+            s.remove()
+          }
+        })
+        Array.from(clonedDoc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).forEach(l => l.remove())
+      }
+
+      let blob: Blob | null = null
+      try {
+        const canvas = await html2canvas(sheetRef.current, {
+          useCORS: true,
+          scale: 2,
+          backgroundColor: "#ffffff",
+          logging: false,
+          ignoreElements: (el) => el.classList.contains("no-print"),
+          onclone: patchClone,
+        })
+        blob = await new Promise<Blob | null>(resolve =>
+          canvas.toBlob(resolve, "image/png", 1.0)
+        )
+      } catch {
+        // Lần 1 thất bại (SecurityError hoặc lỗi CORS) → thử lần 2 bỏ qua ảnh
+      }
+
+      // Lần 2 fallback: bỏ qua tất cả IMG để đảm bảo canvas không bị taint
+      if (!blob) {
+        const canvas = await html2canvas(sheetRef.current, {
+          useCORS: false,
+          scale: 2,
+          backgroundColor: "#ffffff",
+          logging: false,
+          ignoreElements: (el) =>
+            el.classList.contains("no-print") || el.tagName === "IMG",
+          onclone: patchClone,
+        })
+        blob = await new Promise<Blob | null>(resolve =>
+          canvas.toBlob(resolve, "image/png", 1.0)
+        )
+      }
+
+      if (!blob) {
+        setShareError("Không xuất được ảnh PNG. Thử lại hoặc dùng nút In phiếu.")
+        return
+      }
 
       const fileName = `${sheet?.ma_phieu || "phieu-do-nhanh"}.png`
       const file = new File([blob], fileName, { type: "image/png" })
@@ -108,12 +150,16 @@ export default function ProcessPrintPage() {
         const a = document.createElement("a")
         a.href = url
         a.download = fileName
+        a.style.display = "none"
+        document.body.appendChild(a)
         a.click()
-        URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         console.error("Share failed:", err)
+        setShareError(`Lỗi xuất ảnh: ${(err as Error).message || "Không xác định"}`)
       }
     } finally {
       setSharing(false)
@@ -186,6 +232,17 @@ export default function ProcessPrintPage() {
           )}
         </button>
       </div>
+
+      {/* Toast lỗi chia sẻ */}
+      {shareError && (
+        <div className="no-print fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-sm w-[calc(100%-2rem)]">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span className="text-sm flex-1">{shareError}</span>
+          <button onClick={() => setShareError(null)} className="hover:opacity-70">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Wrapper trên mobile: có padding, scroll ngang cho bảng */}
       <div className="p-3 sm:p-4 md:p-6 bg-slate-50 min-h-screen">
