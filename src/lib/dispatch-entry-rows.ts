@@ -36,6 +36,7 @@ export type LegacyDispatchRow = {
   locked?: boolean
   row_id?: string
   dispatch_entry_id?: string
+  stops_detail?: Array<{ diem: string; phien: string[] }> | null
 }
 
 export type DispatchEntryRowRecord = never
@@ -109,6 +110,7 @@ export function dispatchDbRowToLegacy(row: LegacyDispatchRow): LegacyDispatchRow
     ngan_ref: arr(row.ngan_ref),
     ghi_chu: row.ghi_chu || "",
     locked: Boolean(row.locked),
+    stops_detail: (row.stops_detail as Array<{ diem: string; phien: string[] }> | null | undefined) ?? null,
   }
 
   for (const field of NUM_FIELDS) {
@@ -147,6 +149,7 @@ export function legacyDispatchRowToDb(
     ngan_ref: arr(row.ngan_ref),
     ghi_chu: row.ghi_chu || "",
     locked: Boolean(row.locked),
+    stops_detail: row.stops_detail ?? null,
   }
 
   for (const field of NUM_FIELDS) {

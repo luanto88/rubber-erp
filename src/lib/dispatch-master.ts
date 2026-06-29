@@ -106,12 +106,20 @@ export function calcManhattanKm(
   return Math.round(total * 111.32 * 10) / 10
 }
 
-export function buildLoThuHoach(diem_gn: string[], phien: string[], points: DiemGN[] = DIEM_GN): string[] {
+export function buildLoThuHoach(
+  diem_gn: string[],
+  phien: string[],
+  points: DiemGN[] = DIEM_GN,
+  stops_detail?: Array<{ diem: string; phien: string[] }> | null,
+): string[] {
   const lots: string[] = []
   for (const dgn of diem_gn) {
     const point = points.find(item => item.ma_lo === dgn)
     if (!point) continue
-    for (const p of phien) {
+    // Nếu có stops_detail, lấy phiên riêng cho điểm này; ngược lại dùng phien[] phẳng
+    const stopEntry = stops_detail?.find(s => s.diem === dgn)
+    const effectivePhien = stopEntry ? stopEntry.phien : phien
+    for (const p of effectivePhien) {
       const phase = p.replace(/^Phiên\s*/i, "").trim().toLowerCase()
       const key = `phien_${phase}` as keyof DiemGN
       const phaseLots = point[key]

@@ -23,7 +23,7 @@ Há»‡ thá»‘ng ERP quáº£n lÃ½ sáº£n xuáº¥t cao su cho:
 
 ## ThÃ nh pháº©m vÃ  ngÄƒn liá»‡u
 
-- BÃ¡nh `35` vÃ  `33.33`: lÃ´ trÃ²n `144`
+- BÃ nh `35` vÃ  `33.33`: lÃ´ trÃ²n `144`
 - BÃ¡nh `20`: lÃ´ trÃ²n `240`
 - Tráº¡ng thÃ¡i lÃ´ chuáº©n: `Dá»Ÿ dang`, `HoÃ n thÃ nh`, `Xuáº¥t hÃ ng`
 - Tráº¡ng thÃ¡i ngÄƒn chuáº©n: `Äang nháº­n`, `ÄÃ³ng`, `Chá» sáº£n xuáº¥t`, `Äang sáº£n xuáº¥t`, `ÄÃ£ sáº£n xuáº¥t`
@@ -107,12 +107,12 @@ Há»‡ thá»‘ng ERP quáº£n lÃ½ sáº£n xuáº¥t cao su cho:
   - `npx tsc --noEmit --pretty false`
 - `npm run lint` toÃ n repo váº«n fail do lá»—i cÅ© ngoÃ i pháº¡m vi á»Ÿ `page.tsx` vÃ  `src/app/test-sodo/page.tsx`.
 
-## C?p nh?t session 2026-06-03 - ISO PDF/DOCX và soát xét
+## C?p nh?t session 2026-06-03 - ISO PDF/DOCX vï¿½ soï¿½t xï¿½t
 
-- Ğ? fix `generate-pdf/route.ts` ğ? pdfjs ıu tiên dùng asset local trong `node_modules/pdfjs-dist`, gi?m l?i ğ?c text PDF sau deploy.
-- N?u `fillMetadataPlaceholders()` tr? `metaResult.error`, route PDF không v? `drawFooterOnAllPages()` n?a, tránh l?i footer ğ? thêm d?ng khi header/footer không ğ?c ğı?c.
-- Ğ? ğ?i logic xác ğ?nh bı?c k? ? `generate-office` và `generate-pdf`: ıu tiên suy ra theo `action`, fallback theo `userId`.
-- Ğ? tách:
-  - `normalizeDocumentCode()` = canonical so trùng
-  - `formatDocumentCode()` = gi? nguyên format m? ğ? lıu DB
-- Rule nghi?p v? ch?t: soát xét không ğı?c bi?n m? có d?u g?ch/format chu?n ISO thành chu?i li?n nhı `PHKQT22F01`.
+- ï¿½? fix `generate-pdf/route.ts` ï¿½? pdfjs ï¿½u tiï¿½n dï¿½ng asset local trong `node_modules/pdfjs-dist`, gi?m l?i ï¿½?c text PDF sau deploy.
+- N?u `fillMetadataPlaceholders()` tr? `metaResult.error`, route PDF khï¿½ng v? `drawFooterOnAllPages()` n?a, trï¿½nh l?i footer ï¿½? thï¿½m d?ng khi header/footer khï¿½ng ï¿½?c ï¿½ï¿½?c.
+- ï¿½? ï¿½?i logic xï¿½c ï¿½?nh bï¿½?c k? ? `generate-office` vï¿½ `generate-pdf`: ï¿½u tiï¿½n suy ra theo `action`, fallback theo `userId`.
+- ï¿½? tï¿½ch:
+  - `normalizeDocumentCode()` = canonical so trï¿½ng
+  - `formatDocumentCode()` = gi? nguyï¿½n format m? ï¿½? lï¿½u DB
+- Rule nghi?p v? ch?t: soï¿½t xï¿½t khï¿½ng ï¿½ï¿½?c bi?n m? cï¿½ d?u g?ch/format chu?n ISO thï¿½nh chu?i li?n nhï¿½ `PHKQT22F01`.

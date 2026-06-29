@@ -13,7 +13,7 @@ import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -50,6 +50,7 @@ type DxRow = {
   row_id?: string
   dispatch_entry_id?: string
   locked?: boolean
+  stops_detail?: Array<{ diem: string; phien: string[] }> | null
   _warn?: string
 }
 
@@ -697,9 +698,12 @@ export default function DispatchPage() {
     }
   }, [])
 
-  const resolveLoThuHoach = useCallback((diemGn: string[], phien: string[], points = deliveryPoints) => {
-    return buildLoThuHoachFromPoints(diemGn, phien, points)
-  }, [deliveryPoints])
+  const resolveLoThuHoach = useCallback(
+    (diemGn: string[], phien: string[], stopsDetail?: Array<{ diem: string; phien: string[] }> | null, points = deliveryPoints) => {
+      return buildLoThuHoachFromPoints(diemGn, phien, points, stopsDetail ?? undefined)
+    },
+    [deliveryPoints]
+  )
 
   const resolveAllowedDoi = useCallback((diemGn: string[]) => {
     return getAllowedDoiFromPoints(deliveryPoints, diemGn)
@@ -734,7 +738,7 @@ export default function DispatchPage() {
         day_chuyen: r.day_chuyen || e.day_chuyen || inferDayChuyenFromRows(e.rows),
         lo_thu_hoach: r.lo_thu_hoach?.length
           ? r.lo_thu_hoach
-          : resolveLoThuHoach(r.diem_gn || [], r.phien || [], points)
+          : resolveLoThuHoach(r.diem_gn || [], r.phien || [], r.stops_detail, points)
       }))
     }))
 
@@ -961,6 +965,41 @@ export default function DispatchPage() {
       locked: false, _warn: undefined,
     }))
 
+  // Xóa tất cả số xe và tài xế, giữ nguyên tuyến đường
+  const clearAllVehicles = useCallback(() => {
+    setFormRows(rows => rows.map(r => ({ ...r, so_xe: "", tai_xe: "", chuyen: 0 })))
+  }, [])
+
+  // Toggle giữa chế độ phiên chung và phiên riêng từng điểm
+  const toggleStopsDetailMode = useCallback((idx: number) => {
+    setFormRows(rows => rows.map((r, i) => {
+      if (i !== idx) return r
+      if (r.stops_detail) {
+        const allPhien = [...new Set(r.stops_detail.flatMap(s => s.phien))]
+        const next = { ...r, stops_detail: null as (typeof r.stops_detail | null), phien: allPhien }
+        next.lo_thu_hoach = resolveLoThuHoach(next.diem_gn, next.phien, null)
+        return next
+      } else {
+        const stops_detail = r.diem_gn.map(dgn => ({ diem: dgn, phien: r.phien }))
+        const next = { ...r, stops_detail }
+        next.lo_thu_hoach = resolveLoThuHoach(next.diem_gn, next.phien, stops_detail)
+        return next
+      }
+    }))
+  }, [resolveLoThuHoach])
+
+  // Cập nhật phiên riêng cho một điểm cụ thể
+  const updateStopPhien = useCallback((idx: number, diem: string, phien: string[]) => {
+    setFormRows(rows => rows.map((r, i) => {
+      if (i !== idx) return r
+      const stops_detail = (r.stops_detail || r.diem_gn.map(d => ({ diem: d, phien: r.phien })))
+        .map(s => s.diem === diem ? { ...s, phien } : s)
+      const next = { ...r, stops_detail }
+      next.lo_thu_hoach = resolveLoThuHoach(next.diem_gn, next.phien, stops_detail)
+      return next
+    }))
+  }, [resolveLoThuHoach])
+
   // Open Add — luôn lấy phiếu gần nhất từ DB (bỏ qua filter ngày đang active)
   const openAdd = async () => {
     let recentFromDb: DispatchEntry[] = []
@@ -969,7 +1008,7 @@ export default function DispatchPage() {
         .from("dispatch_entries")
         .select("*")
         .eq("factory_id", factoryId)
-        .order("ngay", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(5)
       if (data?.length) {
         recentFromDb = (data as DispatchEntry[]).map(e => ({
@@ -1206,9 +1245,20 @@ export default function DispatchPage() {
       }
 
       if (field === "phien" || field === "diem_gn") {
+        // Khi đổi diem_gn, cập nhật stops_detail để khớp với danh sách điểm mới
+        if (field === "diem_gn") {
+          const newDiem = val as string[]
+          if (next.stops_detail) {
+            // Giữ lại entry đã có, xóa entry không còn trong danh sách, thêm entry mới
+            const existing = next.stops_detail.filter(s => newDiem.includes(s.diem))
+            const newEntries = newDiem.filter(d => !existing.find(s => s.diem === d)).map(d => ({ diem: d, phien: next.phien }))
+            next.stops_detail = [...existing, ...newEntries]
+          }
+        }
         next.lo_thu_hoach = resolveLoThuHoach(
           field === "diem_gn" ? val as string[] : next.diem_gn,
           field === "phien"   ? val as string[] : next.phien,
+          next.stops_detail,
         )
       }
 
@@ -1829,6 +1879,10 @@ export default function DispatchPage() {
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors">
             <Plus size={12}/> Thêm ghi chú
           </button>
+          <button onClick={clearAllVehicles}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-200 rounded-lg transition-colors">
+            <UserX size={12}/> Xóa xe
+          </button>
           <button onClick={() => setFormRows(r => [...r, emptyRow()])}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors">
             <Plus size={12}/> Thêm xe
@@ -1895,15 +1949,43 @@ export default function DispatchPage() {
                   {formatDoiLabel(resolveAllowedDoi(row.diem_gn))}
                 </td>
 
-                {/* PhiĂªn */}
+                {/* Phiên */}
                 <td className="px-2 py-1.5 min-w-[130px]">
                   {row.locked
                     ? <span className="text-slate-600">{row.phien.join(", ") || "—"}</span>
-                    : <SmartMultiSelect
-                        options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
-                        selected={row.phien}
-                        onChange={val => updateRow(idx,"phien",val)}
-                        placeholder="Chọn phiên..."/>
+                    : row.diem_gn.length < 2
+                      ? <SmartMultiSelect
+                          options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
+                          selected={row.phien}
+                          onChange={val => updateRow(idx,"phien",val)}
+                          placeholder="Chọn phiên..."/>
+                      : <div className="space-y-1">
+                          <button
+                            onClick={() => toggleStopsDetailMode(idx)}
+                            className="text-[10px] text-blue-500 underline leading-none">
+                            {row.stops_detail ? "Chung tất cả" : "Riêng từng điểm"}
+                          </button>
+                          {row.stops_detail
+                            ? row.diem_gn.map(dgn => {
+                                const entry = row.stops_detail!.find(s => s.diem === dgn) ?? { diem: dgn, phien: [] }
+                                return (
+                                  <div key={dgn} className="flex items-center gap-1">
+                                    <span className="text-[10px] font-mono w-7 shrink-0 text-slate-500">{dgn}</span>
+                                    <SmartMultiSelect
+                                      options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
+                                      selected={entry.phien}
+                                      onChange={val => updateStopPhien(idx, dgn, val as string[])}
+                                      placeholder="Phiên..."/>
+                                  </div>
+                                )
+                              })
+                            : <SmartMultiSelect
+                                options={["Phiên A","Phiên B","Phiên C","Phiên D"]}
+                                selected={row.phien}
+                                onChange={val => updateRow(idx,"phien",val)}
+                                placeholder="Chọn phiên..."/>
+                          }
+                        </div>
                   }
                 </td>
 

@@ -69,3 +69,63 @@ Error: Command "npm run build" exited with 1
 - `dispatch_entry_rows` la source of truth cho chi tiet dieu xe.
 - Sau moi thao tac import/them/sua/xoa o module San luong, `writeBackToDispatch` phai cap nhat `dispatch_entry_rows` truoc.
 - `dispatch_entries.rows` neu con ton tai chi duoc sync lai nhu cache legacy; code moi khong duoc xem cot nay la nguon chinh.
+
+## Cập nhật 2026-06-29: Xóa xe hàng loạt, fix clone ngày, phiên riêng từng điểm
+
+### Nút "Xóa xe" ở header (thay thế per-row)
+
+- **Không còn** nút `UserX` icon ở cột actions từng dòng điều xe.
+- Thay bằng **1 nút duy nhất "Xóa xe"** nằm trong cụm action header, cùng hàng với "Nhập KL / GeoJSON / Thêm ghi chú / Thêm xe".
+- Hàm `clearAllVehicles()` xóa `so_xe`, `tai_xe`, reset `chuyen: 0` trên **TẤT CẢ** dòng cùng lúc.
+- Giữ nguyên: `diem_gn`, `phien`, `stops_detail`, `lo_trinh`, `lo_thu_hoach`, `doi`, `so_km` và tất cả cột KL.
+- Dùng khi người dùng muốn giữ nguyên tuyến đường nhưng thay toàn bộ xe cho một ngày mới.
+
+```typescript
+// clearAllVehicles trong page.tsx
+const clearAllVehicles = useCallback(() => {
+  setFormRows(rows => rows.map(r => ({ ...r, so_xe: "", tai_xe: "", chuyen: 0 })))
+}, [])
+```
+
+### Fix openAdd() — luôn clone ngày mới nhất
+
+**Bug cũ**: `openAdd()` dùng `.order("ngay", { ascending: false }).limit(5)` nhưng `ngay` lưu dạng text `"dd/mm/yyyy"`. Sort lexicographic khiến `"31/12/2025" > "29/06/2026"` (vì `'3' > '2'`) → `limit(5)` trả về 5 ngày **cũ nhất** thay vì mới nhất. Sau đó JS re-sort bằng `toISO()` không cứu được vì pool ban đầu đã sai.
+
+**Fix**: Đổi sang `.order("created_at", { ascending: false })`. `created_at` là timestamp chuẩn, luôn cho kết quả đúng bất kể format của cột `ngay`.
+
+```typescript
+// Trước (bug):
+.order("ngay", { ascending: false }).limit(5)
+
+// Sau (fix):
+.order("created_at", { ascending: false }).limit(5)
+```
+
+**Quy tắc chung**: Không được dùng `.order()` trên cột `ngay` của `dispatch_entries` để lấy "mới nhất" hay "cũ nhất" — luôn dùng `created_at`. Cột `ngay` dạng text "dd/mm/yyyy" chỉ dùng để hiển thị và so sánh sau khi đã normalize qua `toISO()`.
+
+### Phiên riêng từng điểm (`stops_detail`)
+
+Cho phép một chuyến xe đi nhiều điểm, mỗi điểm có phiên khác nhau (ví dụ: xe 1A đi E1 Phiên A và G3 Phiên B trong cùng chuyến 1).
+
+**Migration** (cần chạy thủ công trong Supabase SQL Editor):
+
+```sql
+-- supabase/migrations/20260629_dispatch_stops_detail.sql
+ALTER TABLE dispatch_entry_rows
+  ADD COLUMN IF NOT EXISTS stops_detail JSONB DEFAULT NULL;
+```
+
+**Quy tắc**:
+- `stops_detail = NULL` → dùng `phien[]` phẳng chung cho tất cả điểm (backward-compatible, không phá vỡ dữ liệu cũ).
+- `stops_detail` có giá trị → mỗi điểm trong `diem_gn[]` có `phien[]` riêng, ví dụ:
+  ```json
+  [{"diem": "E1", "phien": ["Phiên A"]}, {"diem": "G3", "phien": ["Phiên B"]}]
+  ```
+- Khi `stops_detail` có giá trị, `buildLoThuHoach()` trong `dispatch-master.ts` dùng phiên từ `stops_detail` để suy ra `lo_thu_hoach` chính xác từng điểm, không dùng `phien[]` phẳng.
+
+**Các file đã cập nhật**:
+- `src/lib/dispatch-entry-rows.ts` — `LegacyDispatchRow.stops_detail`; `dispatchDbRowToLegacy()` và `legacyDispatchRowToDb()` đều xử lý field này.
+- `src/lib/dispatch-master.ts` — `buildLoThuHoach(diemGnCodes, phienCodes, deliveryPoints, stops_detail?)` — tham số thứ 4 optional.
+- `src/app/dashboard/dispatch/page.tsx` — `DxRow.stops_detail`, `toggleStopsDetailMode`, `updateStopPhien`, UI toggle per-point phiên trên từng dòng.
+
+**Lưu ý quan trọng**: Migration `20260629_dispatch_stops_detail.sql` phải được chạy thủ công trên Supabase SQL Editor trước khi tính năng `stops_detail` hoạt động trên production.

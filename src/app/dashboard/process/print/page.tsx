@@ -21,6 +21,23 @@ function formatDateShort(d: string) {
   return `${day}/${m}/${y.slice(2)}`
 }
 
+// ZWNJ (U+200C) quanh "/" ngăn OpenType fraction ligature khi html2canvas dùng ctx.fillText
+const ZWNJ = "‌"
+function z(text: string | null | undefined): string {
+  if (!text) return ""
+  return text.replace(/\//g, `${ZWNJ}/${ZWNJ}`)
+}
+
+// Inline styles dùng trong capture div (không phụ thuộc Tailwind)
+const TH: React.CSSProperties = {
+  backgroundColor: "#0e7490", color: "#ffffff", fontWeight: "bold",
+  textAlign: "center", fontSize: "10pt",
+  border: "1px solid #999999", padding: "3px 5px", verticalAlign: "middle",
+}
+const TD: React.CSSProperties = {
+  border: "1px solid #cccccc", padding: "3px 5px", verticalAlign: "middle",
+}
+
 export default function ProcessPrintPage() {
   const params = useSearchParams()
   const sheetId = params.get("sheetId")
@@ -34,7 +51,10 @@ export default function ProcessPrintPage() {
   const [shareError, setShareError] = useState<string | null>(null)
   const [zoomUrl, setZoomUrl] = useState<string | null>(null)
 
+  // sheetRef: div hiển thị trên màn hình (dùng cho nút In PDF)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // captureRef: div ẩn offscreen, toàn inline styles, 720px cố định (dùng cho chia sẻ ảnh)
+  const captureRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -79,88 +99,44 @@ export default function ProcessPrintPage() {
   const handlePrint = () => window.print()
 
   const handleShare = async () => {
-    if (!sheetRef.current || sharing) return
+    if (!captureRef.current || sharing) return
     setSharing(true)
     setShareError(null)
     try {
       const html2canvas = (await import("html2canvas")).default
 
-      // Lần 1: useCORS=true, không allowTaint → canvas sạch, ảnh load nếu có CORS header
-      // Nếu ảnh không có CORS header thì ảnh xuất hiện trắng nhưng toBlob() vẫn chạy được
-      // Tailwind v4 dùng oklch()/lab() — html2canvas không parse được → xóa stylesheet đó.
-      // Sau đó inject lại các utility class cần thiết với hex an toàn + bỏ overflow
-      // để capture toàn bộ bảng (không bị cắt trên mobile).
-      // font-feature-settings: normal tắt ligature phân số khiến "6/0" bị render sai glyph.
-      const patchClone = (clonedDoc: Document) => {
-        Array.from(clonedDoc.querySelectorAll("style")).forEach(s => {
-          if (s.textContent?.includes("oklch") || s.textContent?.includes("lab(")) {
-            s.remove()
-          }
-        })
-        Array.from(clonedDoc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).forEach(l => l.remove())
-
-        const safe = clonedDoc.createElement("style")
-        safe.textContent = `
-          * { font-feature-settings: normal !important; font-variant-numeric: normal !important; }
-          .overflow-hidden { overflow: visible !important; }
-          .overflow-x-auto { overflow: visible !important; width: auto !important; }
-          .bg-white { background-color: #ffffff !important; }
-          .bg-slate-50 { background-color: #f8fafc !important; }
-          .flex { display: flex !important; }
-          .flex-wrap { flex-wrap: wrap !important; }
-          .items-start { align-items: flex-start !important; }
-          .justify-between { justify-content: space-between !important; }
-          .gap-2 { gap: 0.5rem !important; }
-          .gap-x-5 { column-gap: 1.25rem !important; }
-          .gap-y-1 { row-gap: 0.25rem !important; }
-          .px-3 { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
-          .py-2 { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
-          .px-4 { padding-left: 1rem !important; padding-right: 1rem !important; }
-          .pt-4 { padding-top: 1rem !important; }
-          .pb-6 { padding-bottom: 1.5rem !important; }
-          .border-b { border-bottom-width: 1px !important; border-bottom-style: solid !important; }
-          .border-slate-200 { border-color: #e2e8f0 !important; }
-          .text-sm { font-size: 0.875rem !important; }
-          .font-bold { font-weight: 700 !important; }
-          .text-right { text-align: right !important; }
-          .whitespace-nowrap { white-space: nowrap !important; }
-          .rounded-lg { border-radius: 0.5rem !important; }
-          .mx-auto { margin-left: auto !important; margin-right: auto !important; }
-          .shadow-md { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important; }
-        `
-        clonedDoc.head.appendChild(safe)
+      // captureRef dùng toàn bộ inline styles + fixed 720px → không cần windowWidth.
+      // Tailwind v4 inject oklch()/lab() vào :root của trang — html2canvas không parse được.
+      // onclone strip toàn bộ <style>/<link> trong cloned doc; captureRef có inline styles
+      // nên không cần CSS bên ngoài để render đúng.
+      const stripGlobalCss = (clonedDoc: Document) => {
+        clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => el.remove())
       }
 
-      // windowWidth: 900 → viewport đủ rộng để table 480px không bị constrain
       let blob: Blob | null = null
       try {
-        const canvas = await html2canvas(sheetRef.current, {
+        const canvas = await html2canvas(captureRef.current, {
           useCORS: true,
           scale: 2,
           backgroundColor: "#ffffff",
           logging: false,
-          windowWidth: 900,
-          ignoreElements: (el) => el.classList.contains("no-print"),
-          onclone: patchClone,
+          onclone: stripGlobalCss,
         })
         blob = await new Promise<Blob | null>(resolve =>
           canvas.toBlob(resolve, "image/png", 1.0)
         )
       } catch {
-        // Lần 1 thất bại (SecurityError hoặc lỗi CORS) → thử lần 2 bỏ qua ảnh
+        // SecurityError từ ảnh cross-origin → thử lần 2 bỏ qua ảnh
       }
 
-      // Lần 2 fallback: bỏ qua tất cả IMG để đảm bảo canvas không bị taint
       if (!blob) {
-        const canvas = await html2canvas(sheetRef.current, {
+        const canvas = await html2canvas(captureRef.current, {
           useCORS: false,
           scale: 2,
           backgroundColor: "#ffffff",
           logging: false,
-          windowWidth: 900,
-          ignoreElements: (el) =>
-            el.classList.contains("no-print") || el.tagName === "IMG",
-          onclone: patchClone,
+          onclone: stripGlobalCss,
+          ignoreElements: (el) => el.tagName === "IMG",
         })
         blob = await new Promise<Blob | null>(resolve =>
           canvas.toBlob(resolve, "image/png", 1.0)
@@ -176,19 +152,12 @@ export default function ProcessPrintPage() {
       const file = new File([blob], fileName, { type: "image/png" })
 
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: sheet?.ma_phieu || "Phiếu đo nhanh",
-        })
+        await navigator.share({ files: [file], title: sheet?.ma_phieu || "Phiếu đo nhanh" })
       } else {
         const url = URL.createObjectURL(blob)
         const a = document.createElement("a")
-        a.href = url
-        a.download = fileName
-        a.style.display = "none"
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
+        a.href = url; a.download = fileName; a.style.display = "none"
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
         setTimeout(() => URL.revokeObjectURL(url), 1000)
       }
     } catch (err) {
@@ -228,9 +197,10 @@ export default function ProcessPrintPage() {
         body { font-family: 'Times New Roman', serif; color: #000; }
         .print-table { border-collapse: collapse; width: 100%; }
         .print-table th, .print-table td {
-          border: 1px solid #000; padding: 3px 5px; vertical-align: middle;
+          border: 1px solid #ccc; padding: 3px 5px; vertical-align: middle;
         }
         .print-table th {
+          border-color: #999;
           background-color: #0e7490; color: #fff; font-weight: bold;
           text-align: center; font-size: 10pt;
         }
@@ -279,9 +249,8 @@ export default function ProcessPrintPage() {
         </div>
       )}
 
-      {/* Wrapper trên mobile: có padding, scroll ngang cho bảng */}
+      {/* ── Phiếu hiển thị trên màn hình (responsive, dùng Tailwind + print CSS) ── */}
       <div className="p-3 sm:p-4 md:p-6 bg-slate-50 min-h-screen">
-        {/* Phiếu — ref để html2canvas chụp */}
         <div
           ref={sheetRef}
           className="print-sheet bg-white shadow-md rounded-lg overflow-hidden mx-auto"
@@ -308,7 +277,6 @@ export default function ProcessPrintPage() {
           <div className="px-3 py-2 flex flex-wrap gap-x-5 gap-y-1 text-sm border-b border-slate-200">
             <div><b>Ngày test:</b> {formatDate(sheet.ngay)}</div>
             <div><b>Dây chuyền:</b> {sheet.day_chuyen || "—"}</div>
-            <div><b>Chủng loại:</b> {sheet.chung_loai || "—"}</div>
             <div><b>Loại CSR:</b> {sheet.loai_csr || "—"}</div>
           </div>
 
@@ -317,19 +285,18 @@ export default function ProcessPrintPage() {
             <table className="print-table" style={{ fontSize: "10pt", minWidth: "480px" }}>
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ width: "28px" }}>STT</th>
-                  <th rowSpan={2} style={{ minWidth: "110px" }}>CT-Thùng/<br />Lô/Mẫu</th>
-                  <th rowSpan={2} style={{ minWidth: "90px" }}>Chế độ sấy</th>
+                  <th style={{ width: "28px" }}>STT</th>
+                  <th style={{ minWidth: "110px" }}>CT-Thùng/<br />Lô/Mẫu</th>
+                  <th style={{ minWidth: "90px" }}>Chế độ sấy</th>
                   {chiTieuCols.map(ct => (
                     <th key={ct} style={{ width: "50px" }}>{ct}</th>
                   ))}
-                  <th rowSpan={2} style={{ minWidth: "52px" }}>Ca SX</th>
-                  {hasNgan && <th rowSpan={2} style={{ minWidth: "80px" }}>Ngăn/<br />Ngày lưu</th>}
-                  <th rowSpan={2} style={{ minWidth: "80px" }}>Người đo</th>
-                  {hasImages && <th rowSpan={2} style={{ minWidth: "90px" }}>Hình ảnh</th>}
-                  <th rowSpan={2} style={{ minWidth: "70px" }}>Ghi chú</th>
+                  <th style={{ minWidth: "52px" }}>Ca SX</th>
+                  {hasNgan && <th style={{ minWidth: "100px" }}>Ngăn/<br />Ngày lưu</th>}
+                  <th style={{ minWidth: "80px" }}>Người đo</th>
+                  {hasImages && <th style={{ minWidth: "90px" }}>Hình ảnh</th>}
+                  <th style={{ minWidth: "70px" }}>Ghi chú</th>
                 </tr>
-                <tr />
               </thead>
               <tbody>
                 {sheet.rows.map((row, idx) => {
@@ -354,12 +321,12 @@ export default function ProcessPrintPage() {
                       })}
                       <td style={{ textAlign: "center", fontSize: "9pt" }}>{row.ca_sx || "—"}</td>
                       {hasNgan && (
-                        <td style={{ fontSize: "9pt", textAlign: "center" }}>
+                        <td style={{ fontSize: "8pt", textAlign: "center", wordBreak: "break-word", verticalAlign: "middle" }}>
                           {ngan ? (
                             <>
-                              <div style={{ fontWeight: "bold" }}>{ngan.ma_ngan || ngan.ten_ngan}</div>
+                              <div style={{ fontWeight: "bold", lineHeight: 1.2 }}>{ngan.ma_ngan || ngan.ten_ngan}</div>
                               {row.so_ngay_luu != null && (
-                                <div style={{ fontSize: "8pt", color: "#555" }}>{row.so_ngay_luu} ngày</div>
+                                <div style={{ color: "#555" }}>{row.so_ngay_luu} ngày</div>
                               )}
                             </>
                           ) : "—"}
@@ -436,6 +403,146 @@ export default function ProcessPrintPage() {
         {/* Hướng dẫn nhỏ bên dưới — không in */}
         <div className="no-print mt-3 text-center text-xs text-slate-400 pb-6">
           Bấm <b>In phiếu</b> để in PDF · Bấm <b>Chia sẻ ảnh</b> để gửi qua Zalo, Telegram...
+        </div>
+      </div>
+
+      {/* ── Capture div: offscreen, toàn inline styles, 720px cố định ──
+          Không phụ thuộc Tailwind → html2canvas không cần windowWidth hay onclone.
+          Dùng z() để chèn ZWNJ quanh "/" ngăn fraction ligature trong Canvas 2D. */}
+      <div
+        ref={captureRef}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "-9999px",
+          top: "0",
+          width: "720px",
+          backgroundColor: "#ffffff",
+          fontFamily: "'Times New Roman', Times, serif",
+          fontSize: "10pt",
+          color: "#000000",
+          lineHeight: "1.4",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          backgroundColor: "#0e7490", color: "#ffffff", padding: "10px 14px",
+          display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+        }}>
+          <div>
+            <div style={{ fontSize: "9pt", fontWeight: "bold" }}>
+              {factory?.name?.toUpperCase() || "CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM"}
+            </div>
+            <div style={{ fontSize: "13pt", fontWeight: "bold", marginTop: "3px", lineHeight: 1.25 }}>
+              PHIẾU ĐO NHANH CHỈ TIÊU NGÀY {z(formatDateShort(sheet.ngay))}
+            </div>
+          </div>
+          <div style={{ textAlign: "right", fontSize: "9pt", whiteSpace: "nowrap" }}>
+            <div style={{ fontWeight: "bold" }}>{z(sheet.ma_phieu) || "—"}</div>
+          </div>
+        </div>
+
+        {/* Meta info */}
+        <div style={{
+          padding: "6px 12px", display: "flex", flexWrap: "wrap", gap: "0 20px",
+          fontSize: "9pt", borderBottom: "1px solid #cccccc",
+        }}>
+          <span><b>Ngày test:</b> {z(formatDate(sheet.ngay))}</span>
+          <span style={{ marginLeft: "4px" }}><b>Dây chuyền:</b> {sheet.day_chuyen || "—"}</span>
+          <span style={{ marginLeft: "4px" }}><b>Loại CSR:</b> {sheet.loai_csr || "—"}</span>
+        </div>
+
+        {/* Bảng */}
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "10pt" }}>
+          <thead>
+            <tr>
+              <th style={{ ...TH, width: "28px" }}>STT</th>
+              <th style={{ ...TH, minWidth: "110px" }}>CT-Thùng/<br />Lô/Mẫu</th>
+              <th style={{ ...TH, minWidth: "90px" }}>Chế độ sấy</th>
+              {chiTieuCols.map(ct => (
+                <th key={ct} style={{ ...TH, width: "50px" }}>{ct}</th>
+              ))}
+              <th style={{ ...TH, minWidth: "52px" }}>Ca SX</th>
+              {hasNgan && <th style={{ ...TH, minWidth: "100px" }}>Ngăn/<br />Ngày lưu</th>}
+              <th style={{ ...TH, minWidth: "80px" }}>Người đo</th>
+              {hasImages && <th style={{ ...TH, minWidth: "90px" }}>Hình ảnh</th>}
+              <th style={{ ...TH, minWidth: "70px" }}>Ghi chú</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sheet.rows.map((row, idx) => {
+              const ngan = row.ngan_id ? ngans[row.ngan_id] : null
+              const ctLabel = [
+                row.chi_tieu.join(", "),
+                [row.thung, row.lo, row.mau].filter(Boolean).join("/"),
+              ].filter(Boolean).join(" — ")
+
+              return (
+                <tr key={row.id} style={{ backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f8fafc" }}>
+                  <td style={{ ...TD, textAlign: "center", fontSize: "9pt" }}>{idx + 1}</td>
+                  <td style={{ ...TD, fontSize: "9pt" }}>{z(ctLabel) || "—"}</td>
+                  <td style={{ ...TD, fontSize: "9pt", textAlign: "center" }}>{z(row.che_do_say) || "—"}</td>
+                  {chiTieuCols.map(ct => {
+                    const val = (row.ket_qua as Record<string, number | null>)[ct]
+                    return (
+                      <td key={ct} style={{ ...TD, textAlign: "center", fontSize: "11pt", fontWeight: "bold" }}>
+                        {val != null ? val : "—"}
+                      </td>
+                    )
+                  })}
+                  <td style={{ ...TD, textAlign: "center", fontSize: "9pt" }}>{row.ca_sx || "—"}</td>
+                  {hasNgan && (
+                    <td style={{ ...TD, fontSize: "8pt", textAlign: "center", wordBreak: "break-word", verticalAlign: "middle" }}>
+                      {ngan ? (
+                        <>
+                          <div style={{ fontWeight: "bold", lineHeight: 1.2 }}>{z(ngan.ma_ngan || ngan.ten_ngan)}</div>
+                          {row.so_ngay_luu != null && (
+                            <div style={{ color: "#555555" }}>{row.so_ngay_luu} ngày</div>
+                          )}
+                        </>
+                      ) : "—"}
+                    </td>
+                  )}
+                  <td style={{ ...TD, fontSize: "9pt" }}>{row.nguoi_do || "—"}</td>
+                  {hasImages && (
+                    <td style={{ ...TD, padding: "3px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
+                        {(row.image_urls || []).slice(0, 4).map((url, imgIdx) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={imgIdx}
+                            src={url}
+                            alt=""
+                            crossOrigin="anonymous"
+                            style={{ width: "44px", height: "44px", objectFit: "cover", border: "1px solid #cccccc", display: "block" }}
+                          />
+                        ))}
+                      </div>
+                    </td>
+                  )}
+                  <td style={{ ...TD, fontSize: "9pt" }}>{row.ghi_chu || ""}</td>
+                </tr>
+              )
+            })}
+            {sheet.rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={20}
+                  style={{ textAlign: "center", color: "#999999", padding: "16px", fontStyle: "italic" }}
+                >
+                  Không có dòng đo
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        {/* Footer ký tên */}
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 16px 24px", fontSize: "10pt" }}>
+          <div style={{ textAlign: "center", width: "180px" }}>
+            <div style={{ fontWeight: "bold" }}>Người lập phiếu</div>
+            <div style={{ fontSize: "8pt", color: "#666666", marginBottom: "48px" }}>(Ký và ghi rõ họ tên)</div>
+          </div>
         </div>
       </div>
 
