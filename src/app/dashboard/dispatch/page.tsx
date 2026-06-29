@@ -979,7 +979,7 @@ export default function DispatchPage() {
       }
     }
     recentFromDb.sort((a, b) => toISO(b.ngay).localeCompare(toISO(a.ngay)))
-    setRecentEntries(recentFromDb)
+    setRecentEntries([])
 
     const latest = recentFromDb[0]
     const today = new Date().toISOString().slice(0, 10)
@@ -997,6 +997,18 @@ export default function DispatchPage() {
     }
     setFormCN("PEFC CS")
     setFormDayChuyen(latest?.day_chuyen || inferDayChuyenFromRows(latest?.rows))
+    setEditId(null)
+    setView("add")
+  }
+
+  const openAddBlank = () => {
+    const today = new Date().toISOString().slice(0, 10)
+    setFormNgay(today)
+    setFormRows([emptyRow()])
+    setClonedFrom(null)
+    setRecentEntries([])
+    setFormCN("PEFC CS")
+    setFormDayChuyen("Mủ tạp")
     setEditId(null)
     setView("add")
   }
@@ -1354,10 +1366,16 @@ export default function DispatchPage() {
           <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>
           <p className="text-sm text-slate-500 mt-0.5">Bảng phân xe thu mủ hằng ngày</p>
         </div>
-        <button onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
-          <Plus size={16}/> Thêm bảng
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={openAddBlank}
+            className="flex items-center gap-2 px-4 py-2.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm transition-all">
+            <FileText size={16}/> Bảng trắng
+          </button>
+          <button onClick={openAdd}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
+            <Plus size={16}/> Thêm bảng
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -1750,24 +1768,6 @@ export default function DispatchPage() {
         )}
       </div>
 
-      {/* Gợi ý nhân bản từ phiếu gần đây */}
-      {!editId && recentEntries.length > 0 && (
-        <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold text-violet-600 shrink-0">Nhân bản từ:</span>
-          {recentEntries.map(e => (
-            <button key={e.id} onClick={() => openClone(e)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
-                clonedFrom === toISO(e.ngay)
-                  ? "bg-violet-600 text-white border-violet-600"
-                  : "bg-white text-violet-700 border-violet-300 hover:bg-violet-100"
-              }`}>
-              {toISO(e.ngay).split("-").reverse().join("/")}
-              {e.rows?.length ? ` (${e.rows.length} xe)` : ""}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Dây chuyền — luôn đặt đầu tiên */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-3">
         <label className="text-xs font-bold text-slate-600 block mb-2">Dây chuyền <span className="text-red-500">*</span></label>
@@ -1815,21 +1815,6 @@ export default function DispatchPage() {
           <Info size={14}/> Lộ trình: chọn từng điểm theo đội.
         </p>
         <div className="flex gap-2 flex-wrap">
-          {isAdmin && !editId && (
-            <button onClick={downloadTemplate}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white border border-slate-300 rounded-lg transition-colors">
-              <Download size={12}/> Tải bảng
-            </button>
-          )}
-          {isAdmin && !editId && (
-            <>
-              <input ref={importRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImport}/>
-              <button onClick={() => importRef.current?.click()} disabled={importing}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-violet-600 hover:bg-violet-50 border border-violet-300 rounded-lg transition-colors disabled:opacity-50">
-                <Upload size={12}/> {importing ? "Đang xử lý..." : "Nhập CSV/XLSX"}
-              </button>
-            </>
-          )}
           {!editId && (
             <button onClick={() => setKlModal(true)}
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-300 rounded-lg transition-colors">
