@@ -1287,8 +1287,21 @@ export default function ExportPage() {
       showToast("Bạn không có quyền xóa đơn này.", "error");
       return;
     }
-    const affectedLotIds = order?.assignments?.length
-      ? [...new Set(order.assignments.map((a: Assignment) => a.lot_id))]
+    // Lấy assignments fresh từ DB trước khi xóa — tránh trường hợp state stale
+    // khiến affectedLotIds = [] và reconcileLotStatuses không chạy, lô kẹt "Xuất hàng"
+    const { data: freshOrder } = await supabase
+      .from("export_orders")
+      .select("id, assignments")
+      .eq("id", id)
+      .single();
+    const affectedLotIds = freshOrder?.assignments?.length
+      ? [
+          ...new Set(
+            (freshOrder.assignments as Assignment[])
+              .map((a) => a.lot_id)
+              .filter(Boolean),
+          ),
+        ]
       : [];
 
     const { error } = await supabase
@@ -1310,10 +1323,7 @@ export default function ExportPage() {
         showToast(snapshotError.message, "error");
         return;
       }
-      await reconcileLotStatuses(
-        affectedLotIds,
-        (latestOrders || []) as Array<{ id?: string; assignments?: Assignment[] }>,
-      );
+      await reconcileLotStatuses(affectedLotIds, latestOrders ?? []);
     }
 
     setDelConfirm(null);

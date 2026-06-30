@@ -1157,12 +1157,29 @@ export default function QualityPage() {
       new Set((affectedResults || []).map(r => r.lot_id).filter(Boolean) as string[])
     )
     if (affectedLotIds.length) {
-      const { error: lotError } = await supabase
+      const { data: allOrders } = await supabase
+        .from("export_orders")
+        .select("assignments")
+        .eq("factory_id", factoryId)
+      const { data: lotsData } = await supabase
         .from("lots")
-        .update({ trang_thai: "Hoàn thành" })
+        .select("id, tong_banh, trang_thai")
         .eq("factory_id", factoryId)
         .in("id", affectedLotIds)
-      if (lotError) { showToast("Đã xóa phiếu nhưng lỗi cập nhật lô: " + lotError.message, false); return }
+      for (const lot of lotsData ?? []) {
+        const assigned = (allOrders ?? []).reduce((sum, order) => {
+          const assgns = (order.assignments as Array<{lot_id:string;kien_a:number;kien_b:number;kien_c:number;kien_d:number}>) ?? []
+          return sum + assgns
+            .filter(a => a.lot_id === lot.id)
+            .reduce((s, a) => s + (a.kien_a||0) + (a.kien_b||0) + (a.kien_c||0) + (a.kien_d||0), 0)
+        }, 0)
+        const nextStatus = assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+          ? "Xuất hàng"
+          : "Hoàn thành"
+        if (lot.trang_thai !== nextStatus) {
+          await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lot.id)
+        }
+      }
     }
 
     setDelConfirm(null); showToast("Đã xóa phiếu kiểm nghiệm")
@@ -1189,12 +1206,29 @@ export default function QualityPage() {
       new Set((affectedResults || []).map(r => r.lot_id).filter(Boolean) as string[])
     )
     if (affectedLotIds.length) {
-      const { error: lotError } = await supabase
+      const { data: allOrders } = await supabase
+        .from("export_orders")
+        .select("assignments")
+        .eq("factory_id", factoryId)
+      const { data: lotsData } = await supabase
         .from("lots")
-        .update({ trang_thai: "Hoàn thành" })
+        .select("id, tong_banh, trang_thai")
         .eq("factory_id", factoryId)
         .in("id", affectedLotIds)
-      if (lotError) { showToast("Đã xóa phiếu nhưng lỗi cập nhật lô: " + lotError.message, false); return }
+      for (const lot of lotsData ?? []) {
+        const assigned = (allOrders ?? []).reduce((sum, order) => {
+          const assgns = (order.assignments as Array<{lot_id:string;kien_a:number;kien_b:number;kien_c:number;kien_d:number}>) ?? []
+          return sum + assgns
+            .filter(a => a.lot_id === lot.id)
+            .reduce((s, a) => s + (a.kien_a||0) + (a.kien_b||0) + (a.kien_c||0) + (a.kien_d||0), 0)
+        }, 0)
+        const nextStatus = assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+          ? "Xuất hàng"
+          : "Hoàn thành"
+        if (lot.trang_thai !== nextStatus) {
+          await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lot.id)
+        }
+      }
     }
 
     setSelectedDeleteIds(new Set()); setDeleteMode(null)

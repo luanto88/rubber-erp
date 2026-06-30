@@ -144,6 +144,59 @@ Kể từ migration `20260619_sk_atomic_rpc.sql`, **toàn bộ thao tác Sang ki
 - Lô `Xuất hàng` không được phép sửa/xóa theo luồng thành phẩm.
 - Logic `Xuất hàng` phải reconcile theo snapshot `export_orders` đọc lại từ DB, không tin snapshot cục bộ.
 
+### Rule reconcile trang thái lô sau xóa phiếu KN (2026-06-30)
+
+**KHÔNG bao giờ** set cứng `trang_thai = "Hoàn thành"` sau khi xóa phiếu kiểm nghiệm (`qc_results`).
+
+Lý do: lô có thể đang được gán trong `export_orders.assignments` dù phiếu KN đã xóa. Set cứng "Hoàn thành" sẽ downgrade nhầm lô đang thuộc đơn xuất.
+
+**Pattern bắt buộc** trong `quality/page.tsx` `handleDelete` và `handleBulkDelete`:
+
+```typescript
+// SAI — set cứng không check export_orders
+await supabase.from("lots").update({ trang_thai: "Hoàn thành" }).in("id", affectedLotIds)
+
+// ĐÚNG — reconcile từ export_orders thực tế
+const { data: allOrders } = await supabase
+  .from("export_orders")
+  .select("assignments")
+  .eq("factory_id", factoryId)
+const { data: lotsData } = await supabase
+  .from("lots")
+  .select("id, tong_banh, trang_thai")
+  .eq("factory_id", factoryId)
+  .in("id", affectedLotIds)
+for (const lot of lotsData ?? []) {
+  const assigned = (allOrders ?? []).reduce((sum, order) => {
+    const assgns = (order.assignments as Array<{lot_id:string;kien_a:number;kien_b:number;kien_c:number;kien_d:number}>) ?? []
+    return sum + assgns
+      .filter(a => a.lot_id === lot.id)
+      .reduce((s, a) => s + (a.kien_a||0) + (a.kien_b||0) + (a.kien_c||0) + (a.kien_d||0), 0)
+  }, 0)
+  const nextStatus = assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+    ? "Xuất hàng"
+    : "Hoàn thành"
+  if (lot.trang_thai !== nextStatus) {
+    await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lot.id)
+  }
+}
+```
+
+Logic này mirror `reconcileLotStatuses` trong `export/page.tsx` — các thay đổi phải đồng bộ giữa 2 nơi.
+
+### Admin sync button — fix lô bị kẹt do xóa DB trực tiếp
+
+Xóa dữ liệu trực tiếp từ Supabase (không qua UI) → không có code reconcile nào chạy → lô có thể kẹt sai trạng thái.
+
+Nút **"Đồng bộ trạng thái lô"** (amber, chỉ hiện với `user.role === "admin"`) trong `/dashboard/product` (`handleSyncAllLotStatuses`):
+
+- Quét tất cả `lots` có `trang_thai IN ("Hoàn thành", "Xuất hàng")` trong `factory_id`
+- Tính lại `assigned` từ `export_orders.assignments` cho từng lô
+- Cập nhật `trang_thai` về đúng giá trị
+- Idempotent — chạy nhiều lần không có tác hại
+
+Dùng khi người dùng báo lô hiển thị sai trạng thái sau khi thao tác trực tiếp trên DB.
+
 ## 6. Sản lượng
 
 - Khóa nghiệp vụ chuẩn của `production_records` là `factory_id + ngay + doi + so_xe + chuyen`.

@@ -133,11 +133,54 @@ if (form.assignments.length > 0) {
 
 ### Rule đồng bộ khi xóa đơn xuất
 
-- Khi xóa 1 `export_order`, không update trạng thái lô theo kiểu cứng nhắc
-- Bắt buộc tính lại theo các đơn xuất còn lại:
-  - `remaining <= 0` -> `Xuất hàng`
-  - `remaining > 0` -> `Hoàn thành`
+- Khi xóa 1 `export_order`, **KHÔNG** update trạng thái lô theo kiểu cứng nhắc
+- Bắt buộc reconcile từ `export_orders.assignments` thực tế trong DB:
+  - Tính tổng `assigned = sum(kien_a+kien_b+kien_c+kien_d)` của lô đó qua **TẤT CẢ** đơn còn lại trong `factory_id`
+  - `assigned > 0 && assigned >= tong_banh` → `Xuất hàng`
+  - còn lại → `Hoàn thành`
 - Kết quả tính lại phải phản ánh ngay ở module `Thành phẩm` theo hướng đồng bộ 2 chiều
+- Tham chiếu implementation: `reconcileLotStatuses` trong `export/page.tsx`
+
+### Rule đồng bộ khi xóa phiếu Kiểm nghiệm (2026-06-30)
+
+Quy tắc reconcile **áp dụng đồng nhất** cho cả thao tác xóa phiếu KN trong `quality/page.tsx`, không chỉ khi xóa đơn xuất.
+
+**Lý do:** `handleDelete` và `handleBulkDelete` ở `quality/page.tsx` trước đây set cứng `trang_thai = "Hoàn thành"` sau khi xóa `qc_results`. Điều này gây ra: nếu lô vẫn còn gán trong đơn xuất, lô sẽ bị downgrade nhầm về "Hoàn thành" dù không có remaining.
+
+**Canonical reconcile pattern** — dùng thống nhất ở `quality/page.tsx`, `export/page.tsx`, và `product/page.tsx` (admin sync):
+
+```typescript
+// Sau khi xóa qc_results, thu thập affectedLotIds rồi:
+const { data: allOrders } = await supabase
+  .from("export_orders")
+  .select("assignments")
+  .eq("factory_id", factoryId)
+const { data: lotsData } = await supabase
+  .from("lots")
+  .select("id, tong_banh, trang_thai")
+  .eq("factory_id", factoryId)
+  .in("id", affectedLotIds)
+for (const lot of lotsData ?? []) {
+  const assigned = (allOrders ?? []).reduce((sum, order) => {
+    const assgns = (order.assignments as Array<{lot_id:string;kien_a:number;kien_b:number;kien_c:number;kien_d:number}>) ?? []
+    return sum + assgns
+      .filter(a => a.lot_id === lot.id)
+      .reduce((s, a) => s + (a.kien_a||0) + (a.kien_b||0) + (a.kien_c||0) + (a.kien_d||0), 0)
+  }, 0)
+  const nextStatus = assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+    ? "Xuất hàng"
+    : "Hoàn thành"
+  if (lot.trang_thai !== nextStatus) {
+    await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lot.id)
+  }
+}
+```
+
+**Các trường hợp phải áp dụng:**
+- `quality/page.tsx` `handleDelete` — xóa 1 phiếu KN
+- `quality/page.tsx` `handleBulkDelete` — xóa nhiều phiếu KN cùng lúc
+- `export/page.tsx` — khi xóa đơn xuất (`reconcileLotStatuses`)
+- `product/page.tsx` `handleSyncAllLotStatuses` — admin batch sync (fix lô bị kẹt do xóa DB trực tiếp)
 
 ## Khách hàng
 

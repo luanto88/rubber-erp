@@ -277,6 +277,24 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     return endStr < startStr ? "Giờ kết thúc đang sớm hơn giờ bắt đầu" : null
   }, [ngay, tuGio, denGio])
 
+  // Pre-compute filtered inventory items per material to avoid O(n×m×k) in render
+  const filteredItemsMap = useMemo(() => {
+    const map = new Map<string, InventoryItemOption[]>()
+    for (const line of lines) {
+      for (const mat of line.materials) {
+        const search = (matSearches[mat.id] || "").toLowerCase()
+        const catFilter = matCategoryFilters[mat.id] || ""
+        const filtered = inventoryItems.filter((item) => {
+          if (catFilter && item.category_id !== catFilter) return false
+          if (!search) return true
+          return item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
+        })
+        map.set(mat.id, filtered)
+      }
+    }
+    return map
+  }, [lines, inventoryItems, matSearches, matCategoryFilters])
+
   // Close dropdown on outside click
   useEffect(() => {
     if (!assetDropdownOpen) return
@@ -455,7 +473,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     return !cv.includes("giám đốc") && !cv.includes("nhân viên")
   })
 
-  const loadInventoryItems = async (fid: string) => {
+  const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }] = await Promise.all([
       supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id").eq("factory_id", fid).eq("is_active", true).order("code"),
       supabase.from("inventory_stock_balances").select("item_id, on_hand").eq("factory_id", fid),
@@ -476,9 +494,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       }))
     )
     setInventoryCategories((cats || []) as InventoryCategory[])
-  }
+  }, [])
 
-  const loadDispatchVehicles = async (fid: string) => {
+  const loadDispatchVehicles = useCallback(async (fid: string) => {
     const { data: vehicles } = await supabase
       .from("dispatch_vehicles")
       .select("id, code, name, vehicle_type, plate_number, sort_order")
@@ -505,7 +523,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         currentDriverName: driverMap.get(v.id) || null,
       }))
     )
-  }
+  }, [])
 
   const loadRecord = useCallback(async (fid: string, recordId: string) => {
     const { data: rec } = await supabase
@@ -625,7 +643,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Close material dropdown when clicking outside
   useEffect(() => {
     if (!activeMaterialDropdown) return
-    const handler = (e: MouseEvent) => {
+    const handler = (e: PointerEvent) => {
       if (matDropdownRef.current && !matDropdownRef.current.contains(e.target as Node)) {
         setActiveMaterialDropdown(null)
       }
@@ -1781,6 +1799,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             <img
                               src={url}
                               alt={`Ảnh chung ${slotIdx + 1}`}
+                              loading="lazy"
+                              decoding="async"
                               className="w-full h-full object-cover rounded-xl border border-amber-200 cursor-pointer hover:opacity-90"
                               onClick={() => window.open(url, "_blank")}
                             />
@@ -2100,12 +2120,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   const search = matSearches[searchKey] || ""
                   const catFilter = matCategoryFilters[searchKey] || ""
                   // Both nguon types use inventory_items; display differs (stock shown for trong_kho only)
-                  const filteredItems = inventoryItems.filter((item) => {
-                    if (catFilter && item.category_id !== catFilter) return false
-                    if (!search) return true
-                    const q = search.toLowerCase()
-                    return item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
-                  })
+                  const filteredItems = filteredItemsMap.get(mat.id) ?? []
                   return (
                     <div key={mat.id} className="mb-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                       {/* Label row */}
@@ -2307,6 +2322,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         <img
                           src={url}
                           alt={`Ảnh ${slotIdx + 1}`}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-80"
                           onClick={() => window.open(url, "_blank")}
                         />

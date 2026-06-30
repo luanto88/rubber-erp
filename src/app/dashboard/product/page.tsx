@@ -45,6 +45,7 @@ import {
   ChevronRight,
   ArrowLeftRight,
   MoveRight,
+  RefreshCw,
 } from "lucide-react";
 
 // Types
@@ -1182,6 +1183,8 @@ export default function ProductPage() {
   const [editTransactionId, setEditTransactionId] = useState<string | null>(null);
   const [editContext, setEditContext] = useState<EditTransactionContext | null>(null);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [postSaveReadyNgans, setPostSaveReadyNgans] = useState<PostSaveReadyNgan[]>([]);
   const [selectedReadyNganIds, setSelectedReadyNganIds] = useState<Set<string>>(
@@ -3476,6 +3479,51 @@ export default function ProductPage() {
     );
   };
 
+  // Admin: đồng bộ lại trạng thái tất cả lô từ export_orders thực tế trong DB
+  const handleSyncAllLotStatuses = async () => {
+    if (!factoryId) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const { data: allLots } = await supabase
+        .from("lots")
+        .select("id, tong_banh, trang_thai")
+        .eq("factory_id", factoryId)
+        .in("trang_thai", ["Hoàn thành", "Xuất hàng"]);
+
+      const { data: allOrders } = await supabase
+        .from("export_orders")
+        .select("assignments")
+        .eq("factory_id", factoryId);
+
+      let fixedCount = 0;
+      for (const lot of allLots ?? []) {
+        const assigned = (allOrders ?? []).reduce((sum, order) => {
+          const assgns = (order.assignments as Array<{lot_id:string;kien_a:number;kien_b:number;kien_c:number;kien_d:number}>) ?? [];
+          return sum + assgns
+            .filter(a => a.lot_id === lot.id)
+            .reduce((s, a) => s + (a.kien_a||0) + (a.kien_b||0) + (a.kien_c||0) + (a.kien_d||0), 0);
+        }, 0);
+        const nextStatus = assigned > 0 && assigned >= Number(lot.tong_banh || 0)
+          ? "Xuất hàng"
+          : "Hoàn thành";
+        if (lot.trang_thai !== nextStatus) {
+          await supabase.from("lots").update({ trang_thai: nextStatus }).eq("id", lot.id);
+          fixedCount++;
+        }
+      }
+
+      void loadData(factoryId);
+      const msg = fixedCount > 0
+        ? `Đã đồng bộ ${fixedCount} lô về đúng trạng thái`
+        : "Tất cả lô đã đúng trạng thái";
+      setSyncMsg(msg);
+      setTimeout(() => setSyncMsg(null), 4000);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // ------------------------------
   // CREATE VIEW
   // ------------------------------
@@ -4319,6 +4367,16 @@ export default function ProductPage() {
           </div>
         )}
 
+        {syncMsg && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl max-w-xl">
+            <RefreshCw size={16} className="shrink-0" />
+            <span className="text-sm font-bold">{syncMsg}</span>
+            <button onClick={() => setSyncMsg(null)} className="ml-2 hover:opacity-70">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-40">
           <div className="max-w-7xl mx-auto px-6 py-3">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -4396,7 +4454,18 @@ export default function ProductPage() {
             Quản lý lô và phân tách sản lượng theo ca
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {currentUser?.role === "admin" && (
+            <button
+              onClick={handleSyncAllLotStatuses}
+              disabled={syncing}
+              title="Tính lại trạng thái tất cả lô từ đơn xuất thực tế trong DB"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg disabled:opacity-50 transition-all"
+            >
+              <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Đang đồng bộ..." : "Đồng bộ trạng thái lô"}
+            </button>
+          )}
           <button
             onClick={openSk}
             className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
@@ -5136,7 +5205,7 @@ export default function ProductPage() {
                       </div>
                       <div>
                         <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                          Loại bánh
+                          Loại bành
                         </label>
                         <input
                           readOnly
@@ -5474,7 +5543,7 @@ export default function ProductPage() {
                               Ca này
                             </div>
                             <div className="mt-1 text-lg font-extrabold text-slate-800">
-                              {editForm.tong_banh} bánh
+                              {editForm.tong_banh} bành
                             </div>
                           </div>
                           <div className="rounded-xl bg-slate-50 px-3 py-3">
@@ -5490,7 +5559,7 @@ export default function ProductPage() {
                               Toàn lô sau lưu
                             </div>
                             <div className="mt-1 text-lg font-extrabold text-slate-800">
-                              {lotTongSauLuu} bánh
+                              {lotTongSauLuu} bành
                             </div>
                           </div>
                           <div className="rounded-xl bg-slate-50 px-3 py-3">
