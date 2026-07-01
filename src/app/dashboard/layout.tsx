@@ -118,6 +118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isPublicStorageLookup = pathname.startsWith("/dashboard/storage/")
   const [user, setUser] = useState<SessionUser | null>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ production: true })
   const [loading, setLoading] = useState(true)
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
@@ -338,6 +339,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isPublicStorageLookup, loading, user])
 
+  // Đóng drawer menu mobile khi bấm phím Escape
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileNavOpen(false)
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [mobileNavOpen])
+
   if (isPublicStorageLookup) {
     return <>{children}</>
   }
@@ -357,10 +368,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       <aside
         className={
-          (collapsed ? "w-16" : "w-64") +
-          " flex flex-shrink-0 flex-col bg-slate-900 text-white transition-all duration-300"
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-shrink-0 flex-col bg-slate-900 text-white transition-transform duration-300 md:relative md:z-auto md:w-auto md:translate-x-0 md:transition-all " +
+          (mobileNavOpen ? "translate-x-0" : "-translate-x-full") +
+          " " +
+          (collapsed ? "md:w-16" : "md:w-64")
         }
       >
         <div className="flex items-center gap-3 border-b border-slate-700 p-4">
@@ -393,7 +413,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               />
             </div>
           )}
-          <button onClick={() => setCollapsed(!collapsed)} className="text-slate-400 hover:text-white">
+          <button onClick={() => setCollapsed(!collapsed)} className="hidden text-slate-400 hover:text-white md:flex">
             <Menu size={18} />
           </button>
         </div>
@@ -436,7 +456,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       return (
                         <button
                           key={child.key}
-                          onClick={() => router.push(child.key)}
+                          onClick={() => {
+                            router.push(child.key)
+                            setMobileNavOpen(false)
+                          }}
                           className={
                             "w-full flex items-center gap-3 py-2 pl-10 pr-4 text-sm transition-colors " +
                             (childActive
@@ -458,7 +481,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             return (
               <button
                 key={item.key}
-                onClick={() => router.push(item.key)}
+                onClick={() => {
+                  router.push(item.key)
+                  setMobileNavOpen(false)
+                }}
                 className={
                   "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors " +
                   (itemActive
@@ -475,7 +501,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-end gap-2 border-b border-slate-200 bg-white/95 px-6 py-2.5 shadow-sm backdrop-blur-sm">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur-sm md:px-6">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors md:hidden"
+            aria-label="Mở menu điều hướng"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {/* Bell notifications */}
           <div ref={notifRef} className="relative">
             <button
@@ -550,12 +584,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div ref={userDropdownRef} className="relative">
             <button
               onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-              className="flex items-center gap-2.5 rounded-xl px-3 py-1.5 transition-all duration-200 hover:bg-slate-100 active:scale-95"
+              className="flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-1.5 transition-all duration-200 hover:bg-slate-100 active:scale-95"
             >
               <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
                 {user.full_name?.[0] || "U"}
               </div>
-              <span className="text-sm font-semibold text-slate-700">{user.full_name}</span>
+              <span className="hidden max-w-[8rem] truncate text-sm font-semibold text-slate-700 sm:inline sm:max-w-[10rem] md:max-w-[14rem]">
+                {user.full_name}
+              </span>
               <ChevronDown
                 size={14}
                 className={
@@ -587,6 +623,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </button>
               </div>
             )}
+          </div>
           </div>
         </header>
         <main className="flex-1 overflow-y-auto">
