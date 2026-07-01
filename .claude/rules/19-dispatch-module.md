@@ -169,3 +169,12 @@ const renumberChuyenForVehicle = (rows: DxRow[], so_xe: string): DxRow[] => {
 
 - Bất kỳ thao tác nào làm thay đổi tập hợp dòng của một xe trong ngày (nhân bản dòng, xóa dòng, và các thao tác tương lai nếu có) đều phải chạy qua `renumberChuyenForVehicle` để đảm bảo `chuyen` luôn là dãy liên tục 1,2,3... theo từng xe, không hở số và không trùng số.
 - Không được để logic nhân bản/xóa dòng copy hoặc giữ nguyên `chuyen` của dòng khác mà không tính lại theo nhóm cùng `so_xe`.
+
+## Cập nhật 2026-07-01 (bổ sung): Đội/Xe trong tab Thống kê là multi-select
+
+- `statsDoi` và `statsVehicle` trong `src/app/dashboard/dispatch/page.tsx` nay là `string[]` (trước đây là `string` đơn), dùng chung component `FilterMultiSelect` (`src/app/dashboard/_components/filter-multi-select.tsx`) giống hệt pattern của `Loại nguyên liệu` — dropdown checkbox + ô tìm kiếm, thay cho `<select>` đơn cũ.
+- `FilterMultiSelect` có thêm prop optional `searchPlaceholder` (mặc định `"Tìm loại..."`) để đổi placeholder ô tìm kiếm theo ngữ cảnh dùng lại (`"Tìm đội..."`, `"Tìm xe..."`).
+- Filter `Đội` và `Xe` phải hoạt động đồng thời với `Loại nguyên liệu`, `Ghi chú`, `Từ ngày`, `Đến ngày` — áp dụng cho `Danh sách`, `Thống kê`, `PDF tổng`, `PDF đội`, `PDF xe`.
+- `buildDispatchAnalytics()` trong `src/lib/dispatch-analytics.ts` nhận `filters.dois?: string[]` và `filters.vehicles?: string[]` (đổi từ `doi?: string` / `vehicle?: string`). Lọc đội dùng `dois.some(...)` khớp bất kỳ giá trị nào trong tập đã chọn; lọc xe đổi từ so khớp substring sang exact-match theo `Set` (vì giá trị chọn luôn đến từ danh sách option cố định, không phải nhập tay).
+- `downloadDispatchStatsPdf()` và `buildStatsContext()` trong `src/lib/dispatch-pdf.ts` nhận `selectedDois?: string[]` / `selectedVehicles?: string[]`. Context line PDF ghép nhiều giá trị bằng `", "`; tên file PDF ghép nhiều giá trị đã `safeName()` hoá bằng `-`.
+- Khi sửa tiếp các hàm này, phải đồng bộ type ở tất cả nơi gọi (`page.tsx` ↔ `dispatch-analytics.ts` ↔ `dispatch-pdf.ts`) — đúng bài học lỗi build `selectedNote` đã ghi ở trên.

@@ -194,10 +194,10 @@ function addTrip(summary: DispatchGroupSummary, trip: DispatchFlatTrip) {
 export function buildDispatchAnalytics(
   entries: DispatchAnalyticsEntry[],
   deliveryPoints: DiemGN[],
-  filters?: { doi?: string; vehicle?: string; note?: string; materials?: string[] },
+  filters?: { dois?: string[]; vehicles?: string[]; note?: string; materials?: string[] },
 ): DispatchAnalytics {
-  const vehicleNeedle = (filters?.vehicle || "").trim().toLowerCase()
-  const doiFilter = filters?.doi ? Number(filters.doi) : 0
+  const vehicleFilters = new Set((filters?.vehicles || []).map((v) => v.trim().toLowerCase()).filter(Boolean))
+  const doiFilters = (filters?.dois || []).map(Number).filter((d) => Number.isFinite(d) && d > 0)
   const noteFilter = (filters?.note || "").trim()
   const selectedMaterials = filters?.materials || []
   const trips: DispatchFlatTrip[] = []
@@ -218,8 +218,8 @@ export function buildDispatchAnalytics(
     for (const row of entry.rows || []) {
       const dois = getTripDois(row, deliveryPoints)
       if (!matchesNoteFilter(row.ghi_chu, noteFilter)) continue
-      if (doiFilter && !dois.includes(doiFilter)) continue
-      if (vehicleNeedle && !(row.so_xe || "").toLowerCase().includes(vehicleNeedle)) continue
+      if (doiFilters.length > 0 && !dois.some((d) => doiFilters.includes(d))) continue
+      if (vehicleFilters.size > 0 && !vehicleFilters.has((row.so_xe || "").toLowerCase())) continue
       if (selectedMaterials.length > 0) {
         const flags = getTripMaterialFlags(row)
         if (!selectedMaterials.some((material) => flags[material as DispatchMaterialOption])) continue

@@ -221,6 +221,7 @@ Dùng khi người dùng báo lô hiển thị sai trạng thái sau khi thao t�
 
 - Danh sách và Thống kê có filter `Loại nguyên liệu` dạng `multi-select`.
 - Filter này phải kết hợp được với `Ghi chú`.
+- Filter `Đội` và `Xe` trong tab Thống kê cũng là `multi-select` (dùng chung component `FilterMultiSelect` với `Loại nguyên liệu`), phải hoạt động đồng thời với `Loại nguyên liệu`, `Ghi chú`, `Từ ngày`, `Đến ngày`.
 - Thống kê phải hiển thị tổng bảng phân xe, tổng chuyến, tổng km, khối lượng tươi/khô theo loại.
 - Không để text mojibake; mọi text phải là Unicode tiếng Việt bình thường.
 

@@ -10,6 +10,7 @@ type FilterMultiSelectProps = {
   placeholder: string
   labels?: Record<string, string>
   className?: string
+  searchPlaceholder?: string
 }
 
 export function FilterMultiSelect({
@@ -19,6 +20,7 @@ export function FilterMultiSelect({
   placeholder,
   labels,
   className = "",
+  searchPlaceholder = "Tìm loại...",
 }: FilterMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -92,7 +94,7 @@ export function FilterMultiSelect({
               ref={searchRef}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Tìm loại..."
+              placeholder={searchPlaceholder}
               className="w-full bg-transparent text-sm outline-none"
             />
             {search && (

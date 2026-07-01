@@ -394,15 +394,17 @@ function buildStatsContext(params: {
   from?: string
   to?: string
   mode: "all" | "doi" | "vehicle"
-  selectedDoi?: string
-  selectedVehicle?: string
+  selectedDois?: string[]
+  selectedVehicles?: string[]
   selectedNote?: string
 }) {
   const range = `T\u1eeb ng\u00e0y ${params.from ? formatDateVi(params.from) : "t\u1ea5t c\u1ea3"} \u0111\u1ebfn ng\u00e0y ${params.to ? formatDateVi(params.to) : "t\u1ea5t c\u1ea3"}`
   const noteLabel = describeNoteFilter(params.selectedNote || "")
   const note = noteLabel ? `; ${noteLabel}` : ""
-  if (params.mode === "doi" && params.selectedDoi) return `${range}; \u0111\u1ed9i ${params.selectedDoi}${note}`
-  if (params.mode === "vehicle" && params.selectedVehicle) return `${range}; xe ${params.selectedVehicle}${note}`
+  const dois = params.selectedDois || []
+  const vehicles = params.selectedVehicles || []
+  if (params.mode === "doi" && dois.length > 0) return `${range}; \u0111\u1ed9i ${dois.join(", ")}${note}`
+  if (params.mode === "vehicle" && vehicles.length > 0) return `${range}; xe ${vehicles.join(", ")}${note}`
   return `${range}; t\u1ea5t c\u1ea3 \u0111\u1ed9i xe${note}`
 }
 
@@ -412,8 +414,8 @@ export async function downloadDispatchStatsPdf(params: {
   from?: string
   to?: string
   mode: "all" | "doi" | "vehicle"
-  selectedDoi?: string
-  selectedVehicle?: string
+  selectedDois?: string[]
+  selectedVehicles?: string[]
   selectedNote?: string
   makerName?: string
 }) {
@@ -512,9 +514,9 @@ export async function downloadDispatchStatsPdf(params: {
   renderSignatures(doc, params.makerName)
   footer(doc)
   const suffix = params.mode === "doi"
-    ? `doi-${safeName(params.selectedDoi || "tat-ca")}`
+    ? `doi-${(params.selectedDois || []).length > 0 ? params.selectedDois!.map(safeName).join("-") : "tat-ca"}`
     : params.mode === "vehicle"
-      ? `xe-${safeName(params.selectedVehicle || "tat-ca")}`
+      ? `xe-${(params.selectedVehicles || []).length > 0 ? params.selectedVehicles!.map(safeName).join("-") : "tat-ca"}`
       : "tong-hop"
   doc.save(`thong-ke-dieu-xe-${suffix}-${params.from || "all"}-${params.to || "all"}.pdf`)
 }

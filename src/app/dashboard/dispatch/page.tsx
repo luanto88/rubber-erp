@@ -590,8 +590,8 @@ export default function DispatchPage() {
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
   const [listTab, setListTab] = useState<"list"|"stats">("list")
-  const [statsDoi, setStatsDoi] = useState("")
-  const [statsVehicle, setStatsVehicle] = useState("")
+  const [statsDoi, setStatsDoi] = useState<string[]>([])
+  const [statsVehicle, setStatsVehicle] = useState<string[]>([])
 
   // Views: list | detail | add | edit
   const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
@@ -860,8 +860,8 @@ export default function DispatchPage() {
       s + (e.rows||[]).reduce((ss,r) => ss + getDispatchRowDry(r), 0), 0),
   }
   const analytics = buildDispatchAnalytics(exportableEntries, deliveryPoints, {
-    doi: statsDoi,
-    vehicle: statsVehicle,
+    dois: statsDoi,
+    vehicles: statsVehicle,
     note: filterGhiChu,
     materials: filterLoai,
   })
@@ -880,6 +880,8 @@ export default function DispatchPage() {
     dt: analytics.totals.dtKho,
   })
   const doiOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).flatMap(row => getTripDois(row, deliveryPoints))))].sort((a, b) => a - b)
+  const doiOptionStrings = doiOptions.map(String)
+  const doiLabels = Object.fromEntries(doiOptions.map(d => [String(d), `Đội ${d}`]))
   const statVehicleOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).map(row => row.so_xe).filter(Boolean)))].sort((a, b) => a.localeCompare(b))
 
   const exportStatsPdf = async (mode: "all" | "doi" | "vehicle") => {
@@ -894,8 +896,8 @@ export default function DispatchPage() {
         from: filterFrom,
         to: filterTo,
         mode,
-        selectedDoi: statsDoi,
-        selectedVehicle: statsVehicle,
+        selectedDois: statsDoi,
+        selectedVehicles: statsVehicle,
         selectedNote: filterGhiChu,
         makerName,
       })
@@ -1518,18 +1520,23 @@ export default function DispatchPage() {
           placeholder="Tất cả loại nguyên liệu"
           className="min-w-64"
         />
-        <select value={statsDoi} onChange={e => setStatsDoi(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-          <option value="">Tất cả đội</option>
-          {doiOptions.map(doi => <option key={doi} value={doi}>{`Đội ${doi}`}</option>)}
-        </select>
-        <select value={statsVehicle} onChange={e => setStatsVehicle(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-          <option value="">Tất cả xe</option>
-          {statVehicleOptions.map(vehicle => <option key={vehicle} value={vehicle}>{vehicle}</option>)}
-        </select>
-        {(search||filterFrom||filterTo||filterGhiChu||filterLoai.length>0||statsDoi||statsVehicle) &&
-          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu(""); setFilterLoai([]); setStatsDoi(""); setStatsVehicle("") }}
+        <FilterMultiSelect
+          options={doiOptionStrings}
+          selected={statsDoi}
+          onChange={setStatsDoi}
+          labels={doiLabels}
+          placeholder="Tất cả đội"
+          searchPlaceholder="Tìm đội..."
+        />
+        <FilterMultiSelect
+          options={statVehicleOptions}
+          selected={statsVehicle}
+          onChange={setStatsVehicle}
+          placeholder="Tất cả xe"
+          searchPlaceholder="Tìm xe..."
+        />
+        {(search||filterFrom||filterTo||filterGhiChu||filterLoai.length>0||statsDoi.length>0||statsVehicle.length>0) &&
+          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu(""); setFilterLoai([]); setStatsDoi([]); setStatsVehicle([]) }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}
