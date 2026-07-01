@@ -328,9 +328,14 @@ Ví dụ: `DX-110426/001` (Đội xe), `MT-110426/002` (Mủ tạp)
 
 ```typescript
 const BO_PHAN_PREFIX: Record<string, string> = {
-  "Mủ tạp": "MT", "Mủ nước": "MN", "Đội xe": "DX",
-  "Nước thải": "NT", "Biomass": "BO", "Văn phòng": "VP", "Khác": "K",
-}
+  "Mủ tạp": "MT",
+  "Mủ nước": "MN",
+  "Đội xe": "DX",
+  "Nước thải": "NT",
+  Biomass: "BO",
+  "Văn phòng": "VP",
+  Khác: "K",
+};
 // prefix = `${BO_PHAN_PREFIX[boPhan] || "MT"}-${dd}${mm}${yy}`
 // like query: `${prefix}/%` để đếm tuần tự theo prefix
 ```
@@ -754,12 +759,12 @@ if (
 
 ### Print URL params
 
-| Param        | Mô tả                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `type`       | `su_co` \| `de_nghi` \| `su_co_nho` \| `bao_duong` \| `bao_duong_xe` \| `sua_chua_nho_xe` \| `ly_lich` \| `ly_lich_xe` |
-| `record_id`  | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho / bao_duong / bao_duong_xe / sua_chua_nho_xe)                      |
-| `asset_id`   | UUID 1 thiết bị (ly_lich đơn)                                                                                          |
-| `asset_ids`  | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich**                                                           |
+| Param         | Mô tả                                                                                                                  |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `type`        | `su_co` \| `de_nghi` \| `su_co_nho` \| `bao_duong` \| `bao_duong_xe` \| `sua_chua_nho_xe` \| `ly_lich` \| `ly_lich_xe` |
+| `record_id`   | UUID biên bản (dùng cho su_co / de_nghi / su_co_nho / bao_duong / bao_duong_xe / sua_chua_nho_xe)                      |
+| `asset_id`    | UUID 1 thiết bị (ly_lich đơn)                                                                                          |
+| `asset_ids`   | Danh sách UUID cách nhau dấu phẩy — **multi-device ly_lich**                                                           |
 | `vehicle_id`  | UUID xe từ `dispatch_vehicles` (ly_lich_xe đơn — legacy/backward-compat từ trang chi tiết biên bản)                    |
 | `vehicle_ids` | Danh sách UUID cách nhau dấu phẩy — **multi-vehicle ly_lich_xe** (từ tab Lý lịch, ưu tiên hơn `vehicle_id`)            |
 | `from`        | Ngày bắt đầu lọc (ly_lich / ly_lich_xe)                                                                                |
@@ -869,15 +874,15 @@ src/app/dashboard/maintenance/
 
 #### Chiều rộng các trường vật tư
 
-| Trường     | Chiều rộng  | Ghi chú                        |
-| ---------- | ----------- | ------------------------------ |
-| Nguồn      | `w-[88px]`  |                                |
-| Nhóm       | `w-[180px]` | native `<select>`              |
-| Tìm/Chọn  | `flex-1`    | custom dropdown, min `180px`   |
-| ĐVT        | `w-[42px]`  |                                |
-| Số lượng   | `w-[50px]`  |                                |
-| Đơn giá    | `w-[72px]`  | chỉ `ben_ngoai`                |
-| Tiền tệ    | `w-[74px]`  | chỉ `ben_ngoai`                |
+| Trường   | Chiều rộng  | Ghi chú                      |
+| -------- | ----------- | ---------------------------- |
+| Nguồn    | `w-[88px]`  |                              |
+| Nhóm     | `w-[180px]` | native `<select>`            |
+| Tìm/Chọn | `flex-1`    | custom dropdown, min `180px` |
+| ĐVT      | `w-[42px]`  |                              |
+| Số lượng | `w-[50px]`  |                              |
+| Đơn giá  | `w-[72px]`  | chỉ `ben_ngoai`              |
+| Tiền tệ  | `w-[74px]`  | chỉ `ben_ngoai`              |
 
 Font tất cả labels và inputs vật tư: `text-xs` (không dùng `text-[10px]`).
 

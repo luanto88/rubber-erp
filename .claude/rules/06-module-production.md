@@ -18,7 +18,11 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - Không đọc/ghi trực tiếp `dispatch_entries.rows` cho logic mới, chỉ xem như cache legacy tạm thời.
 - Khi thêm/sửa/import điều xe, chi tiết phải đi qua `dispatch_entry_rows`.
 - Khối lượng khô phải auto-calc từ khối lượng tươi và DRC.
-- `chuyen` được auto-assign theo xe trong ngày.
+- `chuyen` được auto-assign theo xe trong ngày:
+  - Khi chọn `so_xe` cho một dòng: `chuyen` = số dòng khác đã có cùng `so_xe` + 1.
+  - Khi nhân bản dòng hoặc xóa dòng trong form Điều xe (`src/app/dashboard/dispatch/page.tsx`): phải đánh lại `chuyen` tuần tự (1,2,3...) cho **tất cả** dòng cùng `so_xe`, theo đúng thứ tự xuất hiện trong mảng. Không được để dòng nhân bản giữ nguyên số chuyến của dòng gốc; không được để hở số chuyến khi xóa dòng ở giữa hoặc đầu danh sách cùng xe.
+  - Helper dùng chung cho việc đánh số lại: `renumberChuyenForVehicle(rows, so_xe)` trong `dispatch/page.tsx`, gọi từ `cloneRow` và `removeRow`.
+  - Dòng chưa chọn `so_xe` (rỗng) không bị đụng tới bởi việc đánh số lại.
 - Danh mục `diem_gn` dùng `dispatch_delivery_points`, có filter `factory_id`.
 - `lo_thu_hoach` của chuyến phải suy ra từ `diem_gn + phiên`.
 

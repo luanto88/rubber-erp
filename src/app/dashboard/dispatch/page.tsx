@@ -1065,6 +1065,23 @@ export default function DispatchPage() {
     setView("add")
   }
 
+  // Đánh lại số "chuyến" tuần tự (1,2,3...) cho tất cả các dòng cùng so_xe,
+  // giữ nguyên thứ tự xuất hiện trong mảng. Dòng chưa chọn xe (so_xe rỗng) không đổi.
+  const renumberChuyenForVehicle = (rows: DxRow[], so_xe: string): DxRow[] => {
+    if (!so_xe) return rows
+    const total = rows.filter(r => r.so_xe === so_xe).length
+    let seq = 0
+    return rows.map(r => {
+      if (r.so_xe !== so_xe) return r
+      seq += 1
+      return {
+        ...r,
+        chuyen: seq,
+        _warn: total >= 3 ? `Xe ${so_xe} đã có ${total - 1} chuyến trong ngày này!` : undefined,
+      }
+    })
+  }
+
   // Nhân bản 1 dòng xe trong form — chẳn ngay sau dòng nguồn, xóa KL
   const cloneRow = (idx: number) => {
     const src = formRows[idx]
@@ -1079,11 +1096,23 @@ export default function DispatchPage() {
       ghi_chu: "",
       locked: false, _warn: undefined,
     }
-    setFormRows(r => [
-      ...r.slice(0, idx + 1),
-      cloned,
-      ...r.slice(idx + 1),
-    ])
+    setFormRows(r => {
+      const inserted = [
+        ...r.slice(0, idx + 1),
+        cloned,
+        ...r.slice(idx + 1),
+      ]
+      return renumberChuyenForVehicle(inserted, cloned.so_xe)
+    })
+  }
+
+  // Xóa 1 dòng xe trong form — đánh lại số "chuyến" cho các dòng còn lại cùng xe
+  const removeRow = (idx: number) => {
+    setFormRows(r => {
+      const removed = r[idx]
+      const rest = r.filter((_, i) => i !== idx)
+      return renumberChuyenForVehicle(rest, removed.so_xe)
+    })
   }
 
   // Open Edit
@@ -2053,7 +2082,7 @@ export default function DispatchPage() {
                           title="Khóa hàng" className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
                           <Unlock size={14}/>
                         </button>
-                        <button onClick={() => setFormRows(r => r.filter((_,i) => i !== idx))}
+                        <button onClick={() => removeRow(idx)}
                           className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
                           <X size={14}/>
                         </button>

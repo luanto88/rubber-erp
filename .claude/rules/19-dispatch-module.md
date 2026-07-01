@@ -129,3 +129,43 @@ ALTER TABLE dispatch_entry_rows
 - `src/app/dashboard/dispatch/page.tsx` — `DxRow.stops_detail`, `toggleStopsDetailMode`, `updateStopPhien`, UI toggle per-point phiên trên từng dòng.
 
 **Lưu ý quan trọng**: Migration `20260629_dispatch_stops_detail.sql` phải được chạy thủ công trên Supabase SQL Editor trước khi tính năng `stops_detail` hoạt động trên production.
+
+## Cập nhật 2026-07-01: Đánh lại số chuyến khi nhân bản / xóa dòng trong form Điều xe
+
+### Bug đã fix
+
+- **Nhân bản dòng** (`cloneRow`): dòng nhân bản copy nguyên `chuyen` của dòng gốc qua spread `{...src}`. Nhân bản dòng "10A chuyến 1" tạo ra dòng mới cũng là "10A chuyến 1" thay vì "10A chuyến 2".
+- **Xóa dòng** (nút X trong cột hành động): chỉ `setFormRows(r => r.filter((_,i) => i !== idx))`, không đánh lại `chuyen` của các dòng còn lại cùng xe. Xóa "10A chuyến 1" khi còn "10A chuyến 2" thì dòng còn lại phải tụt xuống "10A chuyến 1", nhưng trước fix vẫn giữ nguyên `chuyen: 2`.
+
+### Fix
+
+Thêm helper dùng chung trong `src/app/dashboard/dispatch/page.tsx`, đặt cạnh `cloneRow`:
+
+```typescript
+// Đánh lại số "chuyến" tuần tự (1,2,3...) cho tất cả các dòng cùng so_xe,
+// giữ nguyên thứ tự xuất hiện trong mảng. Dòng chưa chọn xe (so_xe rỗng) không đổi.
+const renumberChuyenForVehicle = (rows: DxRow[], so_xe: string): DxRow[] => {
+  if (!so_xe) return rows
+  const total = rows.filter(r => r.so_xe === so_xe).length
+  let seq = 0
+  return rows.map(r => {
+    if (r.so_xe !== so_xe) return r
+    seq += 1
+    return {
+      ...r,
+      chuyen: seq,
+      _warn: total >= 3 ? `Xe ${so_xe} đã có ${total - 1} chuyến trong ngày này!` : undefined,
+    }
+  })
+}
+```
+
+- `cloneRow` gọi `renumberChuyenForVehicle` ngay sau khi chèn dòng nhân bản vào mảng — dòng gốc, dòng nhân bản, và bất kỳ dòng nào khác đã có sẵn cùng `so_xe` đều được đánh số lại tuần tự trong một lần duyệt.
+- Nút xóa dòng không còn gọi `setFormRows(r => r.filter(...))` trực tiếp trong JSX; thay bằng hàm `removeRow(idx)` — filter bỏ dòng xong thì gọi lại helper cho đúng `so_xe` của dòng vừa xóa.
+- Renumber áp dụng cho toàn bộ dòng cùng `so_xe` bất kể `locked` hay không, nhất quán với cách `updateRow` đếm `sameXe` khi auto-assign lúc chọn xe (không phân biệt `locked`).
+- Dòng chưa chọn `so_xe` (rỗng) không bị đụng tới — không xung đột với `clearAllVehicles()` (mục "Xóa xe hàng loạt" phía trên), vì hàm đó reset `so_xe = ""` nên helper renumber sẽ bỏ qua các dòng đó ngay từ điều kiện `if (!so_xe) return rows`.
+
+### Quy tắc chung (thay thế mọi mô tả cũ về clone/xóa dòng không renumber)
+
+- Bất kỳ thao tác nào làm thay đổi tập hợp dòng của một xe trong ngày (nhân bản dòng, xóa dòng, và các thao tác tương lai nếu có) đều phải chạy qua `renumberChuyenForVehicle` để đảm bảo `chuyen` luôn là dãy liên tục 1,2,3... theo từng xe, không hở số và không trùng số.
+- Không được để logic nhân bản/xóa dòng copy hoặc giữ nguyên `chuyen` của dòng khác mà không tính lại theo nhóm cùng `so_xe`.
