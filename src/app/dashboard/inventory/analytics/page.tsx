@@ -16,6 +16,8 @@ import {
   ShieldAlert,
 } from "lucide-react"
 import { InventoryPageShell, InventoryPlaceholderSection, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import {
   loadInventoryMovementData,
   type InventoryItemOption,
@@ -584,7 +586,10 @@ export default function InventoryAnalyticsPage() {
         />
       </ScrollReveal>
 
-      <ScrollRevealSection className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <ScrollRevealSection className="mb-4">
+        <FilterBar
+          activeCount={[selectedWarehouseId !== "all", selectedFocus !== "all"].filter(Boolean).length}
+        >
         <div className="min-w-[220px] flex-1">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
           <select
@@ -613,6 +618,7 @@ export default function InventoryAnalyticsPage() {
             <option value="lot-expiry">Chỉ lô và hạn sử dụng</option>
           </select>
         </div>
+        </FilterBar>
       </ScrollRevealSection>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -696,7 +702,8 @@ export default function InventoryAnalyticsPage() {
         </ScrollRevealSection>
       </div>
 
-      <ScrollRevealSection className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <ScrollRevealSection>
+        <ResponsiveTableWrapper>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
             <h2 className="text-base font-bold text-slate-800">Giao dịch gần đây</h2>
@@ -779,6 +786,7 @@ export default function InventoryAnalyticsPage() {
             </table>
           </div>
         )}
+        </ResponsiveTableWrapper>
       </ScrollRevealSection>
 
       <div className="grid gap-4 xl:grid-cols-2">

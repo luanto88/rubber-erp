@@ -41,6 +41,8 @@ import {
 } from "@/lib/storage-status"
 import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2,
@@ -1042,8 +1044,11 @@ export default function StoragePage() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-5 space-y-4">
-          <div className="flex flex-wrap gap-3 items-center">
+        <FilterBar
+          className="mb-5"
+          activeCount={[search, filterTT, filterGhiChu, reportFrom, reportTo, reportLoaiNL].filter(Boolean).length}
+        >
+          <div className="flex flex-wrap gap-3 items-center w-full">
             <div className="flex items-center gap-2 flex-1 min-w-48">
               <Search size={15} className="text-slate-400" />
               <input value={search} onChange={e => setSearch(e.target.value)}
@@ -1076,7 +1081,7 @@ export default function StoragePage() {
             )}
           </div>
 
-          <div className="border-t border-slate-100 pt-4">
+          <div className="border-t border-slate-100 pt-4 w-full">
             <div className="flex flex-wrap items-end gap-2.5">
               <div className="min-w-[150px]">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
@@ -1121,7 +1126,7 @@ export default function StoragePage() {
               Chỉ lấy các {subTerm.toLowerCase()} có toàn bộ thời gian nguyên liệu nằm trọn trong kỳ lọc.
             </p>
           </div>
-        </div>
+        </FilterBar>
 
         {/* Card grid */}
         {loading ? (
@@ -1371,18 +1376,24 @@ export default function StoragePage() {
 
       {/* ── Add / Edit Modal ───────────────────────────────────────────────── */}
       {(modal === "add" || modal === "edit") && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
-              <h2 className="text-lg font-extrabold text-slate-800">
-                {modal === "add" ? `Tạo ${subTerm.toLowerCase()} mới` : `Sửa ${subTerm.toLowerCase()}`}
-              </h2>
-              <button onClick={() => setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl">
-                <X size={18} />
+        <ModalShell
+          title={modal === "add" ? `Tạo ${subTerm.toLowerCase()} mới` : `Sửa ${subTerm.toLowerCase()}`}
+          onClose={() => setModal(null)}
+          maxWidth="2xl"
+          footer={
+            <>
+              <button onClick={() => setModal(null)}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hồy
               </button>
-            </div>
-
-            <div className="p-6 space-y-4">
+              <button onClick={handleSave} disabled={saving}
+                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
+                {saving ? "Đang lưu..." : modal === "add" ? `Tạo ${subTerm.toLowerCase()}` : "Lưu thay đổi"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {/* Row 1: Vị trí · Loại NL · Nguồn gốc */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -1622,25 +1633,14 @@ export default function StoragePage() {
             </div>
 
             {saveError && (
-              <div className="px-6 pt-2 pb-0">
+              <div className="pt-2">
                 <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">
                   <X size={13} className="shrink-0" />
                   {saveError}
                 </div>
               </div>
             )}
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setModal(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hồy
-              </button>
-              <button onClick={handleSave} disabled={saving}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
-                {saving ? "Đang lưu..." : modal === "add" ? `Tạo ${subTerm.toLowerCase()}` : "Lưu thay đổi"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* ── View detail modal ──────────────────────────────────────────────── */}

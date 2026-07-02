@@ -33,6 +33,7 @@ import {
   Loader2,
 } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string }
 type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
@@ -513,18 +514,31 @@ export default function DocumentDetailPage() {
 
       {/* PIN Modal */}
       {pinModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-800">
-                {pinModal === "ky_buoc"
-                  ? currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"
-                  : "Phê duyệt văn bản"}
-              </h3>
-              <button onClick={() => { setPinModal(null); setPin(""); setPinError(null) }} className="text-slate-400 hover:text-slate-700">
-                <X size={18} />
+        <ModalShell
+          title={pinModal === "ky_buoc"
+            ? currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"
+            : "Phê duyệt văn bản"}
+          onClose={() => { setPinModal(null); setPin(""); setPinError(null) }}
+          maxWidth="sm"
+          footer={
+            <>
+              <button
+                onClick={() => void (pinModal === "ky_buoc" ? handleKyBuoc() : handlePheDuyet())}
+                disabled={acting || !pin.trim()}
+                className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all"
+              >
+                {acting ? "Đang xử lý..." : "Xác nhận"}
               </button>
-            </div>
+              <button
+                onClick={() => { setPinModal(null); setPin(""); setPinError(null) }}
+                disabled={acting}
+                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Hủy
+              </button>
+            </>
+          }
+        >
             {pinModal === "ky_buoc" && currentStep && (
               <p className="text-sm text-slate-600 mb-4">
                 {currentStep.type === "ca_nhan"
@@ -549,40 +563,40 @@ export default function DocumentDetailPage() {
               />
               {pinError && <p className="text-xs text-red-600 mt-1.5">{pinError}</p>}
             </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={() => void (pinModal === "ky_buoc" ? handleKyBuoc() : handlePheDuyet())}
-                disabled={acting || !pin.trim()}
-                className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all"
-              >
-                {acting ? "Đang xử lý..." : "Xác nhận"}
-              </button>
-              <button
-                onClick={() => { setPinModal(null); setPin(""); setPinError(null) }}
-                disabled={acting}
-                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Hủy
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Distribution Modal */}
       {distModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: "90vh" }}>
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div>
-                <h3 className="font-bold text-slate-800">Phân phối văn bản</h3>
-                <p className="text-xs text-slate-400 mt-0.5">{doc.ma_van_ban} — {doc.ten_van_ban}</p>
-              </div>
-              <button onClick={() => setDistModal(false)} className="text-slate-400 hover:text-slate-700 p-1">
-                <X size={18} />
+        <ModalShell
+          title="Phân phối văn bản"
+          onClose={() => setDistModal(false)}
+          maxWidth="lg"
+          footer={
+            <>
+              <button
+                onClick={() => void handleDistSend()}
+                disabled={distSending || distSelected.size === 0}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-all"
+              >
+                {distSending ? (
+                  <><Loader2 size={14} className="animate-spin" />Đang gửi...</>
+                ) : (
+                  <><Share2 size={14} />Phân phối ({distSelected.size})</>
+                )}
               </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <button
+                onClick={() => setDistModal(false)}
+                disabled={distSending}
+                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Hủy
+              </button>
+            </>
+          }
+        >
+            <p className="text-xs text-slate-400 -mt-2 mb-2">{doc.ma_van_ban} — {doc.ten_van_ban}</p>
+            <div className="space-y-4">
               {distLoading ? (
                 <div className="flex items-center justify-center py-10 text-slate-400 gap-2">
                   <Loader2 size={18} className="animate-spin" />
@@ -655,52 +669,17 @@ export default function DocumentDetailPage() {
                 />
               </div>
             </div>
-            <div className="p-5 border-t border-slate-100 flex gap-2">
-              <button
-                onClick={() => void handleDistSend()}
-                disabled={distSending || distSelected.size === 0}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-all"
-              >
-                {distSending ? (
-                  <><Loader2 size={14} className="animate-spin" />Đang gửi...</>
-                ) : (
-                  <><Share2 size={14} />Phân phối ({distSelected.size})</>
-                )}
-              </button>
-              <button
-                onClick={() => setDistModal(false)}
-                disabled={distSending}
-                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Hủy
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Trả về Modal */}
       {traVeModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-800">Trả về văn bản</h3>
-              <button onClick={() => setTraVeModal(false)} className="text-slate-400 hover:text-slate-700">
-                <X size={18} />
-              </button>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về (tùy chọn)</label>
-              <textarea
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
-                rows={3}
-                placeholder="Nhập lý do hoặc yêu cầu chỉnh sửa..."
-                value={traVeLyDo}
-                onChange={(e) => setTraVeLyDo(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="flex gap-2 mt-4">
+        <ModalShell
+          title="Trả về văn bản"
+          onClose={() => setTraVeModal(false)}
+          maxWidth="sm"
+          footer={
+            <>
               <button
                 onClick={handleTraVe}
                 disabled={acting}
@@ -715,9 +694,21 @@ export default function DocumentDetailPage() {
               >
                 Hủy
               </button>
+            </>
+          }
+        >
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về (tùy chọn)</label>
+              <textarea
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+                rows={3}
+                placeholder="Nhập lý do hoặc yêu cầu chỉnh sửa..."
+                value={traVeLyDo}
+                onChange={(e) => setTraVeLyDo(e.target.value)}
+                autoFocus
+              />
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </DocumentsShell>
   )

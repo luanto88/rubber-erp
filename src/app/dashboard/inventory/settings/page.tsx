@@ -18,11 +18,12 @@ import {
   ShieldCheck,
   Trash2,
   Warehouse,
-  X,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
 import { InventoryPageShell } from "../_components/inventory-shell"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 type SettingsTab = "warehouses" | "categories" | "items" | "norms"
 type ModalType = "warehouse" | "category" | "item" | null
@@ -728,7 +729,7 @@ export default function InventorySettingsPage() {
           />
 
           <div className="grid gap-6 p-6 xl:grid-cols-[1.3fr_0.7fr]">
-            <div className="overflow-hidden rounded-3xl border border-slate-200">
+            <ResponsiveTableWrapper className="rounded-3xl">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
@@ -783,7 +784,7 @@ export default function InventorySettingsPage() {
                   ) : null}
                 </tbody>
               </table>
-            </div>
+            </ResponsiveTableWrapper>
 
             <div className="space-y-4">
               <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
@@ -903,7 +904,7 @@ export default function InventorySettingsPage() {
           />
 
           <div className="grid gap-6 p-6 xl:grid-cols-[1.45fr_0.55fr]">
-            <div className="overflow-hidden rounded-3xl border border-slate-200">
+            <ResponsiveTableWrapper className="rounded-3xl">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
@@ -974,7 +975,7 @@ export default function InventorySettingsPage() {
                   )))}
                 </tbody>
               </table>
-            </div>
+            </ResponsiveTableWrapper>
 
             <div className="space-y-4">
               <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5">
@@ -1008,7 +1009,7 @@ export default function InventorySettingsPage() {
           />
 
           <div className="grid gap-6 p-6 xl:grid-cols-[1.15fr_0.85fr]">
-            <div className="overflow-hidden rounded-3xl border border-slate-200">
+            <ResponsiveTableWrapper className="rounded-3xl">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
@@ -1029,7 +1030,7 @@ export default function InventorySettingsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ResponsiveTableWrapper>
 
             <div className="space-y-4">
               <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
@@ -1045,37 +1046,45 @@ export default function InventorySettingsPage() {
       )}
 
       {modalType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-xl rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-800">
-                  {modalType === "warehouse"
-                    ? editingId
-                      ? "Cập nhật kho"
-                      : "Thêm kho mới"
-                    : modalType === "item"
-                      ? editingId
-                        ? "Cập nhật vật tư / hóa chất"
-                        : "Thêm vật tư / hóa chất"
-                      : editingId
-                        ? "Cập nhật nhóm vật tư"
-                        : "Thêm nhóm vật tư"}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {modalType === "warehouse"
-                    ? "Lưu danh mục kho theo nhà máy đang đăng nhập."
-                    : modalType === "item"
-                      ? "Lưu danh mục vật tư, kho chứa, lô-hạn và giới hạn min-max."
-                      : "Lưu danh mục nhóm vật tư để dùng cho báo cáo và cảnh báo."}
-                </p>
-              </div>
-              <button onClick={closeModal} className="rounded-2xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                <X size={18} />
+        <ModalShell
+          title={
+            modalType === "warehouse"
+              ? editingId
+                ? "Cập nhật kho"
+                : "Thêm kho mới"
+              : modalType === "item"
+                ? editingId
+                  ? "Cập nhật vật tư / hóa chất"
+                  : "Thêm vật tư / hóa chất"
+                : editingId
+                  ? "Cập nhật nhóm vật tư"
+                  : "Thêm nhóm vật tư"
+          }
+          onClose={closeModal}
+          maxWidth="xl"
+          footer={
+            <>
+              <button onClick={closeModal} className="rounded-2xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100">
+                Hủy
               </button>
-            </div>
-
-            <div className="space-y-4 px-6 py-5">
+              <button
+                onClick={modalType === "warehouse" ? saveWarehouse : modalType === "item" ? saveItem : saveCategory}
+                disabled={saving}
+                className="rounded-2xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {saving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </>
+          }
+        >
+            <p className="-mt-2 mb-4 text-sm text-slate-500">
+              {modalType === "warehouse"
+                ? "Lưu danh mục kho theo nhà máy đang đăng nhập."
+                : modalType === "item"
+                  ? "Lưu danh mục vật tư, kho chứa, lô-hạn và giới hạn min-max."
+                  : "Lưu danh mục nhóm vật tư để dùng cho báo cáo và cảnh báo."}
+            </p>
+            <div className="space-y-4">
               {formError ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {formError}
@@ -1335,21 +1344,7 @@ export default function InventorySettingsPage() {
                 </>
               )}
             </div>
-
-            <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
-              <button onClick={closeModal} className="rounded-2xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100">
-                Hủy
-              </button>
-              <button
-                onClick={modalType === "warehouse" ? saveWarehouse : modalType === "item" ? saveItem : saveCategory}
-                disabled={saving}
-                className="rounded-2xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {saving ? "Đang lưu..." : "Lưu"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {deleteTarget ? (

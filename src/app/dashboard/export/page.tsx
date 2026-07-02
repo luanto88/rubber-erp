@@ -969,12 +969,11 @@ export default function ExportPage() {
     e.preventDefault();
     setDropTarget(vIdx);
   };
-  const handleDrop = (e: React.DragEvent, vIdx: number) => {
-    e.preventDefault();
-    setDropTarget(null);
-    const lotId = e.dataTransfer.getData("lot_id");
+  // Gán 1 lô vào 1 xe — dùng chung cho kéo-thả (desktop) và chọn nhanh (mobile)
+  // Trả về true nếu đã thêm assignment mới (dùng để hiện toast xác nhận trên mobile)
+  const assignLotToVehicle = (lotId: string, vIdx: number): boolean => {
     const lot = lotsExt.find((l) => l.id === lotId);
-    if (!lot) return;
+    if (!lot) return false;
     const latestQc = latestQcByLotId.get(lot.id);
     const isFailedQc =
       latestQc?.dat_hang?.endsWith("RH") || latestQc?.trang_thai === "khong_dat";
@@ -997,17 +996,17 @@ export default function ExportPage() {
           returnTo: "/dashboard/export",
         });
         window.location.assign(`/dashboard/quality?${params.toString()}`);
-        return;
+        return false;
       }
       if (typeof window !== "undefined") {
         window.sessionStorage.removeItem(EXPORT_DRAFT_SESSION_KEY);
       }
-      return;
+      return false;
     }
     const alreadyInVehicle = form.assignments.some(
       (a) => a.lot_id === lotId && a.vehicleIdx === vIdx,
     );
-    if (alreadyInVehicle) return;
+    if (alreadyInVehicle) return false;
     const rem = getFormRemaining(lot);
     setForm((prev) => ({
       ...prev,
@@ -1024,6 +1023,21 @@ export default function ExportPage() {
         },
       ],
     }));
+    return true;
+  };
+
+  const handleDrop = (e: React.DragEvent, vIdx: number) => {
+    e.preventDefault();
+    setDropTarget(null);
+    const lotId = e.dataTransfer.getData("lot_id");
+    assignLotToVehicle(lotId, vIdx);
+  };
+
+  // Chọn nhanh gán lô vào xe trên mobile (thay thế kéo-thả không hoạt động trên cảm ứng)
+  const handleMobileAssign = (lot: LotExt, vIdx: number) => {
+    if (assignLotToVehicle(lot.id, vIdx)) {
+      showToast(`Đã gán lô ${lot.ma_lo} vào xe ${vIdx + 1}`);
+    }
   };
 
   const reconcileLotStatuses = useCallback(
@@ -2110,9 +2124,9 @@ export default function ExportPage() {
         </div>
       </div>
 
-      <div className="flex gap-4" style={{ height: "calc(100vh - 200px)" }}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:h-[calc(100vh-200px)]">
         {/* --- LEFT PANEL ------------------------------------------------- */}
-        <div className="w-1/2 overflow-y-auto pr-2 space-y-4">
+        <div className="w-full space-y-4 lg:w-1/2 lg:overflow-y-auto lg:pr-2">
           {/* Thông tin đơn */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-700 mb-4">Thông tin đơn</h3>
@@ -2433,8 +2447,8 @@ export default function ExportPage() {
                     onDrop={(e) => handleDrop(e, idx)}
                   >
                     {/* Vehicle header */}
-                    <div className="grid grid-cols-12 gap-2 items-end p-3">
-                      <div className="col-span-3">
+                    <div className="grid grid-cols-2 gap-2 items-end p-3 sm:grid-cols-12">
+                      <div className="col-span-2 sm:col-span-3">
                         <label className="text-xs text-slate-500 block mb-1">
                           Xe {idx + 1}
                         </label>
@@ -2457,7 +2471,7 @@ export default function ExportPage() {
                           ))}
                         </select>
                       </div>
-                      <div className="relative col-span-2">
+                      <div className="relative col-span-1 sm:col-span-2">
                         <label className="text-xs text-slate-500 block mb-1">
                           Biển trước
                         </label>
@@ -2483,7 +2497,7 @@ export default function ExportPage() {
                           ))}
                         </datalist>
                       </div>
-                      <div className="relative col-span-2">
+                      <div className="relative col-span-1 sm:col-span-2">
                         <label className="text-xs text-slate-500 block mb-1">
                           Biển sau
                         </label>
@@ -2509,7 +2523,7 @@ export default function ExportPage() {
                           ))}
                         </datalist>
                       </div>
-                      <div className="col-span-4">
+                      <div className="col-span-2 sm:col-span-4">
                         <label className="text-xs text-slate-500 block mb-1">
                           Ghi chú
                         </label>
@@ -2542,7 +2556,7 @@ export default function ExportPage() {
                               ),
                           }))
                         }
-                        className="col-span-1 justify-self-end p-1.5 text-red-400 hover:bg-red-50 rounded-lg self-end"
+                        className="col-span-2 justify-self-end p-1.5 text-red-400 hover:bg-red-50 rounded-lg self-end sm:col-span-1"
                       >
                         <X size={14} />
                       </button>
@@ -2654,9 +2668,12 @@ export default function ExportPage() {
                       >
                         <GripVertical
                           size={14}
-                          className="mx-auto mb-1 opacity-50"
+                          className="mx-auto mb-1 opacity-50 hidden lg:block"
                         />
-                        Kéo lô hàng vào đây
+                        <span className="hidden lg:inline">Kéo lô hàng vào đây</span>
+                        <span className="lg:hidden">
+                          Chọn xe ở lô bên dưới để gán vào đây
+                        </span>
                       </div>
                     ) : (
                       <div className="mx-3 mb-3 space-y-1.5">
@@ -2665,15 +2682,26 @@ export default function ExportPage() {
                           return (
                             <div
                               key={a.lot_id}
-                              className="grid grid-cols-[16px_minmax(84px,1fr)_repeat(4,minmax(78px,92px))_16px] items-center gap-2 text-xs bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2"
+                              className="text-xs bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 sm:grid sm:grid-cols-[16px_minmax(84px,1fr)_repeat(4,minmax(78px,92px))_16px] sm:items-center sm:gap-2"
                             >
-                              <Package
-                                size={12}
-                                className="text-emerald-500 shrink-0"
-                              />
-                              <span className="font-bold text-emerald-700 min-w-0 truncate">
-                                {a.ma_lo}
-                              </span>
+                              <div className="flex items-center justify-between gap-2 sm:contents">
+                                <div className="flex items-center gap-2 min-w-0 flex-1 sm:contents">
+                                  <Package
+                                    size={12}
+                                    className="text-emerald-500 shrink-0"
+                                  />
+                                  <span className="font-bold text-emerald-700 min-w-0 truncate">
+                                    {a.ma_lo}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => removeAssignment(a.lot_id, idx)}
+                                  className="text-red-400 hover:text-red-600 sm:hidden"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                              <div className="mt-1.5 grid grid-cols-4 gap-1.5 sm:contents sm:mt-0">
                               {(
                                 [
                                   "kien_a",
@@ -2719,9 +2747,10 @@ export default function ExportPage() {
                                   </div>
                                 );
                               })}
+                              </div>
                               <button
                                 onClick={() => removeAssignment(a.lot_id, idx)}
-                                className="justify-self-end text-red-400 hover:text-red-600"
+                                className="hidden text-red-400 hover:text-red-600 sm:block sm:justify-self-end"
                               >
                                 <X size={11} />
                               </button>
@@ -2741,74 +2770,11 @@ export default function ExportPage() {
               })}
             </div>
           </div>
-
-          {/* Summary */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-slate-500">Tổng bành</div>
-                <div className="text-2xl font-extrabold text-emerald-600">
-                  {totalBanh.toLocaleString()}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Tổng tấn</div>
-                <div className="text-2xl font-extrabold text-emerald-700">
-                  {totalTan.toFixed(3)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Tổng lô</div>
-                <div className="text-2xl font-extrabold text-slate-700">
-                  {[...new Set(form.assignments.map((a) => a.lot_id))].length}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Tổng xe</div>
-                <div className="text-2xl font-extrabold text-slate-700">
-                  {form.vehicles.length}
-                </div>
-              </div>
-            </div>
-            {form.vehicles.length > 0 && form.assignments.length > 0 && (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <div className="text-xs font-bold text-slate-500 mb-2">Chi tiết theo xe</div>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-slate-400">
-                      <th className="text-left pb-1 font-medium">Xe</th>
-                      <th className="text-right pb-1 font-medium">Bành</th>
-                      <th className="text-right pb-1 font-medium">Tấn</th>
-                      <th className="text-right pb-1 font-medium">Lô</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.vehicles.map((v, idx) => (
-                      <tr key={v.id} className="border-t border-slate-50">
-                        <td className="py-0.5 text-slate-600 font-medium">
-                          {v.bien_truoc || `Xe ${idx + 1}`}
-                        </td>
-                        <td className="text-right text-slate-700">
-                          {vehicleStats[idx].banh.toLocaleString()}
-                        </td>
-                        <td className="text-right text-slate-700">
-                          {vehicleStats[idx].tan.toFixed(3)}
-                        </td>
-                        <td className="text-right text-slate-700">
-                          {vehicleStats[idx].lo}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* --- RIGHT PANEL: Lot picker ------------------------------------ */}
-        <div className="w-1/2 overflow-y-auto pl-2 space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-0 z-10">
+        <div className="w-full space-y-4 lg:w-1/2 lg:overflow-y-auto lg:pl-2">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 lg:sticky lg:top-0 lg:z-10">
             <h3 className="font-bold text-slate-700 mb-1">
               Lô hàng - {form.chung_loai}
               <span className="ml-2 text-xs text-slate-400 font-normal">
@@ -2829,7 +2795,7 @@ export default function ExportPage() {
           </div>
 
           {/* Pill cards grid */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
             {availLots.length === 0 ? (
               <div className="col-span-2 p-8 text-center text-slate-400">
                 <Package size={32} className="mx-auto mb-2 opacity-30" />
@@ -2919,6 +2885,27 @@ export default function ExportPage() {
                           : `Xe ${assignedVehicles.map((a) => `${a.vehicleIdx + 1}`).join(",")}`}
                       </div>
                     )}
+
+                    {/* Chọn nhanh gán vào xe — chỉ hiện trên mobile, thay thế kéo-thả */}
+                    {!isFullyAssigned && !isFailedQc && form.vehicles.length > 0 && (
+                      <select
+                        value=""
+                        disabled={totalRem <= 0}
+                        onChange={(e) => {
+                          const vIdx = Number(e.target.value);
+                          if (!Number.isNaN(vIdx)) handleMobileAssign(lot, vIdx);
+                          e.target.value = "";
+                        }}
+                        className="mt-2 w-full rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-[11px] font-bold text-emerald-700 outline-none disabled:opacity-40 lg:hidden"
+                      >
+                        <option value="">+ Gán vào xe...</option>
+                        {form.vehicles.map((v, i) => (
+                          <option key={v.id} value={i}>
+                            {`Xe ${i + 1}${v.bien_truoc ? ` · ${v.bien_truoc}` : ""}`}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 );
               })
@@ -2927,27 +2914,97 @@ export default function ExportPage() {
 
           {/* Instructions */}
           <div className="text-xs text-slate-400 text-center py-2">
-            <GripVertical size={14} className="inline mr-1" />
-            Kéo thả pill vào vùng xe bên trái để phân lô
+            <GripVertical size={14} className="mr-1 hidden lg:inline" />
+            <span className="hidden lg:inline">
+              Kéo thả pill vào vùng xe bên trái để phân lô
+            </span>
+            <span className="lg:hidden">
+              Bấm &quot;+ Gán vào xe...&quot; trên mỗi lô để phân vào xe
+            </span>
           </div>
         </div>
       </div>
 
+      {/* Summary */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 mt-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-500">Tổng bành</div>
+            <div className="text-2xl font-extrabold text-emerald-600">
+              {totalBanh.toLocaleString()}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng tấn</div>
+            <div className="text-2xl font-extrabold text-emerald-700">
+              {totalTan.toFixed(3)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng lô</div>
+            <div className="text-2xl font-extrabold text-slate-700">
+              {[...new Set(form.assignments.map((a) => a.lot_id))].length}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng xe</div>
+            <div className="text-2xl font-extrabold text-slate-700">
+              {form.vehicles.length}
+            </div>
+          </div>
+        </div>
+        {form.vehicles.length > 0 && form.assignments.length > 0 && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="text-xs font-bold text-slate-500 mb-2">Chi tiết theo xe</div>
+            <ResponsiveTableWrapper>
+              <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-400">
+                  <th className="text-left pb-1 font-medium">Xe</th>
+                  <th className="text-right pb-1 font-medium">Bành</th>
+                  <th className="text-right pb-1 font-medium">Tấn</th>
+                  <th className="text-right pb-1 font-medium">Lô</th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.vehicles.map((v, idx) => (
+                  <tr key={v.id} className="border-t border-slate-50">
+                    <td className="py-0.5 text-slate-600 font-medium">
+                      {v.bien_truoc || `Xe ${idx + 1}`}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].banh.toLocaleString()}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].tan.toFixed(3)}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].lo}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+              </ResponsiveTableWrapper>
+          </div>
+        )}
+      </div>
+
       {/* Save bar */}
-      <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-200 bg-white">
+      <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-white mt-4 pt-4 sm:flex-row sm:justify-end">
         <button
           onClick={() => {
             setView("list");
             setEditId(null);
           }}
-          className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+          className="w-full px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl sm:w-auto"
         >
           Hủy
         </button>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50"
+          className="w-full px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50 sm:w-auto"
         >
           {saving
             ? "Đang lưu..."

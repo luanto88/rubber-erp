@@ -16,6 +16,8 @@ import {
 } from "./_components/documents-types"
 import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2 } from "lucide-react"
 import Link from "next/link"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type AiSearchResult = {
   id: string
@@ -164,8 +166,8 @@ export default function DocumentsPage() {
       {activeTab === "stats" && <VanBanStats docs={docs} loading={loading} />}
 
       {/* Tab danh sách */}
-      {activeTab === "list" && (<><div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 space-y-3">
-        <div className="flex flex-wrap gap-3 items-center">
+      {activeTab === "list" && (<><FilterBar activeCount={aiMode ? 0 : [search, filterLoai, filterPhongBan, filterTrangThai].filter(Boolean).length}>
+        <div className="flex flex-wrap gap-3 items-center w-full">
           {/* Toggle AI / Text search */}
           <button
             onClick={() => {
@@ -275,20 +277,20 @@ export default function DocumentsPage() {
         </div>
 
         {aiMode && aiError && (
-          <p className="text-xs text-red-600 font-medium flex items-center gap-1.5">
+          <p className="text-xs text-red-600 font-medium flex items-center gap-1.5 w-full">
             <span className="text-red-500">⚠</span> {aiError}
           </p>
         )}
         {aiMode && (
-          <p className="text-xs text-violet-500">
+          <p className="text-xs text-violet-500 w-full">
             AI tìm kiếm ngữ nghĩa trên văn bản đã phê duyệt. Nhập mô tả nội dung rồi nhấn Tìm kiếm hoặc Enter.
           </p>
         )}
-      </div>
+      </FilterBar>
 
       {/* Kết quả AI */}
       {aiMode && aiResults !== null && (
-        <div className="bg-white rounded-xl border border-violet-200 shadow-sm overflow-hidden mb-4">
+        <ResponsiveTableWrapper className="border-violet-200 mb-4">
           <div className="px-4 py-3 bg-violet-50 border-b border-violet-100 flex items-center gap-2">
             <Sparkles size={14} className="text-violet-600" />
             <span className="text-sm font-bold text-violet-700">
@@ -354,12 +356,12 @@ export default function DocumentsPage() {
               </tbody>
             </table>
           )}
-        </div>
+        </ResponsiveTableWrapper>
       )}
 
       {/* Bảng danh sách thường */}
       {(!aiMode || aiResults === null) && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <ResponsiveTableWrapper>
           {loading ? (
             <div className="p-12 text-center text-slate-400">Đang tải...</div>
           ) : filtered.length === 0 ? (
@@ -428,7 +430,7 @@ export default function DocumentsPage() {
               </tbody>
             </table>
           )}
-        </div>
+        </ResponsiveTableWrapper>
       )}
 
       {!aiMode && (
@@ -568,7 +570,7 @@ function VanBanStats({ docs, loading }: { docs: VanBanDocument[]; loading: boole
       </div>
 
       {/* Theo trạng thái - bảng đầy đủ */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         <div className="px-4 py-3 border-b border-slate-100">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Chi tiết theo trạng thái</p>
         </div>
@@ -598,7 +600,7 @@ function VanBanStats({ docs, loading }: { docs: VanBanDocument[]; loading: boole
               ))}
           </tbody>
         </table>
-      </div>
+      </ResponsiveTableWrapper>
     </div>
   )
 }

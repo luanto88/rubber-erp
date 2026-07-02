@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { AlertTriangle, Ban, Check, CopyPlus, Printer, Save, Trash2, X } from "lucide-react"
+import { AlertTriangle, Ban, Check, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
@@ -12,6 +12,7 @@ import { fetchInventoryDocumentByReference } from "../_components/inventory-docu
 import { InventoryQrCard } from "../_components/inventory-qr-card"
 import { buildEffectiveStockBalances, getStockContextLabel } from "../_components/inventory-stock"
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
@@ -1558,23 +1559,35 @@ export default function InventoryReceiptsPage() {
     </InventoryPageShell>
 
     {quickModal ? (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800">
-                {quickModal === "category" ? "Thêm phân loại vật tư" : "Thêm mã vật tư"}
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                {quickModal === "category"
-                  ? "Lưu trực tiếp vào bảng inventory_item_categories."
-                  : "Lưu trực tiếp vào bảng inventory_items và gán kho mặc định theo kho nhập đang chọn."}
-              </p>
-            </div>
-            <button onClick={closeQuickModal} className="text-slate-400 hover:text-slate-700">
-              <X size={18} />
+      <ModalShell
+        title={quickModal === "category" ? "Thêm phân loại vật tư" : "Thêm mã vật tư"}
+        onClose={closeQuickModal}
+        maxWidth="2xl"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closeQuickModal}
+              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            >
+              Đóng
             </button>
-          </div>
+            <button
+              type="button"
+              onClick={() => void (quickModal === "category" ? saveQuickCategory() : saveQuickItem())}
+              disabled={quickSaving}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+            >
+              {quickSaving ? "Đang lưu..." : "Lưu mới"}
+            </button>
+          </>
+        }
+      >
+          <p className="-mt-2 mb-4 text-sm text-slate-500">
+            {quickModal === "category"
+              ? "Lưu trực tiếp vào bảng inventory_item_categories."
+              : "Lưu trực tiếp vào bảng inventory_items và gán kho mặc định theo kho nhập đang chọn."}
+          </p>
 
           {quickFormError ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1751,51 +1764,16 @@ export default function InventoryReceiptsPage() {
               </div>
             </div>
           )}
-
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={closeQuickModal}
-              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
-            >
-              Đóng
-            </button>
-            <button
-              type="button"
-              onClick={() => void (quickModal === "category" ? saveQuickCategory() : saveQuickItem())}
-              disabled={quickSaving}
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-            >
-              {quickSaving ? "Đang lưu..." : "Lưu mới"}
-            </button>
-          </div>
-        </div>
-      </div>
+      </ModalShell>
     ) : null}
 
     {cancelModal ? (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-red-600">
-              <Ban size={18} />
-              <h3 className="text-base font-bold">Hủy phiếu nhập</h3>
-            </div>
-            <button onClick={() => { setCancelModal(false); setCancelReason("") }} className="text-slate-400 hover:text-slate-700">
-              <X size={18} />
-            </button>
-          </div>
-          <p className="mb-3 text-sm text-slate-600">
-            Hủy phiếu sẽ <strong>đảo ngược tồn kho</strong> đã được ghi sổ. Thao tác này không thể hoàn tác.
-          </p>
-          <textarea
-            value={cancelReason}
-            onChange={(e) => setCancelReason(e.target.value)}
-            placeholder="Lý do hủy phiếu (bắt buộc)..."
-            rows={3}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-red-400"
-          />
-          <div className="mt-4 flex justify-end gap-2">
+      <ModalShell
+        title={<span className="flex items-center gap-2 text-red-600"><Ban size={18} /> Hủy phiếu nhập</span>}
+        onClose={() => { setCancelModal(false); setCancelReason("") }}
+        maxWidth="md"
+        footer={
+          <>
             <button
               onClick={() => { setCancelModal(false); setCancelReason("") }}
               className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
@@ -1809,9 +1787,20 @@ export default function InventoryReceiptsPage() {
             >
               {cancelling ? "Đang hủy..." : "Xác nhận hủy phiếu"}
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      >
+          <p className="mb-3 text-sm text-slate-600">
+            Hủy phiếu sẽ <strong>đảo ngược tồn kho</strong> đã được ghi sổ. Thao tác này không thể hoàn tác.
+          </p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Lý do hủy phiếu (bắt buộc)..."
+            rows={3}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-red-400"
+          />
+      </ModalShell>
     ) : null}
     </>
   )

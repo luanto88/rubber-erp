@@ -5,6 +5,9 @@ import { AlertTriangle, Pencil, Plus, Thermometer, Trash2, X } from "lucide-reac
 import { getActiveFactoryId } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { ProcessShell } from "../_components/process-shell"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
   type ProcessParam,
   emptyProcessParamForm,
@@ -196,7 +199,7 @@ export default function ProcessParamsPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <FilterBar activeCount={[filterFrom, filterTo, filterDayChuyen].filter(Boolean).length}>
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
           <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
@@ -223,10 +226,10 @@ export default function ProcessParamsPage() {
             Xóa bộ lọc
           </button>
         )}
-      </div>
+      </FilterBar>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : items.length === 0 ? (
@@ -291,21 +294,28 @@ export default function ProcessParamsPage() {
             </table>
           </div>
         )}
-      </div>
+      </ResponsiveTableWrapper>
 
       {/* Add/Edit Modal */}
       {modal && (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="text-lg font-extrabold text-slate-800">
-                {modal === "add" ? "Thêm thông số kỹ thuật" : "Sửa thông số kỹ thuật"}
-              </h2>
-              <button onClick={() => setModal(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
-                <X size={18} />
+        <ModalShell
+          title={modal === "add" ? "Thêm thông số kỹ thuật" : "Sửa thông số kỹ thuật"}
+          onClose={() => setModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setModal(null)}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
               </button>
-            </div>
-            <div className="p-6 space-y-4">
+              <button onClick={handleSave} disabled={saving}
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all">
+                {saving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày <span className="text-red-500">*</span></label>
@@ -372,18 +382,7 @@ export default function ProcessParamsPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500 resize-none" />
               </div>
             </div>
-            <div className="px-6 pb-6 flex justify-end gap-3">
-              <button onClick={() => setModal(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hủy
-              </button>
-              <button onClick={handleSave} disabled={saving}
-                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all">
-                {saving ? "Đang lưu..." : "Lưu"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Delete confirm */}

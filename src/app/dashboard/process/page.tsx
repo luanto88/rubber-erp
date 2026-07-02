@@ -9,6 +9,7 @@ import { Activity, ClipboardCheck, Thermometer } from "lucide-react"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { ProcessShell } from "./_components/process-shell"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 
 type ParamPoint = {
   ngay: string
@@ -186,7 +187,7 @@ export default function ProcessOverviewPage() {
   return (
     <ProcessShell>
       {/* Filter bar */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <FilterBar activeCount={[filterDayChuyen, filterChungLoai].filter(Boolean).length}>
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
           <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
@@ -215,7 +216,7 @@ export default function ProcessOverviewPage() {
             <option value="Mủ nước">Mủ nước</option>
           </select>
         </div>
-      </div>
+      </FilterBar>
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">

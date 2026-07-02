@@ -9,6 +9,8 @@ import { getActiveFactoryId } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { isProductSelectableStorageStatus } from "@/lib/storage-status"
 import { ProcessShell } from "../_components/process-shell"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import {
   type QuickMeasurementSheet, type QuickMeasurementRow, type MeasurementRowDraft,
   CHI_TIEU_BY_CSR, ALL_CSR_TYPES, CSR_BY_DAY_CHUYEN, CA_SX_OPTIONS,
@@ -462,8 +464,7 @@ export default function MeasurementsPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+        <ResponsiveTableWrapper className="rounded-2xl">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -534,8 +535,7 @@ export default function MeasurementsPage() {
                 })}
               </tbody>
             </table>
-          </div>
-        </div>
+        </ResponsiveTableWrapper>
       </ProcessShell>
     )
   }
@@ -684,7 +684,7 @@ export default function MeasurementsPage() {
       </div>
 
       {/* Filter */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <FilterBar activeCount={[filterFrom, filterTo, filterDayChuyen].filter(Boolean).length}>
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
           <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
@@ -704,10 +704,10 @@ export default function MeasurementsPage() {
             <option value="Mủ nước">Mủ nước</option>
           </select>
         </div>
-      </div>
+      </FilterBar>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : sheets.length === 0 ? (
@@ -769,7 +769,7 @@ export default function MeasurementsPage() {
             </table>
           </div>
         )}
-      </div>
+      </ResponsiveTableWrapper>
     </ProcessShell>
   )
 }

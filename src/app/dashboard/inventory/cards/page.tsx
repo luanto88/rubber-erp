@@ -15,6 +15,7 @@ import {
 } from "../_components/inventory-data"
 import { MultiSelectField } from "../_components/inventory-ui"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { supabase } from "@/lib/supabase"
 
 const INPUT_CLASS =
@@ -526,8 +527,9 @@ export default function InventoryCardsPage() {
 
       <section
         ref={revealRef}
-        className="scroll-reveal relative z-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+        className="scroll-reveal relative z-0"
       >
+        <ResponsiveTableWrapper>
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
             <h2 className="text-base font-bold text-slate-800">Lịch sử phát sinh</h2>
@@ -603,6 +605,7 @@ export default function InventoryCardsPage() {
             </table>
           </div>
         )}
+        </ResponsiveTableWrapper>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">

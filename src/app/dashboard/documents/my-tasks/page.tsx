@@ -15,6 +15,7 @@ import {
 } from "../_components/documents-types"
 import { ClipboardList, ArrowRight } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type TaskItem = {
   doc: VanBanDocument
@@ -146,7 +147,7 @@ export default function MyTasksPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : tasks.length === 0 ? (
@@ -218,7 +219,7 @@ export default function MyTasksPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrapper>
 
       {tasks.length > 0 && (
         <p className="text-xs text-slate-400 mt-2 text-right">{tasks.length} việc cần xử lý</p>

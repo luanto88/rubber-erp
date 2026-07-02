@@ -15,6 +15,7 @@ import {
   type InventoryWarehouseOption,
 } from "../_components/inventory-data"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 function SummaryCard({
   icon,
@@ -271,8 +272,9 @@ export default function InventoryItemPage() {
 
           <section
             ref={revealRef}
-            className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+            className="scroll-reveal"
           >
+            <ResponsiveTableWrapper>
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="text-base font-bold text-slate-800">Tồn theo từng kho</h2>
             </div>
@@ -300,12 +302,14 @@ export default function InventoryItemPage() {
                 </tbody>
               </table>
             </div>
+            </ResponsiveTableWrapper>
           </section>
 
           <section
             ref={revealRef}
-            className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+            className="scroll-reveal"
           >
+            <ResponsiveTableWrapper>
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="text-base font-bold text-slate-800">Tồn theo số lô</h2>
             </div>
@@ -334,12 +338,14 @@ export default function InventoryItemPage() {
                 </tbody>
               </table>
             </div>
+            </ResponsiveTableWrapper>
           </section>
 
           <section
             ref={revealRef}
-            className="scroll-reveal overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+            className="scroll-reveal"
           >
+            <ResponsiveTableWrapper>
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="text-base font-bold text-slate-800">Lịch sử nhập xuất chuyển</h2>
             </div>
@@ -375,6 +381,7 @@ export default function InventoryItemPage() {
                 </tbody>
               </table>
             </div>
+            </ResponsiveTableWrapper>
           </section>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
