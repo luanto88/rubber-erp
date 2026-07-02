@@ -45,6 +45,8 @@ type Vehicle = {
   image_url_1?: string;
   image_url_2?: string;
   image_url_3?: string;
+  // Đánh dấu xe đã đầy — chỉ toggle trên mobile; xe đầy bị loại khỏi danh sách gán lô nhanh
+  confirmed?: boolean;
 };
 type Assignment = {
   lot_id: string;
@@ -2442,9 +2444,9 @@ export default function ExportPage() {
                   <div
                     key={v.id}
                     className={`rounded-xl border-2 transition-all ${dropTarget === idx ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300" : "border-slate-200 bg-slate-50"}`}
-                    onDragOver={(e) => handleDragOver(e, idx)}
+                    onDragOver={(e) => !v.confirmed && handleDragOver(e, idx)}
                     onDragLeave={() => setDropTarget(null)}
-                    onDrop={(e) => handleDrop(e, idx)}
+                    onDrop={(e) => !v.confirmed && handleDrop(e, idx)}
                   >
                     {/* Vehicle header */}
                     <div className="grid grid-cols-2 gap-2 items-end p-3 sm:grid-cols-12">
@@ -2561,6 +2563,27 @@ export default function ExportPage() {
                         <X size={14} />
                       </button>
                     </div>
+
+                    {/* Xác nhận đầy xe — chỉ hiện trên mobile; xe đã đầy bị loại khỏi danh sách gán lô nhanh */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          vehicles: p.vehicles.map((vv, i) =>
+                            i === idx ? { ...vv, confirmed: !vv.confirmed } : vv,
+                          ),
+                        }))
+                      }
+                      className={`mx-3 mb-2 flex w-[calc(100%-1.5rem)] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors lg:hidden ${
+                        v.confirmed
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-slate-300 bg-white text-slate-500 hover:border-emerald-400 hover:text-emerald-600"
+                      }`}
+                    >
+                      <Check size={13} />
+                      {v.confirmed ? "Đã đầy xe" : "Xác nhận đầy xe"}
+                    </button>
 
                     {/* Per-vehicle stats */}
                     {vehicleStats[idx]?.banh > 0 && (
@@ -2886,8 +2909,8 @@ export default function ExportPage() {
                       </div>
                     )}
 
-                    {/* Chọn nhanh gán vào xe — chỉ hiện trên mobile, thay thế kéo-thả */}
-                    {!isFullyAssigned && !isFailedQc && form.vehicles.length > 0 && (
+                    {/* Chọn nhanh gán vào xe — chỉ hiện trên mobile, thay thế kéo-thả; xe đã xác nhận đầy bị loại khỏi danh sách */}
+                    {!isFullyAssigned && !isFailedQc && form.vehicles.some((v) => !v.confirmed) && (
                       <select
                         value=""
                         disabled={totalRem <= 0}
@@ -2899,11 +2922,13 @@ export default function ExportPage() {
                         className="mt-2 w-full rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-[11px] font-bold text-emerald-700 outline-none disabled:opacity-40 lg:hidden"
                       >
                         <option value="">+ Gán vào xe...</option>
-                        {form.vehicles.map((v, i) => (
-                          <option key={v.id} value={i}>
-                            {`Xe ${i + 1}${v.bien_truoc ? ` · ${v.bien_truoc}` : ""}`}
-                          </option>
-                        ))}
+                        {form.vehicles.map((v, i) =>
+                          v.confirmed ? null : (
+                            <option key={v.id} value={i}>
+                              {`Xe ${i + 1}${v.bien_truoc ? ` · ${v.bien_truoc}` : ""}`}
+                            </option>
+                          ),
+                        )}
                       </select>
                     )}
                   </div>

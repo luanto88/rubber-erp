@@ -1285,9 +1285,9 @@ export default function EudrClient() {
 
       {/* Main content */}
       {order && (
-        <div className="flex gap-4" style={{ height: "calc(100vh - 260px)" }}>
+        <div className="flex flex-col lg:flex-row gap-4" style={{ height: "calc(100vh - 260px)" }}>
           {/* LEFT: Info + Files */}
-          <div className="w-80 shrink-0 overflow-y-auto space-y-4">
+          <div className="w-full lg:w-80 shrink-0 overflow-y-auto space-y-4 max-h-64 lg:max-h-none lg:h-full">
 
             {/* Order info */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
@@ -1574,7 +1574,7 @@ export default function EudrClient() {
           </div>
 
           {/* RIGHT: Map */}
-          <div className="flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-md relative">
+          <div className="flex-1 min-h-[280px] rounded-xl overflow-hidden border border-slate-200 shadow-md relative">
             {!geoData && !loadingGeo && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-10">
                 {traceInfo !== null ? (

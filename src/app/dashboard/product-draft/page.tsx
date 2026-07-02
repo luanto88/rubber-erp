@@ -985,7 +985,7 @@ export default function ProductPage() {
           (now.getTime() - new Date(n.ngay_bd).getTime()) / 86400000,
         ) >= 21
       );
-    });
+    });
 
     const dangSX = eligible
       .filter((n) => n.trang_thai === "Äang sáº£n xuáº¥t")
@@ -1356,7 +1356,7 @@ export default function ProductPage() {
           const tb = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d;
           const trang_thai = autoTrangThai(tb, cfg.lo_tron, "D\u1edf dang");
 
-          await saveLotTransaction({
+          const saveResult = await saveLotTransaction({
             lot: {
               factory_id: factoryId,
               ma_lo,
@@ -1390,6 +1390,11 @@ export default function ProductPage() {
               so_kg: Math.round(added_banh * session.loai_banh * 100) / 100,
             },
           });
+          if (!saveResult.success) {
+            setSaveError(`Không lưu được lô ${ma_lo}: ${saveResult.error}`);
+            hasError = true;
+            break;
+          }
         }
         if (hasError) break;
       }
@@ -1583,7 +1588,7 @@ export default function ProductPage() {
       const deltaD = editForm.kien_d - prevD;
       const deltaBanh = deltaA + deltaB + deltaC + deltaD;
 
-      await saveLotTransaction({
+      const saveResult = await saveLotTransaction({
         lot: {
           factory_id: factoryId,
           ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
@@ -1616,6 +1621,11 @@ export default function ProductPage() {
           so_kg: Math.round(deltaBanh * editForm.loai_banh * 100) / 100,
         },
       });
+
+      if (!saveResult.success) {
+        setSaveError(saveResult.error);
+        return;
+      }
 
       const { error: updateError } = await supabase
         .from("lots")
@@ -1702,7 +1712,12 @@ export default function ProductPage() {
         return;
       }
       try {
-        await deleteLotTransaction({ transactionId });
+        const result = await deleteLotTransaction({ transactionId });
+        if (!result.success) {
+          setSaveError(result.error);
+          setDelConfirm(null);
+          return;
+        }
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : String(err));
         setDelConfirm(null);
@@ -1715,7 +1730,12 @@ export default function ProductPage() {
 
     if (transactionCount === 1 && lot.lot_transactions?.[0]?.id) {
       try {
-        await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
+        const result = await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
+        if (!result.success) {
+          setSaveError(result.error);
+          setDelConfirm(null);
+          return;
+        }
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : String(err));
         setDelConfirm(null);

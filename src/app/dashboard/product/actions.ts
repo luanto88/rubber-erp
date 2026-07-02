@@ -263,7 +263,7 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
 
     const snapshot = await syncLotMasterSnapshot(lotId);
     revalidateLotScreens();
-    return { success: true, lotId, snapshot, transaction: savedTransaction };
+    return { success: true as const, lotId, snapshot, transaction: savedTransaction };
   } catch (error) {
     logProductActionError("saveLotTransaction", {
       factoryId: lot.factory_id,
@@ -276,7 +276,12 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
       soBanh: transaction.so_banh,
       soKg: transaction.so_kg,
     }, error);
-    throw error;
+    // Tra ve loi da serialize thay vi throw — Next.js se thay message that
+    // bang generic digest tren client neu throw truc tiep tu Server Action.
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -320,7 +325,7 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
     revalidateLotScreens();
 
     return {
-      success: true,
+      success: true as const,
       deletedTransactionId: transactionId,
       lotId: targetTx.lot_id,
       affectedNganId: targetTx.ngan_id,
@@ -329,6 +334,9 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
     };
   } catch (error) {
     logProductActionError("deleteLotTransaction", { transactionId }, error);
-    throw error;
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }

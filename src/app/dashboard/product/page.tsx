@@ -49,6 +49,7 @@ import {
   ArrowLeftRight,
   MoveRight,
   RefreshCw,
+  Minus,
 } from "lucide-react";
 
 // Types
@@ -1145,6 +1146,44 @@ function emptyEditForm(): EditForm {
     trang_thai: "Ho\u00e0n th\u00e0nh",
     ghi_chu: "",
   };
+}
+
+function LotNumberStepper({
+  value,
+  min,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div className="flex items-center rounded-2xl border border-slate-300 bg-white overflow-hidden">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, value - 1))}
+        className="flex items-center justify-center w-10 h-10 text-slate-500 hover:bg-slate-100 active:bg-slate-200 shrink-0"
+        aria-label="Giảm"
+      >
+        <Minus size={16} />
+      </button>
+      <input
+        type="number"
+        min={min}
+        value={value}
+        onChange={(e) => onChange(Math.max(min, Number(e.target.value) || min))}
+        className="w-16 text-center text-[22px] font-extrabold leading-none text-slate-800 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      <button
+        type="button"
+        onClick={() => onChange(value + 1)}
+        className="flex items-center justify-center w-10 h-10 text-slate-500 hover:bg-slate-100 active:bg-slate-200 shrink-0"
+        aria-label="Tăng"
+      >
+        <Plus size={16} />
+      </button>
+    </div>
+  );
 }
 
 // Main Component
@@ -2765,7 +2804,7 @@ export default function ProductPage() {
             const tb = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d;
             const trang_thai = autoTrangThai(tb, blockCfg.lo_tron, "D\u1edf dang");
 
-            await saveLotTransaction({
+            const saveResult = await saveLotTransaction({
               lot: {
                 factory_id: factoryId,
                 ma_lo,
@@ -2801,6 +2840,11 @@ export default function ProductPage() {
                 so_kg: addedKg,
               },
             });
+            if (!saveResult.success) {
+              setSaveError(`Không lưu được lô ${ma_lo}: ${saveResult.error}`);
+              hasError = true;
+              break;
+            }
             affectedNganIds.add(blockNganId);
             savedKgByNganId.set(
               blockNganId,
@@ -3308,6 +3352,11 @@ export default function ProductPage() {
         },
       });
 
+      if (!saveResult.success) {
+        setSaveError(`Lỗi cập nhật ngăn lưu: ${saveResult.error}`);
+        return;
+      }
+
       const syncedSnapshot = saveResult.snapshot;
 
       const { error: updateError } = await supabase
@@ -3394,8 +3443,13 @@ export default function ProductPage() {
     if (transactionId) {
       try {
         const result = await deleteLotTransaction({ transactionId });
+        if (!result.success) {
+          setSaveError(result.error);
+          setDelConfirm(null);
+          return;
+        }
         const affectedNganIds = Array.from(
-          new Set([result?.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
+          new Set([result.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
         );
         for (const nganId of affectedNganIds) {
           await syncNganStatusAfterLotEdit(nganId);
@@ -4080,34 +4134,23 @@ export default function ProductPage() {
                         <div className="flex flex-wrap items-center gap-3 text-sm">
                           <span className="font-extrabold text-slate-600">Khoảng lô:</span>
                           <span className="text-slate-400">Từ lô</span>
-                          <input
-                            type="number"
+                          <LotNumberStepper
                             min={1}
                             value={block.from_num}
-                            onChange={(e) => {
-                              const rawValue = Math.max(1, Number(e.target.value) || 1);
-                              const nextFrom = rawValue;
+                            onChange={(nextFrom) => {
                               updateCaBlock(caIdx, blockIdx, {
                                 from_num: nextFrom,
                                 to_num: Math.max(block.to_num, nextFrom),
                               });
                             }}
-                            className="w-36 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-center text-[22px] font-extrabold leading-none text-slate-800 outline-none focus:border-emerald-500"
                           />
                           <span className="text-slate-400">Đến lô</span>
-                          <input
-                            type="number"
+                          <LotNumberStepper
                             min={block.from_num}
                             value={block.to_num}
-                            onChange={(e) => {
-                              const rawValue = Math.max(
-                                block.from_num,
-                                Number(e.target.value) || block.from_num,
-                              );
-                              const nextTo = rawValue;
+                            onChange={(nextTo) => {
                               updateCaBlock(caIdx, blockIdx, { to_num: nextTo });
                             }}
-                            className="w-36 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-center text-[22px] font-extrabold leading-none text-slate-800 outline-none focus:border-emerald-500"
                           />
                           <span className="font-extrabold text-slate-500">
                             {session.suffix}/{sessionYear}
@@ -4823,10 +4866,10 @@ export default function ProductPage() {
                 key={date}
                 className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200"
               >
-                <div className="bg-slate-50 px-5 py-3.5 flex items-center justify-between hover:bg-slate-100 transition-colors select-none">
+                <div className="bg-slate-50 px-4 sm:px-5 py-3.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 hover:bg-slate-100 transition-colors select-none">
                   <div
                     onClick={() => toggleDate(date)}
-                    className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
+                    className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0"
                   >
                     {isExpanded ? (
                       <ChevronDown
@@ -4839,17 +4882,17 @@ export default function ProductPage() {
                         className="text-slate-400 shrink-0"
                       />
                     )}
-                    <span className="font-extrabold text-slate-800 text-base">
+                    <span className="font-extrabold text-slate-800 text-sm sm:text-base truncate">
                       {date !== "Chưa có ngày"
                         ? new Date(date).toLocaleDateString("vi-VN")
                         : date}
                     </span>
-                    <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full">
+                    <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full shrink-0">
                       {Object.values(dateGroups).flat().length} lần nhập
                     </span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
+                  <div className="flex items-center flex-wrap gap-2 sm:gap-3">
+                    <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm font-bold text-slate-600">
                       <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
