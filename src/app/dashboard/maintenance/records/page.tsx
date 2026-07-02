@@ -8,6 +8,8 @@ import { getFreshAuthSession } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
 import { BO_PHAN_LIST } from "../_components/maintenance-data"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type RecordRow = {
   id: string
@@ -113,7 +115,7 @@ export default function MaintenanceRecordsPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+      <FilterBar activeCount={[filterHangMuc, filterBoPhan, filterTrangThai, filterSearch].filter(Boolean).length}>
         <Filter size={15} className="text-slate-400" />
         <select
           value={filterHangMuc}
@@ -151,10 +153,10 @@ export default function MaintenanceRecordsPage() {
             className="flex-1 text-sm outline-none bg-transparent"
           />
         </div>
-      </div>
+      </FilterBar>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
@@ -192,7 +194,7 @@ export default function MaintenanceRecordsPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrapper>
     </MaintenanceShell>
   )
 }

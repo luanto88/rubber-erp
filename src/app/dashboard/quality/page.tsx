@@ -7,6 +7,9 @@ import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
@@ -1904,7 +1907,7 @@ export default function QualityPage() {
               </div>
 
               {/* Filter bar */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+              <FilterBar activeCount={[search,filterLoai,filterTT,filterFrom,filterTo].filter(Boolean).length}>
                 <div className="flex items-center gap-2 flex-1 min-w-40">
                   <Search size={14} className="text-slate-400"/>
                   <input value={search} onChange={e=>setSearch(e.target.value)}
@@ -1932,7 +1935,7 @@ export default function QualityPage() {
                     <X size={13}/> Xóa lọc
                   </button>
                 )}
-              </div>
+              </FilterBar>
 
               {/* Date-grouped list */}
               {loading ? (
@@ -2032,6 +2035,7 @@ export default function QualityPage() {
 
                         {/* Expanded rows */}
                         {expanded && (
+                          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
                           <table className="w-full text-sm">
                             <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
@@ -2131,6 +2135,7 @@ export default function QualityPage() {
                               ))}
                             </tbody>
                           </table>
+                          </ResponsiveTableWrapper>
                         )}
                       </div>
                     )
@@ -2159,7 +2164,7 @@ export default function QualityPage() {
               </div>
 
               {/* Filter bar */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+              <FilterBar activeCount={[gmsFilter,gmsFrom,gmsTo,gmsLoai].filter(Boolean).length}>
                 <button onClick={()=>setGmsFilter("rot_ct")}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-xl border-2 transition-all ${gmsFilter==="rot_ct"?"border-amber-500 bg-amber-50 text-amber-700":"border-slate-200 text-slate-500"}`}>
                   <RefreshCw size={13}/> KN lại rớt CT ({gmsStats.rotCT})
@@ -2172,7 +2177,7 @@ export default function QualityPage() {
                   className={`px-3 py-1.5 text-sm font-bold rounded-xl border-2 transition-all ${gmsFilter===""?"border-slate-500 bg-slate-100 text-slate-700":"border-slate-200 text-slate-500"}`}>
                   Tất cả
                 </button>
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="flex items-center gap-2 md:ml-auto">
                   <input type="date" value={gmsFrom} onChange={e=>setGmsFrom(e.target.value)}
                     className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none"/>
                   <span className="text-slate-400">→</span>
@@ -2184,7 +2189,7 @@ export default function QualityPage() {
                     {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,factoryCode)}>{getLoaiCSR(c,factoryCode)}</option>)}
                   </select>
                 </div>
-              </div>
+              </FilterBar>
 
               {/* Giám sát cards */}
               {gmsResults.length === 0 ? (
@@ -2276,15 +2281,12 @@ export default function QualityPage() {
 
       {/* ── EDIT DATE MODAL ──────────────────────────────────────────────────── */}
       {editDateModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="font-extrabold text-slate-800">
-                Phiếu KN ngày {new Date(editDateModal).toLocaleDateString("vi-VN")}
-              </h2>
-              <button onClick={()=>setEditDateModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16}/></button>
-            </div>
-            <div className="p-4 space-y-2">
+        <ModalShell
+          title={`Phiếu KN ngày ${new Date(editDateModal).toLocaleDateString("vi-VN")}`}
+          onClose={()=>setEditDateModal(null)}
+          maxWidth="2xl"
+        >
+            <div className="space-y-2">
               {(dateGroups.find(([d])=>d===editDateModal)?.[1]||[]).map(r=>(
                 <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
                   <span className="text-xs font-bold text-violet-600">{formatPKN(r.pkn,r.ngay_kn,factoryCode)}</span>
@@ -2307,8 +2309,7 @@ export default function QualityPage() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* ── DELETE CONFIRM MODAL ──────────────────────────────────────────────── */}
@@ -2327,13 +2328,18 @@ export default function QualityPage() {
 
       {/* ── IMPORT RESULT MODAL ─────────────────────────────────────────────── */}
       {importResult && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h2 className="font-extrabold text-slate-800">Kết quả nhập dữ liệu</h2>
-              <button onClick={()=>setImportResult(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16}/></button>
-            </div>
-            <div className="p-6 space-y-3">
+        <ModalShell
+          title="Kết quả nhập dữ liệu"
+          onClose={()=>setImportResult(null)}
+          maxWidth="md"
+          footer={
+            <button onClick={()=>setImportResult(null)}
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md">
+              Đóng
+            </button>
+          }
+        >
+            <div className="space-y-3">
               <div className={`flex items-center gap-3 px-4 py-3 rounded-xl ${importResult.ok>0?"bg-emerald-50 text-emerald-700":"bg-slate-50 text-slate-600"}`}>
                 <Check size={18} className={importResult.ok>0?"text-emerald-600":"text-slate-400"}/>
                 <span className="font-bold">Nhập thành công: {importResult.ok} lô</span>
@@ -2386,25 +2392,26 @@ export default function QualityPage() {
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t border-slate-200 flex justify-end">
-              <button onClick={()=>setImportResult(null)}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md">
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* ── TCKH MODAL ───────────────────────────────────────────────────────── */}
       {tkhModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="font-extrabold text-slate-800">Thêm tiêu chuẩn khách hàng</h2>
-              <button onClick={()=>setTkhModal(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16}/></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title="Thêm tiêu chuẩn khách hàng"
+          onClose={()=>setTkhModal(false)}
+          maxWidth="2xl"
+          footer={
+            <>
+              <button onClick={()=>setTkhModal(false)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={handleSaveTKH} disabled={tkhSaving||!tkhName.trim()}
+                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-40">
+                {tkhSaving?"Đang lưu...":"Lưu tiêu chuẩn"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên khách hàng *</label>
                 <input value={tkhName} onChange={e=>setTkhName(e.target.value)}
@@ -2429,15 +2436,7 @@ export default function QualityPage() {
                 </div>
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3">
-              <button onClick={()=>setTkhModal(false)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={handleSaveTKH} disabled={tkhSaving||!tkhName.trim()}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-40">
-                {tkhSaving?"Đang lưu...":"Lưu tiêu chuẩn"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   )

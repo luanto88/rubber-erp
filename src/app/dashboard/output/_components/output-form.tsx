@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { X, AlertTriangle, CheckCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle } from "lucide-react"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
@@ -9,6 +9,8 @@ import type { ProductionRecord, OutputFormState } from "./output-types"
 import { emptyOutputForm, parseVehicleCode } from "./output-types"
 import { formatDateDisplay, getTodayISODate, normalizeDateInput } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
@@ -215,18 +217,24 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-bold text-slate-800">
-            {record ? "Sửa bản ghi sản lượng" : "Thêm sản lượng thủ công"}
-          </h2>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+    <ModalShell
+      title={record ? "Sửa bản ghi sản lượng" : "Thêm sản lượng thủ công"}
+      onClose={onClose}
+      maxWidth="2xl"
+      footer={
+        <>
+          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving || (!record && noDispatch)}
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
+          >
+            {saving ? "Đang lưu..." : record ? "Cập nhật" : "Thêm mới"}
+          </button>
+        </>
+      }
+    >
+        <div className="space-y-4">
           {/* Thông tin cơ bản — Ngày + Đội */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -349,7 +357,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
           {/* KL theo loại mủ */}
           <div>
             <p className="text-xs font-bold text-slate-600 mb-2">Khối lượng theo loại mủ</p>
-            <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <ResponsiveTableWrapper className="rounded-xl">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
@@ -401,7 +409,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
                   })}
                 </tbody>
               </table>
-            </div>
+            </ResponsiveTableWrapper>
             <p className="text-[11px] text-slate-400 mt-1">* KL khô tự tính khi nhập Tươi và DRC%, hoặc nhập tay.</p>
           </div>
 
@@ -430,19 +438,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving || (!record && noDispatch)}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            {saving ? "Đang lưu..." : record ? "Cập nhật" : "Thêm mới"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }

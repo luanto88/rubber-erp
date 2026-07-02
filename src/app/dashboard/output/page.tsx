@@ -34,6 +34,8 @@ import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { downloadOutputDayPdf } from "@/lib/output-pdf"
 import { formatDateDisplay, getTodayISODate } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 interface DispatchEntry {
   id: string
@@ -564,8 +566,10 @@ export default function OutputPage() {
         ))}
       </div>
 
-      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
+      <FilterBar
+        className="mb-5"
+        activeCount={[filterFrom, filterTo, filterDoi, filterXe, filterGhiChu].filter(Boolean).length + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
+      >
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <CalendarDays size={15} />
             <DateTextInput value={filterFrom} onChange={setFilterFrom} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
@@ -637,8 +641,7 @@ export default function OutputPage() {
             )}
             <span className="text-xs text-slate-400">{records.length} bản ghi trong kỳ</span>
           </div>
-        </div>
-      </div>
+      </FilterBar>
 
       {tab === "list" && (
         <>
@@ -698,8 +701,7 @@ export default function OutputPage() {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="overflow-x-auto">
+              <ResponsiveTableWrapper className="rounded-2xl">
                   <table className="w-full min-w-[960px] text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50">
                       <tr>
@@ -772,12 +774,10 @@ export default function OutputPage() {
                       })}
                     </tbody>
                   </table>
-                </div>
-              </div>
+              </ResponsiveTableWrapper>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="overflow-x-auto">
+            <ResponsiveTableWrapper className="rounded-2xl">
                 <table className="w-full min-w-[900px] text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50">
                     <tr>
@@ -818,8 +818,7 @@ export default function OutputPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
-            </div>
+            </ResponsiveTableWrapper>
           )}
         </>
       )}
@@ -856,7 +855,7 @@ export default function OutputPage() {
             <div className="border-b border-slate-100 px-5 py-3">
               <h3 className="font-bold text-slate-700">Chi tiết theo xe</h3>
             </div>
-            <div className="overflow-x-auto">
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-200 bg-slate-50">
                   <tr>
@@ -881,7 +880,7 @@ export default function OutputPage() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ResponsiveTableWrapper>
           </div>
         </div>
       )}

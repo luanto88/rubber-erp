@@ -13,6 +13,9 @@ import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
 
 // Types
@@ -1495,7 +1498,14 @@ export default function DispatchPage() {
       )}
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <FilterBar
+        activeCount={
+          [search, filterFrom, filterTo, filterGhiChu].filter(Boolean).length +
+          (filterLoai.length > 0 ? 1 : 0) +
+          (statsDoi.length > 0 ? 1 : 0) +
+          (statsVehicle.length > 0 ? 1 : 0)
+        }
+      >
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
@@ -1540,7 +1550,7 @@ export default function DispatchPage() {
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}
-      </div>
+      </FilterBar>
 
       {listTab === "stats" && (
         <div className="space-y-4">
@@ -1647,7 +1657,7 @@ export default function DispatchPage() {
       )}
 
       {/* List */}
-      <div className={`${listTab === "list" ? "" : "hidden"} bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden`}>
+      <ResponsiveTableWrapper className={listTab === "list" ? "" : "hidden"}>
         {loading ? (
           <div className="p-12 text-center text-slate-400">{"\u0110ang t\u1ea3i..."}</div>
         ) : filtered.length === 0 ? (
@@ -1733,7 +1743,7 @@ export default function DispatchPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrapper>
 
       {/* Delete confirm */}
       {delConfirm && (
@@ -1774,7 +1784,7 @@ export default function DispatchPage() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+      <ResponsiveTableWrapper>
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
@@ -1831,7 +1841,7 @@ export default function DispatchPage() {
             </tr>
           </tfoot>
         </table>
-      </div>
+      </ResponsiveTableWrapper>
     </div>
   )
 
@@ -2114,15 +2124,16 @@ export default function DispatchPage() {
 
       {/* Modal Nhập KL */}
       {klModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                <Weight size={18} className="text-orange-500"/> Nhập khối lượng
-              </h3>
-              <button onClick={() => setKlModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={18}/></button>
-            </div>
-            <div className="p-4 overflow-x-auto">
+        <ModalShell
+          title={<span className="flex items-center gap-2"><Weight size={18} className="text-orange-500"/> Nhập khối lượng</span>}
+          onClose={() => setKlModal(false)}
+          maxWidth="4xl"
+          bodyClassName="overflow-x-auto"
+          footer={
+            <button onClick={() => setKlModal(false)}
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all">Xong</button>
+          }
+        >
               {/* KL badge dây chuyền */}
               <div className="mb-3 flex items-center gap-2">
                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -2228,13 +2239,7 @@ export default function DispatchPage() {
                 </tbody>
               </table>
               )}
-            </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end">
-              <button onClick={() => setKlModal(false)}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all">Xong</button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   )

@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
-import { Upload, AlertTriangle, CheckCircle, FileSpreadsheet, X, ChevronRight } from "lucide-react"
+import { Upload, AlertTriangle, CheckCircle, FileSpreadsheet, ChevronRight } from "lucide-react"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import type { MatchedSlRow, ParsedSlRow, WarnCode } from "./output-types"
 import {
   buildProductionRecordKey,
@@ -400,30 +402,45 @@ export function OutputImport({
   ).length
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <FileSpreadsheet size={20} className="text-emerald-600" />
-            <h2 className="text-lg font-bold text-slate-800">Import file sản lượng</h2>
-            {/* steps */}
-            <div className="flex items-center gap-1 ml-4">
-              {([1,2,3] as const).map(s => (
-                <span key={s} className={`flex items-center gap-1 text-xs font-bold ${step === s ? "text-emerald-700" : step > s ? "text-slate-400" : "text-slate-300"}`}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${step === s ? "bg-emerald-600 text-white" : step > s ? "bg-slate-300 text-slate-600" : "bg-slate-100 text-slate-400"}`}>{s}</span>
-                  {s === 1 ? "Chọn file" : s === 2 ? "Xem trước" : "Hoàn thành"}
-                  {s < 3 && <ChevronRight size={12} className="text-slate-300" />}
-                </span>
-              ))}
-            </div>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
+    <ModalShell
+      title={
+        <span className="flex items-center gap-3">
+          <FileSpreadsheet size={20} className="text-emerald-600" />
+          Import file sản lượng
+          {/* steps */}
+          <span className="hidden md:flex items-center gap-1 ml-4">
+            {([1,2,3] as const).map(s => (
+              <span key={s} className={`flex items-center gap-1 text-xs font-bold ${step === s ? "text-emerald-700" : step > s ? "text-slate-400" : "text-slate-300"}`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${step === s ? "bg-emerald-600 text-white" : step > s ? "bg-slate-300 text-slate-600" : "bg-slate-100 text-slate-400"}`}>{s}</span>
+                {s === 1 ? "Chọn file" : s === 2 ? "Xem trước" : "Hoàn thành"}
+                {s < 3 && <ChevronRight size={12} className="text-slate-300" />}
+              </span>
+            ))}
+          </span>
+        </span>
+      }
+      onClose={onClose}
+      maxWidth="5xl"
+      footer={(step === 1 || step === 2) && (
+        <div className="flex items-center justify-between w-full">
+          <button
+            onClick={() => { if (step === 2) setStep(1); else onClose() }}
+            className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+          >
+            {step === 2 ? "← Chọn lại file" : "Hủy"}
+          </button>
+          {step === 2 && (
+            <button
+              onClick={handleConfirm}
+              disabled={importing}
+              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
+            >
+              {importing ? "Đang nhập..." : `Nhập ${matched.length} bản ghi${warnCount > 0 ? ` (${warnCount} cảnh báo)` : ""}`}
+            </button>
+          )}
         </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-auto p-6">
-
+      )}
+    >
           {/* Step 1 – Upload */}
           {step === 1 && (
             <div>
@@ -479,7 +496,7 @@ export function OutputImport({
                 )}
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <ResponsiveTableWrapper className="rounded-xl">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -519,7 +536,7 @@ export function OutputImport({
                     })}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTableWrapper>
 
               {importError && (
                 <div className="mt-4 flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-xl text-sm">
@@ -545,29 +562,6 @@ export function OutputImport({
               </button>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        {(step === 1 || step === 2) && (
-          <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-            <button
-              onClick={() => { if (step === 2) setStep(1); else onClose() }}
-              className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-            >
-              {step === 2 ? "← Chọn lại file" : "Hủy"}
-            </button>
-            {step === 2 && (
-              <button
-                onClick={handleConfirm}
-                disabled={importing}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
-              >
-                {importing ? "Đang nhập..." : `Nhập ${matched.length} bản ghi${warnCount > 0 ? ` (${warnCount} cảnh báo)` : ""}`}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }

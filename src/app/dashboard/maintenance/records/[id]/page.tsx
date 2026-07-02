@@ -25,6 +25,7 @@ import {
   type MaintenanceRecordLine,
   type MaintenanceStaff,
 } from "../../_components/maintenance-data"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 type InventoryItemOption = {
   id: string
@@ -2371,12 +2372,28 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       {/* Modal thêm vật tư mới vào inventory_items */}
       {newItemModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-slate-800">Thêm vật tư mới</h3>
-              <button onClick={() => setNewItemModal(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
-            </div>
+        <ModalShell
+          title="Thêm vật tư mới"
+          onClose={() => setNewItemModal(null)}
+          maxWidth="sm"
+          footer={
+            <>
+              <button
+                onClick={() => setNewItemModal(null)}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-600 font-bold rounded-xl text-sm hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleSaveNewItem}
+                disabled={savingNewItem}
+                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm disabled:opacity-50"
+              >
+                {savingNewItem ? "Đang lưu..." : "Lưu vật tư"}
+              </button>
+            </>
+          }
+        >
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Mã vật tư *</label>
@@ -2407,33 +2424,33 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
             </div>
-            <div className="flex gap-3 pt-2">
+        </ModalShell>
+      )}
+
+      {newExtMatModal && (
+        <ModalShell
+          title="Thêm vật tư bên ngoài"
+          onClose={() => setNewExtMatModal(null)}
+          maxWidth="lg"
+          footer={
+            <>
               <button
-                onClick={() => setNewItemModal(null)}
-                className="flex-1 px-4 py-2 border border-slate-300 text-slate-600 font-bold rounded-xl text-sm hover:bg-slate-50"
+                onClick={() => setNewExtMatModal(null)}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
                 Hủy
               </button>
               <button
-                onClick={handleSaveNewItem}
-                disabled={savingNewItem}
-                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm disabled:opacity-50"
+                onClick={() => void handleSaveNewExtMat()}
+                disabled={savingNewExtMat}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
               >
-                {savingNewItem ? "Đang lưu..." : "Lưu vật tư"}
+                {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {newExtMatModal && (
-        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-base font-extrabold text-slate-800">Thêm vật tư bên ngoài</h2>
-              <button onClick={() => setNewExtMatModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+            </>
+          }
+        >
+            <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
@@ -2488,23 +2505,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button
-                onClick={() => setNewExtMatModal(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={() => void handleSaveNewExtMat()}
-                disabled={savingNewExtMat}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Personnel section */}

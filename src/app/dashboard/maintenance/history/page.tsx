@@ -7,6 +7,8 @@ import { getActiveFactoryId } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
 import { BO_PHAN_LIST, currencySymbol, type MaintenanceAsset } from "../_components/maintenance-data"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type HistoryRow = {
   record_id: string
@@ -315,7 +317,11 @@ export default function MaintenanceHistoryPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-end">
+      <FilterBar
+        activeCount={
+          selectedAssetIds.length + selectedVehicleIds.length + [filterFrom, filterTo, filterSearch].filter(Boolean).length
+        }
+      >
         <Filter size={15} className="text-slate-400 self-center" />
 
         {/* Unified Thiết bị / Xe multi-select picker */}
@@ -505,7 +511,7 @@ export default function MaintenanceHistoryPage() {
             className="flex-1 text-sm outline-none bg-transparent"
           />
         </div>
-      </div>
+      </FilterBar>
 
       {/* Selected devices banner */}
       {showBanner && (
@@ -547,7 +553,7 @@ export default function MaintenanceHistoryPage() {
       )}
 
       {/* History table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
@@ -689,7 +695,7 @@ export default function MaintenanceHistoryPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </ResponsiveTableWrapper>
 
       {/* Summary */}
       {filtered.length > 0 && (

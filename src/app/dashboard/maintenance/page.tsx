@@ -7,6 +7,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "./_components/maintenance-shell"
 import { currencySymbol } from "./_components/maintenance-data"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type KpiData = {
   totalMonth: number
@@ -151,6 +152,7 @@ export default function MaintenanceDashboardPage() {
             <p className="text-sm">Chưa có biên bản nào</p>
           </div>
         ) : (
+          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
@@ -175,6 +177,7 @@ export default function MaintenanceDashboardPage() {
               ))}
             </tbody>
           </table>
+          </ResponsiveTableWrapper>
         )}
       </div>
     </MaintenanceShell>

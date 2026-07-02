@@ -17,6 +17,9 @@ import {
 } from "@/app/dashboard/product/shared";
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes";
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter";
+import { FilterBar } from "@/app/dashboard/_components/filter-bar";
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
+import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import {
   InventoryImageUploadGroup,
 } from "@/app/dashboard/inventory/_components/inventory-image-upload";
@@ -4666,7 +4669,9 @@ export default function ProductPage() {
         ) : null;
       })()}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+      <FilterBar
+        activeCount={[search, filterDC, filterLoai, filterTT, filterCa, filterGhiChu, filterFrom, filterTo].filter(Boolean).length}
+      >
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400" />
           <input
@@ -4798,7 +4803,7 @@ export default function ProductPage() {
             <X size={14} /> Xóa lọc
           </button>
         )}
-      </div>
+      </FilterBar>
 
       <div className="space-y-4 pb-32">
         {Object.keys(groupedByDateAndCa)
@@ -4945,7 +4950,7 @@ export default function ProductPage() {
                                 {fmtKg(caKg)}
                               </span>
                             </div>
-                            <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+                            <ResponsiveTableWrapper className="rounded-xl">
                               <table className="w-full text-sm">
                                 <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
                                   <tr>
@@ -5096,7 +5101,7 @@ export default function ProductPage() {
                                   })}
                                 </tbody>
                               </table>
-                            </div>
+                            </ResponsiveTableWrapper>
                           </div>
                         );
                       })}
@@ -5114,30 +5119,47 @@ export default function ProductPage() {
       </div>
 
       {editModal && (
-        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-800">
-                  Sửa transaction thành phẩm
-                </h2>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  Dòng đang sửa: <span className="font-bold text-slate-700">{editForm.ma_lo}</span>
-                  {editTransactionId ? ` · TX ${editTransactionId.slice(0, 8)}` : ""}
-                </p>
-              </div>
+        <ModalShell
+          title={
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-800">
+                Sửa transaction thành phẩm
+              </h2>
+              <p className="text-sm text-slate-500 mt-0.5 font-normal">
+                Dòng đang sửa: <span className="font-bold text-slate-700">{editForm.ma_lo}</span>
+                {editTransactionId ? ` · TX ${editTransactionId.slice(0, 8)}` : ""}
+              </p>
+            </div>
+          }
+          onClose={() => {
+            setEditModal(false);
+            setEditTransactionId(null);
+            setEditContext(null);
+          }}
+          maxWidth="6xl"
+          footer={
+            <>
               <button
                 onClick={() => {
                   setEditModal(false);
                   setEditTransactionId(null);
                   setEditContext(null);
                 }}
-                className="p-2 hover:bg-slate-100 rounded-xl"
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
               >
-                <X size={18} />
+                Hủy
               </button>
-            </div>
-            <div className="p-6 space-y-6">
+              <button
+                onClick={handleEditSave}
+                disabled={saving}
+                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+              >
+                {saving ? "Đang lưu..." : "Lưu thay đổi"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-6">
               <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-start gap-2">
                 <AlertTriangle
                   size={16}
@@ -5584,27 +5606,7 @@ export default function ProductPage() {
               </div>
 
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button
-                onClick={() => {
-                  setEditModal(false);
-                  setEditTransactionId(null);
-                  setEditContext(null);
-                }}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleEditSave}
-                disabled={saving}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {saving ? "Đang lưu..." : "Lưu thay đổi"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {editDateModal &&
@@ -5619,30 +5621,27 @@ export default function ProductPage() {
             grouped[k].push(c);
           });
           return (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-                <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-                  <div>
-                    <h3 className="font-extrabold text-slate-800">
-                      Sửa ngày{" "}
-                      {new Date(editDateModal).toLocaleDateString("vi-VN")}
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Sửa thông tin chung của phiếu. Mỗi dòng bên dưới vẫn giữ
-                      ngăn riêng theo từng giao dịch.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setEditDateModal(null);
-                      setDateEditHeader(null);
-                    }}
-                    className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    <X size={18} className="text-slate-500" />
-                  </button>
+            <ModalShell
+              title={
+                <div>
+                  <h3 className="font-extrabold text-slate-800">
+                    Sửa ngày{" "}
+                    {new Date(editDateModal).toLocaleDateString("vi-VN")}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5 font-normal">
+                    Sửa thông tin chung của phiếu. Mỗi dòng bên dưới vẫn giữ
+                    ngăn riêng theo từng giao dịch.
+                  </p>
                 </div>
-                <div className="overflow-y-auto flex-1">
+              }
+              onClose={() => {
+                setEditDateModal(null);
+                setDateEditHeader(null);
+              }}
+              maxWidth="2xl"
+              bodyClassName="p-0"
+            >
+                <div>
                   {dateEditHeader && (
                     <div className="p-6 border-b border-slate-100 space-y-4 bg-slate-50">
                       <div className="flex items-start justify-between gap-3">
@@ -5845,8 +5844,7 @@ export default function ProductPage() {
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
+        </ModalShell>
           );
         })()}
 

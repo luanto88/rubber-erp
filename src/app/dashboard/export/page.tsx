@@ -29,6 +29,9 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
+import { FilterBar } from "@/app/dashboard/_components/filter-bar";
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
+import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 
 // --- Types -------------------------------------------------------------------
 type Vehicle = {
@@ -1539,7 +1542,9 @@ export default function ExportPage() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+        <FilterBar
+          activeCount={[search, filterLoai, filterFrom, filterTo].filter(Boolean).length}
+        >
           <div className="flex items-center gap-2 flex-1 min-w-48">
             <Search size={15} className="text-slate-400" />
             <input
@@ -1585,10 +1590,10 @@ export default function ExportPage() {
               <X size={14} /> Xóa lọc
             </button>
           )}
-        </div>
+        </FilterBar>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <ResponsiveTableWrapper>
           {loading ? (
             <div className="p-12 text-center text-slate-400">Đang tải...</div>
           ) : filtered.length === 0 ? (
@@ -1947,7 +1952,7 @@ export default function ExportPage() {
               </tbody>
             </table>
           )}
-        </div>
+        </ResponsiveTableWrapper>
 
         {/* Delete confirm */}
         {delConfirm && (
@@ -1989,23 +1994,39 @@ export default function ExportPage() {
 
       {/* Customer creation modal */}
       {custModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
-                <UserPlus size={18} /> Tạo khách hàng mới
-              </h3>
+        <ModalShell
+          title={
+            <span className="flex items-center gap-2">
+              <UserPlus size={18} /> Tạo khách hàng mới
+            </span>
+          }
+          onClose={() => {
+            setCustModal(false);
+            setCustError(null);
+          }}
+          maxWidth="md"
+          footer={
+            <>
               <button
                 onClick={() => {
                   setCustModal(false);
                   setCustError(null);
                 }}
-                className="p-1.5 hover:bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
-                <X size={16} />
+                Hủy
               </button>
-            </div>
-            <div className="p-6 space-y-3">
+              <button
+                onClick={handleCreateCustomer}
+                disabled={custSaving}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50"
+              >
+                {custSaving ? "Đang lưu..." : "Tạo khách hàng"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-3">
               {custError && (
                 <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 flex items-center gap-2">
                   <AlertTriangle size={14} />
@@ -2069,26 +2090,7 @@ export default function ExportPage() {
                 </div>
               ))}
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button
-                onClick={() => {
-                  setCustModal(false);
-                  setCustError(null);
-                }}
-                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleCreateCustomer}
-                disabled={custSaving}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {custSaving ? "Đang lưu..." : "Tạo khách hàng"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       <div className="flex items-center gap-3 mb-4">
