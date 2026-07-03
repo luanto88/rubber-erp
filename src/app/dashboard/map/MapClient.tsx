@@ -225,10 +225,10 @@ export default function MapClient() {
   const hasFilters = filterTeam || filterVariety || filterYear || searchLot
 
   return (
-    <div className="flex h-[calc(100vh-48px)] relative">
+    <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-48px)] relative">
       {/* ── LEFT: Filter Panel ─────────────────────────────────────────── */}
-      <div className={`${showFilters ? "w-80" : "w-0"} transition-all duration-300 overflow-hidden flex-shrink-0`}>
-        <div className="w-80 h-full bg-white border-r border-slate-200 flex flex-col">
+      <div className={`${showFilters ? "w-full lg:w-80" : "w-0"} transition-all duration-300 overflow-hidden flex-shrink-0`}>
+        <div className="w-full lg:w-80 max-h-64 lg:max-h-none lg:h-full bg-white border-r border-slate-200 flex flex-col">
           {/* Panel header */}
           <div className="p-4 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -348,7 +348,9 @@ export default function MapClient() {
             <div className="border-t border-slate-200 pt-4">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-3">Chú thích màu</label>
               <div className="grid grid-cols-2 gap-1.5">
-                {Object.entries(TEAM_COLORS).map(([team, color]) => (
+                {Object.entries(TEAM_COLORS)
+                  .filter(([team]) => team !== "0")
+                  .map(([team, color]) => (
                   <button
                     key={team}
                     onClick={() => setFilterTeam(filterTeam === team ? "" : team)}
@@ -359,7 +361,7 @@ export default function MapClient() {
                     }`}
                   >
                     <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: color }} />
-                    {team === "0" ? "KXĐ" : `Đội ${team}`}
+                    Đội {team}
                   </button>
                 ))}
               </div>
@@ -369,7 +371,8 @@ export default function MapClient() {
       </div>
 
       {/* ── CENTER: Map ────────────────────────────────────────────────── */}
-      <div className="flex-1 relative">
+      {/* isolate: chặn z-index nội bộ của Leaflet (pane 200-700, control 1000) tràn lên trên sidebar/backdrop mobile (z-40/z-50) */}
+      <div className="flex-1 relative isolate min-h-[280px]">
         {/* Toggle filter button */}
         {!showFilters && (
           <button
@@ -415,8 +418,8 @@ export default function MapClient() {
         </MapContainer>
 
         {/* Top stats bar */}
-        <div className="absolute top-3 right-3 z-[1000] flex gap-2">
-          <div className="bg-white/95 backdrop-blur-lg shadow-lg rounded-xl px-4 py-2 border border-slate-200 flex items-center gap-4">
+        <div className="absolute top-3 right-3 z-[1000] flex flex-wrap justify-end gap-2 max-w-[calc(100vw-1.5rem)]">
+          <div className="bg-white/95 backdrop-blur-lg shadow-lg rounded-xl px-4 py-2 border border-slate-200 flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-2">
               <MapPin size={14} className="text-emerald-600" />
               <span className="text-xs font-bold text-slate-700">{stats.count} lô</span>
@@ -437,7 +440,7 @@ export default function MapClient() {
 
       {/* ── RIGHT: Selected Lot Detail ─────────────────────────────────── */}
       {selectedLot && (
-        <div className="w-80 bg-white border-l border-slate-200 flex flex-col flex-shrink-0 animate-[slideInRight_0.3s_ease-out]">
+        <div className="w-full lg:w-80 max-h-[50vh] lg:max-h-none lg:h-full bg-white border-l border-slate-200 flex flex-col flex-shrink-0 animate-[slideInRight_0.3s_ease-out]">
           <div className="p-4 border-b border-slate-200 flex items-center justify-between">
             <h3 className="font-bold text-slate-700 text-sm">Chi tiết lô</h3>
             <button onClick={() => setSelectedLot(null)} className="p-1 hover:bg-slate-100 rounded-lg">

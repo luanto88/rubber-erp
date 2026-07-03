@@ -1615,7 +1615,7 @@ export default function QualityPage() {
 
           {/* Form header card */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-5 mb-4">
-            <div className="grid grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày KN <span className="text-red-500">*</span></label>
                 <input type="date" value={createForm.ngay_kn}
@@ -1844,13 +1844,13 @@ export default function QualityPage() {
             onChange={e => { const f=e.target.files?.[0]; if (f) handleImport(f) }}/>
 
           {/* Page header */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-5">
             <div>
               <h1 className="text-2xl font-extrabold text-slate-800">Kiểm nghiệm</h1>
               <p className="text-sm text-slate-500 mt-0.5">Kết quả kiểm nghiệm — TCCS / TCVN / TCKH</p>
             </div>
             {mainTab !== "thong_ke" && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {userRole === "admin" && (
                   <>
                     <button onClick={handleDownloadTemplate}
@@ -1873,7 +1873,7 @@ export default function QualityPage() {
           </div>
 
           {/* Tab nav */}
-          <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit">
+          <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">
             {([
               { val:"xep_hang", label:"Xếp hạng", icon:Star },
               { val:"giam_sat", label:"Giám sát KN", icon:Eye },
@@ -1891,7 +1891,7 @@ export default function QualityPage() {
           {mainTab === "xep_hang" && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-4 gap-3 mb-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                 {[
                   { label:"Tổng lô (mới nhất)", value:stats.total,                                            color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
                   { label:"Đạt hạng",            value:`${stats.dat} lô`,                                     color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
@@ -1965,8 +1965,8 @@ export default function QualityPage() {
                     return (
                       <div key={date} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         {/* Date header */}
-                        <div className={`px-5 py-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors ${expanded?"border-b border-slate-100":""}`}>
-                          <div className="flex items-center gap-3 cursor-pointer flex-1"
+                        <div className={`px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${expanded?"border-b border-slate-100":""}`}>
+                          <div className="flex items-center gap-3 cursor-pointer flex-1 flex-wrap"
                             onClick={()=>{ const next=new Set(expandedDates); expanded?next.delete(date):next.add(date); setExpandedDates(next) }}>
                             {expanded ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
                             <span className="font-extrabold text-slate-800 text-base">
@@ -1984,7 +1984,7 @@ export default function QualityPage() {
                             <span className="text-xs text-emerald-600 font-bold">{dateDat} đạt</span>
                             {hasRetest && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">↺ KN lại</span>}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             {inDeleteMode ? (
                               <>
                                 <span className="text-xs text-red-600 font-bold">Chọn phiếu cần xóa...</span>
@@ -2149,7 +2149,7 @@ export default function QualityPage() {
           {mainTab === "giam_sat" && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 {[
                   { label:"KN lại rớt CT", value:gmsStats.rotCT, color:"text-amber-600", Icon:RefreshCw, ic:"text-amber-400" },
                   { label:"KN lại 6 tháng",value:gmsStats.thang6,color:"text-blue-600",  Icon:Clock,     ic:"text-blue-400"  },
@@ -2204,7 +2204,7 @@ export default function QualityPage() {
                     return (
                       <div key={r.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         {/* Card header */}
-                        <div className="px-5 py-3 flex items-center gap-4 border-b border-slate-100 bg-slate-50">
+                        <div className="px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-100 bg-slate-50">
                           <span className="font-extrabold text-slate-800">Lô {r.ma_lo}</span>
                           <span className="text-xs text-slate-500">{formatPKN(r.pkn, r.ngay_kn, factoryCode)}</span>
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">{r.loai_csr}</span>
@@ -2224,7 +2224,7 @@ export default function QualityPage() {
                         </div>
 
                         {/* Comparison */}
-                        <div className="px-5 py-3 grid grid-cols-2 gap-4">
+                        <div className="px-5 py-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {/* Old result */}
                           <div className="rounded-xl border border-slate-200 p-3 bg-slate-50">
                             <div className="text-xs font-bold text-slate-500 mb-2">KQ CŨ — {parent?.dat_hang||"?"}</div>
@@ -2424,7 +2424,7 @@ export default function QualityPage() {
                   <button onClick={()=>setTkhLimits(TCCS[limitKey(createLoaiCSR)]||TCCS.CSR10)}
                     className="text-xs text-blue-600 hover:underline">Reset về TCCS</button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                   {(Object.entries(tkhLimits) as [string,number|null][]).map(([k,v])=>(
                     <div key={k}>
                       <label className="text-slate-500 block mb-0.5">{k}</label>

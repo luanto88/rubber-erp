@@ -3715,7 +3715,7 @@ export default function ProductPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">
                 Ngày sản xuất <span className="text-red-500">*</span>
@@ -4528,7 +4528,7 @@ export default function ProductPage() {
       </div>
 
       {postSaveReadyNgans.length > 0 && (
-        <div className="fixed inset-x-4 bottom-4 z-50 md:inset-x-auto md:right-6 md:w-[34rem]">
+        <div className="fixed inset-x-4 bottom-4 z-[60] md:inset-x-auto md:right-6 md:w-[34rem]">
           <div className="rounded-3xl border border-emerald-200 bg-white/95 p-4 shadow-[0_24px_70px_rgba(15,23,42,0.18)] backdrop-blur">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -5180,6 +5180,7 @@ export default function ProductPage() {
             setEditContext(null);
           }}
           maxWidth="6xl"
+          zIndexClassName="z-[60]"
           footer={
             <>
               <button

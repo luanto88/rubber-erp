@@ -24,7 +24,7 @@ function FitBoundsToStorageGeoJson({ data }: { data: StorageGeoJsonCollection })
 
 export function StorageGeoJsonMap({ data }: { data: StorageGeoJsonCollection }) {
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200">
+    <div className="isolate overflow-hidden rounded-3xl border border-slate-200">
       <MapContainer center={[12.5819, 105.4972]} zoom={11} scrollWheelZoom className="h-[420px] w-full">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

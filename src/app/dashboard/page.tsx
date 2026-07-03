@@ -184,12 +184,12 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div ref={revealRef} className="flex items-center justify-between scroll-reveal">
+      <div ref={revealRef} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between scroll-reveal">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-1">{factoryName || "Đang tải..."}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => router.push("/dashboard/map")}
             className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-sm transition-all"
@@ -208,7 +208,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Stat Cards ─────────────────────────────────────────────────── */}
-      <div ref={revealRef} className="grid grid-cols-5 gap-4 scroll-reveal">
+      <div ref={revealRef} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 scroll-reveal">
         {cards.map((c, i) => (
           <div
             key={c.label}
@@ -230,15 +230,15 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Charts Row ─────────────────────────────────────────────────── */}
-      <div ref={revealRef} className="grid grid-cols-3 gap-4 scroll-reveal">
+      <div ref={revealRef} className="grid grid-cols-1 lg:grid-cols-3 gap-4 scroll-reveal">
         {/* Bar Chart: CSR Type Distribution */}
-        <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-md p-5">
-          <div className="flex items-center justify-between mb-4">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-md p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div>
               <h2 className="text-base font-bold text-slate-700">Sản lượng theo loại CSR</h2>
               <p className="text-xs text-slate-400 mt-0.5">Số lô & tổng bành theo chủng loại sản phẩm</p>
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-3 text-xs flex-wrap">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Số lô
               </span>
@@ -338,14 +338,14 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Area Chart: Monthly Exports ─────────────────────────────────── */}
-      <div ref={revealRef} className="grid grid-cols-3 gap-4 scroll-reveal">
-        <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-md p-5">
-          <div className="flex items-center justify-between mb-4">
+      <div ref={revealRef} className="grid grid-cols-1 lg:grid-cols-3 gap-4 scroll-reveal">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-md p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div>
               <h2 className="text-base font-bold text-slate-700">Xuất hàng theo tháng</h2>
               <p className="text-xs text-slate-400 mt-0.5">12 tháng gần nhất — số đơn & tổng bành xuất</p>
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-3 text-xs flex-wrap">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-purple-500" /> Số đơn
               </span>

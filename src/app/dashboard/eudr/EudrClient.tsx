@@ -1574,7 +1574,8 @@ export default function EudrClient() {
           </div>
 
           {/* RIGHT: Map */}
-          <div className="flex-1 min-h-[280px] rounded-xl overflow-hidden border border-slate-200 shadow-md relative">
+          {/* isolate: chặn z-index nội bộ của Leaflet (control z-1000, pane 200-700) tràn lên trên sidebar/backdrop mobile (z-40/z-50) */}
+          <div className="flex-1 min-h-[280px] rounded-xl overflow-hidden border border-slate-200 shadow-md relative isolate">
             {!geoData && !loadingGeo && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-10">
                 {traceInfo !== null ? (

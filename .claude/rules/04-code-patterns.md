@@ -4,6 +4,35 @@ description: Patterns code chuẩn — dùng khi viết mới hoặc sửa bất
 
 # Code Patterns & Conventions
 
+## Phân trang khi query bảng lớn (Supabase PostgREST mặc định giới hạn 1000 dòng)
+
+PostgREST (nền tảng của `supabase-js`) **mặc định cắt kết quả ở 1000 dòng/query** trừ khi dùng `.range()`. Nếu bảng có nhiều hơn 1000 dòng và query không phân trang, kết quả bị cắt **âm thầm không báo lỗi** — không có warning, không throw, chỉ trả về đúng 1000 dòng đầu theo thứ tự nào đó (không đảm bảo ổn định nếu không có `.order()` tường minh).
+
+Bug thật đã xảy ra (2026-07-03, điều tra Bug 8 lô "mồ côi"): 1 script Node dùng `service_role` key query `lots` không giới hạn, factory có 1013 lô nhưng chỉ nhận về 1000 dòng. Không có `.order()` ổn định khiến 2 lần chạy script trả về **tập con khác nhau** (86 vs 73 lô khớp điều kiện lọc) — silent data bug, dẫn tới kết luận sai nếu không phát hiện.
+
+**Bắt buộc** với mọi query/script (kể cả script điều tra một lần, script seed, script migration dữ liệu) trên bảng có khả năng vượt 1000 dòng:
+
+```typescript
+async function fetchAll(table: string, selectCols: string, filters?: (q: any) => any) {
+  let all: any[] = []
+  let from = 0
+  const PAGE_SIZE = 1000
+  for (;;) {
+    let q = supabase.from(table).select(selectCols).range(from, from + PAGE_SIZE - 1)
+    if (filters) q = filters(q)
+    const { data, error } = await q
+    if (error) throw error
+    all = all.concat(data || [])
+    if (!data || data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return all
+}
+```
+
+- Nên verify chéo bằng `{ count: "exact", head: true }` để xác nhận số dòng fetch được đúng bằng tổng thật, tự abort nếu lệch — không tin tưởng 1 lần `.select()` không giới hạn là đã lấy đủ dữ liệu.
+- Áp dụng cho cả `.in()` với danh sách ID dài — nên chunk theo lô ~200 ID/lần thay vì 1 câu `IN (...)` khổng lồ.
+
 ## Fetch data pattern
 
 ```typescript

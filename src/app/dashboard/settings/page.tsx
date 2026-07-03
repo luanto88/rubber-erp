@@ -5223,7 +5223,7 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Vẽ vùng lô vườn trên bản đồ (tùy chọn)</label>
-                    <div className="rounded-xl overflow-hidden border border-slate-200">
+                    <div className="isolate rounded-xl overflow-hidden border border-slate-200">
                       <PolygonDrawMap existingGeometry={forestPlotGeometry} onChange={setForestPlotGeometry} />
                     </div>
                   </div>
