@@ -1,5 +1,9 @@
 import type { Metadata } from "next"
 import "./globals.css"
+// Import ở root layout (không tied vào next/dynamic ssr:false của từng module bản đồ)
+// để đảm bảo CSS Leaflet luôn có trong bundle chính — tránh nguy cơ blank map do
+// leaflet.css không được include đúng khi chỉ import bên trong component dynamic import.
+import "leaflet/dist/leaflet.css"
 export const metadata: Metadata = {
   title: "Công ty TNHH PTCS Phước Hòa Kampong - NMCB",
   description: "Nhà máy chế biến cao su Phước Hòa Kampong Thom - Sản xuất CSR10, CSR20, CSR3L theo tiêu chuẩn PEFC CS. Thành lập 2019 tại Campuchia.",

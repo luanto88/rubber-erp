@@ -251,7 +251,7 @@ export default function MapClient() {
     <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-48px)] relative">
       {/* ── LEFT: Filter Panel ─────────────────────────────────────────── */}
       <div className={`${showFilters ? "w-full lg:w-80" : "w-0"} transition-all duration-300 overflow-hidden flex-shrink-0`}>
-        <div className="w-full lg:w-80 max-h-64 lg:max-h-none lg:h-full bg-white border-r border-slate-200 flex flex-col">
+        <div className="w-full lg:w-80 max-h-64 lg:max-h-none lg:h-full overflow-hidden bg-white border-r border-slate-200 flex flex-col">
           {/* Panel header */}
           <div className="p-4 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -264,7 +264,7 @@ export default function MapClient() {
           </div>
 
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
             {/* File selector */}
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-2">Nguồn dữ liệu</label>
