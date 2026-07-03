@@ -192,3 +192,14 @@ production_records thay doi (import / save / delete)
 - `supabase/migrations/20260606_storage_xe_dates.sql`
 - `supabase/schema.sql`
 - `src/types/index.ts`
+
+## 11. Cập nhật 2026-07-03 — Tab "Đang hoạt động" / "Lịch sử" (mobile UX)
+
+- Danh sách ngăn ở `/dashboard/storage` tách thành 2 tab, state `nganTab: "active" | "history"`:
+  - `Đang hoạt động` (mặc định): card grid như cũ (`columns-1 lg:columns-2 2xl:columns-3`), chỉ chứa ngăn có `trang_thai !== "Đã sản xuất"`.
+  - `Lịch sử`: toàn bộ ngăn `trang_thai === "Đã sản xuất"`, hiển thị dạng bảng (`ResponsiveTableWrapper`), không có QR, chỉ cột thông tin chính (Mã ngăn, Loại NL, KL tươi/khô, TP/QK %, Ngày lưu ủ, Hành động).
+  - Cả 2 tab đều dẫn xuất từ cùng `filtered` (đã áp `dcLoaiNL`, `filterTT`, `filterGhiChu`, `search`, khoảng ngày báo cáo) — không tạo query/state lọc riêng cho từng tab.
+  - Dropdown lọc trạng thái (`filterTT`) không còn option "Đã sản xuất" và bị disable khi đang ở tab Lịch sử (trạng thái đã cố định theo tab).
+- Ngăn tự "chuyển tab" khi trạng thái đổi vì cả 2 mảng đều derive lại từ `filtered` mỗi render — không cache riêng theo tab.
+- Nút "Về đang SX" (chỉ admin, business rule bắt buộc giữ — xem `.claude/rules/06-module-production.md` mục Kho nguyên liệu) vẫn tồn tại ở tab Lịch sử dưới dạng nút gọn trong cột "Hành động" của bảng, gọi đúng `handleNganStatusToggle(n.id, STORAGE_STATUS_IN_PRODUCTION)` như card cũ — không đổi logic quyền/nghiệp vụ.
+- Card tab Đang hoạt động: đã bỏ khối QR to ở footer (chỉ còn icon QR ở header dẫn tới `/dashboard/storage/[id]`); icon nút "Thu gọn" đổi từ `X` xám sang `Minus` để không còn giống hệt icon `X` đỏ của nút "Xóa"; card dùng `shadow-sm` (không còn `shadow-md` + viền cứng); các nút hành động (QR/PDF/GeoJSON/Xem/Sửa/Xóa — không gồm nút toggle trạng thái) chỉ mờ đi ở desktop khi không hover (`md:opacity-0 md:group-hover:opacity-100`), luôn hiện rõ trên mobile vì thiết bị cảm ứng không có hover.

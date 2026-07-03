@@ -410,6 +410,25 @@ function FitBounds({ data }: { data: FeatureCollection | null }) {
   return null
 }
 
+// ─── MapResizeFix ─────────────────────────────────────────────────────────────
+// Container map dùng style={{height:"100%"}} phụ thuộc layout flex responsive không
+// có chiều cao cố định trên mobile — cùng nguy cơ Leaflet đo sai size lúc mount như
+// module Bản đồ lô. invalidateSize() + ResizeObserver phòng ngừa, cộng thêm thuần túy.
+function MapResizeFix() {
+  const map = useMap()
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 200)
+    const container = map.getContainer()
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize())
+    resizeObserver.observe(container)
+    return () => {
+      clearTimeout(timer)
+      resizeObserver.disconnect()
+    }
+  }, [map])
+  return null
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function EudrClient() {
   const searchParams = useSearchParams()
@@ -1626,6 +1645,7 @@ export default function EudrClient() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; OpenStreetMap contributors'
               />
+              <MapResizeFix />
               {geoData && geoData.features.length > 0 && (
                 <>
                   <GeoJSON

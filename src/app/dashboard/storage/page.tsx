@@ -1,7 +1,6 @@
 "use client"
 import Link from "next/link"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -43,9 +42,10 @@ import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
-  Warehouse, Plus, X, Search, Eye, Edit2,
+  Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
   ChevronDown, ChevronRight, Map as MapIcon
 } from "lucide-react"
@@ -196,6 +196,7 @@ export default function StoragePage() {
   // filters
   const [search, setSearch]     = useState("")
   const [filterTT, setFilterTT] = useState("")
+  const [nganTab, setNganTab]   = useState<"active" | "history">("active")
   const [filterGhiChu, setFilterGhiChu] = useState("")
   const [dayChuyen, setDayChuyen] = useState<"Mủ tạp" | "Mủ nước">("Mủ tạp")
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
@@ -590,6 +591,10 @@ export default function StoragePage() {
   })
 
   const subTerm = dayChuyen === "Mủ tạp" ? "Ngăn" : "Hồ"
+
+  // ── Tách theo tab: Đang hoạt động / Lịch sử ─────────────────────────────────
+  const activeNgans = filtered.filter(n => n.trang_thai !== STORAGE_STATUS_PRODUCED)
+  const historyNgans = filtered.filter(n => n.trang_thai === STORAGE_STATUS_PRODUCED)
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const statsCards = [
@@ -1043,6 +1048,32 @@ export default function StoragePage() {
           ))}
         </div>
 
+        {/* Tab nav: Đang hoạt động / Lịch sử */}
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">
+          <button
+            type="button"
+            onClick={() => setNganTab("active")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              nganTab === "active" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
+            <Warehouse size={14}/> Đang hoạt động
+            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+              nganTab === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+              {activeNgans.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setNganTab("history")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              nganTab === "history" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
+            <History size={14}/> Lịch sử
+            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+              nganTab === "history" ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-500"}`}>
+              {historyNgans.length}
+            </span>
+          </button>
+        </div>
+
         {/* Filters */}
         <FilterBar
           className="mb-5"
@@ -1056,9 +1087,11 @@ export default function StoragePage() {
                 className="flex-1 text-sm outline-none" />
             </div>
             <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
+              disabled={nganTab === "history"}
+              title={nganTab === "history" ? "Tab Lịch sử chỉ gồm ngăn Đã sản xuất" : undefined}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">
               <option value="">Tất cả trạng thái</option>
-              {TRANG_THAI_OPTS.map(t => <option key={t}>{t}</option>)}
+              {TRANG_THAI_OPTS.filter(t => t !== STORAGE_STATUS_PRODUCED).map(t => <option key={t}>{t}</option>)}
             </select>
             <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
               className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
@@ -1128,17 +1161,17 @@ export default function StoragePage() {
           </div>
         </FilterBar>
 
-        {/* Card grid */}
-        {loading ? (
+        {/* Card grid — tab Đang hoạt động */}
+        {nganTab === "active" && (loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
-        ) : filtered.length === 0 ? (
+        ) : activeNgans.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
             <Warehouse size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có {subTerm.toLowerCase()} nào</p>
+            <p>Không có {subTerm.toLowerCase()} nào đang hoạt động</p>
           </div>
         ) : (
           <div className="columns-1 gap-4 lg:columns-2 2xl:columns-3">
-            {filtered.map(n => {
+            {activeNgans.map(n => {
               const days  = curingDays(n.ngay_bd)
               const ready = days !== null && days >= 21
               const hs      = headerStyle(n.trang_thai)
@@ -1160,7 +1193,6 @@ export default function StoragePage() {
                     ? STORAGE_STATUS_IN_PRODUCTION
                     : null
               const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
-              const lookupUrl = typeof window !== "undefined" ? `${window.location.origin}${lookupPath}` : lookupPath
               const isCollapsed = collapsedCardIds.has(n.id)
               const normalizedStatus = normalizeStorageStatus(n.trang_thai)
               const canEditThisNgan =
@@ -1173,10 +1205,10 @@ export default function StoragePage() {
               const canViewThisNgan = canViewStorage
 
               return (
-                <div key={n.id} className="mb-4 break-inside-avoid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md hover-lift">
+                <div key={n.id} className="group mb-4 break-inside-avoid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm hover-lift">
                   {/* Card header */}
-                  <div className={`bg-gradient-to-r ${hs.grad} px-4 py-3 border-b border-slate-200 flex items-center justify-between`}>
-                    <div className="flex items-center gap-2 min-w-0">
+                  <div className={`bg-gradient-to-r ${hs.grad} px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2`}>
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <Warehouse size={16} className={`${hs.icon} shrink-0`} />
                       <span className="font-extrabold text-slate-800 text-base truncate">{n.ten_ngan}</span>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${badgeClass(n.trang_thai)}`}>
@@ -1213,63 +1245,65 @@ export default function StoragePage() {
                                 : "Về đang SX"}
                         </button>
                       )}
-                      {canViewThisNgan && (
-                        <Link
-                          href={lookupPath}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
-                          title="QR / Tra cứu"
-                        >
-                          <QrCode size={14} />
-                        </Link>
-                      )}
-                      {canViewThisNgan && (
-                        <button
-                          onClick={() => void handleExportDetailPdf(n.id)}
-                          disabled={exportingDetailId === n.id}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
-                          title="Xuất PDF"
-                        >
-                          <FileText size={14} />
-                        </button>
-                      )}
-                      {canViewThisNgan && (
-                        <button
-                          onClick={() => void handleExportGeoJson(n)}
-                          disabled={exportingGeoId === n.id}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
-                          title="Xuất GeoJSON"
-                        >
-                          <MapIcon size={14} />
-                        </button>
-                      )}
-                      {canViewThisNgan && (
-                        <button onClick={() => openView(n)}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
-                          title="Xem chi tiết">
-                          <Eye size={14} />
-                        </button>
-                      )}
-                      {canEditThisNgan && (
-                        <button onClick={() => openEdit(n)}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors"
-                          title="Sửa">
-                          <Edit2 size={14} />
-                        </button>
-                      )}
-                      {canDeleteThisNgan && (
-                        <button onClick={() => setDelConfirm(n.id)}
-                          className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors"
-                          title="Xóa">
-                          <X size={14} />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        {canViewThisNgan && (
+                          <Link
+                            href={lookupPath}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
+                            title="QR / Tra cứu"
+                          >
+                            <QrCode size={14} />
+                          </Link>
+                        )}
+                        {canViewThisNgan && (
+                          <button
+                            onClick={() => void handleExportDetailPdf(n.id)}
+                            disabled={exportingDetailId === n.id}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
+                            title="Xuất PDF"
+                          >
+                            <FileText size={14} />
+                          </button>
+                        )}
+                        {canViewThisNgan && (
+                          <button
+                            onClick={() => void handleExportGeoJson(n)}
+                            disabled={exportingGeoId === n.id}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
+                            title="Xuất GeoJSON"
+                          >
+                            <MapIcon size={14} />
+                          </button>
+                        )}
+                        {canViewThisNgan && (
+                          <button onClick={() => openView(n)}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
+                            title="Xem chi tiết">
+                            <Eye size={14} />
+                          </button>
+                        )}
+                        {canEditThisNgan && (
+                          <button onClick={() => openEdit(n)}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors"
+                            title="Sửa">
+                            <Edit2 size={14} />
+                          </button>
+                        )}
+                        {canDeleteThisNgan && (
+                          <button onClick={() => setDelConfirm(n.id)}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors"
+                            title="Xóa">
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => toggleCardCollapsed(n.id)}
                         className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
                         title={isCollapsed ? "Mở rộng" : "Thu gọn"}
                       >
-                        <X size={14} />
+                        <Minus size={14} />
                       </button>
                     </div>
                   </div>
@@ -1352,26 +1386,113 @@ export default function StoragePage() {
                         <span className="text-xs font-semibold text-slate-700 break-words">{n.ghi_chu}</span>
                       </div>
                     )}
-                    <div className="pt-3 border-t border-dashed border-slate-200">
-                      <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
-                        <div className="shrink-0 rounded-lg border border-slate-200 bg-white p-1.5">
-                          <QRCodeSVG value={lookupUrl} size={48} level="M" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">QR ngăn</div>
-                          <Link href={lookupPath} className="mt-1 block text-xs font-semibold text-emerald-700 hover:underline">
-                            Quét để mở trang chi tiết ngăn
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                   )}
                 </div>
               )
             })}
           </div>
-        )}
+        ))}
+
+        {/* Data table — tab Lịch sử (ngăn Đã sản xuất) */}
+        {nganTab === "history" && (loading ? (
+          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+        ) : historyNgans.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
+            <History size={40} className="mx-auto mb-3 opacity-30" />
+            <p>Chưa có {subTerm.toLowerCase()} nào trong lịch sử</p>
+          </div>
+        ) : (
+          <ResponsiveTableWrapper>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  {["Mã " + subTerm.toLowerCase(), "Loại NL", "KL tươi/khô", "TP/QK ngăn", "Ngày lưu ủ", ""].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {historyNgans.map(n => {
+                  const days  = curingDays(n.ngay_bd)
+                  const ready = days !== null && days >= 21
+                  const tpKg    = lotStats[n.id] || 0
+                  const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+                  const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
+                  const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
+                  return (
+                    <tr key={n.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <div className="font-bold text-slate-800">{n.ten_ngan}</div>
+                        <div className="text-xs text-slate-400">{n.ma_ngan || "—"}</div>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">{n.loai_nl}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
+                        {(n.tong_tuoi || 0).toLocaleString()} / <span className="text-emerald-700 font-semibold">{(n.tong_kho || 0).toLocaleString()}</span> kg
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
+                        {n.tong_kho > 0 ? `${tpPct.toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
+                        {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
+                        {days !== null && (
+                          <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
+                            ({days} ngày{ready ? " ✓" : ""})
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {canViewStorage && (
+                            <Link href={lookupPath}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-emerald-600 transition-colors"
+                              title="QR / Tra cứu">
+                              <QrCode size={14} />
+                            </Link>
+                          )}
+                          {canViewStorage && (
+                            <button onClick={() => void handleExportDetailPdf(n.id)}
+                              disabled={exportingDetailId === n.id}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
+                              title="Xuất PDF">
+                              <FileText size={14} />
+                            </button>
+                          )}
+                          {canViewStorage && (
+                            <button onClick={() => void handleExportGeoJson(n)}
+                              disabled={exportingGeoId === n.id}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
+                              title="Xuất GeoJSON">
+                              <MapIcon size={14} />
+                            </button>
+                          )}
+                          {canViewStorage && (
+                            <button onClick={() => openView(n)}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+                              title="Xem chi tiết">
+                              <Eye size={14} />
+                            </button>
+                          )}
+                          {canReturnToDraft && isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => void handleNganStatusToggle(n.id, STORAGE_STATUS_IN_PRODUCTION)}
+                              disabled={nganStatusSavingId === n.id}
+                              className="rounded-lg border border-emerald-200 bg-white px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50 transition disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                              title={`Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`}
+                            >
+                              {nganStatusSavingId === n.id ? "Đang cập nhật..." : "Về đang SX"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
+        ))}
       </div>
 
       {/* ── Add / Edit Modal ───────────────────────────────────────────────── */}

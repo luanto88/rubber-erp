@@ -80,6 +80,29 @@ function FitBoundsToGeoJSON({ data }: { data: FeatureCollection | null }) {
   return null
 }
 
+// ─── MapResizeFix ─────────────────────────────────────────────────────────────
+// Container của MapContainer nằm trong layout flex responsive (flex-col trên mobile,
+// flex-row từ lg:) và không có chiều cao cố định trên mobile ngoài min-h-[280px].
+// Leaflet đo clientWidth/clientHeight của container ngay lúc mount — nếu layout flex
+// chưa ổn định tại thời điểm đó (thường gặp trên mobile do transition CSS của panel
+// bộ lọc bên cạnh, viewport height động khi thanh địa chỉ co giãn), map khởi tạo với
+// kích thước sai và không tự phục hồi. invalidateSize() + ResizeObserver bắt buộc để
+// map luôn tính lại đúng kích thước container thực tế.
+function MapResizeFix() {
+  const map = useMap()
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 200)
+    const container = map.getContainer()
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize())
+    resizeObserver.observe(container)
+    return () => {
+      clearTimeout(timer)
+      resizeObserver.disconnect()
+    }
+  }, [map])
+  return null
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function MapClient() {
   const [geoData, setGeoData] = useState<FeatureCollection | null>(null)
@@ -404,6 +427,7 @@ export default function MapClient() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <MapResizeFix />
           {filteredData && (
             <>
               <GeoJSON
