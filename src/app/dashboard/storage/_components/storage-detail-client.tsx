@@ -216,6 +216,7 @@ export function StorageDetailClient({
           caption="Quét mã để mở lại đúng trang chi tiết này trên web."
           hrefPath={buildStorageLookupPath(detail.ngan.id, detail.ngan.ma_ngan)}
           valueText={detail.ngan.ma_ngan || detail.ngan.ten_ngan}
+          downloadFileName={`QR-${detail.ngan.ma_ngan || detail.ngan.ten_ngan}`}
         />
       </div>
 

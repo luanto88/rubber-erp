@@ -1814,6 +1814,7 @@ export default function StoragePage() {
                   caption="Quét để mở trang chi tiết ngăn lưu trên web."
                   hrefPath={buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)}
                   valueText={viewNgan.ma_ngan || viewNgan.ten_ngan}
+                  downloadFileName={`QR-${viewNgan.ma_ngan || viewNgan.ten_ngan}`}
                 />
               </div>
 

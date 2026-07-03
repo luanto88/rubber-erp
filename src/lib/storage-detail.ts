@@ -599,7 +599,36 @@ export async function loadStorageLots(factoryId: string, nganId: string) {
       trang_thai: tx.lots?.trang_thai || "",
     }))
 
-  return rows.sort((a, b) =>
+  // Fallback: một số lô cũ (vd lô bị ghi trực tiếp vào `lots` ngoài luồng app — xem
+  // ".claude/rules/06-module-production.md" mục "Invariant bắt buộc... lot_transactions
+  // backing") không có bản ghi `lot_transactions` nào dù `lots.ngan_id` đã trỏ đúng ngăn.
+  // Không có lot_transactions thì query trên bỏ sót hoàn toàn — bù bằng cách đọc thẳng
+  // `lots` theo `ngan_id`, chỉ lấy các lô CHƯA có transaction nào ở trên để tránh trùng.
+  const coveredLotIds = new Set(rows.map((r) => r.lot_id).filter(Boolean))
+  const { data: fallbackLots, error: fallbackError } = await supabase
+    .from("lots")
+    .select("id, ma_lo, ngay_sx, ca, loai_csr, loai_banh, boc, tong_banh, tong_kg, trang_thai")
+    .eq("factory_id", factoryId)
+    .eq("ngan_id", nganId)
+  if (fallbackError) throw new Error(fallbackError.message)
+
+  const fallbackRows = (fallbackLots || [])
+    .filter((lot) => !coveredLotIds.has(lot.id))
+    .map((lot) => ({
+      id: `lot-${lot.id}`,
+      lot_id: lot.id,
+      ma_lo: lot.ma_lo || "",
+      ngay_sx: (lot.ngay_sx || "").slice(0, 10),
+      ca: lot.ca || "",
+      loai_csr: lot.loai_csr || "",
+      loai_banh: Number(lot.loai_banh || 0),
+      boc: lot.boc || "",
+      tong_banh: Number(lot.tong_banh || 0),
+      tong_kg: Number(lot.tong_kg || 0),
+      trang_thai: lot.trang_thai || "",
+    }))
+
+  return [...rows, ...fallbackRows].sort((a, b) =>
     b.ngay_sx.localeCompare(a.ngay_sx) ||
     a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }),
   )
