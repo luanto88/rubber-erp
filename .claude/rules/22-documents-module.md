@@ -57,6 +57,16 @@ phe_duyet_is_kt BOOLEAN DEFAULT false -- true → thêm "KT." trước tên ngư
 
 ---
 
+## Bảng `van_ban_document_types`
+
+**Xác nhận 2026-07-04**: bảng này **KHÔNG có cột `factory_id`** — là danh mục loại văn bản dùng chung toàn hệ thống (`UNIQUE(code)`, không phân biệt nhà máy), đúng theo migration gốc `20260610_van_ban_types_sequences.sql`. Seed mặc định 5 loại: `DN`, `TTR`, `BC`, `KH`, `BB`; có thể thêm loại mới qua `Cài đặt → Danh mục → Loại văn bản` (ví dụ đã thêm `CV` — Công văn).
+
+**Bug đã fix**: `settings/page.tsx` (`loadVanBanTypes`/`saveVanBanType`/`deleteVanBanType`) trước đây query bảng này với `.eq("factory_id", fid)` và insert kèm `factory_id` trong payload — gây lỗi PostgREST `Could not find the 'factory_id' column ... in the schema cache` khi thêm loại văn bản mới. Đã xác nhận bằng script test trực tiếp qua `SUPABASE_SERVICE_ROLE_KEY` (không đoán). Đã sửa: bỏ hẳn `factory_id` khỏi filter/payload của cả 3 hàm — khớp đúng cách `new/page.tsx` và `new/upload/page.tsx` vẫn luôn query bảng này (không filter theo factory).
+
+**Quy tắc cho code mới**: mọi truy vấn `van_ban_document_types` KHÔNG được thêm `.eq("factory_id", ...)` hay `factory_id` vào payload — khác với hầu hết bảng khác trong app (đây là ngoại lệ có chủ đích, một danh mục toàn hệ thống, không phải lỗi thiếu multi-tenant).
+
+---
+
 ## Phân loại Thường/Mật
 
 ### Cột DB
@@ -126,9 +136,19 @@ Cột `pham_vi TEXT DEFAULT 'Cong_ty'` phân biệt 2 luồng vòng ký khác nh
 
 ### `pham_vi = "Don_vi"` — Luồng ký xác nhận nội bộ đơn vị
 
-- User chọn phòng ban → UI gọi `GET /api/documents/dept-users?factoryId=...&dept={phong_ban}&leadership=false&permission=documents.ky_phong_ban`
-- Kết quả là danh sách tất cả user active trong phòng ban đó có quyền ký (không chỉ admin/manager)
-- User tick chọn nhiều người → thứ tự chọn = thứ tự ký
+**Cập nhật 2026-07-04**: Người phê duyệt cuối cho `Don_vi` không còn chọn tay từ dropdown toàn nhà máy — hệ thống **tự động xác định "lãnh đạo phòng ban"** qua API mới `GET /api/documents/dept-leader?factoryId=...&dept={phong_ban}`.
+
+- Logic xác định lãnh đạo (`dept-leader/route.ts`):
+  1. Lọc `profiles` active theo phòng ban đã chọn (3-way match: `department_id`, `department` theo tên, hoặc so khớp code — giống cách `dept-users/route.ts` đang làm).
+  2. Với từng profile, tra `maintenance_staff` (liên kết qua `profile_id`) — lấy `chuc_vu` hoặc `chuc_vu_chinh_quyen`, so khớp substring (không phân biệt hoa/thường) với từ khóa lãnh đạo: `"trưởng phòng"`, `"phó phòng"`, `"giám đốc"` (`"phó giám đốc"` đã được bao phủ bởi substring `"giám đốc"`, không cần pattern riêng).
+  3. Lọc tiếp: chỉ giữ người có quyền `documents.phe_duyet` (explicit `user_permissions.granted=true` hoặc qua `role_permissions`).
+- UI (`documents/new/page.tsx`) gọi API này mỗi khi đổi `phong_ban` hoặc chuyển `pham_vi` sang `Don_vi` (qua `useEffect` phụ thuộc `[factoryId, form.phong_ban, form.pham_vi]`):
+  - **0 kết quả**: chặn lưu (nút Lưu `disabled`), hiện banner đỏ hướng dẫn cụ thể 3 điều cần kiểm tra (Chức vụ trong Nhân sự bảo trì, đã "Liên kết tài khoản", đã được cấp quyền `documents.phe_duyet`).
+  - **Đúng 1 kết quả**: tự động gán `form.phe_duyet_user_id`, hiển thị badge "Tự động xác định" (không cho đổi tay).
+  - **≥2 kết quả**: hiện `<select>` chỉ trong số các lãnh đạo hợp lệ đó (không phải toàn nhà máy).
+- **`cap_tl` và `phan_loai` bị khóa cứng cho `Don_vi`**: `cap_tl` luôn là `"Cấp 1"` (không còn lựa chọn Cấp 2), `phan_loai` luôn `"Thuong"` — UI ẩn hẳn khối chọn "Phân loại Thường/Mật" khi `pham_vi === "Don_vi"` (chỉ hiện cho `Cong_ty`).
+- Bước "Ký xác nhận" (chọn người ký theo thứ tự, `type: "ca_nhan"`) giờ là **tùy chọn, có thể để trống** cho `Don_vi` — không còn bắt buộc ≥1 step như trước; validate save chỉ còn bắt buộc với `Cấp 1` + `Cong_ty` (≥1 step phòng ban).
+- Danh sách ứng viên cho bước "Ký xác nhận" (khác với người phê duyệt cuối) vẫn dùng `GET /api/documents/dept-users?...&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet` — `dept-users/route.ts` giờ hỗ trợ **nhiều permission code phân tách bằng dấu phẩy (OR-match)** thay vì chỉ 1 code như trước.
 - `thu_tu_ky_json` lưu mảng step với `type: "ca_nhan"`, `user_id`, `ten`
 - `sign/route.ts` đã hỗ trợ `ca_nhan` type: kiểm tra `step.user_id !== userId` để xác thực quyền ký, thông báo đến `step.user_id` đích danh
 
@@ -204,7 +224,8 @@ GEMINI_API_KEY=<Google AI Studio key>  # đã có trong .env.local từ ISO form
 | `/api/documents/notify` | POST | 3 kênh thông báo: in-app + Telegram + Email |
 | `/api/documents/dept-code` | GET | Resolve dept code của user (bypass RLS) |
 | `/api/documents/approvers` | GET | Danh sách users có quyền `documents.phe_duyet` + trả `department` |
-| `/api/documents/dept-users` | GET | Tất cả user active theo phòng ban (`leadership=false`) hoặc chỉ admin/manager (`leadership=true`) |
+| `/api/documents/dept-users` | GET | Tất cả user active theo phòng ban (`leadership=false`) hoặc chỉ admin/manager (`leadership=true`); `permission=` hỗ trợ nhiều code phân tách dấu phẩy (OR-match) |
+| `/api/documents/dept-leader` | GET | Tự động xác định "lãnh đạo phòng ban" (Trưởng/Phó phòng, Giám đốc/Phó giám đốc qua từ khóa chức vụ trong `maintenance_staff`) có quyền `documents.phe_duyet` — dùng làm người phê duyệt cuối cho luồng `Don_vi` |
 | `/api/documents/embed-doc` | POST | Embed 1 văn bản vào `embedding` sau phe_duyet |
 | `/api/documents/search` | POST | Semantic search `{ query, factoryId }` → kết quả + similarity |
 | `/api/documents/distribute` | GET | Danh sách user active trong factory kèm `alreadyReceived[]` per doc |
@@ -347,7 +368,57 @@ Component `TagGuidePanel` trong `new/page.tsx`:
 11. Ghi chú
 
 ### Auto-fill từ tên file
-Khi upload file, nếu `form.ten_van_ban` đang trống → auto-fill từ tên file (bỏ extension, thay `_-` thành dấu cách).
+Khi upload file, nếu `form.ten_van_ban` đang trống → auto-fill từ tên file (bỏ extension, thay `_-` thành dấu cách). Đây là fallback đơn giản của `new/page.tsx` — khác với parser đầy đủ của `new/upload/page.tsx` (xem mục "Upload văn bản ký tay" bên dưới).
+
+---
+
+## Upload văn bản ký tay (`new/upload/page.tsx`)
+
+Ghi lại 1 văn bản **đã ký tay trên giấy** vào hệ thống — bỏ qua toàn bộ workflow ký số, lưu thẳng `trang_thai = "da_phe_duyet"`, `is_uploaded = true`. Đã rework hoàn toàn 2026-07-04 (2 phiên liên tiếp) sau khi user test trên `npm run dev` và phản hồi các vấn đề bên dưới — mô tả sau đây là logic **hiện hành**, thay thế hoàn toàn bản mô tả cũ (checkbox tự do + free text đã bị loại bỏ).
+
+### Thứ tự section trên UI (đã đổi 2026-07-04)
+
+Cột trái (`lg:col-span-2`), 1 card "Thông tin văn bản":
+1. **File văn bản đã ký** — đặt lên **đầu tiên** (trước đây ở cuối) vì các trường bên dưới phụ thuộc auto-fill từ file; đặt file trước giúp user thấy ngay các trường tự điền.
+2. Loại văn bản, Phòng ban, Mã văn bản (editable + banner), Tên/Trích yếu
+3. Phạm vi lưu hành (toggle `Cong_ty`/`Don_vi`)
+4. Ngày ký/phê duyệt, Ghi chú
+
+Cột phải: Card "Người phê duyệt" rồi Card "Phòng ban đã ký" (`Cong_ty`) hoặc "Người lập" (`Don_vi`), rồi nút Lưu/Hủy. Layout `grid grid-cols-1 lg:grid-cols-3 gap-6`, mirror đúng cấu trúc `new/page.tsx` — không còn dùng layout 1 card đơn `max-w-2xl` như bản cũ.
+
+### Auto-fill từ tên file — `parseVanBanFileName()`
+
+Windows không cho phép ký tự `/` trong tên file, nên **không thể** dùng nguyên định dạng mã chuẩn `"01/ĐN-NMCB Tên..."` làm tên file thật. Parser phải chịu được các biến thể thực tế, tất cả đều tương đương và đều parse đúng:
+
+- `"01/ĐN-NMCB Tên văn bản.pdf"` (dấu gạch chéo — hiếm gặp trên Windows nhưng vẫn hỗ trợ)
+- `"01 ĐN-NMCB Tên văn bản.pdf"` (dấu cách thay `/`)
+- `"01ĐN-NMCB Tên văn bản.pdf"` (dính liền số + ký hiệu, giữ gạch ngang)
+- `"01ĐNNMCB Tên văn bản.pdf"` (dính liền hoàn toàn, không dấu phân cách nào)
+
+Thuật toán tách tuần tự (không dùng 1 regex cứng duy nhất):
+1. Tách số thứ tự bằng `/^(\d{1,4})/` ở đầu chuỗi (bỏ extension trước).
+2. Bỏ qua 0+ ký tự phân cách tùy chọn `[\s\-/]+` ngay sau số.
+3. Khớp ký hiệu loại văn bản ở đầu phần còn lại — `matchPrefix()`: so khớp không phân biệt hoa/thường, chuẩn hóa NFC, ưu tiên candidate dài hơn trước; nguồn candidate ưu tiên `docTypes` (runtime, từ DB), fallback `LOAI_VAN_BAN_KY_HIEU` tĩnh.
+4. Bỏ qua tiếp phân cách tùy chọn, rồi khớp mã phòng ban — `matchPhongBanPrefix()`: bắt buộc có ranh giới sau khi khớp (hết chuỗi hoặc theo sau là khoảng trắng), tránh khớp nhầm khi 1 mã là tiền tố của mã khác.
+5. Phần còn lại (sau khi bỏ phân cách) là Tên/Trích yếu.
+
+Nếu bất kỳ bước nào thất bại (tên file không theo quy ước nào cả) → fallback về hành vi cũ: chỉ set `ten_van_ban` từ tên file (bỏ extension, thay `_`/`-` bằng dấu cách), không ép các trường khác. Chỉ fill field đang trống, không ghi đè giá trị user đã tự nhập. Khi auto-fill được mã, bắt buộc `setMaVanBanEdited(true)` — nếu không, effect peek số tiếp theo sẽ ghi đè lại mã vừa parse.
+
+### Người phê duyệt — chặt chẽ như `new/page.tsx`
+
+Không còn free text. Mirror đúng logic: `Don_vi` auto-detect lãnh đạo phòng ban qua `/api/documents/dept-leader` (banner đỏ nếu 0 candidate, badge "Tự động xác định" nếu 1, select nếu ≥2); `Cong_ty` chọn từ `/api/documents/approvers`. Lưu `phe_duyet_user_id` (FK thật) + `phe_duyet` (tên snapshot derive lúc save) + `phe_duyet_is_kt`.
+
+### Phòng ban đã ký (`Cong_ty`) — CHẶT HƠN cả `new/page.tsx` gốc, có chủ đích
+
+Đây là điểm khác biệt quan trọng cần nhớ: bước `type: "phong_ban"` trong luồng ký số thật (`new/page.tsx`) **không bao giờ** gắn người ký cụ thể lúc tạo — chỉ lưu `phong_ban_code` (người ký thật resolve sau, lúc ký thật qua `/api/documents/sign`). Nhưng với văn bản **đã ký xong trên giấy**, user đã xác nhận (2026-07-04) muốn ghi nhận chặt hơn: mỗi bước phải chọn **cả phòng ban lẫn 1 người ký thật** (dropdown load từ `/api/documents/dept-users?dept=<code>`, không filter permission vì đây là "ai đã ký trên giấy" chứ không phải "ai có quyền ký số"). Step builder có thứ tự, loại trừ phòng ban của người phê duyệt (`approverDept`) và loại trừ phòng ban đã dùng ở step khác; **chặn trùng phòng ban giữa các step lúc save** (rule tự thêm, không có trong `new/page.tsx` gốc). Không bắt buộc tối thiểu 1 step — văn bản giấy có thể chỉ có chữ ký phê duyệt.
+
+### Người lập (`Don_vi`) — bắt buộc chọn user thật
+
+Không còn free text. Dropdown bắt buộc chọn từ `donViUsers` (load qua `/api/documents/dept-users?dept=<form.phong_ban>`, không filter permission), loại trừ người đã là `phe_duyet_user_id` khỏi danh sách. Lưu `soan_thao_user_id` (FK thật) + `nguoi_soan_thao_display` (tên snapshot).
+
+### Tái sử dụng nguyên vẹn data model ký số thật — không cần sửa `[id]/page.tsx`
+
+Thay vì tạo cấu trúc riêng, `handleSave` populate `thu_tu_ky_json` (mỗi step `{step, type:"phong_ban", phong_ban_code, phong_ban_name}`) và `nguoi_ky` (keyed theo step number, `{ten: tên người ký thật, chuc_vu:"", ky_at}`) — y hệt cấu trúc luồng ký số đang chạy, cộng `buoc_hien_tai = so_buoc_tong = steps.length` (đánh dấu tất cả đã xong). Vòng lặp timeline trong `[id]/page.tsx` (đọc `thu_tu_ky_json`/`nguoi_ky`) **tự động hiển thị đúng** tên người ký thật + ngày ký cho văn bản upload, không cần code riêng. Vẫn giữ song song cột `phong_ban_ky_display` (chip tóm tắt nhanh ở khối "Thông tin văn bản" trang chi tiết) — không thay thế, chỉ bổ sung.
 
 ---
 
@@ -370,7 +441,7 @@ Khi upload file, nếu `form.ten_van_ban` đang trống → auto-fill từ tên 
 src/app/dashboard/documents/
   page.tsx                    -- danh sách + filter + AI search toggle + tab Thống kê (VanBanStats)
   new/page.tsx                -- form soạn thảo (phân loại, mã editable, TagGuidePanel, AI desc)
-  new/upload/page.tsx         -- upload văn bản ký tay
+  new/upload/page.tsx         -- upload văn bản ký tay (xem mục "Upload văn bản ký tay" — layout 2 cột, parser tên file Windows-safe, người ký thật per phòng ban)
   [id]/page.tsx               -- chi tiết + badge Mật + PIN modal + ký duyệt + nút In + nút Phân phối + DistModal
   my-tasks/page.tsx           -- việc cần xử lý
   print/page.tsx              -- trang in (bypass sidebar, A4, QR, watermark Mật, auto-print)
@@ -384,7 +455,8 @@ src/app/api/documents/
   notify/route.ts
   dept-code/route.ts
   approvers/route.ts             (trả về department)
-  dept-users/route.ts            (hỗ trợ leadership=false)
+  dept-users/route.ts            (hỗ trợ leadership=false; permission= nhiều code phân tách dấu phẩy)
+  dept-leader/route.ts           (GET: tự động xác định lãnh đạo phòng ban cho luồng Don_vi)
   embed-doc/route.ts             (POST: embed 1 văn bản sau phe_duyet)
   search/route.ts                (POST: semantic search)
   distribute/route.ts            (GET: danh sách users+alreadyReceived; POST: tạo batch + 3-channel notify)
@@ -394,9 +466,11 @@ src/app/api/documents/
 
 ## Trạng thái deploy
 
-**Toàn bộ code là untracked files, chưa commit/push → 404 trên production.**
+**Cập nhật 2026-07-04**: Toàn bộ code module Văn bản đã được commit và push lên `origin/main` (gộp chung trong commit "Cải tiến giao diện mobile GD8" cùng đợt responsive hoá Cài đặt/ISO/Kho Thành phẩm) — không còn ở trạng thái untracked/404 như ghi chú cũ. Tính năng "lãnh đạo phòng ban tự động" (`dept-leader/route.ts`) nằm trong cùng đợt commit này.
 
-Chi tiết deploy checklist xem memory `project_documents_module.md`.
+Chi tiết deploy checklist cũ (lịch sử trước 2026-07-04) xem memory `project_documents_module.md` — cần đối chiếu lại vì có thể đã lỗi thời sau commit này.
+
+**Cập nhật 2026-07-04 (sau commit trên, CHƯA commit/push)**: `new/upload/page.tsx` (rework toàn bộ — xem mục "Upload văn bản ký tay"), `[id]/page.tsx` (thêm chip "Phòng ban đã ký", tiêu đề timeline 3 nhánh), `settings/page.tsx` (fix bug schema `van_ban_document_types.factory_id`) đang là **thay đổi chưa commit** trong working tree — không giả định các file này đã lên production chỉ vì phần "Trạng thái deploy" ở trên nói code cũ đã push.
 
 ---
 
@@ -475,3 +549,14 @@ type DistUser = { id: string; full_name: string; department: string; role: strin
 
 export default function DocumentDetailPage() { ... }
 ```
+
+---
+
+## Handoff cho session sau (2026-07-04) — "Lãnh đạo phòng ban tự động" chưa test tay
+
+Tính năng auto-detect lãnh đạo phòng ban cho luồng `Don_vi` (`dept-leader/route.ts` + `new/page.tsx`) đã code xong, build/tsc/eslint pass, đã commit + push, nhưng **chưa được xác nhận hoạt động đúng trên dữ liệu thật**. Việc cần làm session sau nếu user báo lỗi liên quan:
+
+- Test tay tạo văn bản `Nội bộ đơn vị` với 1 phòng ban có đúng 1 người khớp từ khóa lãnh đạo (`trưởng phòng`/`phó phòng`/`giám đốc`) trong `maintenance_staff.chuc_vu`/`chuc_vu_chinh_quyen` — xác nhận tự động chọn đúng người, badge "Tự động xác định" hiện đúng.
+- Test tay trường hợp phòng ban có ≥2 người khớp — xác nhận dropdown chỉ liệt kê đúng nhóm lãnh đạo hợp lệ (không lẫn người khác trong phòng ban).
+- Test tay trường hợp phòng ban chưa gán ai đủ điều kiện (thiếu Chức vụ, chưa liên kết tài khoản, hoặc chưa có quyền `documents.phe_duyet`) — xác nhận banner lỗi hiện đúng, nút Lưu bị khóa đúng như thiết kế.
+- Đối chiếu lại toàn bộ phòng ban thực tế đang có trong `maintenance_staff` xem có Chức vụ nào viết khác cách (không chứa nguyên văn `"trưởng phòng"`/`"phó phòng"`/`"giám đốc"`) mà đáng lẽ phải được nhận diện là lãnh đạo — `LEADER_KEYWORDS` hiện là danh sách cứng trong code (`dept-leader/route.ts`), không phải cấu hình DB, nên nếu cách gọi chức danh thực tế khác đi sẽ cần sửa code, không sửa được qua UI.

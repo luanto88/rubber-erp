@@ -1048,30 +1048,16 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const loadVanBanTypes = useCallback(async (fid: string) => {
+  const loadVanBanTypes = useCallback(async (_fid: string) => {
     setVbtLoading(true)
     try {
+      // Bảng van_ban_document_types là danh mục dùng chung toàn hệ thống,
+      // không có cột factory_id (xem supabase/migrations/20260610_van_ban_types_sequences.sql)
       const { data } = await supabase
         .from("van_ban_document_types")
         .select("id, code, name, ky_hieu, sort_order, is_active")
-        .eq("factory_id", fid)
         .order("sort_order")
-      if (data && data.length > 0) {
-        setVanBanTypes(data as VanBanDocumentTypeRow[])
-      } else {
-        // Seed mặc định nếu chưa có dữ liệu
-        const defaults = [
-          { code: "DN", name: "Đề nghị", ky_hieu: "ĐN", sort_order: 1 },
-          { code: "TTR", name: "Tờ trình", ky_hieu: "Ttr", sort_order: 2 },
-          { code: "BC", name: "Báo cáo", ky_hieu: "BC", sort_order: 3 },
-          { code: "KH", name: "Kế hoạch", ky_hieu: "KH", sort_order: 4 },
-          { code: "BB", name: "Biên bản", ky_hieu: "BB", sort_order: 5 },
-        ]
-        const { data: inserted } = await supabase.from("van_ban_document_types")
-          .insert(defaults.map((d) => ({ ...d, factory_id: fid, is_active: true })))
-          .select("id, code, name, ky_hieu, sort_order, is_active")
-        setVanBanTypes((inserted || []) as VanBanDocumentTypeRow[])
-      }
+      setVanBanTypes((data || []) as VanBanDocumentTypeRow[])
       setVbtLoaded(true)
     } finally {
       setVbtLoading(false)
@@ -2223,8 +2209,8 @@ export default function SettingsPage() {
     setVbtSaving(true)
     setVbtError("")
     try {
+      // van_ban_document_types là danh mục dùng chung toàn hệ thống, không có cột factory_id
       const payload = {
-        factory_id: factoryId,
         code: vbtForm.code.trim().toUpperCase(),
         name: vbtForm.name.trim(),
         ky_hieu: vbtForm.ky_hieu.trim(),
@@ -2232,7 +2218,7 @@ export default function SettingsPage() {
         is_active: vbtForm.is_active,
       }
       if (vbtEditId) {
-        const { error: e } = await supabase.from("van_ban_document_types").update(payload).eq("id", vbtEditId).eq("factory_id", factoryId)
+        const { error: e } = await supabase.from("van_ban_document_types").update(payload).eq("id", vbtEditId)
         if (e) { setVbtError(e.message); return }
       } else {
         const { error: e } = await supabase.from("van_ban_document_types").insert(payload)
@@ -2261,7 +2247,7 @@ export default function SettingsPage() {
       setVbtDelConfirm(null)
       return
     }
-    await supabase.from("van_ban_document_types").delete().eq("id", vbtDelConfirm.id).eq("factory_id", factoryId)
+    await supabase.from("van_ban_document_types").delete().eq("id", vbtDelConfirm.id)
     setVbtDelConfirm(null)
     void loadVanBanTypes(factoryId)
   }

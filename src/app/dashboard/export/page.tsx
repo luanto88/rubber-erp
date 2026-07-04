@@ -27,6 +27,7 @@ import {
   GripVertical,
   Printer,
   ImagePlus,
+  ArrowLeftRight,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
@@ -369,7 +370,6 @@ export default function ExportPage() {
   // Vehicle image upload
   const [uploadingVehicleIdx, setUploadingVehicleIdx] = useState<number | null>(null);
   const [ocrLoadingVehicleIdx, setOcrLoadingVehicleIdx] = useState<number | null>(null);
-  const [ocrConfirm, setOcrConfirm] = useState<{ plate: string; vehicleIdx: number } | null>(null);
 
   // Lot search
   const [lotSearch, setLotSearch] = useState("");
@@ -1127,23 +1127,81 @@ export default function ExportPage() {
               : v,
           ),
         }));
-        // OCR biển số từ ảnh đầu tiên vừa upload
+        // OCR tất cả ảnh vừa upload (tối đa 6), khử trùng và tự gán vào 2 ô
+        // theo quy tắc: biển có số đầu nhỏ hơn -> Biển trước, số đầu lớn hơn -> Biển sau
         setOcrLoadingVehicleIdx(vehicleIdx);
-        void fetch("/api/export/ocr-plate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageUrl: uploaded[0] }),
-        })
-          .then((r) => r.json() as Promise<{ plate?: string | null }>)
-          .then(({ plate }) => {
-            if (plate) {
-              setOcrConfirm({ plate, vehicleIdx });
-            } else {
+        void Promise.all(
+          uploaded.map((imageUrl) =>
+            fetch("/api/export/ocr-plate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ imageUrl }),
+            })
+              .then((r) => r.json() as Promise<{ plate?: string | null }>)
+              .then((d) => d.plate ?? null)
+              .catch(() => null),
+          ),
+        )
+          .then((results) => {
+            const detected = results.filter((p): p is string => !!p);
+            if (detected.length === 0) {
               showToast("Không đọc được biển số từ ảnh", "error");
+              return;
             }
-          })
-          .catch(() => {
-            showToast("Không đọc được biển số từ ảnh", "error");
+            // Đếm tần suất từng biển số (nhiều ảnh có thể chụp trùng 1 biển),
+            // chỉ giữ lại tối đa 2 giá trị khác nhau xuất hiện nhiều nhất — loại nhiễu OCR
+            const order: string[] = [];
+            const freq = new Map<string, number>();
+            for (const plate of detected) {
+              if (!freq.has(plate)) order.push(plate);
+              freq.set(plate, (freq.get(plate) ?? 0) + 1);
+            }
+            const distinct = order
+              .slice()
+              .sort(
+                (a, b) =>
+                  (freq.get(b) ?? 0) - (freq.get(a) ?? 0) ||
+                  order.indexOf(a) - order.indexOf(b),
+              )
+              .slice(0, 2);
+
+            const leadingDigits = (plate: string) => {
+              const m = plate.match(/^\d+/);
+              return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER;
+            };
+
+            const fill: { bien_truoc?: string; bien_sau?: string } = {};
+
+            if (distinct.length === 1) {
+              // Chỉ nhận diện được 1 biển số — điền vào ô trống đầu tiên
+              if (!vehicle.bien_truoc) fill.bien_truoc = distinct[0];
+              else if (!vehicle.bien_sau) fill.bien_sau = distinct[0];
+            } else {
+              const [a, b] = distinct;
+              const front = leadingDigits(a) <= leadingDigits(b) ? a : b;
+              const back = front === a ? b : a;
+              if (!vehicle.bien_truoc) fill.bien_truoc = front;
+              if (!vehicle.bien_sau) fill.bien_sau = back;
+            }
+
+            if (fill.bien_truoc || fill.bien_sau) {
+              setForm((p) => ({
+                ...p,
+                vehicles: p.vehicles.map((v, i) =>
+                  i === vehicleIdx ? { ...v, ...fill } : v,
+                ),
+              }));
+              const parts = [
+                fill.bien_truoc && `trước ${fill.bien_truoc}`,
+                fill.bien_sau && `sau ${fill.bien_sau}`,
+              ].filter(Boolean);
+              showToast(`Đã tự điền biển số: ${parts.join(", ")}`, "success");
+            } else {
+              showToast(
+                `Đã nhận diện biển số: ${distinct.join(", ")} (Biển trước/sau đã có dữ liệu)`,
+                "error",
+              );
+            }
           })
           .finally(() => {
             setOcrLoadingVehicleIdx(null);
@@ -1457,39 +1515,6 @@ export default function ExportPage() {
           <Check size={16} />
         )}{" "}
         {toast.msg}
-      </div>
-    ) : null;
-
-  const OcrConfirmBar = () =>
-    ocrConfirm ? (
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-slate-800 text-white rounded-2xl shadow-2xl">
-        <span className="text-sm">
-          Phát hiện:{" "}
-          <strong className="text-emerald-400">{ocrConfirm.plate}</strong> —
-          điền vào Biển trước?
-        </span>
-        <button
-          onClick={() => {
-            setForm((p) => ({
-              ...p,
-              vehicles: p.vehicles.map((v, i) =>
-                i === ocrConfirm.vehicleIdx
-                  ? { ...v, bien_truoc: ocrConfirm.plate }
-                  : v,
-              ),
-            }));
-            setOcrConfirm(null);
-          }}
-          className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-bold rounded-lg transition-colors"
-        >
-          Điền
-        </button>
-        <button
-          onClick={() => setOcrConfirm(null)}
-          className="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors"
-        >
-          Bỏ qua
-        </button>
       </div>
     ) : null;
 
@@ -2006,7 +2031,6 @@ export default function ExportPage() {
   return (
     <div>
       <Toast />
-      <OcrConfirmBar />
 
       {/* Customer creation modal */}
       {custModal && (
@@ -2473,57 +2497,80 @@ export default function ExportPage() {
                           ))}
                         </select>
                       </div>
-                      <div className="relative col-span-1 sm:col-span-2">
-                        <label className="text-xs text-slate-500 block mb-1">
-                          Biển trước
-                        </label>
-                        <input
-                          value={v.bien_truoc}
-                          placeholder="3E2358"
-                          onChange={(e) =>
+                      <div className="relative col-span-2 sm:col-span-4 grid grid-cols-2 gap-2">
+                        <div className="relative">
+                          <label className="text-xs text-slate-500 block mb-1">
+                            Biển trước
+                          </label>
+                          <input
+                            value={v.bien_truoc}
+                            placeholder="3E2358"
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                vehicles: p.vehicles.map((vv, i) =>
+                                  i === idx
+                                    ? { ...vv, bien_truoc: e.target.value }
+                                    : vv,
+                                ),
+                              }))
+                            }
+                            list={`sug-truoc-${idx}`}
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
+                          />
+                          <datalist id={`sug-truoc-${idx}`}>
+                            {vehicleSuggestions.map((vs, si) => (
+                              <option key={si} value={vs.bien_truoc} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <button
+                          type="button"
+                          title="Hoán đổi Biển trước / Biển sau"
+                          onClick={() =>
                             setForm((p) => ({
                               ...p,
                               vehicles: p.vehicles.map((vv, i) =>
                                 i === idx
-                                  ? { ...vv, bien_truoc: e.target.value }
+                                  ? {
+                                      ...vv,
+                                      bien_truoc: vv.bien_sau,
+                                      bien_sau: vv.bien_truoc,
+                                    }
                                   : vv,
                               ),
                             }))
                           }
-                          list={`sug-truoc-${idx}`}
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
-                        />
-                        <datalist id={`sug-truoc-${idx}`}>
-                          {vehicleSuggestions.map((vs, si) => (
-                            <option key={si} value={vs.bien_truoc} />
-                          ))}
-                        </datalist>
-                      </div>
-                      <div className="relative col-span-1 sm:col-span-2">
-                        <label className="text-xs text-slate-500 block mb-1">
-                          Biển sau
-                        </label>
-                        <input
-                          value={v.bien_sau}
-                          placeholder="4A9639"
-                          onChange={(e) =>
-                            setForm((p) => ({
-                              ...p,
-                              vehicles: p.vehicles.map((vv, i) =>
-                                i === idx
-                                  ? { ...vv, bien_sau: e.target.value }
-                                  : vv,
-                              ),
-                            }))
-                          }
-                          list={`sug-sau-${idx}`}
-                          className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
-                        />
-                        <datalist id={`sug-sau-${idx}`}>
-                          {vehicleSuggestions.map((vs, si) => (
-                            <option key={si} value={vs.bien_sau} />
-                          ))}
-                        </datalist>
+                          className="absolute left-1/2 top-[26px] -translate-x-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-400 shadow-sm transition-colors hover:border-emerald-400 hover:text-emerald-600"
+                        >
+                          <ArrowLeftRight size={11} />
+                        </button>
+                        <div className="relative">
+                          <label className="text-xs text-slate-500 block mb-1">
+                            Biển sau
+                          </label>
+                          <input
+                            value={v.bien_sau}
+                            placeholder="4A9639"
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                vehicles: p.vehicles.map((vv, i) =>
+                                  i === idx
+                                    ? { ...vv, bien_sau: e.target.value }
+                                    : vv,
+                                ),
+                              }))
+                            }
+                            list={`sug-sau-${idx}`}
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
+                          />
+                          <datalist id={`sug-sau-${idx}`}>
+                            {vehicleSuggestions.map((vs, si) => (
+                              <option key={si} value={vs.bien_sau} />
+                            ))}
+                          </datalist>
+                        </div>
                       </div>
                       <div className="col-span-2 sm:col-span-4">
                         <label className="text-xs text-slate-500 block mb-1">

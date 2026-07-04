@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""
-const GEMINI_MODEL = "gemini-2.0-flash"
+const GEMINI_MODEL = "gemini-2.5-flash-lite"
 const MAX_IMAGES = 2
 
 function createEmptyCodes(count: number) {
@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             generationConfig: {
               responseMimeType: "application/json",
+              thinkingConfig: { thinkingBudget: 0 },
             },
             contents: [
               {

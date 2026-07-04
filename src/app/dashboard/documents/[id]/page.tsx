@@ -431,6 +431,18 @@ export default function DocumentDetailPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <InfoRow label="Loại văn bản" value={doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : "—"} />
               <InfoRow label="Phòng ban" value={doc.phong_ban || "—"} />
+              {!!doc.phong_ban_ky_display?.length && (
+                <div className="col-span-2">
+                  <dt className="text-xs font-bold text-slate-400 mb-1">Phòng ban đã ký</dt>
+                  <dd className="flex flex-wrap gap-1.5">
+                    {doc.phong_ban_ky_display.map((pb) => (
+                      <span key={pb} className="px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
+                        {pb}
+                      </span>
+                    ))}
+                  </dd>
+                </div>
+              )}
               <InfoRow label="Cấp văn bản" value={doc.cap_tl || "—"} />
               <InfoRow label="Phân loại" value={doc.phan_loai ? (PHAN_LOAI_LABEL[doc.phan_loai] || doc.phan_loai) : "Thường"} />
               <InfoRow label="Người soạn thảo" value={doc.nguoi_soan_thao_display || "—"} />
@@ -466,16 +478,22 @@ export default function DocumentDetailPage() {
         <div>
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h2 className="text-sm font-bold text-slate-700 mb-4">
-              {doc.pham_vi === "Don_vi" ? "Tiến trình ký xác nhận & phê duyệt" : "Tiến trình ký duyệt"}
+              {doc.is_uploaded
+                ? "Thông tin ký tay"
+                : doc.pham_vi === "Don_vi"
+                  ? "Tiến trình ký xác nhận & phê duyệt"
+                  : "Tiến trình ký duyệt"}
             </h2>
             <div className="space-y-3">
-              {/* Soạn thảo */}
-              <TimelineStep
-                label="Soạn thảo"
-                sublabel={doc.nguoi_soan_thao_display || ""}
-                done={true}
-                at={doc.created_at}
-              />
+              {/* Soạn thảo — ẩn nếu là văn bản upload ký tay không có tên người soạn */}
+              {(!doc.is_uploaded || doc.nguoi_soan_thao_display) && (
+                <TimelineStep
+                  label="Soạn thảo"
+                  sublabel={doc.nguoi_soan_thao_display || ""}
+                  done={true}
+                  at={doc.created_at}
+                />
+              )}
 
               {/* Từng bước ký phòng ban */}
               {(doc.thu_tu_ky_json || []).map((step: ThuTuKyStep, i) => {

@@ -38,7 +38,7 @@ description: Roadmap phát triển
 - Bảo trì máy móc ✅
 - Quản lý kho vật tư ✅
 - Module Sản lượng ✅
-- Nâng cấp responsive và browser compatibility (đang tiếp tục)
+- Nâng cấp responsive mobile ✅ Hoàn thành (2026-07-04) — toàn bộ module đã áp dụng 3 component dùng chung `FilterBar`/`ResponsiveTableWrapper`/`ModalShell` (xem `.claude/rules/05-ui-components.md` mục "Component dùng chung cho mobile responsive"); còn 2 khu vực kéo-thả (sơ đồ Kho Thành phẩm, đặt chữ ký/QR ISO) cố ý để sau chưa quyết định hướng xử lý mobile
 
 ## Phase E - ISO & Văn bản nội bộ
 
@@ -77,6 +77,11 @@ Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
 - Trang in (bypass sidebar) ✅ (`documents/print/`, watermark "MẬT", auto-print)
 - In-app notification bell ✅ (`Bell` icon + `notifications` state trong `dashboard/layout.tsx`)
 - QR public view cho PDF đã ký ✅ (`qr_url` trong `iso_documents`)
+
+### Giai đoạn 5 ✅ Hoàn thành (2026-07-04)
+
+- Nội bộ đơn vị: người phê duyệt cuối tự động xác định qua "lãnh đạo phòng ban" (API mới `/api/documents/dept-leader`) thay vì chọn tay ✅
+- `cap_tl`/`phan_loai` khóa cứng `Cấp 1`/`Thường` cho luồng Nội bộ đơn vị, bước "Ký xác nhận" chuyển thành tùy chọn ✅
 
 Chi tiết đầy đủ module Văn bản: xem `.claude/rules/22-documents-module.md`.
 

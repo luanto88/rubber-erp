@@ -211,3 +211,32 @@ EUDR đã được triển khai, không còn là ý tưởng tương lai.
 - Session `Xuất hàng` phải hiển thị tiếng Việt có dấu, đúng chính tả
 - Session `Xuất hàng` hiện tại phải đồng bộ cách gọi số lượng theo thuật ngữ nghiệp vụ là `bánh`
 - Các nhãn quan trọng cần giữ đúng dạng chuẩn: `Xuất hàng`, `Tạo đơn xuất`, `Tổng bánh`, `Khách hàng`, `Lô hàng`, `Yêu cầu chỉ tiêu`
+
+## OCR biển số xe (2026-07-04)
+
+### Model Gemini và quota
+
+- Route: `src/app/api/export/ocr-plate/route.ts`
+- Model bắt buộc: `gemini-2.5-flash-lite` — **không dùng `gemini-2.5-flash`**.
+- Lý do: `gemini-2.5-flash` chỉ có **20 request/ngày** trên free tier của API key hiện tại (`GEMINI_API_KEY`, dạng Vertex AI `AQ.Ab8...`). Verify trực tiếp bằng `ListModels`/test burst: `gemini-2.5-flash` bị `429 RESOURCE_EXHAUSTED` (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20) ngay cả khi gọi tuần tự có delay; `gemini-2.5-flash-lite` chịu được burst 6 request song song không lỗi.
+- `gemini-1.5-flash` và `gemini-2.0-flash` đã bị Google gỡ khỏi key này (404 / quota=0) — không dùng lại các model này cho bất kỳ route Gemini Vision nào trong app.
+- Model có "thinking" (`gemini-2.5-*`) bắt buộc phải set `generationConfig.thinkingConfig: { thinkingBudget: 0 }`, nếu không sẽ tiêu hết `maxOutputTokens` cho suy luận nội bộ và trả về rỗng/cụt khi `maxOutputTokens` thấp.
+- 2 route OCR khác trong app (`src/app/api/process/ocr-image/route.ts`, `src/app/api/product/extract-image-codes/route.ts`) cũng đã đổi sang `gemini-2.5-flash-lite` cùng lý do quota.
+
+### Prompt đọc biển số Campuchia
+
+- Prompt (`PLATE_PROMPT` trong `route.ts`) phải mô tả đúng đặc điểm biển số Campuchia: nền trắng, chữ xanh dương/đen, format `1 chữ số + 1-2 chữ cái + gạch ngang + 3-4 chữ số` (vd `3F-9676`, `4B-0189`), kèm chữ Khmer nhỏ (tên tỉnh) phía trên/dưới.
+- Phải liệt kê rõ những gì KHÔNG được lấy nhầm làm biển số: mã ISO container (`ZCSU 273812`, `WHLU 423353`), thông số tải trọng (MAX GROSS/TARE/NET), số hotline/decal, số sơn tay trực tiếp lên khung gầm/sát-xi.
+- Route trả về plain text (không dùng `responseMimeType: "application/json"`) — đã thử JSON mode kèm nhãn vị trí "trước/sau" (`vi_tri`) nhưng làm giảm độ tin cậy OCR (model phải làm 2 việc cùng lúc); đã bỏ hẳn, quay về chỉ đọc text biển số đơn giản.
+- `normalizePlate()` dùng regex `(\d[A-Z]{1,2})[\s-]*(\d{3,5})` để chuẩn hóa lại định dạng (tự thêm dấu gạch ngang, viết hoa), fallback về text gốc nếu không khớp.
+
+### Client-side: gán Biển trước/Biển sau
+
+- `handleVehicleImageUpload` trong `export/page.tsx` chạy OCR **song song** (`Promise.all`) cho **tất cả ảnh vừa upload** trong 1 lượt (tối đa 6 ảnh/xe), không chỉ ảnh đầu tiên.
+- Không dùng AI để đoán ảnh nào là "đầu xe" hay "đuôi xe" — độ tin cậy thấp trong thực tế. Thay vào đó:
+  1. Đếm tần suất mỗi biển số xuất hiện trong các ảnh vừa OCR (nhiều ảnh có thể chụp trùng 1 biển) — chỉ giữ lại **tối đa 2 giá trị khác nhau xuất hiện nhiều nhất**, loại nhiễu do OCR đọc sai lệch.
+  2. Nếu có 2 giá trị khác nhau: so sánh **chữ số đầu tiên** của mỗi biển — biển có số đầu **nhỏ hơn** → `Biển trước`, số đầu **lớn hơn** → `Biển sau` (vd `3F-9676` → trước, `4B-0189` → sau). Quy tắc này dựa trên quy ước thực tế của nhà máy (đầu kéo đăng ký số nhỏ hơn rơ-moóc).
+  3. Nếu chỉ nhận diện được 1 giá trị: điền vào ô còn trống đầu tiên (ưu tiên Biển trước).
+  4. Không ghi đè ô đã có sẵn dữ liệu.
+- **Điền thẳng vào form ngay khi OCR xong, không qua bước xác nhận** — đã bỏ hẳn banner `OcrConfirmBar` (nút "Điền"/"Bỏ qua") vì rườm rà; chỉ hiện toast ngắn báo đã tự điền biển số nào (`showToast(..., "success")`).
+- Không tạo lại banner xác nhận này nếu cải tiến thêm — giữ nguyên tắc "OCR xong là điền thẳng".

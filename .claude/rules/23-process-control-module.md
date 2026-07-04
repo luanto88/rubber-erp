@@ -256,3 +256,111 @@ Entry thêm vào `src/app/dashboard/layout.tsx`:
 - Xóa phiếu (`quick_measurements`) → CASCADE tự xóa tất cả `quick_measurement_rows` liên quan.
 - Không dùng `localStorage` cho dữ liệu nghiệp vụ.
 - Mọi query phải filter `factory_id`.
+
+## OCR Po/Mo — model đã fix (2026-07-04)
+
+- Route: `src/app/api/process/ocr-image/route.ts`
+- Model đã đổi từ `gemini-1.5-flash` (đã bị Google gỡ bỏ, trả 404) sang **`gemini-2.5-flash-lite`** — lý do đầy đủ và cách phát hiện quota xem `.claude/rules/08-module-export.md` mục "OCR biển số xe (2026-07-04)" (cùng nguyên nhân gốc: `gemini-2.5-flash` chỉ có 20 request/ngày free-tier, `gemini-1.5-flash`/`gemini-2.0-flash` đã bị gỡ/quota=0).
+- Đã thêm `generationConfig.thinkingConfig: { thinkingBudget: 0 }` — bắt buộc với mọi model `gemini-2.5-*` để tránh bị tiêu hết `maxOutputTokens` cho suy luận nội bộ.
+- Đây chỉ là fix hạ tầng (model + quota); prompt đọc số Po/Mo đã được hiệu chỉnh theo ảnh thật ở mục dưới.
+
+## Cải tiến OCR Po/Mo + UX form đo nhanh (2026-07-04, đã hoàn tất)
+
+### Prompt Po/Mo đã hiệu chỉnh theo ảnh thiết bị thật
+
+Ảnh tham khảo trong repo: `cung_cap_dl/dn.jpg` (Wallace MK III Mooney Viscometer), `cung_cap_dl/po.jpg` (Wallace Rapid Plastimeter).
+
+- `dn.jpg`: LCD xanh lá 2 dòng — dòng 1 là nhãn tĩnh `"* Mooney *"`, dòng 2 là số liệu thật (`82.0` bên trái + số phụ đếm/timer bên phải cần bỏ qua). Panel còn có 2 màn hình nhiệt độ riêng ("upper platen"/"lower platen", vd `100.3`) — không phải giá trị Mo, dễ bị OCR nhầm nếu prompt không loại trừ rõ.
+- `po.jpg`: LCD xanh dương hiển thị thẳng `39.0` (đã là số thập phân có dấu chấm, không phải số nguyên cần chia 10).
+- `PROMPTS` trong `ocr-image/route.ts` đã viết lại để mô tả đúng layout 2 dòng của Mooney (loại trừ số phụ bên phải + 2 màn nhiệt độ khác) và để Po tự phân biệt: có dấu chấm thập phân thì giữ nguyên, số nguyên không dấu chấm mới chia 10.
+- **Chưa verify được bằng script Node gọi thẳng Gemini** trong phiên 2026-07-04: quota free-tier `gemini-2.5-flash-lite` (20 request/ngày/project, xem `feedback_ocr_gemini_model` trong memory) đã cạn từ các lần test OCR khác trong cùng ngày, script test (`node --env-file=.env.local` gọi trực tiếp REST API với 2 ảnh mẫu) liên tục nhận `429 RESOURCE_EXHAUSTED` dù đã retry với backoff dài. Prompt được viết dựa trên soát xét trực quan chính xác nội dung 2 ảnh mẫu (đọc từng pixel LCD), nhưng **phiên sau nên chạy lại script test này khi quota đã reset** để xác nhận Gemini thực sự trả đúng `Po = 39` và `Mo = 82` trước khi yên tâm hoàn toàn.
+
+### UX form đo nhanh (`measurements/page.tsx`) — đã áp dụng
+
+1. Mặc định khi bấm "Tạo phiếu mới": `Dây chuyền = "Mủ tạp"`, `Loại CSR = "10"`, dòng đo đầu tiên tick sẵn `chi_tieu = ["Po", "Mo"]` (theo `CHI_TIEU_BY_CSR["10"]`). Nút "Thêm dòng" (`addRow`) cũng tick sẵn theo `chiTieuForCsr` của `formLoaiCsr` hiện tại.
+2. `emptyMeasurementRow(defaultNguoiDo, defaultCheDo, defaultChiTieu)` trong `process-types.ts` nhận thêm tham số thứ 3 để tick sẵn chỉ tiêu và khởi tạo sẵn key rỗng trong `ket_qua`.
+3. **Người đo**: bootstrap đổi sang `hydrateActiveSession()` (không đọc `localStorage.erp_user` trực tiếp) để lấy `full_name`/`username` thật của session; input "Người đo" trong `MeasurementRowForm` đổi thành `readOnly`, nền xám, không cho sửa tay.
+4. **Ngăn lưu gợi ý**: nguồn gợi ý đổi từ `lots.created_at` (thời điểm tạo bản ghi lô, có thể rất cũ) sang `lot_transactions.created_at` (thời điểm nhập liệu thật gần nhất ở module Thành phẩm), join `lots!inner(factory_id)` để lọc đúng nhà máy — cùng pattern đã dùng trong `src/lib/storage-detail.ts`.
+5. **Layout desktop**: Row 1 (Chỉ tiêu/Thùng/Lô/Mẫu/Chế độ sấy/Ca SX) và Row 2 (Kết quả từng chỉ tiêu/Ngăn lưu/Người đo/Ghi chú) trong `MeasurementRowForm` đổi từ `flex flex-wrap` + width cố định (`w-24`, `w-36`...) sang CSS grid `grid-cols-2 md:grid-cols-3 xl:grid-cols-6` (row 1) / `...xl:grid-cols-5` (row 2) — cùng breakpoint chuyển 2→3 cột ở `md` như card "Thông tin phiếu" phía trên, mở rộng thêm ở `xl` cho màn hình lớn.
+6. **OCR điền thẳng, không banner xác nhận**: giữ nguyên nguyên tắc đã có — `handleOcrUpload` set thẳng `ket_qua`/`image_urls` vào state ngay khi Gemini trả kết quả; chỉ thêm toast xanh góc dưới phải tự tắt sau 3s ("Đã tự điền {chỉ tiêu} = {giá trị} từ ảnh"), theo đúng pattern `showToast` của module Xuất hàng.
+7. **Hợp nhất 2 khối upload ảnh thành 1**: đã bỏ icon Camera OCR riêng cạnh từng ô "Kết quả {ct}". Chỉ còn 1 khối "Hình ảnh / OCR (tối đa 6)" ở dưới — bấm vào ô "+": nếu dòng đo chưa chọn chỉ tiêu nào thì mở picker ảnh thường; nếu đã chọn ít nhất 1 chỉ tiêu thì mở popover cho chọn "OCR ảnh {ct}" (theo từng chỉ tiêu đang tick) hoặc "Ảnh khác (không OCR)".
+8. **Chia sẻ ảnh nhanh**: thêm nút `Share2` trong bảng danh sách phiếu (`measurements/page.tsx`, cạnh icon `Printer`) — gom toàn bộ `image_urls` của mọi dòng trong phiếu (tối đa 6 ảnh), tải blob rồi dùng `navigator.share({ files })` (Web Share API), fallback tải file trực tiếp nếu trình duyệt không hỗ trợ. Không cần mở trang in trước.
+
+`npx tsc --noEmit` và `npx eslint` đã chạy sạch trên các file đã sửa (`ocr-image/route.ts`, `measurements/page.tsx`, `process-types.ts`).
+
+## OCR Po/Mo — tự nhận dạng thiết bị, upload nhiều ảnh cùng lúc (2026-07-04, bổ sung)
+
+Sau phản hồi thực tế của người dùng: khi 1 dòng đo chọn cả 2 chỉ tiêu Po + Mo (mặc định), người dùng muốn chọn 2 ảnh (1 ảnh Po, 1 ảnh Mo) trong **cùng một lần bấm upload**, AI tự nhận dạng ảnh nào là thiết bị nào và điền đúng — không bắt người dùng chọn trước từng chỉ tiêu rồi upload riêng lẻ từng ảnh.
+
+- **API đã đổi hoàn toàn sang tự nhận dạng**: `POST /api/process/ocr-image` không còn nhận `chiTieu` trong body. Body chỉ còn `{ imageBase64, mimeType }`. Response: `{ chiTieu: "Po" | "Mo", value: number } | { error }`.
+- `AUTO_PROMPT` duy nhất mô tả cả 2 thiết bị (Rapid Plastimeter cho Po, Mooney Viscometer cho Mo) và yêu cầu Gemini tự xác định ảnh thuộc thiết bị nào trước khi trích số, trả về đúng 1 dòng dạng `LABEL:VALUE` (vd `"Po:39.0"`, `"Mo:82.0"`) để parse bằng regex `/(Po|Mo)\s*:\s*(-?[0-9]+(?:\.[0-9]+)?)/i`.
+- Client (`measurements/page.tsx`) chỉ còn **1 hàm OCR duy nhất**: `handleOcrAutoUpload(files: FileList, rowId)` — nhận nhiều file cùng lúc, gọi Gemini song song (`Promise.all`) cho từng ảnh, mỗi ảnh tự trả về chỉ tiêu đã nhận dạng + giá trị.
+  - Ảnh luôn được upload lên Storage dù OCR có nhận dạng được hay không (không mất ảnh hiện trường).
+  - Chỉ tiêu nhận dạng được nhưng dòng đo chưa tick sẵn thì **tự động tick thêm** vào `row.chi_tieu` (không chặn, không bắt phải tick trước).
+  - Toast xanh báo tổng hợp tất cả chỉ tiêu đã điền trong 1 lượt (vd "Đã tự nhận dạng và điền Po=39, Mo=82 từ ảnh"); ảnh không nhận dạng được thì liệt kê tên file trong banner đỏ, không chặn các ảnh còn lại.
+- **Đã xóa hoàn toàn** code đường dẫn cũ (chọn từng chỉ tiêu rồi mới OCR 1 ảnh): `PROMPTS` (Po/Mo riêng), `onOcrImage`, `ocrFileInputRef`, `ocrActiveRef`, `handleOcrUpload`. Không giữ lại làm dead code.
+- Popover khi bấm ô "+" trong khối "Hình ảnh / OCR" (chỉ hiện khi `row.chi_tieu.length > 0`) giờ chỉ còn 2 lựa chọn: **"OCR ảnh (chọn nhiều ảnh cùng lúc, AI tự nhận dạng)"** (input `multiple`) và **"Ảnh khác (không OCR)"**.
+- Vẫn giữ nguyên tắc **điền thẳng, không banner xác nhận** — chỉ khác là giờ điền cho nhiều chỉ tiêu trong 1 lượt thay vì 1 chỉ tiêu/lần.
+- **Verify bằng script Node vẫn đang bị chặn bởi quota** (xem mục "Chưa verify được..." phía trên) — quota `gemini-2.5-flash-lite` chưa reset trong suốt phiên 2026-07-04, đã thử retry với backoff dài (tới 13+ lần, giãn cách tới 5 phút) vẫn `429 RESOURCE_EXHAUSTED`. Phiên sau cần chạy lại script test khi quota đã reset.
+
+## Sửa phiếu đã có + Thêm mẫu vào phiếu (nhiều người đo chung 1 phiếu) — 2026-07-04
+
+Trước đây danh sách phiếu đo nhanh chỉ có Xem/In/Xóa — không sửa được phiếu đã lưu, và mỗi lần muốn đo thêm phải tạo phiếu mới (dù cùng ngày, cùng dây chuyền, cùng loại CSR). Đã bổ sung 2 luồng mới, dùng lại chung 1 form với `measurements/page.tsx`:
+
+### Phân quyền (permission có sẵn từ `20260619_process_control.sql`: `process.create`, `process.edit`)
+
+- `canCreate = hasPermission(currentUser, "process.create")` — quyết định hiện nút "Tạo phiếu mới" (header) và nút "Thêm" (mỗi dòng phiếu trong danh sách). Không yêu cầu là người tạo phiếu — đúng nghiệp vụ "1 phiếu trong ngày nhiều mẫu có thể nhiều người đo".
+- `canEditSheet(sheet) = currentUser?.role === "admin" || (hasPermission(currentUser, "process.edit") && sheet.created_by === currentUser.id)` — quyết định hiện nút "Sửa" (Pencil) trên từng dòng. Admin luôn sửa được mọi phiếu; user thường chỉ sửa được phiếu do chính mình tạo.
+- Phiếu tạo trước khi có `created_by` (dữ liệu cũ) sẽ có `created_by = null` → chỉ admin sửa được, user thường (kể cả người thực tế đã tạo) không sửa được nữa vì không có cách xác định lại chủ sở hữu — đây là giới hạn chấp nhận được của dữ liệu lịch sử, không phải bug.
+- Nút "Xóa" (Trash2) giữ nguyên không gate quyền — chưa nằm trong yêu cầu, không tự ý thêm.
+
+### "Sửa" — chỉnh sửa toàn bộ phiếu đã có
+
+- `openEdit(sheet)`: load lại tất cả `quick_measurement_rows` của phiếu, map sang `MeasurementRowDraft` qua `rowToDraft()` (giữ nguyên `id` thật của dòng DB để phân biệt với dòng mới thêm trong form, giữ nguyên `nguoi_do` gốc — **không** ghi đè bằng tên người đang sửa).
+- Header (Ngày/Dây chuyền/Loại CSR) vẫn editable như lúc tạo mới; `ma_phieu` giữ nguyên, không sinh lại.
+- `handleSave` nhánh sửa: UPDATE header `quick_measurements`; so `existingRowIds` (chụp lúc mở form) với id còn lại trong `rows` để tính `removedIds` → DELETE các dòng bị xóa khỏi form; dòng có id nằm trong `existingRowIds` → UPDATE; dòng còn lại (id mới sinh bởi `emptyMeasurementRow`) → INSERT. `sort_order`/`so_mau` được đánh lại theo vị trí hiện tại trong `rows`.
+
+### "Thêm" — thêm mẫu mới vào phiếu đã có, không đụng dữ liệu cũ
+
+- `openAddRows(sheet)`: header hiển thị **read-only** (không phải input) lấy từ phiếu gốc — không cho đổi Ngày/Dây chuyền/CSR vì mục đích chỉ là bổ sung mẫu cùng bối cảnh với phiếu đã có. `rows` khởi tạo chỉ 1 dòng trắng mới (gợi ý ngăn + chỉ tiêu như tạo mới), **không load dòng cũ**.
+- `handleSave` nhánh này: chỉ INSERT các dòng trong `rows` (toàn bộ đều là dòng mới), `sort_order`/`so_mau` nối tiếp từ `existingRowCount` (đếm số dòng đã có của phiếu tại thời điểm mở form) — không UPDATE/DELETE gì ở header hay dòng cũ.
+- `nguoi_do` của dòng mới vẫn tự điền theo người đang thao tác (đúng nghiệp vụ: người khác đo thêm thì đứng tên người đó), độc lập với người đã tạo phiếu ban đầu.
+
+### Helper dùng chung
+
+- `rowToDraft(row: QuickMeasurementRow): MeasurementRowDraft` — nạp dòng DB vào form sửa.
+- `rowDraftToFields(row)` / `rowDraftToPayload(row, sheetId, factoryId, sortOrder)` — chuẩn hoá field ghi DB, dùng chung cho cả 3 nhánh insert/update của `handleSave` (tạo mới, sửa, thêm mẫu) để tránh lặp code 3 nơi.
+- `resetEditingState()` — reset `editingSheetId/editingSheet/addRowsMode/existingRowIds/existingRowCount`, gọi khi mở "Tạo phiếu mới", khi bấm "Quay lại", và sau khi lưu thành công (mọi nhánh).
+
+### UI theo mode (biến `editingSheetId` + `addRowsMode`)
+
+- Tiêu đề: "Tạo phiếu đo nhanh" / "Sửa phiếu đo nhanh" / "Thêm mẫu vào phiếu".
+- Badge mã phiếu: mode tạo mới hiện preview (`getMaPhieuPreview`), mode sửa/thêm hiện đúng `editingSheet.ma_phieu` đã có.
+- Nút lưu: "Lưu phiếu" / "Lưu thay đổi" / "Thêm mẫu" tương ứng.
+
+### Fix layout Row 1 + Ca SX động theo Thành phẩm (2026-07-04, bổ sung)
+
+- **Bug layout**: Row 1 của dòng đo (`grid xl:grid-cols-6`) có Chỉ tiêu (span 2) + Thùng/Lô/Mẫu/Chế độ sấy/Ca SX (mỗi field 1 cột) = 2+5 = 7 đơn vị cột nhưng lưới chỉ có 6 cột ở `xl` → "Ca SX" tràn xuống dòng riêng, để trống phần lớn dòng đó. Fix: đổi `xl:grid-cols-6` → `xl:grid-cols-7` để đúng 7 đơn vị vừa khít 1 dòng, "Ca SX" nằm cùng dòng với "Chỉ tiêu" như mong đợi.
+- **Ca SX không còn hard-code**: đã bỏ hằng số `CA_SX_OPTIONS` (`["Ca 1", "Ca 2 (Ban)", "Ca 2", "Ca 3", "Ban ngày"]`) — không khớp với hệ thống ca thực tế của Thành phẩm. Dropdown "Ca SX" giờ lấy từ `caSxOptions` state, tính bằng cách kiểm tra ca nào (`"A"`, `"B"`, `"C"`) thực sự tồn tại trong `lot_transactions.ca` của nhà máy hiện tại (bảng Thành phẩm dùng chữ cái đơn `"A"/"B"/"C"`, xem `product/page.tsx` `CA_OPTS`), hiển thị dạng `Ca A`, `Ca B`, `Ca C`. Nếu nhà máy chưa từng có giao dịch `ca = "C"` thì dropdown chỉ còn `Ca A`, `Ca B`. Nếu nhà máy hoàn toàn chưa có `lot_transactions` nào (factory mới), fallback mặc định `["Ca A", "Ca B"]`.
+- **Kỹ thuật quan trọng**: `loadCaSxOptions(fid)` chạy **3 query `.limit(1)` riêng cho từng ca** (`Promise.all`) thay vì 1 query `select("ca")` không giới hạn rồi tự suy distinct ở client — vì `lot_transactions` là bảng có thể vượt 1000 dòng, PostgREST sẽ âm thầm cắt kết quả ở 1000 dòng nếu không phân trang (xem `.claude/rules/04-code-patterns.md` mục "Phân trang khi query bảng lớn"), có thể làm sai lệch kết luận "nhà máy có dùng Ca C hay không" nếu các dòng có `ca = "C"` nằm ngoài 1000 dòng đầu trả về.
+- **Rủi ro dữ liệu cũ cần lưu ý cho session sau**: các phiếu đã lưu trước khi đổi (`ca_sx` mang giá trị cũ như `"Ca 2 (Ban)"`, `"Ca 3"`...) khi mở lại bằng nút "Sửa" sẽ có `<select>` không khớp option nào (hiển thị trống) vì giá trị cũ không còn nằm trong danh sách `caSxOptions` mới. Đây là hệ quả tất yếu của việc đổi chuẩn dữ liệu, không phải bug — nếu người dùng phản ánh, hướng xử lý là chọn lại giá trị đúng theo chuẩn mới, không cố gắng auto-migrate ngược.
+
+### Danh sách phiếu (`sheets` table trong list view)
+
+- Đã bỏ cột "Dây chuyền" đứng riêng (trùng lặp với cột "Dây chuyền / CSR" ngay cạnh).
+- Thêm cột "Người đo" — gom `Array.from(new Set(sheet.rows.map(r => r.nguoi_do).filter(Boolean)))`, join bằng dấu phẩy vì 1 phiếu có thể có nhiều người đo khác nhau qua nhiều mẫu.
+- Thứ tự nút hành động mỗi dòng: Xem (Eye) → In (Printer) → Chia sẻ (Share2) → Sửa (Pencil, có điều kiện) → Thêm (Plus, có điều kiện) → Xóa (Trash2).
+
+## Handoff cho session sau (2026-07-04)
+
+Toàn bộ thay đổi trong phiên này (OCR auto-detect đa ảnh, Sửa/Thêm mẫu + phân quyền, fix layout Row 1, Ca SX động) mới chỉ qua `npx tsc --noEmit` + `npx eslint`, **chưa test tay trên trình duyệt thật**. Việc cần làm tiếp:
+
+1. **Verify OCR bằng script Node thật khi quota Gemini đã reset** — quota `gemini-2.5-flash-lite` (20 req/ngày) bị cạn suốt phiên 2026-07-04, đã retry >13 lần với backoff tới 5 phút vẫn `429`. Gọi lại `/api/process/ocr-image` với `cung_cap_dl/po.jpg` (kỳ vọng Po=39) và `cung_cap_dl/dn.jpg` (kỳ vọng Mo=82) để xác nhận `AUTO_PROMPT` hoạt động đúng.
+2. **Test tay luồng OCR đa ảnh**: tạo dòng đo có cả Po+Mo, bấm "+" → "OCR ảnh (chọn nhiều ảnh cùng lúc...)" → chọn 2 ảnh cùng lúc, xác nhận cả 2 ô kết quả được điền đúng chỉ tiêu tương ứng; thử thêm 1 ảnh không rõ nội dung để xác nhận vẫn lưu ảnh nhưng báo lỗi nhận dạng đúng, không chặn ảnh còn lại.
+3. **Test tay nút Sửa/Thêm theo quyền**: đăng nhập bằng tài khoản không phải admin, không có `process.edit`/`process.create` → xác nhận 2 nút ẩn đúng; tài khoản có quyền nhưng không phải người tạo phiếu → chỉ thấy nút Thêm, không thấy Sửa; admin → thấy cả 2 trên mọi phiếu.
+4. **Test tay luồng "Sửa" toàn bộ phiếu**: đổi header (ngày/dây chuyền/CSR), sửa 1 dòng cũ, xóa 1 dòng cũ, thêm 1 dòng mới trong cùng lần sửa → lưu → tải lại danh sách/DB xác nhận đúng cả update/delete/insert, không sót dòng, `sort_order`/`so_mau` liên tục.
+5. **Test tay luồng "Thêm mẫu vào phiếu"**: mở từ 1 phiếu đã có nhiều dòng → xác nhận header hiển thị read-only đúng dữ liệu gốc → thêm 1-2 dòng mới → lưu → xác nhận dòng cũ không bị đụng, dòng mới nối tiếp đúng thứ tự, `nguoi_do` của dòng mới là người đang thao tác (không phải người tạo phiếu gốc).
+6. **Test tay layout Row 1** (`xl:grid-cols-7`) trên nhiều độ rộng màn hình thật, xác nhận "Ca SX" luôn nằm cùng dòng với "Chỉ tiêu" ở `xl`, không vỡ ở các breakpoint nhỏ hơn.
+7. **Test tay dropdown "Ca SX" động**: xác nhận đúng nhà máy đang test có dùng `Ca C` hay không trong Thành phẩm, đối chiếu dropdown hiện đúng 2 hoặc 3 lựa chọn tương ứng.
+8. **Mở lại 1 phiếu cũ có `ca_sx` giá trị lịch sử** (`"Ca 2 (Ban)"`, `"Ca 3"`...) qua nút "Sửa" — xác nhận đúng hành vi đã ghi ở trên (dropdown hiển thị trống vì giá trị cũ không khớp option mới); hỏi người dùng nếu cần xử lý thêm, không tự ý migrate.
+9. **Cân nhắc (chưa làm, cần hỏi trước)**: nút "Xóa" phiếu (Trash2) hiện chưa gate theo quyền `process.delete` như 2 nút Sửa/Thêm mới thêm — nếu người dùng muốn nhất quán, cần bổ sung; không tự ý thêm vì ngoài phạm vi yêu cầu ban đầu.

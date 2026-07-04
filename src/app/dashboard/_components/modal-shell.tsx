@@ -1,7 +1,12 @@
 "use client"
 
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useId, type ReactNode } from "react"
 import { X } from "lucide-react"
+
+// Ngăn xếp thứ tự mount của mọi ModalShell đang hiển thị (phần tử cuối = modal trên cùng).
+// Dùng để chỉ modal trên cùng phản hồi phím Escape khi có modal lồng nhau (vd modal A mở
+// modal B bên trên); tránh 1 lần Escape đóng cả 2 do mỗi modal tự gắn listener riêng trên document.
+let modalStack: string[] = []
 
 const MAX_WIDTH_CLASS: Record<string, string> = {
   sm: "max-w-sm",
@@ -43,13 +48,26 @@ export function ModalShell({
   zIndexClassName = "z-50",
   backdropClassName = "bg-black/50",
 }: ModalShellProps) {
+  const id = useId()
+
+  // Đăng ký vào ngăn xếp — chỉ chạy khi mount/unmount, không chạy lại mỗi lần
+  // onClose đổi identity (rất phổ biến vì phần lớn nơi gọi truyền arrow function inline).
+  useEffect(() => {
+    if (!modalStack.includes(id)) modalStack.push(id)
+    return () => {
+      modalStack = modalStack.filter((x) => x !== id)
+    }
+  }, [id])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
+      if (event.key !== "Escape") return
+      if (modalStack[modalStack.length - 1] !== id) return
+      onClose()
     }
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [onClose])
+  }, [onClose, id])
 
   return (
     <div

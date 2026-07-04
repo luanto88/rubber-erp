@@ -65,8 +65,6 @@ export const CSR_BY_DAY_CHUYEN: Record<string, string[]> = {
   "Mủ nước": ["L", "3L", "CV50", "CV60"],
 }
 
-export const CA_SX_OPTIONS = ["Ca 1", "Ca 2 (Ban)", "Ca 2", "Ca 3", "Ban ngày"]
-
 // Prefix mã phiếu theo dây chuyền (hoặc chủng loại — giá trị giống nhau)
 export function getMaPhieuPrefix(day_chuyen: string | null): string {
   return day_chuyen === "Mủ tạp" ? "MT" : "MN"
@@ -131,10 +129,10 @@ export type MeasurementRowDraft = {
   ghi_chu: string
 }
 
-export function emptyMeasurementRow(defaultNguoiDo = "", defaultCheDo = ""): MeasurementRowDraft {
+export function emptyMeasurementRow(defaultNguoiDo = "", defaultCheDo = "", defaultChiTieu: string[] = []): MeasurementRowDraft {
   return {
     id: Math.random().toString(36).slice(2),
-    chi_tieu: [],
+    chi_tieu: [...defaultChiTieu],
     thung: "",
     lo: "",
     mau: "",
@@ -142,7 +140,7 @@ export function emptyMeasurementRow(defaultNguoiDo = "", defaultCheDo = ""): Mea
     ca_sx: "",
     ngan_id: "",
     so_ngay_luu: null,
-    ket_qua: {},
+    ket_qua: Object.fromEntries(defaultChiTieu.map(ct => [ct, ""])),
     image_urls: [],
     nguoi_do: defaultNguoiDo,
     ghi_chu: "",
