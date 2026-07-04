@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
+import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "../_components/iso-types"
 import { ClipboardCheck, ClipboardList, Eye, FileText } from "lucide-react"
 import Link from "next/link"
@@ -143,6 +144,7 @@ export default function IsoMyTasksPage() {
               <div className="px-5 py-3 bg-amber-50 border-b border-amber-100 text-sm text-amber-700 font-medium">
                 Có {taskGroups.length} đầu việc đang chờ bạn xử lý
               </div>
+              <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
                   <tr>
@@ -211,6 +213,7 @@ export default function IsoMyTasksPage() {
                   )})}
                 </tbody>
               </table>
+              </ResponsiveTableWrapper>
             </>
           )}
         </div>
@@ -234,6 +237,7 @@ export default function IsoMyTasksPage() {
                 <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-100 text-sm text-emerald-700 font-medium">
                   Có {formTasks.length} hồ sơ đang chờ bạn xử lý
                 </div>
+                <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
                     <tr>
@@ -285,6 +289,7 @@ export default function IsoMyTasksPage() {
                     })}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               </>
             )}
           </div>

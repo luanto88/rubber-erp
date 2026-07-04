@@ -25,12 +25,12 @@ description: Roadmap phát triển
 - Hoàn thiện quan hệ `Thành phẩm <-> Xuất hàng`
 - Hoàn thiện quản lý remaining và rollback trạng thái lô khi xóa đơn
 
-## Phase C - Dashboard và báo cáo
+## Phase C - Dashboard và báo cáo ✅ Hoàn thành
 
-- Biểu đồ sản lượng theo tháng
-- Biểu đồ KL khô theo chủng loại
-- Biểu đồ tỷ lệ đạt kiểm nghiệm
-- Báo cáo tổng hợp / PDF / in ấn
+- Biểu đồ sản lượng theo tháng ✅ (`dashboard/page.tsx` — bar chart CSR, pie chart trạng thái lô, area chart xuất hàng theo tháng)
+- Biểu đồ KL khô theo chủng loại ✅
+- Biểu đồ tỷ lệ đạt kiểm nghiệm ✅ (`quality-analytics/page.tsx` — KPI "Tỷ lệ đạt"/"Tỷ lệ rớt hạng" + heatmap phân tích chỉ tiêu)
+- Báo cáo tổng hợp / PDF / in ấn ✅ (đã phủ khắp module: storage, maintenance, export, process, quality, dispatch, warehouse...)
 
 ## Phase D - Tiếp tục mở rộng ✅ Hoàn thành
 
@@ -64,19 +64,21 @@ Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
 - Preview chữ ký và tên người ký thành 2 lớp độc lập
 - Fill tag header/footer trực tiếp trên file PDF gốc, không tạo trang phiếu ký duyệt riêng
 
-### Giai đoạn 3 ⏳ Pending
+### Giai đoạn 3 ✅ Hoàn thành
 
-- Module Văn bản (`/dashboard/documents/`): shell, CRUD, upload
-- Vòng ký phòng ban Cấp 1 (tuần tự) + Cấp 2 (trực tiếp)
-- Logic "Không ký" / trả về với lý do
-- Mật vs Thường email routing
-- Thông báo Email + Telegram
+- Module Văn bản (`/dashboard/documents/`): shell, CRUD, upload ✅
+- Vòng ký phòng ban Cấp 1 (tuần tự) + Cấp 2 (trực tiếp) ✅
+- Logic "Không ký" / trả về với lý do ✅
+- Mật vs Thường email routing ✅ (phân loại Thường/Mật, routing người nhận riêng)
+- Thông báo Email + Telegram ✅
 
-### Giai đoạn 4 ⏳ Pending
+### Giai đoạn 4 ✅ Hoàn thành
 
-- Trang in (bypass sidebar)
-- In-app notification bell (Supabase Realtime subscribe `notifications` table)
-- QR public view cho PDF đã ký
+- Trang in (bypass sidebar) ✅ (`documents/print/`, watermark "MẬT", auto-print)
+- In-app notification bell ✅ (`Bell` icon + `notifications` state trong `dashboard/layout.tsx`)
+- QR public view cho PDF đã ký ✅ (`qr_url` trong `iso_documents`)
+
+Chi tiết đầy đủ module Văn bản: xem `.claude/rules/22-documents-module.md`.
 
 Tham chiếu chi tiết: `.claude/rules/16-iso-vanban-module.md`
 

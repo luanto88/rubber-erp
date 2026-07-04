@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "../../_components/iso-shell"
+import { ModalShell } from "../../../_components/modal-shell"
 import {
   TRANG_THAI_LABEL,
   TRANG_THAI_COLOR,
@@ -3020,6 +3021,25 @@ export default function IsoDocumentDetailPage() {
     )
   }
 
+  const pinModalFooter = (
+    <>
+      <button
+        onClick={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
+        className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+      >
+        Hủy
+      </button>
+      <button
+        onClick={() => void handlePinConfirm()}
+        disabled={pinLoading || !pin}
+        className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
+      >
+        {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+        {pinLoading ? "Đang xử lý..." : "Xác nhận"}
+      </button>
+    </>
+  )
+
   return (
     <IsoShell>
       <div className="space-y-4">
@@ -3453,7 +3473,7 @@ export default function IsoDocumentDetailPage() {
                       )
                       return (
                         <div key={row.id} className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <label className="col-span-2 text-[11px] font-bold text-slate-600">
                               Mã hồ sơ cũ <span className="text-red-500">*</span>
                               <select
@@ -3580,7 +3600,7 @@ export default function IsoDocumentDetailPage() {
                 <div className="space-y-2">
                   {childDraftRows.map((row) => (
                     <div key={row.id} className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100">
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <label className="text-[11px] font-bold text-slate-600">
                           Mã hồ sơ
                           <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
@@ -3841,7 +3861,7 @@ export default function IsoDocumentDetailPage() {
                   <div className="space-y-2">
                     {childDraftRows.map((row) => (
                       <div key={row.id} className="rounded-xl bg-white/85 p-2 ring-1 ring-sky-100">
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <label className="text-[11px] font-bold text-slate-600">
                             Mã hồ sơ
                             <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
@@ -3957,7 +3977,7 @@ export default function IsoDocumentDetailPage() {
                         data-testid="child-review-row"
                         data-row-id={row.id}
                       >
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <label className="col-span-2 text-[11px] font-bold text-slate-600">
                             Mã hồ sơ cũ <span className="text-red-500">*</span>
                             <select
@@ -4068,7 +4088,7 @@ export default function IsoDocumentDetailPage() {
                         data-testid="child-draft-row"
                         data-row-id={row.id}
                       >
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <label className="text-[11px] font-bold text-slate-600">
                             Mã hồ sơ
                             <input value={childRecordCode(row)} readOnly className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-700" />
@@ -4705,18 +4725,20 @@ export default function IsoDocumentDetailPage() {
 
         {/* PIN Modal */}
         {pinModal && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-violet-100 rounded-xl">
-                  <KeyRound size={18} className="text-violet-600" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-slate-800">{pinModal.label}</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Nhập PIN ký duyệt để xác nhận</p>
-                </div>
-              </div>
-
+          <ModalShell
+            title={
+              <span className="flex items-center gap-3">
+                <span className="p-2 bg-violet-100 rounded-xl"><KeyRound size={18} className="text-violet-600" /></span>
+                <span>
+                  <span className="font-extrabold text-slate-800 block">{pinModal.label}</span>
+                  <span className="text-xs text-slate-500 font-normal">Nhập PIN ký duyệt để xác nhận</span>
+                </span>
+              </span>
+            }
+            onClose={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
+            maxWidth="sm"
+            footer={pinModalFooter}
+          >
               {(pinModal.action === "tra_ve" || pinModal.action === "khong_xem_xet" || pinModal.action === "tu_choi_phe_duyet" || pinModal.action === "tra_ve_nhap") && (
                 <div className="mb-4">
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -4761,25 +4783,7 @@ export default function IsoDocumentDetailPage() {
                   </p>
                 )}
               </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
-                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  Hủy
-                </button>
-                <button
-                  onClick={() => void handlePinConfirm()}
-                  disabled={pinLoading || !pin}
-                  className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
-                >
-                  {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-                  {pinLoading ? "Đang xử lý..." : "Xác nhận"}
-                </button>
-              </div>
-            </div>
-          </div>
+          </ModalShell>
         )}
       </div>
 

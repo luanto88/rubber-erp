@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import { Filter, X } from "lucide-react"
+import { FilterBar } from "../../_components/filter-bar"
 import {
   type LotInfo,
   type FilterState,
@@ -35,6 +36,9 @@ export default function WarehouseFilterBar({ lots, filter, onChange }: Props) {
   }, [lots])
 
   const active = isFilterActive(filter)
+  const activeCount =
+    filter.csrTypes.length + filter.banhValues.length + filter.bocValues.length +
+    (filter.maLo ? 1 : 0) + (filter.ghiChu ? 1 : 0) + (filter.ngayFrom ? 1 : 0) + (filter.ngayTo ? 1 : 0)
 
   const toggleMulti = (field: "csrTypes" | "banhValues" | "bocValues", val: string) => {
     const current = filter[field] as string[]
@@ -45,12 +49,7 @@ export default function WarehouseFilterBar({ lots, filter, onChange }: Props) {
   }
 
   return (
-    <div className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border text-xs mb-3 transition-all
-      ${active
-        ? "bg-sky-50 border-sky-200 shadow-sm"
-        : "bg-white border-slate-200"
-      }`}>
-
+    <FilterBar activeCount={activeCount} className="text-xs">
       {/* Icon + label */}
       <div className="flex items-center gap-1.5 text-slate-500 font-bold shrink-0">
         <Filter size={13} className={active ? "text-sky-600" : "text-slate-400"} />
@@ -155,6 +154,6 @@ export default function WarehouseFilterBar({ lots, filter, onChange }: Props) {
           <X size={10} /> Xóa lọc
         </button>
       )}
-    </div>
+    </FilterBar>
   )
 }

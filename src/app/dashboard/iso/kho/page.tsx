@@ -5,6 +5,8 @@ import { Archive, Eye, Download, AlertTriangle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "@/app/dashboard/iso/_components/iso-shell"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 type KhoItem = {
   recipientId: string
@@ -156,7 +158,7 @@ export default function KhoPage() {
     <IsoShell>
       <div className="space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
               <Archive size={22} className="text-violet-600" />
@@ -183,7 +185,7 @@ export default function KhoPage() {
         )}
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+        <FilterBar activeCount={filterLoai.length + (filterTrangThai !== "all" ? 1 : 0)}>
           <div className="flex flex-wrap gap-2">
             {allLoai.map((loai) => (
               <button
@@ -216,7 +218,7 @@ export default function KhoPage() {
             <option value="co_hieu_luc">Đang hiệu lực</option>
             <option value="het_hieu_luc">Hết hiệu lực</option>
           </select>
-        </div>
+        </FilterBar>
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -228,6 +230,7 @@ export default function KhoPage() {
               <p>Chưa có tài liệu nào</p>
             </div>
           ) : (
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-left">
@@ -347,6 +350,7 @@ export default function KhoPage() {
                 })}
               </tbody>
             </table>
+            </ResponsiveTableWrapper>
           )}
         </div>
       </div>

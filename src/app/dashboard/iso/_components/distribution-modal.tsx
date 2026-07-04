@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react"
 import {
-  X,
   Send,
   ChevronRight,
   ChevronLeft,
@@ -12,6 +11,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { IsoDocument } from "./iso-types"
+import { ModalShell } from "../../_components/modal-shell"
 
 type RecipientOption = {
   id: string
@@ -227,32 +227,66 @@ export function DistributionModal({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div>
-            <h2 className="text-base font-extrabold text-slate-800">
-              Phân phối tài liệu ISO
-            </h2>
-            {!saveSuccess && (
-              <p className="text-xs text-slate-500 mt-0.5">
-                Bước {step}/2 —{" "}
-                {step === 1 ? "Chọn tài liệu" : "Chọn người nhận"}
-              </p>
-            )}
-          </div>
+  const modalFooter = !saveSuccess ? (
+    <div className="flex w-full items-center justify-between">
+      <div className="text-xs text-slate-500">
+        {step === 1
+          ? `${selectedDocIds.length} tài liệu đã chọn`
+          : `${selectedUserIds.length} người đã chọn`}
+      </div>
+      <div className="flex gap-2">
+        {step === 2 && (
           <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+            onClick={() => setStep(1)}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
           >
-            <X size={16} />
+            <ChevronLeft size={14} />
+            Quay lại
           </button>
-        </div>
+        )}
+        {step === 1 && (
+          <button
+            onClick={() => setStep(2)}
+            disabled={selectedDocIds.length === 0}
+            className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
+          >
+            Tiếp theo
+            <ChevronRight size={14} />
+          </button>
+        )}
+        {step === 2 && (
+          <button
+            onClick={handleSubmit}
+            disabled={saving || selectedUserIds.length === 0}
+            className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
+          >
+            {saving ? (
+              "Đang phân phối..."
+            ) : (
+              <>
+                <Send size={14} />
+                Phân phối ngay
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : undefined
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6">
+  return (
+    <ModalShell
+      title="Phân phối tài liệu ISO"
+      onClose={onClose}
+      maxWidth="2xl"
+      footer={modalFooter}
+    >
+        {!saveSuccess && (
+          <p className="text-xs text-slate-500 -mt-2 mb-4">
+            Bước {step}/2 —{" "}
+            {step === 1 ? "Chọn tài liệu" : "Chọn người nhận"}
+          </p>
+        )}
           {/* ─── Thành công ─── */}
           {saveSuccess && result && (
             <div className="flex flex-col items-center py-8 gap-4">
@@ -552,56 +586,6 @@ export function DistributionModal({
               )}
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        {!saveSuccess && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 shrink-0">
-            <div className="text-xs text-slate-500">
-              {step === 1
-                ? `${selectedDocIds.length} tài liệu đã chọn`
-                : `${selectedUserIds.length} người đã chọn`}
-            </div>
-            <div className="flex gap-2">
-              {step === 2 && (
-                <button
-                  onClick={() => setStep(1)}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  <ChevronLeft size={14} />
-                  Quay lại
-                </button>
-              )}
-              {step === 1 && (
-                <button
-                  onClick={() => setStep(2)}
-                  disabled={selectedDocIds.length === 0}
-                  className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
-                >
-                  Tiếp theo
-                  <ChevronRight size={14} />
-                </button>
-              )}
-              {step === 2 && (
-                <button
-                  onClick={handleSubmit}
-                  disabled={saving || selectedUserIds.length === 0}
-                  className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
-                >
-                  {saving ? (
-                    "Đang phân phối..."
-                  ) : (
-                    <>
-                      <Send size={14} />
-                      Phân phối ngay
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }

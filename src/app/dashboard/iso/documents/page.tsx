@@ -4,6 +4,9 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
+import { FilterBar } from "../../_components/filter-bar"
+import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
+import { ModalShell } from "../../_components/modal-shell"
 import {
   TRANG_THAI_LABEL,
   TRANG_THAI_COLOR,
@@ -194,12 +197,12 @@ export default function IsoDocumentsPage() {
     <IsoShell>
       <div className="space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">Tài liệu ISO</h1>
             <p className="text-sm text-slate-500 mt-0.5">Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canDistribute && (
               <button
                 onClick={() => { setDistributeDocId(undefined); setShowDistributeModal(true) }}
@@ -218,7 +221,7 @@ export default function IsoDocumentsPage() {
         </div>
 
         {/* Bộ lọc */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
+        <FilterBar activeCount={[search, filterStandard, filterLoai, filterTrangThai, filterCap, filterPhongBan].filter(Boolean).length}>
           <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -277,7 +280,7 @@ export default function IsoDocumentsPage() {
               <option key={pb} value={pb}>{pb}</option>
             ))}
           </select>
-        </div>
+        </FilterBar>
 
         {/* Bảng danh sách */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -291,6 +294,7 @@ export default function IsoDocumentsPage() {
               </p>
             </div>
           ) : (
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
                 <tr>
@@ -477,6 +481,7 @@ export default function IsoDocumentsPage() {
                 })}
               </tbody>
             </table>
+            </ResponsiveTableWrapper>
           )}
           {filtered.length > 0 && (
             <div className="px-4 py-2.5 border-t border-slate-100 text-xs text-slate-400">
@@ -513,14 +518,17 @@ export default function IsoDocumentsPage() {
 
       {/* Delete confirm dialog */}
       {delConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></div>
-              <h3 className="font-bold text-slate-800">Xóa tài liệu?</h3>
-            </div>
-            <p className="text-sm text-slate-600 mb-5">Hành động này không thể hoàn tác. Tài liệu và file liên quan sẽ bị xóa vĩnh viễn.</p>
-            <div className="flex gap-2 justify-end">
+        <ModalShell
+          title={
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></span>
+              Xóa tài liệu?
+            </span>
+          }
+          onClose={() => setDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
                 Hủy
               </button>
@@ -530,9 +538,11 @@ export default function IsoDocumentsPage() {
               >
                 Xóa
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-600">Hành động này không thể hoàn tác. Tài liệu và file liên quan sẽ bị xóa vĩnh viễn.</p>
+        </ModalShell>
       )}
 
       {/* Distribution modal */}

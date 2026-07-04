@@ -24,6 +24,7 @@ type ModalShellProps = {
   closeOnBackdrop?: boolean
   bodyClassName?: string
   zIndexClassName?: string
+  backdropClassName?: string
 }
 
 /**
@@ -40,6 +41,7 @@ export function ModalShell({
   closeOnBackdrop = true,
   bodyClassName = "",
   zIndexClassName = "z-50",
+  backdropClassName = "bg-black/50",
 }: ModalShellProps) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -51,7 +53,7 @@ export function ModalShell({
 
   return (
     <div
-      className={`fixed inset-0 ${zIndexClassName} flex items-center justify-center bg-black/50 p-0 sm:p-4`}
+      className={`fixed inset-0 ${zIndexClassName} flex items-center justify-center ${backdropClassName} p-0 sm:p-4`}
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div

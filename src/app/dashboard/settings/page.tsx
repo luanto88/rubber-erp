@@ -16,6 +16,8 @@ const PolygonDrawMap = dynamic(
 )
 import { supabase } from "@/lib/supabase"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
+import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
+import { ModalShell } from "../_components/modal-shell"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -2553,6 +2555,33 @@ export default function SettingsPage() {
     { key: "iso-vanban" as const, label: "ISO & Văn bản", icon: FileText, show: canViewIsoSignature },
   ].filter((item) => item.show)
 
+  const configModalFooter = (
+    <>
+      <button onClick={() => setConfigModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+      <button
+        onClick={
+          configModal === "warehouse"
+            ? saveConfigWarehouse
+            : configModal === "category"
+              ? saveConfigCategory
+              : configModal === "item"
+                ? saveConfigItem
+                : configModal === "driver"
+                  ? saveDispatchDriver
+                  : configModal === "vehicle"
+                    ? saveDispatchVehicle
+                    : configModal === "forest-plot"
+                      ? saveForestPlot
+                      : saveDeliveryPoint
+        }
+        disabled={configSaving}
+        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+      >
+        {configSaving ? "Đang lưu..." : "Lưu"}
+      </button>
+    </>
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -2585,7 +2614,7 @@ export default function SettingsPage() {
       {tab === "system" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
                 {([
                   { key: "users" as const, label: "Người dùng", icon: Users, show: canViewUsers },
                   { key: "permissions" as const, label: "Phân quyền", icon: ShieldCheck, show: canEditPermissions },
@@ -2616,7 +2645,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="p-5 space-y-6">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[
                 { label: "Chờ duyệt", value: pendingUsers.length, tone: "amber" },
                 { label: "Đang hoạt động", value: activeUsers.length, tone: "emerald" },
@@ -2634,7 +2663,7 @@ export default function SettingsPage() {
                 <UserCheck size={15} className="text-amber-600" />
                 <h2 className="font-bold text-slate-800">Tài khoản chờ duyệt</h2>
               </div>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -2680,7 +2709,7 @@ export default function SettingsPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTableWrapper>
             </div>
 
             <div>
@@ -2688,7 +2717,7 @@ export default function SettingsPage() {
                 <ShieldCheck size={15} className="text-emerald-600" />
                 <h2 className="font-bold text-slate-800">Tài khoản đang hoạt động</h2>
               </div>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -2737,7 +2766,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTableWrapper>
             </div>
           </div>
         </div>
@@ -2859,7 +2888,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {([
                   { key: "all", label: "Tất cả nhân sự" },
                   { key: "maintenance", label: "Nhân sự bảo trì" },
@@ -2875,7 +2904,7 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -2911,7 +2940,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTableWrapper>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50/60">
                 <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -2933,7 +2962,7 @@ export default function SettingsPage() {
                     </button>
                   )}
                 </div>
-                <div className="overflow-hidden rounded-b-2xl">
+                <ResponsiveTableWrapper className="rounded-none rounded-b-2xl border-0 shadow-none">
                   <table className="w-full text-sm">
                     <thead className="bg-white border-b border-slate-200">
                       <tr>
@@ -2994,7 +3023,7 @@ export default function SettingsPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTableWrapper>
               </div>
             </div>
           </div>
@@ -3012,7 +3041,7 @@ export default function SettingsPage() {
                 Đây là nơi quản trị tập trung quyền theo module và action. Hiện tại quyền được gán trong modal duyệt user, và danh sách permission hệ thống đã được tải sẵn.
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {Object.entries(groupedPermissions).map(([moduleName, options]) => (
                   <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
                       <div className="font-bold text-slate-800 mb-3">{options[0]?.module_label || moduleName}</div>
@@ -3038,13 +3067,13 @@ export default function SettingsPage() {
       {tab === "factory-config" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
               {canManageSettings && (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
                       <button
@@ -3119,7 +3148,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="p-4">
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-4">
                 {[
                   { key: "warehouses" as const, label: "Kho" },
                   { key: "categories" as const, label: "Nhóm vật tư" },
@@ -3173,6 +3202,7 @@ export default function SettingsPage() {
               {configLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : configTab === "warehouses" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3207,7 +3237,9 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : configTab === "categories" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3242,7 +3274,9 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : configTab === "items" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3287,7 +3321,9 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : configTab === "delivery-points" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3351,7 +3387,9 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : configTab === "forest-plots" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3416,6 +3454,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : null}
             </div>
           </div>
@@ -3429,7 +3468,7 @@ export default function SettingsPage() {
       {tab === "master-data" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {[
                 { key: "suffixes" as const, label: "Hậu tố lô", icon: Tag },
                 { key: "company" as const, label: "Thông tin công ty", icon: Building2 },
@@ -3484,6 +3523,7 @@ export default function SettingsPage() {
                   <p className="text-sm">Chưa có hậu tố nào</p>
                 </div>
               ) : (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3531,6 +3571,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               )}
             </div>
           </div>
@@ -3567,7 +3608,7 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {[
                   { label: "Tên công ty (tiếng Anh)", field: "full_name_en", colSpan: true },
                   { label: "Địa chỉ", field: "address_en", colSpan: true },
@@ -3623,6 +3664,7 @@ export default function SettingsPage() {
                   <p className="text-sm">Chưa có khách hàng nào</p>
                 </div>
               ) : (
+                <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3670,7 +3712,7 @@ export default function SettingsPage() {
                         {expandedCustomerId === c.id && (
                           <tr>
                             <td colSpan={5} className="px-6 py-4 bg-blue-50 border-b border-blue-100">
-                              <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                                 <div><span className="font-bold text-slate-600">Mã KH: </span><span className="text-slate-800">{c.ma_kh || "—"}</span></div>
                                 <div><span className="font-bold text-slate-600">Tên: </span><span className="text-slate-800">{c.ten_kh_en || "—"}</span></div>
                                 <div><span className="font-bold text-slate-600">Email: </span><span className="text-slate-800">{c.email || "—"}</span></div>
@@ -3683,6 +3725,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               )}
             </div>
           </div>
@@ -3720,6 +3763,7 @@ export default function SettingsPage() {
                   <p className="text-sm">Chưa có ghi chú dùng chung nào</p>
                 </div>
               ) : (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3767,6 +3811,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               )}
             </div>
           </div>
@@ -3804,6 +3849,7 @@ export default function SettingsPage() {
                   <p className="text-sm">Chưa có loại văn bản nào</p>
                 </div>
               ) : (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3853,6 +3899,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               )}
               {vbtError && !vbtModal && (
                 <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
@@ -3870,13 +3917,13 @@ export default function SettingsPage() {
       {tab === "maintenance" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-orange-50 to-amber-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-orange-50 to-amber-50 px-6 py-4 border-b border-slate-200 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <Wrench size={16} className="text-orange-600" />
                 <span className="font-extrabold text-slate-700">Bảo trì</span>
               </div>
               {canManageSettings && (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {maintTab === "vehicles" && (
                     <button
                       onClick={() => { setConfigEditId(null); setConfigError(""); setDispatchDriverForm(emptyDispatchDriverForm()); setConfigModal("driver") }}
@@ -3917,6 +3964,7 @@ export default function SettingsPage() {
               {maintLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : maintTab === "assets" ? (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -3950,8 +3998,10 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               ) : maintTab === "vehicles" ? (
                 <>
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -4001,11 +4051,13 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
                 <div className="border-t border-slate-200 mt-2 pt-4">
                   <div className="flex items-center gap-2 mb-3">
                     <h3 className="text-sm font-extrabold text-slate-700">Danh sách tài xế</h3>
                     <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{dispatchDrivers.length} tài xế</span>
                   </div>
+                  <ResponsiveTableWrapper>
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
@@ -4049,11 +4101,12 @@ export default function SettingsPage() {
                       ))}
                     </tbody>
                   </table>
+                  </ResponsiveTableWrapper>
                 </div>
                 </>
               ) : maintTab === "staff" ? (
                 <>
-                <div className="mb-3 flex items-center gap-2">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
                   {([
                     { key: "all", label: "Tất cả nhân sự" },
                     { key: "maintenance", label: "Nhân sự bảo trì" },
@@ -4068,6 +4121,7 @@ export default function SettingsPage() {
                     </button>
                   ))}
                 </div>
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -4103,8 +4157,10 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
                 </>
               ) : (
+                <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -4137,6 +4193,7 @@ export default function SettingsPage() {
                     ))}
                   </tbody>
                 </table>
+                </ResponsiveTableWrapper>
               )}
             </div>
           </div>
@@ -4145,15 +4202,20 @@ export default function SettingsPage() {
 
       {/* Maintenance modals */}
       {maintModal === "asset" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa thiết bị" : "Thêm thiết bị mới"}</h2>
-              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={maintEditId ? "Sửa thiết bị" : "Thêm thiết bị mới"}
+          onClose={() => setMaintModal(null)}
+          maxWidth="lg"
+          footer={
+            <>
+              <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveMaintAsset} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã thiết bị *</label>
                   <input value={assetForm.ma_tb} onChange={e => setAssetForm(p => ({ ...p, ma_tb: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: MCC-1" />
@@ -4170,7 +4232,7 @@ export default function SettingsPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên thiết bị *</label>
                 <input value={assetForm.ten_tb} onChange={e => setAssetForm(p => ({ ...p, ten_tb: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Máy cán cắt 1" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Bộ phận *</label>
                   <select value={assetForm.bo_phan} onChange={e => setAssetForm(p => ({ ...p, bo_phan: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
@@ -4199,23 +4261,23 @@ export default function SettingsPage() {
                   <option value="inactive">Ngừng sử dụng</option>
                 </select>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-                <button onClick={saveMaintAsset} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
-              </div>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {maintModal === "staff" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhân sự" : "Thêm nhân sự"}</h2>
-              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={maintEditId ? "Sửa nhân sự" : "Thêm nhân sự"}
+          onClose={() => setMaintModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveMaintStaff} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Họ tên *</label>
@@ -4289,7 +4351,7 @@ export default function SettingsPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Email nhận thông báo</label>
                 <input type="email" value={staffForm.email} onChange={e => setStaffForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: giamdoc@gmail.com" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Giới tính</label>
                   <select value={staffForm.gioi_tinh} onChange={e => setStaffForm(p => ({ ...p, gioi_tinh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
@@ -4312,28 +4374,27 @@ export default function SettingsPage() {
                 <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
                 <label htmlFor="staff-active" className="text-sm font-bold text-slate-600">Đang làm việc</label>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-                <button onClick={saveMaintStaff} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
-              </div>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {personnelLinkModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-800">Liên kết vào hồ sơ có sẵn</h2>
-                <p className="text-xs text-slate-500">
-                  {profiles.find((profile) => profile.id === personnelLinkModal.profileId)?.full_name || "Tài khoản đã chọn"}
-                </p>
-              </div>
-              <button onClick={() => setPersonnelLinkModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title="Liên kết vào hồ sơ có sẵn"
+          onClose={() => setPersonnelLinkModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setPersonnelLinkModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={handleQuickLinkProfileToStaff} disabled={maintSaving || !personnelLinkModal.staffId} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
+                {maintSaving ? "Đang lưu..." : "Liên kết"}
+              </button>
+            </>
+          }
+        >
+              <p className="text-xs text-slate-500 -mt-2 mb-4">
+                {profiles.find((profile) => profile.id === personnelLinkModal.profileId)?.full_name || "Tài khoản đã chọn"}
+              </p>
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chọn hồ sơ chưa liên kết</label>
@@ -4350,27 +4411,24 @@ export default function SettingsPage() {
                   ))}
                 </select>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setPersonnelLinkModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-                <button onClick={handleQuickLinkProfileToStaff} disabled={maintSaving || !personnelLinkModal.staffId} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
-                  {maintSaving ? "Đang lưu..." : "Liên kết"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {maintModal === "staff-group" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{maintEditId ? "Sửa nhóm" : "Thêm nhóm"}</h2>
-              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={maintEditId ? "Sửa nhóm" : "Thêm nhóm"}
+          onClose={() => setMaintModal(null)}
+          maxWidth="lg"
+          footer={
+            <>
+              <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={savePersonnelGroup} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu nhóm"}</button>
+            </>
+          }
+        >
+              <div className="space-y-4">
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã nhóm</label>
                   <input value={personnelGroupForm.code} onChange={e => setPersonnelGroupForm((p) => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: bao-tri" />
@@ -4392,25 +4450,25 @@ export default function SettingsPage() {
                 <input type="checkbox" id="personnel-group-active" checked={personnelGroupForm.is_active} onChange={e => setPersonnelGroupForm((p) => ({ ...p, is_active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
                 <label htmlFor="personnel-group-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setMaintModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-                <button onClick={savePersonnelGroup} disabled={maintSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu nhóm"}</button>
               </div>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {maintModal === "ext-mat" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-base font-extrabold text-slate-800">{maintEditId ? "Sửa vật tư ngoài" : "Thêm vật tư ngoài"}</h2>
-              <button onClick={() => setMaintModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={maintEditId ? "Sửa vật tư ngoài" : "Thêm vật tư ngoài"}
+          onClose={() => setMaintModal(null)}
+          maxWidth="lg"
+          footer={
+            <>
+              <button onClick={() => setMaintModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveMaintExtMat} disabled={maintSaving} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
                   <input value={extMatForm.code} onChange={e => setExtMatForm(p => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: BD22211" />
@@ -4423,7 +4481,7 @@ export default function SettingsPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
                   <input value={extMatForm.ten_vat_tu} onChange={e => setExtMatForm(p => ({ ...p, ten_vat_tu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Bạc đạn 22211" />
@@ -4442,40 +4500,46 @@ export default function SettingsPage() {
                 <label htmlFor="extmat-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setMaintModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={saveMaintExtMat} disabled={maintSaving} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {maintDelConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
-            <p className="text-sm text-slate-600 mb-6">Xóa <span className="font-bold text-red-600">&quot;{maintDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
-            <div className="flex justify-end gap-2">
+        <ModalShell
+          title="Xác nhận xóa"
+          onClose={() => setMaintDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setMaintDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteMaintItem} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-600">Xóa <span className="font-bold text-red-600">&quot;{maintDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+        </ModalShell>
       )}
 
       {modal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">
-                {modal === "add" ? "Thêm hậu tố mới" : `Sửa hậu tố "${editCode}"`}
-              </h2>
-              <button onClick={() => setModal(null)} className="p-2 hover:bg-slate-100 rounded-xl">
-                <X size={18} />
+        <ModalShell
+          title={modal === "add" ? "Thêm hậu tố mới" : `Sửa hậu tố "${editCode}"`}
+          onClose={() => setModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
               </button>
-            </div>
-
-            <div className="p-6 space-y-4">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+              >
+                {saving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {error && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2">
                   <AlertTriangle size={14} /> {error}
@@ -4501,7 +4565,7 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguồn gốc</label>
                   <input
@@ -4520,61 +4584,53 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hủy
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {saving ? "Đang lưu..." : "Lưu"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {delConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-red-100 text-red-600 rounded-xl">
-                <AlertTriangle size={18} />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-slate-800">Xóa hậu tố &quot;{delConfirm}&quot;?</h3>
-                <p className="text-sm text-slate-500 mt-1">Hành động này không thể hoàn tác.</p>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
+        <ModalShell
+          title={
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-red-100 text-red-600 rounded-xl"><AlertTriangle size={18} /></span>
+              {`Xóa hậu tố "${delConfirm}"?`}
+            </span>
+          }
+          onClose={() => setDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
                 Hủy
               </button>
               <button onClick={() => handleDelete(delConfirm)} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">
                 Xóa
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-500">Hành động này không thể hoàn tác.</p>
+        </ModalShell>
       )}
 
       {requiredNoteModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{requiredNoteModal === "add" ? "Thêm ghi chú" : "Sửa ghi chú"}</h2>
-              <button onClick={() => setRequiredNoteModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={requiredNoteModal === "add" ? "Thêm ghi chú" : "Sửa ghi chú"}
+          onClose={() => setRequiredNoteModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setRequiredNoteModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveRequiredNote} disabled={requiredNoteSaving} className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{requiredNoteSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {requiredNoteError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{requiredNoteError}</div>}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung ghi chú *</label>
                 <input value={requiredNoteForm.content} onChange={e => setRequiredNoteForm((p) => ({ ...p, content: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500" placeholder="VD: Xe hư giữa đường" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
                   <input value={requiredNoteForm.sort_order} onChange={e => setRequiredNoteForm((p) => ({ ...p, sort_order: e.target.value.replace(/\D/g, "") }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500" />
@@ -4585,36 +4641,40 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setRequiredNoteModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={saveRequiredNote} disabled={requiredNoteSaving} className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{requiredNoteSaving ? "Đang lưu..." : "Lưu"}</button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {requiredNoteDelConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <p className="text-sm text-slate-600 mb-6">Xóa ghi chú <span className="font-bold text-red-600">&quot;{requiredNoteDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
-            <div className="flex justify-end gap-2">
+        <ModalShell
+          title="Xác nhận xóa"
+          onClose={() => setRequiredNoteDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setRequiredNoteDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteRequiredNote} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-600">Xóa ghi chú <span className="font-bold text-red-600">&quot;{requiredNoteDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+        </ModalShell>
       )}
 
       {vbtModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{vbtModal === "add" ? "Thêm loại văn bản" : "Sửa loại văn bản"}</h2>
-              <button onClick={() => { setVbtModal(null); setVbtError("") }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={vbtModal === "add" ? "Thêm loại văn bản" : "Sửa loại văn bản"}
+          onClose={() => { setVbtModal(null); setVbtError("") }}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => { setVbtModal(null); setVbtError("") }} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveVanBanType} disabled={vbtSaving} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{vbtSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {vbtError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{vbtError}</div>}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã loại *</label>
                   <input
@@ -4643,7 +4703,7 @@ export default function SettingsPage() {
                   placeholder="VD: Báo cáo"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
                   <input
@@ -4658,38 +4718,41 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => { setVbtModal(null); setVbtError("") }} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={saveVanBanType} disabled={vbtSaving} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{vbtSaving ? "Đang lưu..." : "Lưu"}</button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {vbtDelConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
-            <p className="text-sm text-slate-600 mb-6">Xóa loại văn bản <span className="font-bold text-red-600">&quot;{vbtDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
-            {vbtError && <p className="text-sm text-red-600 mb-4">{vbtError}</p>}
-            <div className="flex justify-end gap-2">
+        <ModalShell
+          title="Xác nhận xóa"
+          onClose={() => { setVbtDelConfirm(null); setVbtError("") }}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => { setVbtDelConfirm(null); setVbtError("") }} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteVanBanType} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-600">Xóa loại văn bản <span className="font-bold text-red-600">&quot;{vbtDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+            {vbtError && <p className="text-sm text-red-600 mt-3">{vbtError}</p>}
+        </ModalShell>
       )}
 
       {customerModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-lg font-extrabold text-slate-800">{customerModal === "add" ? "Thêm khách hàng" : "Sửa khách hàng"}</h2>
-              <button onClick={() => setCustomerModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={customerModal === "add" ? "Thêm khách hàng" : "Sửa khách hàng"}
+          onClose={() => setCustomerModal(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setCustomerModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={saveCustomer} disabled={customerSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{customerSaving ? "Đang lưu..." : "Lưu"}</button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {customerError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{customerError}</div>}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã khách hàng</label>
                   <input value={customerForm.ma_kh} onChange={e => setCustomerForm(p => ({ ...p, ma_kh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: OLAM" />
@@ -4707,53 +4770,57 @@ export default function SettingsPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Địa chỉ</label>
                 <input value={customerForm.dia_chi} onChange={e => setCustomerForm(p => ({ ...p, dia_chi: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="Địa chỉ công ty" />
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setCustomerModal(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-                <button onClick={saveCustomer} disabled={customerSaving} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">{customerSaving ? "Đang lưu..." : "Lưu"}</button>
-              </div>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {customerDelConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
-            <p className="text-sm text-slate-600 mb-6">Xóa khách hàng <span className="font-bold text-red-600">&quot;{customerDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
-            <div className="flex justify-end gap-2">
+        <ModalShell
+          title="Xác nhận xóa"
+          onClose={() => setCustomerDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setCustomerDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={deleteCustomer} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl">Xóa</button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-600">Xóa khách hàng <span className="font-bold text-red-600">&quot;{customerDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+        </ModalShell>
       )}
 
       {userEditor && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-800">
-                  {userEditor.mode === "approve" ? "Duyệt tài khoản" : "Sửa quyền người dùng"}
-                </h2>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  {userEditor.fullName} ({userEditor.username})
-                </p>
-              </div>
-              <button onClick={() => setUserEditor(null)} className="p-2 hover:bg-slate-100 rounded-xl">
-                <X size={18} />
+        <ModalShell
+          title={userEditor.mode === "approve" ? "Duyệt tài khoản" : "Sửa quyền người dùng"}
+          onClose={() => setUserEditor(null)}
+          maxWidth="4xl"
+          footer={
+            <>
+              <button onClick={() => setUserEditor(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
               </button>
-            </div>
-
-            <div className="p-6 space-y-5">
+              <button
+                onClick={saveUserApproval}
+                disabled={savingUser}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+              >
+                {savingUser ? "Đang lưu..." : userEditor.mode === "approve" ? "Duyệt và kích hoạt" : "Lưu quyền"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-5">
+              <p className="text-sm text-slate-500 -mt-3">
+                {userEditor.fullName} ({userEditor.username})
+              </p>
               {userError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2">
                   <AlertTriangle size={14} /> {userError}
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhà máy *</label>
                   <select
@@ -4787,7 +4854,7 @@ export default function SettingsPage() {
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-3">Phân quyền *</label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {Object.entries(groupedPermissions).map(([moduleName, options]) => (
                     <div key={moduleName} className="border border-slate-200 rounded-xl p-4">
                       <div className="font-bold text-slate-800 mb-3">{options[0]?.module_label || moduleName}</div>
@@ -4809,51 +4876,36 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setUserEditor(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hủy
-              </button>
-              <button
-                onClick={saveUserApproval}
-                disabled={savingUser}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {savingUser ? "Đang lưu..." : userEditor.mode === "approve" ? "Duyệt và kích hoạt" : "Lưu quyền"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {configModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className={`bg-white rounded-2xl shadow-2xl w-full ${configModal === "forest-plot" ? "max-w-3xl max-h-[90vh] overflow-y-auto" : "max-w-lg max-h-[90vh] overflow-y-auto"}`}>
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-base font-extrabold text-slate-800">
-                {configModal === "warehouse"
-                  ? (configEditId ? "Sửa kho" : "Thêm kho mới")
-                  : configModal === "category"
-                    ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư")
-                    : configModal === "item"
-                      ? (configEditId ? "Sửa vật tư" : "Thêm vật tư")
-                      : configModal === "forest-plot"
-                        ? (configEditId ? "Sửa lô vườn" : "Thêm lô vườn mới")
-                        : configModal === "driver"
-                          ? (configEditId ? "Sửa tài xế" : "Thêm tài xế mới")
-                          : configModal === "vehicle"
-                            ? (configEditId ? "Sửa xe" : "Thêm xe mới")
-                            : (configEditId ? "Sửa điểm giao nhận" : "Thêm điểm giao nhận")}
-              </h2>
-              <button onClick={() => setConfigModal(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
-            </div>
-
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title={
+            configModal === "warehouse"
+              ? (configEditId ? "Sửa kho" : "Thêm kho mới")
+              : configModal === "category"
+                ? (configEditId ? "Sửa nhóm" : "Thêm nhóm vật tư")
+                : configModal === "item"
+                  ? (configEditId ? "Sửa vật tư" : "Thêm vật tư")
+                  : configModal === "forest-plot"
+                    ? (configEditId ? "Sửa lô vườn" : "Thêm lô vườn mới")
+                    : configModal === "driver"
+                      ? (configEditId ? "Sửa tài xế" : "Thêm tài xế mới")
+                      : configModal === "vehicle"
+                        ? (configEditId ? "Sửa xe" : "Thêm xe mới")
+                        : (configEditId ? "Sửa điểm giao nhận" : "Thêm điểm giao nhận")
+          }
+          onClose={() => setConfigModal(null)}
+          maxWidth={configModal === "forest-plot" ? "3xl" : "lg"}
+          footer={configModalFooter}
+        >
+            <div className="space-y-4">
               {configError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{configError}</div>}
 
               {configModal === "warehouse" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã kho *</label>
                       <input value={invWarehouseForm.code} onChange={(e) => setInvWarehouseForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
@@ -4879,7 +4931,7 @@ export default function SettingsPage() {
 
               {configModal === "category" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã nhóm *</label>
                       <input value={invCategoryForm.code} onChange={(e) => setInvCategoryForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
@@ -4901,7 +4953,7 @@ export default function SettingsPage() {
 
               {configModal === "item" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư *</label>
                       <input value={invItemForm.code} onChange={(e) => setInvItemForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
@@ -4914,7 +4966,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
                       <input value={invItemForm.name} onChange={(e) => setInvItemForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -4930,7 +4982,7 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Kho chứa *</label>
-                    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                       {invWarehouses.map((w) => (
                         <label key={w.id} className="flex items-center gap-2 text-sm text-slate-700">
                           <input type="checkbox" checked={invItemForm.selected_warehouse_ids.includes(w.id)} onChange={(e) => setInvItemForm((p) => ({ ...p, selected_warehouse_ids: e.target.checked ? [...p.selected_warehouse_ids, w.id] : p.selected_warehouse_ids.filter((id) => id !== w.id) }))} />
@@ -4939,7 +4991,7 @@ export default function SettingsPage() {
                       ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tồn tối thiểu</label>
                       <input value={invItemForm.min_stock} onChange={(e) => setInvItemForm((p) => ({ ...p, min_stock: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -4962,7 +5014,7 @@ export default function SettingsPage() {
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên tài xế *</label>
                     <input value={dispatchDriverForm.name} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài xế</label>
                       <input value={dispatchDriverForm.code} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -4972,7 +5024,7 @@ export default function SettingsPage() {
                       <input value={dispatchDriverForm.phone} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, phone: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Số GPLX</label>
                       <input value={dispatchDriverForm.license_number} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, license_number: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: 030012345678" />
@@ -4982,7 +5034,7 @@ export default function SettingsPage() {
                       <input value={dispatchDriverForm.license_class} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, license_class: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: B2, C, D" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày hết hạn bằng</label>
                       <input type="date" value={dispatchDriverForm.license_expiry} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, license_expiry: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5003,7 +5055,7 @@ export default function SettingsPage() {
               )}
               {configModal === "vehicle" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã xe *</label>
                       <input value={dispatchVehicleForm.code} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
@@ -5013,7 +5065,7 @@ export default function SettingsPage() {
                       <input value={dispatchVehicleForm.sort_order} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên xe *</label>
                       <input value={dispatchVehicleForm.name} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5023,7 +5075,7 @@ export default function SettingsPage() {
                       <input value={dispatchVehicleForm.vehicle_type} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, vehicle_type: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Biển số</label>
                       <input value={dispatchVehicleForm.plate_number} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, plate_number: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5061,7 +5113,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Hiệu lực từ *</label>
                       <input type="date" value={dispatchVehicleForm.effective_from} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, effective_from: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5080,7 +5132,7 @@ export default function SettingsPage() {
               )}
               {configModal === "delivery-point" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã điểm *</label>
                       <input value={deliveryPointForm.ma_lo} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, ma_lo: e.target.value.toUpperCase() }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5090,7 +5142,7 @@ export default function SettingsPage() {
                       <input value={deliveryPointForm.doi} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, doi: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Vĩ độ *</label>
                       <input value={deliveryPointForm.lat} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, lat: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5100,7 +5152,7 @@ export default function SettingsPage() {
                       <input value={deliveryPointForm.lng} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, lng: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên A</label>
                       <input value={deliveryPointForm.phien_a} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_a: e.target.value }))} placeholder="A1, A2, B1" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5110,7 +5162,7 @@ export default function SettingsPage() {
                       <input value={deliveryPointForm.phien_b} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_b: e.target.value }))} placeholder="A1, B2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Phiên C</label>
                       <input value={deliveryPointForm.phien_c} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_c: e.target.value }))} placeholder="C1, D2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5120,7 +5172,7 @@ export default function SettingsPage() {
                       <input value={deliveryPointForm.phien_d} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, phien_d: e.target.value }))} placeholder="D1, E2" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ tự</label>
                       <input value={deliveryPointForm.sort_order} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, sort_order: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
@@ -5136,7 +5188,7 @@ export default function SettingsPage() {
 
               {configModal === "forest-plot" && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã ngắn (Ten) *</label>
                       <input
@@ -5156,7 +5208,7 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Nông trường</label>
                       <input
@@ -5183,7 +5235,7 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Diện tích (ha)</label>
                       <input
@@ -5201,7 +5253,7 @@ export default function SettingsPage() {
                       </label>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Năm trồng</label>
                       <input
@@ -5230,50 +5282,36 @@ export default function SettingsPage() {
                 </>
               )}
             </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setConfigModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button
-                onClick={
-                  configModal === "warehouse"
-                    ? saveConfigWarehouse
-                    : configModal === "category"
-                      ? saveConfigCategory
-                      : configModal === "item"
-                        ? saveConfigItem
-                        : configModal === "driver"
-                          ? saveDispatchDriver
-                          : configModal === "vehicle"
-                            ? saveDispatchVehicle
-                            : configModal === "forest-plot"
-                              ? saveForestPlot
-                              : saveDeliveryPoint
-                }
-                disabled={configSaving}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {configSaving ? "Đang lưu..." : "Lưu"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {vehicleDriverAddOpen && (
-        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <h2 className="text-base font-extrabold text-slate-800">Thêm tài xế mới</h2>
-              <button onClick={() => setVehicleDriverAddOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
-            </div>
-            <div className="p-6 space-y-4">
+        <ModalShell
+          title="Thêm tài xế mới"
+          onClose={() => setVehicleDriverAddOpen(false)}
+          maxWidth="lg"
+          zIndexClassName="z-[60]"
+          footer={
+            <>
+              <button onClick={() => setVehicleDriverAddOpen(false)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button
+                onClick={() => void handleVehicleDriverAdd()}
+                disabled={vehicleDriverAddSaving}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+              >
+                {vehicleDriverAddSaving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </>
+          }
+        >
+            <div className="space-y-4">
               {vehicleDriverAddError && (
                 <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
                   <AlertTriangle size={14} className="shrink-0" />
                   <span>{vehicleDriverAddError}</span>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên tài xế *</label>
                   <input
@@ -5293,7 +5331,7 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Điện thoại</label>
                   <input
@@ -5313,7 +5351,7 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Số GPLX</label>
                   <input
@@ -5362,33 +5400,23 @@ export default function SettingsPage() {
                 <span className="text-sm font-semibold text-slate-700">Đang sử dụng</span>
               </label>
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setVehicleDriverAddOpen(false)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button
-                onClick={() => void handleVehicleDriverAdd()}
-                disabled={vehicleDriverAddSaving}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {vehicleDriverAddSaving ? "Đang lưu..." : "Lưu"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {assignmentHistoryVehicleId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
-              <div>
-                <h2 className="text-base font-extrabold text-slate-800">Lịch sử tài xế chính</h2>
-                <p className="text-sm text-slate-500 mt-1">
-                  {dispatchVehicles.find((row) => row.id === assignmentHistoryVehicleId)?.name || ""}
-                </p>
-              </div>
-              <button onClick={() => setAssignmentHistoryVehicleId(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={16} /></button>
-            </div>
-            <div className="p-6">
+        <ModalShell
+          title={
+            <span>
+              <span className="block">Lịch sử tài xế chính</span>
+              <span className="text-sm font-normal text-slate-500 mt-1 block">
+                {dispatchVehicles.find((row) => row.id === assignmentHistoryVehicleId)?.name || ""}
+              </span>
+            </span>
+          }
+          onClose={() => setAssignmentHistoryVehicleId(null)}
+          maxWidth="2xl"
+        >
+          <ResponsiveTableWrapper>
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
@@ -5415,29 +5443,31 @@ export default function SettingsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </div>
+          </ResponsiveTableWrapper>
+        </ModalShell>
       )}
 
       {configDelConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-red-100 text-red-600 rounded-xl"><AlertTriangle size={18} /></div>
-              <div>
-                <h3 className="font-extrabold text-slate-800">Xóa &quot;{configDelConfirm.label}&quot;?</h3>
-                <p className="text-sm text-slate-500 mt-1">Hành động này không thể hoàn tác.</p>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
+        <ModalShell
+          title={
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-red-100 text-red-600 rounded-xl"><AlertTriangle size={18} /></span>
+              {`Xóa "${configDelConfirm.label}"?`}
+            </span>
+          }
+          onClose={() => setConfigDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setConfigDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
               <button onClick={() => void deleteConfigItem()} disabled={configSaving} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl disabled:opacity-50">
                 {configSaving ? "Đang xóa..." : "Xóa"}
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-500">Hành động này không thể hoàn tác.</p>
+        </ModalShell>
       )}
 
       {/* ── Tab ISO & Văn bản ── */}
@@ -5451,7 +5481,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Sub-tabs */}
-            <div className="px-6 pt-4 flex gap-2 border-b border-slate-100">
+            <div className="px-6 pt-4 flex flex-wrap gap-2 border-b border-slate-100">
               {([{ key: "chu-ky" as const, label: "Chữ ký cá nhân", icon: KeyRound }]).map((st) => (
                 <button
                   key={st.key}
@@ -5674,26 +5704,45 @@ export default function SettingsPage() {
       )}
 
       {sensitiveActionModal && (
-        <div className="fixed inset-0 z-[80] bg-slate-950/50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-800">{sensitiveActionModal.title}</h3>
-                <p className="text-sm text-slate-500 mt-1">
-                  {sensitiveActionModal.challengeId
-                    ? `Nhập OTP đã gửi đến ${sensitiveActionModal.maskedEmail || "email cá nhân"} để tiếp tục.`
-                    : "Xác minh bằng mật khẩu hiện tại, PIN cũ và OTP email trước khi hệ thống cho phép thay đổi."}
-                </p>
-              </div>
+        <ModalShell
+          title={sensitiveActionModal.title}
+          onClose={closeSensitiveActionModal}
+          maxWidth="md"
+          zIndexClassName="z-[80]"
+          backdropClassName="bg-slate-950/50"
+          footer={
+            <>
               <button
                 onClick={closeSensitiveActionModal}
-                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
-                <X size={16} />
+                Hủy
               </button>
-            </div>
-
-            <div className="p-6 space-y-4">
+              <button
+                onClick={() => void (sensitiveActionModal.challengeId ? confirmSensitiveAction() : requestSensitiveOtp())}
+                disabled={
+                  sensitiveActionLoading ||
+                  (!sensitiveActionModal.challengeId
+                    ? !sensitiveActionModal.currentPassword || !sensitiveActionModal.currentPin
+                    : !sensitiveActionModal.otp)
+                }
+                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50"
+              >
+                {sensitiveActionLoading
+                  ? "Đang xử lý..."
+                  : sensitiveActionModal.challengeId
+                    ? sensitiveActionModal.submitLabel
+                    : "Gửi OTP"}
+              </button>
+            </>
+          }
+        >
+            <p className="text-sm text-slate-500 -mt-2 mb-4">
+              {sensitiveActionModal.challengeId
+                ? `Nhập OTP đã gửi đến ${sensitiveActionModal.maskedEmail || "email cá nhân"} để tiếp tục.`
+                : "Xác minh bằng mật khẩu hiện tại, PIN cũ và OTP email trước khi hệ thống cho phép thay đổi."}
+            </p>
+            <div className="space-y-4">
               {!sensitiveActionModal.challengeId ? (
                 <>
                   <div>
@@ -5753,33 +5802,7 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
-
-            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3 bg-slate-50">
-              <button
-                onClick={closeSensitiveActionModal}
-                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-white rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={() => void (sensitiveActionModal.challengeId ? confirmSensitiveAction() : requestSensitiveOtp())}
-                disabled={
-                  sensitiveActionLoading ||
-                  (!sensitiveActionModal.challengeId
-                    ? !sensitiveActionModal.currentPassword || !sensitiveActionModal.currentPin
-                    : !sensitiveActionModal.otp)
-                }
-                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50"
-              >
-                {sensitiveActionLoading
-                  ? "Đang xử lý..."
-                  : sensitiveActionModal.challengeId
-                    ? sensitiveActionModal.submitLabel
-                    : "Gửi OTP"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   )

@@ -12,9 +12,10 @@ type ProfileRow = {
   department_id: string | null
 }
 
-// GET ?factoryId=xxx&dept=KTNN&leadership=true&permission=documents.create
+// GET ?factoryId=xxx&dept=KTNN&leadership=true&permission=documents.create,documents.ky_phong_ban
 // leadership=true → chỉ trả về role IN ('admin','manager')
 // permission=xxx  → lọc user có explicit grant hoặc role được cấp qua role_permissions
+//                    hỗ trợ nhiều code phân tách bằng dấu phẩy (OR-match)
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const factoryId = searchParams.get("factoryId")
@@ -64,11 +65,13 @@ export async function GET(req: NextRequest) {
 
   // Lọc theo permission (explicit grant hoặc role-based default)
   if (permissionCode) {
+    const codes = permissionCode.split(",").map((c) => c.trim()).filter(Boolean)
+
     // 1. Explicit user grants (cột là granted=true)
     const { data: permRows } = await supabaseAdmin
       .from("user_permissions")
       .select("user_id")
-      .eq("permission_code", permissionCode)
+      .in("permission_code", codes)
       .eq("granted", true)
 
     const explicitUserIds = new Set((permRows || []).map((r: { user_id: string }) => r.user_id))
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest) {
     const { data: rolePermRows } = await supabaseAdmin
       .from("role_permissions")
       .select("role")
-      .eq("permission_code", permissionCode)
+      .in("permission_code", codes)
 
     const rolesWithPerm = new Set((rolePermRows || []).map((r: { role: string }) => r.role))
 

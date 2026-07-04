@@ -36,6 +36,14 @@ type ApproverUser = {
   department: string  // Bug 3
 }
 
+// Nội bộ đơn vị: lãnh đạo phòng ban tự động xác định qua Chức vụ (Nhân sự bảo trì)
+type LeaderCandidate = {
+  id: string
+  full_name: string
+  username: string
+  chuc_vu: string
+}
+
 type StepForm = {
   id: string
   type: "phong_ban"
@@ -81,6 +89,11 @@ export default function NewDocumentPage() {
   // Nội bộ đơn vị — danh sách user trong đơn vị và người được chọn ký xác nhận
   const [unitUsers, setUnitUsers] = useState<ApproverUser[]>([])
   const [selectedUnitUserIds, setSelectedUnitUserIds] = useState<string[]>([])
+
+  // Nội bộ đơn vị — lãnh đạo phòng ban tự động xác định (thay cho dropdown phê duyệt tự do)
+  const [deptLeaderCandidates, setDeptLeaderCandidates] = useState<LeaderCandidate[]>([])
+  const [deptLeaderLoading, setDeptLeaderLoading] = useState(false)
+  const [deptLeaderQueried, setDeptLeaderQueried] = useState(false)
 
   // Bug 2: editable mã văn bản
   const [maVanBan, setMaVanBan] = useState("")
@@ -139,15 +152,43 @@ export default function NewDocumentPage() {
     } catch { /* bỏ qua */ }
   }, [deptLeaders])
 
-  // Nội bộ đơn vị: load user trong phòng ban có quyền documents.create
+  // Nội bộ đơn vị: load user trong phòng ban có quyền tạo/ký phòng ban/phê duyệt văn bản
   const loadUnitUsers = useCallback(async (fid: string, dept: string) => {
     if (!dept) return
     try {
       const res = await fetch(
-        `/api/documents/dept-users?factoryId=${fid}&dept=${dept}&leadership=false&permission=documents.create`,
+        `/api/documents/dept-users?factoryId=${fid}&dept=${dept}&leadership=false&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`,
       )
       if (res.ok) setUnitUsers((await res.json()) as ApproverUser[])
     } catch { /* bỏ qua */ }
+  }, [])
+
+  // Nội bộ đơn vị: tự động xác định lãnh đạo phòng ban (Trưởng/Phó phòng, Giám đốc/Phó giám đốc)
+  // đủ điều kiện phê duyệt — thay cho dropdown chọn tay tự do.
+  const loadDeptLeaderCandidates = useCallback(async (fid: string, dept: string) => {
+    setDeptLeaderLoading(true)
+    setDeptLeaderQueried(false)
+    try {
+      const res = await fetch(`/api/documents/dept-leader?factoryId=${fid}&dept=${dept}`)
+      if (res.ok) {
+        const data = (await res.json()) as LeaderCandidate[]
+        setDeptLeaderCandidates(data)
+        if (data.length === 1) {
+          setForm((f) => ({ ...f, phe_duyet_user_id: data[0].id }))
+        } else {
+          setForm((f) => ({ ...f, phe_duyet_user_id: "" }))
+        }
+      } else {
+        setDeptLeaderCandidates([])
+        setForm((f) => ({ ...f, phe_duyet_user_id: "" }))
+      }
+    } catch {
+      setDeptLeaderCandidates([])
+      setForm((f) => ({ ...f, phe_duyet_user_id: "" }))
+    } finally {
+      setDeptLeaderLoading(false)
+      setDeptLeaderQueried(true)
+    }
   }, [])
 
   // Bug 2: Peek next sequence number (không consume — đọc trực tiếp van_ban_sequences)
@@ -234,6 +275,16 @@ export default function NewDocumentPage() {
     }
   }, [factoryId, form.phong_ban, form.pham_vi, loadUnitUsers])
 
+  // Nội bộ đơn vị: tự động tra cứu lãnh đạo phòng ban khi đổi phòng ban / chuyển sang Don_vi
+  useEffect(() => {
+    if (factoryId && form.pham_vi === "Don_vi" && form.phong_ban) {
+      void loadDeptLeaderCandidates(factoryId, form.phong_ban)
+    } else {
+      setDeptLeaderCandidates([])
+      setDeptLeaderQueried(false)
+    }
+  }, [factoryId, form.phong_ban, form.pham_vi, loadDeptLeaderCandidates])
+
   const addStep = () => {
     setSteps((prev) => [...prev, emptyStep(prev.length + 1)])
   }
@@ -286,19 +337,26 @@ export default function NewDocumentPage() {
       setSaveError("Vui lòng điền đầy đủ: Loại văn bản, Phòng ban, Tên văn bản.")
       return
     }
-    if (!form.phe_duyet_user_id) {
+    if (form.pham_vi === "Don_vi") {
+      if (deptLeaderLoading) {
+        setSaveError("Đang xác định người phê duyệt cuối, vui lòng đợi...")
+        return
+      }
+      if (!form.phe_duyet_user_id || !deptLeaderCandidates.some((c) => c.id === form.phe_duyet_user_id)) {
+        setSaveError(
+          deptLeaderQueried && deptLeaderCandidates.length === 0
+            ? "Không tìm thấy lãnh đạo hợp lệ cho phòng ban này. Kiểm tra Chức vụ trong Nhân sự bảo trì, liên kết tài khoản, và quyền phê duyệt."
+            : "Vui lòng chọn Người phê duyệt cuối.",
+        )
+        return
+      }
+    } else if (!form.phe_duyet_user_id) {
       setSaveError("Vui lòng chọn Người phê duyệt cuối.")
       return
     }
-    if (form.cap_tl === "Cấp 1") {
-      if (form.pham_vi === "Don_vi" && selectedUnitUserIds.length === 0) {
-        setSaveError("Cấp 1 Nội bộ đơn vị cần chọn ít nhất 1 người ký xác nhận.")
-        return
-      }
-      if (form.pham_vi === "Cong_ty" && steps.length === 0) {
-        setSaveError("Cấp 1 Nội bộ công ty cần ít nhất 1 bước ký phòng ban.")
-        return
-      }
+    if (form.cap_tl === "Cấp 1" && form.pham_vi === "Cong_ty" && steps.length === 0) {
+      setSaveError("Cấp 1 Nội bộ công ty cần ít nhất 1 bước ký phòng ban.")
+      return
     }
     if (form.pham_vi === "Cong_ty") {
       for (const s of steps) {
@@ -374,7 +432,10 @@ export default function NewDocumentPage() {
       }
       const soBuocTong = thuTuKyJson.length
 
-      const approverUser = approvers.find((a) => a.id === form.phe_duyet_user_id)
+      const approverUser =
+        form.pham_vi === "Don_vi"
+          ? deptLeaderCandidates.find((c) => c.id === form.phe_duyet_user_id)
+          : approvers.find((a) => a.id === form.phe_duyet_user_id)
       const pheDuyetName = approverUser?.full_name || approverUser?.username || ""
 
       let fileGocUrl: string | null = null
@@ -396,8 +457,8 @@ export default function NewDocumentPage() {
         phong_ban: form.phong_ban,
         so_van_ban: String(finalSo).padStart(2, "0"),
         nam: new Date().getFullYear(),
-        cap_tl: form.cap_tl,
-        phan_loai: form.phan_loai,
+        cap_tl: form.pham_vi === "Don_vi" ? "Cấp 1" : form.cap_tl,
+        phan_loai: form.pham_vi === "Don_vi" ? "Thuong" : form.phan_loai,
         trang_thai: "draft",
         is_uploaded: false,
         thu_tu_ky_json: thuTuKyJson,
@@ -440,9 +501,15 @@ export default function NewDocumentPage() {
   }
 
   const isMat = form.phan_loai === "Mat"
-  const selectedApprover = approvers.find((a) => a.id === form.phe_duyet_user_id)
-  // Bug 3: phòng ban của người phê duyệt cuối → loại khỏi dropdown bước ký
-  const approverDept = selectedApprover?.department || ""
+  // Nội bộ đơn vị: người phê duyệt là lãnh đạo phòng ban tự động xác định (deptLeaderCandidates),
+  // không nằm trong danh sách approvers toàn nhà máy dùng cho Nội bộ công ty.
+  const selectedApprover =
+    form.pham_vi === "Don_vi"
+      ? deptLeaderCandidates.find((c) => c.id === form.phe_duyet_user_id)
+      : approvers.find((a) => a.id === form.phe_duyet_user_id)
+  // Bug 3: phòng ban của người phê duyệt cuối → loại khỏi dropdown bước ký (chỉ áp dụng Cong_ty)
+  const approverDept =
+    form.pham_vi === "Don_vi" ? "" : (approvers.find((a) => a.id === form.phe_duyet_user_id)?.department || "")
   // approvers API đã lọc đúng (admin/manager + explicit phe_duyet)
   const filteredApprovers = approvers
 
@@ -481,43 +548,45 @@ export default function NewDocumentPage() {
             <h2 className="text-sm font-bold text-slate-700 mb-4">Thông tin văn bản</h2>
             <div className="space-y-4">
 
-              {/* Bug 5: Phân loại lên ĐẦU TIÊN, nút to và nổi bật hơn */}
-              <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
-                <label className="text-xs font-bold text-slate-600 block mb-2.5">
-                  Phân loại <span className="text-red-500">*</span>
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handlePhanLoaiChange("Thuong")}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                      !isMat
-                        ? "bg-slate-700 text-white border-slate-700 shadow-md"
-                        : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
-                    }`}
-                  >
-                    <Shield size={17} />
-                    Thường
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePhanLoaiChange("Mat")}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                      isMat
-                        ? "bg-red-600 text-white border-red-600 shadow-md"
-                        : "bg-white text-red-500 border-red-300 hover:bg-red-50"
-                    }`}
-                  >
-                    <Lock size={17} />
-                    Mật
-                  </button>
+              {/* Bug 5: Phân loại lên ĐẦU TIÊN, nút to và nổi bật hơn — chỉ áp dụng Nội bộ công ty */}
+              {form.pham_vi !== "Don_vi" && (
+                <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
+                  <label className="text-xs font-bold text-slate-600 block mb-2.5">
+                    Phân loại <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handlePhanLoaiChange("Thuong")}
+                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
+                        !isMat
+                          ? "bg-slate-700 text-white border-slate-700 shadow-md"
+                          : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Shield size={17} />
+                      Thường
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePhanLoaiChange("Mat")}
+                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
+                        isMat
+                          ? "bg-red-600 text-white border-red-600 shadow-md"
+                          : "bg-white text-red-500 border-red-300 hover:bg-red-50"
+                      }`}
+                    >
+                      <Lock size={17} />
+                      Mật
+                    </button>
+                  </div>
+                  <p className={`text-xs mt-2 ${isMat ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                    {isMat
+                      ? "Văn bản Mật: mỗi bước ký cần chọn đích danh người nhận thông báo."
+                      : "Văn bản Thường: thông báo đến trưởng/phó phòng ban tương ứng."}
+                  </p>
                 </div>
-                <p className={`text-xs mt-2 ${isMat ? "text-red-500 font-medium" : "text-slate-400"}`}>
-                  {isMat
-                    ? "Văn bản Mật: mỗi bước ký cần chọn đích danh người nhận thông báo."
-                    : "Văn bản Thường: thông báo đến trưởng/phó phòng ban tương ứng."}
-                </p>
-              </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -624,17 +693,19 @@ export default function NewDocumentPage() {
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp văn bản</label>
-                <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                  value={form.cap_tl}
-                  onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
-                >
-                  <option value="Cấp 1">Cấp 1 — Ký xác nhận/vòng ký, sau đó phê duyệt</option>
-                  <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
-                </select>
-              </div>
+              {form.pham_vi !== "Don_vi" && (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp văn bản</label>
+                  <select
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    value={form.cap_tl}
+                    onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
+                  >
+                    <option value="Cấp 1">Cấp 1 — Ký xác nhận/vòng ký, sau đó phê duyệt</option>
+                    <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
@@ -652,10 +723,16 @@ export default function NewDocumentPage() {
                           : "bg-slate-50 text-slate-500 hover:bg-slate-100"
                       }`}
                       onClick={() => {
-                        setForm((f) => ({ ...f, pham_vi: val }))
+                        setForm((f) => ({
+                          ...f,
+                          pham_vi: val,
+                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
+                          phe_duyet_user_id: "",
+                        }))
                         setSelectedUnitUserIds([])
                         if (val === "Don_vi" && factoryId && form.phong_ban) {
                           void loadUnitUsers(factoryId, form.phong_ban)
+                          // loadDeptLeaderCandidates được effect [factoryId, phong_ban, pham_vi] tự gọi
                         }
                       }}
                     >
@@ -743,32 +820,86 @@ export default function NewDocumentPage() {
             <h2 className="text-sm font-bold text-slate-700 mb-3">
               Người phê duyệt cuối <span className="text-red-500">*</span>
             </h2>
-            <select
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-              value={form.phe_duyet_user_id}
-              onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
-            >
-              <option value="">— Chọn người phê duyệt —</option>
-              {filteredApprovers.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.full_name || a.username}
-                </option>
-              ))}
-            </select>
-            {filteredApprovers.length === 0 && (
-              <p className="text-xs text-slate-400 mt-1.5">
-                {form.pham_vi === "Don_vi"
-                  ? "Chưa có Lãnh đạo nhà máy (Giám đốc, Phó Giám đốc) nào được thiết lập."
-                  : "Chưa có người dùng nào có quyền phê duyệt."}
-              </p>
+
+            {form.pham_vi === "Don_vi" ? (
+              /* --- Nội bộ đơn vị: tự động xác định lãnh đạo phòng ban theo Chức vụ --- */
+              <>
+                {!form.phong_ban ? (
+                  <p className="text-xs text-amber-600">
+                    Chọn phòng ban trước để xác định người phê duyệt.
+                  </p>
+                ) : deptLeaderLoading ? (
+                  <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                    <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                    Đang xác định người phê duyệt...
+                  </p>
+                ) : deptLeaderQueried && deptLeaderCandidates.length === 0 ? (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>
+                      Không tìm thấy lãnh đạo hợp lệ cho phòng ban <strong>{form.phong_ban}</strong>. Kiểm tra:
+                      (1) đã gán Chức vụ / Chức vụ chính quyền lãnh đạo (Trưởng/Phó phòng, Giám đốc/Phó giám đốc)
+                      trong Nhân sự bảo trì; (2) người đó đã được &quot;Liên kết tài khoản&quot;; (3) người đó đã
+                      được cấp quyền phê duyệt văn bản.
+                    </span>
+                  </div>
+                ) : deptLeaderCandidates.length === 1 ? (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 truncate">
+                        {deptLeaderCandidates[0].full_name || deptLeaderCandidates[0].username}
+                      </p>
+                      <p className="text-xs text-slate-500">{deptLeaderCandidates[0].chuc_vu}</p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+                      Tự động xác định
+                    </span>
+                  </div>
+                ) : (
+                  <select
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    value={form.phe_duyet_user_id}
+                    onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
+                  >
+                    <option value="">— Chọn người phê duyệt —</option>
+                    {deptLeaderCandidates.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name || c.username} — {c.chuc_vu}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            ) : (
+              /* --- Nội bộ công ty: chọn tay từ danh sách toàn nhà máy --- */
+              <>
+                <select
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  value={form.phe_duyet_user_id}
+                  onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
+                >
+                  <option value="">— Chọn người phê duyệt —</option>
+                  {filteredApprovers.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.full_name || a.username}
+                    </option>
+                  ))}
+                </select>
+                {filteredApprovers.length === 0 && (
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    Chưa có người dùng nào có quyền phê duyệt.
+                  </p>
+                )}
+                {approverDept && (
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    Phòng ban:{" "}
+                    <strong className="text-slate-600">{approverDept}</strong>
+                    {" "}— sẽ được loại khỏi danh sách bước ký
+                  </p>
+                )}
+              </>
             )}
-            {approverDept && (
-              <p className="text-xs text-slate-400 mt-1.5">
-                Phòng ban:{" "}
-                <strong className="text-slate-600">{approverDept}</strong>
-                {" "}— sẽ được loại khỏi danh sách bước ký
-              </p>
-            )}
+
             <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer mt-2">
               <input
                 type="checkbox"
@@ -787,15 +918,9 @@ export default function NewDocumentPage() {
               <>
                 <h2 className="text-sm font-bold text-slate-700 mb-3">
                   Ký xác nhận (Nội bộ đơn vị)
-                  {form.cap_tl === "Cấp 2" && (
-                    <span className="ml-2 text-xs font-normal text-slate-400">(bỏ qua với Cấp 2)</span>
-                  )}
+                  <span className="ml-2 text-xs font-normal text-slate-400">(tùy chọn — có thể để trống)</span>
                 </h2>
-                {form.cap_tl === "Cấp 2" ? (
-                  <div className="text-sm text-slate-400 text-center py-4">
-                    Văn bản Cấp 2 chuyển thẳng lên phê duyệt.
-                  </div>
-                ) : !form.phong_ban ? (
+                {!form.phong_ban ? (
                   <p className="text-sm text-amber-600 text-center py-4">
                     Chọn Phòng ban trước để hiện danh sách người ký.
                   </p>
@@ -846,7 +971,7 @@ export default function NewDocumentPage() {
                       })}
                   </div>
                 )}
-                {form.cap_tl === "Cấp 1" && selectedUnitUserIds.length > 0 && selectedApprover && (
+                {selectedUnitUserIds.length > 0 && selectedApprover && (
                   <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
                     <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
                       ✓
@@ -1002,7 +1127,11 @@ export default function NewDocumentPage() {
           <div className="flex flex-col gap-2">
             <button
               onClick={handleSave}
-              disabled={saving || maVanBanExists}
+              disabled={
+                saving ||
+                maVanBanExists ||
+                (form.pham_vi === "Don_vi" && deptLeaderQueried && deptLeaderCandidates.length === 0)
+              }
               className="flex items-center justify-center gap-2 w-full px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all"
             >
               {saving ? (

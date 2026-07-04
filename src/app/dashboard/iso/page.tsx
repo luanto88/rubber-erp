@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "./_components/iso-shell"
+import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "./_components/iso-types"
 import { FileText, CheckCircle2, Clock, AlertTriangle, Plus } from "lucide-react"
 import Link from "next/link"
@@ -73,14 +74,14 @@ export default function IsoOverviewPage() {
     <IsoShell>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">Quản lý ISO</h1>
             <p className="text-sm text-slate-500 mt-0.5">Tài liệu quy trình, hướng dẫn và biểu mẫu</p>
           </div>
           <Link
             href="/dashboard/iso/documents/new"
-            className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
           >
             <Plus size={16} /> Tạo tài liệu
           </Link>
@@ -120,6 +121,7 @@ export default function IsoOverviewPage() {
               </Link>
             </div>
           ) : (
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500">
                 <tr>
@@ -160,6 +162,7 @@ export default function IsoOverviewPage() {
                 ))}
               </tbody>
             </table>
+            </ResponsiveTableWrapper>
           )}
         </div>
       </div>

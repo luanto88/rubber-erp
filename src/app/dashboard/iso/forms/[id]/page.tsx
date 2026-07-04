@@ -14,6 +14,7 @@ import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../../_components/iso-shell"
+import { ModalShell } from "../../../_components/modal-shell"
 import {
   fmtDate,
   LOAI_TAI_LIEU_LABEL,
@@ -111,23 +112,12 @@ function ReturnModal({ onConfirm, onClose }: { onConfirm: (lyDo: string) => void
   const [lyDo, setLyDo] = useState("")
   const [err, setErr] = useState("")
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-extrabold text-slate-800">Trả về hồ sơ</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
-        </div>
-        <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về</label>
-        <textarea
-          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-rose-400 resize-none mb-3"
-          rows={3}
-          value={lyDo}
-          onChange={(e) => { setLyDo(e.target.value); setErr("") }}
-          placeholder="Nhập lý do..."
-          autoFocus
-        />
-        {err && <div className="mb-3 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={12} />{err}</div>}
-        <div className="flex gap-2 justify-end">
+    <ModalShell
+      title="Trả về hồ sơ"
+      onClose={onClose}
+      maxWidth="sm"
+      footer={
+        <>
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
           <button
             onClick={() => { if (!lyDo.trim()) { setErr("Vui lòng nhập lý do"); return } onConfirm(lyDo) }}
@@ -135,9 +125,20 @@ function ReturnModal({ onConfirm, onClose }: { onConfirm: (lyDo: string) => void
           >
             Xác nhận trả về
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về</label>
+      <textarea
+        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-rose-400 resize-none mb-3"
+        rows={3}
+        value={lyDo}
+        onChange={(e) => { setLyDo(e.target.value); setErr("") }}
+        placeholder="Nhập lý do..."
+        autoFocus
+      />
+      {err && <div className="mb-3 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={12} />{err}</div>}
+    </ModalShell>
   )
 }
 
@@ -1045,7 +1046,7 @@ export default function IsoFormInstancePage() {
                 Biểu mẫu gốc (read-only)
               </h2>
               {template ? (
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-xs text-slate-400">Tên</span>
                     <p className="font-semibold text-slate-800 mt-0.5">{template.ten_tai_lieu}</p>

@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Search, Plus, FolderOpen, AlertTriangle, X,
+  Search, Plus, FolderOpen, AlertTriangle,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
   Eye, Pencil, Trash2,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
+import { ModalShell } from "../../_components/modal-shell"
+import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
@@ -65,39 +67,12 @@ function CloneDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-extrabold text-slate-800">Tạo bản thực hiện</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="mb-4 p-3 bg-violet-50 rounded-xl text-sm text-violet-800 border border-violet-100">
-          <div className="font-bold truncate">{template.ten_tai_lieu}</div>
-          <div className="text-xs mt-0.5 text-violet-500">
-            {template.ma_tai_lieu} &middot; {LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu ?? ""] ?? template.loai_tai_lieu} &middot; {template.phong_ban}
-          </div>
-        </div>
-
-        <label className="text-xs font-bold text-slate-600 block mb-1.5">Tiêu đề hồ sơ thực hiện</label>
-        <input
-          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 mb-4"
-          value={tieu_de}
-          onChange={(e) => setTieuDe(e.target.value)}
-          placeholder="Nhập tiêu đề..."
-          autoFocus
-        />
-
-        {error && (
-          <div className="mb-3 p-3 bg-red-50 text-red-700 rounded-xl text-xs flex items-start gap-2">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <div className="flex gap-2 justify-end">
+    <ModalShell
+      title="Tạo bản thực hiện"
+      onClose={onClose}
+      maxWidth="md"
+      footer={
+        <>
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
             Hủy
           </button>
@@ -109,9 +84,32 @@ function CloneDialog({
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             Tạo hồ sơ
           </button>
+        </>
+      }
+    >
+      <div className="mb-4 p-3 bg-violet-50 rounded-xl text-sm text-violet-800 border border-violet-100">
+        <div className="font-bold truncate">{template.ten_tai_lieu}</div>
+        <div className="text-xs mt-0.5 text-violet-500">
+          {template.ma_tai_lieu} &middot; {LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu ?? ""] ?? template.loai_tai_lieu} &middot; {template.phong_ban}
         </div>
       </div>
-    </div>
+
+      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tiêu đề hồ sơ thực hiện</label>
+      <input
+        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 mb-4"
+        value={tieu_de}
+        onChange={(e) => setTieuDe(e.target.value)}
+        placeholder="Nhập tiêu đề..."
+        autoFocus
+      />
+
+      {error && (
+        <div className="mb-3 p-3 bg-red-50 text-red-700 rounded-xl text-xs flex items-start gap-2">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+    </ModalShell>
   )
 }
 
@@ -264,17 +262,34 @@ function LapHoSoDialog({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-            <ClipboardList size={18} className="text-emerald-600" />
-            Lập hồ sơ
-          </h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={16} /></button>
-        </div>
+  const footer = (
+    <>
+      <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+        Hủy
+      </button>
+      <button
+        onClick={handleCreate}
+        disabled={saving || !selectedDocId || !tieuDe.trim()}
+        className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+      >
+        {saving ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
+        Lập hồ sơ ngay
+      </button>
+    </>
+  )
 
+  return (
+    <ModalShell
+      title={
+        <span className="flex items-center gap-2">
+          <ClipboardList size={18} className="text-emerald-600" />
+          Lập hồ sơ
+        </span>
+      }
+      onClose={onClose}
+      maxWidth="md"
+      footer={footer}
+    >
         <div className="mb-4">
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban</label>
           {loadingPb ? (
@@ -338,22 +353,7 @@ function LapHoSoDialog({
             <span>{error}</span>
           </div>
         )}
-
-        <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-            Hủy
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={saving || !selectedDocId || !tieuDe.trim()}
-            className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
-          >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
-            Lập hồ sơ ngay
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 
@@ -511,13 +511,13 @@ export default function IsoFormsPage() {
       <div className="space-y-6">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">Thực hiện hồ sơ ISO</h1>
             <p className="text-sm text-slate-500 mt-0.5">Tìm biểu mẫu bằng AI, tạo bản thực hiện và gửi phê duyệt</p>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:items-end gap-1">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleReembed}
                 disabled={reembedding || !factoryId}
@@ -608,7 +608,7 @@ export default function IsoFormsPage() {
 
         {/* ── Instances list ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-slate-100">
             <h2 className="text-sm font-extrabold text-slate-700">Hồ sơ của tôi</h2>
             {/* Status filter chips */}
             <div className="flex gap-1 flex-wrap">
@@ -641,6 +641,7 @@ export default function IsoFormsPage() {
               <p className="text-xs mt-1">Tìm biểu mẫu phía trên để bắt đầu</p>
             </div>
           ) : (
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 text-left">
@@ -710,6 +711,7 @@ export default function IsoFormsPage() {
                 })}
               </tbody>
             </table>
+            </ResponsiveTableWrapper>
           )}
         </div>
       </div>
@@ -740,14 +742,17 @@ export default function IsoFormsPage() {
 
       {/* Delete confirm dialog */}
       {delConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></div>
-              <h3 className="font-bold text-slate-800">Xóa hồ sơ?</h3>
-            </div>
-            <p className="text-sm text-slate-600 mb-5">Hành động này không thể hoàn tác. Hồ sơ và file đính kèm sẽ bị xóa vĩnh viễn.</p>
-            <div className="flex gap-2 justify-end">
+        <ModalShell
+          title={
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-red-100 rounded-xl"><Trash2 size={18} className="text-red-600" /></span>
+              Xóa hồ sơ?
+            </span>
+          }
+          onClose={() => setDelConfirm(null)}
+          maxWidth="sm"
+          footer={
+            <>
               <button onClick={() => setDelConfirm(null)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
                 Hủy
               </button>
@@ -757,9 +762,11 @@ export default function IsoFormsPage() {
               >
                 Xóa
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-600">Hành động này không thể hoàn tác. Hồ sơ và file đính kèm sẽ bị xóa vĩnh viễn.</p>
+        </ModalShell>
       )}
     </IsoShell>
   )
