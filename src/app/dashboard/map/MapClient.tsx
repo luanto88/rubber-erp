@@ -248,7 +248,12 @@ export default function MapClient() {
   const hasFilters = filterTeam || filterVariety || filterYear || searchLot
 
   return (
-    <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-48px)] relative">
+    // Chiều cao phải đặt cứng ở MỌI breakpoint (không chỉ lg:) — nếu chỉ có ở lg:, trên
+    // mobile container ngoài không có chiều cao xác định, khiến flex-1 của khung bản đồ
+    // không có gì để "grow" vào (chỉ còn min-h-[280px] làm sàn, phụ thuộc hành vi flexbox
+    // mơ hồ khi cha không có kích thước xác định) — đây là nguyên nhân khiến bản đồ trắng
+    // trên mobile dù desktop (đã có lg:h-...) vẫn bình thường.
+    <div className="flex flex-col lg:flex-row h-[calc(100dvh-48px)] lg:h-[calc(100vh-48px)] relative">
       {/* ── LEFT: Filter Panel ─────────────────────────────────────────── */}
       <div className={`${showFilters ? "w-full lg:w-80" : "w-0"} transition-all duration-300 overflow-hidden flex-shrink-0`}>
         <div className="w-full lg:w-80 max-h-64 lg:max-h-none lg:h-full overflow-hidden bg-white border-r border-slate-200 flex flex-col">
