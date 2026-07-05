@@ -10,10 +10,12 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
   type ProcessParam,
+  type CheDoRow,
   emptyProcessParamForm,
   type EmptyProcessParamForm,
   ALL_CSR_TYPES,
   CSR_BY_DAY_CHUYEN,
+  resolveCheDoSuggestion,
 } from "../_components/process-types"
 
 const DAY_CHUYEN_OPTIONS = ["Mủ tạp", "Mủ nước"]
@@ -45,6 +47,7 @@ export default function ProcessParamsPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
+  const [cheDoWarning, setCheDoWarning] = useState<string | null>(null)
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -80,33 +83,51 @@ export default function ProcessParamsPage() {
     if (factoryId) void loadData(factoryId)
   }, [factoryId, loadData])
 
-  // Auto-fill thông số từ lần nhập gần nhất khi chọn dây chuyền + loại CSR
+  // Auto-fill thông số từ lần nhập gần nhất khi chọn dây chuyền + loại CSR.
+  // Chạy song song 2 query (khớp đúng CSR + mới nhất bất kể CSR) vì loai_csr là cột optional,
+  // bản ghi mới nhất có thể bị bỏ sót nếu chỉ lọc cứng theo CSR đang chọn.
   useEffect(() => {
-    if (!modal || !factoryId || !form.day_chuyen || !form.loai_csr) return
+    if (!modal || !factoryId || !form.day_chuyen) { setCheDoWarning(null); return }
     const fetchLast = async () => {
-      let q = supabase
-        .from("process_params")
-        .select("nhiet_do_dau_1, nhiet_do_dau_2, thoi_gian_say")
-        .eq("factory_id", factoryId)
-        .eq("day_chuyen", form.day_chuyen)
-        .eq("loai_csr", form.loai_csr)
-        .order("ngay", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(1)
+      const selectCols = "nhiet_do_dau_1, nhiet_do_dau_2, thoi_gian_say, ngay, created_at, loai_csr"
 
-      // Khi edit, bỏ qua chính record đang sửa
-      if (editId) q = q.neq("id", editId)
+      let csrQuery = form.loai_csr
+        ? supabase.from("process_params").select(selectCols)
+            .eq("factory_id", factoryId).eq("day_chuyen", form.day_chuyen).eq("loai_csr", form.loai_csr)
+            .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1)
+        : null
+      if (csrQuery && editId) csrQuery = csrQuery.neq("id", editId)
 
-      const { data } = await q
-      if (data && data.length > 0) {
-        const last = data[0] as { nhiet_do_dau_1: number | null; nhiet_do_dau_2: number | null; thoi_gian_say: number | null }
+      let anyQuery = supabase.from("process_params").select(selectCols)
+        .eq("factory_id", factoryId).eq("day_chuyen", form.day_chuyen)
+        .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1)
+      if (editId) anyQuery = anyQuery.neq("id", editId)
+
+      const [csrRes, anyRes] = await Promise.all([
+        csrQuery ?? Promise.resolve({ data: null as CheDoRow[] | null }),
+        anyQuery,
+      ])
+      const csrMatch = (csrRes.data?.[0] as CheDoRow | undefined) ?? null
+      const latestAny = (anyRes.data?.[0] as CheDoRow | undefined) ?? null
+
+      const applyRow = (row: CheDoRow | null) => {
+        if (!row) return
         setForm(f => ({
           ...f,
-          nhiet_do_dau_1: last.nhiet_do_dau_1 != null ? String(last.nhiet_do_dau_1) : f.nhiet_do_dau_1,
-          nhiet_do_dau_2: last.nhiet_do_dau_2 != null ? String(last.nhiet_do_dau_2) : f.nhiet_do_dau_2,
-          thoi_gian_say: last.thoi_gian_say != null ? String(last.thoi_gian_say) : f.thoi_gian_say,
+          nhiet_do_dau_1: row.nhiet_do_dau_1 != null ? String(row.nhiet_do_dau_1) : f.nhiet_do_dau_1,
+          nhiet_do_dau_2: row.nhiet_do_dau_2 != null ? String(row.nhiet_do_dau_2) : f.nhiet_do_dau_2,
+          thoi_gian_say: row.thoi_gian_say != null ? String(row.thoi_gian_say) : f.thoi_gian_say,
         }))
       }
+
+      if (!form.loai_csr) {
+        applyRow(latestAny)
+        setCheDoWarning(null)
+        return
+      }
+      const { row, warning } = resolveCheDoSuggestion(csrMatch, latestAny, form.loai_csr, formatDate)
+      applyRow(row)
+      setCheDoWarning(warning)
     }
     void fetchLast()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,6 +158,7 @@ export default function ProcessParamsPage() {
   const handleSave = async () => {
     if (!factoryId) return
     if (!form.day_chuyen) { setSaveError("Vui lòng chọn dây chuyền."); return }
+    if (!form.loai_csr) { setSaveError("Vui lòng chọn Loại CSR."); return }
     setSaving(true)
     setSaveError(null)
     const payload = {
@@ -332,7 +354,7 @@ export default function ProcessParamsPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại CSR <span className="text-red-500">*</span></label>
                 <div className="flex flex-wrap gap-2">
                   {(CSR_BY_DAY_CHUYEN[form.day_chuyen] ?? ALL_CSR_TYPES).map(csr => (
                     <button
@@ -352,6 +374,11 @@ export default function ProcessParamsPage() {
                 {form.day_chuyen && form.loai_csr && (
                   <p className="text-xs text-teal-600 mt-1.5">
                     ✓ Thông số sẽ tự điền từ lần nhập gần nhất của {form.day_chuyen} / CSR {form.loai_csr}
+                  </p>
+                )}
+                {cheDoWarning && (
+                  <p className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-1.5">
+                    ⚠ {cheDoWarning}
                   </p>
                 )}
               </div>

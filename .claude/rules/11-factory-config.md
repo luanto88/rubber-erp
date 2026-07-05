@@ -135,6 +135,20 @@ Rule chính thức:
 - Vẽ polygon trực tiếp trên bản đồ trong modal form (leaflet + `@geoman-io/leaflet-geoman-free`)
 - Module EUDR query DB trước, fallback file GeoJSON tĩnh nếu bảng rỗng
 
+## Mục tiêu chất lượng trong cấu hình nhà máy
+
+Danh mục mục tiêu chất lượng theo năm thuộc nhóm cấu hình theo nhà máy, phục vụ Báo cáo thống kê chất lượng của module Kiểm nghiệm.
+
+Rule chính thức:
+
+- Dữ liệu lưu trong bảng `quality_targets`
+- Quản trị tại `Cài đặt → Cấu hình nhà máy → Mục tiêu chất lượng`
+- Khóa duy nhất `(factory_id, nam, chi_tieu, san_pham)`
+- Ngưỡng mục tiêu (`nguong_min`/`nguong_max`) độc lập với ngưỡng chấm Kiểm nghiệm chính thức (TCCS 112:2022/TCVN 3769:2016) — không dùng chung nguồn
+- Nếu năm hiện tại chưa có mục tiêu, báo cáo tự fallback dùng mục tiêu năm liền trước
+
+Chi tiết đầy đủ: `.claude/rules/25-quality-targets-reports-module.md`.
+
 ## Nút thêm nhanh
 
 Trong module nghiệp vụ, `loai_pallet_sx` và `loai_pallet_xuat` có thể có nút `+`.

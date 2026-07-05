@@ -311,6 +311,8 @@ Vi du:
 - Dieu xe: `.claude/rules/19-dispatch-module.md`
 - Thuc hien ho so ISO (form instances + pgvector search): `.claude/rules/20-iso-forms-module.md`
 - Kiem soat qua trinh (thong so ky thuat + do nhanh chi tieu): `.claude/rules/23-process-control-module.md`
+- Chuong thong bao "Viec can lam theo module" (layout.tsx + module-tasks.ts): `.claude/rules/24-notification-bell-module-tasks.md`
+- Muc tieu chat luong theo nam + Bao cao thong ke chat luong (quality_targets, lib/quality-stats.ts, 2 bao cao in): `.claude/rules/25-quality-targets-reports-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
 - ISO và hồ sơ con: đọc `.claude/rules/16-iso-vanban-module.md` và `.claude/rules/17-iso-soat-xet.md`; ưu tiên các mục "Cập nhật mới nhất (2026-05-28)" nếu có mâu thuẫn với logic cũ.
 
@@ -412,3 +414,13 @@ Các dòng dưới đây thay thế các ghi chú ISO cũ phía trên nếu có 
 - `showSignature` trong `SignPlacement`: hồ sơ con (`isCon=true`) có thể ẩn cả chữ ký lẫn tên trong modal placement; tài liệu cha chỉ ẩn được tên.
 - `handleFileUpload` dùng `rebuildDraftCode` sau khi điền trường từ tên file — mã tự sinh ngay sau upload.
 - Form soạn thảo hồ sơ riêng lẻ (`isNew && phan_loai_tl === "con"`) dùng multi-row table (`childDraftRows`) giống tài liệu cha; không còn section đơn "File hồ sơ" với `ref.click()`. Lưu tạo N `iso_documents` từ các dòng, navigate tới doc đầu tiên.
+
+## Ghi chú module Kiểm nghiệm — Mục tiêu chất lượng & Báo cáo thống kê (2026-07-05)
+
+Chi tiết đầy đủ: `.claude/rules/25-quality-targets-reports-module.md`. Tóm tắt các điểm dễ quên:
+
+- Bảng mới `quality_targets` — ngưỡng mục tiêu theo `(nam, chi_tieu, san_pham)` **độc lập** với ngưỡng chấm KN chính thức (TCCS/TCVN); nếu năm hiện tại chưa nhập mục tiêu thì tự fallback dùng mục tiêu năm liền trước.
+- Engine tính toán riêng `src/lib/quality-stats.ts`, cố ý không tái dùng `calcGrade` (`quality/page.tsx`) hay công thức trong `quality-analytics/page.tsx` — bản thứ 3 độc lập, chỉ đồng bộ công thức grading per-field.
+- Báo cáo phân tích SPC (`buildCriterionSpcReport`): khi 1 ngày có nhiều lô, mỗi cột "Mẫu N" là **trung bình vị trí mẫu qua các lô cùng ngày** (không flatten thô — từng gây tràn cột khi ngày có nhiều lô). Cp/Cpk 1 phía cho chỉ tiêu chỉ có 1 giới hạn thật (không bịa biên giả định).
+- Trang in `/dashboard/quality/reports/print`: mỗi chỉ tiêu in đúng 2 trang (bảng dữ liệu + biểu đồ), ngắt trang bằng inline `style={{ pageBreakBefore: "always" }}` — **không dùng CSS sibling selector** vì đã test không đáng tin cậy khi in thật.
+- Giám đốc nhà máy chọn từ dropdown `maintenance_staff` (chức vụ chứa "giám đốc"); người lập báo cáo/nhân viên kỹ thuật luôn là user đang đăng nhập, không nhập tay.

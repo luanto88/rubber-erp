@@ -145,3 +145,11 @@ Khi xoa phieu kiem nghiem:
   - save xong quay lai `Xuat hang`
   - neu ket qua KN lai dat thi auto-gan lo ve dung xe dang cho
 - Neu nguoi dung dang o module `Kiem nghiem` va tao / sua `KN lai (Rot hang)` truc tiep, save xong o lai luong `Kiem nghiem`, khong redirect sang `Xuat hang`
+
+## Mục tiêu chất lượng theo năm & Báo cáo thống kê (2026-07-05)
+
+Chi tiết đầy đủ xem `.claude/rules/25-quality-targets-reports-module.md`. Tóm tắt:
+
+- Bảng `quality_targets` (Cài đặt → Cấu hình nhà máy → Mục tiêu chất lượng) lưu ngưỡng + % mục tiêu theo `(nam, chi_tieu, san_pham)`, **độc lập** với ngưỡng chấm KN chính thức (TCCS/TCVN).
+- `src/lib/quality-stats.ts` là engine tính toán riêng cho 2 báo cáo mới (Bảng thống kê tháng + Phân tích SPC từng chỉ tiêu) — **không** tái dùng `calcGrade` ở trên, chỉ đảm bảo cùng công thức grading per-field.
+- Route in: `/dashboard/quality/reports` (cấu hình bộ lọc) và `/dashboard/quality/reports/print` (in HTML, `window.print()`), truy cập từ nút trong tab Thống kê.

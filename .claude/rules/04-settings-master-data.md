@@ -40,6 +40,10 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 
 - `forest_plots`
 
+#### Kiểm nghiệm
+
+- `quality_targets` — Mục tiêu chất lượng theo năm
+
 ### Tab Danh mục
 
 - `suffixes` — Hậu tố lô (đổi tên từ "Hậu tố mã lô")
@@ -165,6 +169,15 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
   - `is_active` — trạng thái hiển thị
 
 **Lưu ý quan trọng**: Dropdown chọn vật tư trong form biên bản bảo trì — cả `trong_kho` lẫn `ben_ngoai` — đều lấy danh sách từ **`inventory_items`**, không phải `maintenance_external_materials`. Bảng này chỉ dùng để quản lý danh mục trong `Cài đặt`.
+
+### 4.10. Mục tiêu chất lượng
+
+- Bảng: `quality_targets`
+- Vai trò: mục tiêu chất lượng theo năm (ngưỡng + % kỳ vọng) theo `(nam, chi_tieu, san_pham)`, phục vụ Báo cáo thống kê chất lượng module Kiểm nghiệm
+- Quản trị tại: `Cài đặt → Cấu hình nhà máy → Mục tiêu chất lượng`
+- Khóa duy nhất: `(factory_id, nam, chi_tieu, san_pham)`
+- Ngưỡng mục tiêu độc lập với ngưỡng chấm Kiểm nghiệm chính thức (TCCS/TCVN) — không dùng chung nguồn
+- Chi tiết đầy đủ (fallback năm trước, công thức tính, 2 loại báo cáo in): `.claude/rules/25-quality-targets-reports-module.md`
 
 ## 5. Quy định khi dùng trong Điều xe
 

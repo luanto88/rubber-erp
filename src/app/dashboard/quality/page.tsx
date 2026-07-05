@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
@@ -2275,7 +2276,19 @@ export default function QualityPage() {
             </>
           )}
 
-          {mainTab === "thong_ke" && <QualityAnalyticsPage embedded factoryId={factoryId} />}
+          {mainTab === "thong_ke" && (
+            <>
+              <div className="flex justify-end mb-3">
+                <Link
+                  href="/dashboard/quality/reports"
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all"
+                >
+                  <Printer size={15} /> In báo cáo thống kê chất lượng
+                </Link>
+              </div>
+              <QualityAnalyticsPage embedded factoryId={factoryId} />
+            </>
+          )}
         </div>
       )}
 

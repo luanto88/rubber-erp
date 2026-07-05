@@ -19,6 +19,7 @@ description: Schema Supabase - tham chiếu khi viết query, migration hoặc l
 | `ngans` | Ngăn lưu mủ cao su | `id` UUID |
 | `lots` | Lô thành phẩm | `id` UUID |
 | `qc_results` | Kết quả kiểm nghiệm | `id` UUID |
+| `quality_targets` | Mục tiêu chất lượng theo năm (nam, chi_tieu, san_pham) | `id` UUID |
 | `export_orders` | Đơn xuất hàng | `id` UUID |
 | `customers` | Khách hàng | `id` UUID |
 | `forest_plots` | Lô vườn cao su cho EUDR (polygon GeoJSON) | `id` UUID |
@@ -51,6 +52,7 @@ factories
   ├── ngans (factory_id)
   ├── lots (factory_id)
   ├── qc_results (factory_id)
+  ├── quality_targets (factory_id)
   ├── export_orders (factory_id)
   ├── customers (factory_id)
   ├── forest_plots (factory_id)
@@ -286,6 +288,8 @@ Quy định chi tiết về:
 xem tại:
 
 - `.claude/rules/04-settings-master-data.md`
+
+Chi tiết `quality_targets` (mục tiêu chất lượng theo năm) và 2 báo cáo thống kê liên quan xem `.claude/rules/25-quality-targets-reports-module.md`.
 ## Update 2026-06-11: dispatch rows
 
 - `dispatch_entries.rows` da bi ha xuong vai tro cache legacy mirrored tu `dispatch_entry_rows`.

@@ -351,6 +351,43 @@ Trước đây danh sách phiếu đo nhanh chỉ có Xem/In/Xóa — không s�
 - Thêm cột "Người đo" — gom `Array.from(new Set(sheet.rows.map(r => r.nguoi_do).filter(Boolean)))`, join bằng dấu phẩy vì 1 phiếu có thể có nhiều người đo khác nhau qua nhiều mẫu.
 - Thứ tự nút hành động mỗi dòng: Xem (Eye) → In (Printer) → Chia sẻ (Share2) → Sửa (Pencil, có điều kiện) → Thêm (Plus, có điều kiện) → Xóa (Trash2).
 
+## Fix gợi ý "Chế độ sấy" không phản ánh đúng bản ghi mới nhất (2026-07-05)
+
+### Nguyên nhân
+
+Cột `process_params.loai_csr` được thêm bằng migration sau (`20260619_process_params_loai_csr.sql`), không backfill dữ liệu cũ, và trường "Loại CSR" trên form nhập từng là optional. Trong Postgres `NULL = 'x'` luôn `false`, nên câu query gợi ý cũ (`.eq("loai_csr", formLoaiCsr)`) bỏ sót bản ghi mới nhất của 1 dây chuyền nếu bản ghi đó thiếu CSR, tụt xuống lấy 1 bản ghi cũ hơn.
+
+### Fix: query 2 tầng + cảnh báo, thay vì bỏ hẳn lọc CSR
+
+Nghiệp vụ xác nhận 1 dây chuyền CÓ THỂ chạy chế độ sấy khác nhau tùy Loại CSR, nên không được bỏ hẳn điều kiện lọc CSR (sẽ làm sai gợi ý khi 2 CSR xen kẽ). Thay vào đó, chạy song song 2 query (`Promise.all`) ở cả 2 nơi có cùng pattern:
+
+- `src/app/dashboard/process/measurements/page.tsx` (effect lấy `defaultCheDo`)
+- `src/app/dashboard/process/params/page.tsx` (effect `fetchLast`)
+
+1. `csrMatch` — bản ghi mới nhất khớp đúng `factory_id + day_chuyen + loai_csr`.
+2. `latestAny` — bản ghi mới nhất của cả dây chuyền, KHÔNG lọc CSR.
+
+Helper dùng chung `resolveCheDoSuggestion(csrMatch, latestAny, formLoaiCsr, formatDateFn)` trong `process-types.ts`:
+
+- Có `csrMatch` → dùng làm giá trị chính thức; nếu `latestAny` mới hơn (so `ngay` rồi `created_at`) và `loai_csr` khác → set cảnh báo nhẹ "Có chế độ mới hơn ngày X ghi nhận cho CSR khác — kiểm tra lại nếu dây chuyền chỉ chạy 1 chế độ."
+- Không có `csrMatch` nhưng có `latestAny` → dùng `latestAny` làm fallback, cảnh báo "Chưa có dữ liệu riêng cho CSR X, đang dùng chế độ gần nhất của dây chuyền (ngày Y, CSR Z)."
+- Không có cả 2 → rỗng, không cảnh báo.
+- Nếu `formLoaiCsr` rỗng (chưa chọn CSR) → bỏ qua toàn bộ logic cảnh báo, chỉ dùng `latestAny` im lặng.
+
+Cảnh báo hiển thị dạng dòng chữ nhỏ màu amber:
+- `measurements/page.tsx`: state `cheDoWarning`, hiện ngay dưới card "Thông tin phiếu" (cả 2 biến thể editable và read-only của `addRowsMode`).
+- `params/page.tsx`: state `cheDoWarning`, hiện ngay dưới dòng "✓ Thông số sẽ tự điền..." đã có sẵn.
+
+### Bắt buộc chọn Loại CSR khi lưu Thông số kỹ thuật
+
+`params/page.tsx` `handleSave` giờ chặn cứng nếu `!form.loai_csr` (cùng pattern với validate `day_chuyen` đã có) — chặn phát sinh thêm bản ghi `loai_csr = NULL` từ nay về sau. UI vẫn cho phép bấm lại vào chip CSR đang chọn để bỏ chọn khi đang thao tác (không ép cứng ở tầng UI), chỉ chặn tại thời điểm lưu. Nhãn "Loại CSR" đã thêm dấu `*` bắt buộc.
+
+**Lưu ý dữ liệu cũ**: các bản ghi `process_params` có sẵn với `loai_csr = NULL` KHÔNG bị migrate/xóa — vẫn đóng vai trò `latestAny` fallback bình thường, chỉ không còn phát sinh thêm bản ghi NULL mới.
+
+## Redesign chuông thông báo — "Việc cần làm theo module" (2026-07-05)
+
+Chi tiết đầy đủ kiến trúc xem `.claude/rules/24-notification-bell-module-tasks.md`. Tóm tắt phần liên quan module này: khi đang đứng ở `/dashboard/process*`, chuông KHÔNG có section riêng (chưa nằm trong danh sách module được hỗ trợ: ISO, Văn bản, Xuất hàng, Kho vật tư, Chất lượng) — fallback về "Thông báo chung" như các module khác chưa được hỗ trợ.
+
 ## Handoff cho session sau (2026-07-04)
 
 Toàn bộ thay đổi trong phiên này (OCR auto-detect đa ảnh, Sửa/Thêm mẫu + phân quyền, fix layout Row 1, Ca SX động) mới chỉ qua `npx tsc --noEmit` + `npx eslint`, **chưa test tay trên trình duyệt thật**. Việc cần làm tiếp:
@@ -364,3 +401,12 @@ Toàn bộ thay đổi trong phiên này (OCR auto-detect đa ảnh, Sửa/Thêm
 7. **Test tay dropdown "Ca SX" động**: xác nhận đúng nhà máy đang test có dùng `Ca C` hay không trong Thành phẩm, đối chiếu dropdown hiện đúng 2 hoặc 3 lựa chọn tương ứng.
 8. **Mở lại 1 phiếu cũ có `ca_sx` giá trị lịch sử** (`"Ca 2 (Ban)"`, `"Ca 3"`...) qua nút "Sửa" — xác nhận đúng hành vi đã ghi ở trên (dropdown hiển thị trống vì giá trị cũ không khớp option mới); hỏi người dùng nếu cần xử lý thêm, không tự ý migrate.
 9. **Cân nhắc (chưa làm, cần hỏi trước)**: nút "Xóa" phiếu (Trash2) hiện chưa gate theo quyền `process.delete` như 2 nút Sửa/Thêm mới thêm — nếu người dùng muốn nhất quán, cần bổ sung; không tự ý thêm vì ngoài phạm vi yêu cầu ban đầu.
+
+## Handoff cho session sau (2026-07-05)
+
+Fix "Chế độ sấy" (query 2 tầng + cảnh báo + bắt buộc CSR) mới qua `npx tsc --noEmit` + `npx eslint`, **chưa test tay trên trình duyệt/DB thật**:
+
+1. Test case có `csrMatch` cũ + `latestAny` mới hơn khác CSR (dữ liệu lịch sử có sẵn `loai_csr = NULL` hoặc CSR khác) → xác nhận cảnh báo amber xuất hiện đúng cả ở `measurements/page.tsx` (dưới card "Thông tin phiếu") và `params/page.tsx` (dưới dòng "✓ Thông số sẽ tự điền...").
+2. Test case chưa từng có dữ liệu cho CSR đang chọn (`csrMatch` rỗng) nhưng dây chuyền có dữ liệu CSR khác → xác nhận fallback dùng đúng `latestAny`, cảnh báo đúng nội dung.
+3. Test lưu Thông số kỹ thuật không chọn Loại CSR → bị chặn `"Vui lòng chọn Loại CSR."`, không tạo được bản ghi `loai_csr = NULL` mới.
+4. Xác nhận việc bấm lại chip CSR đang chọn để bỏ chọn (giữa lúc thao tác, trước khi lưu) vẫn hoạt động bình thường — chỉ chặn ở bước lưu, không chặn ở UI chọn.

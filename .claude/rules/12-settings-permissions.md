@@ -22,7 +22,7 @@ Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được
 | Tab | Icon | Sub-tab |
 |---|---|---|
 | **Hệ thống** | ShieldCheck | Người dùng, Phân quyền |
-| **Cấu hình nhà máy** | SlidersHorizontal | Kho, Nhóm vật tư, Vật tư, Điểm giao nhận, Tài xế, Tài xế chính, Lô vườn |
+| **Cấu hình nhà máy** | SlidersHorizontal | Kho, Nhóm vật tư, Vật tư, Điểm giao nhận, Tài xế, Tài xế chính, Lô vườn, Mục tiêu chất lượng |
 | **Danh mục** | Database | Hậu tố lô, Thông tin công ty, Khách hàng |
 | **Bảo trì** | Wrench | Thiết bị, Nhân sự bảo trì, Xe & Tài xế, Vật tư ngoài |
 | **ISO & Văn bản** | FileText | Chữ ký cá nhân |
@@ -45,6 +45,7 @@ Bất kỳ danh mục dùng chung nào phát sinh sau này cũng phải được
 - Tài xế chính theo xe (dispatch_vehicle_driver_assignments)
 - Điểm giao nhận (dispatch_delivery_points)
 - Lô vườn (forest_plots) — thêm/sửa/xóa, import GeoJSON, vẽ polygon trên bản đồ
+- Mục tiêu chất lượng (`quality_targets`) — component riêng `settings/_components/quality-targets-tab.tsx`, phục vụ Báo cáo thống kê chất lượng module Kiểm nghiệm (xem `.claude/rules/25-quality-targets-reports-module.md`)
 - **Không còn sub-tab Xe** (đã chuyển sang tab Bảo trì)
 
 **Tab Danh mục:**

@@ -18,6 +18,7 @@ import { supabase } from "@/lib/supabase"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
+import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -170,7 +171,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 
@@ -648,6 +649,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     },
     "forest-plots": {
       filename: "lo_vuon.csv",
+      rows: [],
+    },
+    "quality-targets": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "muc_tieu_chat_luong.csv",
       rows: [],
     },
   }
@@ -3058,7 +3064,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && (
+              {canManageSettings && configTab !== "quality-targets" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -3141,6 +3147,7 @@ export default function SettingsPage() {
                   { key: "items" as const, label: "Vật tư / Hóa chất" },
                   { key: "delivery-points" as const, label: "Điểm giao nhận" },
                   { key: "forest-plots" as const, label: "Lô vườn" },
+                  { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -3441,6 +3448,8 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
                 </ResponsiveTableWrapper>
+              ) : configTab === "quality-targets" ? (
+                <QualityTargetsTab factoryId={factoryId} canManage={canManageSettings} />
               ) : null}
             </div>
           </div>

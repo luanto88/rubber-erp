@@ -91,6 +91,53 @@ export function calcSoNgayLuu(ngayDo: string, ngayBd: string): number {
   return Math.max(0, Math.round((a.getTime() - b.getTime()) / 86400000))
 }
 
+// Dòng process_params dùng để gợi ý chế độ sấy — kèm ngay/created_at/loai_csr để so sánh "mới hơn"
+export type CheDoRow = {
+  nhiet_do_dau_1: number | null
+  nhiet_do_dau_2: number | null
+  thoi_gian_say: number | null
+  ngay: string
+  created_at: string
+  loai_csr: string | null
+}
+
+export type CheDoSuggestion = {
+  row: CheDoRow | null
+  warning: string | null
+}
+
+// So 2 bản ghi process_params: bản khớp đúng Loại CSR đang chọn (csrMatch) và bản mới nhất
+// của cả dây chuyền bất kể CSR (latestAny). Ưu tiên dùng csrMatch làm gợi ý chính thức (giữ
+// đúng nghiệp vụ "chế độ sấy có thể khác nhau theo CSR"), nhưng cảnh báo nếu latestAny mới hơn
+// và khác CSR — vì có thể người vận hành vừa cập nhật chế độ mới mà quên chọn đúng CSR.
+export function resolveCheDoSuggestion(
+  csrMatch: CheDoRow | null,
+  latestAny: CheDoRow | null,
+  formLoaiCsr: string,
+  formatDateFn: (iso: string) => string,
+): CheDoSuggestion {
+  const isNewer = (a: CheDoRow, b: CheDoRow) => {
+    if (a.ngay !== b.ngay) return a.ngay > b.ngay
+    return new Date(a.created_at).getTime() > new Date(b.created_at).getTime()
+  }
+  if (csrMatch) {
+    const hasNewerOtherCsr = !!latestAny && latestAny.loai_csr !== formLoaiCsr && isNewer(latestAny, csrMatch)
+    return {
+      row: csrMatch,
+      warning: hasNewerOtherCsr
+        ? `Có chế độ mới hơn ngày ${formatDateFn(latestAny!.ngay)} ghi nhận cho CSR ${latestAny!.loai_csr || "chưa chọn"} — kiểm tra lại nếu dây chuyền chỉ chạy 1 chế độ.`
+        : null,
+    }
+  }
+  if (latestAny) {
+    return {
+      row: latestAny,
+      warning: `Chưa có dữ liệu riêng cho CSR ${formLoaiCsr}, đang dùng chế độ gần nhất của dây chuyền (ngày ${formatDateFn(latestAny.ngay)}, CSR ${latestAny.loai_csr || "chưa chọn"}).`,
+    }
+  }
+  return { row: null, warning: null }
+}
+
 export type EmptyProcessParamForm = {
   ngay: string
   day_chuyen: string
