@@ -53,6 +53,7 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - Vẫn cho phép lưu khi chỉ có `Ngày bắt đầu`.
 - Chuyển `Đóng -> Chờ sản xuất` là thao tác chỉ dành cho admin.
 - Chuyển `Đã sản xuất -> Đang sản xuất` để mở lại cho nhập tiếp cũng chỉ dành cho admin.
+- Nút "Sửa" ngăn ở `src/app/dashboard/storage/page.tsx`: user thường chỉ sửa được khi ngăn ở `Đang nhận`, `Đóng`, `Chờ sản xuất`. Admin được sửa ở **mọi trạng thái**, kể cả `Đang sản xuất` và `Đã sản xuất` — dùng để đồng bộ lại khối lượng nguyên liệu (thêm/bớt chuyến, đổi ngày) khi dữ liệu điều xe có sai lệch phát sinh sau khi ngăn đã vào sản xuất.
 
 ## 4. Thành phẩm (`lots`)
 

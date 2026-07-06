@@ -744,6 +744,7 @@ export default function StoragePage() {
   const openEdit = (n: Ngan) => {
     const normalizedStatus = normalizeStorageStatus(n.trang_thai)
     const canEditThisStatus =
+      isAdmin ||
       normalizedStatus === STORAGE_STATUS_RECEIVING ||
       normalizedStatus === STORAGE_STATUS_CLOSED ||
       normalizedStatus === STORAGE_STATUS_WAITING
@@ -1197,6 +1198,7 @@ export default function StoragePage() {
               const normalizedStatus = normalizeStorageStatus(n.trang_thai)
               const canEditThisNgan =
                 canEditStorage && (
+                  isAdmin ||
                   normalizedStatus === STORAGE_STATUS_RECEIVING ||
                   normalizedStatus === STORAGE_STATUS_CLOSED ||
                   normalizedStatus === STORAGE_STATUS_WAITING
@@ -1471,6 +1473,13 @@ export default function StoragePage() {
                               className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
                               title="Xem chi tiết">
                               <Eye size={14} />
+                            </button>
+                          )}
+                          {canEditStorage && isAdmin && (
+                            <button onClick={() => openEdit(n)}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-blue-500 transition-colors"
+                              title="Sửa">
+                              <Edit2 size={14} />
                             </button>
                           )}
                           {canReturnToDraft && isAdmin && (
