@@ -37,6 +37,7 @@ export type QualityTargetRow = {
   tieu_chuan: string | null
   ty_le_muc_tieu: number
   noi_dung_muc_tieu: string | null
+  target_value: number | null
   sort_order: number
   is_active: boolean
 }
@@ -48,6 +49,7 @@ export type QualityTargetForm = {
   nguong_max: number | null
   tieu_chuan: string | null
   ty_le_muc_tieu: number
+  target_value: number | null
 }
 
 type LimitRow = {
@@ -582,6 +584,7 @@ export type CriterionSpcReportData = {
   rControl: { center: number; ucl: number; lcl: number }
   histogram: HistogramBin[]
   allValues: number[]
+  targetValue: number | null
   nhanXet: string
 }
 
@@ -601,8 +604,12 @@ export async function buildCriterionSpcReport(params: {
 }): Promise<CriterionSpcReportData> {
   const { factoryId, nam, thang, sanPham, chiTieu, tieuChuan } = params
   const { tuThang, denThang } = monthRange(nam, thang)
-  const allRows = await fetchAllQcResults(factoryId, tuThang, denThang)
+  const [allRows, targetRows] = await Promise.all([
+    fetchAllQcResults(factoryId, tuThang, denThang),
+    fetchQualityTargets(factoryId, nam),
+  ])
   const rowsForSp = allRows.filter((r) => matchesSanPham(r.loai_csr, sanPham))
+  const targetValue = buildTargetResolver(targetRows, nam)(chiTieu, sanPham)?.target_value ?? null
 
   const byDay = new Map<string, QcResultRow[]>()
   let maxCols = 0
@@ -668,7 +675,7 @@ export async function buildCriterionSpcReport(params: {
   const rSd = populationSd(rangeValues)
   const rControl = { center: rMean, ucl: rMean + 3 * rSd, lcl: Math.max(0, rMean - 3 * rSd) }
 
-  const histogram = buildHistogramBins(allValues, 6)
+  const histogram = buildHistogramBins(allValues, 12)
 
   const nhanXet = buildCpkNhanXet(cap.cpk, chiTieuDisplayLabel(chiTieu, sanPham), sanPham)
 
@@ -682,6 +689,7 @@ export async function buildCriterionSpcReport(params: {
     rControl,
     histogram,
     allValues,
+    targetValue,
     nhanXet,
   }
 }

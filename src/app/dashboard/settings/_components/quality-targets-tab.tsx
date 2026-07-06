@@ -27,6 +27,7 @@ type FormState = {
   tieu_chuan: string
   ty_le_muc_tieu: string
   noi_dung_muc_tieu: string
+  target_value: string
 }
 
 function emptyForm(nam: number): FormState {
@@ -39,6 +40,7 @@ function emptyForm(nam: number): FormState {
     tieu_chuan: TIEU_CHUAN_OPTIONS[0],
     ty_le_muc_tieu: "",
     noi_dung_muc_tieu: "",
+    target_value: "",
   }
 }
 
@@ -50,6 +52,7 @@ function toFormPreview(f: FormState): QualityTargetForm {
     nguong_max: f.nguong_max.trim() ? Number(f.nguong_max) : null,
     tieu_chuan: f.chi_tieu === "tccs_tong" ? f.tieu_chuan : null,
     ty_le_muc_tieu: Number(f.ty_le_muc_tieu) || 0,
+    target_value: f.target_value.trim() ? Number(f.target_value) : null,
   }
 }
 
@@ -113,6 +116,7 @@ export function QualityTargetsTab({ factoryId, canManage }: { factoryId: string 
       tieu_chuan: row.tieu_chuan || TIEU_CHUAN_OPTIONS[0],
       ty_le_muc_tieu: String(row.ty_le_muc_tieu),
       noi_dung_muc_tieu: row.noi_dung_muc_tieu || "",
+      target_value: row.target_value != null ? String(row.target_value) : "",
     })
     setModalOpen(true)
   }
@@ -145,6 +149,7 @@ export function QualityTargetsTab({ factoryId, canManage }: { factoryId: string 
         tieu_chuan: preview.tieu_chuan,
         ty_le_muc_tieu: tyLe,
         noi_dung_muc_tieu: form.noi_dung_muc_tieu.trim() || buildMucTieuText(preview),
+        target_value: preview.target_value,
         sort_order: rowsForYear.length + 1,
       }
       const result = editId
@@ -202,14 +207,14 @@ export function QualityTargetsTab({ factoryId, canManage }: { factoryId: string 
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["STT", "Nội dung mục tiêu", "Sản phẩm", "Chỉ tiêu", "Tỷ lệ mục tiêu", ""].map((h) => (
+                {["STT", "Nội dung mục tiêu", "Sản phẩm", "Chỉ tiêu", "Tỷ lệ mục tiêu", "Target", ""].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rowsForYear.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Chưa có mục tiêu nào cho năm {year}.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có mục tiêu nào cho năm {year}.</td></tr>
               ) : rowsForYear.map((row, idx) => (
                 <tr key={row.id} className="row-hover">
                   <td className="px-4 py-3 text-slate-500">{idx + 1}</td>
@@ -217,6 +222,7 @@ export function QualityTargetsTab({ factoryId, canManage }: { factoryId: string 
                   <td className="px-4 py-3 font-mono font-bold text-emerald-700">CSR{row.san_pham}</td>
                   <td className="px-4 py-3 text-slate-700">{chiTieuDisplayLabel(row.chi_tieu, row.san_pham)}</td>
                   <td className="px-4 py-3 font-bold text-slate-700">{row.ty_le_muc_tieu}%</td>
+                  <td className="px-4 py-3 text-slate-500">{row.target_value != null ? row.target_value : "—"}</td>
                   <td className="px-4 py-3">
                     {canManage && (
                       <div className="flex items-center gap-1">
@@ -333,6 +339,19 @@ export function QualityTargetsTab({ factoryId, canManage }: { factoryId: string 
                     />
                   </div>
                 )}
+              </div>
+            )}
+
+            {meta.bound !== "rate" && (
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Giá trị trọng tâm (Target) — tùy chọn</label>
+                <input
+                  value={form.target_value}
+                  onChange={(e) => setForm((p) => ({ ...p, target_value: e.target.value }))}
+                  placeholder="Giá trị lý tưởng muốn nhắm tới, dùng để vẽ biểu đồ phân bố"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+                <p className="text-xs text-slate-400 mt-1">Khác với ngưỡng đạt/không đạt ở trên — đây là giá trị trung tâm lý tưởng, chỉ dùng để vẽ đường &quot;Trọng tâm&quot; trên biểu đồ phân bố khi in Báo cáo phân tích chỉ tiêu. Để trống nếu chưa có.</p>
               </div>
             )}
 

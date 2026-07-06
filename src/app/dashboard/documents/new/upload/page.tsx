@@ -10,8 +10,12 @@ import {
   LOAI_VAN_BAN_LABEL,
   LOAI_VAN_BAN_OPTIONS,
   PHONG_BAN_VAN_BAN_OPTIONS,
+  SIGN_AS_OPTIONS,
+  SIGN_AS_LABEL,
   buildMaVanBan,
+  sanitizeStorageFileName,
   type VanBanDocumentType,
+  type SignAsType,
 } from "../../_components/documents-types"
 import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2 } from "lucide-react"
 
@@ -120,8 +124,10 @@ export default function UploadVanBanPage() {
     pham_vi: "Cong_ty" as "Cong_ty" | "Don_vi",
     soan_thao_user_id: "",
     phe_duyet_user_id: "",
-    phe_duyet_is_kt: false,
   })
+  // Văn bản upload ký tay không đi qua SignPlacementModal (không có bước ký live) —
+  // chọn ký thay ngay tại đây, ghi trực tiếp vào phe_duyet_sign_as lúc lưu.
+  const [pheDuyetSignAs, setPheDuyetSignAs] = useState<SignAsType>("none")
 
   // Người phê duyệt
   const [approvers, setApprovers] = useState<ApproverUser[]>([])
@@ -430,7 +436,7 @@ export default function UploadVanBanPage() {
       // Upload file lên Storage
       setUploading(true)
       const ext = file.name.split(".").pop() || "pdf"
-      const filePath = `${factoryId}/vanban/uploads/${Date.now()}_${file.name.replace(/\s+/g, "_")}`
+      const filePath = `${factoryId}/vanban/uploads/${Date.now()}_${sanitizeStorageFileName(file.name)}`
       const { error: uploadErr } = await supabase.storage
         .from(STORAGE_BUCKET)
         .upload(filePath, file, { upsert: false })
@@ -467,7 +473,7 @@ export default function UploadVanBanPage() {
         nguoi_soan_thao_display: form.pham_vi === "Don_vi" ? (soanThaoUser?.full_name || soanThaoUser?.username || null) : null,
         phe_duyet_user_id: form.phe_duyet_user_id || null,
         phe_duyet: pheDuyetName || null,
-        phe_duyet_is_kt: form.phe_duyet_is_kt,
+        phe_duyet_sign_as: pheDuyetSignAs === "none" ? null : pheDuyetSignAs,
         thu_tu_ky_json: form.pham_vi === "Cong_ty"
           ? steps.map((s, i) => ({
               step: i + 1,
@@ -826,15 +832,31 @@ export default function UploadVanBanPage() {
               </>
             )}
 
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer mt-3">
-              <input
-                type="checkbox"
-                checked={form.phe_duyet_is_kt}
-                onChange={(e) => setForm((f) => ({ ...f, phe_duyet_is_kt: e.target.checked }))}
-                className="rounded"
-              />
-              Ký thay — thêm <strong className="font-mono text-slate-700">KT.</strong> trước chức danh
-            </label>
+            <div className="mt-3">
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="upload-sign-as"
+                    checked={pheDuyetSignAs === "none"}
+                    onChange={() => setPheDuyetSignAs("none")}
+                  />
+                  Ký trực tiếp
+                </label>
+                {SIGN_AS_OPTIONS.map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="upload-sign-as"
+                      checked={pheDuyetSignAs === opt}
+                      onChange={() => setPheDuyetSignAs(opt)}
+                    />
+                    {SIGN_AS_LABEL[opt]}
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Phòng ban đã ký (Cong_ty) / Người lập (Don_vi) */}

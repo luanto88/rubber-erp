@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { resolveUserDeptCode } from "@/lib/documents-dept"
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,24 +18,7 @@ export async function GET(req: NextRequest) {
 
     if (!profile) return NextResponse.json({ code: null })
 
-    let code: string | null = null
-
-    if (profile.department_id) {
-      const { data: dept } = await supabaseAdmin
-        .from("departments")
-        .select("code")
-        .eq("id", profile.department_id)
-        .single()
-      code = (dept?.code as string) || null
-    } else if (profile.department) {
-      const { data: dept } = await supabaseAdmin
-        .from("departments")
-        .select("code")
-        .eq("name", profile.department)
-        .limit(1)
-        .maybeSingle()
-      code = (dept?.code as string) || null
-    }
+    const code = await resolveUserDeptCode(supabaseAdmin, profile)
 
     return NextResponse.json({ code })
   } catch {

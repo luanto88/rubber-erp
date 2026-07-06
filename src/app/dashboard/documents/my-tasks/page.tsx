@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
 import {
   LOAI_VAN_BAN_LABEL,
@@ -99,9 +99,11 @@ export default function MyTasksPage() {
           continue
         }
 
-        // cho_phe_duyet → người có quyền documents.phe_duyet hoặc admin
+        // cho_phe_duyet → chỉ đúng người được chỉ định phe_duyet_user_id hoặc admin
+        // (không gate theo quyền chung documents.phe_duyet — quyền đó có thể cấp cho
+        // nhiều lãnh đạo/trưởng phòng khác không phải người được chỉ định trên văn bản này)
         if (doc.trang_thai === "cho_phe_duyet") {
-          if (isAdmin || hasPermission(sessionUser, "documents.phe_duyet")) {
+          if (isAdmin || doc.phe_duyet_user_id === uid) {
             result.push({
               doc,
               role: "phe_duyet",

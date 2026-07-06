@@ -3,7 +3,7 @@
 import { Fragment, Suspense, useEffect, useState, type CSSProperties } from "react"
 import { useSearchParams } from "next/navigation"
 import {
-  Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine,
+  Bar, CartesianGrid, ComposedChart, LabelList, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts"
 import {
@@ -18,7 +18,7 @@ import {
 
 function CompanyHeader() {
   return (
-    <div className="text-center mb-1">
+    <div className="text-left mb-1">
       <div className="font-bold uppercase" style={{ fontSize: "12px", color: "#000000" }}>
         Công ty TNHH PTCS Phước Hòa Kampongthom
       </div>
@@ -29,9 +29,15 @@ function CompanyHeader() {
   )
 }
 
+/** Ngăn trình duyệt cắt ngang khối này khi ngắt trang in — dùng cho chữ ký để tên không rơi sang trang khác với chức vụ. */
+const avoidBreakStyle: CSSProperties = { breakInside: "avoid", pageBreakInside: "avoid" }
+
 function SignatureRow({ cols }: { cols: { role: string; name?: string }[] }) {
   return (
-    <div className="grid gap-4 mt-8 text-center text-xs" style={{ gridTemplateColumns: `repeat(${cols.length}, 1fr)` }}>
+    <div
+      className="grid gap-4 mt-8 text-center text-xs"
+      style={{ gridTemplateColumns: `repeat(${cols.length}, 1fr)`, ...avoidBreakStyle }}
+    >
       {cols.map((col, i) => (
         <div key={i}>
           <div className="font-bold text-slate-700 mb-1">{col.role}</div>
@@ -48,7 +54,7 @@ function SignatureRow({ cols }: { cols: { role: string; name?: string }[] }) {
 /** Chữ ký đơn, canh góc phải trang — dùng cho các trang biểu đồ thống kê chỉ có 1 người ký (người lập). */
 function SignatureRight({ role, name }: { role: string; name?: string }) {
   return (
-    <div className="flex justify-end mt-8">
+    <div className="flex justify-end mt-8" style={avoidBreakStyle}>
       <div className="text-center text-xs" style={{ width: 180 }}>
         <div className="font-bold text-slate-700 mb-1">{role}</div>
         <div className="h-16" />
@@ -92,8 +98,8 @@ function MonthlyReportSection({ data, giamDoc, nguoiThucHien, pageBreak }: { dat
         const sanPhamInGroup = data.sanPhamList.filter((sp) => rowsInGroup.some((r) => r.bySanPham[sp]))
         if (sanPhamInGroup.length === 0) return null
         return (
-          <div key={nhom} className="mb-4">
-            <table className="w-full border-collapse text-[11px]" style={{ border: "1px solid #000" }}>
+          <div key={nhom} className="mb-4 overflow-x-auto">
+            <table className="w-full border-collapse text-[10px]" style={{ border: "1px solid #000", tableLayout: "fixed" }}>
               <thead>
                 <tr>
                   <td colSpan={1 + sanPhamInGroup.length * 4} className="text-center font-bold py-1" style={{ border: "1px solid #000" }}>
@@ -205,7 +211,8 @@ function CriterionDataTablePage({ data, pageBreak }: { data: CriterionSpcReportD
       <CompanyHeader />
       <CriterionHeader data={data} />
 
-      <table className="w-full border-collapse text-[9px] mb-2" style={cellStyle}>
+      <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-[8px] mb-2" style={{ ...cellStyle, tableLayout: "fixed" }}>
         <thead>
           <tr>
             <td rowSpan={2} style={cellStyle} className="px-1 font-bold text-center">Ngày</td>
@@ -239,8 +246,10 @@ function CriterionDataTablePage({ data, pageBreak }: { data: CriterionSpcReportD
           </tr>
         </tbody>
       </table>
+      </div>
 
-      <table className="w-full border-collapse text-[9px] mb-4" style={cellStyle}>
+      <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-[8px] mb-4" style={{ ...cellStyle, tableLayout: "fixed" }}>
         <thead>
           <tr>
             {["STD", "Mean", ...(data.overall.usl != null ? ["USL"] : []), ...(data.overall.lsl != null ? ["LSL"] : []), "UCL", "LCL", "Min", "Max", "Cp", "Cpk", "Range"].map((h) => (
@@ -264,15 +273,35 @@ function CriterionDataTablePage({ data, pageBreak }: { data: CriterionSpcReportD
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
 
-/** Trang 2 / chỉ tiêu: biểu đồ phân bố + biểu đồ 6 xích ma (cùng hàng), biểu đồ kiểm soát X/R, nhận xét, ký tên. */
+/** Mật độ Gauss tại x, scale theo count (n × độ rộng bin) để overlay cùng đơn vị với chiều cao cột histogram. */
+function normalDensityScaled(x: number, mean: number, sd: number, n: number, binWidth: number): number {
+  if (sd <= 0 || n <= 0) return 0
+  const density = (1 / (sd * Math.sqrt(2 * Math.PI))) * Math.exp(-((x - mean) ** 2) / (2 * sd * sd))
+  return density * n * binWidth
+}
+
+/** Trang 2 / chỉ tiêu: biểu đồ phân bố (histogram + đường cong chuẩn), biểu đồ kiểm soát X/R, nhận xét, ký tên. */
 function CriterionChartsPage({ data, nguoiThucHien, pageBreak }: { data: CriterionSpcReportData; nguoiThucHien: string; pageBreak: boolean }) {
   const xChartData = data.dailyRows.map((r, i) => ({ idx: i + 1, x: r.xBar }))
   const rChartData = data.dailyRows.map((r, i) => ({ idx: i + 1, r: r.range }))
-  const sigmaChartData = data.allValues.map((v, i) => ({ idx: i + 1, x: v }))
+
+  // 1 mảng data dùng chung cho cả Bar (histogram) và Line (đường cong chuẩn) — mỗi bin
+  // vừa có "count" thật vừa có "curve" (mật độ chuẩn tại đúng điểm giữa bin đó), tránh
+  // dùng prop `data` riêng từng series (kiểu recharts hiện tại không hỗ trợ prop này).
+  const binWidth = data.histogram.length ? data.histogram[0].to - data.histogram[0].from : 1
+  const distChartData = data.histogram.map((b) => {
+    const x = (b.from + b.to) / 2
+    return { x, count: b.count, curve: normalDensityScaled(x, data.overall.mean, data.overall.sd, data.allValues.length, binWidth) }
+  })
+  const domainMin = data.histogram.length ? data.histogram[0].from : data.overall.min
+  const domainMax = data.histogram.length ? data.histogram[data.histogram.length - 1].to : data.overall.max
+  const yMax = Math.max(1, ...distChartData.map((p) => p.count), ...distChartData.map((p) => p.curve))
+  const barSize = Math.max(10, 700 / (distChartData.length || 1))
 
   return (
     <div className="report-page" style={pageBreakStyle(pageBreak)}>
@@ -280,35 +309,30 @@ function CriterionChartsPage({ data, nguoiThucHien, pageBreak }: { data: Criteri
       <CriterionHeader data={data} />
 
       <div className="font-bold mb-1" style={{ fontSize: "11px" }}>1. BIỂU ĐỒ PHÂN BỐ</div>
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div style={{ height: 170 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.histogram.map((b) => ({ name: b.rangeLabel, count: b.count }))}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" tick={{ fontSize: 8 }} />
-              <YAxis tick={{ fontSize: 8 }} allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#0f766e" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div>
-          <div className="text-center font-bold" style={{ fontSize: "9px" }}>BIỂU ĐỒ 6 XÍCH MA (CÁC GIÁ TRỊ ĐƠN LẺ)</div>
-          <div style={{ height: 155 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sigmaChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="idx" tick={{ fontSize: 8 }} />
-                <YAxis tick={{ fontSize: 8 }} domain={["auto", "auto"]} />
-                <Tooltip />
-                <ReferenceLine y={data.overall.mean} stroke="#0f766e" strokeDasharray="4 2" label={{ value: "CENTER", fontSize: 8 }} />
-                {data.overall.usl != null && <ReferenceLine y={data.overall.usl} stroke="#dc2626" strokeDasharray="2 2" label={{ value: "USL", fontSize: 8 }} />}
-                {data.overall.lsl != null && <ReferenceLine y={data.overall.lsl} stroke="#dc2626" strokeDasharray="2 2" label={{ value: "LSL", fontSize: 8 }} />}
-                <Line type="monotone" dataKey="x" stroke="#2563eb" dot={false} strokeWidth={1} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      <div style={{ height: 230 }} className="mb-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={distChartData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis type="number" dataKey="x" domain={[domainMin, domainMax]} tick={{ fontSize: 8 }} />
+            <YAxis type="number" domain={[0, Math.ceil(yMax * 1.3)]} tick={{ fontSize: 8 }} allowDecimals={false} />
+            <Tooltip />
+            <Bar dataKey="count" fill="#38bdf8" stroke="#0284c7" strokeWidth={1} barSize={barSize} isAnimationActive={false} radius={[2, 2, 0, 0]}>
+              <LabelList dataKey="count" position="top" formatter={(v: string | number | boolean | null | undefined) => (v ? String(v) : "")} style={{ fontSize: 9, fontWeight: 700, fill: "#0f172a" }} />
+            </Bar>
+            <Line dataKey="curve" stroke="#f97316" strokeWidth={2} dot={false} type="monotone" isAnimationActive={false} />
+            {data.overall.usl != null && (
+              <ReferenceLine x={data.overall.usl} stroke="#ef4444" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `USL ${fmt3(data.overall.usl)}`, fontSize: 9, fill: "#b91c1c" }} />
+            )}
+            {data.overall.lsl != null && (
+              <ReferenceLine x={data.overall.lsl} stroke="#ef4444" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `LSL ${fmt3(data.overall.lsl)}`, fontSize: 9, fill: "#b91c1c" }} />
+            )}
+            <ReferenceLine x={data.overall.ucl} stroke="#f59e0b" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `UCL ${fmt3(data.overall.ucl)}`, fontSize: 9, fill: "#b45309" }} />
+            <ReferenceLine x={data.overall.lcl} stroke="#f59e0b" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `LCL ${fmt3(data.overall.lcl)}`, fontSize: 9, fill: "#b45309" }} />
+            {data.targetValue != null && (
+              <ReferenceLine x={data.targetValue} stroke="#3b82f6" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `Target ${fmt3(data.targetValue)}`, fontSize: 9, fill: "#1d4ed8" }} />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
 
       <div className="font-bold mb-1" style={{ fontSize: "11px" }}>2. BIỂU ĐỒ KIỂM SOÁT</div>
@@ -322,9 +346,11 @@ function CriterionChartsPage({ data, nguoiThucHien, pageBreak }: { data: Criteri
                 <XAxis dataKey="idx" tick={{ fontSize: 8 }} />
                 <YAxis tick={{ fontSize: 8 }} domain={["auto", "auto"]} />
                 <Tooltip />
-                <ReferenceLine y={data.overall.mean} stroke="#0f766e" strokeDasharray="4 2" label={{ value: "CL", fontSize: 9 }} />
-                {data.overall.usl != null && <ReferenceLine y={data.overall.usl} stroke="#dc2626" label={{ value: "USL", fontSize: 9 }} />}
-                {data.overall.lsl != null && <ReferenceLine y={data.overall.lsl} stroke="#dc2626" label={{ value: "LSL", fontSize: 9 }} />}
+                <ReferenceLine y={data.overall.mean} stroke="#0f766e" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `CL ${fmt3(data.overall.mean)}`, fontSize: 9 }} />
+                <ReferenceLine y={data.overall.ucl} stroke="#f59e0b" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `UCL ${fmt3(data.overall.ucl)}`, fontSize: 9, fill: "#b45309" }} />
+                <ReferenceLine y={data.overall.lcl} stroke="#f59e0b" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `LCL ${fmt3(data.overall.lcl)}`, fontSize: 9, fill: "#b45309" }} />
+                {data.overall.usl != null && <ReferenceLine y={data.overall.usl} stroke="#dc2626" ifOverflow="extendDomain" label={{ value: `USL ${fmt3(data.overall.usl)}`, fontSize: 9 }} />}
+                {data.overall.lsl != null && <ReferenceLine y={data.overall.lsl} stroke="#dc2626" ifOverflow="extendDomain" label={{ value: `LSL ${fmt3(data.overall.lsl)}`, fontSize: 9 }} />}
                 <Line type="monotone" dataKey="x" stroke="#2563eb" dot={{ r: 2 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
@@ -339,9 +365,9 @@ function CriterionChartsPage({ data, nguoiThucHien, pageBreak }: { data: Criteri
                 <XAxis dataKey="idx" tick={{ fontSize: 8 }} />
                 <YAxis tick={{ fontSize: 8 }} domain={[0, "auto"]} />
                 <Tooltip />
-                <ReferenceLine y={data.rControl.center} stroke="#0f766e" strokeDasharray="4 2" label={{ value: "R̄", fontSize: 9 }} />
-                <ReferenceLine y={data.rControl.ucl} stroke="#dc2626" label={{ value: "UCL", fontSize: 9 }} />
-                <ReferenceLine y={data.rControl.lcl} stroke="#dc2626" label={{ value: "LCL", fontSize: 9 }} />
+                <ReferenceLine y={data.rControl.center} stroke="#0f766e" strokeDasharray="4 2" ifOverflow="extendDomain" label={{ value: `R̄ ${fmt3(data.rControl.center)}`, fontSize: 9 }} />
+                <ReferenceLine y={data.rControl.ucl} stroke="#dc2626" ifOverflow="extendDomain" label={{ value: `UCL ${fmt3(data.rControl.ucl)}`, fontSize: 9 }} />
+                <ReferenceLine y={data.rControl.lcl} stroke="#dc2626" ifOverflow="extendDomain" label={{ value: `LCL ${fmt3(data.rControl.lcl)}`, fontSize: 9 }} />
                 <Line type="monotone" dataKey="r" stroke="#ea580c" dot={{ r: 2 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
@@ -417,12 +443,12 @@ function QualityReportsPrintInner() {
   if (error) return <div className="p-12 text-center text-red-500">{error}</div>
 
   return (
-    <div className="bg-slate-100 min-h-screen py-6 print:bg-white print:py-0">
-      <div className="no-print fixed top-4 right-4 z-50">
-        <button onClick={() => window.print()} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg">In</button>
+    <div className="bg-slate-100 min-h-screen py-4 sm:py-6 print:bg-white print:py-0">
+      <div className="no-print fixed top-2 right-2 sm:top-4 sm:right-4 z-50">
+        <button onClick={() => window.print()} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm sm:text-base font-bold rounded-xl shadow-lg">In</button>
       </div>
 
-      <div className="print-page bg-white mx-auto p-8 shadow-lg print:shadow-none" style={{ maxWidth: "1100px" }}>
+      <div className="print-page bg-white mx-auto w-full p-3 sm:p-8 print:p-2 shadow-lg print:shadow-none" style={{ maxWidth: "780px" }}>
         {monthly && <MonthlyReportSection data={monthly} giamDoc={giamDoc} nguoiThucHien={nguoiThucHien} pageBreak={false} />}
         {spcList.map((d, i) => (
           <Fragment key={`${d.sanPham}-${d.chiTieu}`}>
@@ -436,7 +462,7 @@ function QualityReportsPrintInner() {
       <style jsx global>{`
         @media print {
           .no-print { display: none !important; }
-          @page { size: A4 landscape; margin: 10mm; }
+          @page { size: A4 portrait; margin: 10mm 8mm; }
           body { font-size: 10pt; }
         }
       `}</style>

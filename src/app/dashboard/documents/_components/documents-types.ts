@@ -16,6 +16,19 @@ export type VanBanDocumentType = {
   is_active: boolean
 }
 
+// Chữ viết tắt ký thay, chọn ngay lúc ký (SignPlacementModal) — áp dụng cho cả bước
+// ký phòng ban (nguoi_ky[step].sign_as) và Phê duyệt cuối (phe_duyet_sign_as).
+export type SignAsType = "none" | "KT" | "TM" | "TL" | "TUQ"
+
+export const SIGN_AS_OPTIONS: Exclude<SignAsType, "none">[] = ["KT", "TM", "TL", "TUQ"]
+
+export const SIGN_AS_LABEL: Record<Exclude<SignAsType, "none">, string> = {
+  KT: "KT. (Ký thay)",
+  TM: "TM. (Thay mặt)",
+  TL: "TL. (Thừa lệnh)",
+  TUQ: "TUQ. (Thừa ủy quyền)",
+}
+
 export type ThuTuKyStep = {
   step: number
   type: "phong_ban" | "ca_nhan"
@@ -43,7 +56,7 @@ export type VanBanDocument = {
   thu_tu_ky_json: ThuTuKyStep[]
   buoc_hien_tai: number
   so_buoc_tong: number
-  nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string }>
+  nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }>
   placement_ky: Record<string, unknown>
   tra_ve_step: number | null
   tra_ve_ly_do: string | null
@@ -63,7 +76,8 @@ export type VanBanDocument = {
   phe_duyet_user_id: string | null
   phe_duyet: string | null
   pham_vi: string | null            // 'Cong_ty' | 'Don_vi'
-  phe_duyet_is_kt: boolean | null   // true → thêm "KT." trước tên phê duyệt
+  phe_duyet_is_kt: boolean | null   // LEGACY — set lúc soạn thảo cho văn bản cũ trước 2026-07-06, chỉ đọc để hiển thị
+  phe_duyet_sign_as: SignAsType | null   // chọn lúc ký (SignPlacementModal) — thay thế phe_duyet_is_kt cho văn bản mới
   ghi_chu: string | null
   created_at: string
   updated_at: string
@@ -127,6 +141,25 @@ export function buildMaVanBan(so: number | string, kyHieu: string, phongBan: str
   const num = typeof so === "string" ? parseInt(so) : so
   if (isNaN(num) || num < 1) return ""
   return `${String(num).padStart(2, "0")}/${kyHieu}-${phongBan}`
+}
+
+// Chuẩn hóa tên file lưu vào Supabase Storage — bỏ dấu tiếng Việt, chỉ giữ ký tự an toàn.
+// Mirror sanitizeStorageFileName() của module ISO (iso/documents/[id]/page.tsx).
+export function sanitizeStorageFileName(fileName: string): string {
+  const lastDot = fileName.lastIndexOf(".")
+  const rawBase = lastDot > 0 ? fileName.slice(0, lastDot) : fileName
+  const rawExt = lastDot > 0 ? fileName.slice(lastDot + 1) : ""
+  const base = rawBase
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120)
+  const ext = rawExt.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()
+  return `${base || "file"}${ext ? `.${ext}` : ""}`
 }
 
 export function fmtDate(d: string | null | undefined): string {

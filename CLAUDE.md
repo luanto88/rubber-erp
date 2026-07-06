@@ -424,3 +424,9 @@ Chi tiết đầy đủ: `.claude/rules/25-quality-targets-reports-module.md`. T
 - Báo cáo phân tích SPC (`buildCriterionSpcReport`): khi 1 ngày có nhiều lô, mỗi cột "Mẫu N" là **trung bình vị trí mẫu qua các lô cùng ngày** (không flatten thô — từng gây tràn cột khi ngày có nhiều lô). Cp/Cpk 1 phía cho chỉ tiêu chỉ có 1 giới hạn thật (không bịa biên giả định).
 - Trang in `/dashboard/quality/reports/print`: mỗi chỉ tiêu in đúng 2 trang (bảng dữ liệu + biểu đồ), ngắt trang bằng inline `style={{ pageBreakBefore: "always" }}` — **không dùng CSS sibling selector** vì đã test không đáng tin cậy khi in thật.
 - Giám đốc nhà máy chọn từ dropdown `maintenance_staff` (chức vụ chứa "giám đốc"); người lập báo cáo/nhân viên kỹ thuật luôn là user đang đăng nhập, không nhập tay.
+
+### Cập nhật 2026-07-06
+
+- `quality_targets` có thêm cột `target_value` (migration `20260706_quality_targets_value.sql`) — giá trị "trọng tâm" lý tưởng, **độc lập với `nguong_min/max`**, chỉ vẽ đường tham chiếu trên biểu đồ phân bố, không dùng để tính đạt/không đạt.
+- Trang in chuyển khổ `A4 landscape` → `A4 portrait`; các bảng rộng dùng `table-layout: fixed` + `overflow-x-auto` để không tràn trang; tiêu đề công ty/nhà máy chuyển sang căn trái; khối chữ ký thêm `break-inside: avoid` để tên không bị ngắt sang trang khác với chức danh.
+- Biểu đồ phân bố (Báo cáo 2): cột histogram đổi màu nổi bật hơn + thêm nhãn số đếm trên đỉnh cột (`LabelList`); bổ sung đường UCL/LCL (thiếu trước đó); mọi đường tham chiếu (USL/LSL/Target/UCL/LCL/CL/R̄) trên cả 3 biểu đồ đều hiện kèm giá trị số, dùng `ifOverflow="extendDomain"` để trục tự giãn. Chi tiết đầy đủ xem mục "Cập nhật 2026-07-06" trong `.claude/rules/25-quality-targets-reports-module.md`.

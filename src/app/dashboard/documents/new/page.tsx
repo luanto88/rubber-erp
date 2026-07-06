@@ -11,6 +11,7 @@ import {
   LOAI_VAN_BAN_OPTIONS,
   PHONG_BAN_VAN_BAN_OPTIONS,
   buildMaVanBan,
+  sanitizeStorageFileName,
   type VanBanDocumentType,
   type ThuTuKyStep,
 } from "../_components/documents-types"
@@ -81,7 +82,6 @@ export default function NewDocumentPage() {
     phan_loai: "Thuong",
     pham_vi: "Cong_ty",        // 'Cong_ty' | 'Don_vi'
     phe_duyet_user_id: "",
-    phe_duyet_is_kt: false,    // true → thêm "KT." trước tên phê duyệt
     ghi_chu: "",
     mo_ta_tim_kiem: "",  // Bug 6e: AI search description
   })
@@ -440,7 +440,7 @@ export default function NewDocumentPage() {
 
       let fileGocUrl: string | null = null
       if (file) {
-        const filePath = `${factoryId}/vanban/drafts/${Date.now()}_${file.name.replace(/\s+/g, "_")}`
+        const filePath = `${factoryId}/vanban/drafts/${Date.now()}_${sanitizeStorageFileName(file.name)}`
         const { error: uploadErr } = await supabase.storage
           .from(STORAGE_BUCKET)
           .upload(filePath, file, { upsert: false })
@@ -471,7 +471,6 @@ export default function NewDocumentPage() {
         phe_duyet_user_id: form.phe_duyet_user_id || null,
         phe_duyet: pheDuyetName || null,
         pham_vi: form.pham_vi,
-        phe_duyet_is_kt: form.phe_duyet_is_kt,
         ghi_chu: form.ghi_chu.trim() || null,
         mo_ta_tim_kiem: form.mo_ta_tim_kiem.trim() || null,
         file_goc_url: fileGocUrl,
@@ -548,7 +547,84 @@ export default function NewDocumentPage() {
             <h2 className="text-sm font-bold text-slate-700 mb-4">Thông tin văn bản</h2>
             <div className="space-y-4">
 
-              {/* Bug 5: Phân loại lên ĐẦU TIÊN, nút to và nổi bật hơn — chỉ áp dụng Nội bộ công ty */}
+              {/* File đính kèm — đặt đầu tiên vì các trường bên dưới phụ thuộc auto-fill từ tên file */}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  File đính kèm (tùy chọn)
+                </label>
+                {file ? (
+                  <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <FileText size={16} className="text-blue-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
+                      <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
+                    </div>
+                    <button
+                      onClick={() => setFile(null)}
+                      className="p-1 text-slate-400 hover:text-red-600 rounded"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
+                    <Plus size={16} className="text-slate-400" />
+                    <span className="text-sm text-slate-500">
+                      Đính kèm file nháp (PDF, DOCX, XLSX)
+                      <span className="ml-1 text-slate-400 text-xs">— tên file sẽ tự điền tên VB nếu trống</span>
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,.docx,.xlsx,.doc,.xls"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Phạm vi lưu hành — quyết định luồng ký, đặt sớm để các section bên dưới hiện đúng nhánh */}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
+                <div className="flex rounded-xl overflow-hidden border border-slate-200">
+                  {[
+                    { val: "Cong_ty", label: "Nội bộ công ty" },
+                    { val: "Don_vi", label: "Nội bộ đơn vị" },
+                  ].map(({ val, label }) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={`flex-1 py-2 text-sm font-bold transition-all ${
+                        form.pham_vi === val
+                          ? "bg-blue-600 text-white"
+                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                      }`}
+                      onClick={() => {
+                        setForm((f) => ({
+                          ...f,
+                          pham_vi: val,
+                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
+                          phe_duyet_user_id: "",
+                        }))
+                        setSelectedUnitUserIds([])
+                        if (val === "Don_vi" && factoryId && form.phong_ban) {
+                          void loadUnitUsers(factoryId, form.phong_ban)
+                          // loadDeptLeaderCandidates được effect [factoryId, phong_ban, pham_vi] tự gọi
+                        }
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {form.pham_vi === "Don_vi" && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    Văn bản chỉ lưu hành trong đơn vị. Người trong phòng ban ký xác nhận tuần tự.
+                  </p>
+                )}
+              </div>
+
+              {/* Phân loại Thường/Mật — chỉ áp dụng Nội bộ công ty */}
               {form.pham_vi !== "Don_vi" && (
                 <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
                   <label className="text-xs font-bold text-slate-600 block mb-2.5">
@@ -708,46 +784,6 @@ export default function NewDocumentPage() {
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
-                <div className="flex rounded-xl overflow-hidden border border-slate-200">
-                  {[
-                    { val: "Cong_ty", label: "Nội bộ công ty" },
-                    { val: "Don_vi", label: "Nội bộ đơn vị" },
-                  ].map(({ val, label }) => (
-                    <button
-                      key={val}
-                      type="button"
-                      className={`flex-1 py-2 text-sm font-bold transition-all ${
-                        form.pham_vi === val
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      }`}
-                      onClick={() => {
-                        setForm((f) => ({
-                          ...f,
-                          pham_vi: val,
-                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
-                          phe_duyet_user_id: "",
-                        }))
-                        setSelectedUnitUserIds([])
-                        if (val === "Don_vi" && factoryId && form.phong_ban) {
-                          void loadUnitUsers(factoryId, form.phong_ban)
-                          // loadDeptLeaderCandidates được effect [factoryId, phong_ban, pham_vi] tự gọi
-                        }
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {form.pham_vi === "Don_vi" && (
-                  <p className="text-xs text-blue-600 mt-1">
-                    Văn bản chỉ lưu hành trong đơn vị. Người trong phòng ban ký xác nhận tuần tự.
-                  </p>
-                )}
-              </div>
-
-              <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                 <textarea
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
@@ -772,42 +808,6 @@ export default function NewDocumentPage() {
                   value={form.mo_ta_tim_kiem}
                   onChange={(e) => setForm((f) => ({ ...f, mo_ta_tim_kiem: e.target.value }))}
                 />
-              </div>
-
-              {/* Bug 4: File upload với auto-fill tên */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  File đính kèm (tùy chọn)
-                </label>
-                {file ? (
-                  <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <FileText size={16} className="text-blue-600 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
-                      <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                    <button
-                      onClick={() => setFile(null)}
-                      className="p-1 text-slate-400 hover:text-red-600 rounded"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <label className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
-                    <Plus size={16} className="text-slate-400" />
-                    <span className="text-sm text-slate-500">
-                      Đính kèm file nháp (PDF, DOCX, XLSX)
-                      <span className="ml-1 text-slate-400 text-xs">— tên file sẽ tự điền tên VB nếu trống</span>
-                    </span>
-                    <input
-                      type="file"
-                      accept=".pdf,.docx,.xlsx,.doc,.xls"
-                      className="hidden"
-                      onChange={handleFileChange}
-                    />
-                  </label>
-                )}
               </div>
             </div>
           </div>
@@ -899,16 +899,6 @@ export default function NewDocumentPage() {
                 )}
               </>
             )}
-
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer mt-2">
-              <input
-                type="checkbox"
-                checked={!!form.phe_duyet_is_kt}
-                onChange={(e) => setForm((f) => ({ ...f, phe_duyet_is_kt: e.target.checked }))}
-                className="rounded"
-              />
-              Phó ký thay — thêm <strong className="font-mono text-slate-700">KT.</strong> trước chức danh
-            </label>
           </div>
 
           {/* Vòng ký / Ký xác nhận — phân nhánh theo pham_vi */}

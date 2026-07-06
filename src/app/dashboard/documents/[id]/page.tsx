@@ -1,7 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import type { RefObject } from "react"
 import { useParams, useRouter } from "next/navigation"
+import Draggable from "react-draggable"
+import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
@@ -11,9 +14,12 @@ import {
   TRANG_THAI_LABEL,
   PHAN_LOAI_LABEL,
   PHAN_LOAI_COLOR,
+  SIGN_AS_OPTIONS,
+  SIGN_AS_LABEL,
   fmtDate,
   type VanBanDocument,
   type ThuTuKyStep,
+  type SignAsType,
 } from "../_components/documents-types"
 import { Lock } from "lucide-react"
 import {
@@ -25,6 +31,9 @@ import {
   Send,
   RotateCcw,
   Eye,
+  EyeOff,
+  ChevronLeft,
+  ChevronRight,
   ArrowLeft,
   PenLine,
   ShieldCheck,
@@ -35,8 +44,453 @@ import {
 import type { SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
-type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string }
+type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }
 type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
+
+// Vị trí đặt chữ ký/tên trên PDF do người ký kéo-thả chọn — khớp với
+// SignPlacement lưu trong van_ban_documents.placement_ky[stepKey] (sign/route.ts)
+type SignPlacement = {
+  page: number
+  x: number; y: number; width: number; height: number
+  showSignature: boolean; showSignerName: boolean
+  nameX: number; nameY: number; nameWidth: number; nameHeight: number
+  // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng khi file là PDF
+  showPrefix?: boolean
+  prefixX?: number; prefixY?: number; prefixWidth?: number; prefixHeight?: number
+}
+type ElemState = { x: number; y: number; w: number; h: number }
+
+// Đọc tiền tố ký thay để hiển thị trên timeline — ưu tiên sign_as (cơ chế mới,
+// chọn lúc ký), fallback is_kt/phe_duyet_is_kt (cơ chế cũ, chỉ có "KT.") cho dữ
+// liệu lịch sử trước 2026-07-06.
+function signAsPrefixLabel(signAs: SignAsType | null | undefined, legacyIsKt: boolean | null | undefined): string {
+  if (signAs && signAs !== "none") return `${signAs}. `
+  if (legacyIsKt) return "KT. "
+  return ""
+}
+
+function urlIsPdf(url: string | null): boolean {
+  if (!url) return false
+  return url.split("?")[0].toLowerCase().endsWith(".pdf")
+}
+
+function getDocFileExt(url: string | null, officeType: string | null): string | null {
+  if (!url) return officeType || null
+  const clean = url.split("?")[0].toLowerCase()
+  if (clean.endsWith(".pdf")) return "pdf"
+  if (clean.endsWith(".docx")) return "docx"
+  if (clean.endsWith(".xlsx")) return "xlsx"
+  return officeType || null
+}
+
+// Modal ký duyệt: hiển thị canvas PDF cho kéo-thả vị trí chữ ký/tên khi file nguồn
+// là PDF (mirror SignPlacementModal của module ISO forms — iso/forms/[id]/page.tsx);
+// với file Office chỉ hiển thị thông tin tag sẽ được thay tự động, không có canvas.
+function SignPlacementModal({
+  stepLabel,
+  sourceFileUrl,
+  fileExt,
+  signatureUrl,
+  userName,
+  sigTag,
+  nameTag,
+  acting,
+  allowSignAs,
+  onConfirm,
+  onClose,
+}: {
+  stepLabel: string
+  sourceFileUrl: string | null
+  fileExt: string | null
+  signatureUrl: string | null
+  userName: string
+  sigTag: string
+  nameTag: string
+  acting: boolean
+  allowSignAs: boolean
+  onConfirm: (pin: string, placement: SignPlacement | null, signAs: SignAsType) => void
+  onClose: () => void
+}) {
+  const isPdf = fileExt === "pdf" || urlIsPdf(sourceFileUrl)
+  const showCanvas = isPdf && !!sourceFileUrl
+  // Ký thay (KT./TM./TL./TUQ.) chỉ có ý nghĩa trên PDF (vẽ hộp riêng) — DOCX/XLSX
+  // không cần tính năng này (đã xác nhận với người dùng), nên chỉ hiện picker khi
+  // action cho phép VÀ file đang ký là PDF.
+  const showSignAsPicker = allowSignAs && showCanvas
+
+  const [pin, setPin] = useState("")
+  const [pinError, setPinError] = useState("")
+  const [signAs, setSignAs] = useState<SignAsType>("none")
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfDocRef = useRef<any>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [numPages, setNumPages] = useState(1)
+  const [canvasW, setCanvasW] = useState(0)
+  const [canvasH, setCanvasH] = useState(0)
+  const [pdfPageH, setPdfPageH] = useState(841.89) // A4 default
+  const [pdfScale, setPdfScale] = useState(1.5)
+  const [canvasReady, setCanvasReady] = useState(false)
+  const [canvasError, setCanvasError] = useState<string | null>(null)
+
+  const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
+  const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: 140, h: 24 })
+  const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
+  const [showSig, setShowSig] = useState(true)
+  const [showName, setShowName] = useState(true)
+
+  const sigNodeRef = useRef<HTMLDivElement>(null)
+  const nameNodeRef = useRef<HTMLDivElement>(null)
+  const prefixNodeRef = useRef<HTMLDivElement>(null)
+
+  // Render 1 trang PDF lên canvas — tách riêng để gọi lại khi đổi trang, không
+  // phải load lại toàn bộ file. Tính lại viewport/scale mỗi lần vì kích thước
+  // trang có thể khác nhau giữa các trang.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderPdfPage = async (pdf: any, pageNum: number) => {
+    const page = await pdf.getPage(pageNum)
+    const scale = 1.5
+    const viewport = page.getViewport({ scale })
+    const cW = Math.floor(viewport.width)
+    const cH = Math.floor(viewport.height)
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.width = cW
+    canvas.height = cH
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await page.render({ canvasContext: ctx, viewport } as any).promise
+
+    const unscaledViewport = page.getViewport({ scale: 1 })
+    setCanvasW(cW)
+    setCanvasH(cH)
+    setPdfScale(scale)
+    setPdfPageH(unscaledViewport.height)
+  }
+
+  useEffect(() => {
+    if (!showCanvas || !sourceFileUrl) return
+    let cancelled = false
+
+    const loadPdf = async () => {
+      const pdfjsLib = await import("pdfjs-dist")
+      if ((globalThis as Record<string, unknown>).pdfjsWorker) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = ""
+      } else {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.mjs", import.meta.url
+        ).toString()
+      }
+
+      const task = pdfjsLib.getDocument(sourceFileUrl)
+      const pdf = await task.promise
+      if (cancelled) return
+
+      pdfDocRef.current = pdf
+      setNumPages(pdf.numPages)
+      await renderPdfPage(pdf, 1)
+      if (cancelled) return
+
+      const cH = canvasRef.current?.height || 0
+      setSigState({ x: 60, y: cH - 120, w: 140, h: 60 })
+      setNameState({ x: 60, y: cH - 55, w: 140, h: 24 })
+      setPrefixState({ x: 220, y: cH - 55, w: 60, h: 24 })
+      setCanvasReady(true)
+    }
+
+    loadPdf().catch(() => {
+      if (!cancelled) setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
+    })
+    return () => { cancelled = true }
+  }, [showCanvas, sourceFileUrl])
+
+  const goToPage = (p: number) => {
+    if (p < 1 || p > numPages || !pdfDocRef.current) return
+    setCurrentPage(p)
+    void renderPdfPage(pdfDocRef.current, p)
+  }
+
+  const toPdf = (canX: number, canY: number, w: number, h: number) => ({
+    x: canX / pdfScale,
+    y: pdfPageH - (canY + h) / pdfScale,
+    width: w / pdfScale,
+    height: h / pdfScale,
+  })
+
+  const handleConfirm = () => {
+    if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
+    if (!showCanvas || !canvasReady) {
+      onConfirm(pin, null, "none")
+      return
+    }
+    const sigPdf = toPdf(sigState.x, sigState.y, sigState.w, sigState.h)
+    const namePdf = toPdf(nameState.x, nameState.y, nameState.w, nameState.h)
+    const showPrefix = signAs !== "none"
+    const prefixPdf = showPrefix ? toPdf(prefixState.x, prefixState.y, prefixState.w, prefixState.h) : null
+    onConfirm(pin, {
+      page: currentPage,
+      x: sigPdf.x, y: sigPdf.y, width: sigPdf.width, height: sigPdf.height,
+      showSignature: showSig,
+      showSignerName: showName,
+      nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
+      showPrefix,
+      ...(prefixPdf
+        ? { prefixX: prefixPdf.x, prefixY: prefixPdf.y, prefixWidth: prefixPdf.width, prefixHeight: prefixPdf.height }
+        : {}),
+    }, signAs)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-4">
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <div>
+            <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {showCanvas
+                ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
+                : "Tag chữ ký trong file Office sẽ được thay tự động khi ký"}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {showCanvas && numPages > 1 && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage <= 1}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-xs font-bold text-slate-600">Trang {currentPage} / {numPages}</span>
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage >= numPages}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+          {showCanvas ? (
+            <div className="overflow-auto rounded-xl border border-slate-200" style={{ maxHeight: "55vh" }}>
+              <div
+                ref={containerRef}
+                className="relative"
+                style={{ width: canvasW || "100%", height: canvasH || 300, display: "inline-block" }}
+              >
+                <canvas ref={canvasRef} className="block" />
+
+                {!canvasReady && !canvasError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
+                    <Loader2 size={24} className="animate-spin text-amber-500" />
+                  </div>
+                )}
+                {canvasError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-amber-50 p-4">
+                    <div className="text-center">
+                      <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
+                      <p className="text-sm font-semibold text-amber-800">Không tải được PDF</p>
+                      <p className="text-xs text-amber-600 mt-1">Chữ ký sẽ đặt ở vị trí mặc định</p>
+                    </div>
+                  </div>
+                )}
+
+                {canvasReady && (
+                  <>
+                    {/* Chữ ký */}
+                    <Draggable
+                      nodeRef={sigNodeRef as RefObject<HTMLElement>}
+                      position={{ x: sigState.x, y: sigState.y }}
+                      onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
+                      bounds="parent"
+                    >
+                      <div ref={sigNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                        <Resizable
+                          size={{ width: sigState.w, height: sigState.h }}
+                          onResizeStop={(_, __, ___, delta) =>
+                            setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          minWidth={40} minHeight={20}
+                        >
+                          <div className="w-full h-full border border-dashed border-amber-400 bg-amber-50/60 rounded relative select-none">
+                            {showSig && signatureUrl && (
+                              <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain opacity-90" />
+                            )}
+                            {showSig && !signatureUrl && (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <span className="text-[10px] text-slate-400">Chữ ký</span>
+                              </div>
+                            )}
+                            {!showSig && (
+                              <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
+                                <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
+                              </div>
+                            )}
+                            <button
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => setShowSig((v) => !v)}
+                              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
+                              style={{ zIndex: 20 }}
+                              title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
+                            >
+                              {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
+                            </button>
+                          </div>
+                        </Resizable>
+                      </div>
+                    </Draggable>
+
+                    {/* Tên người ký */}
+                    <Draggable
+                      nodeRef={nameNodeRef as RefObject<HTMLElement>}
+                      position={{ x: nameState.x, y: nameState.y }}
+                      onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
+                      bounds="parent"
+                    >
+                      <div ref={nameNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                        <Resizable
+                          size={{ width: nameState.w, height: nameState.h }}
+                          onResizeStop={(_, __, ___, delta) =>
+                            setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          minWidth={60} minHeight={16}
+                        >
+                          <div className="w-full h-full border border-dashed border-blue-400 bg-blue-50/60 rounded relative select-none flex items-center justify-center">
+                            {showName ? (
+                              <span className="text-[10px] font-bold text-blue-700 truncate px-1">{userName || "Người ký"}</span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">Ẩn tên</span>
+                            )}
+                            <button
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => setShowName((v) => !v)}
+                              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
+                              style={{ zIndex: 20 }}
+                              title={showName ? "Ẩn tên" : "Hiện tên"}
+                            >
+                              {showName ? <EyeOff size={10} /> : <Eye size={10} />}
+                            </button>
+                          </div>
+                        </Resizable>
+                      </div>
+                    </Draggable>
+
+                    {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ hiện khi đã chọn ở dưới */}
+                    {signAs !== "none" && (
+                      <Draggable
+                        nodeRef={prefixNodeRef as RefObject<HTMLElement>}
+                        position={{ x: prefixState.x, y: prefixState.y }}
+                        onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
+                        bounds="parent"
+                      >
+                        <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                          <Resizable
+                            size={{ width: prefixState.w, height: prefixState.h }}
+                            onResizeStop={(_, __, ___, delta) =>
+                              setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                            enable={{ right: true, bottom: true, bottomRight: true }}
+                            minWidth={36} minHeight={16}
+                          >
+                            <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
+                              <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
+                            </div>
+                          </Resizable>
+                        </div>
+                      </Draggable>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl">
+              <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
+              <div className="space-y-1 text-xs text-sky-700">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{sigTag}</span>
+                  <span>→ chữ ký của bạn (PNG)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{nameTag}</span>
+                  <span>→ tên người ký</span>
+                </div>
+                <p className="text-sky-500 mt-1">Tag không có trong file sẽ được bỏ qua.</p>
+              </div>
+            </div>
+          )}
+
+          {showSignAsPicker && (
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="sign-as"
+                    checked={signAs === "none"}
+                    onChange={() => setSignAs("none")}
+                  />
+                  Ký trực tiếp
+                </label>
+                {SIGN_AS_OPTIONS.map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="sign-as"
+                      checked={signAs === opt}
+                      onChange={() => setSignAs(opt)}
+                    />
+                    {SIGN_AS_LABEL[opt]}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN chữ ký</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+              value={pin}
+              onChange={(e) => { setPin(e.target.value); setPinError("") }}
+              onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
+              placeholder="4–6 chữ số"
+              autoFocus={!showCanvas}
+            />
+            {pinError && (
+              <div className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+                <AlertTriangle size={11} />{pinError}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end px-5 pb-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+          <button
+            onClick={handleConfirm}
+            disabled={acting}
+            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+          >
+            <PenLine size={13} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function DocumentDetailPage() {
   const params = useParams()
@@ -53,10 +507,9 @@ export default function DocumentDetailPage() {
   const [actionOk, setActionOk] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
 
-  // PIN modal
-  const [pinModal, setPinModal] = useState<"ky_buoc" | "phe_duyet" | null>(null)
-  const [pin, setPin] = useState("")
-  const [pinError, setPinError] = useState<string | null>(null)
+  // Modal ký duyệt (canvas PDF kéo-thả chữ ký hoặc info tag Office)
+  const [signModal, setSignModal] = useState<"ky_buoc" | "phe_duyet" | null>(null)
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
 
   // Trả về modal
   const [traVeModal, setTraVeModal] = useState(false)
@@ -70,10 +523,16 @@ export default function DocumentDetailPage() {
   const [distGhiChu, setDistGhiChu] = useState("")
   const [distSending, setDistSending] = useState(false)
 
-  // Fetch department code via admin API
+  // Fetch department code via admin API — PHẢI gắn Authorization, nếu không
+  // requireAuthUser() ở route sẽ throw và route trả về { code: null } với status 200,
+  // khiến userDeptCode luôn là null và canKyBuoc luôn sai cho mọi người dùng.
   const resolveUserDeptCode = useCallback(async (uid: string) => {
     try {
-      const res = await fetch(`/api/documents/dept-code?userId=${uid}`)
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token || ""
+      const res = await fetch(`/api/documents/dept-code?userId=${uid}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       if (res.ok) {
         const json = (await res.json()) as { code: string | null }
         setUserDeptCode(json.code)
@@ -101,6 +560,10 @@ export default function DocumentDetailPage() {
       if (sessionUser) {
         setUser(sessionUser)
         void resolveUserDeptCode(sessionUser.id)
+        const { data: sigUrlData } = supabase.storage
+          .from("iso-documents")
+          .getPublicUrl(`signatures/${fid}/${sessionUser.id}/chu_ky.png`)
+        setSignatureUrl(sigUrlData.publicUrl)
       }
       setLoading(false)
     }
@@ -147,59 +610,44 @@ export default function DocumentDetailPage() {
 
   const handleGuiKy = () => void doAction("gui_ky")
 
-  const handleKyBuoc = async () => {
-    if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
+  const handleSignConfirm = async (pin: string, placement: SignPlacement | null, signAs: SignAsType) => {
+    if (!factoryId || !doc || !signModal) return
+    const action = signModal
     setActing(true)
-    setPinError(null)
-    if (!factoryId || !doc) return
+    setActionError(null)
     try {
       const token = await getAuthToken()
       const res = await fetch("/api/documents/sign", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ docId: doc.id, factoryId, action: "ky_buoc", pin }),
+        body: JSON.stringify({
+          docId: doc.id,
+          factoryId,
+          action,
+          pin,
+          placement,
+          sign_as: signAs === "none" ? undefined : signAs,
+        }),
       })
       const json = (await res.json()) as { ok?: boolean; error?: string }
-      if (!res.ok || !json.ok) { setPinError(json.error || "Lỗi ký"); return }
-      setPinModal(null)
-      setPin("")
-      setActionOk("Ký thành công!")
+      if (!res.ok || !json.ok) {
+        setActionError(json.error || (action === "phe_duyet" ? "Lỗi phê duyệt" : "Lỗi ký"))
+        return
+      }
+      setSignModal(null)
+      setActionOk(action === "phe_duyet" ? "Phê duyệt thành công!" : "Ký thành công!")
       setTimeout(() => setActionOk(null), 3000)
+      if (action === "phe_duyet") {
+        // Cập nhật AI embedding sau khi phê duyệt (fire-and-forget)
+        void fetch("/api/documents/embed-doc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docId: doc.id, factoryId }),
+        }).catch(() => {})
+      }
       void loadDoc(factoryId)
     } catch (err) {
-      setPinError(err instanceof Error ? err.message : "Lỗi không xác định")
-    } finally {
-      setActing(false)
-    }
-  }
-
-  const handlePheDuyet = async () => {
-    if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
-    setActing(true)
-    setPinError(null)
-    if (!factoryId || !doc) return
-    try {
-      const token = await getAuthToken()
-      const res = await fetch("/api/documents/sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ docId: doc.id, factoryId, action: "phe_duyet", pin }),
-      })
-      const json = (await res.json()) as { ok?: boolean; error?: string }
-      if (!res.ok || !json.ok) { setPinError(json.error || "Lỗi phê duyệt"); return }
-      setPinModal(null)
-      setPin("")
-      setActionOk("Phê duyệt thành công!")
-      setTimeout(() => setActionOk(null), 3000)
-      // Bug 6c: Cập nhật AI embedding sau khi phê duyệt (fire-and-forget)
-      void fetch("/api/documents/embed-doc", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docId: doc.id, factoryId }),
-      }).catch(() => {})
-      void loadDoc(factoryId)
-    } catch (err) {
-      setPinError(err instanceof Error ? err.message : "Lỗi không xác định")
+      setActionError(err instanceof Error ? err.message : "Lỗi không xác định")
     } finally {
       setActing(false)
     }
@@ -299,15 +747,33 @@ export default function DocumentDetailPage() {
     }
   }
 
-  const canPheDuyet = doc.trang_thai === "cho_phe_duyet" && (isAdmin || hasPermission(user, "documents.phe_duyet"))
+  // Chỉ đúng người được chỉ định phe_duyet_user_id (hoặc admin) mới được Phê duyệt /
+  // Trả về ở bước phê duyệt — không gate theo quyền chung documents.phe_duyet, vì
+  // quyền đó thường cấp rộng cho nhiều lãnh đạo/trưởng phòng khác không phải người
+  // được chỉ định trên chính văn bản này.
+  const isPheDuyetNguoi = isAdmin || (!!user && doc.phe_duyet_user_id === user.id)
+
+  const canPheDuyet = doc.trang_thai === "cho_phe_duyet" && isPheDuyetNguoi
 
   const canTraVe =
-    (doc.trang_thai === "cho_ky_phong_ban" && (canKyBuoc || isAdmin || hasPermission(user, "documents.phe_duyet"))) ||
-    (doc.trang_thai === "cho_phe_duyet" && (isAdmin || hasPermission(user, "documents.phe_duyet")))
+    (doc.trang_thai === "cho_ky_phong_ban" && (canKyBuoc || isPheDuyetNguoi)) ||
+    (doc.trang_thai === "cho_phe_duyet" && isPheDuyetNguoi)
 
   const canDistribute = doc.trang_thai === "da_phe_duyet" && hasPermission(user, "documents.distribute")
 
   const fileUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+
+  // Nguồn file sẽ được ký — PHẢI khớp đúng thứ tự ưu tiên sourceUrl trong performFileStamp()
+  // của sign/route.ts, để canvas đặt chữ ký hiển thị đúng file thật sự bị stamp.
+  const docSourceUrl = doc.file_signed_office_url || doc.file_signed_pdf_url || doc.file_goc_url
+  const docExt = getDocFileExt(docSourceUrl, doc.file_signed_office_url ? doc.file_signed_office_type : null)
+
+  const signStepLabel = signModal === "ky_buoc"
+    ? (currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban")
+    : "Phê duyệt văn bản"
+  const signStepKey = signModal === "phe_duyet" ? "phe_duyet" : String(doc.buoc_hien_tai + 1)
+  const signSigTag = signModal === "phe_duyet" ? "{{CHU_KY_PHE_DUYET}}" : `{{CHU_KY_BUOC_${signStepKey}}}`
+  const signNameTag = signModal === "phe_duyet" ? "{{TEN_PHE_DUYET}}" : `{{TEN_BUOC_${signStepKey}}}`
 
   return (
     <DocumentsShell>
@@ -392,17 +858,17 @@ export default function DocumentDetailPage() {
           )}
           {canKyBuoc && (
             <button
-              onClick={() => { setPinModal("ky_buoc"); setPin(""); setPinError(null) }}
+              onClick={() => setSignModal("ky_buoc")}
               disabled={acting}
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
               <PenLine size={15} />
-              Ký phòng ban
+              {currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"}
             </button>
           )}
           {canPheDuyet && (
             <button
-              onClick={() => { setPinModal("phe_duyet"); setPin(""); setPinError(null) }}
+              onClick={() => setSignModal("phe_duyet")}
               disabled={acting}
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
@@ -503,7 +969,11 @@ export default function DocumentDetailPage() {
                   <TimelineStep
                     key={i}
                     label={`Bước ${i + 1}: ${step.phong_ban_code || step.ten || ""}`}
-                    sublabel={nguoiKyEntry?.ten || (isCurrentStep ? "Đang chờ ký..." : "Chờ")}
+                    sublabel={
+                      nguoiKyEntry?.ten
+                        ? `${signAsPrefixLabel(nguoiKyEntry.sign_as, nguoiKyEntry.is_kt)}${nguoiKyEntry.ten}`
+                        : (isCurrentStep ? "Đang chờ ký..." : "Chờ")
+                    }
                     done={!!nguoiKyEntry}
                     pending={isCurrentStep}
                     at={nguoiKyEntry?.ky_at}
@@ -516,7 +986,7 @@ export default function DocumentDetailPage() {
                 label="Phê duyệt"
                 sublabel={
                   doc.trang_thai === "da_phe_duyet"
-                    ? `${doc.phe_duyet_is_kt ? "KT. " : ""}${doc.phe_duyet || "Đã phê duyệt"}`
+                    ? `${signAsPrefixLabel(doc.phe_duyet_sign_as as SignAsType | null, doc.phe_duyet_is_kt)}${doc.phe_duyet || "Đã phê duyệt"}`
                     : doc.trang_thai === "cho_phe_duyet"
                       ? "Đang chờ phê duyệt..."
                       : doc.phe_duyet || "Chờ phê duyệt"
@@ -530,58 +1000,21 @@ export default function DocumentDetailPage() {
         </div>
       </div>
 
-      {/* PIN Modal */}
-      {pinModal && (
-        <ModalShell
-          title={pinModal === "ky_buoc"
-            ? currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"
-            : "Phê duyệt văn bản"}
-          onClose={() => { setPinModal(null); setPin(""); setPinError(null) }}
-          maxWidth="sm"
-          footer={
-            <>
-              <button
-                onClick={() => void (pinModal === "ky_buoc" ? handleKyBuoc() : handlePheDuyet())}
-                disabled={acting || !pin.trim()}
-                className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all"
-              >
-                {acting ? "Đang xử lý..." : "Xác nhận"}
-              </button>
-              <button
-                onClick={() => { setPinModal(null); setPin(""); setPinError(null) }}
-                disabled={acting}
-                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Hủy
-              </button>
-            </>
-          }
-        >
-            {pinModal === "ky_buoc" && currentStep && (
-              <p className="text-sm text-slate-600 mb-4">
-                {currentStep.type === "ca_nhan"
-                  ? <>Bước {doc.buoc_hien_tai + 1}: Ký xác nhận — <strong>{currentStep.ten}</strong></>
-                  : <>Bước {doc.buoc_hien_tai + 1}: Ký cho phòng ban <strong>{currentStep.phong_ban_code}</strong></>}
-              </p>
-            )}
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN ký duyệt</label>
-              <input
-                type="password"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 tracking-widest"
-                placeholder="Nhập PIN..."
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    void (pinModal === "ky_buoc" ? handleKyBuoc() : handlePheDuyet())
-                  }
-                }}
-                autoFocus
-              />
-              {pinError && <p className="text-xs text-red-600 mt-1.5">{pinError}</p>}
-            </div>
-        </ModalShell>
+      {/* Modal ký duyệt — canvas PDF kéo-thả chữ ký/tên (PDF) hoặc info tag (Office) */}
+      {signModal && (
+        <SignPlacementModal
+          stepLabel={signStepLabel}
+          sourceFileUrl={docSourceUrl}
+          fileExt={docExt}
+          signatureUrl={signatureUrl}
+          userName={user?.full_name || user?.username || "Người ký"}
+          sigTag={signSigTag}
+          nameTag={signNameTag}
+          acting={acting}
+          allowSignAs={(signModal === "ky_buoc" && currentStep?.type === "phong_ban") || signModal === "phe_duyet"}
+          onConfirm={handleSignConfirm}
+          onClose={() => setSignModal(null)}
+        />
       )}
 
       {/* Distribution Modal */}

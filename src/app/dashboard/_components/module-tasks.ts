@@ -10,7 +10,7 @@
 // component (vốn kéo theo state/effect/UI không liên quan, không có ý nghĩa tái sử dụng ở đây).
 
 import { supabase } from "@/lib/supabase"
-import { hasPermission, type SessionUser } from "@/lib/auth"
+import type { SessionUser } from "@/lib/auth"
 import { buildEffectiveStockBalances } from "@/app/dashboard/inventory/_components/inventory-stock"
 import type {
   InventoryItemOption,
@@ -161,11 +161,11 @@ async function getDocumentsTasks(factoryId: string, user: SessionUser): Promise<
 
   const { data } = await supabase
     .from("van_ban_documents")
-    .select("id, trang_thai, thu_tu_ky_json, buoc_hien_tai, soan_thao_user_id")
+    .select("id, trang_thai, thu_tu_ky_json, buoc_hien_tai, soan_thao_user_id, phe_duyet_user_id")
     .eq("factory_id", factoryId)
     .in("trang_thai", ["draft", "cho_ky_phong_ban", "cho_phe_duyet", "tra_ve"])
 
-  type VanBanRow = { trang_thai: string; thu_tu_ky_json: ThuTuKyStep[] | null; buoc_hien_tai: number; soan_thao_user_id: string | null }
+  type VanBanRow = { trang_thai: string; thu_tu_ky_json: ThuTuKyStep[] | null; buoc_hien_tai: number; soan_thao_user_id: string | null; phe_duyet_user_id: string | null }
   const docs = (data || []) as VanBanRow[]
 
   let soanThaoCount = 0
@@ -185,7 +185,10 @@ async function getDocumentsTasks(factoryId: string, user: SessionUser): Promise<
       if (match) kyBuocCount++
       continue
     }
-    if (doc.trang_thai === "cho_phe_duyet" && (isAdmin || hasPermission(user, "documents.phe_duyet"))) {
+    // Chỉ đúng người được chỉ định phe_duyet_user_id hoặc admin — không gate theo
+    // quyền chung documents.phe_duyet (có thể cấp cho nhiều lãnh đạo khác không phải
+    // người được chỉ định trên chính văn bản này).
+    if (doc.trang_thai === "cho_phe_duyet" && (isAdmin || doc.phe_duyet_user_id === user.id)) {
       pheDuyetCount++
     }
   }

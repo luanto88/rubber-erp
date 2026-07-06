@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin, verifyCurrentPin } from "@/app/api/account/_lib/security"
-import type { ThuTuKyStep } from "@/app/dashboard/documents/_components/documents-types"
+import { resolveUserDeptCode } from "@/lib/documents-dept"
+import { SIGN_AS_OPTIONS, type ThuTuKyStep, type SignAsType } from "@/app/dashboard/documents/_components/documents-types"
 import { PDFDocument, rgb } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
@@ -12,6 +13,34 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// Vị trí đặt chữ ký/tên trên PDF do người ký kéo-thả chọn (SignPlacementModal).
+// showSignature/showSignerName + name*: giống hệt FullPlacement của ISO forms
+// (src/app/dashboard/iso/forms/[id]/page.tsx) để tái dùng đúng công thức vẽ tên.
+type SignPlacement = {
+  page: number
+  x: number
+  y: number
+  width: number
+  height: number
+  showSignature?: boolean
+  showSignerName?: boolean
+  nameX?: number
+  nameY?: number
+  nameWidth?: number
+  nameHeight?: number
+  // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ áp dụng cho PDF, vẽ tách biệt khỏi
+  // tên người ký. Không có khái niệm tương đương cho DOCX/XLSX (theo yêu cầu nghiệp vụ).
+  showPrefix?: boolean
+  prefixX?: number
+  prefixY?: number
+  prefixWidth?: number
+  prefixHeight?: number
+}
+
+function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
+  return typeof v === "string" && (SIGN_AS_OPTIONS as string[]).includes(v)
+}
+
 type VanBanRow = {
   id: string
   factory_id: string
@@ -21,8 +50,8 @@ type VanBanRow = {
   thu_tu_ky_json: ThuTuKyStep[]
   buoc_hien_tai: number
   so_buoc_tong: number
-  nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string }>
-  placement_ky: Record<string, { x: number; y: number; width?: number; height?: number; page?: number }>
+  nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: string }>
+  placement_ky: Record<string, SignPlacement>
   soan_thao_user_id: string | null
   phe_duyet_user_id: string | null
   file_goc_url: string | null
@@ -38,6 +67,8 @@ type VanBanRow = {
   nam: number | null
   nguoi_soan_thao_display: string | null
   phe_duyet: string | null
+  phe_duyet_is_kt: boolean | null
+  phe_duyet_sign_as: string | null
 }
 
 type ProfileRow = {
@@ -52,29 +83,12 @@ type ProfileRow = {
 type PermissionRow = { permission_code: string }
 
 const DOC_SELECT =
-  "id, factory_id, trang_thai, cap_tl, phan_loai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet"
+  "id, factory_id, trang_thai, cap_tl, phan_loai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet, phe_duyet_is_kt, phe_duyet_sign_as"
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 async function getUserDeptCode(profile: ProfileRow): Promise<string | null> {
-  if (profile.department_id) {
-    const { data } = await supabaseAdmin
-      .from("departments")
-      .select("code")
-      .eq("id", profile.department_id)
-      .single()
-    return (data?.code as string) || null
-  }
-  if (profile.department) {
-    const { data } = await supabaseAdmin
-      .from("departments")
-      .select("code")
-      .eq("name", profile.department)
-      .limit(1)
-      .maybeSingle()
-    return (data?.code as string) || null
-  }
-  return null
+  return resolveUserDeptCode(supabaseAdmin, profile)
 }
 
 async function getProfileAndPermissions(userId: string) {
@@ -289,11 +303,23 @@ async function stampOffice(
   return (await zip.generateAsync({ type: "nodebuffer" })) as any as Buffer
 }
 
+// Vị trí tên người ký: dùng box riêng (nameX/nameY/nameWidth/nameHeight) nếu
+// SignPlacementModal đã đặt, fallback về căn giữa ngay dưới chữ ký như trước.
+// Mirror buildSignerNamePlacement() của ISO forms finalize route.
+function buildSignerNamePlacement(p: SignPlacement) {
+  return {
+    xCenter: typeof p.nameX === "number" ? p.nameX + (p.nameWidth ?? p.width) / 2 : p.x + p.width / 2,
+    y: typeof p.nameY === "number" ? p.nameY : Math.max(p.y - 14, 4),
+    maxWidth: Math.max(typeof p.nameWidth === "number" ? p.nameWidth : p.width + 20, 60),
+  }
+}
+
 async function stampPdfStep(
   fileBytes: Buffer,
   sigBuf: Buffer | null,
   signerName: string,
-  placement: { x: number; y: number; width?: number; height?: number; page?: number } | null,
+  prefixText: string | null,
+  placement: SignPlacement | null,
   defaultX: number,
 ): Promise<Buffer> {
   const pdfDoc = await PDFDocument.load(fileBytes)
@@ -317,23 +343,44 @@ async function stampPdfStep(
   const w = placement?.width ?? 120
   const h = placement?.height ?? 60
 
-  if (sigBuf) {
+  if (sigBuf && placement?.showSignature !== false) {
     try {
       const embedded = await pdfDoc.embedPng(sigBuf).catch(() => pdfDoc.embedJpg(sigBuf))
       page.drawImage(embedded, { x, y, width: w, height: h, opacity: 0.92 })
     } catch { /* skip */ }
   }
 
-  if (signerName && signerFont) {
+  if (signerName && signerFont && placement?.showSignerName !== false) {
     try {
+      const slot = buildSignerNamePlacement(placement ?? { page: 1, x, y, width: w, height: h })
       let size = 10
-      const maxW = w + 20
-      while (size > 7 && signerFont.widthOfTextAtSize(signerName, size) > maxW) size -= 0.5
+      while (size > 7 && signerFont.widthOfTextAtSize(signerName, size) > slot.maxWidth) size -= 0.5
       const tw = signerFont.widthOfTextAtSize(signerName, size)
       page.drawText(signerName, {
-        x: x + w / 2 - tw / 2,
-        y: Math.max(y - 14, 4),
+        x: slot.xCenter - tw / 2,
+        y: slot.y,
         size,
+        font: signerFont,
+        color: rgb(0, 0, 0),
+      })
+    } catch { /* skip */ }
+  }
+
+  // Tiền tố ký thay (KT./TM./TL./TUQ.) — hộp riêng, chỉ vẽ khi có tọa độ thật do
+  // SignPlacementModal đặt. Không có fallback vị trí mặc định như chữ ký/tên vì
+  // đây là tính năng tùy chọn (không phải mọi lượt ký đều chọn ký thay).
+  if (
+    prefixText &&
+    signerFont &&
+    placement?.showPrefix &&
+    typeof placement.prefixX === "number" &&
+    typeof placement.prefixY === "number"
+  ) {
+    try {
+      page.drawText(prefixText, {
+        x: placement.prefixX,
+        y: placement.prefixY,
+        size: 10,
         font: signerFont,
         color: rgb(0, 0, 0),
       })
@@ -350,6 +397,9 @@ async function performFileStamp(
   signerName: string,
   chucVu: string,
   stepKey: string,
+  // Tiền tố ký thay (vd "TM.") — chỉ ảnh hưởng file PDF (vẽ hộp riêng), KHÔNG ghép
+  // vào signerName/textTags của DOCX/XLSX (không có nhu cầu nghiệp vụ cho Office).
+  prefixText: string | null = null,
 ): Promise<void> {
   const sourceUrl = d.file_signed_office_url || d.file_signed_pdf_url || d.file_goc_url
   if (!sourceUrl) return
@@ -375,14 +425,10 @@ async function performFileStamp(
   if (ext === "docx" || ext === "xlsx") {
     stampedBytes = await stampOffice(fileBytes, ext, textTags, imageTagName, sigBuf, stepKey)
   } else if (ext === "pdf") {
-    const placement =
-      (d.placement_ky?.[stepKey] as
-        | { x: number; y: number; width?: number; height?: number; page?: number }
-        | null
-        | undefined) ?? null
+    const placement = d.placement_ky?.[stepKey] ?? null
     const defaultX =
       stepKey === "phe_duyet" ? 460 : (parseInt(stepKey) - 1) * 120 + 30
-    stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, placement, defaultX)
+    stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX)
   } else {
     return
   }
@@ -512,14 +558,16 @@ export async function POST(req: NextRequest) {
       action: "gui_ky" | "ky_buoc" | "phe_duyet" | "tra_ve"
       pin?: string
       ly_do?: string
+      placement?: SignPlacement
+      sign_as?: string
     }
-    const { docId, factoryId, action, pin, ly_do } = body
+    const { docId, factoryId, action, pin, ly_do, placement, sign_as } = body
 
     if (!docId || !factoryId || !action) {
       return NextResponse.json({ error: "Thiếu thông tin bắt buộc" }, { status: 400 })
     }
 
-    const { profile, isAdmin, hasPermission } = await getProfileAndPermissions(userId)
+    const { profile, isAdmin } = await getProfileAndPermissions(userId)
     const userName = profile.full_name || profile.username || "Người dùng"
 
     const { data: doc, error: docErr } = await supabaseAdmin
@@ -614,17 +662,23 @@ export async function POST(req: NextRequest) {
       }
 
       const chucVu = step.phong_ban_code || step.chuc_vu || ""
+      // Chỉ áp dụng ký thay (KT./TM./TL./TUQ.) cho bước phong_ban (Phó ký thay) —
+      // không áp dụng cho ca_nhân (đã đích danh 1 người, không có khái niệm "ký thay")
+      const signAs: SignAsType = step.type === "phong_ban" && isValidSignAs(sign_as) ? sign_as : "none"
       const newNguoiKy = {
         ...d.nguoi_ky,
         [String(stepIndex + 1)]: {
           ten: userName,
           chuc_vu: chucVu,
           ky_at: new Date().toISOString(),
+          sign_as: signAs === "none" ? undefined : signAs,
         },
       }
       const newBuoc = d.buoc_hien_tai + 1
       const done = newBuoc >= d.so_buoc_tong
       const nextStatus = done ? "cho_phe_duyet" : "cho_ky_phong_ban"
+      const stepKey = String(stepIndex + 1)
+      const newPlacementKy = placement ? { ...d.placement_ky, [stepKey]: placement } : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
@@ -632,15 +686,19 @@ export async function POST(req: NextRequest) {
           nguoi_ky: newNguoiKy,
           buoc_hien_tai: newBuoc,
           trang_thai: nextStatus,
+          placement_ky: newPlacementKy,
           updated_at: new Date().toISOString(),
         })
         .eq("id", docId)
 
       if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
-      // Stamp file (best-effort — lỗi không block response)
-      const stepKey = String(stepIndex + 1)
-      await performFileStamp(d, factoryId, userId, userName, chucVu, stepKey).catch(() => {})
+      // Stamp file (best-effort — lỗi không block response). Tiền tố chỉ vẽ riêng
+      // trên PDF (hộp draggable riêng) — KHÔNG ghép vào signerName, vì DOCX/XLSX
+      // không cần hiển thị tiền tố ký thay (đã xác nhận với người dùng).
+      d.placement_ky = newPlacementKy
+      const prefixText = signAs !== "none" ? `${signAs}.` : null
+      await performFileStamp(d, factoryId, userId, userName, chucVu, stepKey, prefixText).catch(() => {})
 
       const { recipientUserIds, targetDeptCode } = getNextRecipients(d, "ky_buoc", newBuoc)
       fireNotify({
@@ -664,8 +722,11 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         )
       }
-      if (!hasPermission("documents.phe_duyet")) {
-        return NextResponse.json({ error: "Bạn không có quyền phê duyệt văn bản" }, { status: 403 })
+      // Chỉ đúng người được chỉ định phe_duyet_user_id (hoặc admin) mới được phê duyệt —
+      // không dùng quyền chung documents.phe_duyet, vì quyền đó có thể được cấp cho
+      // nhiều lãnh đạo/trưởng phòng khác không phải người được chỉ định trên văn bản này.
+      if (!isAdmin && d.phe_duyet_user_id !== userId) {
+        return NextResponse.json({ error: "Bạn không phải người được chỉ định phê duyệt văn bản này" }, { status: 403 })
       }
       if (!pin) {
         return NextResponse.json({ error: "Vui lòng nhập PIN ký duyệt" }, { status: 400 })
@@ -676,7 +737,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "PIN không đúng" }, { status: 401 })
       }
 
+      // Ký thay được chọn ngay lúc ký (SignPlacementModal), không còn set lúc soạn
+      // thảo — thay thế cơ chế cũ phe_duyet_is_kt (vẫn giữ cột đó cho văn bản cũ
+      // hiển thị đúng lịch sử, nhưng không còn ghi thêm từ đây trở đi).
+      const signAsPD: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
+
       const today = new Date().toISOString().slice(0, 10)
+      const newPlacementKy = placement ? { ...d.placement_ky, phe_duyet: placement } : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
@@ -684,7 +751,9 @@ export async function POST(req: NextRequest) {
           trang_thai: "da_phe_duyet",
           phe_duyet: userName,
           phe_duyet_user_id: userId,
+          phe_duyet_sign_as: signAsPD === "none" ? null : signAsPD,
           ngay_phe_duyet: today,
+          placement_ky: newPlacementKy,
           updated_at: new Date().toISOString(),
         })
         .eq("id", docId)
@@ -693,7 +762,11 @@ export async function POST(req: NextRequest) {
 
       // Chức vụ phê duyệt lấy từ department profile
       const chucVuPD = profile.department || profile.role || ""
-      await performFileStamp(d, factoryId, userId, userName, chucVuPD, "phe_duyet").catch(() => {})
+      d.placement_ky = newPlacementKy
+      // Tiền tố chỉ vẽ riêng trên PDF (hộp draggable riêng) — KHÔNG ghép vào tên
+      // dùng cho tag DOCX/XLSX (không cần cho Office, đã xác nhận với người dùng).
+      const prefixTextPD = signAsPD !== "none" ? `${signAsPD}.` : null
+      await performFileStamp(d, factoryId, userId, userName, chucVuPD, "phe_duyet", prefixTextPD).catch(() => {})
 
       fireNotify({
         docId,
@@ -715,7 +788,10 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      let canReturn = isAdmin || hasPermission("documents.phe_duyet")
+      // Cùng nguyên tắc với action "phe_duyet": chỉ đúng người được chỉ định
+      // phe_duyet_user_id mới được trả về sớm (kể cả khi văn bản còn ở bước ký
+      // phòng ban) — không dùng quyền chung documents.phe_duyet.
+      let canReturn = isAdmin || d.phe_duyet_user_id === userId
       if (!canReturn && d.trang_thai === "cho_ky_phong_ban") {
         const step = (d.thu_tu_ky_json || [])[d.buoc_hien_tai]
         if (step?.type === "phong_ban") {
