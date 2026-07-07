@@ -166,6 +166,161 @@ Kể từ migration `20260619_sk_atomic_rpc.sql`, **toàn bộ thao tác Sang ki
 }
 ```
 
+## 4.6. Dự đoán số lô trước sản xuất + in nhãn QR theo kiện (2026-07-09)
+
+### Mục tiêu
+
+Cho phép dự đoán trước dãy số lô sẽ phát sinh khi sản xuất một ngăn cụ thể, in nhãn QR (theo từng **kiện**, không phải theo lô) để đưa xuống ca — công nhân dán nhãn lên pallet ngay khi sản xuất tới lô đó, thay vì văn phòng gõ lại toàn bộ sau khi nhận giấy ghi tay.
+
+### Bảng mới (migration `20260709_lot_predictions.sql`)
+
+- `lot_prediction_batches` — 1 dòng / 1 ngăn / lần "chọn ngăn → tạo dự đoán" (khi chọn nhiều ngăn cùng lúc, mỗi ngăn vẫn tạo 1 batch riêng — xem mục "Chọn nhiều ngăn" bên dưới, không đổi schema bảng này).
+- `lot_prediction_lots` — 1 dòng / lô dự kiến, có 4 cột `kien_a_ngan_id..kien_d_ngan_id` (ngăn nguồn dự kiến của từng kiện), `unassignable_kien TEXT[]` (kiện đã có thật ở lô thật — đủ hoặc dở dang một phần — KHÔNG được gán ngăn mới qua dự đoán, dù cột `kien_X_ngan_id` tương ứng vẫn NULL), `carry_over_status` (`none|pending|continued|abandoned`), `trang_thai` (`Dự kiến|Đã dùng|Hủy`), `real_lot_id` (liên kết mềm khi đã có lô thật khớp `ma_lo`). `UNIQUE (factory_id, ma_lo)` — không được khóa cứng `ma_lo` như bảng `lots`, chỉ là gợi ý đã lưu lại để tra cứu/tự điền, không tạo bản ghi `lots` thật.
+- RLS: SELECT mở public (`USING (true)`, mirror precedent "Allow all" của `ngans`/`lots`) để trang tra cứu QR công khai `/product-label` đọc được không cần đăng nhập; INSERT/UPDATE vẫn giới hạn theo `factory_id` của user đăng nhập.
+- RPC atomic `create_lot_prediction_batch(...)` — xử lý **1 ngăn/lần gọi**, thực thi thuật toán phân bổ trong 1 transaction (`FOR UPDATE` lock ngăn + lô carry-over cùng series). Nhận thêm `p_reserved_kg`, `p_real_lot_ma_lo`, `p_real_lot_num`, `p_real_unassignable_kien` để tự "bridge" 1 lô thật Dở dang chưa từng qua dự đoán (xem mục "Kiện dở dang một phần"). Xem chi tiết thuật toán trong chính file migration (đã comment đầy đủ).
+
+### Ràng buộc nghiệp vụ
+
+- 1 lô có 4 kiện (a,b,c,d), **được phép sản xuất từ 2 ngăn khác nhau** theo kiện (vd A,B từ ngăn 1, C,D từ ngăn 2), nhưng **1 kiện đơn lẻ tuyệt đối không được lấy nguyên liệu từ 2 ngăn**.
+  - **Lưu ý quan trọng (đã xác minh qua code thật, 2026-07-09)**: hệ thống thật (`product/page.tsx`, `product/actions.ts` `syncLotMasterSnapshot`) **hiện KHÔNG hề chặn cứng** điều này — `locked_X = prev_X >= max_per_kien` chỉ khóa kiện đã ĐỦ bánh, và tổng `kien_a/b/c/d` được tính bằng SUM tất cả `lot_transactions` cùng `lot_id` mà **không lọc theo `ngan_id`**. Rule "1 kiện 1 ngăn" hiện chỉ là quy ước vận hành, không phải ràng buộc code ở hệ thống thật — tính năng dự đoán tôn trọng đúng tinh thần rule này (xem mục "Kiện dở dang một phần"), nhưng không (và không thể) ngăn người dùng nhập liệu thật trái quy ước đó ngoài luồng dự đoán.
+- Số lô đề xuất tự tính vừa khít 100–110% sức chứa còn lại của ngăn (dùng đúng công thức `getLoaiBanhConfig`/`lo_tron`/`kien_weight_kg` mirror từ `product/page.tsx`, xem `src/lib/product-lot-config.ts`), người dùng có thể giảm số lô muốn in (không được tăng vượt đề xuất).
+- **Carry-over từ dự đoán trước KHÔNG được tự động ép buộc**: khi phát hiện 1 lô dở dang (`carry_over_status='pending'`) đang chờ nối từ ngăn trước cùng series (phát sinh từ chính thuật toán dự đoán, không phải lô thật), hệ thống bắt buộc hỏi người dùng rõ ràng "Tiếp tục lô dở dang" hay "Bỏ qua, bắt đầu lô mới" — không tự chọn thay (ví dụ thực tế: ngăn đang sản xuất phát hiện chất lượng kém phải ngưng giữa chừng, chuyển ngăn khác và muốn bắt đầu lô mới, không muốn nối tiếp phần kiện còn thiếu của lô cũ).
+- QR trên nhãn dùng khóa nghiệp vụ thật `(factory_id, ma_lo, kiện)` — **không** dùng `lot_prediction_lots.id` — để hoạt động cho MỌI lô kể cả lô nhập tay trực tiếp không qua dự đoán, và để module Xuất hàng/EUDR sau này có thể tự tái sinh đúng QR này in trên báo cáo (xem `src/lib/product-label.ts`).
+- "Sửa" 1 lô dự kiến (đổi ngăn nguồn từng kiện, đổi CSR/bọc/bành) chỉ chặn khi ngăn đích sau khi nhận thêm kiện vượt quá 110% — không có ràng buộc tối thiểu 100% (100% chỉ là ngưỡng "sẵn sàng đánh dấu Đã sản xuất", không phải điều kiện chặn sửa). User thường chỉ sửa được lô chưa `Đã dùng`; admin sửa được mọi trạng thái.
+
+### Kiện dở dang một phần (2026-07-09)
+
+Khi 1 lô thật đang "Dở dang" có kiện đã có sản lượng thật nhưng **chưa đủ** số bánh chuẩn (vd kiện C = 12/36 bánh) và **CHƯA từng qua dự đoán** (chưa có row `lot_prediction_lots` khớp `ma_lo`), thuật toán dự đoán tự động ("bridge", không hỏi người dùng — khác hẳn carry-over từ dự đoán trước):
+
+- Xác định trạng thái từng kiện qua `findRealContinuationForSeries()` (`predict/actions.ts`) — quét `lot_transactions` của lô đó, với mỗi kiện: `empty` (chưa có bánh nào), `partial` (có nhưng chưa đủ `max_per_kien`), `full` (đã đủ).
+- Kiện `full` và `partial` → đưa vào `unassignable_kien` của row bridge — KHÔNG được dự đoán/gán ngăn mới (dù cột `kien_X_ngan_id` vẫn NULL). Chỉ kiện `empty` (vd kiện D) mới được gán cho ngăn đang xử lý.
+- Với mỗi kiện `partial`, phần bánh còn thiếu (`max_per_kien - real_count`) được coi là **"đã có chủ"** — quy về đúng ngăn đã sản xuất phần bánh thật đó (`origin_ngan_id` lấy từ `lot_transactions.ngan_id` của lần đóng góp gần nhất > 0 cho kiện đó). Phần KL này được TRỪ vào capacity khả dụng của đúng ngăn đó (`p_reserved_kg`) để tính đúng tỷ lệ ngăn, **dù không in nhãn/dự đoán cho phần đó**.
+- Ví dụ thực tế: ngăn 8 đang sản xuất CSR10/bành 35, lô `1014cs` đã có kiện A,B đủ (thật) + kiện C thật = 12/36 bành; khi dự đoán tiếp cho ngăn 8 (hoặc ngăn khác), hệ thống tự bỏ qua C (không dự đoán), bắt đầu dự đoán từ kiện D, đồng thời trừ phần 24 bánh còn thiếu của kiện C vào capacity của **đúng ngăn 8** (ngăn đã sản xuất 12 bánh đầu của kiện C).
+
+### Chọn nhiều ngăn cùng lúc (2026-07-09)
+
+- Bước 1 của `predict/page.tsx` dùng `FilterMultiSelect` (đã dùng ở nhiều module khác) — cho phép chọn **nhiều ngăn cùng lúc** trong 1 lần tạo dự đoán, thay vì chỉ 1 ngăn/lần như bản đầu.
+- Thứ tự tiêu thụ: **ngăn "Đang sản xuất" trước, sau đó theo đúng thứ tự người dùng bấm chọn** (không cho kéo sắp xếp lại) — tính bằng `Array.prototype.sort` ổn định trên mảng `selected` của `FilterMultiSelect` (mảng này tự nhiên giữ đúng thứ tự click vì `onChange` luôn append vào cuối).
+- **Không đổi schema đa ngăn** — mỗi ngăn trong danh sách vẫn tạo **1 batch riêng** (`lot_prediction_batches` giữ nguyên 1 cột `ngan_id`). "Đa ngăn" chỉ là điều phối ở tầng client: `createLotPredictionBatchMulti()` (`predict/actions.ts`) gọi lại RPC atomic 1-ngăn hiện có, tuần tự từng ngăn theo đúng thứ tự đã sắp — carry-over phát sinh giữa các ngăn TRONG CÙNG thao tác này tự động "continue" (không hỏi lại người dùng); chỉ ngăn ĐẦU TIÊN mới có thể gặp carry-over từ 1 phiên trước và cần hỏi (`needsCarryDecision`).
+- Không trộn ngăn khác `day_chuyen` (Mủ tạp/Mủ nước) trong cùng 1 lần chọn — `mixedDayChuyen` chặn tạo dự đoán nếu phát hiện.
+
+### Lọc ngăn "hết dung lượng dự đoán" (2026-07-09)
+
+- `loadPredictAvailableNgans()` ngoài lọc `trang_thai IN ('Chờ sản xuất','Đang sản xuất')`, giờ loại thêm ngăn đã hết dung lượng — real kg + predicted kg đã chạm ~110% `tong_kho` (không còn chỗ trống dù chỉ 1 kiện).
+- Tính thuần theo kg, **không phụ thuộc CSR/bành cụ thể** (vì bước chọn ngăn diễn ra TRƯỚC khi chọn CSR/bành ở bước 2) — dùng chung `getExistingRealKg`/`getExistingPredictedKg` đã có.
+
+### Quyền Hủy dự đoán — chỉ admin (2026-07-09)
+
+- Nút "Hủy" trong tab Lịch sử chỉ hiển thị khi `user.role === 'admin'` (trước đây là `product.predict_manage`, mọi user có quyền quản lý đều hủy được).
+- `cancelPredictionLot()` nhận thêm tham số `isAdmin`, kiểm tra chặn cứng ở tầng server action (không chỉ ẩn nút UI).
+- Nút "Sửa" vẫn theo `product.predict_manage` như cũ (không đổi).
+
+### Nhãn in (redesign 2026-07-09, theo mẫu `cung_cap_dl/Nhãn dán pallet.png`)
+
+A4 portrait, **cố định 4 nhãn/trang** (lưới 2×2, khác lưới nhỏ nhiều-nhãn/trang của QR ngăn), mỗi nhãn gồm 4 khối ngăn cách bằng đường kẻ đứt + 1 footer viền liền:
+
+1. Logo công ty (`public/logo-phk-moi.png`) + tên công ty 2 dòng.
+2. QR (trỏ `/product-label?f=...&lo=...&kien=...`) + mã ngăn nguồn gốc của đúng kiện đó bên dưới QR | CSR/mã lô rút gọn không năm/"Kiện {X}" (to đậm, cột phải).
+3. "Bành {loại_bành} kg" + "Bọc {tên đầy đủ}".
+4. "Ngày SX:" + "Ca SX:" — để trống, ca trực tự viết tay khi dán nhãn lên pallet.
+5. Footer viền liền: "Nhà máy chế biến {tên}" (hiện đang hard-code "PHK", **chưa có quyết định cách rút gọn động cho nhà máy khác** — xem `ProductLabelPdfOptions.footerText` trong `product-label-pdf.ts` để tuỳ biến).
+
+In đen trắng hoàn toàn (logo màu vẫn nhúng nguyên bản — máy in đen trắng tự rasterize thành grayscale khi in, không cần xử lý trước). Mỗi kiện in đúng 2 bản giống nhau. Thuật ngữ hiển thị dùng **"Bành"** (dấu huyền), không phải "Bánh" — xem mục "Đính chính thuật ngữ" trong lịch sử plan, chỉ áp dụng phạm vi tính năng này, không đụng module Xuất hàng (rule 08 khóa cứng "bánh").
+
+### File liên quan
+
+- `src/lib/product-lot-config.ts` — mirror `getLoaiBanhConfig`/`buildMaLo`/`getLoaiCSRByDayChuyen`/`getBocsForLoaiCSR` từ `product/page.tsx` (các hàm gốc không export vì `page.tsx` là module-private — nếu sửa công thức ở `product/page.tsx`, phải cập nhật đồng bộ ở đây).
+- `src/lib/product-label.ts`, `src/lib/product-label-pdf.ts` — URL/QR + resolve logic + PDF nhãn (logo, mã ngăn, Ca SX, footer).
+- `src/app/product-label/page.tsx` + `src/app/dashboard/product/_components/product-label-client.tsx` — trang tra cứu công khai (mirror `/storage`).
+- `src/app/dashboard/product/predict/page.tsx` + `actions.ts` — UI multi-select ngăn → xác nhận CSR/bọc/bành/số lô → xem trước & in + tab lịch sử (sửa/hủy admin-only/in lại/xóa đợt admin-only). `actions.ts` có thêm `findRealContinuationForSeries`, `createLotPredictionBatchMulti`, `getReservedKgForPartialKien`, `deletePredictionBatch`, `loadNganLabelInfoWithFill`.
+- `src/lib/pdf-qr-shared.ts` — tách từ `storage-pdf.ts` (`ensurePdfFont`, `addQrImage`, `safeName`, `PDF_FONT_NAME`) để dùng chung giữa nhãn ngăn và nhãn kiện thành phẩm.
+- Permission mới: `product.predict_view`, `product.predict_manage` (đã thêm vào `DEFAULT_PERMISSION_CODES` + `ROLE_DEFAULTS.manager` trong `src/lib/auth.ts`; `user` role không có quyền này).
+
+### Cập nhật phiên 2 (2026-07-07) — fix bug thật sau test tay + redesign nhãn
+
+Sau khi test tay lần đầu, người dùng báo 8 vấn đề. Đã fix hết ở tầng code (chưa test tay lại):
+
+1. **Bug "Đề xuất 0 lô" rỗng + nút "In lại" không phản hồi** — nguyên nhân gốc: `getExistingRealKg`/`getExistingPredictedKg` không tính KL "có chủ" của kiện dở dang MỘT PHẦN thuộc lô thật "Dở dang" khác (`reservedKg`) — chỉ tính đúng 1 lần tại thời điểm "bridge" (`findRealContinuationForSeries`) rồi bị bỏ quên ở các lần gọi RPC sau, khiến ngăn còn "dung lượng ảo" (thực ra đã hết) nhưng vẫn hiện trong danh sách chọn.
+   - Hàm mới `getReservedKgForPartialKien(factoryId)` quét **tất cả** lô "Dở dang" của nhà máy (không giới hạn 1 series), tính lại reservedKg **mỗi lần gọi**, dùng thống nhất trong `loadPredictAvailableNgans`, `previewLotPrediction`, `createLotPredictionBatch`, và fill% (mục 5 bên dưới). `findRealContinuationForSeries` chỉ còn giữ vai trò xác định `unassignableLetters/openLetters` để bridge, không còn tính `reservedKgByNgan` (tách 2 trách nhiệm).
+   - `createLotPredictionBatchMulti`: sau vòng lặp, nếu **không có ngăn nào** tạo được dù chỉ 1 dòng (không lô đầy đủ, không leftover, không nối tiếp carry-over — `createdIds.length===0 && !carryContinued`), tự động **xóa** các đợt rỗng vừa tạo (`cleanupEmptyBatches`, không cần `isAdmin` vì chỉ dọn dẹp chính request vừa tạo ra) và trả về lỗi rõ ràng thay vì "thành công" với 0 lô.
+   - `canCreate`/`outOfCapacity` ở `page.tsx` giờ gate theo **`availableKg < kienWeightKg`** (không đủ cho dù 1 kiện), **không phải** `suggestedLotCount<=0` (không đủ cho 1 LÔ đầy đủ) — vì RPC vẫn hợp lệ tạo lô lẻ 1-3 kiện khi còn giữa 1-4 kienWeight; gate sai theo lô đầy đủ sẽ chặn nhầm case hợp lệ này.
+   - `handlePrintAfterCreate`/`handleReprintBatch`: khi `items.length===0`, hiện banner lỗi rõ ràng thay vì im lặng không làm gì.
+2. **Nút "Xóa" đợt dự đoán cho admin** — server action `deletePredictionBatch(factoryId, batchId, isAdmin)`: chặn xóa nếu có lô đã `real_lot_id` (đã dùng thực tế); nếu có lô KHÁC đợt nhưng `last_batch_id` trỏ vào đợt này (đợt này từng "nối tiếp" 1 lô dở dang nguồn gốc từ đợt khác), tự trỏ lại `last_batch_id` về đúng `origin_batch_id` của lô đó trước khi xóa (trường này không được đọc ở đâu trong code nên an toàn). UI: nút "Xóa đợt" (đỏ, icon `Trash2`) trong panel mở rộng của mỗi đợt lịch sử, chỉ admin thấy, có modal xác nhận.
+3. **Logo tròn hơn** — logo gốc `logo-phk-moi.png` là ảnh dọc 631×809 (vòng tròn + chữ bên dưới); ép cứng vào ô vuông `logoSize×logoSize` làm vòng tròn bị bóp méo thành bầu dục. Đã crop bằng `sharp` thành `public/logo-phk-icon.png` (631×631 vuông, chỉ giữ vòng tròn) và đổi `LOGO_PATH` trong `product-label-pdf.ts` sang file này. Không đụng `logo-phk-moi.png` gốc (vẫn dùng ở `export/print`, trang chủ — nơi đó dùng `<img>` CSS, không bị lỗi này).
+4. **Tên công ty (header) + tên nhà máy (footer) +10% font**: `7.5pt → 8.25pt` (company), `8.5pt → 9.35pt` (footer). Line-height company cũng tăng tương ứng (3.2mm → 3.5mm) để không đè chữ.
+5. **Tỷ lệ lấp đầy ngăn dưới mã ngăn của mỗi kiện** — `ProductLabelItem` thêm field `nganFillPercent?: number`; hàm mới `loadNganLabelInfoWithFill(factoryId, ids)` (thay `loadNgansByIds` — đã xóa hẳn vì không còn nơi nào dùng) tính `(realKg + predictedKg + reservedKg) / tongKho * 100` — **có tính cả `reservedKg`** (phần kiện dở dang một phần "có chủ" — đúng yêu cầu "code đã bỏ qua" trước đây). Hiển thị dạng `"Đầy 87%"` ngay dưới mã ngăn, màu theo ngưỡng (emerald ≥100%, amber ≥80%, slate còn lại).
+6. **CSR/số lô/số kiện +50% font + đậm**: `15pt → 22.5pt` (đã đậm sẵn từ trước), `rightLineHeight` tăng tương ứng `7mm → 10.5mm`. Đồng thời tăng `midBlockHeight` từ `0.42×cellHeight` lên `0.46×cellHeight` để đủ chỗ (bù lại giảm `blankBlockHeight` từ `0.16` xuống `0.14`).
+7. **Đường kẻ Ngày SX/Ca SX đổi nét đứt xám, nằm mép dưới mỗi dòng** — hàm mới `dashedGrayLine()` (màu `slate-400`, dash `[1,1]`) thay cho `doc.line()` liền đen ngay dưới baseline chữ như trước; vị trí đổi sang mép dưới của từng hàng trong khối (`blankTop + rowH - 0.8` và `blankTop + blankBlockHeight - 0.8`) thay vì `label1Y - 1`/`label2Y - 1`.
+8. **Hậu tố mã lô gợi ý từ DB thật** — vẫn là `<input>` tự do (không ép thành `<select>` cứng, vì đây chỉ là gợi ý mã lô dự kiến, không phải chọn từ danh mục bắt buộc) nhưng có `<datalist>` nạp từ bảng `suffixes` thật (`.eq("factory_id", fid).order("code")`, load trong bootstrap) — mirror đúng nguồn dữ liệu `product/page.tsx` đang dùng cho dropdown "Hậu tố" thật.
+9. **Redesign responsive** — `predict/page.tsx` tab "Tạo dự đoán" đổi từ 1 cột `max-w-xl` cố định sang layout `lg:grid lg:grid-cols-[1.5fr_1fr]`: cột trái (chọn ngăn + CSR/bành/bọc/thảm/hậu tố) và cột phải sticky (`lg:sticky lg:top-6`, carry-over + preview + nút Tạo) — trên mobile 2 cột tự stack theo thứ tự DOM (trái trước, phải sau). Tăng `min-h-[40-46px]` cho các nút/input chính (tap target), header/tab responsive hơn (`text-xl sm:text-2xl`, nút "Quay lại" full-width trên mobile).
+
+**Chưa test tay** — toàn bộ 9 mục trên mới qua `tsc --noEmit`/`eslint`/`npm run build` (đều sạch), chưa chạy `npm run dev` xác nhận trên trình duyệt thật. Đặc biệt cần test tay:
+- Đúng kịch bản bug gốc: chọn 2 ngăn đã gần đầy (do đợt trước đã dùng gần hết dung lượng), tạo đợt mới → phải bị chặn nút Tạo (banner đỏ "không đủ dung lượng cho dù 1 kiện") thay vì tạo ra 2 dòng lịch sử rỗng.
+- Trường hợp còn 1-3 kiện lẻ (không đủ 1 lô đầy đủ nhưng đủ ≥1 kiện) — nút Tạo phải VẪN bấm được, tạo ra 1 lô "dở dang" đúng số kiện đó.
+- Nút "Xóa đợt" admin trên 1 đợt có lô thật/carry-over phức tạp.
+- Nhãn in ra thật (kiểm tra logo tròn, font size, đường kẻ xám nét đứt, dòng "Đầy X%" đúng số).
+- Layout 2 cột trên màn hình desktop thật và trên điện thoại.
+
+### Cập nhật phiên 3 (2026-07-07, tiếp) — fix nhãn sau test tay lần 2 + mục tiêu 100-105% + % lũy kế theo kiện + đóng ngăn
+
+Sau khi test tay bản phiên 2, người dùng báo tiếp 3 vấn đề nhãn nhỏ + 3 yêu cầu nghiệp vụ lớn hơn. Đã fix/implement hết ở tầng code (chưa test tay lại — xem cuối mục này):
+
+**Nhãn in (thay thế mục 3/4/7 ở phiên 2 phía trên nếu có mâu thuẫn):**
+
+- **Logo**: bản crop vuông `logo-phk-icon.png` (631×631, chỉ giữ vòng tròn) ở phiên 2 vô tình cắt mất dòng chữ viết tắt "VRG PHUOC HOA KAMPONG THOM" nằm dưới vòng tròn trong ảnh gốc. Đã xóa hẳn `public/logo-phk-icon.png`, quay lại dùng `public/logo-phk-moi.png` (đầy đủ) nhưng vẽ theo **đúng tỷ lệ khung hình gốc** (`LOGO_ASPECT = 631/809`, `logoWidth = logoHeight * LOGO_ASPECT`) thay vì ép vuông như bản rất đầu (đó là nguyên nhân bầu dục ban đầu) — vừa giữ vòng tròn không méo, vừa giữ nguyên dòng chữ viết tắt (dù nhỏ). `headerHeight` tăng từ `0.16×cellHeight` lên `0.185×cellHeight` để có thêm chỗ; `midBlockHeight` bù giảm từ `0.46` xuống `0.445`.
+- **Font tên công ty +20% cộng dồn** (không phải tính lại từ gốc): `8.25pt → 9.9pt` (tổng +32% so với 7.5pt gốc), line-height `3.5mm → 4.2mm`.
+- **Đường kẻ Ca SX dịch lên 2mm**: `blankTop + blankBlockHeight - 0.8` → `blankTop + blankBlockHeight - 0.8 - 2`, chỉ dòng Ca SX, dòng Ngày SX giữ nguyên vị trí.
+
+**Mục tiêu lấp đầy 100-105% (thay auto-max 110%) + điều chỉnh tay kiện lẻ cuối — chỉ khi chọn đúng 1 ngăn:**
+
+- Client tính mặc định `TARGET_FILL_RATIO = 1.02` (giữa khoảng 100-105%): `targetFullLots`/`targetTrailingKien` (0-3) suy từ `preview.availableKg`/`lotWeightKg`/`kienWeightKg` đã có sẵn, không gọi thêm server — set làm giá trị mặc định của `requestedLotCount`/`trailingKienCount` (state mới) mỗi khi effect tính `preview` chạy lại (đổi ngăn/CSR/bành). Chỉ áp dụng khi `selectedNgans.length === 1`; multi-ngăn giữ `""`/tự động tối đa 110%/ngăn như cũ, không đổi.
+- UI: stepper "Kiện lẻ cuối (0-3)" cạnh input "Số lô muốn in", hiện live "Tỷ lệ ngăn sau khi tạo: ~X%" tính hoàn toàn client-side (`liveCalc` trong `page.tsx`, không round-trip server). Guard: nếu người dùng tự chỉnh về `0 lô đầy đủ + 0 kiện lẻ`, chặn nút Tạo với message rõ ràng (`singleNganZeroZero`) thay vì rơi vào lỗi "hết dung lượng" chung chung.
+- Backend: `CreateLotPredictionBatchInput` thêm `trailingKienCount: number | null` (null = auto-max, dùng cho multi-ngăn) → RPC nhận thêm `p_requested_trailing_kien INTEGER DEFAULT NULL`.
+- **SQL quan trọng**: khối "đuôi lẻ" (leftover) của `create_lot_prediction_batch` trước đây chỉ chạy khi `v_n = v_n_max` (đã dùng hết mức 110%). Vì mặc định mới nhắm 102% khiến `v_n` hầu như luôn NHỎ HƠN `v_n_max`, đã sửa gate thành `IF v_n = v_n_max OR p_requested_trailing_kien IS NOT NULL THEN` — nếu không sửa, khối leftover (cả tự động lẫn override thủ công) sẽ bị bỏ qua hoàn toàn. Thêm `LEAST(FLOOR(...), 3)` vì invariant "leftover luôn < 1 lô" chỉ đúng khi `v_n = v_n_max`. Override thủ công (`p_requested_trailing_kien`) chỉ được **giảm** so với mức tối đa an toàn vừa tính (không bao giờ vượt trần 110%/`v_cap_kg`). Không đụng nhánh `v_continue` (nối tiếp lô dở dang/carry-over — xử lý kiện có danh tính cố định, độc lập với khối leftover).
+
+**% lũy kế đúng theo từng kiện trên nhãn (thay flat % cào bằng ở phiên 2) — theo mẫu `cung_cap_dl/goi_y.pdf`:**
+
+- File mẫu cho thấy mỗi kiện dự kiến phải hiện tỷ lệ **lũy kế tại đúng vị trí của nó** trong chuỗi (kiện đầu dự kiến % thấp nhất, kiện cuối % cao nhất) — không phải 1 số tổng cào bằng cho mọi kiện như `loadNganLabelInfoWithFill` (đã **xóa hẳn**, không còn call site nào dùng).
+- `getExistingPredictedKg(factoryId, nganId, excludeIds?)` generalize thêm tham số thứ 3 (mặc định `[]`, cần thêm `id` vào `.select()`) — 2 call site cũ (`loadPredictAvailableNgans`, `previewLotPrediction`) không đổi vì optional. `getNganFillPct` (dùng trong `updatePredictionLot`) refactor gọn lại để dùng chung hàm này thay vì query trùng lặp.
+- Hàm mới `loadNganCumulativeBaselines(factoryId, nganIds, excludePredictionLotIds)` tính `baselineKg` = real + predicted (LOẠI TRỪ các lô đang được in trong chính đợt này) + reservedKg — điểm bắt đầu để cộng dồn.
+- `buildLabelItemsFromLots` (`page.tsx`): group theo `nganId`, sort mỗi nhóm theo `(num asc, KIEN_LETTERS.indexOf(kien) asc)`, cộng dồn `cumulativeKg` từ baseline, mỗi kiện set `nganFillPercent = cumulativeKg/tongKho*100` (giữ `undefined` nếu không có baseline — không mặc định `0`, tránh in nhầm "Đầy 0%"). `handlePrintAfterCreate`/`handleReprintBatch` dùng chung hàm này nên tự động nhất quán.
+
+**Đánh dấu ngăn "đã dự kiến xong" (checkbox mặc định tick) + mở lại:**
+
+- Nghiệp vụ xác nhận: checkbox trong form tạo, **mặc định tick sẵn**. Lý do cần cờ riêng (không chỉ dựa vào capacity còn lại): mục tiêu mặc định chỉ 100-105% (không phải 110%) nên luôn còn dư ~5-10% nếu chỉ dựa vào capacity thô — nếu không có cờ đóng riêng, ngăn sẽ tiếp tục bị gợi ý dù người dùng đã coi là "xong".
+- Schema: `lot_prediction_batches.closes_ngan BOOLEAN NOT NULL DEFAULT false` — batch nào của 1 ngăn có cờ này thì ngăn đó bị loại khỏi `loadPredictAvailableNgans`, bất kể còn dư bao nhiêu. RPC thêm `p_closes_ngan BOOLEAN DEFAULT false`, ghi vào INSERT.
+- Backend mới: `loadClosedNgans(factoryId)` (danh sách ngăn đang đóng), `reopenNganPrediction(factoryId, nganId)` (hạ `closes_ngan=false`, không cần `isAdmin` — không phá hủy dữ liệu). `CreateLotPredictionBatchInput` thêm `closesNgan: boolean`, áp dụng cho **mọi** ngăn trong `orderedNganIds` khi tạo nhiều ngăn cùng lúc (độc lập với giới hạn 1-ngăn của mục tiêu 100-105%).
+- UI: checkbox trong form Tạo dự đoán; panel "Ngăn đã đóng dự kiến" ở đầu tab Lịch sử (chip mã ngăn + nút "Mở lại"), load qua `loadClosed` cùng lúc với `loadNgans`/`loadHistory`.
+
+**Xác nhận không cần viết lại logic TH1/TH2** (đối chiếu yêu cầu "so sánh MAX(lots.num) vs MAX(lot_prediction_lots.num)"): `findRealContinuationForSeries` (tìm lô `trang_thai='Dở dang'` mới nhất, chưa bridge) + nhánh `v_continue` của RPC đã đúng là TH1 (số lô thật lớn hơn); khi không có lô Dở dang cần bridge, RPC tự rơi vào fallback `GREATEST(MAX(lots.num), MAX(lot_prediction_lots.num không tính abandoned))+1` — đúng là TH2 (không có logic phần thừa kiện thực). Không sửa 2 nhánh này, chỉ đảm bảo khối leftover (mục tiêu 100-105%) không đụng vào `v_continue`.
+
+### Cập nhật phiên 4 (2026-07-07, tiếp) — fix 2 bug modal "Sửa lô" phát hiện khi test tay lần 3
+
+Test tay bản phiên 3 phát hiện modal "Sửa lô" ở tab Lịch sử hiển thị SAI: cả 4 kiện đều hiện "-- Chưa gán --" dù lô đã có ngăn thật (ví dụ lô đã in nhãn thành công). Điều tra ra **2 bug**, cả 2 đã fix:
+
+1. **Dropdown hiển thị sai "-- Chưa gán --" cho kiện đã có ngăn**: `<select>` trong modal sửa lấy option từ state `ngans` — vốn là danh sách CHỈ dành cho chọn ngăn MỚI (`loadPredictAvailableNgans`, đã lọc bỏ ngăn đóng dự kiến/hết dung lượng). Ngăn đã được gán cho 1 lô thường CHÍNH LÀ loại ngăn đã đóng/gần đầy này (nhất là từ phiên 3, checkbox "đóng ngăn" mặc định tick khiến ngăn biến mất khỏi `ngans` ngay sau khi tạo) — nên `<select value={uuid_thật}>` không tìm thấy option khớp, trình duyệt hiển thị option đầu tiên ("-- Chưa gán --") dù giá trị thật vẫn đúng trong state.
+   - Fix: `openEditLot` (giờ là async) tính các `ngan_id` đang được gán cho lô, ngăn nào KHÔNG có trong `ngans` thì gọi hàm mới `loadNgansByIdsRaw(ids)` (không lọc trạng thái/dung lượng/đóng — chỉ tra thông tin hiển thị) để bổ sung vào state riêng `editNganOptions`, dùng cho dropdown thay vì `ngans` trực tiếp. Option của ngăn đã đóng/hết dung lượng có thêm hậu tố "(đã đóng/hết dung lượng)" để phân biệt.
+2. **Không thể thực sự bỏ gán 1 kiện (chọn "-- Chưa gán --" rồi Lưu không có tác dụng)**: `handleSaveEdit` cũ có điều kiện `if (value && value !== original)` — khi user chọn "-- Chưa gán --" thì `value = ""`, là falsy, nên KHÔNG BAO GIỜ được đưa vào payload gửi lên server, dù đã đổi so với `original`.
+   - Fix: đổi điều kiện thành `if (value !== original) assignments[key] = value === "" ? null : value` — gửi `null` thật xuống DB khi bỏ gán. `UpdatePredictionLotInput.kienAssignments` đổi kiểu từ `Partial<Record<KienKey, string>>` sang `Partial<Record<KienKey, string | null>>`; `updatePredictionLot` không cần đổi gì thêm (payload spread + Supabase update đã tự xử lý đúng `null`).
+
+**Tự động đồng bộ `carry_over_status` khi sửa kiện (đã xác nhận nghiệp vụ, đã cài đặt)**: `updatePredictionLot` giờ select thêm `kien_a-d_ngan_id`, `unassignable_kien`, `carry_over_status` của lô hiện tại, merge với các thay đổi trong `input.kienAssignments`, rồi tự tính lại `carry_over_status` — thiếu ít nhất 1 kiện (và kiện đó không nằm trong `unassignable_kien`, tức không phải kiện đã có thật ngoài đời qua bridge) → `'pending'`; đủ cả 4 (kể cả tính unassignable) → `'none'`. Chỉ áp dụng khi `real_lot_id IS NULL` (lô chưa thực sự dùng). Nhờ đó, ví dụ bỏ gán kiện D của 1 lô đầy đủ (đưa ngăn từ 102% xuống 100,1%) sẽ tự chuyển lô đó sang `'pending'`, và lần tạo dự đoán kế tiếp cùng CSR/bành/năm sẽ được `findPendingCarryLot` gợi ý "Tiếp tục lô dở dang" đúng lô đó — nếu sau đó gán lại đủ 4 kiện, tự chuyển về `'none'`.
+
+**Chưa test tay lại** — cả 2 fix bug modal + cơ chế tự động pending mới qua `tsc --noEmit`/`eslint`/`npm run build` (đều sạch). Cần test tay: sửa lô bỏ gán 1 kiện → mở lại modal Sửa xác nhận không còn hiện "-- Chưa gán --" sai; tạo dự đoán mới cùng series cho ngăn khác → xác nhận banner "Tiếp tục lô dở dang" xuất hiện đúng lô vừa sửa; xác nhận gán lại đủ 4 kiện thì lô không còn được gợi ý nữa.
+
+**Chưa test tay** — toàn bộ các mục trên mới qua `tsc --noEmit`/`eslint`/`npm run build` (đều sạch), chưa chạy `npm run dev` xác nhận trên trình duyệt thật. Đặc biệt cần test tay:
+- Logo: xuất PDF, xác nhận vòng tròn không méo VÀ dòng chữ viết tắt vẫn hiện (dù nhỏ); font tên công ty rõ ràng to hơn; đường kẻ Ca SX dịch đúng ~2mm.
+- Chọn đúng 1 ngăn: khối xanh lá hiện tỷ lệ ước tính quanh 100-105% mặc định; tăng/giảm stepper kiện lẻ, % preview đổi live, không vượt 110%; thử chỉnh về 0/0 → nút Tạo bị chặn đúng message.
+- Tạo 1 đợt với checkbox mặc định tick → ngăn biến mất khỏi danh sách chọn dù còn dư kg; vào Lịch sử thấy ngăn trong panel "Ngăn đã đóng dự kiến"; bấm "Mở lại" → ngăn xuất hiện lại.
+- In nhãn nhiều kiện liên tiếp cùng 1 ngăn — % trên từng kiện TĂNG DẦN đúng thứ tự lô/kiện (không còn 1 số cào bằng), khớp `cung_cap_dl/goi_y.pdf`.
+- Test case TH1 (có lô Dở dang thật) và TH2 (ngăn mới hoàn toàn) sau khi sửa khối leftover, xác nhận cả 2 nhánh vẫn đúng.
+
+### Phạm vi CHƯA làm (cần hoàn thiện ở phiên sau)
+
+- **Chưa tích hợp nút "Nhập từ dự đoán" vào form tạo phiếu Thành phẩm** (`product/page.tsx`) — mới có nút "Dự đoán số lô" ở header link sang trang `/dashboard/product/predict`. Văn phòng hiện vẫn phải gõ tay `ma_lo`/CSR/bọc/bành như trước khi tạo phiếu thật; dự đoán chỉ có tác dụng in nhãn, chưa tự điền lại vào form nhập liệu thật.
+- Migration `20260709_lot_predictions.sql` **chưa chạy** trên Supabase — cần chạy thủ công trong SQL Editor trước khi tính năng hoạt động (theo đúng convention toàn bộ migration trong repo). Đã sửa nhiều lần trong lúc code (thêm cột `unassignable_kien`, `closes_ngan`, thêm tham số RPC `p_requested_trailing_kien`/`p_closes_ngan`) — vì CHƯA chạy lần nào nên an toàn để sửa trực tiếp file cũ, không tạo migration nối tiếp. Chạy lại **toàn bộ** file (idempotent) kể cả nếu trước đó đã chạy 1 phần.
+- Cách rút gọn tên nhà máy cho footer nhãn (khi nhà máy khác PHK) **chưa được quyết định** — hiện hard-code "Nhà máy chế biến PHK".
+- Toàn bộ luồng (đơn ngăn lẫn đa ngăn, bridge kiện dở dang, lọc hết dung lượng, nhãn mới) **chưa test tay** trên dữ liệu thật.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

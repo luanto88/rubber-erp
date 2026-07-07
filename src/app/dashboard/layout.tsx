@@ -34,6 +34,7 @@ import {
   hydrateActiveSession,
   isAuthSessionError,
   signOutEverywhere,
+  type AppRole,
   type SessionUser,
 } from "@/lib/auth"
 import { getModuleTasks, type ModuleTaskSummary } from "./_components/module-tasks"
@@ -52,6 +53,9 @@ type NavLeaf = {
   label: string
   icon: typeof Home
   permission?: string
+  // Ẩn mục này hẳn với các role liệt kê, kể cả khi không cần permission (vd "Dashboard"
+  // nội bộ không phù hợp cho role="customer" — họ chỉ được thấy "Đơn hàng của tôi").
+  hiddenForRoles?: AppRole[]
 }
 
 type NavGroup = {
@@ -68,7 +72,13 @@ function isNavGroup(item: NavItem): item is NavGroup {
 }
 
 const NAV: NavItem[] = [
-  { key: "/dashboard", label: "Dashboard", icon: Home },
+  { key: "/dashboard", label: "Dashboard", icon: Home, hiddenForRoles: ["customer"] },
+  {
+    key: "/dashboard/customer-portal",
+    label: "Đơn hàng của tôi",
+    icon: FileOutput,
+    permission: "export.view_own",
+  },
   { key: "/dashboard/notes", label: "Ghi chú nhanh", icon: NotebookPen, permission: "notes.view" },
   { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
   { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
@@ -333,6 +343,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return children.length ? [{ ...item, children }] : []
     }
 
+    if (item.hiddenForRoles?.includes(user?.role as AppRole)) return []
     if (item.permission && !hasPermission(user, item.permission)) return []
     return [item]
   })
@@ -372,6 +383,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.location.replace("/login")
     }
   }, [isPublicStorageLookup, loading, user])
+
+  // Tài khoản role="customer" chỉ được dùng "Đơn hàng của tôi" — đây chỉ là UX điều hướng,
+  // KHÔNG phải lớp bảo vệ chính. Bảo mật thật nằm ở RESTRICTIVE RLS + API route tự verify
+  // quyền (xem supabase/migrations/20260708_customer_portal_export_grants.sql).
+  useEffect(() => {
+    if (isPublicStorageLookup) return
+    if (loading || !user) return
+    if (user.role === "customer" && !pathname.startsWith("/dashboard/customer-portal")) {
+      router.replace("/dashboard/customer-portal")
+    }
+  }, [isPublicStorageLookup, loading, user, pathname, router])
 
   // Đóng drawer menu mobile khi bấm phím Escape
   useEffect(() => {

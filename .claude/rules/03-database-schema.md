@@ -28,6 +28,8 @@ description: Schema Supabase - tham chiếu khi viết query, migration hoặc l
 | `maintenance_external_materials` | Vật tư mua ngoài (master list gợi ý) | `id` UUID |
 | `inventory_*` | Cụm bảng module kho vật tư / hóa chất | UUID / theo từng bảng |
 | `sk_history` | Lịch sử thao tác Sang kiện / Thay bọc | `id` UUID |
+| `lot_prediction_batches` | Dự đoán số lô trước sản xuất — 1 dòng/lần tạo dự đoán | `id` UUID |
+| `lot_prediction_lots` | Lô dự kiến (4 cột ngăn theo từng kiện, chưa phải `lots` thật) | `id` UUID |
 | `sign_pins` | PIN chữ ký số (bcrypt hash) theo user | `user_id` UUID |
 | `iso_documents` | Tài liệu ISO (quy trình, hướng dẫn, biểu mẫu) | `id` UUID |
 | `van_ban_documents` | Văn bản nội bộ (công văn, thông báo, quyết định) | `id` UUID |

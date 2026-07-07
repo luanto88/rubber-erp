@@ -565,6 +565,7 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   soat_xet: "soát xét",
   upload_signed: "tải lên bản đã ký",
   view: "xem",
+  view_own: "xem đơn được cấp",
   xem_xet: "xem xét",
 }
 

@@ -1,0 +1,111 @@
+"use client";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { hasPermission, hydrateActiveSession } from "@/lib/auth";
+import { FileOutput, Package } from "lucide-react";
+
+type PortalOrder = {
+  id: string;
+  ma_don: string;
+  ngay: string;
+  chung_loai: string;
+  tong_banh: number;
+  trang_thai: string | null;
+  customer_name: string | null;
+};
+
+async function getAuthToken() {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token || "";
+}
+
+function formatDate(value: string) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+
+export default function CustomerPortalPage() {
+  const [loading, setLoading] = useState(true);
+  const [orders, setOrders] = useState<PortalOrder[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/api/customer-portal/orders", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = (await res.json().catch(() => null)) as { orders?: PortalOrder[]; error?: string } | null;
+      if (!res.ok) throw new Error(json?.error || "Không tải được danh sách đơn hàng.");
+      setOrders(json?.orders || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không tải được danh sách đơn hàng.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      const { user } = await hydrateActiveSession().catch(() => ({ user: null }));
+      if (!hasPermission(user, "export.view_own")) {
+        setLoading(false);
+        window.location.replace("/dashboard");
+        return;
+      }
+      void loadOrders();
+    };
+    void bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-extrabold text-slate-800">Đơn hàng của tôi</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Danh sách đơn xuất hàng được cấp quyền xem, kèm chuỗi truy xuất nguồn gốc EUDR
+        </p>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{error}</div>
+      )}
+
+      {loading ? (
+        <div className="p-12 text-center text-slate-400">Đang tải...</div>
+      ) : orders.length === 0 ? (
+        <div className="p-12 text-center text-slate-400 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <Package size={40} className="mx-auto mb-3 opacity-30" />
+          <p>Chưa có đơn hàng nào được cấp quyền xem.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {orders.map((order) => (
+            <Link
+              key={order.id}
+              href={`/dashboard/customer-portal/${order.id}`}
+              className="block bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:shadow-md hover:border-emerald-300 transition-all"
+            >
+              <div className="flex items-center gap-2 text-emerald-600 mb-2">
+                <FileOutput size={16} />
+                <span className="font-extrabold text-slate-800">{order.ma_don}</span>
+              </div>
+              <div className="text-xs text-slate-500 space-y-1">
+                <div>Ngày: {formatDate(order.ngay)}</div>
+                <div>Chủng loại: {order.chung_loai || "-"}</div>
+                <div>Tổng bánh: {order.tong_banh?.toLocaleString("vi-VN") ?? "-"}</div>
+                {order.customer_name && <div>Khách hàng: {order.customer_name}</div>}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

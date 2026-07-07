@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   getActiveFactoryId,
@@ -50,6 +51,7 @@ import {
   MoveRight,
   RefreshCw,
   Minus,
+  Wand2,
 } from "lucide-react";
 
 // Types
@@ -4511,6 +4513,14 @@ export default function ProductPage() {
               <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
               {syncing ? "Đang đồng bộ..." : "Đồng bộ trạng thái lô"}
             </button>
+          )}
+          {hasPermission(currentUser, "product.predict_view") && (
+            <Link
+              href="/dashboard/product/predict"
+              className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+            >
+              <Wand2 size={16} /> Dự đoán số lô
+            </Link>
           )}
           <button
             onClick={openSk}

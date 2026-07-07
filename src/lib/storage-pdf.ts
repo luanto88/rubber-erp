@@ -1,6 +1,5 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import QRCode from "qrcode"
 import {
   buildStorageLookupUrl,
   formatStorageDate,
@@ -9,9 +8,8 @@ import {
   type StorageDetailData,
   type StorageNgan,
 } from "@/lib/storage-detail"
+import { PDF_FONT_NAME, addQrImage, ensurePdfFont, safeName } from "@/lib/pdf-qr-shared"
 
-const PDF_FONT_FILE = "NotoSans-Regular.ttf"
-const PDF_FONT_NAME = "NotoSans"
 const ORG_LINE_1 = "Nhà máy chế biến"
 const ORG_LINE_2 = "Báo cáo ngăn lưu nguyên liệu"
 
@@ -28,47 +26,6 @@ type StoragePeriodReportRow = {
   doDangCount: number
   ratioPct: number | null
   lotDetailsText: string
-}
-
-let fontBase64Promise: Promise<string> | null = null
-
-async function loadPdfFontBase64() {
-  if (!fontBase64Promise) {
-    fontBase64Promise = fetch(`/fonts/${PDF_FONT_FILE}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Không tải được font PDF: ${PDF_FONT_FILE}`)
-        const buffer = await res.arrayBuffer()
-        const bytes = new Uint8Array(buffer)
-        let binary = ""
-        const chunkSize = 0x8000
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
-        }
-        return btoa(binary)
-      })
-      .catch((error) => {
-        fontBase64Promise = null
-        throw error
-      })
-  }
-
-  return fontBase64Promise
-}
-
-async function ensurePdfFont(doc: jsPDF) {
-  const base64 = await loadPdfFontBase64()
-  doc.addFileToVFS(PDF_FONT_FILE, base64)
-  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "normal")
-  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "bold")
-  doc.setFont(PDF_FONT_NAME, "normal")
-}
-
-function safeName(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
 }
 
 function formatKg(value: number) {
@@ -107,11 +64,6 @@ function renderFooter(doc: jsPDF) {
     doc.setPage(i)
     doc.text(`Trang ${i}/${pageCount}`, pageW - 12, pageH - 8, { align: "right" })
   }
-}
-
-async function addQrImage(doc: jsPDF, qrUrl: string, x: number, y: number, size: number) {
-  const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 240, margin: 1 })
-  doc.addImage(qrDataUrl, "PNG", x, y, size, size)
 }
 
 // ─── Bulk QR label sheet (35x35mm, cắt dán tại hiện trường) ──────────────────

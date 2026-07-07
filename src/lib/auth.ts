@@ -328,6 +328,8 @@ export const DEFAULT_PERMISSION_CODES = [
   "product.edit",
   "product.delete",
   "product.mark_completed",
+  "product.predict_view",
+  "product.predict_manage",
   "quality.view",
   "quality.create",
   "quality.edit",
@@ -340,6 +342,7 @@ export const DEFAULT_PERMISSION_CODES = [
   "export.delete",
   "export.delete_order",
   "export.quick_add_customer",
+  "export.view_own",
   "settings.view",
   "settings.manage_config",
   "settings.master_data",
@@ -382,6 +385,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "product.create",
     "product.edit",
     "product.mark_completed",
+    "product.predict_view",
+    "product.predict_manage",
     "quality.view",
     "quality.create",
     "quality.edit",
@@ -418,7 +423,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.edit",
     "notes.delete",
   ],
-  customer: [],
+  customer: ["export.view_own"],
 }
 
 export type AuthHydration = {

@@ -1,5 +1,6 @@
 "use client"
 
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import { normalizeDateInput } from "@/lib/date-utils"
@@ -280,11 +281,12 @@ export async function loadDispatchTripsByUids(
   factoryId: string,
   tripRefs: string[],
   options?: { fromDate?: string | null; toDate?: string | null },
+  client: SupabaseClient = supabase,
 ) {
   if (!factoryId || tripRefs.length === 0) return []
   const requestedRefs = new Set(tripRefs.filter(Boolean))
   const tripsByRef = new Map<string, StorageTripItem>()
-  const entries = await loadDispatchEntriesWithResolvedRows(supabase, {
+  const entries = await loadDispatchEntriesWithResolvedRows(client, {
     factoryId,
     select: "id,ngay,rows",
     fromDate: options?.fromDate || undefined,

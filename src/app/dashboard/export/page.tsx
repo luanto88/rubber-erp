@@ -33,6 +33,7 @@ import { QRCodeSVG as QRCode } from "qrcode.react";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
+import { CustomerGrantModal } from "@/app/dashboard/export/_components/customer-grant-modal";
 
 // --- Types -------------------------------------------------------------------
 type Vehicle = {
@@ -333,6 +334,7 @@ export default function ExportPage() {
   );
   const [currentUser, setCurrentUser] = useState<SessionUserLite | null>(null);
   const [canApproveOrders, setCanApproveOrders] = useState(false);
+  const [grantModalOrder, setGrantModalOrder] = useState<ExportOrder | null>(null);
   const isNMCP = useMemo(
     () => factory?.name?.toLowerCase().includes("cuaparis") ?? false,
     [factory],
@@ -1983,6 +1985,15 @@ export default function ExportPage() {
                               >
                                 <Printer size={11} /> In Biên bản
                               </a>
+                              {currentUser?.role === "admin" && (
+                                <button
+                                  type="button"
+                                  onClick={() => setGrantModalOrder(order)}
+                                  className="flex items-center gap-1 text-xs text-violet-600 hover:underline font-bold mt-1"
+                                >
+                                  <UserPlus size={11} /> Cấp quyền KH
+                                </button>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -2021,6 +2032,16 @@ export default function ExportPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {grantModalOrder && factoryId && currentUser?.id && (
+          <CustomerGrantModal
+            orderId={grantModalOrder.id}
+            orderCode={grantModalOrder.ma_don}
+            factoryId={factoryId}
+            actorId={currentUser.id}
+            onClose={() => setGrantModalOrder(null)}
+          />
         )}
       </div>
     );
