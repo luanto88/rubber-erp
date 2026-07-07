@@ -5,6 +5,7 @@ import { Package, Warehouse, ClipboardCheck, FileOutput, Truck, Plus, Map, Trend
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { useRouter } from "next/navigation"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { QuickNotesWidget } from "./_components/quick-notes-widget"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -86,11 +87,26 @@ export default function DashboardPage() {
         })
 
       // ── Charts data ────────────────────────────────────────────────────
-      // 1. Lots by CSR type (bar chart)
-      const { data: allLots } = await supabase
-        .from("lots")
-        .select("loai_csr, tong_banh, trang_thai, ngay_sx, ma_lo")
-        .eq("factory_id", fid)
+      // 1. Lots by CSR type (bar chart) — phân trang vì PostgREST mặc định
+      // cắt kết quả ở 1000 dòng, nhà máy có thể có nhiều hơn số đó.
+      const fetchAllLotsForDashboard = async () => {
+        const PAGE_SIZE = 1000
+        let from = 0
+        let all: { loai_csr: string; tong_banh: number; trang_thai: string; ngay_sx: string; ma_lo: string }[] = []
+        for (;;) {
+          const { data, error } = await supabase
+            .from("lots")
+            .select("loai_csr, tong_banh, trang_thai, ngay_sx, ma_lo")
+            .eq("factory_id", fid)
+            .range(from, from + PAGE_SIZE - 1)
+          if (error) break
+          all = all.concat(data || [])
+          if (!data || data.length < PAGE_SIZE) break
+          from += PAGE_SIZE
+        }
+        return all
+      }
+      const allLots = await fetchAllLotsForDashboard()
 
       if (allLots) {
         // Group by CSR type
@@ -102,7 +118,7 @@ export default function DashboardPage() {
           csrMap[csr].lots++
           csrMap[csr].banh += lot.tong_banh || 0
 
-          const st = lot.trang_thai || "Khác"
+          const st = normalizeLotStatus(lot.trang_thai)
           statusMap[st] = (statusMap[st] || 0) + 1
         })
 

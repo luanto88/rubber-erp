@@ -91,7 +91,10 @@ export default function WarehousePage() {
       .from("lots")
       .select("id, ma_lo, loai_csr, loai_banh, boc, pallet, kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ngay_sx, ngay_ht, day_chuyen, suffix, ghi_chu")
       .eq("factory_id", fid)
-      .in("trang_thai", ["Hoàn thành", "Xuất hàng"])
+      // "Hoan thanh" (khong dau) la gia tri sai do trigger DB cu ghi truoc khi
+      // duoc chuan hoa (xem migration 20260708_fix_lot_status_trigger.sql) —
+      // giu them de tranh am tham bo sot lo trong khi cho migration duoc ap dung.
+      .in("trang_thai", ["Hoàn thành", "Xuất hàng", "Hoan thanh"])
       .order("ngay_ht", { ascending: false, nullsFirst: false })
     // Lọc: phải có ít nhất 1 kiện còn bánh
     const filtered = (data as LotInfo[] || []).filter(l =>

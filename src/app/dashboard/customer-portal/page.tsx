@@ -1,8 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
-import { hasPermission, hydrateActiveSession } from "@/lib/auth";
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth";
 import { FileOutput, Package } from "lucide-react";
 
 type PortalOrder = {
@@ -14,11 +13,6 @@ type PortalOrder = {
   trang_thai: string | null;
   customer_name: string | null;
 };
-
-async function getAuthToken() {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token || "";
-}
 
 function formatDate(value: string) {
   if (!value) return "-";
@@ -32,11 +26,12 @@ export default function CustomerPortalPage() {
   const [orders, setOrders] = useState<PortalOrder[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const loadOrders = useCallback(async () => {
+  // Nhận thẳng token đã lấy được từ bootstrap (qua hydrateActiveSession()) — không đọc
+  // lại session lần 2 bằng supabase.auth.getSession() riêng, tránh khoảng hở không cần thiết.
+  const loadOrders = useCallback(async (token: string) => {
     setLoading(true);
     setError(null);
     try {
-      const token = await getAuthToken();
       const res = await fetch("/api/customer-portal/orders", {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -52,13 +47,20 @@ export default function CustomerPortalPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const { user } = await hydrateActiveSession().catch(() => ({ user: null }));
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }));
+      const blocked = authBlockReason(user);
+      if (!session?.user || blocked) {
+        setLoading(false);
+        await signOutEverywhere();
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`);
+        return;
+      }
       if (!hasPermission(user, "export.view_own")) {
         setLoading(false);
         window.location.replace("/dashboard");
         return;
       }
-      void loadOrders();
+      void loadOrders(session.access_token);
     };
     void bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps

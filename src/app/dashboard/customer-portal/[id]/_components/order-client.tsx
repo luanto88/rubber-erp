@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { supabase } from "@/lib/supabase"
-import { hasPermission, hydrateActiveSession } from "@/lib/auth"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -72,11 +71,6 @@ function MapResizeFix() {
   return null
 }
 
-async function getAuthToken() {
-  const { data } = await supabase.auth.getSession()
-  return data.session?.access_token || ""
-}
-
 function formatDate(value: string) {
   if (!value) return "-"
   const d = new Date(value)
@@ -100,7 +94,14 @@ export default function CustomerPortalOrderClient() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const { user } = await hydrateActiveSession().catch(() => ({ user: null }))
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
       if (!hasPermission(user, "export.view_own")) {
         setLoading(false)
         window.location.replace("/dashboard")
@@ -111,9 +112,8 @@ export default function CustomerPortalOrderClient() {
         return
       }
       try {
-        const token = await getAuthToken()
         const res = await fetch(`/api/customer-portal/orders/${orderId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${session.access_token}` },
         })
         const json = (await res.json().catch(() => null)) as (PortalData & { error?: string }) | null
         if (!res.ok) throw new Error(json?.error || "Không tải được chi tiết đơn hàng.")

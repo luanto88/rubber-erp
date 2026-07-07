@@ -32,8 +32,15 @@ export type ExportOrderGrant = {
 
 // Danh sách tài khoản role=customer trong nhà máy — phải qua API route server-side vì
 // RLS của bảng `profiles` không cho user thường đọc toàn bộ profiles trong factory.
+// Route đích bắt buộc requireAuthUser() (xem api/export/customer-grant-candidates/route.ts)
+// nên PHẢI đính kèm Authorization Bearer token, nếu không sẽ luôn nhận lỗi
+// "Phiên đăng nhập không hợp lệ" dù admin đang đăng nhập hợp lệ.
 export async function fetchGrantCandidates(factoryId: string): Promise<GrantCandidate[]> {
-  const res = await fetch(`/api/export/customer-grant-candidates?factoryId=${encodeURIComponent(factoryId)}`)
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData.session?.access_token || ""
+  const res = await fetch(`/api/export/customer-grant-candidates?factoryId=${encodeURIComponent(factoryId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   const json = (await res.json().catch(() => null)) as { users?: GrantCandidate[]; error?: string } | null
   if (!res.ok) throw new Error(json?.error || "Không tải được danh sách khách hàng.")
   return json?.users || []

@@ -60,7 +60,10 @@ async function getRotHangLotCount(factoryId: string): Promise<number> {
     .from("lots")
     .select("id")
     .eq("factory_id", factoryId)
-    .in("trang_thai", ["Hoàn thành", "Xuất hàng"])
+    // "Hoan thanh" (khong dau) la gia tri sai do trigger DB cu ghi truoc khi
+    // duoc chuan hoa (xem migration 20260708_fix_lot_status_trigger.sql) —
+    // giu them de tranh am tham bo sot lo trong khi cho migration duoc ap dung.
+    .in("trang_thai", ["Hoàn thành", "Xuất hàng", "Hoan thanh"])
   const lotIds = ((lotsData || []) as { id: string }[]).map((l) => l.id)
   if (lotIds.length === 0) return 0
 

@@ -1281,17 +1281,31 @@ export default function ProductPage() {
     setLoading(true);
     setSkHistoryLoading(true);
     try {
-      const q = supabase
-        .from("lots")
-        .select(
-          "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at)",
-        )
-        .eq("factory_id", fid)
-        .order("ngay_sx", { ascending: false })
-        .order("created_at", { ascending: false });
+      const fetchAllLots = async () => {
+        const PAGE_SIZE = 1000;
+        let from = 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let all: any[] = [];
+        for (;;) {
+          const { data, error } = await supabase
+            .from("lots")
+            .select(
+              "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at)",
+            )
+            .eq("factory_id", fid)
+            .order("ngay_sx", { ascending: false })
+            .order("created_at", { ascending: false })
+            .range(from, from + PAGE_SIZE - 1);
+          if (error) throw error;
+          all = all.concat(data || []);
+          if (!data || data.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+        return all;
+      };
 
-      const [{ data: lotsData }, { data: ngansData }, { data: historyData }] = await Promise.all([
-        q,
+      const [lotsData, { data: ngansData }, { data: historyData }] = await Promise.all([
+        fetchAllLots(),
         supabase
           .from("ngans")
           .select(
@@ -1697,10 +1711,23 @@ export default function ProductPage() {
       normalizeDayChuyen(l.day_chuyen) === normalizeDayChuyen(session.day_chuyen),
   );
   const dorDangCountByNganId = useMemo(() => {
+    // Đếm theo TẤT CẢ ngăn thực sự có giao dịch của lô (lot_transactions.ngan_id),
+    // không chỉ theo lots.ngan_id đơn — vì syncLotMasterSnapshot() luôn ghi đè
+    // lots.ngan_id bằng giao dịch mới nhất, nên 1 lô dở dang trải qua 2 ngăn
+    // khác ngày sẽ bị bỏ sót cảnh báo ở ngăn dùng NGÀY ĐẦU nếu chỉ đọc lots.ngan_id.
     const map: Record<string, number> = {};
     createDorDangLots.forEach((lot) => {
-      if (!lot.ngan_id) return;
-      map[lot.ngan_id] = (map[lot.ngan_id] || 0) + 1;
+      const nganIds = new Set<string>();
+      (lot.lot_transactions || []).forEach((tx) => {
+        if (tx.ngan_id) nganIds.add(tx.ngan_id);
+      });
+      if (nganIds.size === 0 && lot.ngan_id) {
+        // Lô chưa có giao dịch nào ghi nhận (vd vừa tạo) — fallback dùng ngan_id của lô
+        nganIds.add(lot.ngan_id);
+      }
+      nganIds.forEach((nganId) => {
+        map[nganId] = (map[nganId] || 0) + 1;
+      });
     });
     return map;
   }, [createDorDangLots]);
@@ -3548,7 +3575,9 @@ export default function ProductPage() {
         .from("lots")
         .select("id, tong_banh, trang_thai")
         .eq("factory_id", factoryId)
-        .in("trang_thai", ["Hoàn thành", "Xuất hàng"]);
+        // "Hoan thanh" (khong dau) la gia tri sai do trigger DB cu tung ghi —
+        // giu them de nut nay tu sua duoc luon ca cac lo con sot gia tri sai.
+        .in("trang_thai", ["Hoàn thành", "Xuất hàng", "Hoan thanh"]);
 
       const { data: allOrders } = await supabase
         .from("export_orders")
@@ -5882,11 +5911,13 @@ export default function ProductPage() {
                                 >
                                   <Edit2 size={12} /> Sửa lô
                                 </button>
-                              ) : (
+                              ) : !lot ? (
+                                // isExported đã hiện rõ qua badge trạng thái bên trái —
+                                // không lặp lại "Đã xuất hàng" ở đây để tránh 2 nhãn chồng nhau.
                                 <span className="text-xs text-slate-400 shrink-0">
-                                  {isExported ? "Đã xuất hàng" : "Không thể sửa"}
+                                  Không thể sửa
                                 </span>
-                              )}
+                              ) : null}
                             </div>
                           );
                         })}
