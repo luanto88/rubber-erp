@@ -120,6 +120,13 @@ Kết quả:
 - Pass ở các file đã chạm.
 - Warning cũ về `<img>` trong `export/page.tsx` không liên quan bug logic.
 
+## Cập nhật 2026-07-07 — Quyền sửa ngăn theo trạng thái
+
+- Admin được sửa ngăn ở **mọi trạng thái**, kể cả `Đang sản xuất` và `Đã sản xuất` — mục đích để đồng bộ lại khối lượng nguyên liệu khi dữ liệu điều xe lệch sau khi ngăn đã vào sản xuất.
+- User thường vẫn giữ nguyên rule cũ: chỉ sửa được khi ngăn ở `Đang nhận`, `Đóng`, `Chờ sản xuất`.
+- Đã thêm nút "Sửa" vào bảng tab "Lịch sử" (chỉ admin thấy) vì trước đó tab này (toàn bộ ngăn `Đã sản xuất`) không có nút sửa nào.
+- Chi tiết đầy đủ: `.claude/rules/storage.md` mục "Quyền sửa ngăn theo trạng thái (cập nhật 2026-07-07)"; `.claude/rules/06-module-production.md` mục "Rule trạng thái".
+
 ## Việc nên làm ở session sau
 
 - Rà và xử lý dữ liệu cũ của các ngăn rỗng nhưng đã có thành phẩm, đặc biệt `N6` và `N8`.

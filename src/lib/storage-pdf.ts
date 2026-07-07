@@ -114,6 +114,115 @@ async function addQrImage(doc: jsPDF, qrUrl: string, x: number, y: number, size:
   doc.addImage(qrDataUrl, "PNG", x, y, size, size)
 }
 
+// ─── Bulk QR label sheet (35x35mm, cắt dán tại hiện trường) ──────────────────
+const QR_LABEL_SIZE_MM = 35
+const QR_LABEL_CELL_PADDING_MM = 2
+const QR_LABEL_TEXT_GAP_MM = 1.2
+const QR_LABEL_LINE_HEIGHT_MM = 3
+const QR_LABEL_MAX_TEXT_LINES = 2
+const QR_LABEL_FONT_SIZE_PT = 7.2
+const QR_LABEL_GAP_X_MM = 5
+const QR_LABEL_GAP_Y_MM = 4
+const QR_LABEL_PAGE_MARGIN_MM = 10
+const QR_LABEL_HEADER_HEIGHT_MM = 8
+
+function computeBulkQrGridLayout(doc: jsPDF) {
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+
+  const cellBoxWidth = QR_LABEL_SIZE_MM + QR_LABEL_CELL_PADDING_MM * 2
+  const textBlockHeight = QR_LABEL_LINE_HEIGHT_MM * QR_LABEL_MAX_TEXT_LINES
+  const cellBoxHeight =
+    QR_LABEL_SIZE_MM + QR_LABEL_TEXT_GAP_MM + textBlockHeight + QR_LABEL_CELL_PADDING_MM * 2
+
+  const usableWidth = pageWidth - QR_LABEL_PAGE_MARGIN_MM * 2
+  const usableHeight = pageHeight - QR_LABEL_PAGE_MARGIN_MM * 2 - QR_LABEL_HEADER_HEIGHT_MM
+
+  const cols = Math.max(1, Math.floor((usableWidth + QR_LABEL_GAP_X_MM) / (cellBoxWidth + QR_LABEL_GAP_X_MM)))
+  const rows = Math.max(1, Math.floor((usableHeight + QR_LABEL_GAP_Y_MM) / (cellBoxHeight + QR_LABEL_GAP_Y_MM)))
+
+  const gridWidth = cols * cellBoxWidth + (cols - 1) * QR_LABEL_GAP_X_MM
+  const gridHeight = rows * cellBoxHeight + (rows - 1) * QR_LABEL_GAP_Y_MM
+  const offsetX = QR_LABEL_PAGE_MARGIN_MM + Math.max(0, (usableWidth - gridWidth) / 2)
+  const offsetY =
+    QR_LABEL_PAGE_MARGIN_MM + QR_LABEL_HEADER_HEIGHT_MM + Math.max(0, (usableHeight - gridHeight) / 2)
+
+  return { cols, rows, perPage: cols * rows, cellBoxWidth, cellBoxHeight, offsetX, offsetY }
+}
+
+function renderBulkQrPageHeader(doc: jsPDF, pageNo: number, totalPages: number) {
+  const pageWidth = doc.internal.pageSize.getWidth()
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(10)
+  doc.setTextColor(15, 23, 42)
+  doc.text("Nhãn QR ngăn lưu — cắt theo đường viền", QR_LABEL_PAGE_MARGIN_MM, 8)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(8)
+  doc.text(`Trang ${pageNo}/${totalPages}`, pageWidth - QR_LABEL_PAGE_MARGIN_MM, 8, { align: "right" })
+}
+
+export async function downloadStorageBulkQrPdf(
+  ngans: Pick<StorageNgan, "id" | "ma_ngan" | "ten_ngan">[],
+) {
+  if (ngans.length === 0) throw new Error("Chưa chọn ngăn nào để in QR.")
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+
+  const layout = computeBulkQrGridLayout(doc)
+  const totalPages = Math.ceil(ngans.length / layout.perPage)
+
+  for (let i = 0; i < ngans.length; i++) {
+    const indexInPage = i % layout.perPage
+    if (indexInPage === 0) {
+      const pageIndex = Math.floor(i / layout.perPage)
+      if (pageIndex > 0) doc.addPage()
+      renderBulkQrPageHeader(doc, pageIndex + 1, totalPages)
+    }
+
+    const col = indexInPage % layout.cols
+    const row = Math.floor(indexInPage / layout.cols)
+    const cellX = layout.offsetX + col * (layout.cellBoxWidth + QR_LABEL_GAP_X_MM)
+    const cellY = layout.offsetY + row * (layout.cellBoxHeight + QR_LABEL_GAP_Y_MM)
+    const qrX = cellX + QR_LABEL_CELL_PADDING_MM
+    const qrY = cellY + QR_LABEL_CELL_PADDING_MM
+
+    const ngan = ngans[i]
+    const qrUrl = buildStorageLookupUrl(ngan.id, ngan.ma_ngan)
+    await addQrImage(doc, qrUrl, qrX, qrY, QR_LABEL_SIZE_MM)
+
+    // Khung viền nét đứt = đường cắt tham khảo
+    doc.setDrawColor(148, 163, 184)
+    doc.setLineWidth(0.15)
+    doc.setLineDashPattern([1.2, 1], 0)
+    doc.rect(cellX, cellY, layout.cellBoxWidth, layout.cellBoxHeight)
+    doc.setLineDashPattern([], 0)
+
+    // Nhãn text: ma_ngan đầy đủ, fallback ten_ngan, fallback "—"
+    const label = (ngan.ma_ngan || ngan.ten_ngan || "").trim() || "—"
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(QR_LABEL_FONT_SIZE_PT)
+    doc.setTextColor(15, 23, 42)
+
+    let lines: string[] = doc.splitTextToSize(label, QR_LABEL_SIZE_MM)
+    if (lines.length > QR_LABEL_MAX_TEXT_LINES) {
+      lines = lines.slice(0, QR_LABEL_MAX_TEXT_LINES)
+      const lastLine = lines[QR_LABEL_MAX_TEXT_LINES - 1] || ""
+      lines[QR_LABEL_MAX_TEXT_LINES - 1] =
+        lastLine.length > 1 ? `${lastLine.slice(0, -1)}…` : lastLine
+    }
+
+    const textX = qrX + QR_LABEL_SIZE_MM / 2
+    const textStartY = qrY + QR_LABEL_SIZE_MM + QR_LABEL_TEXT_GAP_MM + QR_LABEL_LINE_HEIGHT_MM * 0.8
+    lines.forEach((line, lineIndex) => {
+      doc.text(line, textX, textStartY + lineIndex * QR_LABEL_LINE_HEIGHT_MM, { align: "center" })
+    })
+  }
+
+  const fileSuffix = safeName(`${ngans.length}-ngan-${new Date().toISOString().slice(0, 10)}`)
+  doc.save(`in-qr-hang-loat-${fileSuffix}.pdf`)
+}
+
 function ratioLabel(ratio: number | null) {
   if (ratio === null || Number.isNaN(ratio)) return "—"
   return `${ratio.toFixed(1)}%`

@@ -357,6 +357,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "iso.phe_duyet",
   "iso.print",
   "iso.signature",
+  "notes.view",
+  "notes.create",
+  "notes.edit",
+  "notes.delete",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -394,6 +398,10 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "iso.edit",
     "iso.soat_xet",
     "iso.signature",
+    "notes.view",
+    "notes.create",
+    "notes.edit",
+    "notes.delete",
   ],
   user: [
     "dispatch.view",
@@ -405,6 +413,10 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "export.view",
     "iso.view",
     "iso.signature",
+    "notes.view",
+    "notes.create",
+    "notes.edit",
+    "notes.delete",
   ],
   customer: [],
 }

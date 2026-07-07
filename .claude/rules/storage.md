@@ -25,6 +25,13 @@ Khong co trang thai `Hoan thanh` cho ngan.
 - `KL tuoi` va `KL kho` la field read-only, tu tinh tu danh sach xe da chon
 - Sau khi tao / sua ngan, `tong_tuoi` va `tong_kho` co the duoc cap nhat lai tu dong boi `writeBackToDispatch` trong module San luong khi san luong thay doi (xem muc 9)
 
+### Quyen sua ngan theo trang thai (cap nhat 2026-07-07)
+
+- User thuong (`storage.create`/`storage.edit`) chi duoc sua ngan khi trang thai la `Dang nhan (Can cap nhat)`, `Dong`, hoac `Cho san xuat`.
+- Admin duoc sua ngan o **moi trang thai**, ke ca `Dang san xuat` va `Da san xuat` — dung de dong bo lai khoi luong nguyen lieu (them/bot chuyen, doi ngay) khi du lieu dieu xe co sai lech phat sinh sau khi ngan da vao san xuat.
+- Nut "Sua" o tab "Dang hoat dong" (card) va tab "Lich su" (bang, chi gom ngan `Da san xuat`) deu ap dung dung rule nay — `openEdit()` va dieu kien hien nut deu check `isAdmin` truoc khi check trang thai.
+- Code: `src/app/dashboard/storage/page.tsx` — ham `openEdit()` va bien `canEditThisNgan` (tab Dang hoat dong) / nut Sua trong bang tab Lich su.
+
 ## 3. Tinh khoi luong theo loai nguyen lieu
 
 Khi tao / sua ngan, chi duoc cong dung cot KL cua dung loai nguyen lieu da chon:
@@ -203,3 +210,40 @@ production_records thay doi (import / save / delete)
 - Ngăn tự "chuyển tab" khi trạng thái đổi vì cả 2 mảng đều derive lại từ `filtered` mỗi render — không cache riêng theo tab.
 - Nút "Về đang SX" (chỉ admin, business rule bắt buộc giữ — xem `.claude/rules/06-module-production.md` mục Kho nguyên liệu) vẫn tồn tại ở tab Lịch sử dưới dạng nút gọn trong cột "Hành động" của bảng, gọi đúng `handleNganStatusToggle(n.id, STORAGE_STATUS_IN_PRODUCTION)` như card cũ — không đổi logic quyền/nghiệp vụ.
 - Card tab Đang hoạt động: đã bỏ khối QR to ở footer (chỉ còn icon QR ở header dẫn tới `/dashboard/storage/[id]`); icon nút "Thu gọn" đổi từ `X` xám sang `Minus` để không còn giống hệt icon `X` đỏ của nút "Xóa"; card dùng `shadow-sm` (không còn `shadow-md` + viền cứng); các nút hành động (QR/PDF/GeoJSON/Xem/Sửa/Xóa — không gồm nút toggle trạng thái) chỉ mờ đi ở desktop khi không hover (`md:opacity-0 md:group-hover:opacity-100`), luôn hiện rõ trên mobile vì thiết bị cảm ứng không có hover.
+
+## 12. Cập nhật 2026-07-07 — Trạng thái nổi bật trên trang tra cứu công khai `/storage`
+
+- Trang tra cứu công khai (`src/app/storage/page.tsx` → `StorageDetailClient` tại `src/app/dashboard/storage/_components/storage-detail-client.tsx`) trước đây **không hiển thị `trang_thai` của ngăn ở đâu cả** — người quét QR ngoài hiện trường chỉ thấy loại nguyên liệu/khối lượng, không biết ngăn đang ở trạng thái gì. Đã fix bằng cách thêm 1 badge trạng thái nổi bật ngay dưới tiêu đề.
+- Helper dùng chung mới trong `src/lib/storage-status.ts` (không đổi hành vi của các hàm cũ, chỉ thêm mới):
+  - `getStorageStatusLabelEn(status)` — bảng dịch tiếng Anh cố định cho 5 trạng thái hợp lệ (`Receiving`, `Closed`, `Awaiting production`, `In production`, `Produced`).
+  - `getStorageStatusTheme(status)` — trả `{ badge, dot, gradient }` dùng chung màu sắc với `badgeClass`/`headerStyle` đã có sẵn trong `storage/page.tsx` (không refactor lại 2 hàm cũ đó để tránh rủi ro, chỉ thêm bản mới dùng riêng cho trang public).
+- `StorageDetailClient` hiển thị badge dạng pill full-width, có chấm màu + nhãn tiếng Việt in đậm + nhãn tiếng Anh nhạt hơn ngay sau (`{statusLabelVi} · {statusLabelEn}`), đặt trong khối riêng ngay dưới hàng tiêu đề/nút "Xuất PDF chi tiết" — luôn hiển thị đầy đủ trên cả mobile (full width, wrap) và desktop (inline, không bị nút PDF che khuất vì đã tách hàng riêng).
+- Khối "Thông tin ngăn lưu" (card gradient chứa Loại nguyên liệu/Ngày nguyên liệu/KL...) đổi từ gradient `emerald→cyan` cố định sang `statusTheme.gradient` động theo đúng trạng thái hiện tại của ngăn — nhất quán với cách `headerStyle()` tô màu card theo trạng thái ở `/dashboard/storage`.
+
+## 13. Cập nhật 2026-07-07 — Tab "In QR hàng loạt" (nhãn cắt dán hiện trường)
+
+- Thêm tab thứ 3 ở `/dashboard/storage` cạnh "Đang hoạt động" / "Lịch sử": `nganTab: "active" | "history" | "print"`. Phạm vi chọn = dùng chung `activeNgans` (mọi trạng thái trừ `Đã sản xuất`) — không tạo query/filter riêng.
+- UI: action bar ("Chọn tất cả (N)" / "Bỏ chọn tất cả" / đếm đã chọn / nút "In QR đã chọn (N)") + grid card chọn gọn (`grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6`), mỗi card là 1 `<button>` toggle toàn bộ khi click (phong cách giống `CompactItemSelectorCard` ở `src/app/dashboard/inventory/_components/inventory-ui.tsx` — border/bg đổi màu tím `violet` khi chọn + badge check tròn góc phải trên), hiển thị `ten_ngan` đậm, `ma_ngan` nhỏ (`break-all`), badge trạng thái dùng `badgeClass` sẵn có. State chọn `selectedPrintIds: Set<string>` độc lập với filter — đổi filter không tự bỏ chọn ngăn đã chọn trước đó; "Chọn tất cả" chỉ áp dụng theo `activeNgans` đang hiển thị.
+- Hàm PDF mới `downloadStorageBulkQrPdf(ngans)` trong `src/lib/storage-pdf.ts` — tạo 1 file PDF A4 portrait chứa lưới nhãn QR **35×35mm đúng kích thước vật lý**, mỗi QR kèm dòng `ma_ngan` đầy đủ in bên dưới (không phải `ten_ngan` ngắn — đã chốt với người dùng vì mục đích là nhãn nhận diện tại hiện trường, chấp nhận chuỗi dài ~25-30 ký tự có dấu tiếng Việt), có khung viền nét đứt quanh mỗi nhãn làm đường cắt tham khảo (`doc.setLineDashPattern`).
+  - Lưới tự tính theo kích thước trang thật qua `computeBulkQrGridLayout(doc)`: mặc định ra **4 cột × 5 hàng = 20 nhãn/trang** trên A4, tự phân trang (`doc.addPage()`) khi vượt `perPage`, tiêu đề mỗi trang tối giản 1 dòng (`renderBulkQrPageHeader`) — **không** dùng banner `renderHeader`/`renderFooter` sẵn có (quá to, lãng phí diện tích in nhãn).
+  - `ma_ngan` dài được wrap tối đa 2 dòng qua `doc.splitTextToSize(label, QR_LABEL_SIZE_MM)` (đã xác nhận jsPDF wrap đúng chuỗi dài không khoảng trắng dạng `"N8-NT-ĐC-X-16/06/26-18/06/26"`), dòng cuối bị cắt bớt kèm `…` nếu vẫn dư sau 2 dòng. Fallback nhãn: `ma_ngan || ten_ngan || "—"`.
+  - QR payload mỗi ngăn dùng `buildStorageLookupUrl(ngan.id, ngan.ma_ngan)` — giống hệt QR đơn lẻ ở trang chi tiết/tra cứu, quét ra đúng `/storage?id=...`.
+- Không thêm permission mới — dùng chung guard `storage.view` sẵn có của trang.
+
+Xem thêm quyết định thiết kế/plan implementation gốc tại lịch sử phiên làm việc nếu cần đối chiếu chi tiết công thức layout.
+
+## 14. Fix nghiêm trọng 2026-07-07 — `/storage` (trang tra cứu công khai) bị lỗi 500 do SSR crash với `leaflet`
+
+- **Phát hiện khi test tab "In QR hàng loạt"** ở mục 13: quét bất kỳ QR ngăn nào (kể cả QR cũ đã in trước đây) đều dẫn tới lỗi 500 — đã xác nhận lỗi này tồn tại ở **cả dev lẫn production** (`qlsxkpt.vercel.app/storage` cũng 500 tại thời điểm phát hiện), tức là toàn bộ tính năng tra cứu qua QR ngoài hiện trường đã bị hỏng từ trước, không liên quan gì đến tính năng in QR hàng loạt.
+- **Nguyên nhân**: `src/app/dashboard/storage/_components/storage-geojson-map.tsx` `import L from "leaflet"` ở top-level — thư viện `leaflet` đọc `window` ngay khi module được load (không đợi render). File này được `storage-detail-client.tsx` import **tĩnh** (`import { StorageGeoJsonMap } from ...`), nên khi Next.js server-render trang `/storage` (client component vẫn được render ra HTML ban đầu trên server), toàn bộ cây module bị load kể cả `leaflet` → `ReferenceError: window is not defined` → crash toàn trang.
+- **Fix**: đổi sang `next/dynamic` với `ssr: false` trong `storage-detail-client.tsx`:
+  ```ts
+  const StorageGeoJsonMap = dynamic(
+    () => import("@/app/dashboard/storage/_components/storage-geojson-map").then(m => m.StorageGeoJsonMap),
+    { ssr: false, loading: () => <div>Đang tải bản đồ...</div> },
+  )
+  ```
+  Nhờ vậy `leaflet` chỉ được load ở client, không bao giờ chạy trong quá trình SSR.
+- Đã verify: `/storage` và `/storage?id=...` trả về 200 sau fix (trước đó 500), nội dung trang render đúng ("Tra cứu ngăn lưu nguyên liệu"...). Chỉ có **1 nơi duy nhất** import `StorageGeoJsonMap` trong toàn repo (`storage-detail-client.tsx`) nên fix này đã bao phủ đủ mọi route dùng chung component này (cả `/storage` công khai lẫn mọi trang dashboard nào render lại `StorageDetailClient`).
+- **Quy tắc cho code mới**: bất kỳ thư viện nào phụ thuộc trực tiếp vào `window`/`document` ở top-level module (leaflet, các thư viện vẽ bản đồ/canvas khác) khi dùng trong cây component có khả năng bị Next.js server-render (page không đánh dấu client-only ở tầng route) đều phải import qua `next/dynamic({ ssr: false })`, không import tĩnh trực tiếp.
+- **Chưa deploy lên production** — fix này mới nằm trong working tree (`git status` sẽ thấy `storage-detail-client.tsx` modified), cần commit + deploy để khôi phục tính năng tra cứu QR trên `qlsxkpt.vercel.app`.

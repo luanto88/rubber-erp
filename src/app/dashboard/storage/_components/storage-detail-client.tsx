@@ -1,10 +1,10 @@
 "use client"
 
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Download, FileText, Layers, Map, QrCode, Truck, Warehouse, Weight } from "lucide-react"
+import { Activity, ArrowLeft, Download, FileText, Layers, Map, QrCode, Truck, Warehouse, Weight } from "lucide-react"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
-import { StorageGeoJsonMap } from "@/app/dashboard/storage/_components/storage-geojson-map"
 import {
   buildStorageLookupPath,
   formatStorageDate,
@@ -16,6 +16,21 @@ import {
   type StorageGeoJsonCollection,
 } from "@/lib/storage-detail"
 import { downloadStorageDetailPdf } from "@/lib/storage-pdf"
+import { getStorageStatusLabelEn, getStorageStatusTheme, normalizeStorageStatus } from "@/lib/storage-status"
+
+// leaflet đọc `window` ngay khi module được load — phải tắt SSR, nếu không trang public
+// /storage (server-rendered) sẽ crash với "ReferenceError: window is not defined".
+const StorageGeoJsonMap = dynamic(
+  () => import("@/app/dashboard/storage/_components/storage-geojson-map").then((m) => m.StorageGeoJsonMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[420px] w-full items-center justify-center rounded-3xl border border-slate-200 bg-slate-50 text-sm text-slate-400">
+        Đang tải bản đồ...
+      </div>
+    ),
+  },
+)
 
 type StorageDetailClientProps = {
   nganId?: string
@@ -114,6 +129,10 @@ export function StorageDetailClient({
   const summary = useMemo(() => (detail ? summarizeStorageLots(detail.lots) : null), [detail])
   const ratio = detail && summary && detail.ngan.tong_kho > 0 ? (summary.thanhPhamKg / detail.ngan.tong_kho) * 100 : null
 
+  const statusLabelVi = detail ? normalizeStorageStatus(detail.ngan.trang_thai) || "—" : "—"
+  const statusLabelEn = detail ? getStorageStatusLabelEn(detail.ngan.trang_thai) : ""
+  const statusTheme = getStorageStatusTheme(detail?.ngan.trang_thai)
+
   const handleExportPdf = async () => {
     if (!detail) return
 
@@ -162,30 +181,46 @@ export function StorageDetailClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           {showDashboardBackLink ? (
             <Link href="/dashboard/storage" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-800">
               <ArrowLeft size={15} />
               Quay lại danh sách ngăn lưu
             </Link>
           ) : null}
-          <h1 className="mt-3 text-3xl font-extrabold text-slate-900">{detail.ngan.ten_ngan}</h1>
+          <h1 className="mt-3 text-3xl font-extrabold text-slate-900 break-words">{detail.ngan.ten_ngan}</h1>
           <p className="mt-1 text-sm text-slate-500">{detail.ngan.ma_ngan || "—"}</p>
         </div>
         <button
           type="button"
           onClick={() => void handleExportPdf()}
           disabled={exportingPdf}
-          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+          className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"
         >
           <FileText size={15} />
           {exportingPdf ? "Đang xuất PDF..." : "Xuất PDF chi tiết"}
         </button>
       </div>
 
+      <div
+        className={`inline-flex w-full flex-wrap items-center gap-2 rounded-2xl border border-white/60 bg-gradient-to-br ${statusTheme.gradient} px-4 py-3 shadow-sm sm:w-auto`}
+      >
+        <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${statusTheme.badge}`}>
+          <Activity size={16} />
+        </span>
+        <span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+          Trạng thái ngăn / Bin status
+        </span>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-extrabold ${statusTheme.badge}`}>
+          <span className={`h-2 w-2 rounded-full ${statusTheme.dot}`} />
+          {statusLabelVi}
+          <span className="font-semibold opacity-70">· {statusLabelEn}</span>
+        </span>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
-        <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-emerald-50 via-white to-cyan-50 p-6">
+        <div className={`rounded-3xl border border-slate-200 bg-gradient-to-br ${statusTheme.gradient} p-6`}>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[
               { label: "Loại nguyên liệu", value: detail.ngan.loai_nl, icon: <Layers size={16} className="text-emerald-600" /> },

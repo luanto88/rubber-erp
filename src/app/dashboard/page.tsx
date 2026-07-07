@@ -5,6 +5,7 @@ import { Package, Warehouse, ClipboardCheck, FileOutput, Truck, Plus, Map, Trend
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { useRouter } from "next/navigation"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { QuickNotesWidget } from "./_components/quick-notes-widget"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -52,6 +53,7 @@ export default function DashboardPage() {
   const [recentLots, setRecentLots] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [factoryId, setFactoryId] = useState<string | null>(null)
   const revealRef = useScrollReveal()
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export default function DashboardPage() {
         setLoading(false)
         return
       }
+      setFactoryId(fid)
 
       try {
         // Factory name
@@ -490,6 +493,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Ghi chú nhanh ─────────────────────────────────────────────── */}
+      <QuickNotesWidget factoryId={factoryId} user={currentUser} />
     </div>
   )
 }

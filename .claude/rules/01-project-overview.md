@@ -112,6 +112,7 @@ Module nghiệp vụ có thể giữ nút thêm nhanh, nhưng dữ liệu tạo 
 - `inventory`: Kho vật tư / hóa chất
 - `iso`: Quản lý tài liệu ISO (workflow ký duyệt kỹ thuật số)
 - `documents`: Văn bản nội bộ (vòng ký phòng ban)
+- `notes`: Ghi chú nhanh (riêng tư theo người tạo, admin thấy tất cả, có thể chia sẻ, kèm ảnh, có widget trên Dashboard)
 - `settings`: Quản trị danh mục, cấu hình, user, phân quyền
 ## Update 2026-06-11: dispatch diem_gn
 

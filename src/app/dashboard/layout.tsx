@@ -17,6 +17,7 @@ import {
   LogOut,
   Map,
   Menu,
+  NotebookPen,
   Package,
   Settings,
   Shield,
@@ -68,6 +69,7 @@ function isNavGroup(item: NavItem): item is NavGroup {
 
 const NAV: NavItem[] = [
   { key: "/dashboard", label: "Dashboard", icon: Home },
+  { key: "/dashboard/notes", label: "Ghi chú nhanh", icon: NotebookPen, permission: "notes.view" },
   { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
   { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
   {

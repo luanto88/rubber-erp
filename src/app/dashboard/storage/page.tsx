@@ -38,7 +38,7 @@ import {
   STORAGE_STATUS_RECEIVING,
   STORAGE_STATUS_WAITING,
 } from "@/lib/storage-status"
-import { downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
+import { downloadStorageBulkQrPdf, downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
@@ -47,7 +47,7 @@ import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon
+  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer
 } from "lucide-react"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ export default function StoragePage() {
   // filters
   const [search, setSearch]     = useState("")
   const [filterTT, setFilterTT] = useState("")
-  const [nganTab, setNganTab]   = useState<"active" | "history">("active")
+  const [nganTab, setNganTab]   = useState<"active" | "history" | "print">("active")
   const [filterGhiChu, setFilterGhiChu] = useState("")
   const [dayChuyen, setDayChuyen] = useState<"Mủ tạp" | "Mủ nước">("Mủ tạp")
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
@@ -212,6 +212,8 @@ export default function StoragePage() {
   const [exportingDetailId, setExportingDetailId] = useState<string | null>(null)
   const [exportingGeoId, setExportingGeoId] = useState<string | null>(null)
   const [exportingPeriod, setExportingPeriod] = useState(false)
+  const [selectedPrintIds, setSelectedPrintIds] = useState<Set<string>>(new Set())
+  const [printingQr, setPrintingQr] = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
   const [viewLots, setViewLots]   = useState<ProducedLot[]>([])
@@ -596,6 +598,18 @@ export default function StoragePage() {
   const activeNgans = filtered.filter(n => n.trang_thai !== STORAGE_STATUS_PRODUCED)
   const historyNgans = filtered.filter(n => n.trang_thai === STORAGE_STATUS_PRODUCED)
 
+  // ── Chọn ngăn để in QR hàng loạt — độc lập với filter, chỉ "Chọn tất cả" theo danh sách đang hiển thị
+  const togglePrintSelection = (id: string) => {
+    setSelectedPrintIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const selectAllPrintable = () => setSelectedPrintIds(new Set(activeNgans.map(n => n.id)))
+  const clearPrintSelection = () => setSelectedPrintIds(new Set())
+
   // ── Stats ─────────────────────────────────────────────────────────────────
   const statsCards = [
     {
@@ -914,6 +928,26 @@ export default function StoragePage() {
     }
   }
 
+  const handleBulkPrintQr = async () => {
+    const selected = activeNgans.filter(n => selectedPrintIds.has(n.id))
+    if (selected.length === 0) {
+      setSaveError(`Vui lòng chọn ít nhất một ${subTerm.toLowerCase()} để in QR.`)
+      return
+    }
+
+    setPrintingQr(true)
+    setSaveError(null)
+    try {
+      await downloadStorageBulkQrPdf(
+        selected.map(n => ({ id: n.id, ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan })),
+      )
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không in được QR hàng loạt")
+    } finally {
+      setPrintingQr(false)
+    }
+  }
+
   const handleNganStatusToggle = async (
     nganId: string,
     nextStatus: "Chờ sản xuất" | "Đang sản xuất" | "Đã sản xuất",
@@ -1071,6 +1105,17 @@ export default function StoragePage() {
             <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
               nganTab === "history" ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-500"}`}>
               {historyNgans.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setNganTab("print")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              nganTab === "print" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
+            <Printer size={14}/> In QR hàng loạt
+            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+              nganTab === "print" ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-500"}`}>
+              {activeNgans.length}
             </span>
           </button>
         </div>
@@ -1501,6 +1546,77 @@ export default function StoragePage() {
               </tbody>
             </table>
           </ResponsiveTableWrapper>
+        ))}
+
+        {/* Card grid — tab In QR hàng loạt */}
+        {nganTab === "print" && (loading ? (
+          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+        ) : activeNgans.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
+            <Printer size={40} className="mx-auto mb-3 opacity-30" />
+            <p>Không có {subTerm.toLowerCase()} nào để in QR</p>
+          </div>
+        ) : (
+          <div>
+            {/* Action bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" onClick={selectAllPrintable}
+                  className="text-xs font-bold text-emerald-700 hover:underline">
+                  Chọn tất cả ({activeNgans.length})
+                </button>
+                <span className="text-slate-300">|</span>
+                <button type="button" onClick={clearPrintSelection}
+                  className="text-xs font-bold text-slate-500 hover:underline">
+                  Bỏ chọn tất cả
+                </button>
+                <span className="text-xs text-slate-500">
+                  Đã chọn <span className="font-bold text-slate-800">{selectedPrintIds.size}</span> / {activeNgans.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleBulkPrintQr()}
+                disabled={selectedPrintIds.size === 0 || printingQr}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl shadow-sm disabled:opacity-50 disabled:cursor-not-allowed btn-press"
+              >
+                <Printer size={14} />
+                {printingQr ? "Đang tạo PDF..." : `In QR đã chọn (${selectedPrintIds.size})`}
+              </button>
+            </div>
+
+            {/* Grid chọn ngăn — click toàn bộ card để toggle */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+              {activeNgans.map(n => {
+                const isSelected = selectedPrintIds.has(n.id)
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => togglePrintSelection(n.id)}
+                    className={`relative rounded-xl border p-3 text-left transition-all ${
+                      isSelected
+                        ? "border-violet-500 bg-violet-50 shadow-sm"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className={`absolute right-2 top-2 rounded-full p-1 ${
+                      isSelected ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-400"
+                    }`}>
+                      <Check size={11} />
+                    </div>
+                    <div className="pr-7">
+                      <div className="truncate text-sm font-extrabold text-slate-800">{n.ten_ngan}</div>
+                      <div className="mt-1 break-all text-[11px] text-slate-500">{n.ma_ngan || "—"}</div>
+                      <span className={`mt-2 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-bold ${badgeClass(n.trang_thai)}`}>
+                        {n.trang_thai}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         ))}
       </div>
 

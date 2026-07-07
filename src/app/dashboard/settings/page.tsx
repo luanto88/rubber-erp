@@ -525,6 +525,7 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   inventory: "Kho vật tư",
   iso: "ISO",
   maintenance: "Bảo trì",
+  notes: "Ghi chú nhanh",
   output: "Sản lượng",
   process: "Kiểm soát quá trình",
   product: "Thành phẩm",
