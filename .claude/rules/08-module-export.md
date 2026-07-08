@@ -240,3 +240,27 @@ EUDR đã được triển khai, không còn là ý tưởng tương lai.
   4. Không ghi đè ô đã có sẵn dữ liệu.
 - **Điền thẳng vào form ngay khi OCR xong, không qua bước xác nhận** — đã bỏ hẳn banner `OcrConfirmBar` (nút "Điền"/"Bỏ qua") vì rườm rà; chỉ hiện toast ngắn báo đã tự điền biển số nào (`showToast(..., "success")`).
 - Không tạo lại banner xác nhận này nếu cải tiến thêm — giữ nguyên tắc "OCR xong là điền thẳng".
+
+## Customer Portal — khách hàng xem đơn xuất hàng được cấp quyền (2026-07-07/08)
+
+### Mục tiêu và kiến trúc
+
+- Admin tạo tài khoản `role="customer"`, **gán tay từng đơn xuất hàng cụ thể** (không tự động theo `customer_id`) cho tài khoản đó xem, kèm toàn bộ chuỗi truy xuất EUDR (bản đồ, polygon, điểm giao nhận) của các lô trong đơn. Customer không xem được bất kỳ dữ liệu nào khác trong hệ thống.
+- Bảng `export_order_customer_grants` (migration `20260708_customer_portal_export_grants.sql`, mirror `operation_note_shares`) lưu cấp quyền theo `(export_order_id, granted_to_user_id)`.
+- RESTRICTIVE RLS policy chặn `role='customer'` đọc thẳng 8 bảng chuỗi trace (`export_orders, customers, lots, ngans, dispatch_entries, qc_results, forest_plots, dispatch_delivery_points`) — không đụng policy hiện có của admin/manager/user.
+- Toàn bộ dữ liệu khách hàng xem đi qua 2 API route dùng `getSupabaseAdmin()` (service role) + `requireAuthUser()` (`src/app/api/customer-portal/orders/route.ts`, `.../[id]/route.ts`) — tự verify `role='customer'` + tồn tại grant trước khi trả dữ liệu, không cho browser khách hàng query thẳng Supabase.
+- Trang: `src/app/dashboard/customer-portal/page.tsx` (danh sách), `.../[id]/_components/order-client.tsx` (chi tiết + bản đồ + tải DDS PDF/GeoJSON). Admin cấp quyền qua modal `src/app/dashboard/export/_components/customer-grant-modal.tsx` (nút "Cấp quyền KH", chỉ admin) trên `/dashboard/export`.
+- Permission mới `export.view_own`, mặc định gán cho `ROLE_DEFAULTS.customer`.
+
+### Bug đã fix (2026-07-08): admin không cấp quyền được, báo "Phiên đăng nhập không hợp lệ"
+
+- **Root cause**: `fetchGrantCandidates()` trong `src/lib/export-order-grants.ts` gọi `fetch("/api/export/customer-grant-candidates?...")` **không đính kèm header `Authorization: Bearer <token>`**, trong khi route đích bắt buộc `requireAuthUser()` (throw đúng chuỗi "Phiên đăng nhập không hợp lệ" khi thiếu token — xem `src/app/api/account/_lib/security.ts`). Lỗi này xảy ra **với mọi admin, mọi lúc** ngay khi mở modal "Cấp quyền KH" — không phải lỗi phiên đăng nhập thật, không liên quan gì tới tài khoản customer đích.
+- **Hệ quả**: vì modal không bao giờ tải được danh sách candidate, chưa admin nào từng cấp quyền thành công qua UI — bảng `export_order_customer_grants` luôn rỗng dù đã "cấp quyền" nhiều lần.
+- **Fix**: `fetchGrantCandidates()` giờ lấy `access_token` qua `supabase.auth.getSession()` và gắn `Authorization: Bearer <token>` vào request, đúng pattern đã dùng ở `customer-portal/page.tsx`.
+- **Cứng hóa thêm** (2026-07-08): `customer-portal/page.tsx` và `[id]/_components/order-client.tsx` — bootstrap giờ tái dùng `session` từ `hydrateActiveSession()` để build Bearer token (không gọi `supabase.auth.getSession()` lần 2 riêng), và thêm guard `authBlockReason(user)` (pending/disabled/no_factory) trước khi gọi API, đề phòng tài khoản bị khóa giữa chừng sau khi đã đăng nhập.
+- Khi rà lỗi này, đã quét toàn bộ client `fetch()` gọi các route dùng `requireAuthUser` trong repo — không phát hiện thêm nơi nào khác thiếu Authorization header tương tự.
+
+### Trạng thái (2026-07-08)
+
+- Migration `20260708_customer_portal_export_grants.sql` đã áp dụng một phần trên DB thật (bảng + permission `export.view_own` đã có); code + bug fix trên đã qua `tsc`/`eslint`/`npm run build`.
+- **Chưa test tay trên trình duyệt thật**: cần admin thử lại modal "Cấp quyền KH" (giờ phải tải được danh sách và lưu thành công), rồi đăng nhập bằng tài khoản customer để xác nhận xem được đúng đơn đã cấp + chuỗi trace EUDR + tải DDS PDF/GeoJSON.

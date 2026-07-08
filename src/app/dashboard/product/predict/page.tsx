@@ -18,7 +18,11 @@ import {
   getLoaiCSRByDayChuyen,
   getBocsForLoaiCSR,
 } from "@/lib/product-lot-config";
-import { downloadProductLabelPdf, type ProductLabelItem } from "@/lib/product-label-pdf";
+import {
+  downloadProductLabelPdf,
+  downloadProductLabelSmallQrPdf,
+  type ProductLabelItem,
+} from "@/lib/product-label-pdf";
 import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   loadPredictAvailableNgans,
@@ -421,7 +425,7 @@ export default function ProductPredictPage() {
     }));
   };
 
-  const handlePrintAfterCreate = async () => {
+  const handlePrintAfterCreate = async (size: "small" | "large") => {
     if (!createdBatchIds || createdBatchIds.length === 0) return;
     setPrintError(null);
     const allLots = (
@@ -432,7 +436,8 @@ export default function ProductPredictPage() {
       setPrintError("Đợt này chưa có kiện nào để in nhãn (có thể chỉ vừa nối tiếp lô dở dang của đợt trước — vào Lịch sử dự đoán để in lại đợt gốc).");
       return;
     }
-    await downloadProductLabelPdf(items);
+    if (size === "small") await downloadProductLabelSmallQrPdf(items);
+    else await downloadProductLabelPdf(items);
   };
 
   const toggleExpandBatch = async (batchId: string) => {
@@ -447,7 +452,7 @@ export default function ProductPredictPage() {
     }
   };
 
-  const handleReprintBatch = async (batchId: string) => {
+  const handleReprintBatch = async (batchId: string, size: "small" | "large") => {
     setPrintError(null);
     const lots = batchLots[batchId] || (await loadPredictionLotsForBatch(batchId));
     const items = await buildLabelItemsFromLots(lots);
@@ -455,7 +460,8 @@ export default function ProductPredictPage() {
       setPrintError("Đợt này chưa có kiện nào để in nhãn.");
       return;
     }
-    await downloadProductLabelPdf(items);
+    if (size === "small") await downloadProductLabelSmallQrPdf(items);
+    else await downloadProductLabelPdf(items);
   };
 
   const openEditLot = async (lot: PredictionLotRow) => {
@@ -611,10 +617,16 @@ export default function ProductPredictPage() {
               )}
               <div className="flex flex-col justify-center gap-3 sm:flex-row">
                 <button
-                  onClick={() => void handlePrintAfterCreate()}
+                  onClick={() => void handlePrintAfterCreate("small")}
                   className="min-h-[44px] rounded-xl bg-emerald-600 px-5 py-2.5 font-bold text-white hover:bg-emerald-700"
                 >
-                  In nhãn QR
+                  In nhãn QR nhỏ
+                </button>
+                <button
+                  onClick={() => void handlePrintAfterCreate("large")}
+                  className="min-h-[44px] rounded-xl bg-emerald-700 px-5 py-2.5 font-bold text-white hover:bg-emerald-800"
+                >
+                  In nhãn QR lớn
                 </button>
                 <button
                   onClick={() => {
@@ -948,10 +960,16 @@ export default function ProductPredictPage() {
                         </button>
                       )}
                       <button
-                        onClick={() => void handleReprintBatch(batch.id)}
+                        onClick={() => void handleReprintBatch(batch.id, "small")}
+                        className="min-h-[36px] rounded-lg bg-slate-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700"
+                      >
+                        In lại nhãn nhỏ
+                      </button>
+                      <button
+                        onClick={() => void handleReprintBatch(batch.id, "large")}
                         className="min-h-[36px] rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
                       >
-                        In lại nhãn cả batch
+                        In lại nhãn lớn
                       </button>
                     </div>
                     <ResponsiveTableWrapper>
