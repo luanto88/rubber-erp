@@ -1630,7 +1630,7 @@ export default function StoragePage() {
             <>
               <button onClick={() => setModal(null)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hồy
+                Hủy
               </button>
               <button onClick={handleSave} disabled={saving}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50">
@@ -2070,7 +2070,7 @@ export default function StoragePage() {
             <div className="flex gap-3">
               <button onClick={() => setDelConfirm(null)}
                 className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
-                Hồy
+                Hủy
               </button>
               <button onClick={() => handleDelete(delConfirm)}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">

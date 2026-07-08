@@ -382,28 +382,28 @@ export default function LandingPage() {
       {/* ── HERO ── */}
       <section className="pt-20 px-4 md:px-6">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[75vh]">
-            <div className="lg:col-span-2 relative rounded-3xl overflow-hidden group">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:min-h-[75vh]">
+            <div className="lg:col-span-2 relative h-[360px] sm:h-[420px] lg:h-auto rounded-3xl overflow-hidden group">
               <Image src="/images/nha_may.png" alt="Nhà máy chế biến cao su Phước Hòa Kampong Thom" fill className="object-cover group-hover:scale-105 transition-transform duration-700" priority />
               <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-8 md:p-12">
+              <div className="absolute inset-x-0 bottom-0 p-6 sm:p-8 md:p-12">
                 <div className="sr" style={{ animationDelay: "0.1s" }}>
-                  <p className="text-emerald-300 text-sm font-semibold tracking-widest uppercase mb-3">Phước Hòa Kampong Thom</p>
-                  <h1 className="text-3xl md:text-5xl lg:text-6xl font-black text-white leading-tight mb-4">
+                  <p className="text-emerald-300 text-xs sm:text-sm font-semibold tracking-widest uppercase mb-2 sm:mb-3">Phước Hòa Kampong Thom</p>
+                  <h1 className="text-2xl sm:text-3xl md:text-5xl lg:text-6xl font-black text-white leading-tight mb-2 sm:mb-4">
                     Nhà máy chế biến<br />cao su tiêu chuẩn quốc tế
                   </h1>
-                  <p className="text-white/80 text-lg max-w-xl">Sản xuất CSR10, CSR20, CSR3L đạt chứng nhận PEFC CS — Vương Quốc Campuchia</p>
+                  <p className="text-white/80 text-sm sm:text-base md:text-lg max-w-xl">Sản xuất CSR10, CSR20, CSR3L đạt chứng nhận PEFC CS — Vương Quốc Campuchia</p>
                 </div>
               </div>
             </div>
-            <Link href="/login" className="relative rounded-3xl overflow-hidden flex flex-col justify-between p-8 md:p-10 group cursor-pointer" style={{ backgroundColor: "#fbbf24" }}>
+            <Link href="/login" className="relative rounded-3xl overflow-hidden flex flex-col justify-between p-6 sm:p-8 md:p-10 min-h-[300px] lg:min-h-0 group cursor-pointer transition-transform duration-300 hover:-translate-y-0.5" style={{ backgroundColor: "#fbbf24" }}>
               <div className="sr">
-                <div className="w-14 h-14 bg-black/10 rounded-2xl flex items-center justify-center mb-6"><span className="text-3xl">⚙️</span></div>
-                <h2 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight mb-4">Vào quy trình sản xuất</h2>
-                <p className="text-slate-700/80 text-base mb-8">Quản lý toàn bộ quy trình sản xuất — từ tiếp nhận mủ đến xuất hàng</p>
+                <div className="w-14 h-14 bg-black/10 rounded-2xl flex items-center justify-center mb-5 sm:mb-6"><span className="text-3xl">🏭</span></div>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-900 leading-tight mb-3 sm:mb-4">Vào quy trình sản xuất</h2>
+                <p className="text-slate-700/80 text-sm sm:text-base mb-6 sm:mb-8">Quản lý toàn bộ quy trình sản xuất — từ tiếp nhận mủ đến xuất hàng</p>
               </div>
               <div className="flex items-center gap-3">
-                <span className="w-12 h-12 bg-black rounded-full flex items-center justify-center group-hover:scale-110 group-hover:bg-slate-800 transition-all duration-300">
+                <span className="w-11 h-11 sm:w-12 sm:h-12 bg-black rounded-full flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:bg-slate-800 transition-all duration-300">
                   <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
                 </span>
                 <span className="text-sm font-bold text-slate-900">Dashboard & ERP</span>

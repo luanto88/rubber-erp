@@ -4524,44 +4524,44 @@ export default function ProductPage() {
   // ------------------------------
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>
           <p className="text-sm text-slate-500 mt-0.5">
             Quản lý lô và phân tách sản lượng theo ca
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap">
           {currentUser?.role === "admin" && (
             <button
               onClick={handleSyncAllLotStatuses}
               disabled={syncing}
-              title="Tính lại trạng thái tất cả lô từ đơn xuất thực tế trong DB"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg disabled:opacity-50 transition-all"
+              title="Đồng bộ trạng thái lô — tính lại trạng thái tất cả lô từ đơn xuất thực tế trong DB"
+              aria-label="Đồng bộ trạng thái lô"
+              className="flex items-center justify-center w-10 h-10 shrink-0 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl border border-amber-200 disabled:opacity-50 transition-all"
             >
-              <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
-              {syncing ? "Đang đồng bộ..." : "Đồng bộ trạng thái lô"}
+              <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
             </button>
           )}
           {hasPermission(currentUser, "product.predict_view") && (
             <Link
               href="/dashboard/product/predict"
-              className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+              className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
             >
-              <Wand2 size={16} /> Dự đoán số lô
+              <Wand2 size={15} /> Dự đoán số lô
             </Link>
           )}
           <button
             onClick={openSk}
-            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+            className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
           >
-            <ArrowLeftRight size={16} /> Sang kiện / Thay bọc
+            <ArrowLeftRight size={15} /> Sang kiện/Thay bọc
           </button>
           <button
             onClick={() => openCreate()}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
           >
-            <Plus size={16} /> Thêm lô
+            <Plus size={15} /> Thêm lô
           </button>
         </div>
       </div>

@@ -793,30 +793,32 @@ export default function DocumentDetailPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-5">
-        <button
-          onClick={() => router.push("/dashboard/documents")}
-          className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-extrabold text-slate-800">{doc.ten_van_ban}</h1>
-            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
-              {TRANG_THAI_LABEL[doc.trang_thai]}
-            </span>
-            {doc.phan_loai && doc.phan_loai !== "Thuong" && (
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${PHAN_LOAI_COLOR[doc.phan_loai] || "bg-red-100 text-red-700 border border-red-200"}`}>
-                <Lock size={10} />
-                {PHAN_LOAI_LABEL[doc.phan_loai] || doc.phan_loai}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-5">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            onClick={() => router.push("/dashboard/documents")}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-extrabold text-slate-800 break-words">{doc.ten_van_ban}</h1>
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
+                {TRANG_THAI_LABEL[doc.trang_thai]}
               </span>
-            )}
+              {doc.phan_loai && doc.phan_loai !== "Thuong" && (
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${PHAN_LOAI_COLOR[doc.phan_loai] || "bg-red-100 text-red-700 border border-red-200"}`}>
+                  <Lock size={10} />
+                  {PHAN_LOAI_LABEL[doc.phan_loai] || doc.phan_loai}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-slate-400 mt-0.5 font-mono">{doc.ma_van_ban || "Chưa có số văn bản"}</p>
           </div>
-          <p className="text-sm text-slate-400 mt-0.5 font-mono">{doc.ma_van_ban || "Chưa có số văn bản"}</p>
         </div>
         {/* Action buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
           {fileUrl && (
             <a
               href={fileUrl}

@@ -1197,20 +1197,20 @@ export default function EudrClient() {
 
       {/* Search bar */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">
-        <div className="flex gap-3">
-          <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 min-w-0 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
             <Search size={16} className="text-slate-400 shrink-0"/>
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key==="Enter" && searchOrder(query)}
               placeholder="Nhập mã đơn xuất hàng (VD: XH-KUMHO-TB001-010126)..."
-              className="flex-1 text-sm outline-none bg-transparent"
+              className="flex-1 min-w-0 text-sm outline-none bg-transparent"
             />
-            {query && <button onClick={()=>{setQuery("");setOrder(null);setGeoData(null);setNotFound(false)}}><X size={14} className="text-slate-400"/></button>}
+            {query && <button onClick={()=>{setQuery("");setOrder(null);setGeoData(null);setNotFound(false)}}><X size={14} className="text-slate-400 shrink-0"/></button>}
           </div>
           <button onClick={()=>searchOrder(query)} disabled={searching || !query.trim()}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50">
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50 shrink-0 whitespace-nowrap w-full sm:w-auto">
             {searching ? <Loader2 size={15} className="animate-spin"/> : <Search size={15}/>}
             Tra cứu
           </button>

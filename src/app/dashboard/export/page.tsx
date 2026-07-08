@@ -2177,7 +2177,7 @@ export default function ExportPage() {
           {/* Thông tin đơn */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-700 mb-4">Thông tin đơn</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Khách hàng */}
               <div className="col-span-2">
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -2189,7 +2189,7 @@ export default function ExportPage() {
                     onChange={(e) =>
                       setForm((p) => ({ ...p, customer_id: e.target.value }))
                     }
-                    className="flex-1 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                    className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                   >
                     <option value="">-- Chọn khách hàng --</option>
                     {customers.map((c) => (
@@ -2309,7 +2309,7 @@ export default function ExportPage() {
                       }
                     }}
                     placeholder="Thêm loại khác..."
-                    className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"
+                    className="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"
                   />
                   <button
                     type="button"

@@ -3114,18 +3114,18 @@ export default function IsoDocumentDetailPage() {
         )}
 
         {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard/iso/documents" className="p-2 hover:bg-slate-100 rounded-xl transition-all">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <Link href="/dashboard/iso/documents" className="p-2 hover:bg-slate-100 rounded-xl transition-all shrink-0">
               <ArrowLeft size={18} className="text-slate-600" />
             </Link>
-            <div>
-              <h1 className="text-xl font-extrabold text-slate-800">
+            <div className="min-w-0">
+              <h1 className="text-xl font-extrabold text-slate-800 break-words">
                 {isNew ? "Tạo tài liệu ISO mới" : (doc?.ten_tai_lieu || "Chi tiết tài liệu")}
               </h1>
               {!isNew && doc && (
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="font-mono text-xs text-violet-700">{doc.ma_tai_lieu || "(chưa có mã)"}</span>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="font-mono text-xs text-violet-700 break-all">{doc.ma_tai_lieu || "(chưa có mã)"}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[trangThai]}`}>
                     {TRANG_THAI_LABEL[trangThai]}
                   </span>

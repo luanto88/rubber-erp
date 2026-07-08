@@ -397,14 +397,32 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [isMobile, setIsMobile] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0, width: 280, maxHeight: 280, openUp: false })
   const btnRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)")
+    const syncIsMobile = () => setIsMobile(mq.matches)
+    syncIsMobile()
+    mq.addEventListener("change", syncIsMobile)
+    return () => mq.removeEventListener("change", syncIsMobile)
+  }, [])
 
   const updatePosition = useCallback(() => {
     if (!btnRef.current) return
     const rect = btnRef.current.getBoundingClientRect()
+
+    // Nut trigger da cuon het khoi vung nhin thay -> dong dropdown thay vi
+    // de panel troi lo lung sai vi tri (nguon goc cam giac "bi mat").
+    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      setOpen(false)
+      return
+    }
+
     const viewportPadding = 12
     const preferredWidth = Math.max(rect.width, 280)
     const width = Math.min(preferredWidth, Math.max(220, window.innerWidth - viewportPadding * 2))
@@ -412,15 +430,17 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
     const spaceAbove = rect.top - viewportPadding
     const openUp = spaceBelow < 220 && spaceAbove > spaceBelow
     const availableHeight = Math.max(180, (openUp ? spaceAbove : spaceBelow) - 8)
+    // position: fixed dung toa do theo viewport (getBoundingClientRect da la toa do
+    // viewport san) -> KHONG duoc cong them window.scrollX/scrollY o day. Bug cu cong
+    // them scroll offset khien panel troi dan xuong duoi khi cuon trang (dung nguyen
+    // nhan gay "nhay"/"mat" nguoi dung bao cao).
     const left = Math.min(
-      Math.max(viewportPadding, rect.left + window.scrollX),
-      window.scrollX + window.innerWidth - width - viewportPadding,
+      Math.max(viewportPadding, rect.left),
+      window.innerWidth - width - viewportPadding,
     )
 
     setPos({
-      top: openUp
-        ? rect.top + window.scrollY - availableHeight - 8
-        : rect.bottom + window.scrollY + 8,
+      top: openUp ? rect.top - availableHeight - 8 : rect.bottom + 8,
       left,
       width,
       maxHeight: availableHeight,
@@ -428,11 +448,10 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
     })
   }, [])
 
+  // Dong khi click ngoai / nhan Escape — luon bat, ke ca o che do mobile bottom-sheet
   useEffect(() => {
     if (!open) return
 
-    updatePosition()
-    const onViewportChange = () => updatePosition()
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node
       if (
@@ -452,25 +471,116 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
       }
     }
 
-    window.addEventListener("resize", onViewportChange)
-    window.addEventListener("scroll", onViewportChange, true)
     document.addEventListener("mousedown", onMouseDown)
     document.addEventListener("keydown", onKeyDown)
     const focusTimer = window.setTimeout(() => searchRef.current?.focus(), 20)
 
     return () => {
-      window.removeEventListener("resize", onViewportChange)
-      window.removeEventListener("scroll", onViewportChange, true)
       document.removeEventListener("mousedown", onMouseDown)
       document.removeEventListener("keydown", onKeyDown)
       window.clearTimeout(focusTimer)
     }
-  }, [open, updatePosition])
+  }, [open])
+
+  // Theo doi vi tri trigger — chi can thiet o che do desktop (panel neo theo nut).
+  // Mobile dung bottom-sheet co dinh, khong can tinh toa do.
+  useEffect(() => {
+    if (!open || isMobile) return
+
+    const onViewportChange = () => {
+      if (rafRef.current !== null) return
+      rafRef.current = window.requestAnimationFrame(() => {
+        rafRef.current = null
+        updatePosition()
+      })
+    }
+    onViewportChange()
+
+    window.addEventListener("resize", onViewportChange)
+    window.addEventListener("scroll", onViewportChange, true)
+
+    return () => {
+      window.removeEventListener("resize", onViewportChange)
+      window.removeEventListener("scroll", onViewportChange, true)
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [open, isMobile, updatePosition])
 
   const filtered = options.filter((option) => option.toLowerCase().includes(search.toLowerCase()))
   const allSelected = filtered.length > 0 && filtered.every((option) => selected.includes(option))
   const selectedPreview = selected.slice(0, 2)
   const labelOf = (value: string) => labels?.[value] || value
+
+  const panelBody = (
+    <>
+      <div className="shrink-0 border-b border-slate-100 bg-slate-50/80 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-500">
+            {selected.length > 0 ? `${selected.length} đã chọn` : "Chưa chọn mục nào"}
+          </span>
+        </div>
+        <input
+          ref={searchRef}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Tìm kiếm..."
+          className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400"
+        />
+      </div>
+      <div className="flex shrink-0 gap-1 border-b border-slate-100 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={() => onChange([...new Set([...selected, ...filtered])])}
+          className="flex-1 rounded-lg px-2 py-2 text-[11px] font-bold text-emerald-600 transition-colors hover:bg-emerald-50"
+        >
+          {allSelected ? "Giữ nguyên tất cả" : "Chọn tất cả"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(selected.filter((item) => !filtered.includes(item)))}
+          className="flex-1 rounded-lg px-2 py-2 text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-50"
+        >
+          Bỏ chọn
+        </button>
+      </div>
+      <div
+        className={isMobile ? "min-h-0 flex-1 overflow-y-auto p-1.5" : "overflow-y-auto p-1.5"}
+        style={isMobile ? undefined : { maxHeight: pos.maxHeight }}
+      >
+        {filtered.length === 0 ? (
+          <p className="py-5 text-center text-xs text-slate-400">Không tìm thấy kết quả phù hợp</p>
+        ) : (
+          filtered.map((option) => (
+            <label key={option} className="flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2.5 text-sm hover:bg-amber-50">
+              <input
+                type="checkbox"
+                checked={selected.includes(option)}
+                onChange={(e) =>
+                  onChange(
+                    e.target.checked
+                      ? [...selected, option]
+                      : selected.filter((item) => item !== option),
+                  )
+                }
+                className="h-4 w-4 shrink-0 accent-amber-500"
+              />
+              <span className={`min-w-0 truncate ${selected.includes(option) ? "font-semibold text-amber-700" : "text-slate-700"}`}>
+                {labelOf(option)}
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+    </>
+  )
+
+  const closeAndReset = () => {
+    setOpen(false)
+    setSearch("")
+  }
 
   return (
     <div className="relative">
@@ -510,70 +620,48 @@ function SmartMultiSelect({ options, selected, onChange, placeholder, labels }: 
       </button>
 
       {open && typeof document !== "undefined" && createPortal(
-        <div
-          ref={panelRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, width: pos.width }}
-          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
-        >
-          <div className="border-b border-slate-100 bg-slate-50/80 p-2">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-500">
-                {selected.length > 0 ? `${selected.length} đã chọn` : "Chưa chọn mục nào"}
-              </span>
-              <span className="text-[10px] text-slate-400">
-                {pos.openUp ? "Mở lên trên" : "Mở xuống dưới"}
-              </span>
+        isMobile ? (
+          <>
+            <div className="fixed inset-0 z-[9998] bg-black/40" onClick={closeAndReset} />
+            <div
+              ref={panelRef}
+              className="fixed inset-x-0 bottom-0 z-[9999] flex max-h-[75dvh] flex-col rounded-t-2xl border border-slate-200 bg-white shadow-[0_-8px_30px_rgba(15,23,42,0.25)]"
+            >
+              <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
+                <span className="text-sm font-bold text-slate-700">{placeholder || "Chọn"}</span>
+                <button
+                  type="button"
+                  onClick={closeAndReset}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              {panelBody}
+              <div
+                className="shrink-0 border-t border-slate-100 p-3"
+                style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
+              >
+                <button
+                  type="button"
+                  onClick={closeAndReset}
+                  className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-700"
+                >
+                  Xong ({selected.length})
+                </button>
+              </div>
             </div>
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm kiếm..."
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-emerald-400"
-            />
+          </>
+        ) : (
+          <div
+            ref={panelRef}
+            style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, width: pos.width }}
+            className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]"
+          >
+            {panelBody}
           </div>
-          <div className="flex gap-1 border-b border-slate-100 px-2 py-1.5">
-            <button
-              type="button"
-              onClick={() => onChange([...new Set([...selected, ...filtered])])}
-              className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-600 transition-colors hover:bg-emerald-50"
-            >
-              {allSelected ? "Giữ nguyên tất cả" : "Chọn tất cả"}
-            </button>
-            <button
-              type="button"
-              onClick={() => onChange(selected.filter((item) => !filtered.includes(item)))}
-              className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-50"
-            >
-              Bỏ chọn
-            </button>
-          </div>
-          <div className="overflow-y-auto p-1.5" style={{ maxHeight: pos.maxHeight }}>
-            {filtered.length === 0 ? (
-              <p className="py-5 text-center text-xs text-slate-400">Không tìm thấy kết quả phù hợp</p>
-            ) : (
-              filtered.map((option) => (
-                <label key={option} className="flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 text-xs hover:bg-amber-50">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(option)}
-                    onChange={(e) =>
-                      onChange(
-                        e.target.checked
-                          ? [...selected, option]
-                          : selected.filter((item) => item !== option),
-                      )
-                    }
-                    className="shrink-0 accent-amber-500"
-                  />
-                  <span className={`min-w-0 truncate ${selected.includes(option) ? "font-semibold text-amber-700" : "text-slate-700"}`}>
-                    {labelOf(option)}
-                  </span>
-                </label>
-              ))
-            )}
-          </div>
-        </div>,
+        ),
         document.body,
       )}
     </div>

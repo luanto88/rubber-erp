@@ -76,7 +76,7 @@ export function FilterMultiSelect({
   }
 
   return (
-    <div ref={rootRef} className={`relative min-w-52 ${className}`}>
+    <div ref={rootRef} className={`relative w-full min-w-0 sm:w-auto sm:min-w-52 ${className}`}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -87,7 +87,7 @@ export function FilterMultiSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-[calc(100%+0.5rem)] z-40 w-full min-w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
+        <div className="absolute left-0 top-[calc(100%+0.5rem)] z-40 w-full min-w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 px-2 py-1.5">
             <Search size={14} className="shrink-0 text-slate-400" />
             <input
