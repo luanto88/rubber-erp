@@ -337,14 +337,21 @@ Yêu cầu người dùng: tăng font CSR/Kiện/Số lô +10% (giữ đậm), t
 3. **UI `predict/page.tsx`**: nút "In nhãn QR" duy nhất trước đây tách thành 2 nút **"In nhãn QR nhỏ"** (gọi nhãn mới) và **"In nhãn QR lớn"** (gọi nhãn cũ) — áp dụng ở cả màn hình "Đã tạo dự đoán thành công" (`handlePrintAfterCreate(size)`) lẫn nút in lại trong tab Lịch sử (`handleReprintBatch(batchId, size)`, đổi tên nút thành "In lại nhãn nhỏ" / "In lại nhãn lớn").
 4. Không đổi bất kỳ logic nghiệp vụ dự đoán/carry-over/reserved-kg nào — thuần túy thay đổi trình bày PDF + thêm 1 hàm in mới.
 
-**Fix sau test tay trên `npm run dev` (cùng ngày 2026-07-08)** — người dùng test trực tiếp và phản hồi 2 điều chỉnh:
+Ban đầu (`npx tsc --noEmit`/`npx eslint` sạch) chưa test tay — 2 vòng test tay sau đó trên `npm run dev` phát hiện các vấn đề đã fix lần lượt bên dưới.
+
+**Fix vòng 1 (cùng ngày 2026-07-08)** — phản hồi sau khi mở `npm run dev` lần đầu:
 
 - **Nhãn nhỏ**: dòng "Lô: {mã} {kiện}" đổi từ canh trái sang **canh giữa**, font `13pt → 14.3pt` (+10%, vẫn đậm) — thêm `splitTextToSize` wrap an toàn tối đa khi text vượt bề rộng ô (hiếm gặp, chỉ để phòng hờ số lô dài bất thường).
 - **Nhãn lớn**: đường kẻ nét đứt của dòng "Ca SX:" dịch lên thêm 2mm so với mép dưới hàng mặc định (chỉ dòng Ca SX, 2 dòng Ngày SX/Giờ SX ở trên giữ nguyên vị trí).
 
-`tsc --noEmit`/`eslint` sạch. Vẫn cần test tay lại lần nữa để xác nhận 2 fix này đúng ý.
+**Fix vòng 2 (cùng ngày 2026-07-08, tiếp)** — người dùng test lại, báo dòng mã ngăn ("mã lô" theo cách gọi của người dùng) và dòng "Lắp đầy %" ("tỷ lệ") vẫn chưa canh giữa, cùng yêu cầu tăng cỡ chữ cả 3 dòng (mã ngăn, tỷ lệ, số lô) thêm 10% nữa, và chỉ dòng mã ngăn giữ in đậm:
 
-`npx tsc --noEmit` và `npx eslint` trên `src/lib/product-label-pdf.ts` + `src/app/dashboard/product/predict/page.tsx` đều sạch. **Chưa test tay** — cần mở `npm run dev`, tạo 1 đợt dự đoán, bấm cả 2 nút để xác nhận: nhãn lớn có 3 dòng ghi tay + font to hơn không bị tràn/đè chữ; nhãn nhỏ xuất đúng 4×4=16 ô/trang, QR quét ra đúng lô/kiện, không bị cắt chữ mã ngăn dài.
+- Dòng mã ngăn (dưới QR): trái → **canh giữa**; font `7.5pt → 8.25pt` (+10%); vẫn `bold` — là dòng DUY NHẤT còn in đậm trong nhãn nhỏ.
+- Dòng "Lắp đầy X%": vẫn canh giữa (đã đúng từ trước, chỉ tăng cỡ) — font `7.5pt → 8.25pt` (+10%); giữ chữ thường.
+- Dòng "Lô: {mã} {kiện}" (số lô): vẫn canh giữa (giữ từ fix vòng 1) — font `14.3pt → 15.73pt` (+10% cộng dồn, tổng +21% so với gốc 13pt); **đổi từ đậm sang chữ thường** theo yêu cầu "riêng mã lô in đậm" (chỉ dòng mã ngăn đậm, 2 dòng còn lại không đậm).
+- `textReserveMm` (khoảng dành cho text dưới QR) tăng `17mm → 20mm` để có đủ chỗ cho cỡ chữ lớn hơn — không ảnh hưởng `qrSize` vì QR vẫn đang bị giới hạn bởi bề rộng ô, không phải chiều cao.
+
+`tsc --noEmit`/`eslint` sạch sau cả 2 vòng fix. **Vẫn cần test tay lại lần nữa** để xác nhận đúng ý — đặc biệt kiểm tra nhãn nhỏ không bị tràn/đè chữ khi mã ngăn dài phải wrap 2 dòng.
 
 ### Phạm vi CHƯA làm (cần hoàn thiện ở phiên sau)
 

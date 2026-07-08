@@ -359,8 +359,9 @@ async function renderSmallQrCell(
   doc.setLineDashPattern([], 0)
 
   // QR chiếm gần trọn chiều rộng ô, giới hạn thêm theo chiều cao để luôn còn đủ chỗ cho
-  // tối đa 3 dòng text bên dưới (mã ngăn có thể wrap 2 dòng + % lấp đầy + dòng Lô)
-  const textReserveMm = 17
+  // tối đa 3 dòng text bên dưới (mã ngăn có thể wrap 2 dòng + % lấp đầy + dòng Lô, cỡ chữ
+  // đã tăng nên dành thêm dư địa so với bản đầu — 17mm → 20mm)
+  const textReserveMm = 20
   const qrSize = Math.min(cellWidth - padding * 2, cellHeight - textReserveMm - padding)
   const qrX = cellX + padding
   const qrY = cellY + padding
@@ -368,12 +369,15 @@ async function renderSmallQrCell(
   await addQrImage(doc, qrUrl, qrX, qrY, qrSize)
 
   doc.setTextColor(15, 23, 42)
+  const textCenterX = cellX + cellWidth / 2
   const textWidth = cellWidth - padding * 2
   let lineY = qrY + qrSize + 3.5
 
-  // Dòng 1: mã ngăn đầy đủ — trái, cho phép wrap tối đa 2 dòng
+  // Dòng 1: mã ngăn đầy đủ — canh giữa, đậm, cho phép wrap tối đa 2 dòng. Fix test tay
+  // 2026-07-08: đổi từ trái sang giữa + tăng font +10% (7.5pt → 8.25pt). Đây là dòng DUY
+  // NHẤT trong nhãn nhỏ giữ in đậm — 2 dòng còn lại (tỷ lệ, số lô) là chữ thường.
   doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(7.5)
+  doc.setFontSize(8.25)
   const nganLabel = (item.nganMa || item.nganTen || "").trim() || "—"
   let nganLines: string[] = doc.splitTextToSize(nganLabel, textWidth)
   if (nganLines.length > 2) {
@@ -382,30 +386,30 @@ async function renderSmallQrCell(
     nganLines[1] = last.length > 1 ? `${last.slice(0, -1)}…` : last
   }
   nganLines.forEach((line) => {
-    doc.text(line, cellX + padding, lineY)
-    lineY += 3.2
+    doc.text(line, textCenterX, lineY, { align: "center" })
+    lineY += 3.6
   })
 
-  // Dòng: Lắp đầy X% — canh giữa
+  // Dòng: Lắp đầy X% — canh giữa, chữ thường, +10% (7.5pt → 8.25pt)
   if (item.nganFillPercent != null) {
     doc.setFont(PDF_FONT_NAME, "normal")
-    doc.setFontSize(7.5)
+    doc.setFontSize(8.25)
     const pct = Math.round(Math.max(0, item.nganFillPercent))
-    doc.text(`Lắp đầy: ${pct}%`, cellX + cellWidth / 2, lineY, { align: "center" })
-    lineY += 4.2
+    doc.text(`Lắp đầy: ${pct}%`, textCenterX, lineY, { align: "center" })
+    lineY += 4.6
   }
 
-  // Dòng: Lô {mã lô ngắn} {kiện} — đậm, to, canh giữa (test tay 2026-07-08: đổi từ trái
-  // sang giữa + tăng font +10%, 13pt → 14.3pt)
-  doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(14.3)
+  // Dòng: Lô {mã lô ngắn} {kiện} — canh giữa, chữ thường (không đậm — chỉ mã ngăn ở trên
+  // đậm), to, +10% cộng dồn từ mức tăng trước đó (13pt → 14.3pt → 15.73pt)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(15.73)
   const shortLabel = buildShortLotLabel(item.num, item.suffix)
   const loText = `Lô: ${shortLabel} ${item.kien}`
   const loLines = doc.splitTextToSize(loText, textWidth)
-  let loY = lineY + 3
+  let loY = lineY + 3.3
   loLines.forEach((line: string) => {
-    doc.text(line, cellX + cellWidth / 2, loY, { align: "center" })
-    loY += 5.5
+    doc.text(line, textCenterX, loY, { align: "center" })
+    loY += 6.1
   })
 }
 
