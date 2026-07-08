@@ -372,6 +372,16 @@ Ban đầu (`npx tsc --noEmit`/`npx eslint` sạch) chưa test tay — 2 vòng t
 
 `npx tsc --noEmit`, `npx eslint` (cả `product-label-pdf.ts` lẫn `predict/page.tsx`), và `npm run build` đều sạch/pass sau vòng fix này. **Vẫn cần test tay lại trên `npm run dev`** — đặc biệt: nhãn lớn cột phải to hơn không tràn cột; nhóm QR/mã ngăn/tỷ lệ hiện nằm giữa cột trái có lề trên dưới đối xứng; chọn ngăn Mủ tạp lần đầu → Loại CSR tự nhảy "CSR10"; dropdown Hậu tố mặc định "cs" và có option "Trống".
 
+### Trang tra cứu QR (`/product-label`) — thêm Ca sản xuất + Ngày sản xuất "Chờ nhập liệu" (2026-07-08)
+
+Khi quét QR trên nhãn (cả nhãn nhỏ lẫn nhãn lớn), trang `ProductLabelClient` (`src/app/dashboard/product/_components/product-label-client.tsx`, dùng bởi route `/product-label`) trước đây **không hiển thị "Ca sản xuất"** và chỉ hiện "Ngày sản xuất" khi đã có dữ liệu thật (`{data.ngaySx && (...)}`) — kiện ở trạng thái dự đoán (`predicted`) hoặc dở dang chưa nhập kiện này (`partial`) thì cả 2 field này biến mất hoàn toàn khỏi UI thay vì báo rõ "chưa có dữ liệu".
+
+- `ProductLabelLookupResult` (`src/lib/product-label.ts`) thêm field `ca: string | null` — giá trị Ca sản xuất thật (`"A"|"B"|"C"`) lấy từ đúng dòng `lot_transactions` đã ghi nhận kiện này (chỉ có giá trị khi `status === "produced"`); `predicted`/`partial`/`not_found` luôn `ca: null`.
+- `resolveProductLabelLookupTarget()`: câu query `lot_transactions` (nhánh lô thật) thêm cột `ca` vào `.select(...)`, gán vào field `ca` của kết quả trả về ở nhánh `produced`.
+- UI: cả 2 dòng "Ngày sản xuất" và "Ca sản xuất" giờ **luôn hiển thị** (không còn ẩn có điều kiện) trong khối thông tin — khi `status !== "produced"` (tức `predicted`/`partial`), cả 2 hiện chữ **"Chờ nhập liệu"** màu amber (`text-amber-600`) thay vì trống/ẩn; khi đã `produced`, hiện đúng ngày/ca thật (màu slate bình thường), fallback `"—"` nếu hiếm khi thiếu `ca` dù đã produced.
+
+`tsc --noEmit`/`eslint`/`npm run build` đều sạch. **Chưa test tay** — cần quét thử QR của 1 kiện còn ở trạng thái dự đoán (phải thấy "Chờ nhập liệu" ở cả Ngày SX và Ca SX) và 1 kiện đã nhập liệu thật (phải thấy đúng ngày + đúng ca đã nhập).
+
 ### Phạm vi CHƯA làm (cần hoàn thiện ở phiên sau)
 
 - **Test tay nhãn in phiên 5** (xem mục ngay trên) — ưu tiên cao vì đụng trực tiếp tới file in thực tế đưa xuống xưởng.

@@ -36,6 +36,10 @@ export type ProductLabelLookupResult = {
   nganMa: string | null
   nganTen: string | null
   ngaySx: string | null
+  // Ca sản xuất thực tế (A/B/C) của đúng giao dịch đã ghi nhận kiện này — chỉ có giá trị khi
+  // status = "produced". Với "predicted"/"partial" luôn là null (kiện chưa được nhập liệu
+  // thật, UI hiển thị "Chờ nhập liệu" thay vì suy đoán).
+  ca: string | null
   realLotId: string | null
 }
 
@@ -62,6 +66,7 @@ export async function resolveProductLabelLookupTarget(
       nganMa: null,
       nganTen: null,
       ngaySx: null,
+      ca: null,
       realLotId: null,
     }
   }
@@ -77,14 +82,14 @@ export async function resolveProductLabelLookupTarget(
   if (lot) {
     const { data: txRows } = await supabase
       .from("lot_transactions")
-      .select("ngan_id,ngay_nhap,kien_a,kien_b,kien_c,kien_d")
+      .select("ngan_id,ngay_nhap,ca,kien_a,kien_b,kien_c,kien_d")
       .eq("lot_id", lot.id)
       .order("ngay_nhap", { ascending: false })
 
     const kienField = `kien_${kienKey}`
     const txWithKien = (txRows || []).find(
       (row) => Number((row as Record<string, unknown>)[kienField] || 0) > 0,
-    ) as { ngan_id: string; ngay_nhap: string } | undefined
+    ) as { ngan_id: string; ngay_nhap: string; ca: string | null } | undefined
 
     if (txWithKien) {
       const { data: ngan } = await supabase
@@ -103,6 +108,7 @@ export async function resolveProductLabelLookupTarget(
         nganMa: ngan?.ma_ngan || null,
         nganTen: ngan?.ten_ngan || null,
         ngaySx: txWithKien.ngay_nhap,
+        ca: txWithKien.ca || null,
         realLotId: lot.id,
       }
     }
@@ -118,6 +124,7 @@ export async function resolveProductLabelLookupTarget(
       nganMa: null,
       nganTen: null,
       ngaySx: null,
+      ca: null,
       realLotId: lot.id,
     }
   }
@@ -155,6 +162,7 @@ export async function resolveProductLabelLookupTarget(
       nganMa,
       nganTen,
       ngaySx: null,
+      ca: null,
       realLotId: null,
     }
   }
@@ -170,6 +178,7 @@ export async function resolveProductLabelLookupTarget(
     nganMa: null,
     nganTen: null,
     ngaySx: null,
+    ca: null,
     realLotId: null,
   }
 }

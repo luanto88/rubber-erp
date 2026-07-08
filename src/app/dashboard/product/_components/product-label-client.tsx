@@ -91,12 +91,18 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
             <div className="text-xs font-bold text-slate-500">Loại bọc</div>
             <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
           </div>
-          {data.ngaySx && (
-            <div>
-              <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
-              <div className="font-semibold text-slate-800">{formatStorageDate(data.ngaySx)}</div>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
+            <div className={`font-semibold ${data.status === "produced" && data.ngaySx ? "text-slate-800" : "text-amber-600"}`}>
+              {data.status === "produced" && data.ngaySx ? formatStorageDate(data.ngaySx) : "Chờ nhập liệu"}
             </div>
-          )}
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Ca sản xuất</div>
+            <div className={`font-semibold ${data.status === "produced" ? "text-slate-800" : "text-amber-600"}`}>
+              {data.status === "produced" ? (data.ca ? `Ca ${data.ca}` : "—") : "Chờ nhập liệu"}
+            </div>
+          </div>
         </div>
       )}
 
