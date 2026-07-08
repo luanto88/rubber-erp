@@ -56,6 +56,10 @@ type NavLeaf = {
   // Ẩn mục này hẳn với các role liệt kê, kể cả khi không cần permission (vd "Dashboard"
   // nội bộ không phù hợp cho role="customer" — họ chỉ được thấy "Đơn hàng của tôi").
   hiddenForRoles?: AppRole[]
+  // Chỉ hiện mục này cho đúng các role liệt kê — dùng cho mục dành riêng cho customer
+  // ("Đơn hàng của tôi"), vì `hasPermission()` cho admin bypass mọi permission check nên
+  // chỉ dùng `permission` không đủ để ẩn khỏi admin/manager/user.
+  onlyForRoles?: AppRole[]
 }
 
 type NavGroup = {
@@ -78,10 +82,11 @@ const NAV: NavItem[] = [
     label: "Đơn hàng của tôi",
     icon: FileOutput,
     permission: "export.view_own",
+    onlyForRoles: ["customer"],
   },
   { key: "/dashboard/notes", label: "Ghi chú nhanh", icon: NotebookPen, permission: "notes.view" },
-  { key: "/dashboard/map", label: "Bản đồ lô", icon: Map },
-  { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield },
+  { key: "/dashboard/map", label: "Bản đồ lô", icon: Map, hiddenForRoles: ["customer"] },
+  { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield, hiddenForRoles: ["customer"] },
   {
     key: "production",
     label: "Quản lý sản xuất",
@@ -344,6 +349,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
 
     if (item.hiddenForRoles?.includes(user?.role as AppRole)) return []
+    if (item.onlyForRoles && !item.onlyForRoles.includes(user?.role as AppRole)) return []
     if (item.permission && !hasPermission(user, item.permission)) return []
     return [item]
   })

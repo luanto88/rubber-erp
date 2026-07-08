@@ -79,6 +79,28 @@ RLS:
   `auth.uid()` tạo (hoặc admin) — không tin `shared_by`/quyền sở hữu do client tự khai.
 - DELETE (gỡ chia sẻ): chủ ghi chú hoặc admin.
 
+### Bug đã fix: "infinite recursion detected in policy for relation operation_note_shares"
+
+- `operation_notes_select` tra vào `operation_note_shares` (kiểm tra đã được chia sẻ chưa),
+  trong khi `operation_note_shares_insert`/`_delete` lại tra ngược vào `operation_notes`
+  (kiểm tra có phải chủ ghi chú không) — 2 chiều tham chiếu chéo giữa 2 bảng đều bật RLS
+  khiến Postgres phát hiện chu trình policy và từ chối thực thi, dù logic không thực sự lặp
+  vô hạn. Đây là lỗi kinh điển của Postgres RLS khi 2 bảng tham chiếu chéo lẫn nhau trong
+  policy, không phải lỗi ở tầng app.
+- **Cách sửa chuẩn** (đã áp dụng trong migration): tách phần tra cứu chéo ra 2 hàm
+  `SECURITY DEFINER` — `is_operation_note_owner(note_id, user_id)` và
+  `is_operation_note_shared_with(note_id, user_id)`. Hàm `SECURITY DEFINER` chạy với quyền
+  của chủ hàm (owner tạo bằng SQL Editor, mặc định được miễn RLS vì là chủ bảng, không set
+  `FORCE ROW LEVEL SECURITY`) nên truy vấn nội bộ trong hàm KHÔNG kích hoạt lại policy của
+  bảng kia — phá vỡ chu trình. `operation_notes_select` gọi
+  `is_operation_note_shared_with(...)`; `operation_note_shares_insert`/`_delete` gọi
+  `is_operation_note_owner(...)` — thay cho `EXISTS (SELECT ... FROM <bảng kia> ...)` trực
+  tiếp như bản đầu.
+- Quy tắc chung cho module này (và bất kỳ cặp bảng RLS nào tham chiếu chéo lẫn nhau trong
+  tương lai): **không** viết `EXISTS (SELECT ... FROM <bảng B có RLS> ...)` trực tiếp trong
+  policy của bảng A nếu bảng B cũng có policy tra ngược lại bảng A — phải bọc bằng hàm
+  `SECURITY DEFINER` cho ít nhất 1 chiều.
+
 ## Quy tắc chọn người để chia sẻ — cần API route bypass RLS `profiles`
 
 RLS của bảng `profiles` chỉ cho **admin** đọc toàn bộ profiles trong factory (xem

@@ -3,6 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth";
 import { FileOutput, Package } from "lucide-react";
+import {
+  getStoredCustomerPortalLang,
+  setStoredCustomerPortalLang,
+  tCustomerPortal,
+  type CustomerPortalLang,
+} from "@/lib/customer-portal-i18n";
+import { CustomerPortalLangToggle } from "./_components/lang-toggle";
 
 type PortalOrder = {
   id: string;
@@ -24,22 +31,33 @@ function formatDate(value: string) {
 export default function CustomerPortalPage() {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<PortalOrder[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [lang, setLang] = useState<CustomerPortalLang>("en");
+  const t = (key: Parameters<typeof tCustomerPortal>[1]) => tCustomerPortal(lang, key);
+
+  useEffect(() => {
+    setLang(getStoredCustomerPortalLang());
+  }, []);
+
+  const changeLang = (next: CustomerPortalLang) => {
+    setLang(next);
+    setStoredCustomerPortalLang(next);
+  };
 
   // Nhận thẳng token đã lấy được từ bootstrap (qua hydrateActiveSession()) — không đọc
   // lại session lần 2 bằng supabase.auth.getSession() riêng, tránh khoảng hở không cần thiết.
   const loadOrders = useCallback(async (token: string) => {
     setLoading(true);
-    setError(null);
+    setError(false);
     try {
       const res = await fetch("/api/customer-portal/orders", {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = (await res.json().catch(() => null)) as { orders?: PortalOrder[]; error?: string } | null;
-      if (!res.ok) throw new Error(json?.error || "Không tải được danh sách đơn hàng.");
+      if (!res.ok) throw new Error(json?.error || "load_failed");
       setOrders(json?.orders || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không tải được danh sách đơn hàng.");
+    } catch {
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -68,23 +86,26 @@ export default function CustomerPortalPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-extrabold text-slate-800">Đơn hàng của tôi</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Danh sách đơn xuất hàng được cấp quyền xem, kèm chuỗi truy xuất nguồn gốc EUDR
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-800">{t("myOrders")}</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{t("myOrdersSubtitle")}</p>
+        </div>
+        <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
       </div>
 
       {error && (
-        <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{error}</div>
+        <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
+          {t("errorLoadOrders")}
+        </div>
       )}
 
       {loading ? (
-        <div className="p-12 text-center text-slate-400">Đang tải...</div>
+        <div className="p-12 text-center text-slate-400">{t("loading")}</div>
       ) : orders.length === 0 ? (
         <div className="p-12 text-center text-slate-400 bg-white rounded-xl border border-slate-200 shadow-sm">
           <Package size={40} className="mx-auto mb-3 opacity-30" />
-          <p>Chưa có đơn hàng nào được cấp quyền xem.</p>
+          <p>{t("noOrders")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -99,10 +120,10 @@ export default function CustomerPortalPage() {
                 <span className="font-extrabold text-slate-800">{order.ma_don}</span>
               </div>
               <div className="text-xs text-slate-500 space-y-1">
-                <div>Ngày: {formatDate(order.ngay)}</div>
-                <div>Chủng loại: {order.chung_loai || "-"}</div>
-                <div>Tổng bánh: {order.tong_banh?.toLocaleString("vi-VN") ?? "-"}</div>
-                {order.customer_name && <div>Khách hàng: {order.customer_name}</div>}
+                <div>{t("dateLabel")}: {formatDate(order.ngay)}</div>
+                <div>{t("productTypeLabel")}: {order.chung_loai || "-"}</div>
+                <div>{t("totalBalesLabel")}: {order.tong_banh?.toLocaleString("vi-VN") ?? "-"}</div>
+                {order.customer_name && <div>{t("customerLabel")}: {order.customer_name}</div>}
               </div>
             </Link>
           ))}

@@ -9,8 +9,16 @@ import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
+import JSZip from "jszip"
 import { ArrowLeft, Download, Loader2, MapPin, Package } from "lucide-react"
 import { generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import {
+  getStoredCustomerPortalLang,
+  setStoredCustomerPortalLang,
+  tCustomerPortal,
+  type CustomerPortalLang,
+} from "@/lib/customer-portal-i18n"
+import { CustomerPortalLangToggle } from "@/app/dashboard/customer-portal/_components/lang-toggle"
 
 type PortalOrderDetail = {
   id: string
@@ -38,6 +46,8 @@ type PortalData = {
   geoData: FeatureCollection
   traceInfo: { lots: number; ngans: number; tripUids: number; matchedRows: number; diemGn: number; features: number; fallback?: boolean }
 }
+
+type DownloadKind = "dds1" | "dds2" | "geojson" | "all"
 
 const TEAM_COLORS: Record<string, string> = {
   "1": "#ef4444", "2": "#f97316", "3": "#eab308", "4": "#22c55e", "5": "#14b8a6",
@@ -82,10 +92,21 @@ export default function CustomerPortalOrderClient() {
   const params = useParams<{ id: string }>()
   const orderId = params?.id
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [data, setData] = useState<PortalData | null>(null)
-  const [downloading, setDownloading] = useState<"dds1" | "dds2" | "geojson" | null>(null)
+  const [downloading, setDownloading] = useState<DownloadKind | null>(null)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [lang, setLang] = useState<CustomerPortalLang>("en")
+  const t = (key: Parameters<typeof tCustomerPortal>[1]) => tCustomerPortal(lang, key)
+
+  useEffect(() => {
+    setLang(getStoredCustomerPortalLang())
+  }, [])
+
+  const changeLang = (next: CustomerPortalLang) => {
+    setLang(next)
+    setStoredCustomerPortalLang(next)
+  }
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
@@ -109,6 +130,7 @@ export default function CustomerPortalOrderClient() {
       }
       if (!orderId) {
         setLoading(false)
+        setLoadFailed(true)
         return
       }
       try {
@@ -116,10 +138,10 @@ export default function CustomerPortalOrderClient() {
           headers: { Authorization: `Bearer ${session.access_token}` },
         })
         const json = (await res.json().catch(() => null)) as (PortalData & { error?: string }) | null
-        if (!res.ok) throw new Error(json?.error || "Không tải được chi tiết đơn hàng.")
+        if (!res.ok || !json) throw new Error("load_failed")
         setData(json)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Không tải được chi tiết đơn hàng.")
+      } catch {
+        setLoadFailed(true)
       } finally {
         setLoading(false)
       }
@@ -135,7 +157,7 @@ export default function CustomerPortalOrderClient() {
 
   const handleDownloadDDS1 = async () => {
     if (!data?.factory) {
-      showToast("Thiếu thông tin nhà máy để tạo DDS.", false)
+      showToast(t("errorMissingFactory"), false)
       return
     }
     setDownloading("dds1")
@@ -147,8 +169,8 @@ export default function CustomerPortalOrderClient() {
         data.lotCertMap,
       )
       saveAs(blob, `${data.order.ma_don}_Plantation.pdf`)
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Không tạo được file DDS.", false)
+    } catch {
+      showToast(t("errorGenerateDds"), false)
     } finally {
       setDownloading(null)
     }
@@ -156,7 +178,7 @@ export default function CustomerPortalOrderClient() {
 
   const handleDownloadDDS2 = async () => {
     if (!data?.factory) {
-      showToast("Thiếu thông tin nhà máy để tạo DDS.", false)
+      showToast(t("errorMissingFactory"), false)
       return
     }
     setDownloading("dds2")
@@ -168,8 +190,8 @@ export default function CustomerPortalOrderClient() {
         data.factory,
       )
       saveAs(blob, `${data.order.ma_don}_Shipment.pdf`)
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Không tạo được file DDS.", false)
+    } catch {
+      showToast(t("errorGenerateDds"), false)
     } finally {
       setDownloading(null)
     }
@@ -186,14 +208,39 @@ export default function CustomerPortalOrderClient() {
     }
   }
 
-  if (loading) {
-    return <div className="p-12 text-center text-slate-400">Đang tải...</div>
+  const handleDownloadAll = async () => {
+    if (!data?.factory) {
+      showToast(t("errorMissingFactory"), false)
+      return
+    }
+    setDownloading("all")
+    try {
+      const orderForDds = { ...data.order, customers: data.order.customers ?? undefined }
+      const [dds1Blob, dds2Blob] = await Promise.all([
+        generateDDS1(orderForDds, data.geoData, data.factory, data.lotCertMap),
+        generateDDS2(orderForDds, data.lotDetails, data.extractionDates, data.factory),
+      ])
+      const zip = new JSZip()
+      zip.file(`${data.order.ma_don}_Plantation.pdf`, dds1Blob)
+      zip.file(`${data.order.ma_don}_Shipment.pdf`, dds2Blob)
+      zip.file(`${data.order.ma_don}_supply_chain.geojson`, JSON.stringify(data.geoData, null, 2))
+      const zipBlob = await zip.generateAsync({ type: "blob" })
+      saveAs(zipBlob, `${data.order.ma_don}_EUDR.zip`)
+    } catch {
+      showToast(t("errorGenerateDds"), false)
+    } finally {
+      setDownloading(null)
+    }
   }
 
-  if (error || !data) {
+  if (loading) {
+    return <div className="p-12 text-center text-slate-400">{t("loading")}</div>
+  }
+
+  if (loadFailed || !data) {
     return (
       <div className="p-12 text-center text-red-500 bg-white rounded-xl border border-slate-200 shadow-sm">
-        {error || "Không tìm thấy đơn hàng."}
+        {t("orderNotFound")}
       </div>
     )
   }
@@ -210,35 +257,46 @@ export default function CustomerPortalOrderClient() {
         </div>
       )}
 
-      <Link
-        href="/dashboard/customer-portal"
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700 mb-4"
-      >
-        <ArrowLeft size={14} /> Quay lại danh sách
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <Link
+          href="/dashboard/customer-portal"
+          className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700"
+        >
+          <ArrowLeft size={14} /> {t("backToList")}
+        </Link>
+        <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
+      </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-extrabold text-slate-800">{order.ma_don}</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Ngày: {formatDate(order.ngay)} · Chủng loại: {order.chung_loai || "-"} · Tổng bánh:{" "}
-              {order.tong_banh?.toLocaleString("vi-VN") ?? "-"}
+              {t("dateLabel")}: {formatDate(order.ngay)} · {t("productTypeLabel")}: {order.chung_loai || "-"} ·{" "}
+              {t("totalBalesLabel")}: {order.tong_banh?.toLocaleString("vi-VN") ?? "-"}
             </p>
             {order.customers && (
               <p className="text-xs text-slate-400 mt-1">
-                Khách hàng: {order.customers.ten_kh_en} — {order.customers.quoc_gia}
+                {t("customerLabel")}: {order.customers.ten_kh_en} — {order.customers.quoc_gia}
               </p>
             )}
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleDownloadAll}
+              disabled={downloading === "all"}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+            >
+              {downloading === "all" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              {t("downloadAll")}
+            </button>
             <button
               onClick={handleDownloadDDS1}
               disabled={downloading === "dds1"}
               className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg disabled:opacity-50"
             >
               {downloading === "dds1" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              DDS Lô vườn (PDF)
+              {t("ddsPlantation")}
             </button>
             <button
               onClick={handleDownloadDDS2}
@@ -246,7 +304,7 @@ export default function CustomerPortalOrderClient() {
               className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg disabled:opacity-50"
             >
               {downloading === "dds2" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              DDS Lô hàng (PDF)
+              {t("ddsShipment")}
             </button>
             <button
               onClick={handleDownloadGeoJson}
@@ -254,17 +312,17 @@ export default function CustomerPortalOrderClient() {
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg disabled:opacity-50"
             >
               {downloading === "geojson" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              GeoJSON
+              {t("geoJson")}
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           {[
-            { label: "Số lô", value: data.traceInfo.lots },
-            { label: "Số ngăn lưu", value: data.traceInfo.ngans },
-            { label: "Điểm giao nhận", value: data.traceInfo.diemGn },
-            { label: "Polygon lô vườn", value: data.traceInfo.features },
+            { label: t("kpiLots"), value: data.traceInfo.lots },
+            { label: t("kpiStorage"), value: data.traceInfo.ngans },
+            { label: t("kpiDeliveryPoints"), value: data.traceInfo.diemGn },
+            { label: t("kpiPolygons"), value: data.traceInfo.features },
           ].map((kpi) => (
             <div key={kpi.label} className="bg-slate-50 rounded-xl p-3 text-center">
               <div className="text-lg font-black text-slate-800">{kpi.value}</div>
@@ -276,7 +334,7 @@ export default function CustomerPortalOrderClient() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">
         <div className="flex items-center gap-2 mb-3 text-slate-700 font-bold text-sm">
-          <MapPin size={16} /> Bản đồ lô vườn
+          <MapPin size={16} /> {t("plantationMap")}
         </div>
         <div className="h-[420px] rounded-xl overflow-hidden border border-slate-200">
           {data.geoData.features.length > 0 ? (
@@ -291,7 +349,7 @@ export default function CustomerPortalOrderClient() {
             </MapContainer>
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-slate-400">
-              Không có dữ liệu polygon lô vườn cho đơn hàng này.
+              {t("noPolygonData")}
             </div>
           )}
         </div>
@@ -299,16 +357,16 @@ export default function CustomerPortalOrderClient() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex items-center gap-2 p-4 text-slate-700 font-bold text-sm border-b border-slate-100">
-          <Package size={16} /> Danh sách lô thành phẩm
+          <Package size={16} /> {t("lotListTitle")}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
-                <th className="text-left px-4 py-2">Mã lô</th>
-                <th className="text-left px-4 py-2">Ngày sản xuất</th>
-                <th className="text-left px-4 py-2">Ngày trích xuất</th>
-                <th className="text-left px-4 py-2">Chứng nhận</th>
+                <th className="text-left px-4 py-2">{t("colLotCode")}</th>
+                <th className="text-left px-4 py-2">{t("colProductionDate")}</th>
+                <th className="text-left px-4 py-2">{t("colExtractionDate")}</th>
+                <th className="text-left px-4 py-2">{t("colCertification")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

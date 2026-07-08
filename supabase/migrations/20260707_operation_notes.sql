@@ -41,6 +41,42 @@ CREATE INDEX IF NOT EXISTS idx_operation_note_shares_user
 ALTER TABLE operation_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operation_note_shares ENABLE ROW LEVEL SECURITY;
 
+-- ── Helper SECURITY DEFINER: tránh "infinite recursion detected in policy" ──
+-- operation_notes_select cần tra operation_note_shares, còn operation_note_shares_insert/
+-- _delete cần tra ngược lại operation_notes — 2 chiều tham chiếu chéo này khiến Postgres
+-- phát hiện chu trình giữa 2 bảng RLS và từ chối thực thi (dù logic không thực sự lặp vô
+-- hạn). Cách sửa chuẩn của Postgres/Supabase: đưa phần tra cứu chéo vào hàm SECURITY DEFINER
+-- — hàm chạy với quyền của chủ hàm (owner tạo bằng SQL Editor, thường bypass RLS vì là chủ
+-- bảng) nên không kích hoạt lại policy của bảng kia, phá vỡ chu trình.
+CREATE OR REPLACE FUNCTION is_operation_note_owner(p_note_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM operation_notes WHERE id = p_note_id AND created_by = p_user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION is_operation_note_shared_with(p_note_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM operation_note_shares WHERE note_id = p_note_id AND shared_with_user_id = p_user_id
+  );
+$$;
+
+REVOKE ALL ON FUNCTION is_operation_note_owner(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_operation_note_owner(UUID, UUID) TO authenticated;
+REVOKE ALL ON FUNCTION is_operation_note_shared_with(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_operation_note_shared_with(UUID, UUID) TO authenticated;
+
 -- ── operation_notes: chỉ chủ ghi chú, admin, hoặc người được chia sẻ mới đọc được ──
 DROP POLICY IF EXISTS "operation_notes_read" ON operation_notes;
 DROP POLICY IF EXISTS "operation_notes_write" ON operation_notes;
@@ -55,10 +91,7 @@ CREATE POLICY "operation_notes_select" ON operation_notes
     AND (
       created_by = auth.uid()
       OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role = 'admin')
-      OR EXISTS (
-        SELECT 1 FROM operation_note_shares s
-        WHERE s.note_id = operation_notes.id AND s.shared_with_user_id = auth.uid()
-      )
+      OR is_operation_note_shared_with(operation_notes.id, auth.uid())
     )
   );
 
@@ -104,7 +137,7 @@ CREATE POLICY "operation_note_shares_insert" ON operation_note_shares
     factory_id IN (SELECT factory_id FROM profiles WHERE id = auth.uid())
     AND shared_by = auth.uid()
     AND (
-      EXISTS (SELECT 1 FROM operation_notes n WHERE n.id = note_id AND n.created_by = auth.uid())
+      is_operation_note_owner(note_id, auth.uid())
       OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role = 'admin')
     )
   );
@@ -115,7 +148,7 @@ CREATE POLICY "operation_note_shares_delete" ON operation_note_shares
     factory_id IN (SELECT factory_id FROM profiles WHERE id = auth.uid())
     AND (
       shared_by = auth.uid()
-      OR EXISTS (SELECT 1 FROM operation_notes n WHERE n.id = note_id AND n.created_by = auth.uid())
+      OR is_operation_note_owner(note_id, auth.uid())
       OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role = 'admin')
     )
   );

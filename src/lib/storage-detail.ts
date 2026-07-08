@@ -1,5 +1,3 @@
-"use client"
-
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
