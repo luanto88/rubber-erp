@@ -1280,8 +1280,28 @@ export default function QualityPage() {
         return raw
       }
 
-      const ngayKN = normDate(meta["NGAY_KN"] || "")
-      const ngaySX = normDate(meta["NGAY_SX"] || "")
+      // Đọc trực tiếp giá trị cell thô (hàng meta = Excel row 2, index 1) thay vì dựa
+      // vào chuỗi đã format sẵn của sheet_to_json({raw:false}) — SheetJS ưu tiên cache
+      // định dạng hiển thị lưu trong file (cell.w) hơn dateNF truyền vào, nên nếu ô có
+      // định dạng số kiểu "m/d/yy" (Mỹ, năm 2 số), giá trị đọc ra có thể là "6/28/26"
+      // — không khớp regex normDate() (đòi năm 4 số + giả định thứ tự ngày/tháng) và
+      // bị so sánh chuỗi thô sai dù cùng 1 ngày thật. Đọc thẳng Date gốc (có sẵn nhờ
+      // cellDates:true) để không phụ thuộc locale/định dạng hiển thị.
+      const metaDateCell = (colName: string): string => {
+        const colI = metaH.indexOf(colName)
+        if (colI >= 0) {
+          const addr = XLSX.utils.encode_cell({ r: 1, c: colI })
+          const cell = ws[addr]
+          if (cell?.v instanceof Date) {
+            const d = cell.v
+            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+          }
+        }
+        return normDate(meta[colName] || "")
+      }
+
+      const ngayKN = metaDateCell("NGAY_KN")
+      const ngaySX = metaDateCell("NGAY_SX")
       const rawLoai = meta["CHUNG_LOAI"] || "10"
       const cl = rawLoai.replace(/^(CSR|SVR)/i, "")
       const tieuChuan = meta["TIEU_CHUAN"] || "TCCS 112:2022"
@@ -1309,11 +1329,34 @@ export default function QualityPage() {
         if (loNM) dataRows.push({ loNM, row })
       }
 
-      const { data: factoryLots, error: factoryLotsError } = await supabase.from("lots")
-        .select("id,ma_lo,ngay_sx,ngay_ht,trang_thai,tong_banh")
-        .eq("factory_id", factoryId)
-        .eq("loai_csr", loaiCsr)
-      if (factoryLotsError) throw factoryLotsError
+      // Phân trang: PostgREST mặc định cắt kết quả ở 1000 dòng, và khi thiếu .order()
+      // thứ tự trả về là heap-order không xác định — nếu nhà máy vượt 1000 lô, các lô
+      // hợp lệ có thể bị loại NGẪU NHIÊN khỏi tập đối chiếu (đã xác nhận bằng dữ liệu
+      // thật). Xem .claude/rules/04-code-patterns.md mục "Phân trang khi query bảng lớn".
+      const factoryLots: {
+        id: string
+        ma_lo: string
+        ngay_sx: string
+        ngay_ht?: string | null
+        trang_thai?: string
+        tong_banh?: number
+      }[] = []
+      {
+        const PAGE_SIZE = 1000
+        let from = 0
+        for (;;) {
+          const { data, error } = await supabase.from("lots")
+            .select("id,ma_lo,ngay_sx,ngay_ht,trang_thai,tong_banh")
+            .eq("factory_id", factoryId)
+            .eq("loai_csr", loaiCsr)
+            .order("num", { ascending: true })
+            .range(from, from + PAGE_SIZE - 1)
+          if (error) throw error
+          factoryLots.push(...(data || []))
+          if (!data || data.length < PAGE_SIZE) break
+          from += PAGE_SIZE
+        }
+      }
 
       const lotByExact = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }>()
       const lotByBase = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number } | null>()

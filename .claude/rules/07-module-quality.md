@@ -125,6 +125,14 @@ Khong dung gia tri `Khong dat` cho `dat_hang`.
   - dong import do phai bao loi
   - khong duoc insert tam bang `ma_lo` roi xu ly sau
 
+### Cập nhật 2026-07-08 — 2 bug đã fix trong `handleImport()` (`src/app/dashboard/quality/page.tsx`)
+
+Triệu chứng thật: import 1 file 8 lô đều tồn tại thật ("Hoàn thành") → "Nhập thành công: 0 lô", 6 lô báo "không tìm thấy lô thành phẩm tương ứng", 2 lô báo "sai ngày hoàn thành" dù ngày file và ngày lô nhìn giống hệt nhau.
+
+- **Bug 1 — query đối chiếu `lots` thiếu phân trang**: câu query lấy `lots` để build `lotByExact`/`lotByBase` chỉ filter `factory_id + loai_csr`, không có `.order()`/`.range()`. Khi tổng số lô của nhà máy vượt mốc 1000 (PostgREST mặc định cắt kết quả), và không có `.order()` tường minh, thứ tự trả về là **heap-order không xác định** — đã xác nhận bằng dữ liệu thật: chỉ 2/8 lô mục tiêu lọt vào tập 1000 dòng "may rủi" này, 6 lô còn lại bị loại dù tồn tại thật, gây lỗi "không tìm thấy lô thành phẩm tương ứng". Đây đúng loại bug đã ghi ở `.claude/rules/04-code-patterns.md` mục "Phân trang khi query bảng lớn", từng gặp và fix ở `product/page.tsx`/`dashboard/page.tsx` cùng tuần. **Đã fix**: thay bằng vòng lặp phân trang có `.order("num", { ascending: true })` ổn định.
+- **Bug 2 — so sánh `NGAY_SX` bằng chuỗi thô, không chuẩn hóa định dạng Excel**: `sheet_to_json({ raw:false, dateNF:"yyyy-mm-dd" })` ưu tiên cache định dạng hiển thị lưu sẵn trong file Excel (`cell.w`) hơn `dateNF` truyền vào — nếu ô Excel có định dạng số kiểu `m/d/yy` (Mỹ, năm 2 chữ số), giá trị đọc ra là chuỗi kiểu `"6/28/26"`, không khớp regex `normDate()` (đòi năm 4 chữ số) nên bị trả về nguyên văn, rồi so sánh chuỗi thô với `"2026-06-28"` từ DB → luôn lệch dù cùng 1 ngày thật. **Đã fix**: đọc thẳng giá trị `Date` gốc của ô Excel (hàng meta, nhờ `cellDates:true` đã bật sẵn) qua `ws[XLSX.utils.encode_cell({r:1,c:colIndex})]`, format bằng `getUTCFullYear/Month/Date()` để tránh lệch múi giờ — bỏ qua hoàn toàn ambiguity locale/định dạng hiển thị. `normDate()` cũ vẫn giữ nguyên làm fallback cho ô nhập tay dạng text (không phải cell Date thật).
+- Không đổi logic matching theo `ma_lo`, kiểm tra trùng KN, hay `calcGrade`.
+
 ## Quan he xoa phieu va trang thai lo
 
 Khi xoa phieu kiem nghiem:

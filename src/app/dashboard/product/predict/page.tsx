@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import {
@@ -152,6 +152,23 @@ export default function ProductPredictPage() {
   const canManage = hasPermission(currentUser, "product.predict_manage");
   const isAdmin = currentUser?.role === "admin";
 
+  // Gợi ý mặc định "Loại CSR" (thường ra CSR10 cho ngăn Mủ tạp) ngay khi người dùng vừa chọn
+  // ngăn đầu tiên (chuyển từ chưa chọn ngăn nào sang đã chọn) — chỉ set khi trường đang trống,
+  // không ghi đè lựa chọn thủ công; không tự ép lại nếu sau đó người dùng chủ động xoá về rỗng
+  // trong cùng phiên chọn ngăn (chỉ theo dõi đúng thời điểm CHUYỂN từ rỗng sang có chọn).
+  const prevHasNganRef = useRef(false);
+  useEffect(() => {
+    const hasNgan = selectedNganIds.length > 0;
+    const justSelected = hasNgan && !prevHasNganRef.current;
+    prevHasNganRef.current = hasNgan;
+    if (justSelected && !loaiCsr && csrOptions.length > 0) {
+      const defaultCsr = csrOptions[0];
+      setLoaiCsr(defaultCsr);
+      setLoaiBanh(getLoaiBanhOptions(defaultCsr)[0] || 35);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNganIds.length, csrOptions]);
+
   useEffect(() => {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId();
@@ -174,7 +191,13 @@ export default function ProductPredictPage() {
         .select("code,name")
         .eq("factory_id", fid)
         .order("code");
-      setSuffixOptions((suffixRows as SuffixOption[]) || []);
+      const suffixList = (suffixRows as SuffixOption[]) || [];
+      setSuffixOptions(suffixList);
+      // Gợi ý sẵn "cs" — hậu tố phổ biến nhất, mirror mặc định của product/page.tsx
+      // (session.suffix mặc định "cs"). Chỉ set khi danh mục thật sự có mã này.
+      if (suffixList.some((s) => s.code === "cs")) {
+        setSuffix("cs");
+      }
       setLoading(false);
     };
     void bootstrap();
@@ -739,24 +762,22 @@ export default function ProductPredictPage() {
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Hậu tố mã lô (tuỳ chọn)</label>
-                      <input
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Hậu tố mã lô *</label>
+                      <select
                         value={suffix}
                         onChange={(e) => setSuffix(e.target.value)}
-                        placeholder="vd: cs"
-                        list="predict-suffix-options"
                         className="w-full min-h-[42px] rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                      />
-                      <datalist id="predict-suffix-options">
+                      >
+                        <option value="">Trống (không hậu tố)</option>
                         {suffixOptions.map((s) => (
                           <option key={s.code} value={s.code}>
-                            {s.name}
+                            {s.code} - {s.name}
                           </option>
                         ))}
-                      </datalist>
+                      </select>
                       {suffixOptions.length === 0 && (
                         <p className="mt-1 text-xs text-slate-400">
-                          Chưa có hậu tố nào trong danh mục — nhập tự do hoặc thêm ở Cài đặt → Danh mục → Hậu tố lô.
+                          Chưa có hậu tố nào trong danh mục — vào Cài đặt → Danh mục → Hậu tố lô để thêm.
                         </p>
                       )}
                     </div>
