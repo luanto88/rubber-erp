@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Package, Warehouse } from "lucide-react"
+import { AlertTriangle, Package, RotateCcw, Warehouse } from "lucide-react"
 import { buildNganLookupPath, resolveProductLabelLookupTarget, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
+import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
 
 type ProductLabelClientProps = {
   factoryId: string
@@ -44,17 +45,26 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
   }, [factoryId, maLo, kien])
 
   if (loading) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-400 shadow-sm">
-        Đang tải...
-      </div>
-    )
+    return <ProductLabelSkeletonCard />
   }
 
   if (error || !data) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center text-red-600 shadow-sm">
-        {error || "Không tải được dữ liệu."}
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+          <AlertTriangle size={24} strokeWidth={2} />
+        </div>
+        <p className="text-sm font-semibold leading-relaxed text-slate-600">
+          Không tìm thấy thông tin kiện mủ hoặc đường link bị hỏng. Vui lòng kiểm tra và quét lại mã QR.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
+        >
+          <RotateCcw size={16} />
+          Thử lại
+        </button>
       </div>
     )
   }
@@ -78,32 +88,46 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
       </div>
 
       {data.status !== "not_found" && (
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <div className="text-xs font-bold text-slate-500">Loại CSR</div>
-            <div className="font-semibold text-slate-800">{data.loaiCsr || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-500">Loại bành</div>
-            <div className="font-semibold text-slate-800">{data.loaiBanh || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-500">Loại bọc</div>
-            <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
-            <div className={`font-semibold ${data.status === "produced" && data.ngaySx ? "text-slate-800" : "text-amber-600"}`}>
-              {data.status === "produced" && data.ngaySx ? formatStorageDate(data.ngaySx) : "Chờ nhập liệu"}
+        <>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-xs font-bold text-slate-500">Loại CSR</div>
+              <div className="font-semibold text-slate-800">{data.loaiCsr || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-500">Loại bành</div>
+              <div className="font-semibold text-slate-800">{data.loaiBanh || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-500">Loại bọc</div>
+              <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
+              <div className={`font-semibold ${data.status === "produced" && data.ngaySx ? "text-slate-800" : "text-amber-600"}`}>
+                {data.status === "produced" && data.ngaySx ? formatStorageDate(data.ngaySx) : "Chờ nhập liệu"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-500">Ca sản xuất</div>
+              <div className={`font-semibold ${data.status === "produced" ? "text-slate-800" : "text-amber-600"}`}>
+                {data.status === "produced" ? (data.ca ? `Ca ${data.ca}` : "—") : "Chờ nhập liệu"}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-xs font-bold text-slate-500">Ca sản xuất</div>
-            <div className={`font-semibold ${data.status === "produced" ? "text-slate-800" : "text-amber-600"}`}>
-              {data.status === "produced" ? (data.ca ? `Ca ${data.ca}` : "—") : "Chờ nhập liệu"}
-            </div>
+
+          <div
+            className={`mt-3 rounded-xl px-3 py-2.5 text-sm font-bold ${
+              !data.datHang
+                ? "bg-amber-50 text-amber-700"
+                : data.datHang.endsWith("RH")
+                  ? "bg-red-50 text-red-600"
+                  : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            Đạt hạng: {data.datHang || "Đang chờ kiểm nghiệm"}
           </div>
-        </div>
+        </>
       )}
 
       {data.nganId && (

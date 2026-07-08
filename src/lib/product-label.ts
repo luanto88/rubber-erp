@@ -41,9 +41,32 @@ export type ProductLabelLookupResult = {
   // thật, UI hiển thị "Chờ nhập liệu" thay vì suy đoán).
   ca: string | null
   realLotId: string | null
+  // Kết quả chấm hạng KN mới nhất của lô thật (vd "CSR10", "CSR10RH") — null nếu lô chưa có
+  // lô thật hoặc chưa có phiếu KN nào (UI hiển thị "Đang chờ kiểm nghiệm").
+  datHang: string | null
 }
 
 const KIEN_LOWER: Record<KienLetter, string> = { A: "a", B: "b", C: "c", D: "d" }
+
+// Lấy dat_hang của phiếu KN mới nhất cho 1 lô thật — dedupe theo lan lớn nhất rồi created_at
+// mới nhất, mirror đúng logic getRotHangLotCount() trong module-tasks.ts.
+async function fetchLatestDatHang(lotId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("qc_results")
+    .select("lan, created_at, dat_hang")
+    .eq("lot_id", lotId)
+  const rows = (data || []) as { lan: number | null; created_at: string; dat_hang: string | null }[]
+  if (rows.length === 0) return null
+  let latest = rows[0]
+  for (const r of rows) {
+    const rLan = r.lan || 1
+    const latestLan = latest.lan || 1
+    if (rLan > latestLan || (rLan === latestLan && new Date(r.created_at || 0) > new Date(latest.created_at || 0))) {
+      latest = r
+    }
+  }
+  return latest.dat_hang || null
+}
 
 export async function resolveProductLabelLookupTarget(
   factoryId: string,
@@ -68,6 +91,7 @@ export async function resolveProductLabelLookupTarget(
       ngaySx: null,
       ca: null,
       realLotId: null,
+      datHang: null,
     }
   }
 
@@ -91,6 +115,8 @@ export async function resolveProductLabelLookupTarget(
       (row) => Number((row as Record<string, unknown>)[kienField] || 0) > 0,
     ) as { ngan_id: string; ngay_nhap: string; ca: string | null } | undefined
 
+    const datHang = await fetchLatestDatHang(lot.id)
+
     if (txWithKien) {
       const { data: ngan } = await supabase
         .from("ngans")
@@ -110,6 +136,7 @@ export async function resolveProductLabelLookupTarget(
         ngaySx: txWithKien.ngay_nhap,
         ca: txWithKien.ca || null,
         realLotId: lot.id,
+        datHang,
       }
     }
 
@@ -126,6 +153,7 @@ export async function resolveProductLabelLookupTarget(
       ngaySx: null,
       ca: null,
       realLotId: lot.id,
+      datHang,
     }
   }
 
@@ -164,6 +192,7 @@ export async function resolveProductLabelLookupTarget(
       ngaySx: null,
       ca: null,
       realLotId: null,
+      datHang: null,
     }
   }
 
@@ -180,6 +209,7 @@ export async function resolveProductLabelLookupTarget(
     ngaySx: null,
     ca: null,
     realLotId: null,
+    datHang: null,
   }
 }
 
