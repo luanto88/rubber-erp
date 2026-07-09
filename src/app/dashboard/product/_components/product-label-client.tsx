@@ -88,46 +88,42 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
       </div>
 
       {data.status !== "not_found" && (
-        <>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-xs font-bold text-slate-500">Loại CSR</div>
-              <div className="font-semibold text-slate-800">{data.loaiCsr || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-500">Loại bành</div>
-              <div className="font-semibold text-slate-800">{data.loaiBanh || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-500">Loại bọc</div>
-              <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
-              <div className={`font-semibold ${data.status === "produced" && data.ngaySx ? "text-slate-800" : "text-amber-600"}`}>
-                {data.status === "produced" && data.ngaySx ? formatStorageDate(data.ngaySx) : "Chờ nhập liệu"}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-500">Ca sản xuất</div>
-              <div className={`font-semibold ${data.status === "produced" ? "text-slate-800" : "text-amber-600"}`}>
-                {data.status === "produced" ? (data.ca ? `Ca ${data.ca}` : "—") : "Chờ nhập liệu"}
-              </div>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <div className="text-xs font-bold text-slate-500">Loại CSR</div>
+            <div className="font-semibold text-slate-800">{data.loaiCsr || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Loại bành</div>
+            <div className="font-semibold text-slate-800">{data.loaiBanh || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Loại bọc</div>
+            <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Ngày sản xuất</div>
+            <div className={`font-semibold ${data.status === "produced" && data.ngaySx ? "text-slate-800" : "text-amber-600"}`}>
+              {data.status === "produced" && data.ngaySx ? formatStorageDate(data.ngaySx) : "Chờ nhập liệu"}
             </div>
           </div>
-
-          <div
-            className={`mt-3 rounded-xl px-3 py-2.5 text-sm font-bold ${
-              !data.datHang
-                ? "bg-amber-50 text-amber-700"
-                : data.datHang.endsWith("RH")
-                  ? "bg-red-50 text-red-600"
-                  : "bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            Đạt hạng: {data.datHang || "Đang chờ kiểm nghiệm"}
+          <div>
+            <div className="text-xs font-bold text-slate-500">Ca sản xuất</div>
+            <div className={`font-semibold ${data.status === "produced" ? "text-slate-800" : "text-amber-600"}`}>
+              {data.status === "produced" ? (data.ca ? `Ca ${data.ca}` : "—") : "Chờ nhập liệu"}
+            </div>
           </div>
-        </>
+          <div>
+            <div className="text-xs font-bold text-slate-500">Đạt hạng</div>
+            <div
+              className={`font-semibold ${
+                !data.datHang ? "text-amber-600" : data.datHang.endsWith("RH") ? "text-red-600" : "text-emerald-700"
+              }`}
+            >
+              {data.datHang || "Đang chờ kiểm nghiệm"}
+            </div>
+          </div>
+        </div>
       )}
 
       {data.nganId && (
