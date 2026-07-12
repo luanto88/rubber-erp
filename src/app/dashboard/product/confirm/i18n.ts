@@ -1,0 +1,137 @@
+// Từ điển song ngữ Việt/Khmer cho trang quét-xác nhận sản xuất (công nhân xưởng Kampong Thom).
+// Bản dịch Khmer là bản dịch kỹ thuật cơ bản — nên nhờ người bản ngữ rà soát lại trước khi
+// dùng chính thức lâu dài, đặc biệt các thuật ngữ chuyên ngành cao su (bành, bọc, ngăn...).
+
+export type Lang = "vi" | "km";
+
+export const LANG_STORAGE_KEY = "product_confirm_lang";
+
+export const LANG_OPTIONS: { code: Lang; label: string }[] = [
+  { code: "vi", label: "VI" },
+  { code: "km", label: "ខ្មែរ" },
+];
+
+const DICT: Record<Lang, Record<string, string>> = {
+  vi: {
+    appTitle: "Thành phẩm",
+    appSubtitle: "Ghi nhận tại xưởng",
+    shiftLabel: "Trực ca",
+    scanQr: "Quét QR",
+    sessionLogTitle: "Log dữ liệu đã gửi",
+    noLogYet: "Chưa có dữ liệu nào được gửi trong ca này.",
+    shiftStartedAt: "Ca bắt đầu lúc",
+    endShift: "Kết thúc ca",
+    confirmEndShiftTitle: "Kết thúc ca sản xuất?",
+    confirmEndShiftMessage:
+      "Toàn bộ log phía trên sẽ không hiển thị lại khi bạn quay lại trang này. Bạn có chắc muốn kết thúc ca?",
+    cancel: "Hủy",
+    confirmAction: "Xác nhận",
+    scanningTitle: "Quét mã QR trên nhãn kiện",
+    scanningHint: "Đưa camera vào mã QR trên nhãn",
+    scanCancel: "Hủy quét",
+    scanInvalid: "Mã QR không hợp lệ, vui lòng thử lại.",
+    cameraError: "Không thể mở camera. Vui lòng cấp quyền camera cho trình duyệt.",
+    formTitle: "Nhập dữ liệu sản xuất",
+    formSubtitle: "Xác nhận kiện thành phẩm từ QR nhãn dán",
+    soLo: "Số lô",
+    kienLabel: "Kiện",
+    soBanh: "Số bành",
+    stepperHint: "Chạm +/- để tăng giảm (tối đa {max})",
+    ngaySanXuat: "Ngày sản xuất",
+    gioSanXuat: "Giờ sản xuất",
+    caSanXuat: "Ca sản xuất",
+    nganNguon: "Ngăn nguồn",
+    chonNganNguon: "Chọn ngăn nguồn (chưa xác định tự động)",
+    chonNgan: "-- Chọn ngăn --",
+    boc: "Bọc",
+    chonBoc: "-- Chọn bọc --",
+    loaiPallet: "Loại pallet",
+    ghiChu: "Ghi chú (nếu có)",
+    ghiChuPlaceholder: "Nhập ghi chú...",
+    lotExistsNote: "Lô đã tồn tại — bọc/pallet giữ nguyên theo lô, chỉ ghi nhận thêm số bành kiện này.",
+    guiDuLieu: "GỬI DỮ LIỆU",
+    dangGui: "Đang gửi...",
+    daGuiThanhCong: "Đã gửi dữ liệu thành công",
+    khongCoQuyen: "Không có quyền truy cập",
+    khongCoQuyenMsg: "Tài khoản của bạn chưa được cấp quyền xác nhận sản xuất. Vui lòng liên hệ quản trị viên.",
+    saiNhaMay: "Mã QR không khớp nhà máy",
+    saiNhaMayMsg: "QR này không thuộc nhà máy bạn đang đăng nhập. Vui lòng kiểm tra lại tài khoản hoặc nhãn quét.",
+    khongTimThay: "Không tìm thấy lô hoặc dự đoán khớp với mã QR này. Vui lòng kiểm tra lại nhãn.",
+    daSanXuatRoi: "Kiện {kien} của lô {maLo} đã được ghi nhận sản xuất trước đó. Không cần gửi lại.",
+    dangTai: "Đang tải thông tin kiện...",
+    xemTatCaLichSu: "Xem tất cả lịch sử",
+    quayVeQuet: "Quay về màn hình quét",
+    back: "Quay lại",
+  },
+  km: {
+    appTitle: "ផលិតផលសម្រេច",
+    appSubtitle: "កត់ត្រានៅរោងចក្រ",
+    shiftLabel: "បម្រើវេន",
+    scanQr: "ស្កេន QR",
+    sessionLogTitle: "កំណត់ត្រាទិន្នន័យបានផ្ញើ",
+    noLogYet: "មិនទាន់មានទិន្នន័យបានផ្ញើក្នុងវេននេះទេ។",
+    shiftStartedAt: "វេនចាប់ផ្តើមនៅម៉ោង",
+    endShift: "បញ្ចប់វេន",
+    confirmEndShiftTitle: "បញ្ចប់វេនផលិតកម្ម?",
+    confirmEndShiftMessage:
+      "ទិន្នន័យខាងលើនឹងមិនបង្ហាញឡើងវិញនៅពេលអ្នកត្រឡប់មកទំព័រនេះទៀតទេ។ តើអ្នកប្រាកដថាចង់បញ្ចប់វេនមែនទេ?",
+    cancel: "បោះបង់",
+    confirmAction: "បញ្ជាក់",
+    scanningTitle: "ស្កេនកូដ QR នៅលើស្លាកកញ្ចប់",
+    scanningHint: "ដាក់កាមេរ៉ាទៅលើកូដ QR នៅលើស្លាក",
+    scanCancel: "បោះបង់ការស្កេន",
+    scanInvalid: "កូដ QR មិនត្រឹមត្រូវ សូមព្យាយាមម្តងទៀត។",
+    cameraError: "មិនអាចបើកកាមេរ៉ាបានទេ។ សូមអនុញ្ញាតសិទ្ធិកាមេរ៉ាសម្រាប់កម្មវិធីរុករក។",
+    formTitle: "បញ្ចូលទិន្នន័យផលិតកម្ម",
+    formSubtitle: "បញ្ជាក់កញ្ចប់ផលិតផលពី QR លើស្លាក",
+    soLo: "លេខឡូត៍",
+    kienLabel: "កញ្ចប់",
+    soBanh: "ចំនួនបន្ទះ",
+    stepperHint: "ចុច +/- ដើម្បីបង្កើន/បន្ថយ (អតិបរមា {max})",
+    ngaySanXuat: "ថ្ងៃផលិត",
+    gioSanXuat: "ម៉ោងផលិត",
+    caSanXuat: "វេនផលិត",
+    nganNguon: "ប្រអប់ប្រភព",
+    chonNganNguon: "ជ្រើសរើសប្រអប់ប្រភព (មិនទាន់កំណត់ស្វ័យប្រវត្តិ)",
+    chonNgan: "-- ជ្រើសរើសប្រអប់ --",
+    boc: "ស្រោប",
+    chonBoc: "-- ជ្រើសរើសស្រោប --",
+    loaiPallet: "ប្រភេទប៉ាឡែត",
+    ghiChu: "កំណត់ចំណាំ (ប្រសិនបើមាន)",
+    ghiChuPlaceholder: "បញ្ចូលកំណត់ចំណាំ...",
+    lotExistsNote: "ឡូត៍មានរួចហើយ — ស្រោប/ប៉ាឡែតរក្សាដដែលតាមឡូត៍ គ្រាន់តែកត់ត្រាបន្ថែមចំនួនបន្ទះកញ្ចប់នេះ។",
+    guiDuLieu: "ផ្ញើទិន្នន័យ",
+    dangGui: "កំពុងផ្ញើ...",
+    daGuiThanhCong: "បានផ្ញើទិន្នន័យដោយជោគជ័យ",
+    khongCoQuyen: "មិនមានសិទ្ធិចូលប្រើ",
+    khongCoQuyenMsg: "គណនីរបស់អ្នកមិនទាន់ត្រូវបានផ្តល់សិទ្ធិបញ្ជាក់ផលិតកម្មទេ។ សូមទាក់ទងអ្នកគ្រប់គ្រង។",
+    saiNhaMay: "កូដ QR មិនត្រូវគ្នានឹងរោងចក្រ",
+    saiNhaMayMsg: "QR នេះមិនមែនជារបស់រោងចក្រដែលអ្នកកំពុងចូលប្រើទេ។ សូមពិនិត្យគណនី ឬស្លាកស្កេនម្តងទៀត។",
+    khongTimThay: "រកមិនឃើញឡូត៍ ឬការព្យាករណ៍ដែលត្រូវគ្នានឹងកូដ QR នេះទេ។ សូមពិនិត្យស្លាកម្តងទៀត។",
+    daSanXuatRoi: "កញ្ចប់ {kien} នៃឡូត៍ {maLo} ត្រូវបានកត់ត្រាផលិតរួចហើយ។ មិនចាំបាច់ផ្ញើម្តងទៀតទេ។",
+    dangTai: "កំពុងផ្ទុកព័ត៌មានកញ្ចប់...",
+    xemTatCaLichSu: "មើលប្រវត្តិទាំងអស់",
+    quayVeQuet: "ត្រឡប់ទៅអេក្រង់ស្កេន",
+    back: "ត្រឡប់ក្រោយ",
+  },
+};
+
+export function t(lang: Lang, key: string, vars?: Record<string, string | number>): string {
+  const raw = DICT[lang]?.[key] ?? DICT.vi[key] ?? key;
+  if (!vars) return raw;
+  return Object.entries(vars).reduce(
+    (acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)),
+    raw,
+  );
+}
+
+export function loadStoredLang(): Lang {
+  if (typeof window === "undefined") return "vi";
+  const stored = window.localStorage.getItem(LANG_STORAGE_KEY);
+  return stored === "km" ? "km" : "vi";
+}
+
+export function storeLang(lang: Lang) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LANG_STORAGE_KEY, lang);
+}
