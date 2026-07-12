@@ -178,3 +178,29 @@ const renumberChuyenForVehicle = (rows: DxRow[], so_xe: string): DxRow[] => {
 - `buildDispatchAnalytics()` trong `src/lib/dispatch-analytics.ts` nhận `filters.dois?: string[]` và `filters.vehicles?: string[]` (đổi từ `doi?: string` / `vehicle?: string`). Lọc đội dùng `dois.some(...)` khớp bất kỳ giá trị nào trong tập đã chọn; lọc xe đổi từ so khớp substring sang exact-match theo `Set` (vì giá trị chọn luôn đến từ danh sách option cố định, không phải nhập tay).
 - `downloadDispatchStatsPdf()` và `buildStatsContext()` trong `src/lib/dispatch-pdf.ts` nhận `selectedDois?: string[]` / `selectedVehicles?: string[]`. Context line PDF ghép nhiều giá trị bằng `", "`; tên file PDF ghép nhiều giá trị đã `safeName()` hoá bằng `-`.
 - Khi sửa tiếp các hàm này, phải đồng bộ type ở tất cả nơi gọi (`page.tsx` ↔ `dispatch-analytics.ts` ↔ `dispatch-pdf.ts`) — đúng bài học lỗi build `selectedNote` đã ghi ở trên.
+
+## Bug nghiêm trọng đã fix 2026-07-11: `cloneRow`/`cloneRowsTemplate` làm trùng `row_id`, gây "mất" chuyến xe ở module Kho nguyên liệu
+
+### Triệu chứng
+
+Người dùng báo: khi tạo/sửa ngăn ở Kho nguyên liệu và chọn "Chuyến xe từ Điều xe", chỉ chuyến 1 của một số xe hiển thị được để chọn, các chuyến sau (chuyến 2, 3...) "biến mất" khỏi danh sách — ví dụ ngăn N21 (07/07/2026, "Mủ đông chén") thiếu hẳn `7A` chuyến 2 và `22A` chuyến 2, khiến tổng KL của ngăn bị thiếu so với thực tế.
+
+### Nguyên nhân gốc
+
+`cloneRow()` (nút "Nhân bản dòng") và `cloneRowsTemplate()` (dùng bởi "Nhân bản phiếu này" / mở form "Thêm mới" tự động clone từ phiếu gần nhất) trong `src/app/dashboard/dispatch/page.tsx` khi nhân bản 1 dòng chỉ sinh `uid` mới nhưng **không reset `row_id` cũ** — dòng clone giữ nguyên `row_id` của dòng nguồn. Vì `ref` liên kết trip trong module Kho nguyên liệu = `` `${dispatchEntryId}::${rowId}` `` (`buildDispatchTripRef` trong `src/lib/storage-detail.ts`), khi 2-3 dòng vật lý khác nhau (khác xe, khác chuyến, khác KL) trong CÙNG 1 phiếu chia sẻ chung `row_id`, code dedupe-theo-ref (`loadDispatchTripsByDateRange`/`loadDispatchTripsByUids`) chỉ giữ được dòng đầu tiên gặp trong mảng — các dòng trùng còn lại bị "nuốt mất" khỏi danh sách chọn chuyến.
+
+KL từng dòng (`kl_dct`, `kl_dck`...) không hề bị hỏng — `writeBackToDispatch` (module Sản lượng) ghi KL theo khóa nghiệp vụ `so_xe:chuyen` (không phải `row_id`) nên không bị ảnh hưởng. Chỉ có `row_id` (dùng để liên kết trip vào `ngans.trips[]`) là bị trùng.
+
+### Fix code (đã áp dụng)
+
+`cloneRowsTemplate()` và `cloneRow()` giờ thêm `row_id: undefined` vào object spread khi tạo dòng clone (cạnh `uid: ...` đã có). Khi lưu, `legacyDispatchRowToDb()` (`src/lib/dispatch-entry-rows.ts`) có fallback `row_id: row.row_id || row.uid || ...` — nếu `row_id` là falsy, nó tự dùng `uid` mới (đã unique) làm `row_id`.
+
+### Data repair đã chạy (2026-07-11)
+
+Quét toàn bộ factory `phuochoa_kt` phát hiện **12/165 phiếu điều xe đã bị trùng `row_id`, 67 dòng bị ảnh hưởng** (dữ liệu lịch sử phát sinh từ trước khi có fix trên). Đã viết `scripts/fix-duplicate-dispatch-row-ids.mjs` (dry-run mặc định, cần flag `--apply` để ghi DB thật — in ra toàn bộ danh sách thay đổi dự kiến trước khi ghi) và đã chạy `--apply` thành công: 12 phiếu được sửa, 34 dòng được cấp `row_id` mới (giữ nguyên `row_id` của dòng đầu tiên trong mỗi nhóm trùng, không đổi `so_xe`/`chuyen`/`uid`/KL). Quét lại xác nhận 0/165 phiếu còn trùng `row_id`.
+
+**Quan trọng**: script chỉ khôi phục tính duy nhất của `row_id` và tính lại `tong_tuoi`/`tong_kho` của ngăn theo đúng các trip đã có sẵn trong `ngans.trips[]` — nó **không tự động thêm** chuyến trước đây bị ẩn vào `trips[]` của ngăn nào cả (hệ thống không thể tự suy luận người dùng có muốn gộp thêm đúng chuyến đó vào đúng ngăn đó hay không). Sau khi chạy repair, người dùng phải tự vào `Kho nguyên liệu → Sửa ngăn` để tick chọn bổ sung các chuyến giờ đã hiển thị lại được.
+
+### Quy tắc chung cho code mới
+
+Bất kỳ hàm nào nhân bản/duplicate 1 dòng `DxRow` trong tương lai đều phải reset `row_id` (set `undefined`) giống `uid` — không được spread `{...src}` rồi chỉ đổi `uid` mà quên `row_id`, nếu không sẽ tái tạo đúng bug này.

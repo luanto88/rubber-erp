@@ -46,6 +46,7 @@ export type StorageTripItem = {
   kl_dk: number
   kl_mn: number
   kl_mnk: number
+  ghi_chu: string
 }
 
 export type StorageProducedLot = {
@@ -230,6 +231,7 @@ function mapTripRow(row: Record<string, string>, ngay: string, dispatchEntryId?:
     kl_dk: Number(row.kl_dk) || 0,
     kl_mn: Number(row.kl_mn) || 0,
     kl_mnk: Number(row.kl_mnk) || 0,
+    ghi_chu: String(row.ghi_chu || "").trim(),
   }
 }
 

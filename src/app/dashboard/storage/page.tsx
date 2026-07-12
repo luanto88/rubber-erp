@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
-import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
+import { EMPTY_NOTE_FILTER, matchesNoteFilter, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import {
@@ -41,13 +41,14 @@ import {
 import { downloadStorageBulkQrPdf, downloadStorageDetailPdf, downloadStoragePeriodReportPdf } from "@/lib/storage-pdf"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer
+  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw
 } from "lucide-react"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -236,6 +237,7 @@ export default function StoragePage() {
   const [availableTrips, setAvailableTrips] = useState<TripItem[]>([])
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
   const [loadingTrips, setLoadingTrips]     = useState(false)
+  const [tripNoteFilter, setTripNoteFilter] = useState<string[]>([]) // mặc định rỗng = hiển thị tất cả
   const dispatchTrips = useMemo(
     () => mergeTripsByUid(linkedTrips, availableTrips),
     [linkedTrips, availableTrips],
@@ -243,6 +245,14 @@ export default function StoragePage() {
   const visibleTripUidSet = useMemo(
     () => new Set(dispatchTrips.map((trip) => trip.ref).filter(Boolean)),
     [dispatchTrips],
+  )
+  const tripNoteOptions = useMemo(
+    () => [EMPTY_NOTE_FILTER, ...new Set(dispatchTrips.map((trip) => trip.ghi_chu.trim()).filter(Boolean))],
+    [dispatchTrips],
+  )
+  const noteFilteredTrips = useMemo(
+    () => dispatchTrips.filter((trip) => matchesNoteFilterMulti(trip.ghi_chu, tripNoteFilter)),
+    [dispatchTrips, tripNoteFilter],
   )
   const groupedViewLots = useMemo(() => {
     const grouped = viewLots.reduce<Record<string, {
@@ -645,6 +655,8 @@ export default function StoragePage() {
   // ── Save / Delete ─────────────────────────────────────────────────────────
   const [saveError, setSaveError] = useState<string | null>(null)
   const [nganStatusSavingId, setNganStatusSavingId] = useState<string | null>(null)
+  const [nganSyncingId, setNganSyncingId] = useState<string | null>(null)
+  const [nganSyncMessage, setNganSyncMessage] = useState<Record<string, string>>({})
   const handleAddRequiredNote = async () => {
     if (!factoryId) return
     const input = window.prompt("Nhập ghi chú mới")
@@ -752,6 +764,7 @@ export default function StoragePage() {
     setSelectedTrips(new Set())
     setLinkedTrips([])
     setAvailableTrips([])
+    setTripNoteFilter([])
     setModal("add")
   }
 
@@ -791,6 +804,7 @@ export default function StoragePage() {
     setSelectedTrips(new Set(n.trips || []))
     setLinkedTrips([])
     setAvailableTrips([])
+    setTripNoteFilter([])
     setModal("edit")
     if (!factoryId) return
     void (async () => {
@@ -970,6 +984,49 @@ export default function StoragePage() {
       setSaveError(err instanceof Error ? err.message : "Không cập nhật được trạng thái ngăn")
     } finally {
       setNganStatusSavingId(null)
+    }
+  }
+
+  // Đồng bộ nhanh KL tươi/khô của 1 ngăn từ dữ liệu Điều xe/Sản lượng hiện tại,
+  // không cần tải lại toàn bộ trang. Dùng lại đúng công thức resolveStorageNgansActualTotals
+  // (chỉ tính lại theo các trip đã có trong ngan.trips[], không tự thêm chuyến mới).
+  const handleQuickSyncNgan = async (ngan: Ngan) => {
+    if (!factoryId) return
+    if (!canEditStorage) {
+      setSaveError(`Bạn không có quyền sửa ${subTerm.toLowerCase()}.`)
+      return
+    }
+    setNganSyncingId(ngan.id)
+    try {
+      const [resolved] = await resolveStorageNgansActualTotals(factoryId, [ngan], { persist: true })
+      if (resolved) {
+        setNgans((prev) =>
+          prev.map((item) =>
+            item.id === ngan.id
+              ? { ...item, tong_tuoi: resolved.tong_tuoi, tong_kho: resolved.tong_kho, trips: resolved.trips }
+              : item,
+          ),
+        )
+        const tuoiDiff = resolved.tong_tuoi - (ngan.tong_tuoi || 0)
+        const khoDiff = resolved.tong_kho - (ngan.tong_kho || 0)
+        const message =
+          Math.abs(tuoiDiff) < 0.01 && Math.abs(khoDiff) < 0.01
+            ? "Đã đồng bộ — không có thay đổi"
+            : `Đã đồng bộ — KL khô ${(ngan.tong_kho || 0).toLocaleString()} → ${resolved.tong_kho.toLocaleString()} kg`
+        setNganSyncMessage((prev) => ({ ...prev, [ngan.id]: message }))
+        setTimeout(() => {
+          setNganSyncMessage((prev) => {
+            if (!(ngan.id in prev)) return prev
+            const next = { ...prev }
+            delete next[ngan.id]
+            return next
+          })
+        }, 5000)
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Không đồng bộ được sản lượng ngăn")
+    } finally {
+      setNganSyncingId(null)
     }
   }
 
@@ -1226,10 +1283,11 @@ export default function StoragePage() {
               const canCloseForProduction =
                 n.trang_thai === STORAGE_STATUS_CLOSED &&
                 canManuallyMoveClosedToWaiting(n.ngay_bd, todayMs)
+              // Admin được đánh dấu "Đã sản xuất" khi ngăn đạt từ 50% trở lên (không giới hạn trên).
+              // Ngưỡng 100%-110% ở banner hậu lưu trong module Thành phẩm (product/page.tsx) không đổi.
               const canMarkProduced =
                 n.trang_thai === STORAGE_STATUS_IN_PRODUCTION &&
-                tpPct >= 100 &&
-                tpPct <= 110
+                tpPct >= 50
               const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
               const nextManualStatus = canCloseForProduction
                 ? STORAGE_STATUS_WAITING
@@ -1330,6 +1388,16 @@ export default function StoragePage() {
                           </button>
                         )}
                         {canEditThisNgan && (
+                          <button
+                            onClick={() => void handleQuickSyncNgan(n)}
+                            disabled={nganSyncingId === n.id}
+                            className="p-1.5 hover:bg-white/60 rounded-lg text-teal-600 transition-colors disabled:opacity-50"
+                            title="Đồng bộ nhanh KL tươi/khô từ Điều xe/Sản lượng"
+                          >
+                            <RefreshCw size={14} className={nganSyncingId === n.id ? "animate-spin" : undefined} />
+                          </button>
+                        )}
+                        {canEditThisNgan && (
                           <button onClick={() => openEdit(n)}
                             className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors"
                             title="Sửa">
@@ -1381,9 +1449,14 @@ export default function StoragePage() {
                     <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
                       <Weight size={14} className="text-slate-400 shrink-0" />
                       <span className="text-xs text-slate-500 w-24 shrink-0">KL tươi / khô</span>
-                      <span className="text-sm font-semibold text-slate-800">
-                        {(n.tong_tuoi || 0).toLocaleString()} / <span className="text-emerald-700">{(n.tong_kho || 0).toLocaleString()}</span> kg
-                      </span>
+                      <div className="flex-1">
+                        <span className="text-sm font-semibold text-slate-800">
+                          {(n.tong_tuoi || 0).toLocaleString()} / <span className="text-emerald-700">{(n.tong_kho || 0).toLocaleString()}</span> kg
+                        </span>
+                        {nganSyncMessage[n.id] && (
+                          <div className="text-xs font-semibold text-teal-600 mt-0.5">{nganSyncMessage[n.id]}</div>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
                       <BarChart2 size={14} className="text-slate-400 shrink-0 mt-1" />
@@ -1742,16 +1815,25 @@ export default function StoragePage() {
               {/* Trips from Điều xe */}
               {form.ngay_bd && (
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between border-b border-slate-200">
+                  <div className="bg-slate-50 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200">
                     <div className="flex items-center gap-2">
                       <Truck size={14} className="text-slate-500" />
                       <span className="text-xs font-bold text-slate-700">
                         Chuyến xe từ Điều xe ({fmtDate(form.ngay_bd)} → {fmtDate(form.ngay_kt || form.ngay_bd)})
                       </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <FilterMultiSelect
+                        options={tripNoteOptions}
+                        selected={tripNoteFilter}
+                        onChange={setTripNoteFilter}
+                        labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+                        placeholder="Tất cả ghi chú"
+                        searchPlaceholder="Tìm ghi chú..."
+                        className="min-w-48"
+                      />
                       <button
-                        onClick={() => setSelectedTrips(new Set(dispatchTrips.map(t => t.ref)))}
+                        onClick={() => setSelectedTrips(new Set(noteFilteredTrips.map(t => t.ref)))}
                         className="text-xs px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition-colors">
                         Chọn tất cả
                       </button>
@@ -1769,6 +1851,10 @@ export default function StoragePage() {
                     <div className="p-6 text-center text-slate-400 text-sm">
                       Không có chuyến xe trong khoảng ngày này
                     </div>
+                  ) : noteFilteredTrips.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-sm">
+                      Không có chuyến xe nào khớp bộ lọc Ghi chú đang chọn
+                    </div>
                   ) : (
                     <div className="max-h-56 overflow-y-auto">
                       <table className="w-full text-xs">
@@ -1779,12 +1865,13 @@ export default function StoragePage() {
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Xe</th>
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Chuyến</th>
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Tài xế</th>
+                            <th className="px-3 py-2 text-left text-slate-500 font-bold">Ghi chú</th>
                             <th className="px-3 py-2 text-right text-slate-500 font-bold">KL tươi</th>
                             <th className="px-3 py-2 text-right text-slate-500 font-bold">KL khô</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {dispatchTrips.map(t => {
+                          {noteFilteredTrips.map(t => {
                             const checked = selectedTrips.has(t.ref)
                             const kl = getKLFromTrip(t, form.loai_nl)
                             return (
@@ -1808,6 +1895,7 @@ export default function StoragePage() {
                                 <td className="px-3 py-2 font-bold text-slate-800">{t.so_xe}</td>
                                 <td className="px-3 py-2 text-slate-600">C{t.chuyen}</td>
                                 <td className="px-3 py-2 text-slate-600">{t.tai_xe}</td>
+                                <td className="px-3 py-2 text-slate-500">{t.ghi_chu || "—"}</td>
                                 <td className="px-3 py-2 text-right font-semibold text-amber-600">
                                   {kl.tuoi.toLocaleString()}
                                 </td>

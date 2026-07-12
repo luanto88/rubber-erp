@@ -91,7 +91,7 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
   - ngăn không có nguyên liệu
   - thiếu `ngan_id` ở bất kỳ block nào
   - tỷ lệ sau lưu vượt `110%`
-- Nếu ngăn đang là `Đang sản xuất` và tỷ lệ nằm trong `100% - 110%`, admin có thể chuyển tay sang `Đã sản xuất`.
+- **Cập nhật 2026-07-11**: Nút đánh dấu thủ công `Đã SX` trên thẻ ngăn ở `src/app/dashboard/storage/page.tsx` (chỉ admin thấy) không còn giới hạn trong khoảng `100% - 110%` — admin được chuyển tay sang `Đã sản xuất` khi ngăn đang `Đang sản xuất` và tỷ lệ lấp đầy đạt **từ 50% trở lên** (`tpPct >= 50`, không giới hạn trên). Ngưỡng `100% - 110%` của banner hậu lưu trong module Thành phẩm (dòng dưới) giữ nguyên không đổi — 2 cơ chế độc lập nhau.
 - Nếu ngăn đang là `Đã sản xuất` và dữ liệu đồng bộ làm tỷ lệ xuống dưới `100%`, hệ thống tự chuyển về `Đang sản xuất`.
 - Nếu ngăn đang là `Đã sản xuất` và tỷ lệ sau đồng bộ vẫn trong `100% - 110%`, giữ nguyên `Đã sản xuất`.
 - Không tự trả về `Đang sản xuất` chỉ vì user bấm nhầm `Lưu & đánh dấu đã sản xuất` sớm nhưng tỷ lệ vẫn còn trong `100% - 110%`; case này admin xử lý tay.

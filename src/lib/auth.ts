@@ -289,6 +289,33 @@ export async function signUpWithUsername(input: {
   return { data: result, error: null }
 }
 
+export function describeAuthError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const lower = message.toLowerCase()
+  const status = (error as { status?: number } | null)?.status
+
+  if (
+    lower.includes("invalid login credentials") ||
+    lower.includes("invalid email or password")
+  ) {
+    return "Sai tên đăng nhập hoặc mật khẩu"
+  }
+  if (lower.includes("email not confirmed")) {
+    return "Tài khoản chưa được xác thực email. Vui lòng liên hệ admin."
+  }
+  if (status === 402 || lower.includes("restricted") || lower.includes("quota")) {
+    return "Hệ thống đang gặp sự cố hạ tầng (vượt hạn mức dịch vụ). Vui lòng thử lại sau hoặc liên hệ quản trị viên."
+  }
+  if (status === 429 || lower.includes("rate limit") || lower.includes("too many requests")) {
+    return "Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút."
+  }
+  if (lower.includes("fetch") || lower.includes("network")) {
+    return "Không kết nối được máy chủ. Vui lòng kiểm tra mạng và thử lại."
+  }
+  if (!message) return "Sai tên đăng nhập hoặc mật khẩu"
+  return `Không thể đăng nhập: ${message}`
+}
+
 export function authBlockReason(user: SessionUser | Profile | null) {
   if (!user) return "missing"
   if (user.status === "pending") return "pending"

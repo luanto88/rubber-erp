@@ -975,21 +975,21 @@ export default function InventoryTransfersPage() {
         />
       </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-          <div>
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
             <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Thông tin phiếu</div>
-            <h2 className="mt-1 text-xl font-bold text-slate-800">{documentCode}</h2>
+            <h2 className="mt-1 break-all text-lg font-bold text-slate-800 sm:text-xl">{documentCode}</h2>
             <p className="mt-1 text-sm text-slate-500">
               Khối chọn vật tư được đặt chung với header để thủ kho thao tác liền mạch hơn.
             </p>
           </div>
-          <div className="flex flex-col items-end gap-3">
-            <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-col gap-3 lg:items-end">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
               {draft.documentId ? (
                 <Link
                   href={`/dashboard/inventory/print?type=transfer&documentId=${encodeURIComponent(draft.documentId)}`}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-2 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700 sm:px-5 sm:py-2"
                 >
                   <Printer size={16} />
                   In phiếu
@@ -997,7 +997,7 @@ export default function InventoryTransfersPage() {
               ) : null}
               <button
                 onClick={resetDraft}
-                className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+                className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 sm:px-5 sm:py-2"
               >
                 Làm mới
               </button>
@@ -1006,7 +1006,7 @@ export default function InventoryTransfersPage() {
                   <button
                     onClick={() => void saveTransferDraft()}
                     disabled={!canSave || saving || posting || loading}
-                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                    className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40 sm:px-5 sm:py-2"
                   >
                     <Save size={14} />
                     {saving ? "Đang lưu..." : draft.documentId ? "Sửa phiếu" : "Lưu nháp"}
@@ -1014,7 +1014,7 @@ export default function InventoryTransfersPage() {
                   <button
                     onClick={() => void postTransferDraft()}
                     disabled={saving || posting || loading}
-                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                    className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50 sm:col-span-1 sm:px-5 sm:py-2"
                   >
                     {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
                   </button>
@@ -1023,7 +1023,7 @@ export default function InventoryTransfersPage() {
               {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
                 <button
                   onClick={() => setCancelModal(true)}
-                  className="rounded-xl border border-red-200 bg-red-50 px-5 py-2 text-sm font-bold text-red-600 transition-colors hover:bg-red-100"
+                  className="col-span-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-600 transition-colors hover:bg-red-100 sm:col-span-1 sm:px-5 sm:py-2"
                 >
                   <Ban size={14} className="mr-1.5 inline" />
                   Hủy phiếu

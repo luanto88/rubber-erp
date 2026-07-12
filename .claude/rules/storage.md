@@ -247,3 +247,32 @@ Xem thêm quyết định thiết kế/plan implementation gốc tại lịch s�
 - Đã verify: `/storage` và `/storage?id=...` trả về 200 sau fix (trước đó 500), nội dung trang render đúng ("Tra cứu ngăn lưu nguyên liệu"...). Chỉ có **1 nơi duy nhất** import `StorageGeoJsonMap` trong toàn repo (`storage-detail-client.tsx`) nên fix này đã bao phủ đủ mọi route dùng chung component này (cả `/storage` công khai lẫn mọi trang dashboard nào render lại `StorageDetailClient`).
 - **Quy tắc cho code mới**: bất kỳ thư viện nào phụ thuộc trực tiếp vào `window`/`document` ở top-level module (leaflet, các thư viện vẽ bản đồ/canvas khác) khi dùng trong cây component có khả năng bị Next.js server-render (page không đánh dấu client-only ở tầng route) đều phải import qua `next/dynamic({ ssr: false })`, không import tĩnh trực tiếp.
 - **Chưa deploy lên production** — fix này mới nằm trong working tree (`git status` sẽ thấy `storage-detail-client.tsx` modified), cần commit + deploy để khôi phục tính năng tra cứu QR trên `qlsxkpt.vercel.app`.
+
+## 15. Cập nhật 2026-07-11 — Bug "chuyến xe bị ẩn" đã fix (nguồn gốc thật ở Điều xe, không phải Storage), + 3 tính năng bổ sung
+
+### Bug "chỉ chuyến 1 hiển thị" khi chọn chuyến xe cho ngăn
+
+Đã điều tra và xác nhận: nguyên nhân **không nằm trong code Storage** (mọi nơi trong `storage/page.tsx`/`storage-detail.ts` đều đọc cột `chuyen` trực tiếp, không parse từ chuỗi `so_xe`). Nguồn gốc thật là bug `row_id` bị trùng khi nhân bản dòng ở module Điều xe (`cloneRow`/`cloneRowsTemplate` trong `dispatch/page.tsx`) — chi tiết đầy đủ, cách fix code, và data repair đã chạy xem tại `.claude/rules/19-dispatch-module.md` mục "Bug nghiêm trọng đã fix 2026-07-11". Đã chạy `scripts/fix-duplicate-dispatch-row-ids.mjs --apply` thành công trên factory `phuochoa_kt` (12 phiếu, 34 dòng được cấp `row_id` mới), xác nhận 0/165 phiếu còn trùng.
+
+**Lưu ý nghiệp vụ**: repair script chỉ khôi phục `row_id` duy nhất, không tự thêm chuyến bị ẩn trước đây vào `ngan.trips[]` — sau khi chạy repair, người dùng phải tự vào `Sửa ngăn` để tick chọn bổ sung các chuyến giờ đã hiển thị lại được (dùng bộ lọc Ghi chú mới — xem mục dưới — để tìm nhanh nếu số lượng chuyến trong ngày nhiều).
+
+### Filter "Ghi chú" trong bảng chọn "Chuyến xe từ Điều xe" (tạo/sửa ngăn)
+
+- `StorageTripItem` (`src/lib/storage-detail.ts`) thêm field `ghi_chu: string`, populate trong `mapTripRow()` từ `row.ghi_chu` (dispatch row).
+- `storage/page.tsx` thêm state `tripNoteFilter: string[]` (multi-select, dùng `FilterMultiSelect` + `matchesNoteFilterMulti` từ `src/lib/note-filter.ts`), **mặc định rỗng = hiển thị tất cả** — reset về `[]` mỗi khi mở modal "Thêm mới" hoặc "Sửa" (trong `openAdd()`/`openEdit()`).
+- `tripNoteOptions` (options cho dropdown) và `noteFilteredTrips` (danh sách trip đã lọc) là 2 `useMemo` tính từ `dispatchTrips` (danh sách trip đã gộp linked+available).
+- Bảng "Chuyến xe từ Điều xe" render theo `noteFilteredTrips` (không phải `dispatchTrips` thô nữa), thêm cột "Ghi chú"; nút "Chọn tất cả" chỉ chọn các trip đang hiển thị theo filter hiện tại (không chọn cả các trip bị ẩn bởi filter).
+- Nếu `dispatchTrips` không rỗng nhưng `noteFilteredTrips` rỗng (filter Ghi chú quá hẹp), hiện thông báo riêng "Không có chuyến xe nào khớp bộ lọc Ghi chú đang chọn" (khác với "Không có chuyến xe trong khoảng ngày này").
+
+### Nút "Đồng bộ nhanh" sản lượng trên thẻ ngăn
+
+- Icon `RefreshCw` (màu teal) trên mỗi thẻ ngăn ở tab "Đang hoạt động", cạnh nút "Sửa" — chỉ hiện khi `canEditThisNgan`.
+- `handleQuickSyncNgan(ngan)` gọi lại `resolveStorageNgansActualTotals(factoryId, [ngan], { persist: true })` **chỉ cho 1 ngăn** (không tải lại toàn bộ trang) — tính lại `tong_tuoi`/`tong_kho` theo đúng các trip đã có sẵn trong `ngan.trips[]`, cập nhật state `ngans` tại chỗ.
+- Không tự thêm/bớt trip nào khỏi `ngan.trips[]` — chỉ recompute KL từ tập trip hiện có, dùng để đồng bộ lại số liệu khi dữ liệu Điều xe/Sản lượng đổi sau khi ngăn đã tạo (ví dụ sau khi chạy repair script `row_id` ở trên, hoặc sau khi ai đó sửa/import lại Sản lượng).
+- Thông báo kết quả (`nganSyncMessage[nganId]`, tự ẩn sau 5s) hiện ngay dưới dòng "KL tươi / khô" trên thẻ — dạng "Đã đồng bộ — không có thay đổi" hoặc "Đã đồng bộ — KL khô X → Y kg".
+- State: `nganSyncingId` (đang đồng bộ, disable nút + icon xoay `animate-spin`), `nganSyncMessage: Record<string, string>`.
+
+### Ngưỡng admin đánh dấu "Đã sản xuất" đổi từ `100%-110%` sang `>= 50%`
+
+- `canMarkProduced` trong `storage/page.tsx` (nút "Đã SX" trên thẻ ngăn, chỉ admin thấy) đổi điều kiện từ `tpPct >= 100 && tpPct <= 110` sang `tpPct >= 50` (không giới hạn trên).
+- **Chỉ áp dụng cho nút thủ công này** — ngưỡng `100%-110%` của banner hậu lưu trong module Thành phẩm (`product/page.tsx`, sau khi lưu phiếu thành phẩm) giữ nguyên không đổi, đây là 2 cơ chế độc lập nhau. Chi tiết xem `.claude/rules/06-module-production.md` mục "Rule lưu thành phẩm và trạng thái ngăn".

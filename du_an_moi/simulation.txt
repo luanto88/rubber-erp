@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mô phỏng App Nhập Liệu</title>
+    <style>
+        :root {
+            --primary-color: #059669; /* emerald-600 */
+            --primary-light: #ecfdf5; /* emerald-50 */
+            --bg-color: #f8fafc; /* slate-50 */
+            --text-dark: #1e293b; /* slate-800 */
+            --text-light: #64748b; /* slate-500 */
+            --border-color: #e2e8f0; /* slate-200 */
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .mobile-frame {
+            width: 100%;
+            max-width: 420px;
+            height: 800px;
+            background-color: white;
+            border: 8px solid #111;
+            border-radius: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        .screen {
+            padding: 24px;
+            box-sizing: border-box;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        #main-screen { display: none; }
+        h1, h2 { color: var(--text-dark); margin-top: 0; }
+        p { color: var(--text-light); font-size: 14px; }
+        .input-group { margin-bottom: 16px; }
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-light);
+            margin-bottom: 6px;
+        }
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 16px;
+            box-sizing: border-box;
+            background-color: #f8fafc;
+        }
+        input:read-only {
+            background-color: #e2e8f0;
+            color: #475569;
+        }
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 16px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        .btn-primary:hover { background-color: #047857; }
+        .btn-scan {
+            padding: 40px;
+            font-size: 24px;
+            margin-top: 40px;
+        }
+        #entry-form {
+            display: none;
+            margin-top: 24px;
+            padding: 20px;
+            background-color: var(--primary-light);
+            border: 1px solid #a7f3d0;
+            border-radius: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        #log-area {
+            margin-top: auto;
+            background-color: #f1f5f9;
+            border-radius: 16px;
+            padding: 16px;
+            height: 200px;
+            overflow-y: auto;
+        }
+        #log-area h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-dark); }
+        .log-item {
+            font-size: 12px;
+            background-color: white;
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 4px solid var(--primary-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="mobile-frame">
+        <!-- Màn hình đăng nhập -->
+        <div id="login-screen" class="screen">
+            <h1>Đăng nhập</h1>
+            <p>Mô phỏng đăng nhập vào hệ thống.</p>
+            <div class="input-group" style="margin-top: 40px;">
+                <label for="username">Tên đăng nhập</label>
+                <input type="text" id="username" value="truongca_a">
+            </div>
+            <button id="login-btn" class="btn btn-primary" style="margin-top: 20px;">Đăng nhập</button>
+        </div>
+
+        <!-- Màn hình chính -->
+        <div id="main-screen" class="screen">
+            <div class="header">
+                <div>
+                    <h2>Thành phẩm</h2>
+                    <p>Ghi nhận tại xưởng</p>
+                </div>
+                <div style="text-align: right;">
+                    <span id="current-user" style="font-weight: 600; font-size: 14px;"></span>
+                    <p style="margin: 4px 0 0 0;">Trực ca</p>
+                </div>
+            </div>
+
+            <button id="scan-btn" class="btn btn-primary btn-scan">Quét QR</button>
+
+            <!-- Form nhập liệu sau khi quét -->
+            <div id="entry-form">
+                <div class="input-group">
+                    <label>Mã lô</label>
+                    <input type="text" id="form-ma-lo" readonly>
+                </div>
+                <div class="input-group">
+                    <label>Kiện</label>
+                    <input type="text" id="form-kien" readonly>
+                </div>
+                <div class="input-group">
+                    <label>Ca sản xuất</label>
+                    <select id="form-ca-sx">
+                        <option value="A">Ca A</option>
+                        <option value="B">Ca B</option>
+                        <option value="C">Ca C</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Số bành</label>
+                    <input type="number" id="form-so-banh" value="36">
+                </div>
+                <button id="submit-btn" class="btn btn-primary">Gửi</button>
+            </div>
+
+            <!-- Log dữ liệu đã gửi -->
+            <div id="log-area">
+                <h3>Log dữ liệu đã gửi (mô phỏng)</h3>
+                <div id="log-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const loginScreen = document.getElementById('login-screen');
+        const mainScreen = document.getElementById('main-screen');
+        const loginBtn = document.getElementById('login-btn');
+        const usernameInput = document.getElementById('username');
+        const currentUserSpan = document.getElementById('current-user');
+        const scanBtn = document.getElementById('scan-btn');
+        const entryForm = document.getElementById('entry-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const logContent = document.getElementById('log-content');
+
+        // --- State ---
+        let currentUser = null;
+
+        // --- Functions ---
+        function handleLogin() {
+            const username = usernameInput.value.trim();
+            if (!username) {
+                alert('Vui lòng nhập tên đăng nhập.');
+                return;
+            }
+            currentUser = username;
+            currentUserSpan.textContent = currentUser;
+            loginScreen.style.display = 'none';
+            mainScreen.style.display = 'flex';
+        }
+
+        function handleScan() {
+            // Mô phỏng việc quét QR. Trình duyệt sẽ hiện một hộp thoại.
+            // Bạn hãy dán một trong các chuỗi QR ví dụ bên dưới vào.
+            const qrData = prompt(
+                'Mô phỏng quét QR. Dán dữ liệu QR vào đây:',
+                '1234cs/26;A' // Ví dụ mặc định
+            );
+
+            if (!qrData) {
+                alert('Hủy quét.');
+                return;
+            }
+
+            try {
+                const [ma_lo, kien] = qrData.split(';');
+                if (!ma_lo || !kien) {
+                    throw new Error('Định dạng QR không hợp lệ.');
+                }
+
+                // Điền thông tin vào form
+                document.getElementById('form-ma-lo').value = ma_lo;
+                document.getElementById('form-kien').value = kien;
+                
+                // Hiển thị form
+                entryForm.style.display = 'block';
+                scanBtn.style.display = 'none';
+
+            } catch (error) {
+                alert('Lỗi: ' + error.message + '\nDữ liệu QR phải có dạng "MA_LO;KIEN", ví dụ: "1234cs/26;A"');
+            }
+        }
+
+        function handleSubmit() {
+            // Lấy dữ liệu từ form
+            const entry = {
+                ma_lo: document.getElementById('form-ma-lo').value,
+                kien: document.getElementById('form-kien').value,
+                ca_sx: document.getElementById('form-ca-sx').value,
+                so_banh: document.getElementById('form-so-banh').value,
+                truc_ca: currentUser,
+                thoi_gian: new Date().toLocaleString('vi-VN')
+            };
+
+            // Mô phỏng gửi dữ liệu thành công
+            alert(`Gửi dữ liệu thành công!\nLô: ${entry.ma_lo}\nKiện: ${entry.kien}\nSố bành: ${entry.so_banh}`);
+
+            // Ghi vào log trên màn hình
+            const logItem = document.createElement('div');
+            logItem.className = 'log-item';
+            logItem.innerHTML = `<strong>${entry.ma_lo} - Kiện ${entry.kien}</strong><br>
+                                 ${entry.so_banh} bành · Ca ${entry.ca_sx} · ${entry.truc_ca} · ${entry.thoi_gian}`;
+            logContent.prepend(logItem);
+
+            // Reset lại giao diện để quét tiếp
+            entryForm.style.display = 'none';
+            scanBtn.style.display = 'block';
+        }
+
+        // --- Event Listeners ---
+        loginBtn.addEventListener('click', handleLogin);
+        scanBtn.addEventListener('click', handleScan);
+        submitBtn.addEventListener('click', handleSubmit);
+    </script>
+</body>
+</html>

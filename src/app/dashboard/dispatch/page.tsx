@@ -1049,6 +1049,7 @@ export default function DispatchPage() {
     rows.map(r => ({
       ...r,
       uid: `r_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      row_id: undefined,
       kl_ct: "", drc_c: "", kl_ck: "",
       kl_dct: "", drc_dc: "", kl_dck: "",
       kl_dkt: "", drc_dk: "", kl_dkk: "",
@@ -1181,6 +1182,7 @@ export default function DispatchPage() {
     const cloned: DxRow = {
       ...src,
       uid: `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      row_id: undefined,
       kl_ct: "", drc_c: "", kl_ck: "",
       kl_dct: "", drc_dc: "", kl_dck: "",
       kl_dkt: "", drc_dk: "", kl_dkk: "",

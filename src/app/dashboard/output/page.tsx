@@ -30,7 +30,7 @@ import { OutputImport } from "./_components/output-import"
 import { OutputForm } from "./_components/output-form"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { loadRequiredNotes } from "@/lib/required-notes"
-import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
+import { EMPTY_NOTE_FILTER, isBlankNoteContent, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { downloadOutputDayPdf } from "@/lib/output-pdf"
 import { formatDateDisplay, getTodayISODate } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
@@ -183,7 +183,7 @@ export default function OutputPage() {
   const [filterTo, setFilterTo] = useState(() => getTodayISODate())
   const [filterDoi, setFilterDoi] = useState("")
   const [filterXe, setFilterXe] = useState("")
-  const [filterGhiChu, setFilterGhiChu] = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState<string[]>([])
   const [filterLoai, setFilterLoai] = useState<string[]>([])
   const [filterWarnOnly, setFilterWarnOnly] = useState(false)
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
@@ -299,7 +299,7 @@ export default function OutputPage() {
     .filter((record) => {
       if (filterDoi && record.doi !== Number(filterDoi)) return false
       if (filterXe && !record.so_xe.toUpperCase().includes(filterXe.toUpperCase())) return false
-      if (!matchesNoteFilter(record.ghi_chu, filterGhiChu)) return false
+      if (!matchesNoteFilterMulti(record.ghi_chu, filterGhiChu)) return false
       if (!matchesMaterialFilter(record, filterLoai)) return false
       if (filterWarnOnly && record.warn_codes.length === 0) return false
       return true
@@ -343,7 +343,7 @@ export default function OutputPage() {
   const redundantRecordCount = redundantRecords.length
 
   const statsFiltered = records.filter((record) => {
-    if (!matchesNoteFilter(record.ghi_chu, filterGhiChu)) return false
+    if (!matchesNoteFilterMulti(record.ghi_chu, filterGhiChu)) return false
     if (filterDoi && record.doi !== Number(filterDoi)) return false
     if (!matchesMaterialFilter(record, filterLoai)) return false
     return true
@@ -377,7 +377,7 @@ export default function OutputPage() {
   }
 
   const hasActiveFilters = Boolean(
-    filterFrom || filterTo || filterDoi || filterXe || filterGhiChu || filterLoai.length > 0 || filterWarnOnly,
+    filterFrom || filterTo || filterDoi || filterXe || filterGhiChu.length > 0 || filterLoai.length > 0 || filterWarnOnly,
   )
 
   const resetFilters = () => {
@@ -385,7 +385,7 @@ export default function OutputPage() {
     setFilterTo("")
     setFilterDoi("")
     setFilterXe("")
-    setFilterGhiChu("")
+    setFilterGhiChu([])
     setFilterLoai([])
     setFilterWarnOnly(false)
   }
@@ -522,20 +522,20 @@ export default function OutputPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-extrabold text-slate-800">
-            <BarChart3 size={26} className="text-emerald-600" />
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-xl font-extrabold text-slate-800 sm:text-2xl">
+            <BarChart3 size={26} className="shrink-0 text-emerald-600" />
             Sản lượng
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Giữ nguyên dữ liệu Sản lượng, đổi giao diện theo cách hiển thị của module Điều xe.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <button
             onClick={() => setShowImport(true)}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-blue-700"
+            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-blue-700"
           >
             <Upload size={15} />
             Import file
@@ -543,7 +543,7 @@ export default function OutputPage() {
           {isAdmin && (
             <button
               onClick={() => { setEditRecord(null); setFormInitialDate(null); setShowForm(true) }}
-              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-bold text-white shadow-md transition-colors hover:bg-emerald-700"
+              className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-bold text-white shadow-md transition-colors hover:bg-emerald-700"
             >
               <Plus size={16} />
               Thêm mới
@@ -552,23 +552,25 @@ export default function OutputPage() {
         </div>
       </div>
 
-      <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        {(["list", "stats", "import"] as const).map((item) => (
-          <button
-            key={item}
-            onClick={() => setTab(item)}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-              tab === item ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            {item === "list" ? "Danh sách" : item === "stats" ? "Thống kê" : "Hướng dẫn Import"}
-          </button>
-        ))}
+      <div className="mb-4 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          {(["list", "stats", "import"] as const).map((item) => (
+            <button
+              key={item}
+              onClick={() => setTab(item)}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
+                tab === item ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {item === "list" ? "Danh sách" : item === "stats" ? "Thống kê" : "Hướng dẫn Import"}
+            </button>
+          ))}
+        </div>
       </div>
 
       <FilterBar
         className="mb-5"
-        activeCount={[filterFrom, filterTo, filterDoi, filterXe, filterGhiChu].filter(Boolean).length + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
+        activeCount={[filterFrom, filterTo, filterDoi, filterXe].filter(Boolean).length + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
       >
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <CalendarDays size={15} />
@@ -601,11 +603,15 @@ export default function OutputPage() {
                 className="min-w-64"
               />
 
-              <select value={filterGhiChu} onChange={(e) => setFilterGhiChu(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400">
-                <option value="">Tất cả ghi chú đội</option>
-                <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
-                {requiredNotes.map((note) => <option key={note} value={note}>{note}</option>)}
-              </select>
+              <FilterMultiSelect
+                options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+                selected={filterGhiChu}
+                onChange={setFilterGhiChu}
+                labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+                placeholder="Tất cả ghi chú đội"
+                searchPlaceholder="Tìm ghi chú..."
+                className="min-w-64"
+              />
 
               {tab === "list" && (
                 <button
@@ -789,7 +795,7 @@ export default function OutputPage() {
                   <tbody className="divide-y divide-slate-100">
                     {groupedDates.map(({ ngay, records: dayRecords, totalTuoi, totalKho }) => {
                       const vehicleCount = [...new Set(dayRecords.map((record) => record.so_xe))].length
-                      const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter(Boolean))]
+                      const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter((note) => !isBlankNoteContent(note)))]
                       const dayWarnCount = dayRecords.reduce((sum, record) => sum + record.warn_codes.length, 0)
                       return (
                         <tr key={ngay} className="cursor-pointer transition-colors hover:bg-slate-50">

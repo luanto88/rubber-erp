@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase"
 import {
   authBlockReason,
   clearLegacySession,
+  describeAuthError,
   hydrateActiveSession,
   normalizeUsername,
   signInWithUsername,
@@ -187,7 +188,7 @@ function LoginPageContent() {
     try {
       const { data, error: authError } = await signInWithUsername(username, password)
       if (authError || !data.user) {
-        setError("Sai tên đăng nhập hoặc mật khẩu")
+        setError(authError ? describeAuthError(authError) : "Sai tên đăng nhập hoặc mật khẩu")
         setLoading(false)
         return
       }
@@ -203,8 +204,8 @@ function LoginPageContent() {
       }
 
       router.replace("/dashboard")
-    } catch {
-      setError("Không thể đăng nhập. Vui lòng thử lại.")
+    } catch (err) {
+      setError(describeAuthError(err))
     }
 
     setLoading(false)

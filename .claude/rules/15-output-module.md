@@ -334,6 +334,12 @@ const loadDispatches = useCallback(async (fid: string) => {
 - KPI của tab `Thống kê` phải hiển thị thêm khối lượng tươi/khô theo từng loại nguyên liệu, không chỉ tổng cộng.
 - Với tài khoản không phải `admin`, không hiển thị action thêm/sửa/xóa theo ngày hoặc theo dòng.
 
+## Cập nhật 2026-07-11: filter Ghi chú là multi-select
+
+- `Ghi chú` là `multi-select` (dùng `FilterMultiSelect`, cùng pattern với `Loại nguyên liệu`), không còn `single select`.
+- Giá trị "rỗng" (khớp option "Không có ghi chú") gồm `null`, chuỗi rỗng, chuỗi chỉ có khoảng trắng, **và chuỗi `"0"`** (phát sinh khi import Excel đọc ô ghi chú trống thành số 0) — xem `isBlankNoteContent()` trong `src/lib/note-filter.ts`.
+- Hàm so khớp multi-select dùng chung: `matchesNoteFilterMulti(note, selected)` trong `src/lib/note-filter.ts`.
+
 ## Lưu ý UI
 
 - Form sửa nổi vẫn dùng `OutputForm`, nhưng phải nhận được `initialDate` khi mở từ header ngày.

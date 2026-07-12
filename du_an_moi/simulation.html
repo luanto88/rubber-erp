@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mô phỏng App Nhập Liệu v4</title>
+  <style>
+    :root {
+      --primary-color: #059669;
+      /* emerald-600 */
+      --primary-dark: #047857;
+      /* emerald-700 */
+      --primary-light: #ecfdf5;
+      /* emerald-50 */
+      --danger-color: #dc2626;
+      /* red-600 */
+      --bg-color: #f8fafc;
+      /* slate-50 */
+      --text-dark: #1e293b;
+      /* slate-800 */
+      --text-light: #64748b;
+      /* slate-500 */
+      --border-color: #e2e8f0;
+      /* slate-200 */
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+
+    .mobile-frame {
+      width: 100%;
+      max-width: 420px;
+      height: 800px;
+      background-color: white;
+      border: 8px solid #111;
+      border-radius: 40px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen {
+      padding: 24px;
+      box-sizing: border-box;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    #main-screen {
+      display: none;
+    }
+
+    h1,
+    h2 {
+      color: var(--text-dark);
+      margin-top: 0;
+    }
+
+    p {
+      color: var(--text-light);
+      font-size: 14px;
+    }
+
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-light);
+      margin-bottom: 6px;
+    }
+
+    label svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      font-size: 16px;
+      box-sizing: border-box;
+      background-color: #f8fafc;
+    }
+
+    input[type="number"] {
+      font-weight: bold;
+      text-align: center;
+    }
+
+    input:read-only {
+      background-color: #e2e8f0;
+      color: #475569;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 16px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background-color: var(--primary-color);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-dark);
+    }
+
+    .btn-scan {
+      padding: 40px;
+      font-size: 24px;
+      margin-top: 24px;
+    }
+
+    #entry-form {
+      display: none;
+      margin-top: 16px;
+      padding: 20px;
+      background-color: var(--primary-light);
+      border: 1px solid #a7f3d0;
+      border-radius: 20px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s ease-out;
+    }
+
+    #entry-form.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-align: right;
+    }
+
+    .user-info .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background-color: var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #log-area {
+      margin-top: 16px;
+      background-color: #f1f5f9;
+      border-radius: 16px;
+      padding: 16px;
+      height: 150px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    #log-area h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: var(--text-dark);
+    }
+
+    .log-item {
+      font-size: 12px;
+      background-color: white;
+      padding: 10px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      border-left: 4px solid var(--primary-color);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .log-item strong {
+      color: var(--text-dark);
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .row>.input-group {
+      flex: 1;
+    }
+
+    #shift-status {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px dashed var(--border-color);
+      flex-shrink: 0;
+    }
+
+    #end-shift-btn {
+      display: none;
+      margin-top: 8px;
+      background-color: var(--danger-color);
+      color: white;
+    }
+
+    #end-shift-btn:hover {
+      background-color: #b91c1c;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="mobile-frame">
+    <!-- Màn hình đăng nhập -->
+    <div id="login-screen" class="screen">
+      <h1>Đăng nhập</h1>
+      <p>Mô phỏng đăng nhập vào hệ thống.</p>
+      <div class="input-group" style="margin-top: 40px;">
+        <label for="username">Tên đăng nhập</label>
+        <select id="username">
+          <option value="truongca_a">truongca_a (Danh Ngàn)</option>
+          <option value="truongca_b">truongca_b (Văn Toàn)</option>
+        </select>
+      </div>
+      <button id="login-btn" class="btn btn-primary" style="margin-top: 20px;">Đăng nhập</button>
+    </div>
+
+    <!-- Màn hình chính -->
+    <div id="main-screen" class="screen">
+      <div class="header">
+        <div>
+          <h2>Thành phẩm</h2>
+          <p>Ghi nhận tại xưởng</p>
+        </div>
+        <div class="user-info">
+          <div style="line-height: 1.3;">
+            <span id="current-user-name" style="font-weight: 600; font-size: 14px; color: var(--text-dark);"></span>
+            <p id="current-user-role" style="margin: 0; font-size: 12px;"></p>
+          </div>
+          <div class="avatar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <button id="scan-btn" class="btn btn-primary btn-scan">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+          <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+          <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+          <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+          <line x1="7" x2="17" y1="12" y2="12" />
+        </svg>
+        Quét QR
+      </button>
+
+      <!-- Form nhập liệu sau khi quét -->
+      <div id="entry-form">
+        <div class="input-group">
+          <label>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            Ngày sản xuất
+          </label>
+          <input type="date" id="form-ngay-sx">
+        </div>
+        <div class="input-group">
+          <label>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            Giờ sản xuất
+          </label>
+          <input type="text" id="form-gio-sx" readonly>
+        </div>
+        <div class="row">
+          <div class="input-group">
+            <label>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+              Mã lô
+            </label>
+            <input type="text" id="form-ma-lo" readonly>
+          </div>
+          <div class="input-group">
+            <label>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                </path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+              Kiện
+            </label>
+            <input type="text" id="form-kien" readonly>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-group">
+            <label>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
+                <path d="M12 6v6l4 2"></path>
+              </svg>
+              Ca
+            </label>
+            <select id="form-ca-sx">
+              <option value="A">Ca A</option>
+              <option value="B">Ca B</option>
+              <option value="C">Ca C</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                </path>
+                <path d="M3.27 6.96 12 12.01l8.73-5.05"></path>
+                <path d="M12 22.08V12"></path>
+                <path d="m7 19.5-5-2.88"></path>
+                <path d="m17 19.5 5-2.88"></path>
+              </svg>
+              Số bành
+            </label>
+            <input type="number" id="form-so-banh" value="36" min="0">
+          </div>
+        </div>
+        <div class="input-group">
+          <label>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+              <line x1="7" y1="7" x2="7.01" y2="7"></line>
+            </svg>
+            Bọc
+          </label>
+          <select id="form-boc">
+            <option>Bọc nhãn 0,04 VRG CSR10</option>
+            <option>Bọc trơn 0,04</option>
+            <option>Bọc nhãn 0,13 VRG CSRL</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+            </svg>
+            Loại pallet
+          </label>
+          <select id="form-pallet">
+            <option>Sắt đế gỗ</option>
+            <option>Sắt đế nhựa</option>
+            <option>Sắt mỏng</option>
+            <option>MB5</option>
+            <option>Gỗ</option>
+          </select>
+        </div>
+        <button id="submit-btn" class="btn btn-primary">Gửi</button>
+      </div>
+
+      <!-- Log dữ liệu đã gửi -->
+      <div id="log-area">
+        <h3>Log dữ liệu đã gửi (mô phỏng)</h3>
+        <div id="log-content"></div>
+      </div>
+
+      <!-- Trạng thái ca -->
+      <div id="shift-status">
+        <p id="shift-status-text" style="text-align: center; font-weight: bold; color: var(--text-light);">Chưa bắt đầu
+          ca</p>
+        <button id="end-shift-btn" class="btn">Kết thúc ca</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- DOM Elements ---
+    const loginScreen = document.getElementById('login-screen');
+    const mainScreen = document.getElementById('main-screen');
+    const loginBtn = document.getElementById('login-btn');
+    const usernameSelect = document.getElementById('username');
+    const currentUserNameSpan = document.getElementById('current-user-name');
+    const currentUserRoleSpan = document.getElementById('current-user-role');
+    const scanBtn = document.getElementById('scan-btn');
+    const entryForm = document.getElementById('entry-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const logContent = document.getElementById('log-content');
+    const shiftStatusText = document.getElementById('shift-status-text');
+    const endShiftBtn = document.getElementById('end-shift-btn');
+
+    // --- State ---
+    let currentUser = null;
+    let shiftStartTime = null;
+    const userFullNameMap = {
+      'truongca_a': 'Danh Ngàn',
+      'truongca_b': 'Văn Toàn'
+    };
+
+    // --- Functions ---
+    function handleLogin() {
+      const username = usernameSelect.value;
+      if (!username) {
+        alert('Vui lòng chọn người dùng.');
+        return;
+      }
+      currentUser = username;
+      currentUserNameSpan.textContent = userFullNameMap[username] || username;
+      currentUserRoleSpan.textContent = 'Trực ca';
+      loginScreen.style.display = 'none';
+      mainScreen.style.display = 'flex';
+    }
+
+    function handleScan() {
+      const qrData = prompt(
+        'Mô phỏng quét QR. Dán dữ liệu QR vào đây:',
+        '1133cs/26;A'
+      );
+
+      if (!qrData) {
+        alert('Hủy quét.');
+        return;
+      }
+
+      try {
+        const [ma_lo, kien] = qrData.split(';');
+        if (!ma_lo || !kien) throw new Error('Định dạng QR không hợp lệ.');
+
+        document.getElementById('form-ma-lo').value = ma_lo;
+        document.getElementById('form-kien').value = kien;
+
+        const now = new Date();
+        const productionDate = new Date();
+        if (now.getHours() < 6) {
+          productionDate.setDate(productionDate.getDate() - 1);
+        }
+        document.getElementById('form-ngay-sx').value = productionDate.toISOString().slice(0, 10);
+        document.getElementById('form-gio-sx').value = now.toLocaleString('vi-VN', { hour12: false });
+
+        entryForm.style.display = 'block';
+        scanBtn.style.display = 'none';
+        setTimeout(() => entryForm.classList.add('visible'), 10);
+
+      } catch (error) {
+        alert('Lỗi: ' + error.message + '\nDữ liệu QR phải có dạng "MA_LO;KIEN", ví dụ: "1133cs/26;A"');
+      }
+    }
+
+    function handleSubmit() {
+      const entry = {
+        ma_lo: document.getElementById('form-ma-lo').value,
+        kien: document.getElementById('form-kien').value,
+        ca_sx: document.getElementById('form-ca-sx').value,
+        so_banh: document.getElementById('form-so-banh').value,
+        boc: document.getElementById('form-boc').value,
+        pallet: document.getElementById('form-pallet').value,
+        truc_ca: userFullNameMap[currentUser] || currentUser,
+        thoi_gian: new Date().toLocaleString('vi-VN', { hour12: false })
+      };
+
+      alert(`Gửi dữ liệu thành công!\nLô: ${entry.ma_lo}\nKiện: ${entry.kien}\nSố bành: ${entry.so_banh}`);
+
+      const logItem = document.createElement('div');
+      logItem.className = 'log-item';
+      logItem.innerHTML = `<strong>${entry.ma_lo} - Kiện ${entry.kien}</strong><br>
+                                 <span style="color: var(--text-light)">${entry.so_banh} bành · Ca ${entry.ca_sx} · ${entry.truc_ca} · ${entry.thoi_gian}</span>`;
+      logContent.prepend(logItem);
+
+      if (!shiftStartTime) {
+        shiftStartTime = new Date();
+        shiftStatusText.textContent = `Ca bắt đầu lúc: ${shiftStartTime.toLocaleTimeString('vi-VN')}`;
+        shiftStatusText.style.color = 'var(--primary-color)';
+        endShiftBtn.style.display = 'flex';
+      }
+
+      entryForm.classList.remove('visible');
+      setTimeout(() => {
+        entryForm.style.display = 'none';
+        scanBtn.style.display = 'flex';
+      }, 300);
+    }
+
+    function handleEndShift() {
+      if (!shiftStartTime) return;
+      const endTime = new Date();
+      const duration = Math.round((endTime - shiftStartTime) / 1000 / 60);
+      alert(`Đã kết thúc ca.\nBắt đầu: ${shiftStartTime.toLocaleTimeString('vi-VN')}\nKết thúc: ${endTime.toLocaleTimeString('vi-VN')}\nThời gian: ${duration} phút.`);
+
+      shiftStartTime = null;
+      shiftStatusText.textContent = 'Chưa bắt đầu ca';
+      shiftStatusText.style.color = 'var(--text-light)';
+      endShiftBtn.style.display = 'none';
+      logContent.innerHTML = '';
+    }
+
+    // --- Event Listeners ---
+    loginBtn.addEventListener('click', handleLogin);
+    scanBtn.addEventListener('click', handleScan);
+    submitBtn.addEventListener('click', handleSubmit);
+    endShiftBtn.addEventListener('click', handleEndShift);
+  </script>
+</body>
+
+</html>
