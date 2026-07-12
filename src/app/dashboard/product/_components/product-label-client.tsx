@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertTriangle, Package, RotateCcw, Warehouse } from "lucide-react"
+import Link from "next/link"
+import { AlertTriangle, ClipboardCheck, Package, RotateCcw, Warehouse } from "lucide-react"
 import { buildNganLookupPath, resolveProductLabelLookupTarget, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
@@ -126,10 +127,20 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
         </div>
       )}
 
+      {(data.status === "predicted" || data.status === "partial") && (
+        <Link
+          href={`/dashboard/product/confirm?f=${encodeURIComponent(factoryId)}&lo=${encodeURIComponent(maLo)}&kien=${kien}`}
+          className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
+        >
+          <ClipboardCheck size={18} />
+          Xác nhận sản xuất
+        </Link>
+      )}
+
       {data.nganId && (
         <a
           href={buildNganLookupPath(data.nganId, data.nganMa)}
-          className="mt-5 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50"
+          className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50"
         >
           <Warehouse size={16} />
           Xem chi tiết ngăn nguồn gốc: {data.nganTen || data.nganMa || "—"}

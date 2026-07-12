@@ -399,10 +399,30 @@ Khi quét QR trên nhãn (cả nhãn nhỏ lẫn nhãn lớn), trang `ProductLab
 - **Bố cục "Đạt hạng"**: đổi từ khối full-width riêng biệt bên dưới lưới thông tin thành 1 ô trong chính lưới `grid-cols-2` (đặt ngay sau "Ca sản xuất") — 6 ô vừa khít 3 hàng × 2 cột, "Ca sản xuất" và "Đạt hạng" nằm cùng hàng cuối, song song nhau. Màu chữ (không còn nền khối riêng): amber khi chờ KN, đỏ khi `RH` (rớt hạng), emerald khi đạt — nhất quán với 2 dòng "Ngày SX"/"Ca SX" phía trên.
 - `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay** — cần deploy rồi kiểm tra lại đúng kịch bản người dùng báo cáo (tab Chrome thường đã mở trước đó vs tab ẩn danh) để xác nhận cache header mới đã khắc phục dứt điểm.
 
+### Quét QR nhãn kiện → xác nhận sản xuất thật (2026-07-12)
+
+Đóng phần "Chưa tích hợp nút Nhập từ dự đoán" cho riêng luồng hiện trường: công nhân dán nhãn lên pallet, quét QR ngay trên nhãn đó → xác nhận → dữ liệu dự kiến trở thành dữ liệu thật, không cần văn phòng gõ tay lại.
+
+- QR nhãn kiện **không đổi** — vẫn trỏ `/product-label?f=&lo=&kien=` (public, read-only, giữ nguyên `resolveProductLabelLookupTarget`).
+- `ProductLabelClient` (`product/_components/product-label-client.tsx`) thêm nút **"Xác nhận sản xuất"** — chỉ hiện khi `status === "predicted" || status === "partial"` — điều hướng sang route mới `/dashboard/product/confirm?f=&lo=&kien=`.
+- Route mới `src/app/dashboard/product/confirm/page.tsx` (Client Component):
+  - **Full-screen, không sidebar** — `dashboard/layout.tsx` mở rộng điều kiện bypass (trước chỉ áp dụng `/print`) thêm `pathname.startsWith("/dashboard/product/confirm")`, đặt SAU khối `loading || !user` nên vẫn bắt buộc đăng nhập, chỉ bỏ chrome sidebar.
+  - Yêu cầu permission mới **`product.confirm_scan`** (migration `20260712_product_confirm_scan_permission.sql` — cần chạy tay theo quy ước dự án), cấp mặc định cho **cả `admin`/`manager`/`user`** — quyết định nghiệp vụ đã chốt, khác `product.create/edit` (chỉ admin/manager) vì đây là thao tác của công nhân xưởng.
+  - Bảo mật: dùng `factoryId` từ session đang đăng nhập (`getActiveFactoryId()`), **không tin** tham số `f` trên URL cho việc ghi dữ liệu — nếu lệch, chặn với thông báo "QR này không thuộc nhà máy bạn đang đăng nhập".
+  - Server actions mới `src/app/dashboard/product/confirm/actions.ts`:
+    - `resolveKienForConfirm()` — lookup riêng (không tái dùng `resolveProductLabelLookupTarget` vì hàm đó thiếu `day_chuyen`/pallet/ghi_chú và không ưu tiên đúng ngăn per-kiện khi lô đã tồn tại một phần). Luôn query cả `lots` lẫn `lot_prediction_lots` theo `ma_lo`; nếu lô đã có thật, ngăn của từng kiện B/C/D vẫn ưu tiên đọc từ `lot_prediction_lots.kien_<letter>_ngan_id`, chỉ fallback `lots.ngan_id` — tránh gán nhầm ngăn khi các kiện của cùng 1 lô nằm ở ngăn khác nhau.
+    - `confirmKienProduction()` — validate lại (chống race) kiện chưa được ghi nhận, chặn cứng nếu ngăn sau khi ghi vượt 110% (tái dùng `getExistingRealKg` đã export từ `predict/actions.ts`), gọi thẳng `saveLotTransaction()` (không sửa hàm này) rồi gọi **`markLotPredictionRealized()`** — hook đã tồn tại sẵn từ trước nhưng chưa từng được gọi ở đâu, giờ là điểm nối chính thức dự kiến → thật. Gọi lại nhiều lần cho các kiện sau của cùng lô là an toàn (idempotent).
+    - `loadRecentConfirmations()` — panel "Lịch sử đã gửi hôm nay", query thẳng `lot_transactions` trong ngày, không có bảng/cột đánh dấu riêng nguồn gốc từ luồng quét.
+  - Bọc/Loại pallet/Ghi chú **chỉ hiển thị dạng input khi tạo kiện đầu tiên của 1 lô mới** (`isNewLot`); các kiện sau của cùng lô hiển thị đọc-only lấy từ `lots` hiện có — 2 field pallet/ghi_chú vốn chỉ được `saveLotTransaction` ghi tại thời điểm TẠO lô (nhánh insert), không cập nhật lại khi lô đã tồn tại, nên cho phép sửa ở kiện 2-4 sẽ vô tác dụng.
+  - **"Kết thúc ca" chỉ là hành động UI** (tóm tắt số kiện đã gửi trong phiên rồi điều hướng về `/dashboard/product`) — **không ghi gì vào DB**, quyết định nghiệp vụ đã chốt, không có bảng "shift" nào được tạo.
+  - Không xây máy quét QR trong app — dựa vào camera điện thoại mở link như `/product-label` hiện tại.
+- `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay trên dữ liệu thật** — cần: tạo 1 dự đoán → quét/mở link kiện đầu → xác nhận Bọc/Pallet mặc định đúng, gửi thành công tạo `lots`/`lot_transactions` + `lot_prediction_lots.trang_thai` chuyển "Đã dùng"; quét kiện thứ 2 cùng lô (khác ngăn nếu có) → xác nhận đúng ngăn theo `kien_b_ngan_id`, Bọc/Pallet hiện đọc-only; quét lại kiện đã xác nhận → hiện "Đã ghi nhận sản xuất"; test vượt 110% ngăn bị chặn; test tài khoản `role=user` chưa có `product.create` vẫn dùng được trang confirm nhờ permission mới.
+
 ### Phạm vi CHƯA làm (cần hoàn thiện ở phiên sau)
 
 - **Test tay nhãn in phiên 5** (xem mục ngay trên) — ưu tiên cao vì đụng trực tiếp tới file in thực tế đưa xuống xưởng.
-- **Chưa tích hợp nút "Nhập từ dự đoán" vào form tạo phiếu Thành phẩm** (`product/page.tsx`) — mới có nút "Dự đoán số lô" ở header link sang trang `/dashboard/product/predict`. Văn phòng hiện vẫn phải gõ tay `ma_lo`/CSR/bọc/bành như trước khi tạo phiếu thật; dự đoán chỉ có tác dụng in nhãn, chưa tự điền lại vào form nhập liệu thật.
+- **Chưa test tay luồng quét QR xác nhận sản xuất** (xem mục ngay trên, 2026-07-12).
+- Migration `20260712_product_confirm_scan_permission.sql` **chưa chạy** trên Supabase — cần chạy thủ công trước khi permission `product.confirm_scan` có hiệu lực.
 - Migration `20260709_lot_predictions.sql` **chưa chạy** trên Supabase — cần chạy thủ công trong SQL Editor trước khi tính năng hoạt động (theo đúng convention toàn bộ migration trong repo). Đã sửa nhiều lần trong lúc code (thêm cột `unassignable_kien`, `closes_ngan`, thêm tham số RPC `p_requested_trailing_kien`/`p_closes_ngan`) — vì CHƯA chạy lần nào nên an toàn để sửa trực tiếp file cũ, không tạo migration nối tiếp. Chạy lại **toàn bộ** file (idempotent) kể cả nếu trước đó đã chạy 1 phần.
 - Cách rút gọn tên nhà máy cho footer nhãn (khi nhà máy khác PHK) **chưa được quyết định** — hiện hard-code "Nhà máy chế biến PHK".
 - Toàn bộ luồng (đơn ngăn lẫn đa ngăn, bridge kiện dở dang, lọc hết dung lượng, nhãn mới) **chưa test tay** trên dữ liệu thật.

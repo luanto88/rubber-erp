@@ -423,8 +423,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  // Print pages bypass the sidebar layout entirely
-  if (pathname.includes("/print")) {
+  // Print pages và trang xác nhận quét QR (full-screen, không sidebar) bypass layout entirely
+  if (pathname.includes("/print") || pathname.startsWith("/dashboard/product/confirm")) {
     return <>{children}</>
   }
 

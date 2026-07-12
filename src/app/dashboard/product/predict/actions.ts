@@ -72,7 +72,9 @@ export async function loadNgansByIdsRaw(ids: string[]): Promise<PredictAvailable
   return (data || []) as PredictAvailableNgan[];
 }
 
-async function getExistingRealKg(
+// Export để tái dùng ở src/app/dashboard/product/confirm/actions.ts (luồng quét QR xác nhận
+// sản xuất) — tránh viết lại cùng 1 query tính KL thật đã ghi nhận trong ngăn.
+export async function getExistingRealKg(
   factoryId: string,
   nganId: string,
 ): Promise<number> {
