@@ -14,7 +14,9 @@ const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = {
   D: "d",
 };
 
-export type ConfirmKienStatus = "predicted" | "partial" | "produced" | "not_found";
+// "partial_kien": kiện đã có MỘT PHẦN bành (do top-up dở dang trước đó) — vẫn cho quét lại,
+// nhưng số bành tối đa cho phép nhập = maxPerKien - existingBanh (xem mục 5 rule 06-module-production.md).
+export type ConfirmKienStatus = "predicted" | "partial" | "partial_kien" | "produced" | "not_found";
 
 export type ConfirmKienLookup = {
   status: ConfirmKienStatus;
@@ -28,12 +30,17 @@ export type ConfirmKienLookup = {
   boc: string | null;
   tham: string | null;
   pallet: string[] | null;
+  chiThi: string | null;
   ghiChu: string | null;
   nganId: string | null;
   nganMa: string | null;
   nganTen: string | null;
   maxPerKien: number | null;
   kienWeightKg: number | null;
+  // Số bành kiện này đã có sẵn (chỉ > 0 khi status = "partial_kien") và số bành còn được phép
+  // nhập thêm (= maxPerKien - existingBanh) — dùng để clamp stepper + hiện cảnh báo trên UI.
+  existingBanh: number;
+  remainingBanh: number | null;
 };
 
 function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
@@ -49,13 +56,32 @@ function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
     boc: null,
     tham: null,
     pallet: null,
+    chiThi: null,
     ghiChu: null,
     nganId: null,
     nganMa: null,
     nganTen: null,
     maxPerKien: null,
     kienWeightKg: null,
+    existingBanh: 0,
+    remainingBanh: null,
   };
+}
+
+// Gợi ý "Số chỉ thị" cho lô MỚI (chưa từng tồn tại trong `lots`) — mặc định theo lô có ngày
+// thành phẩm gần nhất của nhà máy, mirror đúng nguồn `lots[0]?.chi_thi` mà product/page.tsx
+// đang dùng (danh sách lots ở đó được order theo ngay_sx desc, created_at desc).
+async function loadSuggestedChiThiForNewLot(factoryId: string): Promise<string> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("lots")
+    .select("chi_thi")
+    .eq("factory_id", factoryId)
+    .order("ngay_sx", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.chi_thi || "1";
 }
 
 async function loadNganInfo(nganId: string | null) {
@@ -84,7 +110,7 @@ export async function resolveKienForConfirm(
   const [{ data: lot }, { data: predicted }] = await Promise.all([
     supabase
       .from("lots")
-      .select("id,ma_lo,loai_csr,loai_banh,day_chuyen,boc,tham,pallet,ghi_chu,ngan_id")
+      .select("id,ma_lo,loai_csr,loai_banh,day_chuyen,boc,tham,pallet,chi_thi,ghi_chu,ngan_id")
       .eq("factory_id", factoryId)
       .eq("ma_lo", maLo)
       .maybeSingle(),
@@ -117,13 +143,15 @@ export async function resolveKienForConfirm(
       .from("lot_transactions")
       .select("kien_a,kien_b,kien_c,kien_d")
       .eq("lot_id", lot.id);
-    const alreadyProduced = (txRows || []).some(
-      (row) => Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0) > 0,
+    const existingBanh = (txRows || []).reduce(
+      (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
+      0,
     );
 
     const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null;
+    const maxPerKien = config?.max_per_kien ?? 36;
 
-    if (alreadyProduced) {
+    if (existingBanh >= maxPerKien) {
       const { nganMa, nganTen } = await loadNganInfo(lot.ngan_id);
       return {
         status: "produced",
@@ -137,21 +165,24 @@ export async function resolveKienForConfirm(
         boc: lot.boc,
         tham: lot.tham,
         pallet: lot.pallet,
+        chiThi: lot.chi_thi,
         ghiChu: lot.ghi_chu,
         nganId: lot.ngan_id,
         nganMa,
         nganTen,
         maxPerKien: config?.max_per_kien ?? null,
         kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
+        existingBanh,
+        remainingBanh: 0,
       };
     }
 
-    // Lô đã tồn tại nhưng kiện này chưa ghi nhận — ưu tiên ngăn theo dòng dự đoán per-kiện,
-    // fallback về ngan_id chung của lô (đúng thứ tự ưu tiên đã chốt trong plan).
+    // Lô đã tồn tại, kiện này chưa đủ (chưa có gì hoặc có một phần) — ưu tiên ngăn theo dòng dự
+    // đoán per-kiện, fallback về ngan_id chung của lô (đúng thứ tự ưu tiên đã chốt trong plan).
     const nganId = predictedNganId || lot.ngan_id || null;
     const { nganMa, nganTen } = await loadNganInfo(nganId);
     return {
-      status: "partial",
+      status: existingBanh > 0 ? "partial_kien" : "partial",
       maLo,
       kien,
       isNewLot: false,
@@ -162,18 +193,22 @@ export async function resolveKienForConfirm(
       boc: lot.boc,
       tham: lot.tham,
       pallet: lot.pallet,
+      chiThi: lot.chi_thi,
       ghiChu: lot.ghi_chu,
       nganId,
       nganMa,
       nganTen,
       maxPerKien: config?.max_per_kien ?? null,
       kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
+      existingBanh,
+      remainingBanh: maxPerKien - existingBanh,
     };
   }
 
   if (predicted) {
     const config = getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined);
     const { nganMa, nganTen } = await loadNganInfo(predictedNganId);
+    const chiThi = await loadSuggestedChiThiForNewLot(factoryId);
     return {
       status: "predicted",
       maLo,
@@ -186,12 +221,15 @@ export async function resolveKienForConfirm(
       boc: predicted.boc,
       tham: predicted.tham,
       pallet: null,
+      chiThi,
       ghiChu: null,
       nganId: predictedNganId,
       nganMa,
       nganTen,
       maxPerKien: config.max_per_kien,
       kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
+      existingBanh: 0,
+      remainingBanh: config.max_per_kien,
     };
   }
 
@@ -226,8 +264,11 @@ export type ConfirmKienInput = {
   soBanh: number;
   ngaySx: string;
   ca: string;
+  // Bọc/Pallet/Số chỉ thị giờ LUÔN được gửi (không chỉ khi isNewLot) — người dùng có thể sửa
+  // lại ở mọi kiện, kể cả kiện 2-4 của lô đã tồn tại (xem mục 1 rule 06-module-production.md).
   boc?: string | null;
   pallet?: string[] | null;
+  chiThi?: string | null;
   tham?: string | null;
   ghiChu?: string | null;
   userId: string | null;
@@ -250,8 +291,12 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
   }
 
   try {
-    // Chống race: kiểm tra lại kiện chưa được ghi nhận trước khi ghi (lô có thể vừa được
-    // người khác xác nhận giữa lúc mở trang và lúc bấm gửi).
+    // Chống race: tính lại số bành hiện có của đúng kiện này trước khi ghi (lô có thể vừa được
+    // người khác xác nhận thêm giữa lúc mở trang và lúc bấm gửi) — cho phép top-up phần còn
+    // thiếu, chỉ chặn khi vượt quá maxPerKien của đúng loại bành/CSR đang gửi lên.
+    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+    const maxPerKien = config.max_per_kien;
+
     const { data: existingLot } = await supabase
       .from("lots")
       .select("id")
@@ -264,11 +309,18 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
         .from("lot_transactions")
         .select("kien_a,kien_b,kien_c,kien_d")
         .eq("lot_id", existingLot.id);
-      const alreadyProduced = (txRows || []).some(
-        (row) => Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0) > 0,
+      const existingBanh = (txRows || []).reduce(
+        (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
+        0,
       );
-      if (alreadyProduced) {
-        return { success: false, error: "Kiện này vừa được ghi nhận sản xuất, vui lòng tải lại." };
+      if (existingBanh >= maxPerKien) {
+        return { success: false, error: "Kiện này vừa được ghi nhận đủ sản lượng, vui lòng tải lại." };
+      }
+      if (existingBanh + input.soBanh > maxPerKien) {
+        return {
+          success: false,
+          error: `Kiện ${input.kien} đã có ${existingBanh} bành, lần này chỉ được nhập tối đa ${maxPerKien - existingBanh} bành.`,
+        };
       }
     }
 
@@ -314,6 +366,7 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
         boc: input.isNewLot ? (input.boc ?? undefined) : undefined,
         tham: input.isNewLot ? (input.tham ?? undefined) : undefined,
         pallet: input.isNewLot ? (input.pallet ?? undefined) : undefined,
+        chi_thi: input.isNewLot ? (input.chiThi ?? undefined) : undefined,
         ghi_chu: input.isNewLot ? (input.ghiChu ?? undefined) : undefined,
       },
       transaction: {
@@ -327,6 +380,11 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
         so_banh: input.soBanh,
         so_kg: soKg,
         created_by: input.userId ?? undefined,
+        // Ghi kèm bọc/pallet/chỉ thị theo đúng lựa chọn của kiện này — syncLotMasterSnapshot()
+        // sẽ tự cập nhật lại lots.boc/pallet/chi_thi theo giá trị mới nhất (xem product/actions.ts).
+        boc: input.boc ?? null,
+        pallet: input.pallet ?? null,
+        chi_thi: input.chiThi ?? null,
       },
     });
 
@@ -406,4 +464,159 @@ export async function loadRecentConfirmations(
     soKg: Number(row.so_kg || 0),
     createdAt: row.created_at,
   }));
+}
+
+// Chức danh thật hiển thị ở header (thay "Trực ca" cố định) — tra theo profile_id, mirror
+// đúng pattern đã dùng ở src/app/api/documents/dept-leader/route.ts. Trả về null khi tài
+// khoản chưa liên kết maintenance_staff hoặc chưa khai chuc_vu — page.tsx tự fallback về
+// nhãn "Trực ca" (i18n key shiftLabel) khi null.
+export async function loadUserChucVu(factoryId: string, profileId: string | null): Promise<string | null> {
+  if (!profileId) return null;
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("maintenance_staff")
+    .select("chuc_vu, chuc_vu_chinh_quyen")
+    .eq("factory_id", factoryId)
+    .eq("profile_id", profileId)
+    .eq("active", true)
+    .maybeSingle();
+  return data?.chuc_vu_chinh_quyen || data?.chuc_vu || null;
+}
+
+export type ShiftReportLotRow = {
+  maLo: string;
+  loaiCsr: string;
+  kienLetters: string;
+  soBanh: number;
+  soKg: number;
+  boc: string;
+  pallet: string;
+  chiThi: string;
+  hoanThanhAt: string | null;
+};
+
+export type ShiftReportData = {
+  ngay: string;
+  ca: string;
+  nguoiGui: string;
+  chucVu: string;
+  rows: ShiftReportLotRow[];
+  tongBanh: number;
+  tongKg: number;
+  byLoaiCsr: { loaiCsr: string; soBanh: number; soKg: number }[];
+};
+
+const KIEN_ORDER: KienLetter[] = ["A", "B", "C", "D"];
+
+// Tổng hợp toàn bộ giao dịch của MỘT người dùng trong khoảng thời gian ca (từ lúc mở trang tới
+// lúc bấm "Kết thúc ca") để in phiếu báo thành phẩm — truy vấn lại DB (không dùng sessionLog phía
+// client) để không mất dữ liệu nếu người dùng lỡ tải lại trang giữa ca (đã chốt với người dùng).
+export async function loadShiftReportData(
+  factoryId: string,
+  userId: string,
+  sinceIso: string,
+  nguoiGui: string,
+  chucVu: string,
+): Promise<ShiftReportData> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("lot_transactions")
+    .select(
+      "id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,created_at,lots!inner(ma_lo,loai_csr,factory_id)",
+    )
+    .eq("lots.factory_id", factoryId)
+    .eq("created_by", userId)
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  type TxRow = {
+    id: string;
+    ca: string;
+    ngay_nhap: string;
+    kien_a: number;
+    kien_b: number;
+    kien_c: number;
+    kien_d: number;
+    so_banh: number;
+    so_kg: number;
+    boc: string | null;
+    pallet: string[] | null;
+    chi_thi: string | null;
+    created_at: string | null;
+    lots: { ma_lo: string; loai_csr: string } | { ma_lo: string; loai_csr: string }[];
+  };
+
+  const rowsRaw = (data || []) as unknown as TxRow[];
+
+  // Gộp theo mã lô — mỗi lô xuất hiện đúng 1 dòng trong phiếu, kiện = union các kiện đã xác
+  // nhận trong ca này, ngày giờ hoàn thành = giao dịch cuối cùng của lô đó trong ca.
+  const byMaLo = new Map<
+    string,
+    { loaiCsr: string; letters: Set<KienLetter>; soBanh: number; soKg: number; boc: string; pallet: string; chiThi: string; hoanThanhAt: string | null }
+  >();
+
+  for (const row of rowsRaw) {
+    const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
+    const maLo = lotInfo?.ma_lo || "";
+    if (!maLo) continue;
+    const entry = byMaLo.get(maLo) || {
+      loaiCsr: lotInfo?.loai_csr || "",
+      letters: new Set<KienLetter>(),
+      soBanh: 0,
+      soKg: 0,
+      boc: "",
+      pallet: "",
+      chiThi: "",
+      hoanThanhAt: null,
+    };
+    if (Number(row.kien_a || 0) > 0) entry.letters.add("A");
+    if (Number(row.kien_b || 0) > 0) entry.letters.add("B");
+    if (Number(row.kien_c || 0) > 0) entry.letters.add("C");
+    if (Number(row.kien_d || 0) > 0) entry.letters.add("D");
+    entry.soBanh += Number(row.so_banh || 0);
+    entry.soKg += Number(row.so_kg || 0);
+    if (row.boc) entry.boc = row.boc;
+    if (row.pallet && row.pallet.length > 0) entry.pallet = row.pallet.join(", ");
+    if (row.chi_thi) entry.chiThi = row.chi_thi;
+    if (!entry.hoanThanhAt || (row.created_at && row.created_at > entry.hoanThanhAt)) {
+      entry.hoanThanhAt = row.created_at;
+    }
+    byMaLo.set(maLo, entry);
+  }
+
+  const rows: ShiftReportLotRow[] = [...byMaLo.entries()].map(([maLo, entry]) => ({
+    maLo,
+    loaiCsr: entry.loaiCsr,
+    kienLetters: KIEN_ORDER.filter((k) => entry.letters.has(k)).join(""),
+    soBanh: entry.soBanh,
+    soKg: Math.round(entry.soKg * 100) / 100,
+    boc: entry.boc,
+    pallet: entry.pallet,
+    chiThi: entry.chiThi,
+    hoanThanhAt: entry.hoanThanhAt,
+  }));
+
+  const byLoaiCsrMap = new Map<string, { soBanh: number; soKg: number }>();
+  for (const r of rows) {
+    const acc = byLoaiCsrMap.get(r.loaiCsr) || { soBanh: 0, soKg: 0 };
+    acc.soBanh += r.soBanh;
+    acc.soKg += r.soKg;
+    byLoaiCsrMap.set(r.loaiCsr, acc);
+  }
+
+  return {
+    ngay: getTodayISODate(),
+    ca: rowsRaw.at(-1)?.ca || "",
+    nguoiGui,
+    chucVu,
+    rows,
+    tongBanh: rows.reduce((s, r) => s + r.soBanh, 0),
+    tongKg: Math.round(rows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
+    byLoaiCsr: [...byLoaiCsrMap.entries()].map(([loaiCsr, v]) => ({
+      loaiCsr,
+      soBanh: v.soBanh,
+      soKg: Math.round(v.soKg * 100) / 100,
+    })),
+  };
 }

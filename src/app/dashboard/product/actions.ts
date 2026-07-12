@@ -44,6 +44,13 @@ type SaveLotTransactionInput = {
     so_banh: number;
     so_kg: number;
     created_by?: string | null;
+    // Snapshot bọc/pallet/số chỉ thị CỦA ĐÚNG GIAO DỊCH NÀY — chỉ tính năng "Xác nhận sản xuất
+    // qua QR" (confirm/page.tsx) gửi các trường này; product/page.tsx (nhập tay) không gửi, để
+    // undefined/null — syncLotMasterSnapshot() sẽ bỏ qua các dòng null khi suy giá trị mới nhất,
+    // không ghi đè nhầm boc/pallet/chi_thi của lô.
+    boc?: string | null;
+    pallet?: string[] | null;
+    chi_thi?: string | null;
   };
 };
 
@@ -84,6 +91,17 @@ function revalidateLotScreens() {
   revalidatePath("/dashboard/product-draft");
 }
 
+// Duyệt ngược mảng (đã sắp xếp tăng dần theo ngay_nhap/created_at) để tìm giá trị non-null
+// gần nhất — dùng cho boc/pallet/chi_thi vốn chỉ được set bởi luồng "Xác nhận sản xuất qua QR",
+// các dòng nhập tay cũ để null nên phải bỏ qua thay vì coi null là "giá trị mới nhất".
+function lastNonNull<T, V>(arr: T[], picker: (item: T) => V | null | undefined): V | undefined {
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    const value = picker(arr[i]);
+    if (value !== null && value !== undefined) return value;
+  }
+  return undefined;
+}
+
 async function syncLotMasterSnapshot(lotId: string) {
   const supabase = getSupabaseAdmin();
   const [{ data: lot, error: lotError }, { data: transactions, error: txError }] =
@@ -91,7 +109,9 @@ async function syncLotMasterSnapshot(lotId: string) {
       supabase.from("lots").select("id, loai_banh, trang_thai").eq("id", lotId).single(),
       supabase
         .from("lot_transactions")
-        .select("id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at")
+        .select(
+          "id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at, boc, pallet, chi_thi",
+        )
         .eq("lot_id", lotId)
         .order("ngay_nhap", { ascending: true })
         .order("created_at", { ascending: true }),
@@ -113,6 +133,10 @@ async function syncLotMasterSnapshot(lotId: string) {
   const derivedStatus: NormalizedLotStatus =
     tongBanh >= loTron ? "Hoàn thành" : "Dở dang";
 
+  const latestBoc = lastNonNull(txs, (tx) => tx.boc as string | null);
+  const latestPallet = lastNonNull(txs, (tx) => tx.pallet as string[] | null);
+  const latestChiThi = lastNonNull(txs, (tx) => tx.chi_thi as string | null);
+
   const payload = {
     kien_a: kienA,
     kien_b: kienB,
@@ -124,6 +148,9 @@ async function syncLotMasterSnapshot(lotId: string) {
     ca: latestTx?.ca ?? null,
     ngan_id: latestTx?.ngan_id ?? null,
     ngay_ht: derivedStatus === "Hoàn thành" ? (latestTx?.ngay_nhap ?? null) : null,
+    ...(latestBoc !== undefined ? { boc: latestBoc } : {}),
+    ...(latestPallet !== undefined ? { pallet: latestPallet } : {}),
+    ...(latestChiThi !== undefined ? { chi_thi: latestChiThi } : {}),
   };
 
   const { error: updateError } = await supabase.from("lots").update(payload).eq("id", lotId);
@@ -251,6 +278,9 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
           so_banh: transaction.so_banh,
           so_kg: transaction.so_kg,
           ...(transaction.created_by ? { created_by: transaction.created_by } : {}),
+          ...(transaction.boc !== undefined ? { boc: transaction.boc } : {}),
+          ...(transaction.pallet !== undefined ? { pallet: transaction.pallet } : {}),
+          ...(transaction.chi_thi !== undefined ? { chi_thi: transaction.chi_thi } : {}),
         },
         { onConflict: "id" },
       )

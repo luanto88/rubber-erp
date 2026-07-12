@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronLeft, Minus, Package, Plus, ScanLine, User } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  Loader2,
+  Minus,
+  Package,
+  Plus,
+  ScanLine,
+  User,
+} from "lucide-react";
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth";
 import { getTodayISODate } from "@/lib/date-utils";
 import { getBocsForLoaiCSR } from "@/lib/product-lot-config";
@@ -11,10 +21,13 @@ import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   confirmKienProduction,
   loadActiveNgansForFactory,
+  loadShiftReportData,
+  loadUserChucVu,
   resolveKienForConfirm,
   type ActiveNganOption,
   type ConfirmKienLookup,
 } from "@/app/dashboard/product/confirm/actions";
+import { shareOrDownloadShiftReportPdf } from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
 
 const QrScanner = dynamic(
@@ -57,6 +70,14 @@ function formatHMS(d: Date) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+// Ca đêm kéo dài qua nửa đêm — mặc định "Ngày sản xuất" vẫn tính là hôm qua khi đang trong
+// khoảng 00:00-04:59, chỉ chuyển sang hôm nay từ 05:00 trở đi (đã chốt với người dùng).
+function getDefaultNgaySx(d: Date): string {
+  const base = new Date(d);
+  if (base.getHours() < 5) base.setDate(base.getDate() - 1);
+  return `${base.getFullYear()}-${pad2(base.getMonth() + 1)}-${pad2(base.getDate())}`;
+}
+
 // Đọc QR đã quét: nội dung là URL đầy đủ dạng ".../product-label?f=...&lo=...&kien=..." (xem
 // buildProductLabelLookupUrl trong src/lib/product-label.ts) — chỉ cần phần query string, không
 // cần new URL() (tránh lỗi nếu html5-qrcode trả về chuỗi không phải URL tuyệt đối hợp lệ).
@@ -92,10 +113,14 @@ export default function ConfirmKienProductionPage() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [factoryMismatch, setFactoryMismatch] = useState(false);
 
+  const [chucVu, setChucVu] = useState<string | null>(null);
+
   const [view, setView] = useState<ViewMode>("hub");
   const [sessionStartAt, setSessionStartAt] = useState<Date | null>(null);
   const [sessionLog, setSessionLog] = useState<SessionLogEntry[]>([]);
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
+  const [endShiftGenerating, setEndShiftGenerating] = useState(false);
+  const [endShiftError, setEndShiftError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
@@ -111,6 +136,7 @@ export default function ConfirmKienProductionPage() {
   const [ca, setCa] = useState<string>("A");
   const [boc, setBoc] = useState("");
   const [pallet, setPallet] = useState<string[]>([]);
+  const [chiThi, setChiThi] = useState("");
   const [ghiChu, setGhiChu] = useState("");
   const [manualNganId, setManualNganId] = useState("");
   const [activeNgans, setActiveNgans] = useState<ActiveNganOption[]>([]);
@@ -152,6 +178,7 @@ export default function ConfirmKienProductionPage() {
       setFactoryId(fid);
       setCurrentUser(user);
       setSessionStartAt(new Date());
+      loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
 
       const paramLo = (searchParams.get("lo") || "").trim();
       if (paramLo) {
@@ -182,12 +209,13 @@ export default function ConfirmKienProductionPage() {
         const result = await resolveKienForConfirm(factoryId, maLo, kien);
         if (!alive) return;
         setLookup(result);
-        if (result.status === "predicted" || result.status === "partial") {
-          setSoBanh(result.maxPerKien || 36);
-          setNgaySx(getTodayISODate());
+        if (result.status === "predicted" || result.status === "partial" || result.status === "partial_kien") {
+          setSoBanh(result.status === "partial_kien" ? Math.max(1, result.remainingBanh || 1) : result.maxPerKien || 36);
+          setNgaySx(getDefaultNgaySx(new Date()));
           setCa("A");
           setBoc(result.boc || "");
           setPallet(result.pallet || []);
+          setChiThi(result.chiThi || "");
           setGhiChu("");
           if (!result.nganId) {
             const ngans = await loadActiveNgansForFactory(factoryId);
@@ -213,15 +241,18 @@ export default function ConfirmKienProductionPage() {
 
   const effectiveNganId = lookup?.nganId || manualNganId || "";
   const maxPerKien = lookup?.maxPerKien || 36;
+  const stepperMax = lookup?.status === "partial_kien" ? Math.max(1, lookup.remainingBanh ?? maxPerKien) : maxPerKien;
 
   const canSubmit =
     !!lookup &&
-    (lookup.status === "predicted" || lookup.status === "partial") &&
+    (lookup.status === "predicted" || lookup.status === "partial" || lookup.status === "partial_kien") &&
     !!effectiveNganId &&
     soBanh > 0 &&
+    soBanh <= stepperMax &&
     !!ngaySx &&
     !!ca &&
-    (!lookup.isNewLot || (!!boc && pallet.length > 0));
+    !!boc &&
+    pallet.length > 0;
 
   const handleDecoded = useCallback(
     (text: string) => {
@@ -259,8 +290,11 @@ export default function ConfirmKienProductionPage() {
         soBanh,
         ngaySx,
         ca,
-        boc: lookup.isNewLot ? boc : undefined,
-        pallet: lookup.isNewLot ? pallet : undefined,
+        // Bọc/Pallet/Số chỉ thị giờ luôn cho sửa và luôn gửi lên, kể cả kiện 2-4 của lô đã tồn
+        // tại — mỗi kiện tự ghi lại lựa chọn của mình (xem mục 1 rule 06-module-production.md).
+        boc,
+        pallet,
+        chiThi,
         tham: lookup.tham,
         ghiChu: lookup.isNewLot ? (ghiChu || null) : undefined,
         userId: currentUser?.id ?? null,
@@ -289,6 +323,36 @@ export default function ConfirmKienProductionPage() {
   };
 
   const userDisplayName = currentUser?.full_name || currentUser?.username || "";
+
+  const handleConfirmEndShift = async () => {
+    if (!factoryId || !currentUser?.id || !sessionStartAt) {
+      setEndShiftConfirmOpen(false);
+      router.push("/dashboard/product");
+      return;
+    }
+    setEndShiftGenerating(true);
+    setEndShiftError(null);
+    try {
+      const data = await loadShiftReportData(
+        factoryId,
+        currentUser.id,
+        sessionStartAt.toISOString(),
+        userDisplayName,
+        chucVu || tt("shiftLabel"),
+      );
+      if (data.rows.length === 0) {
+        setEndShiftError(tt("endShiftNoData"));
+        return;
+      }
+      await shareOrDownloadShiftReportPdf(data);
+      setEndShiftConfirmOpen(false);
+      router.push("/dashboard/product");
+    } catch (err) {
+      setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
+    } finally {
+      setEndShiftGenerating(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -355,7 +419,7 @@ export default function ConfirmKienProductionPage() {
                   <div className="text-right">
                     <div className="text-sm font-extrabold leading-tight text-slate-700">{userDisplayName}</div>
                     <div className="text-[11px] font-bold uppercase tracking-wide text-amber-600">
-                      {tt("shiftLabel")}
+                      {chucVu || tt("shiftLabel")}
                     </div>
                   </div>
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500">
@@ -387,77 +451,111 @@ export default function ConfirmKienProductionPage() {
             ) : lookup.status === "not_found" ? (
               <CardMessage icon={<AlertTriangle size={24} className="text-red-500" />} text={tt("khongTimThay")} />
             ) : lookup.status === "produced" ? (
-              <CardMessage
-                icon={<CheckCircle2 size={24} className="text-emerald-600" />}
-                text={tt("daSanXuatRoi", { kien: lookup.kien, maLo: lookup.maLo })}
-              />
+              <div className="space-y-4">
+                <CardMessage
+                  icon={<CheckCircle2 size={24} className="text-emerald-600" />}
+                  text={tt("daSanXuatRoi", { kien: lookup.kien, maLo: lookup.maLo })}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanError(null);
+                    setView("scanning");
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
+                >
+                  <ScanLine size={20} />
+                  {tt("scanAnotherKien")}
+                </button>
+              </div>
             ) : (
               <div className="space-y-4">
+                <Field label={tt("ngaySanXuat")}>
+                  <input
+                    type="date"
+                    value={ngaySx}
+                    onChange={(e) => setNgaySx(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                  />
+                </Field>
+                <Field label={tt("gioSanXuat")}>
+                  <div className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600">
+                    {formatDMYHMS(now)}
+                  </div>
+                </Field>
+
                 <div className="rounded-2xl bg-emerald-600 p-5 text-white shadow-md">
-                  <div className="flex items-center justify-between gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="text-xs font-bold uppercase tracking-wide text-emerald-100">{tt("soLo")}</div>
                       <div className="text-2xl font-extrabold">{lookup.maLo}</div>
-                      <div className="mt-2 text-xs font-bold uppercase tracking-wide text-emerald-100">
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wide text-emerald-100">
                         {tt("kienLabel")}
                       </div>
-                      <div className="text-xl font-extrabold">{lookup.kien}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-bold uppercase tracking-wide text-emerald-100">{tt("soBanh")}</div>
-                      <div className="mt-1 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSoBanh((v) => Math.max(1, v - 1))}
-                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 hover:bg-white/30"
-                        >
-                          <Minus size={18} />
-                        </button>
-                        <span className="w-14 text-center text-2xl font-extrabold">{soBanh}</span>
-                        <button
-                          type="button"
-                          onClick={() => setSoBanh((v) => Math.min(maxPerKien, v + 1))}
-                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 hover:bg-white/30"
-                        >
-                          <Plus size={18} />
-                        </button>
-                      </div>
-                      <div className="mt-1 text-[11px] text-emerald-100">
-                        {tt("stepperHint", { max: maxPerKien })}
-                      </div>
+                      <div className="text-2xl font-extrabold">{lookup.kien}</div>
                     </div>
                   </div>
                 </div>
 
+                {lookup.status === "partial_kien" && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-700">
+                    {tt("kienDaCoMotPhan", {
+                      kien: lookup.kien,
+                      existingBanh: lookup.existingBanh,
+                      max: lookup.remainingBanh ?? 0,
+                    })}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label={tt("ngaySanXuat")}>
+                  <Field label={tt("caSanXuat")}>
+                    <select
+                      value={ca}
+                      onChange={(e) => setCa(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    >
+                      {CA_OPTS.map((c) => (
+                        <option key={c} value={c}>
+                          Ca {c}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={tt("chiThi")}>
                     <input
-                      type="date"
-                      value={ngaySx}
-                      onChange={(e) => setNgaySx(e.target.value)}
+                      type="text"
+                      value={chiThi}
+                      onChange={(e) => setChiThi(e.target.value)}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                     />
                   </Field>
-                  <Field label={tt("gioSanXuat")}>
-                    <div className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600">
-                      {formatDMYHMS(now)}
-                    </div>
-                  </Field>
                 </div>
 
-                <Field label={tt("caSanXuat")}>
-                  <select
-                    value={ca}
-                    onChange={(e) => setCa(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                  >
-                    {CA_OPTS.map((c) => (
-                      <option key={c} value={c}>
-                        Ca {c}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{tt("soBanh")}</div>
+                  <div className="mt-1 flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSoBanh((v) => Math.max(1, v - 1))}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    >
+                      <Minus size={18} />
+                    </button>
+                    <span className="w-16 text-center text-3xl font-extrabold text-slate-800">{soBanh}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSoBanh((v) => Math.min(stepperMax, v + 1))}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    >
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-1 text-center text-[11px] text-slate-400">
+                    {tt("stepperHint", { max: stepperMax })}
+                  </div>
+                </div>
 
                 {!lookup.nganId && (
                   <Field label={tt("chonNganNguon")}>
@@ -484,71 +582,60 @@ export default function ConfirmKienProductionPage() {
                   </div>
                 )}
 
-                {lookup.isNewLot ? (
-                  <>
-                    <div className="grid grid-cols-1 gap-3">
-                      <Field label={tt("boc")}>
-                        <select
-                          value={boc}
-                          onChange={(e) => setBoc(e.target.value)}
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                <Field label={tt("boc")}>
+                  <select
+                    value={boc}
+                    onChange={(e) => setBoc(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                  >
+                    <option value="">{tt("chonBoc")}</option>
+                    {bocOptions.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                    {boc && !bocOptions.includes(boc) && <option value={boc}>{boc}</option>}
+                  </select>
+                </Field>
+
+                <Field label={tt("loaiPallet")}>
+                  <div className="flex flex-wrap gap-2">
+                    {PALLET_OPTS.map((p) => {
+                      const checked = pallet.includes(p);
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() =>
+                            setPallet((prev) => (checked ? prev.filter((x) => x !== p) : [...prev, p]))
+                          }
+                          className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                            checked
+                              ? "bg-emerald-600 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
                         >
-                          <option value="">{tt("chonBoc")}</option>
-                          {bocOptions.map((b) => (
-                            <option key={b} value={b}>
-                              {b}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label={tt("loaiPallet")}>
-                        <div className="flex flex-wrap gap-2">
-                          {PALLET_OPTS.map((p) => {
-                            const checked = pallet.includes(p);
-                            return (
-                              <button
-                                key={p}
-                                type="button"
-                                onClick={() =>
-                                  setPallet((prev) => (checked ? prev.filter((x) => x !== p) : [...prev, p]))
-                                }
-                                className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                                  checked
-                                    ? "bg-emerald-600 text-white"
-                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                }`}
-                              >
-                                {p}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </Field>
-                    </div>
-                    <Field label={tt("ghiChu")}>
-                      <textarea
-                        value={ghiChu}
-                        onChange={(e) => setGhiChu(e.target.value)}
-                        rows={2}
-                        placeholder={tt("ghiChuPlaceholder")}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                      />
-                    </Field>
-                  </>
-                ) : (
-                  <div className="space-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
-                    <div>
-                      <span className="font-bold text-slate-500">{tt("boc")}: </span>
-                      <span className="font-semibold text-slate-800">{lookup.boc || "—"}</span>
-                    </div>
-                    <div>
-                      <span className="font-bold text-slate-500">{tt("loaiPallet")}: </span>
-                      <span className="font-semibold text-slate-800">
-                        {lookup.pallet && lookup.pallet.length > 0 ? lookup.pallet.join(", ") : "—"}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-400">{tt("lotExistsNote")}</div>
+                          {p}
+                        </button>
+                      );
+                    })}
                   </div>
+                </Field>
+
+                {!lookup.isNewLot && (
+                  <div className="text-xs text-slate-400">{tt("lotExistsNote")}</div>
+                )}
+
+                {lookup.isNewLot && (
+                  <Field label={tt("ghiChu")}>
+                    <textarea
+                      value={ghiChu}
+                      onChange={(e) => setGhiChu(e.target.value)}
+                      rows={2}
+                      placeholder={tt("ghiChuPlaceholder")}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </Field>
                 )}
 
                 {submitError && (
@@ -575,11 +662,14 @@ export default function ConfirmKienProductionPage() {
       {endShiftConfirmOpen && (
         <EndShiftConfirmModal
           tt={tt}
-          onCancel={() => setEndShiftConfirmOpen(false)}
-          onConfirm={() => {
+          generating={endShiftGenerating}
+          error={endShiftError}
+          onCancel={() => {
+            if (endShiftGenerating) return;
             setEndShiftConfirmOpen(false);
-            router.push("/dashboard/product");
+            setEndShiftError(null);
           }}
+          onConfirm={handleConfirmEndShift}
         />
       )}
     </div>
@@ -707,10 +797,14 @@ function HubView({
 
 function EndShiftConfirmModal({
   tt,
+  generating,
+  error,
   onCancel,
   onConfirm,
 }: {
   tt: (key: string) => string;
+  generating: boolean;
+  error: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -719,20 +813,28 @@ function EndShiftConfirmModal({
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
         <h3 className="text-base font-extrabold text-slate-800">{tt("confirmEndShiftTitle")}</h3>
         <p className="mt-2 text-sm text-slate-500">{tt("confirmEndShiftMessage")}</p>
+        {error && (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+            {error}
+          </div>
+        )}
         <div className="mt-5 flex gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"
+            disabled={generating}
+            className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {tt("cancel")}
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700"
+            disabled={generating}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {tt("confirmAction")}
+            {generating && <Loader2 size={16} className="animate-spin" />}
+            {generating ? tt("endShiftGenerating") : tt("confirmAction")}
           </button>
         </div>
       </div>
