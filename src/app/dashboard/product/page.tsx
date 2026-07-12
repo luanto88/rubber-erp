@@ -3494,11 +3494,16 @@ export default function ProductPage() {
     }
 
     if (transactionCount === 0) {
-      const { error: delError } = await supabase.from("lots").delete().eq("id", contribution.id);
+      // RPC atomic (không phải .delete() thô) — tự gỡ liên kết lot_prediction_lots.real_lot_id
+      // trước khi xóa lots, tránh đúng bug "lô ma" đã fix 2026-07-13 (xem product/actions.ts
+      // deleteLotTransaction). Trước đây gọi thẳng .from("lots").delete() luôn báo nhầm "đã có
+      // phiếu kiểm nghiệm liên quan" cho lô có liên kết dự đoán (lỗi 23503 nhưng không phải do
+      // qc_results), khiến người dùng không bao giờ xóa được.
+      const { error: delError } = await supabase.rpc("delete_orphan_lot", { p_lot_id: contribution.id });
       if (delError) {
         setSaveError(
           delError.code === "23503"
-            ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm liên quan. Xóa phiếu KN trước."
+            ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm hoặc đơn xuất hàng liên quan. Xóa các dữ liệu đó trước."
             : delError.message,
         );
         setDelConfirm(null);

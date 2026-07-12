@@ -42,6 +42,13 @@ export type ConfirmKienLookup = {
   // nhập thêm (= maxPerKien - existingBanh) — dùng để clamp stepper + hiện cảnh báo trên UI.
   existingBanh: number;
   remainingBanh: number | null;
+  // Bọc/Pallet của ĐÚNG kiện đang xác nhận (không phải toàn lô) — chỉ có giá trị khi
+  // status = "partial_kien" (kiện này đã có giao dịch trước đó). Quy tắc đã chốt: các lần nhập
+  // tiếp theo của CÙNG 1 kiện được phép khác Ca SX/Số chỉ thị/Ngày SX, nhưng BẮT BUỘC cùng
+  // Bọc/Pallet với lần nhập trước của chính kiện đó (loại bành đã cố định theo lô nên không cần
+  // check thêm) — UI dùng 2 field này để pre-fill và cảnh báo khi người dùng chọn khác đi.
+  existingKienBoc: string | null;
+  existingKienPallet: string[] | null;
 };
 
 function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
@@ -66,6 +73,8 @@ function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
     kienWeightKg: null,
     existingBanh: 0,
     remainingBanh: null,
+    existingKienBoc: null,
+    existingKienPallet: null,
   };
 }
 
@@ -142,12 +151,23 @@ export async function resolveKienForConfirm(
   if (lot) {
     const { data: txRows } = await supabase
       .from("lot_transactions")
-      .select("kien_a,kien_b,kien_c,kien_d")
-      .eq("lot_id", lot.id);
-    const existingBanh = (txRows || []).reduce(
+      .select("kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
+      .eq("lot_id", lot.id)
+      .order("created_at", { ascending: true });
+    const rows = (txRows || []) as Array<{
+      kien_a: number; kien_b: number; kien_c: number; kien_d: number;
+      boc: string | null; pallet: string[] | null; created_at: string | null;
+    }>;
+    const existingBanh = rows.reduce(
       (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
       0,
     );
+    // Bọc/Pallet của lần nhập GẦN NHẤT của ĐÚNG kiện này (không phải toàn lô) — dùng để bắt buộc
+    // các lần nhập sau của cùng kiện phải đồng nhất (xem ghi chú ở ConfirmKienLookup).
+    const kienField = `kien_${kienKey}` as "kien_a" | "kien_b" | "kien_c" | "kien_d";
+    const lastKienTx = [...rows].reverse().find((row) => Number(row[kienField] || 0) > 0) || null;
+    const existingKienBoc = lastKienTx?.boc ?? null;
+    const existingKienPallet = lastKienTx?.pallet ?? null;
 
     const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null;
     const maxPerKien = config?.max_per_kien ?? 36;
@@ -175,6 +195,8 @@ export async function resolveKienForConfirm(
         kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
         existingBanh,
         remainingBanh: 0,
+        existingKienBoc,
+        existingKienPallet,
       };
     }
 
@@ -182,8 +204,9 @@ export async function resolveKienForConfirm(
     // đoán per-kiện, fallback về ngan_id chung của lô (đúng thứ tự ưu tiên đã chốt trong plan).
     const nganId = predictedNganId || lot.ngan_id || null;
     const { nganMa, nganTen } = await loadNganInfo(nganId);
+    const isPartialKien = existingBanh > 0;
     return {
-      status: existingBanh > 0 ? "partial_kien" : "partial",
+      status: isPartialKien ? "partial_kien" : "partial",
       maLo,
       kien,
       isNewLot: false,
@@ -191,9 +214,11 @@ export async function resolveKienForConfirm(
       loaiCsr: lot.loai_csr,
       loaiBanh: lot.loai_banh,
       dayChuyen: lot.day_chuyen ?? dayChuyenFromBatch,
-      boc: lot.boc,
+      // Kiện đã có một phần: pre-fill đúng bọc/pallet của CHÍNH kiện đó (không phải lot.boc/pallet
+      // — giá trị đó chỉ là "gần nhất của cả lô", có thể đến từ kiện KHÁC đã scan sau kiện này).
+      boc: isPartialKien ? existingKienBoc ?? lot.boc : lot.boc,
       tham: lot.tham,
-      pallet: lot.pallet,
+      pallet: isPartialKien ? existingKienPallet ?? lot.pallet : lot.pallet,
       chiThi: lot.chi_thi,
       ghiChu: lot.ghi_chu,
       nganId,
@@ -203,6 +228,8 @@ export async function resolveKienForConfirm(
       kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
       existingBanh,
       remainingBanh: maxPerKien - existingBanh,
+      existingKienBoc,
+      existingKienPallet,
     };
   }
 
@@ -231,6 +258,8 @@ export async function resolveKienForConfirm(
       kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
       existingBanh: 0,
       remainingBanh: config.max_per_kien,
+      existingKienBoc: null,
+      existingKienPallet: null,
     };
   }
 

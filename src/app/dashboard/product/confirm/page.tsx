@@ -76,6 +76,13 @@ function formatDMYHMS(d: Date) {
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`;
 }
 
+// So khớp 2 mảng string như tập hợp (không phân biệt thứ tự) — dùng để so pallet đa chọn.
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((x) => setB.has(x));
+}
+
 function formatHMS(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -285,6 +292,24 @@ export default function ConfirmKienProductionPage() {
   const maxPerKien = lookup?.maxPerKien || 36;
   const stepperMax = lookup?.status === "partial_kien" ? Math.max(1, lookup.remainingBanh ?? maxPerKien) : maxPerKien;
 
+  // Kiện đang nhập là lần thứ 2+ (top-up dở dang) — Ca SX/Số chỉ thị/Ngày SX được phép khác lần
+  // trước, nhưng Bọc/Loại pallet BẮT BUỘC đồng nhất với chính kiện đó (không phải toàn lô — xem
+  // ConfirmKienLookup trong confirm/actions.ts). So khớp bằng tập hợp, không phân biệt thứ tự.
+  const bocMismatch =
+    lookup?.status === "partial_kien" && !!lookup.existingKienBoc && boc !== lookup.existingKienBoc;
+  const palletMismatch =
+    lookup?.status === "partial_kien" &&
+    !!lookup.existingKienPallet &&
+    lookup.existingKienPallet.length > 0 &&
+    !sameStringSet(pallet, lookup.existingKienPallet);
+  const kienMismatch = bocMismatch || palletMismatch;
+
+  const resetToKienValue = () => {
+    if (!lookup) return;
+    if (lookup.existingKienBoc) setBoc(lookup.existingKienBoc);
+    if (lookup.existingKienPallet) setPallet(lookup.existingKienPallet);
+  };
+
   const canSubmit =
     !!lookup &&
     (lookup.status === "predicted" || lookup.status === "partial" || lookup.status === "partial_kien") &&
@@ -294,7 +319,8 @@ export default function ConfirmKienProductionPage() {
     !!ngaySx &&
     !!ca &&
     !!boc &&
-    pallet.length > 0;
+    pallet.length > 0 &&
+    !kienMismatch;
 
   const handleDecoded = useCallback(
     (text: string) => {
@@ -652,6 +678,33 @@ export default function ConfirmKienProductionPage() {
                       existingBanh: lookup.existingBanh,
                       max: lookup.remainingBanh ?? 0,
                     })}
+                  </div>
+                )}
+
+                {kienMismatch && (
+                  <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3.5 py-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-extrabold text-red-700">
+                          {tt("kienBocPalletMismatchTitle")}
+                        </div>
+                        <div className="mt-1 text-xs font-semibold text-red-600">
+                          {tt("kienBocPalletMismatchBody", {
+                            kien: lookup.kien,
+                            boc: lookup.existingKienBoc || "—",
+                            pallet: (lookup.existingKienPallet || []).join(", ") || "—",
+                          })}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={resetToKienValue}
+                          className="mt-2 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                        >
+                          {tt("resetToKienValue")}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 

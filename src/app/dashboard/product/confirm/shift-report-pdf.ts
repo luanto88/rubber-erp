@@ -20,9 +20,19 @@ const DOC_CODE_LINE = "NMCB-QT01-F09 (03-01/08/2026) Có hiệu lực";
 const PAGE_LEFT = 14;
 const CONTENT_WIDTH = 182; // 210mm (A4) - 14*2 lề
 
-// Quy ước hiển thị "CSR" của app: CSR + giá trị thô lưu trong DB (mirror src/lib/quality-stats.ts).
+// QUAN TRỌNG: khác với module Kiểm nghiệm (lưu "10"/"20" thô, cần tự thêm tiền tố "CSR" khi hiển
+// thị — xem src/lib/quality-stats.ts), module Thành phẩm (`lots.loai_csr`, nguồn của toàn bộ
+// phiếu này) đã lưu SẴN chuỗi đầy đủ dạng "CSR10"/"CSRL"/"CSRCV50" (xem product-lot-config.ts).
+// Bug đã fix 2026-07-13: cột "Loại CSR" và tiêu đề trước đây tự thêm "CSR" một lần nữa, ra
+// "CSRCSR10" / "CSR CSR10" — giờ dùng thẳng giá trị gốc cho cột, chỉ tách tiền tố ra cho tiêu đề.
 function loaiCsrLabel(v: string): string {
-  return v ? `CSR${v}` : "—";
+  return v || "—";
+}
+
+// Chỉ dùng cho tiêu đề "...NHẬP KHO - CSR 10, 20" — tách tiền tố CSR/SVR ra khỏi từng giá trị để
+// ghép thành 1 danh sách số dùng chung 1 chữ "CSR" phía trước, đúng định dạng mẫu giấy gốc.
+function stripCsrPrefix(v: string): string {
+  return v.replace(/^(CSR|SVR)/, "");
 }
 
 function formatDateTime(iso: string | null): string {
@@ -43,7 +53,8 @@ function renderHeader(
   doc.setFontSize(12.5);
   doc.text(COMPANY_LINE, pageWidth / 2, 15, { align: "center", maxWidth: pageWidth - 24 });
 
-  const titleSuffix = meta.csrList.length > 0 ? ` - CSR ${meta.csrList.join(", ")}` : "";
+  const titleSuffix =
+    meta.csrList.length > 0 ? ` - CSR ${meta.csrList.map(stripCsrPrefix).join(", ")}` : "";
   doc.setFontSize(12);
   doc.text(`${TITLE_BASE}${titleSuffix}`, pageWidth / 2, 21.5, { align: "center", maxWidth: pageWidth - 24 });
 

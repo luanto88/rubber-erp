@@ -73,6 +73,10 @@ const DICT: Record<Lang, Record<string, string>> = {
     downloadReport: "Tải phiếu PDF",
     deleteEntry: "Xóa dòng này",
     viewOrRegenerateReport: "Xem / Tạo lại phiếu PDF",
+    kienBocPalletMismatchTitle: "Bọc/Pallet không khớp lần nhập trước của kiện này",
+    kienBocPalletMismatchBody:
+      "Kiện {kien} được phép khác Ca SX/Số chỉ thị/Ngày SX giữa các lần nhập, nhưng bắt buộc CÙNG Bọc và Loại pallet. Giá trị đã ghi nhận trước đó: {boc} · {pallet}.",
+    resetToKienValue: "Đặt lại đúng giá trị",
   },
   km: {
     appTitle: "ផលិតផលសម្រេច",
@@ -135,6 +139,10 @@ const DICT: Record<Lang, Record<string, string>> = {
     downloadReport: "ទាញយក PDF",
     deleteEntry: "លុបជួរនេះ",
     viewOrRegenerateReport: "មើល / បង្កើតរបាយការណ៍ PDF ឡើងវិញ",
+    kienBocPalletMismatchTitle: "ស្រោប/ប៉ាឡែតមិនត្រូវគ្នានឹងលើកចូលមុនរបស់កញ្ចប់នេះ",
+    kienBocPalletMismatchBody:
+      "កញ្ចប់ {kien} អាចខុសគ្នាបាននៅវេនផលិត/លេខការណែនាំ/ថ្ងៃផលិត ប៉ុន្តែត្រូវតែដូចគ្នាទាំងស្រោប និងប្រភេទប៉ាឡែត។ តម្លៃដែលបានកត់ត្រាពីមុន៖ {boc} · {pallet}។",
+    resetToKienValue: "កំណត់ត្រឡប់ទៅតម្លៃត្រឹមត្រូវ",
   },
 };
 

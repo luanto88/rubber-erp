@@ -272,41 +272,40 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
   }
 }
 
+// Trước đây hàm này làm 3 bước riêng biệt không atomic (xóa transaction -> đếm còn lại -> xóa
+// lots nếu hết) — phát hiện bug thật 2026-07-13: nếu lô được tạo qua "Dự đoán số lô", bước xóa
+// lots cuối cùng luôn thất bại vì vi phạm khóa ngoại `lot_prediction_lots.real_lot_id`, nhưng
+// bước xóa transaction TRƯỚC ĐÓ đã commit rồi — để lại "lô ma": transaction đã mất, lots vẫn còn
+// với tong_banh=0 (trigger cũ đã recompute) nhưng kien_a-d vẫn giữ giá trị cũ (trigger cũ không
+// đụng tới), và mọi lần xóa lại sau đó lặp lại đúng lỗi cũ. Đã chuyển toàn bộ luồng vào RPC atomic
+// `delete_lot_transaction` (migration 20260713_delete_lot_transaction_rpc.sql) — khóa lots FOR
+// UPDATE, tự gỡ liên kết lot_prediction_lots trước khi xóa lots, tất cả trong 1 transaction duy
+// nhất (thành công toàn bộ hoặc rollback toàn bộ, không còn trạng thái nửa vời).
 export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
   const { transactionId } = input;
 
   try {
     const supabase = getSupabaseAdmin();
 
-    const { data: targetTx, error: findError } = await supabase
-      .from("lot_transactions")
-      .select("id, lot_id, ngan_id")
-      .eq("id", transactionId)
-      .single();
+    const { data: rpcData, error: rpcError } = await supabase.rpc("delete_lot_transaction", {
+      p_transaction_id: transactionId,
+    });
+    if (rpcError) throw new Error(`Khong xoa duoc giao dich: ${rpcError.message}`);
 
-    if (findError || !targetTx) {
-      throw new Error(`Khong tim thay giao dich can xoa: ${findError?.message ?? transactionId}`);
-    }
-
-    const { error: deleteError } = await supabase
-      .from("lot_transactions")
-      .delete()
-      .eq("id", transactionId);
-    if (deleteError) throw new Error(`Khong xoa duoc giao dich: ${deleteError.message}`);
-
-    const { count, error: countError } = await supabase
-      .from("lot_transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("lot_id", targetTx.lot_id);
-
-    if (countError) throw new Error(`Khong dem duoc giao dich con lai: ${countError.message}`);
+    const row = (Array.isArray(rpcData) ? rpcData[0] : rpcData) as
+      | { lot_id: string; ngan_id: string | null; remaining_count: number; lot_deleted: boolean }
+      | undefined;
+    if (!row) throw new Error("Khong xoa duoc giao dich: RPC khong tra ve du lieu.");
 
     let snapshot = null;
-    if ((count ?? 0) > 0) {
-      snapshot = await syncLotMasterSnapshot(targetTx.lot_id);
-    } else {
-      const { error: deleteLotError } = await supabase.from("lots").delete().eq("id", targetTx.lot_id);
-      if (deleteLotError) throw new Error(`Khong xoa duoc lo tong: ${deleteLotError.message}`);
+    if (!row.lot_deleted) {
+      const { data: lot, error: lotError } = await supabase
+        .from("lots")
+        .select("kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ca, ngan_id, ngay_ht, boc, pallet, chi_thi")
+        .eq("id", row.lot_id)
+        .single();
+      if (lotError || !lot) throw new Error(`Khong doc duoc lo sau khi xoa giao dich: ${lotError?.message}`);
+      snapshot = { ...lot, lotId: row.lot_id };
     }
 
     revalidateLotScreens();
@@ -314,9 +313,9 @@ export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
     return {
       success: true as const,
       deletedTransactionId: transactionId,
-      lotId: targetTx.lot_id,
-      affectedNganId: targetTx.ngan_id,
-      remainingTransactions: count ?? 0,
+      lotId: row.lot_id,
+      affectedNganId: row.ngan_id,
+      remainingTransactions: row.remaining_count,
       snapshot,
     };
   } catch (error) {
