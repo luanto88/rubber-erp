@@ -71,6 +71,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     endShiftNoData: "Ca này chưa có dữ liệu nào để lập phiếu báo thành phẩm.",
     shareReport: "Chia sẻ phiếu",
     downloadReport: "Tải phiếu PDF",
+    deleteEntry: "Xóa dòng này",
+    viewOrRegenerateReport: "Xem / Tạo lại phiếu PDF",
   },
   km: {
     appTitle: "ផលិតផលសម្រេច",
@@ -131,6 +133,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     endShiftNoData: "វេននេះមិនទាន់មានទិន្នន័យសម្រាប់បង្កើតរបាយការណ៍ទេ។",
     shareReport: "ចែករំលែករបាយការណ៍",
     downloadReport: "ទាញយក PDF",
+    deleteEntry: "លុបជួរនេះ",
+    viewOrRegenerateReport: "មើល / បង្កើតរបាយការណ៍ PDF ឡើងវិញ",
   },
 };
 

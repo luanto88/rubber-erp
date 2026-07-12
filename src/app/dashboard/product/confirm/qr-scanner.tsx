@@ -39,7 +39,7 @@ export function QrScanner({
     instance
       .start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1 },
         (decodedText) => {
           if (decodedRef.current || cancelled) return;
           decodedRef.current = true;
@@ -108,7 +108,11 @@ export function QrScanner({
               {scanError}
             </div>
           )}
-          <div id={REGION_ID} className="mx-auto w-full max-w-md flex-1" />
+          {/* Container vuông (aspect-square) — trước đây flex-1 kéo dài theo chiều cao màn
+              hình dọc khiến khung quét bị bóp méo thành hình chữ nhật dù qrbox cấu hình vuông. */}
+          <div className="flex flex-1 items-center justify-center px-4">
+            <div id={REGION_ID} className="aspect-square w-full max-w-md" />
+          </div>
         </>
       )}
 

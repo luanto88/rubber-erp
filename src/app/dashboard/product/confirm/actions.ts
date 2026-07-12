@@ -3,7 +3,8 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { KienLetter } from "@/lib/product-label";
 import { getExistingRealKg, markLotPredictionRealized } from "@/app/dashboard/product/predict/actions";
-import { saveLotTransaction } from "@/app/dashboard/product/actions";
+import { deleteLotTransaction, saveLotTransaction } from "@/app/dashboard/product/actions";
+import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { getTodayISODate } from "@/lib/date-utils";
 
@@ -483,9 +484,132 @@ export async function loadUserChucVu(factoryId: string, profileId: string | null
   return data?.chuc_vu_chinh_quyen || data?.chuc_vu || null;
 }
 
+const KIEN_ORDER: KienLetter[] = ["A", "B", "C", "D"];
+
+type ShiftTxRow = {
+  id: string;
+  lot_id: string;
+  ca: string;
+  ngay_nhap: string;
+  kien_a: number;
+  kien_b: number;
+  kien_c: number;
+  kien_d: number;
+  so_banh: number;
+  so_kg: number;
+  boc: string | null;
+  pallet: string[] | null;
+  chi_thi: string | null;
+  ngan_id: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  lots: { ma_lo: string; loai_csr: string; loai_banh: number; trang_thai: string } | { ma_lo: string; loai_csr: string; loai_banh: number; trang_thai: string }[];
+};
+
+// Toàn bộ giao dịch của MỘT ngày sản xuất + ca — KHÔNG lọc theo người nhập, vì 1 ca có thể có
+// nhiều người trực khác nhau nối tiếp nhau (đã chốt với người dùng). Dùng chung cho cả 3 nơi:
+// - Hub "Lịch sử ca" (kèm xóa dòng)
+// - Sinh phiếu báo thành phẩm cuối ca
+// - Xem/tạo lại phiếu cũ theo ngày+ca bất kỳ
+async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: string): Promise<ShiftTxRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("lot_transactions")
+    .select(
+      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,factory_id)",
+    )
+    .eq("lots.factory_id", factoryId)
+    .eq("ngay_nhap", ngaySx)
+    .eq("ca", ca)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []) as unknown as ShiftTxRow[];
+}
+
+async function resolveProfileNames(profileIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(profileIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase.from("profiles").select("id, full_name, username").in("id", ids);
+  const map = new Map<string, string>();
+  for (const p of data || []) {
+    map.set(p.id, p.full_name || p.username || "—");
+  }
+  return map;
+}
+
+export type ShiftHistoryEntry = {
+  transactionId: string;
+  lotId: string;
+  maLo: string;
+  kienLetters: string;
+  soBanh: number;
+  soKg: number;
+  nguoiNhap: string;
+  createdAt: string | null;
+  canDelete: boolean;
+};
+
+// Danh sách giao dịch (từng lần quét 1 kiện) của 1 ngày SX + ca, mới nhất trước — dùng cho khối
+// "Lịch sử ca" trong Hub, có kèm quyền xóa từng dòng.
+export async function loadShiftHistory(
+  factoryId: string,
+  ngaySx: string,
+  ca: string,
+): Promise<ShiftHistoryEntry[]> {
+  const rows = await loadShiftTransactions(factoryId, ngaySx, ca);
+  const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
+
+  return rows
+    .map((row) => {
+      const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
+      const letters = KIEN_ORDER.filter((k) => {
+        const key = `kien_${KIEN_LOWER[k]}` as "kien_a" | "kien_b" | "kien_c" | "kien_d";
+        return Number(row[key] || 0) > 0;
+      }).join("");
+      return {
+        transactionId: row.id,
+        lotId: row.lot_id,
+        maLo: lotInfo?.ma_lo || "",
+        kienLetters: letters,
+        soBanh: Number(row.so_banh || 0),
+        soKg: Number(row.so_kg || 0),
+        nguoiNhap: row.created_by ? nameMap.get(row.created_by) || "—" : "—",
+        createdAt: row.created_at,
+        canDelete: normalizeLotStatus(lotInfo?.trang_thai) === "Dở dang",
+      };
+    })
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+export type DeleteShiftHistoryResult = { success: true } | { success: false; error: string };
+
+// Cho phép sửa lỗi nhập sai: xóa 1 giao dịch đã gửi trong Hub — chỉ khi lô liên quan vẫn đang
+// "Dở dang" (chưa đi qua Kiểm nghiệm/Xuất hàng), re-check ở server chứ không tin canDelete phía
+// client. Dùng lại deleteLotTransaction() (product/actions.ts) — đã tự đồng bộ lại lots.
+export async function deleteShiftHistoryEntry(transactionId: string): Promise<DeleteShiftHistoryResult> {
+  const supabase = getSupabaseAdmin();
+  const { data: tx, error: txError } = await supabase
+    .from("lot_transactions")
+    .select("lot_id, lots!inner(trang_thai)")
+    .eq("id", transactionId)
+    .maybeSingle();
+  if (txError || !tx) return { success: false, error: "Không tìm thấy giao dịch cần xóa." };
+
+  const lotInfo = Array.isArray(tx.lots) ? tx.lots[0] : tx.lots;
+  if (normalizeLotStatus(lotInfo?.trang_thai) !== "Dở dang") {
+    return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể xóa từ đây." };
+  }
+
+  const result = await deleteLotTransaction({ transactionId });
+  if (!result.success) return { success: false, error: result.error };
+  return { success: true };
+}
+
 export type ShiftReportLotRow = {
   maLo: string;
   loaiCsr: string;
+  loaiBanh: number;
   kienLetters: string;
   soBanh: number;
   soKg: number;
@@ -493,75 +617,60 @@ export type ShiftReportLotRow = {
   pallet: string;
   chiThi: string;
   hoanThanhAt: string | null;
+  nguoiNhap: string;
+};
+
+export type ShiftReportGroupRow = {
+  loaiCsr: string;
+  loaiBanh: number;
+  boc: string;
+  pallet: string;
+  soBanh: number;
+  soKg: number;
 };
 
 export type ShiftReportData = {
   ngay: string;
   ca: string;
-  nguoiGui: string;
-  chucVu: string;
+  nganMa: string;
   rows: ShiftReportLotRow[];
   tongBanh: number;
   tongKg: number;
-  byLoaiCsr: { loaiCsr: string; soBanh: number; soKg: number }[];
+  byGroup: ShiftReportGroupRow[];
 };
 
-const KIEN_ORDER: KienLetter[] = ["A", "B", "C", "D"];
+// Tổng hợp toàn bộ giao dịch của 1 NGÀY SX + CA (không lọc theo người nhập — 1 ca có thể có
+// nhiều người trực) để in phiếu báo thành phẩm — dùng lại cho cả "Kết thúc ca" lẫn "Xem/tạo lại
+// phiếu cũ" vì luôn truy vấn lại DB, không phụ thuộc phiên làm việc nào.
+export async function loadShiftReportData(factoryId: string, ngaySx: string, ca: string): Promise<ShiftReportData> {
+  const rows = await loadShiftTransactions(factoryId, ngaySx, ca);
+  const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
 
-// Tổng hợp toàn bộ giao dịch của MỘT người dùng trong khoảng thời gian ca (từ lúc mở trang tới
-// lúc bấm "Kết thúc ca") để in phiếu báo thành phẩm — truy vấn lại DB (không dùng sessionLog phía
-// client) để không mất dữ liệu nếu người dùng lỡ tải lại trang giữa ca (đã chốt với người dùng).
-export async function loadShiftReportData(
-  factoryId: string,
-  userId: string,
-  sinceIso: string,
-  nguoiGui: string,
-  chucVu: string,
-): Promise<ShiftReportData> {
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("lot_transactions")
-    .select(
-      "id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,created_at,lots!inner(ma_lo,loai_csr,factory_id)",
-    )
-    .eq("lots.factory_id", factoryId)
-    .eq("created_by", userId)
-    .gte("created_at", sinceIso)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-
-  type TxRow = {
-    id: string;
-    ca: string;
-    ngay_nhap: string;
-    kien_a: number;
-    kien_b: number;
-    kien_c: number;
-    kien_d: number;
-    so_banh: number;
-    so_kg: number;
-    boc: string | null;
-    pallet: string[] | null;
-    chi_thi: string | null;
-    created_at: string | null;
-    lots: { ma_lo: string; loai_csr: string } | { ma_lo: string; loai_csr: string }[];
-  };
-
-  const rowsRaw = (data || []) as unknown as TxRow[];
-
-  // Gộp theo mã lô — mỗi lô xuất hiện đúng 1 dòng trong phiếu, kiện = union các kiện đã xác
-  // nhận trong ca này, ngày giờ hoàn thành = giao dịch cuối cùng của lô đó trong ca.
   const byMaLo = new Map<
     string,
-    { loaiCsr: string; letters: Set<KienLetter>; soBanh: number; soKg: number; boc: string; pallet: string; chiThi: string; hoanThanhAt: string | null }
+    {
+      loaiCsr: string;
+      loaiBanh: number;
+      letters: Set<KienLetter>;
+      soBanh: number;
+      soKg: number;
+      boc: string;
+      pallet: string;
+      chiThi: string;
+      hoanThanhAt: string | null;
+      nguoiNhap: string;
+    }
   >();
+  const nganIds = new Set<string>();
 
-  for (const row of rowsRaw) {
+  for (const row of rows) {
     const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
+    if (row.ngan_id) nganIds.add(row.ngan_id);
     const entry = byMaLo.get(maLo) || {
       loaiCsr: lotInfo?.loai_csr || "",
+      loaiBanh: Number(lotInfo?.loai_banh) || 0,
       letters: new Set<KienLetter>(),
       soBanh: 0,
       soKg: 0,
@@ -569,6 +678,7 @@ export async function loadShiftReportData(
       pallet: "",
       chiThi: "",
       hoanThanhAt: null,
+      nguoiNhap: "",
     };
     if (Number(row.kien_a || 0) > 0) entry.letters.add("A");
     if (Number(row.kien_b || 0) > 0) entry.letters.add("B");
@@ -581,13 +691,15 @@ export async function loadShiftReportData(
     if (row.chi_thi) entry.chiThi = row.chi_thi;
     if (!entry.hoanThanhAt || (row.created_at && row.created_at > entry.hoanThanhAt)) {
       entry.hoanThanhAt = row.created_at;
+      entry.nguoiNhap = row.created_by ? nameMap.get(row.created_by) || "—" : "—";
     }
     byMaLo.set(maLo, entry);
   }
 
-  const rows: ShiftReportLotRow[] = [...byMaLo.entries()].map(([maLo, entry]) => ({
+  const reportRows: ShiftReportLotRow[] = [...byMaLo.entries()].map(([maLo, entry]) => ({
     maLo,
     loaiCsr: entry.loaiCsr,
+    loaiBanh: entry.loaiBanh,
     kienLetters: KIEN_ORDER.filter((k) => entry.letters.has(k)).join(""),
     soBanh: entry.soBanh,
     soKg: Math.round(entry.soKg * 100) / 100,
@@ -595,28 +707,35 @@ export async function loadShiftReportData(
     pallet: entry.pallet,
     chiThi: entry.chiThi,
     hoanThanhAt: entry.hoanThanhAt,
+    nguoiNhap: entry.nguoiNhap,
   }));
 
-  const byLoaiCsrMap = new Map<string, { soBanh: number; soKg: number }>();
-  for (const r of rows) {
-    const acc = byLoaiCsrMap.get(r.loaiCsr) || { soBanh: 0, soKg: 0 };
+  // Tổng hợp theo Loại CSR - Loại bành - Bọc - Loại pallet — nếu nhiều tổ hợp khác nhau thì
+  // chia nhiều dòng (đã chốt với người dùng).
+  const byGroupMap = new Map<string, ShiftReportGroupRow>();
+  for (const r of reportRows) {
+    const key = `${r.loaiCsr}||${r.loaiBanh}||${r.boc}||${r.pallet}`;
+    const acc = byGroupMap.get(key) || { loaiCsr: r.loaiCsr, loaiBanh: r.loaiBanh, boc: r.boc, pallet: r.pallet, soBanh: 0, soKg: 0 };
     acc.soBanh += r.soBanh;
     acc.soKg += r.soKg;
-    byLoaiCsrMap.set(r.loaiCsr, acc);
+    byGroupMap.set(key, acc);
+  }
+
+  let nganMa = "—";
+  if (nganIds.size > 0) {
+    const supabase = getSupabaseAdmin();
+    const { data: ngans } = await supabase.from("ngans").select("id, ma_ngan").in("id", [...nganIds]);
+    const mas = (ngans || []).map((n) => n.ma_ngan).filter(Boolean);
+    if (mas.length > 0) nganMa = [...new Set(mas)].join(", ");
   }
 
   return {
-    ngay: getTodayISODate(),
-    ca: rowsRaw.at(-1)?.ca || "",
-    nguoiGui,
-    chucVu,
-    rows,
-    tongBanh: rows.reduce((s, r) => s + r.soBanh, 0),
-    tongKg: Math.round(rows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
-    byLoaiCsr: [...byLoaiCsrMap.entries()].map(([loaiCsr, v]) => ({
-      loaiCsr,
-      soBanh: v.soBanh,
-      soKg: Math.round(v.soKg * 100) / 100,
-    })),
+    ngay: ngaySx,
+    ca,
+    nganMa,
+    rows: reportRows,
+    tongBanh: reportRows.reduce((s, r) => s + r.soBanh, 0),
+    tongKg: Math.round(reportRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
+    byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
   };
 }

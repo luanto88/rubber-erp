@@ -5,14 +5,23 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  Boxes,
+  Calendar,
   CheckCircle2,
   ChevronLeft,
+  Clock,
+  FileDown,
+  Hash,
+  Layers,
   Loader2,
   Minus,
   Package,
   Plus,
   ScanLine,
+  Sun,
+  Trash2,
   User,
+  Warehouse,
 } from "lucide-react";
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth";
 import { getTodayISODate } from "@/lib/date-utils";
@@ -20,12 +29,15 @@ import { getBocsForLoaiCSR } from "@/lib/product-lot-config";
 import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   confirmKienProduction,
+  deleteShiftHistoryEntry,
   loadActiveNgansForFactory,
+  loadShiftHistory,
   loadShiftReportData,
   loadUserChucVu,
   resolveKienForConfirm,
   type ActiveNganOption,
   type ConfirmKienLookup,
+  type ShiftHistoryEntry,
 } from "@/app/dashboard/product/confirm/actions";
 import { shareOrDownloadShiftReportPdf } from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
@@ -39,16 +51,6 @@ const CA_OPTS = ["A", "B", "C"] as const;
 const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
 
 type ViewMode = "hub" | "scanning" | "form";
-
-type SessionLogEntry = {
-  id: string;
-  maLo: string;
-  kien: KienLetter;
-  soBanh: number;
-  ca: string;
-  nguoiGui: string;
-  sentAt: Date;
-};
 
 function pad2(n: number) {
   return n.toString().padStart(2, "0");
@@ -66,7 +68,9 @@ function formatDMYHMS(d: Date) {
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`;
 }
 
-function formatHMS(d: Date) {
+function formatHMS(iso: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
@@ -116,8 +120,6 @@ export default function ConfirmKienProductionPage() {
   const [chucVu, setChucVu] = useState<string | null>(null);
 
   const [view, setView] = useState<ViewMode>("hub");
-  const [sessionStartAt, setSessionStartAt] = useState<Date | null>(null);
-  const [sessionLog, setSessionLog] = useState<SessionLogEntry[]>([]);
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
   const [endShiftError, setEndShiftError] = useState<string | null>(null);
@@ -143,6 +145,20 @@ export default function ConfirmKienProductionPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // "Lịch sử ca" trong Hub — luôn truy vấn lại DB theo (Ngày SX, Ca), KHÔNG theo người nhập, vì
+  // 1 ca có thể có nhiều người trực nối tiếp nhau (đã chốt với người dùng). Selector này cũng
+  // được tái dùng làm tham số cho nút "Xem/Tạo lại phiếu" và cho "Kết thúc ca".
+  const [historyNgay, setHistoryNgay] = useState(() => getDefaultNgaySx(new Date()));
+  const [historyCa, setHistoryCa] = useState<string>("A");
+  const [history, setHistory] = useState<ShiftHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -177,7 +193,6 @@ export default function ConfirmKienProductionPage() {
       }
       setFactoryId(fid);
       setCurrentUser(user);
-      setSessionStartAt(new Date());
       loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
 
       const paramLo = (searchParams.get("lo") || "").trim();
@@ -195,6 +210,25 @@ export default function ConfirmKienProductionPage() {
     void bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshHistory = useCallback(async () => {
+    if (!factoryId) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await loadShiftHistory(factoryId, historyNgay, historyCa);
+      setHistory(rows);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "Lỗi không xác định");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [factoryId, historyNgay, historyCa]);
+
+  useEffect(() => {
+    if (view !== "hub" || !factoryId) return;
+    void refreshHistory();
+  }, [view, factoryId, historyNgay, historyCa, refreshHistory]);
 
   useEffect(() => {
     if (!factoryId || !maLo || view !== "form") return;
@@ -303,17 +337,12 @@ export default function ConfirmKienProductionPage() {
         setSubmitError(result.error);
         return;
       }
-      const entry: SessionLogEntry = {
-        id: `${maLo}-${kien}-${Date.now()}`,
-        maLo,
-        kien,
-        soBanh,
-        ca,
-        nguoiGui: currentUser?.full_name || currentUser?.username || "",
-        sentAt: new Date(),
-      };
-      setSessionLog((prev) => [entry, ...prev]);
       setToast(tt("daGuiThanhCong"));
+      // Đưa selector "Lịch sử ca" về đúng ngày+ca vừa nhập để người dùng thấy ngay dòng mới —
+      // hiệu ứng phụ: nếu đổi ngày/ca so với lần selector trước, useEffect [historyNgay,historyCa]
+      // sẽ tự refetch khi quay lại hub.
+      setHistoryNgay(ngaySx);
+      setHistoryCa(ca);
       setView("hub");
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Lỗi không xác định");
@@ -324,8 +353,41 @@ export default function ConfirmKienProductionPage() {
 
   const userDisplayName = currentUser?.full_name || currentUser?.username || "";
 
+  const handleDeleteEntry = async (entry: ShiftHistoryEntry) => {
+    setDeletingId(entry.transactionId);
+    try {
+      const result = await deleteShiftHistoryEntry(entry.transactionId);
+      if (!result.success) {
+        setHistoryError(result.error);
+        return;
+      }
+      setDeleteConfirmId(null);
+      await refreshHistory();
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleGenerateReportNow = async () => {
+    if (!factoryId) return;
+    setReportGenerating(true);
+    setReportError(null);
+    try {
+      const data = await loadShiftReportData(factoryId, historyNgay, historyCa);
+      if (data.rows.length === 0) {
+        setReportError(tt("endShiftNoData"));
+        return;
+      }
+      await shareOrDownloadShiftReportPdf(data);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
+    } finally {
+      setReportGenerating(false);
+    }
+  };
+
   const handleConfirmEndShift = async () => {
-    if (!factoryId || !currentUser?.id || !sessionStartAt) {
+    if (!factoryId) {
       setEndShiftConfirmOpen(false);
       router.push("/dashboard/product");
       return;
@@ -333,13 +395,7 @@ export default function ConfirmKienProductionPage() {
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
-      const data = await loadShiftReportData(
-        factoryId,
-        currentUser.id,
-        sessionStartAt.toISOString(),
-        userDisplayName,
-        chucVu || tt("shiftLabel"),
-      );
+      const data = await loadShiftReportData(factoryId, historyNgay, historyCa);
       if (data.rows.length === 0) {
         setEndShiftError(tt("endShiftNoData"));
         return;
@@ -434,8 +490,21 @@ export default function ConfirmKienProductionPage() {
             {view === "hub" ? (
               <HubView
                 tt={tt}
-                sessionStartAt={sessionStartAt}
-                sessionLog={sessionLog}
+                historyNgay={historyNgay}
+                historyCa={historyCa}
+                onChangeNgay={setHistoryNgay}
+                onChangeCa={setHistoryCa}
+                history={history}
+                historyLoading={historyLoading}
+                historyError={historyError}
+                deleteConfirmId={deleteConfirmId}
+                deletingId={deletingId}
+                onAskDelete={setDeleteConfirmId}
+                onCancelDelete={() => setDeleteConfirmId(null)}
+                onConfirmDelete={handleDeleteEntry}
+                reportGenerating={reportGenerating}
+                reportError={reportError}
+                onGenerateReport={handleGenerateReportNow}
                 onScan={() => {
                   setScanError(null);
                   setView("scanning");
@@ -470,7 +539,7 @@ export default function ConfirmKienProductionPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <Field label={tt("ngaySanXuat")}>
+                <Field label={tt("ngaySanXuat")} icon={<Calendar size={13} />}>
                   <input
                     type="date"
                     value={ngaySx}
@@ -478,12 +547,38 @@ export default function ConfirmKienProductionPage() {
                     className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                   />
                 </Field>
-                <Field label={tt("gioSanXuat")}>
+                <Field label={tt("gioSanXuat")} icon={<Clock size={13} />}>
                   <div className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600">
                     {formatDMYHMS(now)}
                   </div>
                 </Field>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
+                    <select
+                      value={ca}
+                      onChange={(e) => setCa(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    >
+                      {CA_OPTS.map((c) => (
+                        <option key={c} value={c}>
+                          Ca {c}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={tt("chiThi")} icon={<Hash size={13} />}>
+                    <input
+                      type="text"
+                      value={chiThi}
+                      onChange={(e) => setChiThi(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </Field>
+                </div>
+
+                {/* Thẻ gộp Mã lô + Kiện + Số bành — số bành nhập tay được (xóa/gõ số khác), không
+                    chỉ tăng giảm bằng nút +/-. */}
                 <div className="rounded-2xl bg-emerald-600 p-5 text-white shadow-md">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -495,6 +590,49 @@ export default function ConfirmKienProductionPage() {
                         {tt("kienLabel")}
                       </div>
                       <div className="text-2xl font-extrabold">{lookup.kien}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 border-t border-white/20 pt-4">
+                    <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-emerald-100">
+                      <Package size={12} /> {tt("soBanh")}
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSoBanh((v) => Math.max(0, v - 1))}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 hover:bg-white/30"
+                      >
+                        <Minus size={18} />
+                      </button>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={stepperMax}
+                        value={soBanh === 0 ? "" : soBanh}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            setSoBanh(0);
+                            return;
+                          }
+                          const parsed = Math.floor(Number(raw));
+                          if (!Number.isFinite(parsed)) return;
+                          setSoBanh(Math.max(0, Math.min(stepperMax, parsed)));
+                        }}
+                        className="w-20 rounded-xl border border-white/30 bg-white/10 py-1.5 text-center text-3xl font-extrabold text-white outline-none focus:border-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSoBanh((v) => Math.min(stepperMax, v + 1))}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 hover:bg-white/30"
+                      >
+                        <Plus size={18} />
+                      </button>
+                    </div>
+                    <div className="mt-1 text-center text-[11px] text-emerald-100">
+                      {tt("stepperHint", { max: stepperMax })}
                     </div>
                   </div>
                 </div>
@@ -509,56 +647,8 @@ export default function ConfirmKienProductionPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={tt("caSanXuat")}>
-                    <select
-                      value={ca}
-                      onChange={(e) => setCa(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                    >
-                      {CA_OPTS.map((c) => (
-                        <option key={c} value={c}>
-                          Ca {c}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label={tt("chiThi")}>
-                    <input
-                      type="text"
-                      value={chiThi}
-                      onChange={(e) => setChiThi(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
-                    />
-                  </Field>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{tt("soBanh")}</div>
-                  <div className="mt-1 flex items-center justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSoBanh((v) => Math.max(1, v - 1))}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    >
-                      <Minus size={18} />
-                    </button>
-                    <span className="w-16 text-center text-3xl font-extrabold text-slate-800">{soBanh}</span>
-                    <button
-                      type="button"
-                      onClick={() => setSoBanh((v) => Math.min(stepperMax, v + 1))}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    >
-                      <Plus size={18} />
-                    </button>
-                  </div>
-                  <div className="mt-1 text-center text-[11px] text-slate-400">
-                    {tt("stepperHint", { max: stepperMax })}
-                  </div>
-                </div>
-
                 {!lookup.nganId && (
-                  <Field label={tt("chonNganNguon")}>
+                  <Field label={tt("chonNganNguon")} icon={<Warehouse size={13} />}>
                     <select
                       value={manualNganId}
                       onChange={(e) => setManualNganId(e.target.value)}
@@ -574,7 +664,8 @@ export default function ConfirmKienProductionPage() {
                   </Field>
                 )}
                 {lookup.nganId && (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
+                    <Warehouse size={14} className="shrink-0 text-slate-400" />
                     <span className="font-bold text-slate-500">{tt("nganNguon")}: </span>
                     <span className="font-semibold text-slate-800">
                       {lookup.nganMa || "—"} {lookup.nganTen ? `— ${lookup.nganTen}` : ""}
@@ -582,7 +673,7 @@ export default function ConfirmKienProductionPage() {
                   </div>
                 )}
 
-                <Field label={tt("boc")}>
+                <Field label={tt("boc")} icon={<Layers size={13} />}>
                   <select
                     value={boc}
                     onChange={(e) => setBoc(e.target.value)}
@@ -598,7 +689,7 @@ export default function ConfirmKienProductionPage() {
                   </select>
                 </Field>
 
-                <Field label={tt("loaiPallet")}>
+                <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
                   <div className="flex flex-wrap gap-2">
                     {PALLET_OPTS.map((p) => {
                       const checked = pallet.includes(p);
@@ -695,10 +786,13 @@ function LangToggle({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => voi
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-bold text-slate-500">{label}</div>
+      <div className="mb-1.5 flex items-center gap-1 text-xs font-bold text-slate-500">
+        {icon}
+        {label}
+      </div>
       {children}
     </div>
   );
@@ -729,14 +823,40 @@ function CardMessage({ icon, text }: { icon: React.ReactNode; text: string }) {
 
 function HubView({
   tt,
-  sessionStartAt,
-  sessionLog,
+  historyNgay,
+  historyCa,
+  onChangeNgay,
+  onChangeCa,
+  history,
+  historyLoading,
+  historyError,
+  deleteConfirmId,
+  deletingId,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
+  reportGenerating,
+  reportError,
+  onGenerateReport,
   onScan,
   onEndShift,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
-  sessionStartAt: Date | null;
-  sessionLog: SessionLogEntry[];
+  historyNgay: string;
+  historyCa: string;
+  onChangeNgay: (v: string) => void;
+  onChangeCa: (v: string) => void;
+  history: ShiftHistoryEntry[];
+  historyLoading: boolean;
+  historyError: string | null;
+  deleteConfirmId: string | null;
+  deletingId: string | null;
+  onAskDelete: (id: string) => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: (entry: ShiftHistoryEntry) => void;
+  reportGenerating: boolean;
+  reportError: string | null;
+  onGenerateReport: () => void;
   onScan: () => void;
   onEndShift: () => void;
 }) {
@@ -752,37 +872,112 @@ function HubView({
       </button>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 flex items-center gap-2 text-sm font-extrabold text-emerald-700">
+        <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-emerald-700">
           <Package size={16} />
           {tt("sessionLogTitle")}
         </div>
-        {sessionLog.length === 0 ? (
+
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div>
+            <div className="mb-1 flex items-center gap-1 text-[11px] font-bold text-slate-500">
+              <Calendar size={11} /> {tt("ngaySanXuat")}
+            </div>
+            <input
+              type="date"
+              value={historyNgay}
+              onChange={(e) => onChangeNgay(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500"
+            />
+          </div>
+          <div>
+            <div className="mb-1 flex items-center gap-1 text-[11px] font-bold text-slate-500">
+              <Sun size={11} /> {tt("caSanXuat")}
+            </div>
+            <select
+              value={historyCa}
+              onChange={(e) => onChangeCa(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500"
+            >
+              {CA_OPTS.map((c) => (
+                <option key={c} value={c}>
+                  Ca {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {historyLoading ? (
+          <p className="py-4 text-center text-xs text-slate-400">{tt("dangTai")}</p>
+        ) : historyError ? (
+          <p className="py-2 text-center text-xs font-semibold text-red-500">{historyError}</p>
+        ) : history.length === 0 ? (
           <p className="py-4 text-center text-xs text-slate-400">{tt("noLogYet")}</p>
         ) : (
           <div className="space-y-2">
-            {sessionLog.map((h) => (
+            {history.map((h) => (
               <div
-                key={h.id}
+                key={h.transactionId}
                 className="rounded-xl border-l-4 border-emerald-500 bg-slate-50 px-3 py-2 text-sm shadow-sm"
               >
-                <div className="font-bold text-slate-800">
-                  {h.maLo} - {tt("kienLabel")} {h.kien}
-                </div>
-                <div className="text-xs text-slate-500">
-                  {h.soBanh} · Ca {h.ca} · {h.nguoiGui} · {formatDMYHMS(h.sentAt)}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-bold text-slate-800">
+                      {h.maLo} - {tt("kienLabel")} {h.kienLetters || "—"}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {h.soBanh} bành · {h.nguoiNhap} · {formatHMS(h.createdAt)}
+                    </div>
+                  </div>
+                  {h.canDelete && (
+                    deleteConfirmId === h.transactionId ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={deletingId === h.transactionId}
+                          onClick={() => onConfirmDelete(h)}
+                          className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-60"
+                        >
+                          {deletingId === h.transactionId ? "..." : tt("confirmAction")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onCancelDelete}
+                          className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100"
+                        >
+                          {tt("cancel")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onAskDelete(h.transactionId)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50"
+                        title={tt("deleteEntry")}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        <button
+          type="button"
+          disabled={reportGenerating}
+          onClick={onGenerateReport}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {reportGenerating ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+          {tt("viewOrRegenerateReport")}
+        </button>
+        {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
       </div>
 
-      <div className="border-t border-dashed border-slate-300 pt-4 text-center">
-        {sessionStartAt && (
-          <p className="mb-3 text-sm font-bold text-emerald-700">
-            {tt("shiftStartedAt")}: {formatHMS(sessionStartAt)}
-          </p>
-        )}
+      <div className="border-t border-dashed border-slate-300 pt-4">
         <button
           type="button"
           onClick={onEndShift}

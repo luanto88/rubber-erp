@@ -5,7 +5,6 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   normalizeLotStatus,
   pickCanonicalLot,
-  type NormalizedLotStatus,
 } from "@/app/dashboard/product/shared";
 
 type SaveLotTransactionInput = {
@@ -91,72 +90,30 @@ function revalidateLotScreens() {
   revalidatePath("/dashboard/product-draft");
 }
 
-// Duyệt ngược mảng (đã sắp xếp tăng dần theo ngay_nhap/created_at) để tìm giá trị non-null
-// gần nhất — dùng cho boc/pallet/chi_thi vốn chỉ được set bởi luồng "Xác nhận sản xuất qua QR",
-// các dòng nhập tay cũ để null nên phải bỏ qua thay vì coi null là "giá trị mới nhất".
-function lastNonNull<T, V>(arr: T[], picker: (item: T) => V | null | undefined): V | undefined {
-  for (let i = arr.length - 1; i >= 0; i -= 1) {
-    const value = picker(arr[i]);
-    if (value !== null && value !== undefined) return value;
-  }
-  return undefined;
-}
-
+// Trước đây hàm này tự đọc toàn bộ lot_transactions rồi tính tổng ở JS và ghi đè lots — không
+// có khóa nào giữa bước đọc và ghi, gây race condition (lost update) khi 2 kiện của CÙNG 1 lô
+// được xác nhận gần như đồng thời (rất dễ xảy ra với tính năng "Xác nhận sản xuất qua QR" —
+// quét liên tục, có thể nhiều điện thoại quét song song). Đã phát hiện thực tế 2026-07-12: nhiều
+// lô "Dở dang" có kien_a/b/c/d đúng nhưng tong_banh = 0 dù không có lỗi hiển thị cho người dùng.
+//
+// Fix: chuyển toàn bộ phép tính SUM + ghi lots thành 1 hàm Postgres atomic
+// (sync_lot_master_snapshot, migration 20260712_sync_lot_master_snapshot_rpc.sql), khóa dòng
+// lots bằng FOR UPDATE trước khi tính — loại bỏ hoàn toàn khoảng hở đọc-tính-ghi. Hàm JS này giờ
+// chỉ gọi RPC rồi đọc lại lots để trả về snapshot cho caller.
 async function syncLotMasterSnapshot(lotId: string) {
   const supabase = getSupabaseAdmin();
-  const [{ data: lot, error: lotError }, { data: transactions, error: txError }] =
-    await Promise.all([
-      supabase.from("lots").select("id, loai_banh, trang_thai").eq("id", lotId).single(),
-      supabase
-        .from("lot_transactions")
-        .select(
-          "id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at, boc, pallet, chi_thi",
-        )
-        .eq("lot_id", lotId)
-        .order("ngay_nhap", { ascending: true })
-        .order("created_at", { ascending: true }),
-    ]);
 
-  if (lotError) throw new Error(`Khong dong bo duoc lo: ${lotError.message}`);
-  if (txError) throw new Error(`Khong tai duoc giao dich lo: ${txError.message}`);
+  const { error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotId });
+  if (rpcError) throw new Error(`Khong dong bo duoc lo: ${rpcError.message}`);
 
-  const txs = transactions ?? [];
-  const latestTx = txs.at(-1);
-  const kienA = txs.reduce((sum, tx) => sum + Number(tx.kien_a ?? 0), 0);
-  const kienB = txs.reduce((sum, tx) => sum + Number(tx.kien_b ?? 0), 0);
-  const kienC = txs.reduce((sum, tx) => sum + Number(tx.kien_c ?? 0), 0);
-  const kienD = txs.reduce((sum, tx) => sum + Number(tx.kien_d ?? 0), 0);
-  const tongBanh = txs.reduce((sum, tx) => sum + Number(tx.so_banh ?? 0), 0);
-  const tongKg = txs.reduce((sum, tx) => sum + Number(tx.so_kg ?? 0), 0);
-  const loTron = Number(lot.loai_banh) === 20 ? 240 : 144;
+  const { data: lot, error: lotError } = await supabase
+    .from("lots")
+    .select("kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ca, ngan_id, ngay_ht, boc, pallet, chi_thi")
+    .eq("id", lotId)
+    .single();
+  if (lotError || !lot) throw new Error(`Khong doc duoc lo sau khi dong bo: ${lotError?.message}`);
 
-  const derivedStatus: NormalizedLotStatus =
-    tongBanh >= loTron ? "Hoàn thành" : "Dở dang";
-
-  const latestBoc = lastNonNull(txs, (tx) => tx.boc as string | null);
-  const latestPallet = lastNonNull(txs, (tx) => tx.pallet as string[] | null);
-  const latestChiThi = lastNonNull(txs, (tx) => tx.chi_thi as string | null);
-
-  const payload = {
-    kien_a: kienA,
-    kien_b: kienB,
-    kien_c: kienC,
-    kien_d: kienD,
-    tong_banh: tongBanh,
-    tong_kg: tongKg,
-    trang_thai: derivedStatus,
-    ca: latestTx?.ca ?? null,
-    ngan_id: latestTx?.ngan_id ?? null,
-    ngay_ht: derivedStatus === "Hoàn thành" ? (latestTx?.ngay_nhap ?? null) : null,
-    ...(latestBoc !== undefined ? { boc: latestBoc } : {}),
-    ...(latestPallet !== undefined ? { pallet: latestPallet } : {}),
-    ...(latestChiThi !== undefined ? { chi_thi: latestChiThi } : {}),
-  };
-
-  const { error: updateError } = await supabase.from("lots").update(payload).eq("id", lotId);
-  if (updateError) throw new Error(`Khong cap nhat tong lo duoc: ${updateError.message}`);
-
-  return { ...payload, lotId, transactionsCount: txs.length };
+  return { ...lot, lotId };
 }
 
 export async function saveLotTransaction(input: SaveLotTransactionInput) {
