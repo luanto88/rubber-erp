@@ -615,7 +615,6 @@ export type ShiftReportLotRow = {
   soKg: number;
   boc: string;
   pallet: string;
-  chiThi: string;
   hoanThanhAt: string | null;
   nguoiNhap: string;
 };
@@ -633,6 +632,7 @@ export type ShiftReportData = {
   ngay: string;
   ca: string;
   nganMa: string;
+  soChiThi: string;
   rows: ShiftReportLotRow[];
   tongBanh: number;
   tongKg: number;
@@ -646,9 +646,16 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
   const rows = await loadShiftTransactions(factoryId, ngaySx, ca);
   const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
 
-  const byMaLo = new Map<
+  // Nhóm theo (ma_lo + boc + pallet) của ĐÚNG giao dịch — KHÔNG chỉ theo ma_lo. Trước đây gộp
+  // thuần theo ma_lo rồi ghi đè boc/pallet theo giao dịch cuối cùng (last-wins) khiến 1 lô có
+  // các kiện dùng pallet khác nhau (vd A/B/C = "Sắt đế gỗ", D = "MB5") bị hiển thị sai thành MỘT
+  // pallet duy nhất cho cả lô, kéo theo "Tổng hợp" cộng nhầm số bành vào sai nhóm pallet (bug đã
+  // xác nhận 2026-07-13). Nhóm theo tổ hợp thuộc tính thật của từng giao dịch → khi các kiện của
+  // cùng 1 lô khác bọc/pallet, chúng tự tách thành nhiều dòng riêng, mỗi dòng đúng số liệu.
+  const byGroupKey = new Map<
     string,
     {
+      maLo: string;
       loaiCsr: string;
       loaiBanh: number;
       letters: Set<KienLetter>;
@@ -656,27 +663,32 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
       soKg: number;
       boc: string;
       pallet: string;
-      chiThi: string;
       hoanThanhAt: string | null;
       nguoiNhap: string;
     }
   >();
   const nganIds = new Set<string>();
+  const chiThiSet = new Set<string>();
 
   for (const row of rows) {
     const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
     if (row.ngan_id) nganIds.add(row.ngan_id);
-    const entry = byMaLo.get(maLo) || {
+    if (row.chi_thi) chiThiSet.add(row.chi_thi);
+
+    const rowBoc = row.boc || "";
+    const rowPallet = row.pallet && row.pallet.length > 0 ? row.pallet.join(", ") : "";
+    const key = `${maLo}||${rowBoc}||${rowPallet}`;
+    const entry = byGroupKey.get(key) || {
+      maLo,
       loaiCsr: lotInfo?.loai_csr || "",
       loaiBanh: Number(lotInfo?.loai_banh) || 0,
       letters: new Set<KienLetter>(),
       soBanh: 0,
       soKg: 0,
-      boc: "",
-      pallet: "",
-      chiThi: "",
+      boc: rowBoc,
+      pallet: rowPallet,
       hoanThanhAt: null,
       nguoiNhap: "",
     };
@@ -686,18 +698,15 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     if (Number(row.kien_d || 0) > 0) entry.letters.add("D");
     entry.soBanh += Number(row.so_banh || 0);
     entry.soKg += Number(row.so_kg || 0);
-    if (row.boc) entry.boc = row.boc;
-    if (row.pallet && row.pallet.length > 0) entry.pallet = row.pallet.join(", ");
-    if (row.chi_thi) entry.chiThi = row.chi_thi;
     if (!entry.hoanThanhAt || (row.created_at && row.created_at > entry.hoanThanhAt)) {
       entry.hoanThanhAt = row.created_at;
       entry.nguoiNhap = row.created_by ? nameMap.get(row.created_by) || "—" : "—";
     }
-    byMaLo.set(maLo, entry);
+    byGroupKey.set(key, entry);
   }
 
-  const reportRows: ShiftReportLotRow[] = [...byMaLo.entries()].map(([maLo, entry]) => ({
-    maLo,
+  const reportRows: ShiftReportLotRow[] = [...byGroupKey.values()].map((entry) => ({
+    maLo: entry.maLo,
     loaiCsr: entry.loaiCsr,
     loaiBanh: entry.loaiBanh,
     kienLetters: KIEN_ORDER.filter((k) => entry.letters.has(k)).join(""),
@@ -705,7 +714,6 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     soKg: Math.round(entry.soKg * 100) / 100,
     boc: entry.boc,
     pallet: entry.pallet,
-    chiThi: entry.chiThi,
     hoanThanhAt: entry.hoanThanhAt,
     nguoiNhap: entry.nguoiNhap,
   }));
@@ -728,11 +736,13 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     const mas = (ngans || []).map((n) => n.ma_ngan).filter(Boolean);
     if (mas.length > 0) nganMa = [...new Set(mas)].join(", ");
   }
+  const soChiThi = chiThiSet.size > 0 ? [...chiThiSet].join(", ") : "—";
 
   return {
     ngay: ngaySx,
     ca,
     nganMa,
+    soChiThi,
     rows: reportRows,
     tongBanh: reportRows.reduce((s, r) => s + r.soBanh, 0),
     tongKg: Math.round(reportRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,

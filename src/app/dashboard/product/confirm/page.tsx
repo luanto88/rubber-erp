@@ -50,6 +50,14 @@ const QrScanner = dynamic(
 const CA_OPTS = ["A", "B", "C"] as const;
 const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
 
+// Style dùng chung cho các trường cần "nổi bật hơn" (Ngày SX, Ca SX, Số chỉ thị, Bọc): cỡ chữ
+// +10% so với chuẩn text-sm (14px -> 15.4px), viền dày 2px, nền nhấn nhẹ — tương phản rõ với các
+// trường phụ (Giờ SX, Ghi chú) vẫn giữ style mặc định.
+const highlightFieldClass =
+  "w-full rounded-xl border-2 border-emerald-300 bg-emerald-50/50 px-3.5 py-3 text-[15.4px] font-semibold text-slate-800 outline-none transition-colors focus:border-emerald-500 focus:bg-white";
+const highlightFieldClassAmber =
+  "w-full rounded-xl border-2 border-amber-400 bg-amber-50 px-3.5 py-3 text-[15.4px] font-semibold text-slate-800 outline-none transition-colors focus:border-amber-500 focus:bg-white";
+
 type ViewMode = "hub" | "scanning" | "form";
 
 function pad2(n: number) {
@@ -544,7 +552,7 @@ export default function ConfirmKienProductionPage() {
                     type="date"
                     value={ngaySx}
                     onChange={(e) => setNgaySx(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    className={highlightFieldClass}
                   />
                 </Field>
                 <Field label={tt("gioSanXuat")} icon={<Clock size={13} />}>
@@ -558,7 +566,7 @@ export default function ConfirmKienProductionPage() {
                     <select
                       value={ca}
                       onChange={(e) => setCa(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                      className={highlightFieldClass}
                     >
                       {CA_OPTS.map((c) => (
                         <option key={c} value={c}>
@@ -572,7 +580,7 @@ export default function ConfirmKienProductionPage() {
                       type="text"
                       value={chiThi}
                       onChange={(e) => setChiThi(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                      className={highlightFieldClass}
                     />
                   </Field>
                 </div>
@@ -652,7 +660,7 @@ export default function ConfirmKienProductionPage() {
                     <select
                       value={manualNganId}
                       onChange={(e) => setManualNganId(e.target.value)}
-                      className="w-full rounded-xl border border-amber-400 bg-amber-50 px-3 py-2.5 text-sm outline-none focus:border-amber-500"
+                      className={highlightFieldClassAmber}
                     >
                       <option value="">{tt("chonNgan")}</option>
                       {activeNgans.map((n) => (
@@ -664,10 +672,10 @@ export default function ConfirmKienProductionPage() {
                   </Field>
                 )}
                 {lookup.nganId && (
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
-                    <Warehouse size={14} className="shrink-0 text-slate-400" />
-                    <span className="font-bold text-slate-500">{tt("nganNguon")}: </span>
-                    <span className="font-semibold text-slate-800">
+                  <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/50 px-3.5 py-3">
+                    <Warehouse size={16} className="shrink-0 text-emerald-500" />
+                    <span className="text-[15.4px] font-bold text-slate-500">{tt("nganNguon")}: </span>
+                    <span className="text-[15.4px] font-extrabold text-slate-800">
                       {lookup.nganMa || "—"} {lookup.nganTen ? `— ${lookup.nganTen}` : ""}
                     </span>
                   </div>
@@ -677,7 +685,7 @@ export default function ConfirmKienProductionPage() {
                   <select
                     value={boc}
                     onChange={(e) => setBoc(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    className={highlightFieldClass}
                   >
                     <option value="">{tt("chonBoc")}</option>
                     {bocOptions.map((b) => (
@@ -690,7 +698,7 @@ export default function ConfirmKienProductionPage() {
                 </Field>
 
                 <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-2.5">
                     {PALLET_OPTS.map((p) => {
                       const checked = pallet.includes(p);
                       return (
@@ -700,10 +708,10 @@ export default function ConfirmKienProductionPage() {
                           onClick={() =>
                             setPallet((prev) => (checked ? prev.filter((x) => x !== p) : [...prev, p]))
                           }
-                          className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                          className={`rounded-full px-3.5 py-2 text-[13.2px] font-bold transition-colors ${
                             checked
-                              ? "bg-emerald-600 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              ? "bg-emerald-600 text-white shadow-sm"
+                              : "bg-white text-slate-600 hover:bg-slate-100"
                           }`}
                         >
                           {p}

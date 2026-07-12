@@ -140,6 +140,22 @@ export async function resolveProductLabelLookupTarget(
       }
     }
 
+    // Kiện này chưa có giao dịch thật, nhưng lô đã tồn tại (do kiện khác đã được xác nhận trước
+    // đó) — vẫn phải tra ngăn nguồn theo lot.ngan_id, KHÔNG được hardcode null, nếu không kiện
+    // đầu tiên (đi qua nhánh "predicted" bên dưới) hiển thị đúng số ngăn còn các kiện sau của
+    // cùng lô lại hiện "-" dù đã có ngăn hợp lệ (bug đã xác nhận 2026-07-13).
+    let partialNganMa: string | null = null
+    let partialNganTen: string | null = null
+    if (lot.ngan_id) {
+      const { data: ngan } = await supabase
+        .from("ngans")
+        .select("ma_ngan,ten_ngan")
+        .eq("id", lot.ngan_id)
+        .maybeSingle()
+      partialNganMa = ngan?.ma_ngan || null
+      partialNganTen = ngan?.ten_ngan || null
+    }
+
     return {
       status: "partial",
       maLo: normalizedMaLo,
@@ -148,8 +164,8 @@ export async function resolveProductLabelLookupTarget(
       loaiBanh: lot.loai_banh,
       boc: lot.boc,
       nganId: lot.ngan_id,
-      nganMa: null,
-      nganTen: null,
+      nganMa: partialNganMa,
+      nganTen: partialNganTen,
       ngaySx: null,
       ca: null,
       realLotId: lot.id,
