@@ -251,12 +251,13 @@ function MaterialsTable({ materials, showDonGia = true }: { materials: MaterialR
   )
 }
 
-// Tự nhận diện "Tổ trưởng cơ điện" từ danh sách "Người thực hiện" đã chọn — dùng chung cho
-// danh sách "Chúng tôi gồm:" (F13) và ô chữ ký "Tổ cơ điện" (F13, F03).
-function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>): string[] {
+// Tự nhận diện "Tổ trưởng cơ điện"/"Tổ trưởng tổ cơ khí" từ danh sách "Người thực hiện" đã chọn
+// — dùng chung cho danh sách "Chúng tôi gồm:" (F13) và ô chữ ký "Tổ cơ điện"/"Tổ cơ khí" (F13, F03).
+// `groupKeyword` mặc định "cơ điện"; Sửa chữa Đội xe dùng "cơ khí" (xem PrintSuCo).
+function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>, groupKeyword = "cơ điện"): string[] {
   return nguoiThucHien.filter((name) => {
     const role = staffMap.get(name)?.toLowerCase() || ""
-    return role.includes("tổ trưởng") && role.includes("cơ điện")
+    return role.includes("tổ trưởng") && role.includes(groupKeyword)
   })
 }
 
@@ -265,19 +266,23 @@ function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, strin
 function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
+  // Sửa chữa Đội xe: "Tổ cơ điện" đổi thành "Tổ cơ khí"
+  const toGroupKeyword = isBoDoi ? "cơ khí" : "cơ điện"
+  const toRoleLabel = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
+  const toTruongRoleLabel = isBoDoi ? "Tổ trưởng tổ cơ khí" : "Tổ trưởng cơ điện"
 
-  // Tổ trưởng cơ điện được chọn trong nguoi_thuc_hien (nếu có)
-  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap)
-  // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì → Tổ trưởng cơ điện (từ nguoi_thuc_hien)
+  // Tổ trưởng cơ điện/cơ khí được chọn trong nguoi_thuc_hien (nếu có)
+  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, toGroupKeyword)
+  // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì → Tổ trưởng cơ điện/cơ khí (từ nguoi_thuc_hien)
   const participants: { name: string; role: string }[] = []
   if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
   if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
   if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
   if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
   for (const name of toTruongCoDien) {
-    participants.push({ name, role: staffMap.get(name) || "Tổ trưởng cơ điện" })
+    participants.push({ name, role: staffMap.get(name) || toTruongRoleLabel })
   }
-  if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length === 0) participants.push({ name: "", role: "Tổ trưởng cơ điện" })
+  if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruongCoDien.length === 0) participants.push({ name: "", role: toTruongRoleLabel })
 
   return (
     <div className="print-page font-serif">
@@ -286,22 +291,22 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
       {/* Title + QR */}
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản kiểm tra sự cố</h2>
-          <div className="text-[10px] italic text-slate-500 mt-0.5">
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Biên bản kiểm tra sự cố</h2>
+          <div className="text-[11.5px] italic text-slate-500 mt-0.5">
             (Áp dụng cho {isBoDoi ? "phương tiện vận tải" : "thiết bị sơ chế cao su"})
           </div>
-          <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+          <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
         </div>
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
       {/* Body text */}
-      <div className="text-xs leading-5 space-y-0.5">
+      <div className="text-[13.8px] leading-5 space-y-0.5">
         <p>
           Hôm nay vào lúc <span className="px-2">{fmtTime(record.tu_gio)}</span> giờ,
           {" "}ngày <span className="px-2">{dd}</span> tháng{" "}
@@ -331,9 +336,9 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
 
       {/* Equipment lines */}
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mt-2 text-xs leading-5 space-y-0.5">
+        <div key={line.id} className="mt-2 text-[13.8px] leading-5 space-y-0.5">
           {record.lines.length > 1 && (
-            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-1">
+            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[12.65px] uppercase mb-1">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
             </div>
           )}
@@ -374,7 +379,7 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
         </div>
       ))}
 
-      <div className="mt-2 text-xs leading-5">
+      <div className="mt-2 text-[13.8px] leading-5">
         <span className="font-semibold">Kết luận và những kiến nghị lên Giám đốc nhà máy </span>
         <span className="italic">(đối với những trường hợp không khắc phục ngay được): </span>
         {record.ghi_chu ? (
@@ -387,7 +392,7 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
       <SignatureRow cols={[
         { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
         { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
-        { role: "Tổ cơ điện", name: toTruongCoDien[0] || "" },
+        { role: toRoleLabel, name: toTruongCoDien[0] || "" },
         { role: "Giám đốc nhà máy", name: record.giam_doc },
       ]} />
 
@@ -412,25 +417,25 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
       {/* Date right-aligned */}
-      <div className="text-right text-xs mt-1 mb-3">
+      <div className="text-right text-[13.8px] mt-1 mb-3">
         Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
         <span className="px-1">{mm}</span> năm{" "}
         <span className="px-1">{yyyy}</span>
       </div>
 
       <div className="text-center mb-4">
-        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Giấy đề nghị sửa chữa</h2>
-        <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa thiết bị sơ chế cao su)</div>
-        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Giấy đề nghị sửa chữa</h2>
+        <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa thiết bị sơ chế cao su)</div>
+        <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
-      <div className="text-xs leading-5 space-y-1">
+      <div className="text-[13.8px] leading-5 space-y-1">
         <p>
           <strong>Kính gửi:</strong> Giám đốc Nhà máy chế biến Phước Hòa Kampong Thom
         </p>
@@ -479,7 +484,7 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         </div>
 
         {/* Cost summary */}
-        <div className="flex gap-8 mt-2 text-xs">
+        <div className="flex gap-8 mt-2 text-[13.8px]">
           {record.lines.map((line, idx) => (
             <div key={idx}>
               {record.lines.length > 1 && <span className="font-bold">{line.ten_tb}: </span>}
@@ -509,6 +514,13 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
 function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
+  // "Chất lượng sau sửa chữa" chỉ thực sự được người dùng chọn khi Sửa chữa + Đội xe
+  // (xem gate boPhan==="Đội xe" && hangMuc==="Sửa chữa" ở records/[id]/page.tsx) — chỉ tick
+  // theo dữ liệu khi đúng trường hợp này, tránh tick nhầm "Đạt" mặc định cho các trường hợp
+  // chưa từng được xác nhận.
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const isChatLuongDat = isBoDoi && record.lines.every((l) => l.chat_luong !== "Không đạt")
+  const isChatLuongKhongDat = isBoDoi && record.lines.some((l) => l.chat_luong === "Không đạt")
 
   return (
     <div className="print-page font-serif">
@@ -516,22 +528,22 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
 
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản nghiệm thu</h2>
-          <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
-          <div className="text-xs text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Biên bản nghiệm thu</h2>
+          <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
+          <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
         </div>
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mb-2 text-xs leading-5">
+        <div key={line.id} className="mb-2 text-[13.8px] leading-5">
           {record.lines.length > 1 && (
-            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
+            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[12.65px] uppercase mb-2">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
             </div>
           )}
@@ -546,7 +558,7 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
         </div>
       ))}
 
-      <div className="text-xs leading-5 space-y-0.5">
+      <div className="text-[13.8px] leading-5 space-y-0.5">
         <p>
           Đơn vị quản lý, sử dụng:{" "}
           <span>Nhà máy chế biến Phước Hòa Kampong Thom</span>
@@ -611,10 +623,10 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
         <div className="mt-2 flex items-center gap-6">
           <span className="font-semibold">Chất lượng:</span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Đạt yêu cầu
+            <span className="inline-flex items-center justify-center w-4 h-4 border border-slate-600 align-middle text-[12.65px] font-bold leading-none">{isChatLuongDat ? "✓" : ""}</span> Đạt yêu cầu
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Không đạt
+            <span className="inline-flex items-center justify-center w-4 h-4 border border-slate-600 align-middle text-[12.65px] font-bold leading-none">{isChatLuongKhongDat ? "✓" : ""}</span> Không đạt
           </span>
         </div>
 
@@ -871,23 +883,23 @@ function PrintF03({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
-      <div className="text-right text-xs mt-1 mb-2">
+      <div className="text-right text-[13.8px] mt-1 mb-2">
         Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
         <span className="px-1">{mm}</span> năm{" "}
         <span className="px-1">{yyyy}</span>
       </div>
 
       <div className="text-center mb-4">
-        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Giấy đề nghị bảo trì - sửa chữa</h2>
-        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Giấy đề nghị bảo trì - sửa chữa</h2>
+        <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
-      <div className="text-xs leading-5 space-y-1">
+      <div className="text-[13.8px] leading-5 space-y-1">
         {record.lines.map((line) => (
           <p key={line.id}>
             Mã thiết bị: <span className="font-mono font-bold">{line.ma_tb}</span>
@@ -954,22 +966,22 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
 
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản nghiệm thu</h2>
-          <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho bảo dưỡng định kỳ)</div>
-          <div className="text-xs text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Biên bản nghiệm thu</h2>
+          <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho bảo dưỡng định kỳ)</div>
+          <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
         </div>
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mb-2 text-xs leading-5">
+        <div key={line.id} className="mb-2 text-[13.8px] leading-5">
           {record.lines.length > 1 && (
-            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
+            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[12.65px] uppercase mb-2">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
             </div>
           )}
@@ -983,7 +995,7 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
         </div>
       ))}
 
-      <div className="text-xs leading-5 space-y-0.5">
+      <div className="text-[13.8px] leading-5 space-y-0.5">
         <p>Đơn vị quản lý, sử dụng: <span>Nhà máy chế biến Phước Hòa Kampong Thom</span></p>
         <p>Căn cứ: Giấy đề nghị bảo trì số <span className="font-bold">{record.ma_bb || "..."}</span></p>
         <p>
@@ -1080,21 +1092,21 @@ function PrintF06({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
-      <div className="text-right text-xs mt-1 mb-2">
+      <div className="text-right text-[13.8px] mt-1 mb-2">
         Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
         <span className="px-1">{mm}</span> năm{" "}
         <span className="px-1">{yyyy}</span>
       </div>
 
       <div className="text-center mb-3">
-        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Phiếu hoàn thành công việc bảo trì</h2>
-        <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho xe ôtô vận chuyển mủ)</div>
-        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Phiếu hoàn thành công việc bảo trì</h2>
+        <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho xe ôtô vận chuyển mủ)</div>
+        <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
       {record.lines.map((line, idx) => {
@@ -1135,9 +1147,9 @@ function PrintF06({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         const grandTotal = matTotal + (line.cong_tho || 0)
 
         return (
-          <div key={line.id} className="mb-6 text-xs leading-5">
+          <div key={line.id} className="mb-6 text-[13.8px] leading-5">
             {record.lines.length > 1 && (
-              <div className="bg-slate-100 px-3 py-1.5 font-bold text-xs uppercase mb-2 rounded">
+              <div className="bg-slate-100 px-3 py-1.5 font-bold text-[13.8px] uppercase mb-2 rounded">
                 {idx + 1}. {line.ten_tb} ({line.ma_tb})
               </div>
             )}
@@ -1157,7 +1169,7 @@ function PrintF06({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
             <p className="font-semibold mb-1">Kết quả bảo dưỡng bao gồm:</p>
 
-            <table className="w-full text-xs border-collapse">
+            <table className="w-full text-[13.8px] border-collapse">
               <thead>
                 <tr className="bg-slate-50">
                   <th className="border border-slate-400 px-2 py-1 text-center w-8">STT</th>
@@ -1317,30 +1329,30 @@ function PrintF08NB({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
-      <div className="text-right text-xs mt-1 mb-2">
+      <div className="text-right text-[13.8px] mt-1 mb-2">
         Kampong Thom, ngày <span className="px-1">{dd}</span> tháng{" "}
         <span className="px-1">{mm}</span> năm{" "}
         <span className="px-1">{yyyy}</span>
       </div>
 
       <div className="text-center mb-4">
-        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Giấy đề nghị sửa chữa nhỏ thường xuyên</h2>
-        <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
-        <div className="text-xs text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Giấy đề nghị sửa chữa nhỏ thường xuyên</h2>
+        <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
+        <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Số: {record.ma_bb || "..."}</div>
       </div>
 
-      <div className="text-xs leading-5 space-y-1">
+      <div className="text-[13.8px] leading-5 space-y-1">
         {record.lines.map((line, idx) => (
           <div key={line.id} className="mt-2 pl-3">
             {record.lines.length > 1 && (
               <p className="font-bold mb-1">{idx + 1}. {line.ten_tb} ({line.ma_tb})</p>
             )}
-            <div className="grid grid-cols-2 gap-x-8 gap-y-0.5 mb-2 text-xs">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-0.5 mb-2 text-[13.8px]">
               <p>Xe/thiết bị: <span className="font-semibold">{line.ten_tb}</span></p>
               <p>Biển số/Số hiệu: <span className="font-mono">{line.ma_tb}</span></p>
               <p>
@@ -1387,22 +1399,22 @@ function PrintF15SmallVehicle({ record, qrUrl, staffMap }: { record: RecordData;
 
       <div className="flex items-start justify-between mt-2 mb-3">
         <div className="flex-1 text-center">
-          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>Biên bản nghiệm thu</h2>
-          <div className="text-[10px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
-          <div className="text-xs text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
+          <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "14.95pt" }}>Biên bản nghiệm thu</h2>
+          <div className="text-[11.5px] italic text-slate-500 mt-0.5">(Áp dụng cho sửa chữa nhỏ, thường xuyên)</div>
+          <div className="text-[13.8px] text-slate-600 mt-1 font-semibold">Căn cứ biên bản số: {record.ma_bb || "..."}</div>
         </div>
         {qrUrl && (
           <div className="shrink-0 text-center ml-4">
             <QRCodeSVG value={qrUrl} size={64} level="M" />
-            <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
+            <div className="text-[10.35px] text-slate-400 mt-0.5 font-mono">{record.ma_bb}</div>
           </div>
         )}
       </div>
 
       {record.lines.map((line, idx) => (
-        <div key={line.id} className="mb-2 text-xs leading-5">
+        <div key={line.id} className="mb-2 text-[13.8px] leading-5">
           {record.lines.length > 1 && (
-            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[11px] uppercase mb-2">
+            <div className="bg-slate-100 px-3 py-1 font-bold rounded text-[12.65px] uppercase mb-2">
               {idx + 1}. {line.ten_tb} ({line.ma_tb})
             </div>
           )}
@@ -1414,7 +1426,7 @@ function PrintF15SmallVehicle({ record, qrUrl, staffMap }: { record: RecordData;
         </div>
       ))}
 
-      <div className="text-xs leading-5 space-y-0.5">
+      <div className="text-[13.8px] leading-5 space-y-0.5">
         <p>Đơn vị quản lý, sử dụng: <span>Nhà máy chế biến Phước Hòa Kampong Thom</span></p>
         <p>Căn cứ: Giấy đề nghị sửa chữa số <span className="font-bold">{record.ma_bb || "..."}</span></p>
         <p>

@@ -93,9 +93,10 @@ type InventoryCategory = {
 
 const CURRENCIES = ["USD", "KHR", "VND"]
 const IMAGE_BUCKET = "order-files"
-// 5 nhóm nhân sự vận hành hợp lệ cho "Nhân viên phụ trách" / "Người thực hiện"
-// (xem Cài đặt → Bảo trì → Nhân sự bảo trì để gán nhóm cho từng người)
-const MAINTENANCE_STAFF_GROUP_NAMES = ["Bảo trì", "Cơ điện", "Cơ khí", "Trực ca", "Bảo vệ"]
+// Nhóm nhân sự hợp lệ cho "Người thực hiện" — chỉ người trực tiếp làm công việc bảo trì
+// (xem Cài đặt → Bảo trì → Nhân sự bảo trì để gán nhóm cho từng người). "Nhân viên phụ trách"
+// KHÔNG lọc theo nhóm — dùng toàn bộ nhân sự đang hoạt động của nhà máy (xem eligibleStaff).
+const NGUOI_THUC_HIEN_GROUP_NAMES = ["Cơ điện", "Bảo trì", "Cơ khí"]
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -477,11 +478,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   // Staff categories
   const bgdStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("giám đốc"))
-  // Danh sách "Nhân viên phụ trách" / "Người thực hiện" chỉ gồm người thuộc 1 trong 5 nhóm vận
-  // hành bên dưới (gán qua Cài đặt → Bảo trì → Nhân sự bảo trì) — thay cho so khớp chuỗi chuc_vu
-  // cũ (dễ lọt nhân sự quản lý cấp cao như Phó Tổng Giám đốc vào danh sách).
-  const eligibleStaff = staffList.filter((s) =>
-    s.group_names?.some((g) => MAINTENANCE_STAFF_GROUP_NAMES.includes(g))
+  // "Nhân viên phụ trách": toàn bộ nhân sự đang hoạt động của nhà máy hiện tại, không lọc theo nhóm.
+  const eligibleStaff = staffList
+  // "Người thực hiện": chỉ người thuộc nhóm Cơ điện / Bảo trì / Cơ khí (gán qua Cài đặt → Bảo trì
+  // → Nhân sự bảo trì) — thay cho so khớp chuỗi chuc_vu cũ (dễ lọt nhân sự quản lý cấp cao như
+  // Phó Tổng Giám đốc vào danh sách).
+  const nguoiThucHienStaff = staffList.filter((s) =>
+    s.group_names?.some((g) => NGUOI_THUC_HIEN_GROUP_NAMES.includes(g))
   )
 
   const loadInventoryItems = useCallback(async (fid: string) => {
@@ -2706,7 +2709,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-2">Người thực hiện</label>
           <div className="flex flex-wrap gap-2">
-            {eligibleStaff.map((s) => {
+            {nguoiThucHienStaff.map((s) => {
               const sel = selectedStaff.includes(s.ten)
               return (
                 <button
