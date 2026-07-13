@@ -19,6 +19,7 @@ import {
   loadMaintenanceExtMaterials,
   loadMaintenanceStaff,
   suggestLoaiSuaChua,
+  trangThaiLabel,
   type MaintenanceAsset,
   type MaintenanceExtMaterial,
   type MaintenanceRecord,
@@ -92,6 +93,9 @@ type InventoryCategory = {
 
 const CURRENCIES = ["USD", "KHR", "VND"]
 const IMAGE_BUCKET = "order-files"
+// 5 nhóm nhân sự vận hành hợp lệ cho "Nhân viên phụ trách" / "Người thực hiện"
+// (xem Cài đặt → Bảo trì → Nhân sự bảo trì để gán nhóm cho từng người)
+const MAINTENANCE_STAFF_GROUP_NAMES = ["Bảo trì", "Cơ điện", "Cơ khí", "Trực ca", "Bảo vệ"]
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -165,6 +169,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [notifying, setNotifying] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [rejectReason, setRejectReason] = useState("")
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
 
   // Image slot upload
@@ -212,7 +218,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Personnel
   const [selectedStaff, setSelectedStaff] = useState<string[]>([])
   const [nvPhuTrach, setNvPhuTrach] = useState("")
-  const [phuTrachBaoTri, setPhuTrachBaoTri] = useState("")
   const [bgdPhuTrach, setBgdPhuTrach] = useState("")
   const [giamDoc, setGiamDoc] = useState("")
 
@@ -437,11 +442,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     (bgdPhuTrach && userName === bgdPhuTrach)
   )
   const isAdmin = user?.role === "admin"
-  // Admin có thể chỉnh sửa kể cả trạng thái đã duyệt; hủy thì luôn read-only
+  // Admin luôn được sửa ở mọi trạng thái. Người tạo được sửa khi Chờ duyệt hoặc Từ chối;
+  // Đã duyệt/Đã hủy chỉ admin mới sửa được.
   const isReadOnly =
-    record?.trang_thai === "huy" ||
-    (record?.trang_thai === "da_duyet" && !isAdmin) ||
-    (!isNew && !isCreator && !isAdmin)
+    !isAdmin &&
+    (record?.trang_thai === "huy" ||
+      record?.trang_thai === "da_duyet" ||
+      (!isNew && !isCreator))
+  // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt; admin xóa được mọi trạng thái.
+  const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet")
 
   const handleNotify = async () => {
     if (!id || !factoryId) return
@@ -468,11 +477,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   // Staff categories
   const bgdStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("giám đốc"))
-  const nvStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("nhân viên"))
-  const workerStaff = staffList.filter((s) => {
-    const cv = s.chuc_vu?.toLowerCase() || ""
-    return !cv.includes("giám đốc") && !cv.includes("nhân viên")
-  })
+  // Danh sách "Nhân viên phụ trách" / "Người thực hiện" chỉ gồm người thuộc 1 trong 5 nhóm vận
+  // hành bên dưới (gán qua Cài đặt → Bảo trì → Nhân sự bảo trì) — thay cho so khớp chuỗi chuc_vu
+  // cũ (dễ lọt nhân sự quản lý cấp cao như Phó Tổng Giám đốc vào danh sách).
+  const eligibleStaff = staffList.filter((s) =>
+    s.group_names?.some((g) => MAINTENANCE_STAFF_GROUP_NAMES.includes(g))
+  )
 
   const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }] = await Promise.all([
@@ -555,7 +565,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (rec.noi_dung_chung || rec.nguyen_nhan_chung || rec.cac_khac_phuc_chung || (rec.image_urls_chung && rec.image_urls_chung.length > 0)) setShowCommonContent(true)
     setSelectedStaff(rec.nguoi_thuc_hien || [])
     setNvPhuTrach(rec.nv_phu_trach || "")
-    setPhuTrachBaoTri(rec.phu_trach_bao_tri || "")
     setBgdPhuTrach(rec.bgd_phu_trach || "")
     setGiamDoc(rec.giam_doc || "")
 
@@ -762,6 +771,84 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
+  const handleReject = async () => {
+    if (!rejectReason.trim()) { setSaveError("Vui lòng nhập lý do từ chối"); return }
+    if (!factoryId || !id || id === "new") return
+    setSaving(true); setSaveError(null)
+    try {
+      const { error } = await supabase
+        .from("maintenance_records")
+        .update({ trang_thai: "tu_choi", ly_do_tu_choi: rejectReason.trim() })
+        .eq("id", id)
+        .eq("factory_id", factoryId)
+      if (error) { setSaveError(error.message); return }
+      void fetch("/api/maintenance/notify-reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId: id, factoryId, reason: rejectReason.trim() }),
+      }).catch(() => {})
+      setShowRejectModal(false); setRejectReason("")
+      setSaveSuccess(`Đã từ chối phê duyệt biên bản ${record?.ma_bb || ""}.`)
+      void loadRecord(factoryId, id)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleResubmit = async () => {
+    if (!factoryId || !id || id === "new") return
+    setSaving(true); setSaveError(null)
+    try {
+      const { error } = await supabase
+        .from("maintenance_records")
+        .update({ trang_thai: "cho_duyet", ly_do_tu_choi: null })
+        .eq("id", id)
+        .eq("factory_id", factoryId)
+      if (error) { setSaveError(error.message); return }
+      void fetch("/api/maintenance/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId: id, factoryId }),
+      }).catch(() => {})
+      setSaveSuccess(`Đã gửi duyệt lại biên bản ${record?.ma_bb || ""}.`)
+      void loadRecord(factoryId, id)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteRecord = async () => {
+    if (!factoryId || !id || id === "new" || !record) return
+    if (!window.confirm(`Xóa hẳn biên bản ${record.ma_bb || ""}? Hành động này không thể hoàn tác.`)) return
+    setSaving(true); setSaveError(null)
+    try {
+      if (record.trang_thai === "da_duyet" && issueDocIds.length > 0) {
+        const session = await getFreshAuthSession()
+        if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
+
+        for (const documentId of issueDocIds) {
+          const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
+            p_factory_id: factoryId,
+            p_document_id: documentId,
+            p_cancelled_by: session.user.id,
+            p_cancel_reason: `Xóa biên bản bảo trì ${record.ma_bb || ""}`,
+          })
+          if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
+        }
+      }
+
+      const { error } = await supabase
+        .from("maintenance_records")
+        .delete()
+        .eq("id", id)
+        .eq("factory_id", factoryId)
+      if (error) { setSaveError(error.message); return }
+      router.push("/dashboard/maintenance/records")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSave = async () => {
     if (!factoryId || lines.length === 0) {
       setSaveError("Vui lòng chọn ít nhất một thiết bị")
@@ -783,6 +870,46 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setSaveError(`Vượt tồn kho:\n${stockViolations.join("\n")}`)
       return
     }
+
+    // Validate các trường bắt buộc: nội dung, nguyên nhân (Sửa chữa), cách khắc phục, hình ảnh,
+    // và ĐVT/số lượng/đơn giá của vật tư đã chọn.
+    const fieldViolations: string[] = []
+    for (const l of lines) {
+      const tenTb = l.ten_tb || "(chưa chọn thiết bị)"
+
+      const noiDungOk = l.noi_dung.trim() || (hangMuc === "Bảo dưỡng" && noiDungChung.trim())
+      if (!noiDungOk) {
+        fieldViolations.push(`Thiết bị ${tenTb}: thiếu ${hangMuc === "Sửa chữa" ? "Nội dung sự cố" : "Nội dung bảo dưỡng"}`)
+      }
+
+      if (hangMuc === "Sửa chữa" && !l.nguyen_nhan.trim()) {
+        fieldViolations.push(`Thiết bị ${tenTb}: thiếu Nguyên nhân`)
+      }
+
+      const khacPhucOk = l.cac_khac_phuc.trim() || (hangMuc === "Bảo dưỡng" && cacKhacPhucChung.trim())
+      if (!khacPhucOk) {
+        fieldViolations.push(`Thiết bị ${tenTb}: thiếu Cách khắc phục`)
+      }
+
+      const imagesOk = l.image_urls.filter(Boolean).length > 0 ||
+        (hangMuc === "Bảo dưỡng" && imageUrlsChung.filter(Boolean).length > 0)
+      if (!imagesOk) {
+        fieldViolations.push(`Thiết bị ${tenTb}: thiếu hình ảnh`)
+      }
+
+      for (const m of l.materials.filter((m) => m.ten_vat_tu.trim())) {
+        if (!m.dvt.trim()) fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Đơn vị tính`)
+        if (!(parseFloat(m.so_luong) > 0)) fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Số lượng hợp lệ`)
+        if (m.nguon === "ben_ngoai" && !(parseFloat(m.don_gia) > 0)) {
+          fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Đơn giá`)
+        }
+      }
+    }
+    if (fieldViolations.length > 0) {
+      setSaveError(fieldViolations.join("\n"))
+      return
+    }
+
     setSaving(true); setSaveError(null)
     try {
       const maBB = isNew ? await generateMaBB(factoryId, ngay, boPhan) : (record?.ma_bb || null)
@@ -799,7 +926,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         nguoi_tao: nguoiTao,
         nguoi_thuc_hien: selectedStaff,
         nv_phu_trach: nvPhuTrach || null,
-        phu_trach_bao_tri: phuTrachBaoTri || null,
+        // Đồng bộ cùng giá trị "Nhân viên phụ trách" vào cột cũ để không phá vỡ dữ liệu/mẫu in cũ
+        phu_trach_bao_tri: nvPhuTrach || null,
         bgd_phu_trach: bgdPhuTrach || null,
         giam_doc: giamDoc || null,
         ghi_chu: ghiChu || null,
@@ -916,7 +1044,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       if (isNew) {
         router.push(`/dashboard/maintenance/records/${recordId}`)
       } else {
-        setSaveSuccess(`Đã lưu biên bản ${record?.ma_bb || ""}. Trạng thái: Chờ duyệt.`)
+        setSaveSuccess(`Đã lưu biên bản ${record?.ma_bb || ""}. Trạng thái: ${trangThaiLabel(record?.trang_thai)}.`)
         void loadRecord(factoryId, id)
       }
     } catch (e) {
@@ -1400,6 +1528,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <Send size={12} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
             </button>
           )}
+          {/* GỬI DUYỆT LẠI — creator khi tu_choi, quay về cho_duyet */}
+          {!isNew && record?.trang_thai === "tu_choi" && isCreator && (
+            <button
+              onClick={handleResubmit}
+              disabled={saving}
+              className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
+            >
+              <Send size={12} /> {saving ? "Đang gửi..." : "Gửi duyệt lại"}
+            </button>
+          )}
           {/* HỦY BIÊN BẢN — creator khi cho_duyet; admin được hủy cả biên bản đã duyệt */}
           {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
             <button
@@ -1419,6 +1557,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <X size={12} /> Hủy biên bản
             </button>
           )}
+          {/* XÓA BIÊN BẢN — creator khi cho_duyet; admin xóa được mọi trạng thái */}
+          {!isNew && canDelete && (
+            <button
+              onClick={handleDeleteRecord}
+              disabled={saving}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
+            >
+              <Trash2 size={12} /> Xóa biên bản
+            </button>
+          )}
           {/* PHÊ DUYỆT — chỉ GĐ/BGĐ khi cho_duyet */}
           {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
             <button
@@ -1427,6 +1575,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
               <CheckCircle2 size={13} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
+            </button>
+          )}
+          {/* TỪ CHỐI — chỉ GĐ/BGĐ khi cho_duyet, mở modal nhập lý do */}
+          {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
+            <button
+              onClick={() => setShowRejectModal(true)}
+              disabled={saving}
+              className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg border border-rose-200 transition-all disabled:opacity-50"
+            >
+              <X size={12} /> Từ chối
             </button>
           )}
           {/* HỦY PHÊ DUYỆT — chỉ GĐ/BGĐ khi da_duyet, trả về cho_duyet */}
@@ -1494,6 +1652,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center gap-3 text-sm text-red-700">
           <X size={16} className="shrink-0" />
           <span>Biên bản đã bị hủy — không thể chỉnh sửa.</span>
+        </div>
+      )}
+      {record?.trang_thai === "tu_choi" && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl px-5 py-3 flex items-start gap-3 text-sm text-rose-700">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>
+            <strong>Bị từ chối phê duyệt.</strong> Lý do: {record.ly_do_tu_choi || "—"}
+            {isCreator && " — Vui lòng sửa lại nội dung và bấm \"Gửi duyệt lại\"."}
+          </span>
         </div>
       )}
 
@@ -2508,13 +2675,38 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </ModalShell>
       )}
 
+      {showRejectModal && (
+        <ModalShell
+          title="Từ chối phê duyệt"
+          onClose={() => setShowRejectModal(false)}
+          maxWidth="md"
+          footer={
+            <div className="flex justify-end gap-2 w-full">
+              <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={handleReject} disabled={saving} className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
+                {saving ? "Đang xử lý..." : "Xác nhận từ chối"}
+              </button>
+            </div>
+          }
+        >
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do từ chối *</label>
+          <textarea
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-rose-500 resize-none"
+            placeholder="Nhập lý do từ chối phê duyệt..."
+          />
+        </ModalShell>
+      )}
+
       {/* Personnel section */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
         <div className="font-extrabold text-slate-700 mb-1">Nhân sự</div>
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-2">Người thực hiện</label>
           <div className="flex flex-wrap gap-2">
-            {workerStaff.map((s) => {
+            {eligibleStaff.map((s) => {
               const sel = selectedStaff.includes(s.ten)
               return (
                 <button
@@ -2531,19 +2723,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             })}
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhân viên phụ trách</label>
             <select value={nvPhuTrach} onChange={(e) => setNvPhuTrach(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
               <option value="">— Chọn —</option>
-              {nvStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Phụ trách bảo trì</label>
-            <select value={phuTrachBaoTri} onChange={(e) => setPhuTrachBaoTri(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
-              <option value="">— Chọn —</option>
-              {nvStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+              {eligibleStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
             </select>
           </div>
           <div>

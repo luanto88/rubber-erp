@@ -7,7 +7,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { getFreshAuthSession } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
-import { BO_PHAN_LIST } from "../_components/maintenance-data"
+import { BO_PHAN_LIST, trangThaiLabel } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
@@ -22,6 +22,7 @@ type RecordRow = {
   trang_thai: string
   nguoi_tao: string | null
   created_at: string
+  maintenance_record_lines: { ma_tb: string | null }[]
 }
 
 export default function MaintenanceRecordsPage() {
@@ -40,7 +41,7 @@ export default function MaintenanceRecordsPage() {
     try {
       let q = supabase
         .from("maintenance_records")
-        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_at")
+        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_at, maintenance_record_lines(ma_tb)")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
         .order("created_at", { ascending: false })
@@ -87,9 +88,10 @@ export default function MaintenanceRecordsPage() {
   })
 
   const statusBadge = (s: string) => {
-    if (s === "da_duyet") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Đã duyệt</span>
-    if (s === "huy") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-600">Đã hủy</span>
-    return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Chờ duyệt</span>
+    if (s === "da_duyet") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">{trangThaiLabel(s)}</span>
+    if (s === "huy") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-600">{trangThaiLabel(s)}</span>
+    if (s === "tu_choi") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">{trangThaiLabel(s)}</span>
+    return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">{trangThaiLabel(s)}</span>
   }
 
   const hangMucBadge = (h: string) =>
@@ -142,6 +144,7 @@ export default function MaintenanceRecordsPage() {
           <option value="">Tất cả trạng thái</option>
           <option value="cho_duyet">Chờ duyệt</option>
           <option value="da_duyet">Đã duyệt</option>
+          <option value="tu_choi">Từ chối</option>
           <option value="huy">Đã hủy</option>
         </select>
         <div className="flex items-center gap-2 border border-slate-300 rounded-xl px-3 py-2 flex-1 min-w-[180px]">
@@ -168,7 +171,7 @@ export default function MaintenanceRecordsPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Mã biên bản", "Hạng mục", "Bộ phận", "Ngày", "Người tạo", "Trạng thái", ""].map((h) => (
+                {["Mã biên bản", "Hạng mục", "Mã thiết bị", "Bộ phận", "Ngày", "Người tạo", "Trạng thái", ""].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -182,6 +185,14 @@ export default function MaintenanceRecordsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">{hangMucBadge(r.hang_muc)}</td>
+                  <td className="px-4 py-3 text-slate-600 text-xs">
+                    {(() => {
+                      const codes = (r.maintenance_record_lines || []).map((l) => l.ma_tb).filter(Boolean) as string[]
+                      if (codes.length === 0) return "—"
+                      const shown = codes.slice(0, 2).join(", ")
+                      return codes.length > 2 ? `${shown} +${codes.length - 2} khác` : shown
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-slate-600">{r.bo_phan}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{r.nguoi_tao || "—"}</td>

@@ -251,6 +251,15 @@ function MaterialsTable({ materials, showDonGia = true }: { materials: MaterialR
   )
 }
 
+// Tự nhận diện "Tổ trưởng cơ điện" từ danh sách "Người thực hiện" đã chọn — dùng chung cho
+// danh sách "Chúng tôi gồm:" (F13) và ô chữ ký "Tổ cơ điện" (F13, F03).
+function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>): string[] {
+  return nguoiThucHien.filter((name) => {
+    const role = staffMap.get(name)?.toLowerCase() || ""
+    return role.includes("tổ trưởng") && role.includes("cơ điện")
+  })
+}
+
 // ─── Template F13: Biên bản kiểm tra sự cố ────────────────────────────────────
 
 function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
@@ -258,10 +267,7 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
   const isBoDoi = record.bo_phan === "Đội xe"
 
   // Tổ trưởng cơ điện được chọn trong nguoi_thuc_hien (nếu có)
-  const toTruongCoDien = record.nguoi_thuc_hien.filter(name => {
-    const role = staffMap.get(name)?.toLowerCase() || ""
-    return role.includes("tổ trưởng") && role.includes("cơ điện")
-  })
+  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap)
   // Thứ tự: Giám đốc → BGĐ → NV phụ trách → Phụ trách bảo trì → Tổ trưởng cơ điện (từ nguoi_thuc_hien)
   const participants: { name: string; role: string }[] = []
   if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
@@ -381,7 +387,7 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
       <SignatureRow cols={[
         { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
         { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
-        { role: "Tổ cơ điện", name: record.phu_trach_bao_tri },
+        { role: "Tổ cơ điện", name: toTruongCoDien[0] || "" },
         { role: "Giám đốc nhà máy", name: record.giam_doc },
       ]} />
 
@@ -853,8 +859,9 @@ function mergeNoidung(common: string | null | undefined, own: string | null | un
   return [common, own].filter(Boolean).join("\n")
 }
 
-function PrintF03({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
+function PrintF03({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
+  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap)
   return (
     <div className="print-page font-serif">
       <CompanyHeader boPhan={record.bo_phan} />
@@ -917,7 +924,7 @@ function PrintF03({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
         { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
         { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
         { role: "Giám đốc nhà máy", name: record.giam_doc },
-        { role: "Tổ cơ điện", name: record.phu_trach_bao_tri },
+        { role: "Tổ cơ điện", name: toTruongCoDien[0] || "" },
       ]} />
 
       <DocumentFooter code="KHXD-QT02-F03" />
@@ -1263,7 +1270,7 @@ function PrintBaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrUrl:
   const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean)) || (record.image_urls_chung || []).some(Boolean)
   return (
     <div className="font-serif">
-      <PrintF03 record={record} qrUrl={qrUrl} />
+      <PrintF03 record={record} qrUrl={qrUrl} staffMap={staffMap} />
       <div className="print:page-break-before-always mt-6 pt-6" />
       <PrintF15BaoDuong record={record} qrUrl={qrUrl} staffMap={staffMap} />
       {hasImages && (
@@ -1282,7 +1289,7 @@ function PrintBaoDuongXe({ record, qrUrl, staffMap }: { record: RecordData; qrUr
   const hasImages = record.lines.some((l) => (l.image_urls || []).some(Boolean)) || (record.image_urls_chung || []).some(Boolean)
   return (
     <div className="font-serif">
-      <PrintF03 record={record} qrUrl={qrUrl} />
+      <PrintF03 record={record} qrUrl={qrUrl} staffMap={staffMap} />
       <div className="print:page-break-before-always mt-6 pt-6" />
       <PrintF15BaoDuong record={record} qrUrl={qrUrl} staffMap={staffMap} />
       <div className="print:page-break-before-always mt-6 pt-6" />

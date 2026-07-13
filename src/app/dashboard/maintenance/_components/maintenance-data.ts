@@ -105,11 +105,12 @@ export type MaintenanceRecord = {
   phu_trach_bao_tri: string | null
   bgd_phu_trach: string | null
   giam_doc: string | null
-  trang_thai: "cho_duyet" | "da_duyet" | "huy"
+  trang_thai: "cho_duyet" | "da_duyet" | "huy" | "tu_choi"
   nguoi_duyet: string | null
   ngay_duyet: string | null
   inventory_issue_doc_id: string | null
   inventory_issue_doc_ids?: string[] | null
+  ly_do_tu_choi?: string | null
   ghi_chu: string | null
   created_at: string
   updated_at: string
@@ -182,6 +183,14 @@ export function currencySymbol(loaiTien: string): string {
   if (loaiTien === "KHR") return "៛"
   if (loaiTien === "VND") return "₫"
   return "$"
+}
+
+// Nhãn hiển thị trạng thái biên bản — dùng chung cho danh sách và trang chi tiết
+export function trangThaiLabel(s: string | null | undefined): string {
+  if (s === "da_duyet") return "Đã duyệt"
+  if (s === "huy") return "Đã hủy"
+  if (s === "tu_choi") return "Từ chối"
+  return "Chờ duyệt"
 }
 
 const BO_PHAN_PREFIX: Record<string, string> = {
