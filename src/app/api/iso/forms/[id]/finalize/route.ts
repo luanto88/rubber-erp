@@ -8,6 +8,7 @@ import JSZip from "jszip"
 import fs from "fs"
 import path from "path"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
+import { SIGN_AS_OPTIONS, type SignAsType } from "@/app/dashboard/iso/_components/iso-types"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,6 +32,17 @@ type SignPlacement = {
   qrY?: number
   qrWidth?: number
   qrHeight?: number
+  // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
+  // dụng cho PDF (vẽ hộp riêng, không có khái niệm tương đương cho DOCX/XLSX).
+  showPrefix?: boolean
+  prefixX?: number
+  prefixY?: number
+  prefixWidth?: number
+  prefixHeight?: number
+}
+
+function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
+  return typeof v === "string" && (SIGN_AS_OPTIONS as string[]).includes(v)
 }
 
 function loadSignerNameFont(): Buffer | null {
@@ -78,7 +90,7 @@ async function downloadFile(fileUrl: string): Promise<ArrayBuffer> {
 
 async function stampPdf(
   pdfBytes: ArrayBuffer,
-  placements: Array<{ userId: string; placement: SignPlacement; signerName: string }>,
+  placements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }>,
   factoryId: string,
   qrUrl: string | null,
   qrPlacementOverride?: { x: number; y: number; width: number; height: number; page: number } | null,
@@ -125,7 +137,7 @@ async function stampPdf(
     } catch { /* bỏ qua nếu QR thất bại */ }
   }
 
-  for (const { userId, placement, signerName } of placements) {
+  for (const { userId, placement, signerName, prefixText } of placements) {
     const pageIndex = placement.page - 1
     if (pageIndex < 0 || pageIndex >= pdfDoc.getPageCount()) continue
 
@@ -163,6 +175,23 @@ async function stampPdf(
           color: rgb(0, 0, 0),
         })
       } catch { /* bỏ qua nếu vẽ tên thất bại */ }
+    }
+
+    if (
+      prefixText &&
+      placement.showPrefix &&
+      typeof placement.prefixX === "number" &&
+      typeof placement.prefixY === "number"
+    ) {
+      try {
+        page.drawText(prefixText, {
+          x: placement.prefixX,
+          y: placement.prefixY,
+          size: 10,
+          font: signerNameFont,
+          color: rgb(0, 0, 0),
+        })
+      } catch { /* bỏ qua nếu vẽ tiền tố thất bại */ }
     }
   }
 
@@ -343,8 +372,9 @@ export async function POST(
       placement: SignPlacement
       lyDo?: string
       cap_tl?: string
+      sign_as?: SignAsType
     }
-    const { token, action, placement, lyDo, cap_tl } = body
+    const { token, action, placement, lyDo, cap_tl, sign_as } = body
 
     if (!token || !action || !placement) {
       return NextResponse.json({ error: "Thiếu token, action hoặc placement" }, { status: 400 })
@@ -565,7 +595,13 @@ export async function POST(
 
       const fileBytes = await downloadFile(sourceUrl)
       const sourceIsPdf = sourceUrl.toLowerCase().includes(".pdf") || draftExt === "pdf"
-      const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string }> = []
+      const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
+
+      // Ký thay (KT./TM./TL./TUQ.) — chỉ áp dụng cho bước Phê duyệt, chỉ vẽ riêng
+      // trên PDF (hộp draggable riêng), KHÔNG ghép vào signerName dùng cho tag
+      // DOCX/XLSX (không có nhu cầu nghiệp vụ cho Office — đã xác nhận với người dùng).
+      const signAsPD: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
+      const prefixTextPD = signAsPD !== "none" ? `${signAsPD}.` : null
 
       // Thêm placement soạn thảo
       if (soanThaoPlacement && instance.nguoi_tao) {
@@ -586,7 +622,7 @@ export async function POST(
       }
 
       // Thêm placement phê duyệt
-      allPlacements.push({ userId, placement, signerName })
+      allPlacements.push({ userId, placement, signerName, prefixText: prefixTextPD })
 
       let finalBytes: Uint8Array
       let finalExt = "pdf"
@@ -641,6 +677,7 @@ export async function POST(
         phe_duyet: signerName,
         ky_phe_duyet_at: new Date().toISOString(),
         phe_duyet_placement: placement,
+        phe_duyet_sign_as: signAsPD === "none" ? null : signAsPD,
       }
       if (finalExt === "pdf") {
         updates.final_pdf_url = finalUrlData?.publicUrl

@@ -347,7 +347,28 @@ const toPdf = (canX, canY, w, h) => ({
 })
 ```
 
+### Fix 2026-07-13 — hỗ trợ ký chữ ký ở trang 2+ (trước đó luôn hard-code trang 1)
+
+**Bug đã fix**: `SignPlacementModal` trước đây luôn `pdf.getPage(1)` khi render canvas và luôn gửi `page: 1` trong `FullPlacement` khi ký — không có UI chuyển trang. Với hồ sơ nhiều trang, nếu vị trí đặt chữ ký thực tế nằm ở trang 2 trở đi thì không thể đặt được (chỉ luôn thấy và ký được trên trang 1). Backend `finalize/route.ts` (`stampPdf`) đã hỗ trợ sẵn `placement.page` bất kỳ từ trước (`pageIndex = placement.page - 1`, có bounds-check) — chỉ cần sửa phần giao diện.
+
+**Fix**: mirror đúng pattern đã dùng ở `documents/[id]/page.tsx` (module Văn bản, xem `.claude/rules/22-documents-module.md` mục "PDF nhiều trang trong SignPlacementModal"):
+- Thêm `pdfDocRef` (ref giữ `pdf` đã load), `currentPage`/`numPages` state.
+- Tách hàm `renderPdfPage(pdf, pageNum)` — render 1 trang bất kỳ lên canvas, tính lại viewport/scale mỗi lần (kích thước trang có thể khác nhau giữa các trang).
+- `loadPdf` giờ chỉ load `pdf` 1 lần, lưu vào `pdfDocRef`, gọi `renderPdfPage(pdf, 1)` cho trang đầu.
+- Hàm `goToPage(p)` gọi lại `renderPdfPage(pdfDocRef.current, p)`.
+- UI điều hướng "Trang X / Y" + nút `ChevronLeft`/`ChevronRight` (chỉ hiện khi `numPages > 1`), đặt ngay trên canvas.
+- `handleConfirm` đổi `page: 1` → `page: currentPage` trong nhánh canvas (PDF). Nhánh Office (không có canvas) giữ nguyên `page: 1` vì không có khái niệm trang.
+- QR (chỉ có ở bước `soan_thao`) không đổi — theo thiết kế vẽ trên **tất cả trang** của PDF (`finalize/route.ts`), không phụ thuộc `currentPage`.
+
+Cùng đợt, rà lại 2 module ký PDF liên quan khác theo yêu cầu người dùng:
+- **Văn bản** (`documents/[id]/page.tsx`): đã đúng từ trước (fix ngày 2026-07-06), không có bug tương tự.
+- **Soạn thảo ISO** (`iso/documents/[id]/page.tsx`): modal đặt chữ ký inline (không phải component riêng) đã hỗ trợ chọn trang cho chữ ký/tên từ trước, không có bug tương tự. Tuy nhiên phát hiện thêm 1 bug hẹp hơn ở `src/app/api/sign/generate-pdf/route.ts`: khi `fillMetadataPlaceholders` không đọc được text PDF để dò tag `"QR:"` (lỗi trích xuất text, không phải trường hợp thường gặp), 2 nhánh fallback vẽ QR thủ công (dòng ~1462 và ~1637) hard-code `originalPages.getPage(0)` — bỏ qua trang người dùng đã kéo QR tới. Đã fix: `manualQrPlacement` giờ mang theo `page: soanPlacement.page`, 2 nhánh fallback tính `qrPageIndex = manualQrPlacement.page - 1` (bounds-check trước khi vẽ) thay vì hard-code `getPage(0)`. Không đụng cơ chế chính trong `fillMetadataPlaceholders` (dòng ~886-899) — cơ chế đó vốn đã vẽ QR trên **tất cả trang** đúng thiết kế, không bị bug này.
+
+`npx tsc --noEmit` và `npx eslint` đều sạch (chỉ còn warning cũ không liên quan). **Chưa test tay** — cần: ký 1 hồ sơ PDF ≥2 trang trong `/dashboard/iso/forms`, chuyển sang trang 2+ đặt chữ ký, xác nhận PDF sau ký có chữ ký đúng vị trí/trang; và test case hiếm gặp QR fallback (PDF lỗi trích xuất text) ở module Soạn thảo ISO nếu tái hiện được.
+
 `pdfScale = 1.5`, `pdfPageH` = chiều cao trang PDF theo pdf-lib units (không phải pixel).
+
+**Ghi chú quan trọng (re-verify cùng ngày 2026-07-13)**: người dùng báo lại đúng bug này sau khi mục "Fix 2026-07-13" ở trên đã được ghi vào rule — kiểm tra trực tiếp `forms/[id]/page.tsx` và `generate-pdf/route.ts` lúc đó xác nhận **code vẫn còn hard-code `page: 1`/`getPage(1)`**, dù rule file đã mô tả đúng fix cần làm. Tức là lần trước fix đã được lên kế hoạch/viết tài liệu nhưng **không thực sự được ghi vào code** (session bị ngắt giữa chừng, hoặc thay đổi không được lưu). Đã áp dụng lại đúng fix mô tả ở trên, xác nhận bằng cách đọc trực tiếp file ngay trước khi sửa (không tin nội dung rule mô tả là đã có trong code) và `npx tsc --noEmit` sạch sau khi sửa. Bài học: khi rule mô tả "đã fix X" nhưng người dùng vẫn báo lỗi X, luôn đọc lại chính file code để xác nhận thực tế, không giả định rule đúng.
 
 ### FullPlacement type
 
@@ -679,6 +700,30 @@ Mỗi dòng: tiêu đề, role label (Cần ký & gửi / Cần xem xét / Cần
 - Click dòng thông báo → mark `is_read = true` + navigate đến `notification.link`
 - Realtime: subscribe `postgres_changes INSERT` trên bảng `notifications` filter `user_id=eq.{uid}` → thêm thông báo mới vào đầu danh sách ngay lập tức
 - "Đánh dấu tất cả đã đọc" → UPDATE toàn bộ unread của user
+
+---
+
+### Fix 2026-07-13 (tiếp) — "Xem file"/"Tải xuống" hiện nhầm PDF cũ sau khi hồ sơ bị trả về (`tra_ve`) và người soạn thảo thay file khác
+
+**Bug đã fix**: `fileUrl` (`forms/[id]/page.tsx`, dùng cho cả nút mắt "Xem file" lẫn `handleDownload`) tính bằng `instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url` — không điều kiện theo `trang_thai`. Khi hồ sơ đã qua ít nhất 1 vòng ký (`soan_thao` → `cho_xem_xet`/`cho_phe_duyet`) rồi bị `tra_ve`, các trường file đã ký (`soan_thao_signed_url`/`final_pdf_url`/`final_office_url`) của vòng ký **đã bị từ chối** đó vẫn còn nguyên trong DB (`handleReturn` chỉ set `trang_thai`+`ly_do_tra_ve`, không xóa các trường này — xem `handleReturn`, dòng ~843). Khi người soạn thảo upload file mới (`handleUpload` chỉ cập nhật `draft_file_url`/`draft_file_type`, không đụng các trường trên), `fileUrl` vẫn ưu tiên trường file đã ký CŨ → "Xem file"/"Tải xuống" tiếp tục hiện đúng file PDF trước khi bị trả về, dù `draft_file_url` (badge loại file) đã đổi đúng. Người dùng thấy như "thay file không được".
+
+Lưu ý: bản thân việc upload **không** bị chặn (`isEditable = trang_thai === "draft" || "tra_ve"` đã đúng từ trước, cho phép cả `tra_ve`) và bước ký lại (`soan_thao` action, gọi `finalize/route.ts`) vẫn đọc đúng `draft_file_url` mới nhất làm nguồn ký (`openSendModal` đã có sẵn comment "Dùng URL từ kết quả reload (fresh) thay vì closure cũ") — bug chỉ nằm ở tầng hiển thị "Xem file"/"Tải xuống", không phải ở luồng ký thật.
+
+**Fix**: `fileUrl` giờ ưu tiên `draft_file_url` bất cứ khi nào `isEditable` (tức `draft`/`tra_ve`) — chỉ dùng chuỗi ưu tiên file-đã-ký cũ khi hồ sơ đã ra khỏi trạng thái editable (đang chờ xem xét/phê duyệt trở đi, khi đó `soan_thao_signed_url`/`final_pdf_url` chắc chắn là của vòng ký hiện tại, không phải vòng đã bị từ chối):
+
+```typescript
+const fileUrl = isEditable
+  ? instance.draft_file_url
+  : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
+```
+
+Không sửa `handleReturn`/`handleUpload` để null hóa các trường file đã ký cũ — không cần thiết vì chúng sẽ bị ghi đè đúng ở lần ký kế tiếp, và giữ lại làm lịch sử không gây hại (chỉ tầng đọc/hiển thị bị sai, không phải tầng ghi).
+
+`npx tsc --noEmit`/`npx eslint` sạch. **Chưa test tay** — cần: tạo 1 hồ sơ, ký & gửi xem xét, người xem xét bấm "Trả về" → xác nhận "Xem file" quay về đúng file gốc (chưa ký); người soạn thảo bấm "Thay file" chọn file khác → xác nhận "Xem file"/"Tải xuống" ngay lập tức phản ánh đúng file mới (không còn thấy PDF cũ); ký lại → xác nhận vòng ký mới hoạt động bình thường và sau khi ký xong `fileUrl` lại đúng theo `soan_thao_signed_url`/`final_pdf_url` mới.
+
+---
+
+**Kế hoạch phiên sau (chưa làm)**: tiền tố ký thay KT./TM./TL./TUQ. + hợp nhất eye-icon ẩn/hiện chữ ký-tên cho toàn bộ module ISO (cả Soạn thảo ISO lẫn Thực hiện hồ sơ ISO) — xem `.claude/rules/16-iso-vanban-module.md` mục "Kế hoạch phiên sau (2026-07-13) — Hợp nhất eye-icon chữ ký/tên + tiền tố ký thay KT/TM/TL/TUQ cho toàn bộ module ISO".
 
 ---
 

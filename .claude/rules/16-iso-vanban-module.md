@@ -380,6 +380,107 @@ RLS của bảng `profiles` chỉ cho `admin` đọc tất cả profiles trong f
 
 ---
 
+## Hợp nhất eye-icon chữ ký/tên + tiền tố ký thay KT/TM/TL/TUQ cho toàn bộ module ISO (2026-07-13, ĐÃ CODE XONG)
+
+**Cập nhật 2026-07-13 (phiên tiếp theo)**: Toàn bộ mục dưới đây đã được triển khai — cả 2 module ISO (Soạn thảo ISO lẫn Thực hiện hồ sơ ISO). Phạm vi cuối cùng đã chốt qua 2 câu hỏi xác nhận trực tiếp với người dùng (khác một chút so với bản nháp ban đầu ghi ở dưới — giữ nguyên phần dưới làm lịch sử quyết định, phần này là tóm tắt những gì THỰC SỰ đã code):
+
+- **Tên file hiển thị ở "Thực hiện hồ sơ ISO"** (`iso/forms/[id]/page.tsx`): xác nhận giữ nguyên — nhãn "Tên file" trên thẻ file luôn hiển thị `instance.tieu_de` (tiêu đề hồ sơ), không phải tên file gốc đã upload. Đây là thiết kế cố ý (đã ghi trong mục "Download filename" phía trên), không phải bug — không cần thêm cột lưu tên file gốc.
+- **Phạm vi bước áp dụng tiền tố**: **chỉ bước Phê duyệt**, không áp dụng cho Soạn thảo/Xem xét, giống Văn bản nội bộ (loại trừ bước `ca_nhân`).
+- **Ẩn/hiện chữ ký ở tài liệu cha (Soạn thảo ISO)**: giữ nguyên rule cũ — tài liệu cha chỉ ẩn được "tên", không ẩn được "chữ ký" (chỉ hồ sơ con/file phụ mới ẩn được cả 2). Thay đổi chỉ là trình bày (nút chữ → icon mắt tròn overlay góc trên-phải khung kéo-thả, mirror `forms/[id]/page.tsx`), không đổi điều kiện `placementDocIsCon`.
+- **Tiền tố**: không thêm eye-icon riêng cho khung tiền tố — giữ cơ chế của Văn bản (chọn radio "Trực tiếp" = ẩn khung, chọn KT/TM/TL/TUQ = hiện khung kéo-thả).
+
+### Migration cần chạy thủ công
+
+`supabase/migrations/20260713_iso_phe_duyet_sign_as.sql` — thêm cột `phe_duyet_sign_as TEXT` vào cả `iso_documents` và `iso_form_instances`. **Chưa chạy trên Supabase** — phải chạy trước khi deploy code, nếu không action `phe_duyet` ở cả 2 module sẽ lỗi update (cột không tồn tại).
+
+### Thay đổi theo file
+
+- `src/app/dashboard/iso/_components/iso-types.ts`: thêm `SignAsType`, `SIGN_AS_OPTIONS`, `SIGN_AS_LABEL` (mirror đúng Văn bản — `documents-types.ts`); thêm `phe_duyet_sign_as?: SignAsType | null` vào cả `IsoDocument` và `IsoFormInstance`.
+- `src/app/api/sign/generate-pdf/route.ts` (Soạn thảo ISO — PDF stamping): `SignPlacement` type thêm `showPrefix?/prefixX?/prefixY?/prefixWidth?/prefixHeight?`. Tính `prefixText` một lần từ `doc.phe_duyet_sign_as` (đọc trực tiếp từ DB, **không** truyền qua request body — vì `doTransition` phía client đã ghi cột này vào DB **trước** khi gọi generate-pdf, nên route luôn đọc được giá trị mới nhất tại thời điểm stamp). Vẽ `prefixText` trong CẢ 2 vòng lặp vẽ chữ ký/tên (vòng chính + vòng fallback khi tải PDF lần 2), gated theo `placement.showPrefix` — áp dụng đồng nhất cho cả file main lẫn file phụ (change_request/review_request) vì dùng chung 1 vòng lặp `allPlacements`.
+- `src/app/api/iso/forms/[id]/finalize/route.ts` (Thực hiện hồ sơ ISO): import `SIGN_AS_OPTIONS`/`SignAsType` từ `iso-types.ts` (cross-import từ API route vào `src/app/dashboard/...` — đã có tiền lệ ở `src/app/api/documents/sign/route.ts`). `SignPlacement` thêm prefix fields. `stampPdf()` nhận thêm `prefixText?: string | null` per-entry trong mảng `placements`. Nhánh `action === "phe_duyet"`: đọc `sign_as` từ request body, validate bằng `isValidSignAs`, tính `prefixTextPD`, gắn vào entry `{ userId, placement, signerName, prefixText: prefixTextPD }` (chỉ entry phê duyệt, không phải soạn thảo/xem xét), lưu `phe_duyet_sign_as` vào `updates`. **Không** áp dụng cho nhánh Office (DOCX/XLSX) — đúng quyết định "không cần cho Office".
+- `src/app/dashboard/iso/forms/[id]/page.tsx`: `FullPlacement` thêm prefix fields. `SignPlacementModal` thêm state `signAs`/`prefixState`/`prefixNodeRef`; `showSignAsPicker = action === "phe_duyet" && showCanvas`; radio picker + khung kéo-thả viền xanh emerald (chỉ hiện khi `signAs !== "none"`); `onConfirm` đổi signature thành `(pin, placement, signAs)`. `handleSignConfirm` nhận thêm `signAs`, gửi `sign_as` trong body POST `/api/iso/forms/[id]/finalize`. Timeline "Phê duyệt" hiển thị `signAsPrefixLabel(instance.phe_duyet_sign_as)` trước tên.
+- `src/app/dashboard/iso/documents/[id]/page.tsx` (Soạn thảo ISO — phần lớn thay đổi, do kiến trúc hàng đợi nhiều file):
+  - `SignPlacement` (type cục bộ) thêm prefix fields.
+  - State `placementModal` thêm `prefixX/prefixY/prefixW/prefixH` (reset theo từng file trong hàng đợi, giống `sigX/sigY`).
+  - State `signAs: SignAsType` đặt **NGOÀI** `placementModal` (không reset khi `openPlacementForTask` chuyển sang file tiếp theo trong hàng đợi) — để 1 lựa chọn ký thay áp dụng nhất quán cho toàn bộ các file (main + file phụ + hồ sơ con) ký trong cùng 1 lượt Phê duyệt. Reset về `"none"` mỗi khi bắt đầu lượt ký mới (đầu `handlePinConfirm`, ngay sau khi đóng PIN modal).
+  - Toolbar trong modal đặt chữ ký: 2 nút chữ "Ẩn/Hiện chữ ký"/"Ẩn/Hiện tên" cũ đã bị xóa, thay bằng radio "Ký thay" (chỉ hiện khi `placementModal.action === "phe_duyet"`).
+  - Khung chữ ký: thêm icon mắt overlay góc trên-phải (chỉ hiện khi `placementDocIsCon`, giữ đúng rule cũ) + placeholder "Ẩn chữ ký" khi đang ẩn.
+  - Khung tên: đổi từ unmount-khi-ẩn (không thể bật lại từ trong khung) sang always-mounted + toggle eye-icon (mirror đúng pattern `forms/[id]/page.tsx`) — nút "(X)" cũ (chỉ ẩn, không hiện lại được) đã bị thay thế hoàn toàn.
+  - Khung tiền tố mới (viền emerald) chỉ hiện khi `action === "phe_duyet" && signAs !== "none"`.
+  - `handlePlacementConfirm`: thêm `showPrefix/prefixX/prefixY/prefixWidth/prefixHeight` vào `placement` khi action là phe_duyet và đã chọn ký thay; gọi `doTransition(..., signAs)`.
+  - `doTransition`: thêm tham số `transitionSignAs: SignAsType = "none"`; nhánh `phe_duyet` ghi `phe_duyet_sign_as` vào cả update chính (`docId`) lẫn 2 nhánh update hồ sơ con (`childReviewUpdates` và `remainingChildIds`).
+  - UI: badge nhỏ hiện tiền tố (`signAsPrefixLabel(doc?.phe_duyet_sign_as)`) ngay cạnh label "Người phê duyệt" trong form soạn thảo.
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file đã sửa), và `npm run build` đều sạch (0 lỗi; các warning hiện có đều là warning cũ không liên quan tới thay đổi này).
+
+**Chưa test tay** — cần, theo đúng thứ tự:
+1. Chạy migration `20260713_iso_phe_duyet_sign_as.sql` trên Supabase SQL Editor trước.
+2. Soạn thảo ISO: phê duyệt 1 tài liệu cha PDF, chọn "TM." trong toolbar modal đặt chữ ký → xác nhận khung tiền tố kéo-thả xuất hiện, kéo được, PDF sau ký có "TM." đúng vị trí; xác nhận nút ẩn/hiện chữ ký chỉ xuất hiện với hồ sơ con/file phụ (không xuất hiện với tài liệu cha); xác nhận nút ẩn/hiện tên bật/tắt được nhiều lần qua lại (không còn bug "ẩn xong không bật lại được").
+3. Soạn thảo ISO: phê duyệt 1 bộ có cả tài liệu cha + hồ sơ con (nhiều file trong hàng đợi) với "KT." đã chọn — xác nhận CẢ hai file (cha lẫn con) đều có tiền tố "KT." trong PDF sau ký (không chỉ file đầu tiên).
+4. Thực hiện hồ sơ ISO: phê duyệt 1 hồ sơ PDF chọn "TL." — xác nhận khung tiền tố hiện đúng, PDF sau ký có tiền tố, timeline hiển thị "TL. {tên}".
+5. Thực hiện hồ sơ ISO: phê duyệt 1 hồ sơ Office (DOCX/XLSX) — xác nhận KHÔNG có picker "Ký thay" hiện ra (đúng thiết kế), workflow vẫn hoạt động bình thường.
+6. Xác nhận badge tiền tố cạnh "Người phê duyệt" trong form Soạn thảo ISO hiển thị đúng sau khi phê duyệt xong và load lại trang.
+
+---
+
+## Kế hoạch ban đầu (lịch sử quyết định — đã triển khai theo bản tóm tắt ở trên)
+
+**CHƯA LÀM** — đây là kế hoạch đã rà soát và chốt phạm vi với người dùng, để session sau triển khai. Không tự ý code phần này nếu chưa đọc kỹ mục "Việc cần làm ở ĐẦU session sau" bên dưới.
+
+### Bối cảnh
+
+Người dùng yêu cầu thống nhất toàn bộ logic ký PDF trong module ISO theo đúng pattern đã ổn định ở Văn bản nội bộ (`.claude/rules/22-documents-module.md`, mục "Tổng quát hóa 'KT.' thành 4 lựa chọn KT./TM./TL./TUQ." và "PDF nhiều trang trong SignPlacementModal"): mọi khung ký (chữ ký, tên, tiền tố chức danh) đều dùng eye-icon để ẩn/hiện, và hỗ trợ đặt chữ ký ở bất kỳ trang nào (đã xong — xem mục "Fix 2026-07-13" trong `.claude/rules/20-iso-forms-module.md`).
+
+### Đã rà soát và xác nhận hiện trạng (2026-07-13)
+
+- **Thực hiện hồ sơ ISO** (`iso/forms/[id]/page.tsx`, `SignPlacementModal`): đã có eye-icon (`Eye`/`EyeOff`) thật cho cả chữ ký lẫn tên, đã hỗ trợ đặt chữ ký nhiều trang (fix cùng ngày). **Chưa có** khái niệm tiền tố ký thay (KT./TM./TL./TUQ.) ở bất kỳ đâu.
+- **Soạn thảo ISO** (`iso/documents/[id]/page.tsx`, modal đặt chữ ký inline): `placementModal` state **đã có sẵn** `showSignature`/`showSignerName` (không phải thiếu như nghi ngờ ban đầu), đã hỗ trợ nhiều trang. Nhưng nút ẩn/hiện hiện là **nút chữ** ("Ẩn chữ ký (X)"/"Hiện chữ ký", "Ẩn tên (X)"/"Hiện tên", dòng ~4286-4299), không phải icon mắt. Nút "Ẩn chữ ký" chỉ render khi `placementDocIsCon` (dòng 754-762: hồ sơ con hoặc file phụ soát xét `change_request`/`review_request`) — tài liệu cha chỉ thấy nút "Ẩn tên", không có nút ẩn chữ ký. **Chưa có** khái niệm tiền tố ký thay ở đâu cả (đã grep `KT\.|signAs|SignAsType|phe_duyet_is_kt|prefixText|prefixX` trong cả `documents/[id]/page.tsx` lẫn `src/app/api/sign/generate-pdf/route.ts` — 0 kết quả).
+- `SignPlacement`/`ExtraSignPlacement` type trong `src/app/api/sign/generate-pdf/route.ts` (dòng 66-86) đã có `showSignature?`/`showSignerName?` (dùng đúng, check tại dòng ~1490/1502/1535/1545 và bản sao thứ 2 ~1668/1680) nhưng **chưa có** field `prefixX/Y/width/height` như `ExtraSignPlacement` của Văn bản (`src/app/api/documents/sign/route.ts` dòng 31-37).
+- `iso_documents` và `iso_form_instances` **chưa có cột `sign_as`/`is_kt` nào** — khác với `van_ban_documents` đã có `phe_duyet_sign_as` (migration `20260706_van_ban_sign_as.sql`) — nghĩa là đây là tính năng hoàn toàn mới cho ISO, không cần lo tương thích ngược với dữ liệu `is_kt` cũ như Văn bản từng phải xử lý.
+
+### Quyết định đã chốt với người dùng (2026-07-13)
+
+1. **Phạm vi KT/TM/TL/TUQ**: áp dụng cho **cả 2 module ISO** (Soạn thảo ISO lẫn Thực hiện hồ sơ ISO), không chỉ Soạn thảo.
+2. **Ẩn chữ ký ở tài liệu cha (Soạn thảo ISO)**: **GIỮ NGUYÊN** quy tắc cũ — tài liệu cha vẫn chỉ ẩn được "tên", không ẩn được "chữ ký" (chỉ hồ sơ con mới ẩn được cả 2). Việc "hợp nhất eye-icon" ở đây **chỉ là đổi trình bày** (nút chữ → icon mắt thật, mirror đúng UI pattern của `forms/[id]/page.tsx`), **không đổi điều kiện quyền** `placementDocIsCon` đang gate nút ẩn chữ ký.
+3. **Eye-icon riêng cho khung tiền tố**: **KHÔNG thêm** — giữ nguyên cơ chế của Văn bản (chọn "Không chọn"/`signAs="none"` = ẩn khung tiền tố; chọn KT/TM/TL/TUQ = hiện khung kéo-thả). Không cần trạng thái `showPrefix` độc lập với `signAs`.
+4. **Đồng bộ ngược Văn bản**: vì mục 3 chọn giữ cơ chế cũ (không có pattern mới nào phát sinh), **không có việc gì cần backport vào Văn bản** — Văn bản giữ nguyên làm reference implementation, không đụng vào.
+
+### Việc cần làm
+
+#### A. Hợp nhất UI eye-icon ở Soạn thảo ISO (thuần túy trình bày, không đổi logic quyền)
+
+- `iso/documents/[id]/page.tsx` dòng ~4286-4299: đổi 2 nút chữ thành nút icon tròn nhỏ overlay góc trên-phải khung kéo-thả (mirror đúng style đã dùng trong `forms/[id]/page.tsx` `SignPlacementModal`, ví dụ khung chữ ký dòng ~415-420: `className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"`, icon `{showSig ? <EyeOff size={10}/> : <Eye size={10}/>}`).
+- Giữ nguyên điều kiện `{placementDocIsCon && (...)}` cho nút ẩn chữ ký, không có điều kiện cho nút ẩn tên — chỉ đổi phần render bên trong.
+- `Eye`/`EyeOff` đã import sẵn trong file (dùng ở chỗ khác) — không cần thêm import.
+
+#### B. Tiền tố ký thay KT./TM./TL./TUQ. — chỉ bật ở bước Phê duyệt (cần xác nhận lại — xem mục C)
+
+Mirror kiến trúc Văn bản (`src/app/api/documents/sign/route.ts`, `.claude/rules/22-documents-module.md` mục "2. Tổng quát hóa 'KT.'"):
+
+**B1. Soạn thảo ISO (`iso_documents`)**
+- Migration mới: `ALTER TABLE iso_documents ADD COLUMN phe_duyet_sign_as TEXT` — không cần cột `is_kt` (không có dữ liệu cũ phải tương thích ngược).
+- `SignPlacement` (`generate-pdf/route.ts` dòng ~80-86) thêm `prefixX?/prefixY?/prefixWidth?/prefixHeight?`.
+- Cần đọc lại chính xác luồng gọi API của action `phe_duyet` trong `iso/documents/[id]/page.tsx` trước khi code (route đích, request shape hiện tại) — plan này suy đoán dựa trên cấu trúc `generate-pdf/route.ts` đã biết, chưa xác nhận trực tiếp cách `documents/[id]/page.tsx` gọi route này cho action `phe_duyet`.
+- `placementModal` state thêm `signAs: SignAsType`, `prefixX/Y/W/H` — chỉ hiển thị radio picker + khung kéo-thả tiền tố khi placement hiện tại là bước Phê duyệt.
+- Hàm vẽ chữ ký trong `generate-pdf/route.ts` thêm tham số `prefixText: string | null`, vẽ vào khung riêng tại `prefixX/Y/W/H` khi có tọa độ — mirror `stampPdfStep` của Văn bản (`documents/sign/route.ts` dòng ~317-386). **Không** ghép prefix vào `signerName` dùng cho tag DOCX/XLSX (giữ nguyên tắc "tiền tố chỉ áp dụng khi ký PDF" đã chốt cho Văn bản).
+- UI hiển thị tên phê duyệt (trang chi tiết, timeline) thêm tiền tố theo `sign_as` — mirror `signAsPrefixLabel()` của Văn bản.
+
+**B2. Thực hiện hồ sơ ISO (`iso_form_instances`)**
+- Migration mới: `ALTER TABLE iso_form_instances ADD COLUMN phe_duyet_sign_as TEXT`.
+- `SignPlacement`/`FullPlacement` (cả `forms/[id]/page.tsx` lẫn `finalize/route.ts`) thêm `prefixX?/prefixY?/prefixWidth?/prefixHeight?`.
+- `SignPlacementModal` (`forms/[id]/page.tsx`) thêm state `signAs: SignAsType`, `prefixState: ElemState` — radio picker + khung kéo-thả viền emerald (mirror Văn bản) chỉ hiện khi `action === "phe_duyet"`.
+- `handleConfirm`/`handleSignConfirm` gửi thêm `sign_as` trong body POST `/api/iso/forms/[id]/finalize` (hiện tại body chỉ có `token, action, placement, cap_tl`).
+- `finalize/route.ts`, nhánh `action === "phe_duyet"` trong `stampPdf` (đã đọc kỹ ở phiên trước, dòng ~79-170): đọc `sign_as` từ body, tính `prefixText = signAs !== "none" ? \`${signAs}.\` : null`, vẽ vào khung riêng, lưu `phe_duyet_sign_as` vào DB cùng lúc set `trang_thai = "da_phe_duyet"`.
+- UI hiển thị tên phê duyệt (card "Tiến trình & Lịch sử") thêm tiền tố tương tự.
+
+#### C. Việc cần làm ở ĐẦU session sau (trước khi code bất cứ gì)
+
+1. **Xác nhận lại phạm vi bước áp dụng tiền tố**: plan này giả định tiền tố KT/TM/TL/TUQ chỉ bật ở bước **Phê duyệt** cho cả 2 module (không bật ở Soạn thảo/Xem xét) — suy luận từ cách Văn bản chỉ bật `allowSignAs` cho step `phong_ban` + toàn bộ `phê duyệt`, loại trừ step `ca_nhân` (soạn thảo/xem xét ISO có bản chất gần với "cá nhân tự ký" hơn là "ký thay đại diện phòng ban"). **Đây là suy luận của tôi, chưa phải câu trả lời trực tiếp từ người dùng** — phải hỏi lại xác nhận trước khi code, đặc biệt nếu người dùng muốn tiền tố áp dụng luôn cho cả 3 bước.
+2. Đọc lại chính xác `iso/documents/[id]/page.tsx` để xác định route/luồng gọi API thật của action `phe_duyet` trước khi sửa (mục B1 đang dựa trên suy đoán cấu trúc, chưa verify trực tiếp).
+3. Sau khi code xong, chạy `npx tsc --noEmit` + `npx eslint` + `npm run build`, và ghi rõ "chưa test tay" — đúng quy ước của rule này.
+
+---
+
 ## Nguồn ưu tiên khi có mâu thuẫn
 
 Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:

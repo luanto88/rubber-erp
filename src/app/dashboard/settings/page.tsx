@@ -56,6 +56,7 @@ import {
   ImagePlus,
   Eye,
   EyeOff,
+  Sun,
 } from "lucide-react"
 
 type Suffix = {
@@ -80,6 +81,9 @@ type FactoryInfo = {
   contact_email: string
   website: string
   country_en: string
+  ca_a_ten: string
+  ca_b_ten: string
+  ca_c_ten: string
 }
 
 type FactoryOption = {
@@ -451,6 +455,9 @@ function emptyFactoryInfo(): FactoryInfo {
     contact_email: "",
     website: "",
     country_en: "",
+    ca_a_ten: "",
+    ca_b_ten: "",
+    ca_c_ten: "",
   }
 }
 
@@ -1649,7 +1656,7 @@ export default function SettingsPage() {
       loadPermissions(),
       supabase
         .from("factories")
-        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en")
+        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ca_a_ten, ca_b_ten, ca_c_ten")
         .order("name")
         .then(({ data }) => {
           const rows = data || []
@@ -1663,6 +1670,9 @@ export default function SettingsPage() {
               contact_email: ownFactory.contact_email || "",
               website: ownFactory.website || "",
               country_en: ownFactory.country_en || "",
+              ca_a_ten: ownFactory.ca_a_ten || "",
+              ca_b_ten: ownFactory.ca_b_ten || "",
+              ca_c_ten: ownFactory.ca_c_ten || "",
             })
           }
         }),
@@ -3621,6 +3631,40 @@ export default function SettingsPage() {
                       onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
                       disabled={!canManageSettings}
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {masterDataTab === "company" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mt-4">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Sun size={16} className="text-amber-600" />
+                <span className="font-extrabold text-slate-700">Tên ca sản xuất</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Dùng để in trên phiếu báo thành phẩm và gợi ý trong màn hình quét QR xác nhận sản xuất. Để trống nếu không đặt tên riêng cho ca.
+              </p>
+            </div>
+            <div className="p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[
+                  { label: "Tên Ca A", field: "ca_a_ten" as const },
+                  { label: "Tên Ca B", field: "ca_b_ten" as const },
+                  { label: "Tên Ca C", field: "ca_c_ten" as const },
+                ].map(({ label, field }) => (
+                  <div key={field}>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
+                    <input
+                      value={factoryInfo[field]}
+                      onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
+                      disabled={!canManageSettings}
+                      placeholder="Vd: Sok Khum"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 disabled:bg-slate-50 disabled:text-slate-400"
                     />
                   </div>
                 ))}

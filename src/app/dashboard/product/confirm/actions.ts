@@ -536,10 +536,9 @@ type ShiftTxRow = {
 };
 
 // Toàn bộ giao dịch của MỘT ngày sản xuất + ca — KHÔNG lọc theo người nhập, vì 1 ca có thể có
-// nhiều người trực khác nhau nối tiếp nhau (đã chốt với người dùng). Dùng chung cho cả 3 nơi:
+// nhiều người trực khác nhau nối tiếp nhau (đã chốt với người dùng). Dùng cho:
 // - Hub "Lịch sử ca" (kèm xóa dòng)
-// - Sinh phiếu báo thành phẩm cuối ca
-// - Xem/tạo lại phiếu cũ theo ngày+ca bất kỳ
+// - Xem/tạo lại phiếu cũ theo ngày+ca bất kỳ (qua loadShiftHistory)
 async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: string): Promise<ShiftTxRow[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
@@ -550,6 +549,23 @@ async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: stri
     .eq("lots.factory_id", factoryId)
     .eq("ngay_nhap", ngaySx)
     .eq("ca", ca)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []) as unknown as ShiftTxRow[];
+}
+
+// Toàn bộ giao dịch của MỘT ngày sản xuất, KHÔNG lọc theo ca — 1 ngày có thể có 2 ca (Ca A buổi
+// sáng, Ca B buổi chiều chạy xuyên đêm) và phiếu báo thành phẩm phải gộp cả 2 vào cùng 1 phiếu,
+// mỗi ca 1 bảng chi tiết riêng + 1 bảng "Tổng hợp" chung cho cả ngày (đã chốt với người dùng).
+async function loadDayTransactions(factoryId: string, ngaySx: string): Promise<ShiftTxRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("lot_transactions")
+    .select(
+      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,factory_id)",
+    )
+    .eq("lots.factory_id", factoryId)
+    .eq("ngay_nhap", ngaySx)
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
   return (data || []) as unknown as ShiftTxRow[];
@@ -617,22 +633,29 @@ export type DeleteShiftHistoryResult = { success: true } | { success: false; err
 // "Dở dang" (chưa đi qua Kiểm nghiệm/Xuất hàng), re-check ở server chứ không tin canDelete phía
 // client. Dùng lại deleteLotTransaction() (product/actions.ts) — đã tự đồng bộ lại lots.
 export async function deleteShiftHistoryEntry(transactionId: string): Promise<DeleteShiftHistoryResult> {
-  const supabase = getSupabaseAdmin();
-  const { data: tx, error: txError } = await supabase
-    .from("lot_transactions")
-    .select("lot_id, lots!inner(trang_thai)")
-    .eq("id", transactionId)
-    .maybeSingle();
-  if (txError || !tx) return { success: false, error: "Không tìm thấy giao dịch cần xóa." };
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: tx, error: txError } = await supabase
+      .from("lot_transactions")
+      .select("lot_id, lots!inner(trang_thai)")
+      .eq("id", transactionId)
+      .maybeSingle();
+    if (txError || !tx) return { success: false, error: "Không tìm thấy giao dịch cần xóa." };
 
-  const lotInfo = Array.isArray(tx.lots) ? tx.lots[0] : tx.lots;
-  if (normalizeLotStatus(lotInfo?.trang_thai) !== "Dở dang") {
-    return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể xóa từ đây." };
+    const lotInfo = Array.isArray(tx.lots) ? tx.lots[0] : tx.lots;
+    if (normalizeLotStatus(lotInfo?.trang_thai) !== "Dở dang") {
+      return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể xóa từ đây." };
+    }
+
+    const result = await deleteLotTransaction({ transactionId });
+    if (!result.success) return { success: false, error: result.error };
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Lỗi không xác định khi xóa giao dịch.",
+    };
   }
-
-  const result = await deleteLotTransaction({ transactionId });
-  if (!result.success) return { success: false, error: result.error };
-  return { success: true };
 }
 
 export type ShiftReportLotRow = {
@@ -644,6 +667,10 @@ export type ShiftReportLotRow = {
   soKg: number;
   boc: string;
   pallet: string;
+  // Mã ngăn nguồn của các giao dịch gộp vào dòng này — bình thường 1 giá trị, nhưng 1 kiện có thể
+  // được nhập nhiều lần từ 2 ngăn khác nhau (không có ràng buộc cứng nào chặn việc này, xem mục
+  // 4.6 rule 06-module-production.md) nên phải gộp đủ, cách nhau ", " khi có nhiều hơn 1 ngăn.
+  nganMa: string;
   hoanThanhAt: string | null;
   nguoiNhap: string;
 };
@@ -657,33 +684,92 @@ export type ShiftReportGroupRow = {
   soKg: number;
 };
 
+// 1 section = 1 ca sản xuất trong ngày (chỉ những ca thực sự có giao dịch trong ngày mới có
+// section riêng). caLabel là số thứ tự hiển thị ("Ca 1", "Ca 2"...) theo đúng thứ tự thời gian
+// trong ngày (Ca A luôn bắt đầu buổi sáng, Ca B bắt đầu buổi chiều chạy xuyên đêm — xem CA_ORDER),
+// KHÔNG phải theo alphabet của mã ca. caName là tên ca do nhà máy tự đặt (Cài đặt → Danh mục →
+// Thông tin công ty → "Tên ca sản xuất"), rỗng nếu chưa cấu hình.
+export type ShiftReportCaSection = {
+  ca: string;
+  caLabel: string;
+  caName: string;
+  rows: ShiftReportLotRow[];
+  tongBanh: number;
+  tongKg: number;
+};
+
 export type ShiftReportData = {
   ngay: string;
-  ca: string;
-  nganMa: string;
   soChiThi: string;
-  rows: ShiftReportLotRow[];
+  sections: ShiftReportCaSection[];
   tongBanh: number;
   tongKg: number;
   byGroup: ShiftReportGroupRow[];
 };
 
-// Tổng hợp toàn bộ giao dịch của 1 NGÀY SX + CA (không lọc theo người nhập — 1 ca có thể có
+// Thứ tự cố định của các ca trong 1 ngày sản xuất — Ca A bắt đầu buổi sáng, Ca B bắt đầu buổi
+// chiều và chạy xuyên đêm (đã chốt với người dùng). Mã ca nào không nằm trong danh sách này (dữ
+// liệu cũ/hiếm gặp) được xếp cuối theo alphabet, không làm gãy báo cáo.
+const CA_ORDER = ["A", "B", "C"];
+function compareCaCode(a: string, b: string): number {
+  const ia = CA_ORDER.indexOf(a);
+  const ib = CA_ORDER.indexOf(b);
+  if (ia !== -1 && ib !== -1) return ia - ib;
+  if (ia !== -1) return -1;
+  if (ib !== -1) return 1;
+  return a.localeCompare(b);
+}
+
+const CA_NAME_COLUMNS: Record<string, "ca_a_ten" | "ca_b_ten" | "ca_c_ten"> = {
+  A: "ca_a_ten",
+  B: "ca_b_ten",
+  C: "ca_c_ten",
+};
+
+// Tên ca theo cấu hình nhà máy (Cài đặt → Danh mục → Thông tin công ty) — dùng cho cả tiêu đề
+// section trong phiếu báo thành phẩm lẫn gợi ý trong dropdown "Ca sản xuất" ở trang quét QR.
+export async function loadFactoryShiftNames(factoryId: string): Promise<Record<string, string>> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("factories")
+    .select("ca_a_ten, ca_b_ten, ca_c_ten")
+    .eq("id", factoryId)
+    .maybeSingle();
+  return {
+    A: data?.ca_a_ten || "",
+    B: data?.ca_b_ten || "",
+    C: data?.ca_c_ten || "",
+  };
+}
+
+function resolveCaName(names: Record<string, string>, ca: string): string {
+  if (!CA_NAME_COLUMNS[ca]) return "";
+  return names[ca] || "";
+}
+
+// Tổng hợp toàn bộ giao dịch của 1 NGÀY SX (mọi ca, không lọc theo người nhập — 1 ca có thể có
 // nhiều người trực) để in phiếu báo thành phẩm — dùng lại cho cả "Kết thúc ca" lẫn "Xem/tạo lại
-// phiếu cũ" vì luôn truy vấn lại DB, không phụ thuộc phiên làm việc nào.
-export async function loadShiftReportData(factoryId: string, ngaySx: string, ca: string): Promise<ShiftReportData> {
-  const rows = await loadShiftTransactions(factoryId, ngaySx, ca);
+// phiếu cũ" vì luôn truy vấn lại DB, không phụ thuộc phiên làm việc nào. Trường hợp 2 ca cùng làm
+// trong 1 ngày (Ca A buổi sáng, Ca B buổi chiều xuyên đêm), phiếu gộp cả 2 vào cùng 1 lần in —
+// mỗi ca 1 bảng chi tiết riêng (section), 1 bảng "Tổng hợp" chung cho cả ngày.
+export async function loadShiftReportData(factoryId: string, ngaySx: string): Promise<ShiftReportData> {
+  const [rows, shiftNames] = await Promise.all([
+    loadDayTransactions(factoryId, ngaySx),
+    loadFactoryShiftNames(factoryId),
+  ]);
   const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
 
-  // Nhóm theo (ma_lo + boc + pallet) của ĐÚNG giao dịch — KHÔNG chỉ theo ma_lo. Trước đây gộp
+  // Nhóm theo (ca + ma_lo + boc + pallet) của ĐÚNG giao dịch — KHÔNG chỉ theo ma_lo. Trước đây gộp
   // thuần theo ma_lo rồi ghi đè boc/pallet theo giao dịch cuối cùng (last-wins) khiến 1 lô có
   // các kiện dùng pallet khác nhau (vd A/B/C = "Sắt đế gỗ", D = "MB5") bị hiển thị sai thành MỘT
   // pallet duy nhất cho cả lô, kéo theo "Tổng hợp" cộng nhầm số bành vào sai nhóm pallet (bug đã
   // xác nhận 2026-07-13). Nhóm theo tổ hợp thuộc tính thật của từng giao dịch → khi các kiện của
-  // cùng 1 lô khác bọc/pallet, chúng tự tách thành nhiều dòng riêng, mỗi dòng đúng số liệu.
+  // cùng 1 lô khác bọc/pallet, chúng tự tách thành nhiều dòng riêng, mỗi dòng đúng số liệu. Thêm
+  // `ca` vào khóa nhóm (mới, 2026-07-13) để 1 lô có kiện làm ở 2 ca khác nhau tự tách đúng section.
   const byGroupKey = new Map<
     string,
     {
+      ca: string;
       maLo: string;
       loaiCsr: string;
       loaiBanh: number;
@@ -692,24 +778,26 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
       soKg: number;
       boc: string;
       pallet: string;
+      nganMas: Set<string>;
       hoanThanhAt: string | null;
       nguoiNhap: string;
     }
   >();
-  const nganIds = new Set<string>();
+  const nganIdSet = new Set<string>();
   const chiThiSet = new Set<string>();
 
   for (const row of rows) {
     const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
-    if (row.ngan_id) nganIds.add(row.ngan_id);
+    if (row.ngan_id) nganIdSet.add(row.ngan_id);
     if (row.chi_thi) chiThiSet.add(row.chi_thi);
 
     const rowBoc = row.boc || "";
     const rowPallet = row.pallet && row.pallet.length > 0 ? row.pallet.join(", ") : "";
-    const key = `${maLo}||${rowBoc}||${rowPallet}`;
+    const key = `${row.ca}||${maLo}||${rowBoc}||${rowPallet}`;
     const entry = byGroupKey.get(key) || {
+      ca: row.ca,
       maLo,
       loaiCsr: lotInfo?.loai_csr || "",
       loaiBanh: Number(lotInfo?.loai_banh) || 0,
@@ -718,6 +806,7 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
       soKg: 0,
       boc: rowBoc,
       pallet: rowPallet,
+      nganMas: new Set<string>(),
       hoanThanhAt: null,
       nguoiNhap: "",
     };
@@ -727,6 +816,7 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     if (Number(row.kien_d || 0) > 0) entry.letters.add("D");
     entry.soBanh += Number(row.so_banh || 0);
     entry.soKg += Number(row.so_kg || 0);
+    if (row.ngan_id) entry.nganMas.add(row.ngan_id);
     if (!entry.hoanThanhAt || (row.created_at && row.created_at > entry.hoanThanhAt)) {
       entry.hoanThanhAt = row.created_at;
       entry.nguoiNhap = row.created_by ? nameMap.get(row.created_by) || "—" : "—";
@@ -734,23 +824,55 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     byGroupKey.set(key, entry);
   }
 
-  const reportRows: ShiftReportLotRow[] = [...byGroupKey.values()].map((entry) => ({
-    maLo: entry.maLo,
-    loaiCsr: entry.loaiCsr,
-    loaiBanh: entry.loaiBanh,
-    kienLetters: KIEN_ORDER.filter((k) => entry.letters.has(k)).join(""),
-    soBanh: entry.soBanh,
-    soKg: Math.round(entry.soKg * 100) / 100,
-    boc: entry.boc,
-    pallet: entry.pallet,
-    hoanThanhAt: entry.hoanThanhAt,
-    nguoiNhap: entry.nguoiNhap,
-  }));
+  // Resolve ngan_id -> ma_ngan 1 lần cho toàn bộ report (dùng chung cho mọi dòng/section).
+  let nganMaById = new Map<string, string>();
+  if (nganIdSet.size > 0) {
+    const supabase = getSupabaseAdmin();
+    const { data: ngans } = await supabase.from("ngans").select("id, ma_ngan").in("id", [...nganIdSet]);
+    nganMaById = new Map((ngans || []).map((n) => [n.id, n.ma_ngan || ""]));
+  }
 
-  // Tổng hợp theo Loại CSR - Loại bành - Bọc - Loại pallet — nếu nhiều tổ hợp khác nhau thì
-  // chia nhiều dòng (đã chốt với người dùng).
+  const bySection = new Map<string, ShiftReportLotRow[]>();
+  for (const entry of byGroupKey.values()) {
+    const nganMaList = [...entry.nganMas].map((id) => nganMaById.get(id)).filter((v): v is string => !!v);
+    const row: ShiftReportLotRow = {
+      maLo: entry.maLo,
+      loaiCsr: entry.loaiCsr,
+      loaiBanh: entry.loaiBanh,
+      kienLetters: KIEN_ORDER.filter((k) => entry.letters.has(k)).join(""),
+      soBanh: entry.soBanh,
+      soKg: Math.round(entry.soKg * 100) / 100,
+      boc: entry.boc,
+      pallet: entry.pallet,
+      nganMa: [...new Set(nganMaList)].join(", ") || "—",
+      hoanThanhAt: entry.hoanThanhAt,
+      nguoiNhap: entry.nguoiNhap,
+    };
+    const list = bySection.get(entry.ca) || [];
+    list.push(row);
+    bySection.set(entry.ca, list);
+  }
+
+  const sections: ShiftReportCaSection[] = [...bySection.keys()]
+    .sort(compareCaCode)
+    .map((ca, idx) => {
+      const caRows = (bySection.get(ca) || []).sort((a, b) => (a.hoanThanhAt || "").localeCompare(b.hoanThanhAt || ""));
+      return {
+        ca,
+        caLabel: `Ca ${idx + 1}`,
+        caName: resolveCaName(shiftNames, ca),
+        rows: caRows,
+        tongBanh: caRows.reduce((s, r) => s + r.soBanh, 0),
+        tongKg: Math.round(caRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
+      };
+    });
+
+  const allRows = sections.flatMap((s) => s.rows);
+
+  // Tổng hợp theo Loại CSR - Loại bành - Bọc - Loại pallet, GỘP CHUNG CẢ NGÀY (không tách theo
+  // ca — đã chốt với người dùng: bảng tổng vẫn tổng hợp chung như cũ dù có nhiều ca).
   const byGroupMap = new Map<string, ShiftReportGroupRow>();
-  for (const r of reportRows) {
+  for (const r of allRows) {
     const key = `${r.loaiCsr}||${r.loaiBanh}||${r.boc}||${r.pallet}`;
     const acc = byGroupMap.get(key) || { loaiCsr: r.loaiCsr, loaiBanh: r.loaiBanh, boc: r.boc, pallet: r.pallet, soBanh: 0, soKg: 0 };
     acc.soBanh += r.soBanh;
@@ -758,23 +880,14 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string, ca:
     byGroupMap.set(key, acc);
   }
 
-  let nganMa = "—";
-  if (nganIds.size > 0) {
-    const supabase = getSupabaseAdmin();
-    const { data: ngans } = await supabase.from("ngans").select("id, ma_ngan").in("id", [...nganIds]);
-    const mas = (ngans || []).map((n) => n.ma_ngan).filter(Boolean);
-    if (mas.length > 0) nganMa = [...new Set(mas)].join(", ");
-  }
   const soChiThi = chiThiSet.size > 0 ? [...chiThiSet].join(", ") : "—";
 
   return {
     ngay: ngaySx,
-    ca,
-    nganMa,
     soChiThi,
-    rows: reportRows,
-    tongBanh: reportRows.reduce((s, r) => s + r.soBanh, 0),
-    tongKg: Math.round(reportRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
+    sections,
+    tongBanh: allRows.reduce((s, r) => s + r.soBanh, 0),
+    tongKg: Math.round(allRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
     byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
   };
 }

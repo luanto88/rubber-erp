@@ -83,6 +83,14 @@ type SignPlacement = ExtraSignPlacement & {
   qrWidth?: number
   qrHeight?: number
   extraPlacements?: ExtraSignPlacement[]
+  // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ áp dụng cho bước Phê duyệt, chỉ vẽ
+  // trên PDF (tách biệt khỏi tên người ký). Giá trị chữ thật (KT/TM/TL/TUQ) đọc từ
+  // cột iso_documents.phe_duyet_sign_as, không lưu trong placement này.
+  showPrefix?: boolean
+  prefixX?: number
+  prefixY?: number
+  prefixWidth?: number
+  prefixHeight?: number
 }
 
 type SignFileKind = "main" | "change_request" | "review_request"
@@ -1222,6 +1230,15 @@ export async function POST(req: NextRequest) {
       : ((doc.ngay_hieu_luc as string) || "")
     const dateStr = effectiveDate ? fmtDate(effectiveDate) : ""
     const currentSignerKey = getCurrentSignerKey(doc, userId, action)
+    // Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ có giá trị khi doc đã lưu
+    // phe_duyet_sign_as (ghi bởi doTransition ngay trước khi gọi route này khi
+    // action === "phe_duyet"). Áp dụng cho MỌI placement có showPrefix === true
+    // (main lẫn file phụ change_request/review_request của cùng docId), không cần
+    // phân biệt theo signFileKind vì đây là thuộc tính của tài liệu, không phải file.
+    const pheDuyetSignAsRaw = doc.phe_duyet_sign_as
+    const prefixText = typeof pheDuyetSignAsRaw === "string" && pheDuyetSignAsRaw && pheDuyetSignAsRaw !== "none"
+      ? `${pheDuyetSignAsRaw}.`
+      : null
 
     if (signFileKind === "main" && currentSignerKey && signaturePlacement) {
       const { error: placementSaveErr } = await supabaseAdmin
@@ -1307,7 +1324,7 @@ export async function POST(req: NextRequest) {
       typeof soanPlacement.qrWidth === "number" &&
       typeof soanPlacement.qrHeight === "number"
     )
-      ? { x: soanPlacement.qrX, y: soanPlacement.qrY, width: soanPlacement.qrWidth, height: soanPlacement.qrHeight }
+      ? { x: soanPlacement.qrX, y: soanPlacement.qrY, width: soanPlacement.qrWidth, height: soanPlacement.qrHeight, page: soanPlacement.page }
       : null
 
     const [pSoan, pXem, pPhe] = await Promise.all([
@@ -1457,17 +1474,21 @@ export async function POST(req: NextRequest) {
                 metaResult.error ? undefined : new Set(metaResult.footerFilledPages),
               )
             }
-            // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: PDF không có tag "QR:" trong header),
-            // vẽ QR tại vị trí manual placement trên trang đầu tiên.
+            // Fallback: nếu QR chưa được vẽ bởi fillMetadataPlaceholders (vd: không đọc được text PDF
+            // để dò tag "QR:" trong header), vẽ QR tại vị trí manual placement — đúng trang người dùng
+            // đã kéo QR tới (placement.page), không hard-code trang đầu tiên.
             if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
               try {
-                const qrImgFallback = await originalPages.embedPng(qrBuffer)
-                originalPages.getPage(0).drawImage(qrImgFallback, {
-                  x: manualQrPlacement.x,
-                  y: manualQrPlacement.y,
-                  width: manualQrPlacement.width,
-                  height: manualQrPlacement.height,
-                })
+                const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
+                if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
+                  const qrImgFallback = await originalPages.embedPng(qrBuffer)
+                  originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
+                    x: manualQrPlacement.x,
+                    y: manualQrPlacement.y,
+                    width: manualQrPlacement.width,
+                    height: manualQrPlacement.height,
+                  })
+                }
               } catch { /* bỏ qua nếu embed thất bại */ }
             }
 
@@ -1514,6 +1535,16 @@ export async function POST(req: NextRequest) {
                       color: rgb(0, 0, 0),
                     })
                   }
+                }
+
+                if (prefixText && placement.showPrefix && typeof placement.prefixX === "number" && typeof placement.prefixY === "number") {
+                  originalPages.getPage(pageIndex).drawText(prefixText, {
+                    x: placement.prefixX,
+                    y: placement.prefixY,
+                    size: 10,
+                    font: signerNameFont,
+                    color: rgb(0, 0, 0),
+                  })
                 }
               } catch (err) {
                 sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })
@@ -1636,13 +1667,16 @@ export async function POST(req: NextRequest) {
       }
       if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
         try {
-          const qrImgFallback = await originalPages.embedPng(qrBuffer)
-          originalPages.getPage(0).drawImage(qrImgFallback, {
-            x: manualQrPlacement.x,
-            y: manualQrPlacement.y,
-            width: manualQrPlacement.width,
-            height: manualQrPlacement.height,
-          })
+          const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
+          if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
+            const qrImgFallback = await originalPages.embedPng(qrBuffer)
+            originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
+              x: manualQrPlacement.x,
+              y: manualQrPlacement.y,
+              width: manualQrPlacement.width,
+              height: manualQrPlacement.height,
+            })
+          }
         } catch { /* bỏ qua nếu embed thất bại */ }
       }
 
@@ -1689,6 +1723,16 @@ export async function POST(req: NextRequest) {
                 color: rgb(0, 0, 0),
               })
             }
+          }
+
+          if (prefixText && placement.showPrefix && typeof placement.prefixX === "number" && typeof placement.prefixY === "number") {
+            originalPages.getPage(pageIndex).drawText(prefixText, {
+              x: placement.prefixX,
+              y: placement.prefixY,
+              size: 10,
+              font: signerNameFont,
+              color: rgb(0, 0, 0),
+            })
           }
         } catch (err) {
           sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })

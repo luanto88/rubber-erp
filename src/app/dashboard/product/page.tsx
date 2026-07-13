@@ -3499,18 +3499,24 @@ export default function ProductPage() {
       // deleteLotTransaction). Trước đây gọi thẳng .from("lots").delete() luôn báo nhầm "đã có
       // phiếu kiểm nghiệm liên quan" cho lô có liên kết dự đoán (lỗi 23503 nhưng không phải do
       // qc_results), khiến người dùng không bao giờ xóa được.
-      const { error: delError } = await supabase.rpc("delete_orphan_lot", { p_lot_id: contribution.id });
-      if (delError) {
-        setSaveError(
-          delError.code === "23503"
-            ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm hoặc đơn xuất hàng liên quan. Xóa các dữ liệu đó trước."
-            : delError.message,
-        );
+      try {
+        const { error: delError } = await supabase.rpc("delete_orphan_lot", { p_lot_id: contribution.id });
+        if (delError) {
+          setSaveError(
+            delError.code === "23503"
+              ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm hoặc đơn xuất hàng liên quan. Xóa các dữ liệu đó trước."
+              : delError.message,
+          );
+          setDelConfirm(null);
+          return;
+        }
+        if (lot.ngan_id) {
+          await syncNganStatusAfterLotEdit(lot.ngan_id);
+        }
+      } catch (err) {
+        setSaveError(getErrorMessage(err));
         setDelConfirm(null);
         return;
-      }
-      if (lot.ngan_id) {
-        await syncNganStatusAfterLotEdit(lot.ngan_id);
       }
     } else {
       setSaveError("Dòng session này không có transaction_id hợp lệ để xóa riêng.");

@@ -31,6 +31,7 @@ import {
   confirmKienProduction,
   deleteShiftHistoryEntry,
   loadActiveNgansForFactory,
+  loadFactoryShiftNames,
   loadShiftHistory,
   loadShiftReportData,
   loadUserChucVu,
@@ -133,12 +134,20 @@ export default function ConfirmKienProductionPage() {
   const [factoryMismatch, setFactoryMismatch] = useState(false);
 
   const [chucVu, setChucVu] = useState<string | null>(null);
+  // Tên ca sản xuất theo cấu hình nhà máy (Cài đặt → Danh mục → Thông tin công ty → "Tên ca sản
+  // xuất") — chỉ dùng để làm nhãn gợi ý trong 2 dropdown "Ca sản xuất" (form quét + Hub), không
+  // ảnh hưởng dữ liệu lưu (vẫn lưu mã ca "A"/"B"/"C" như trước).
+  const [shiftNames, setShiftNames] = useState<Record<string, string>>({});
+  const caLabel = useCallback(
+    (c: string) => (shiftNames[c] ? `Ca ${c} — ${shiftNames[c]}` : `Ca ${c}`),
+    [shiftNames],
+  );
 
   const [view, setView] = useState<ViewMode>("hub");
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
   const [endShiftError, setEndShiftError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
   const [maLo, setMaLo] = useState("");
@@ -183,7 +192,7 @@ export default function ConfirmKienProductionPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 2500);
+    const timer = setTimeout(() => setToast(null), toast.variant === "error" ? 4000 : 2500);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -209,6 +218,7 @@ export default function ConfirmKienProductionPage() {
       setFactoryId(fid);
       setCurrentUser(user);
       loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
+      loadFactoryShiftNames(fid).then(setShiftNames).catch(() => setShiftNames({}));
 
       const paramLo = (searchParams.get("lo") || "").trim();
       if (paramLo) {
@@ -371,7 +381,7 @@ export default function ConfirmKienProductionPage() {
         setSubmitError(result.error);
         return;
       }
-      setToast(tt("daGuiThanhCong"));
+      setToast({ message: tt("daGuiThanhCong"), variant: "success" });
       // Đưa selector "Lịch sử ca" về đúng ngày+ca vừa nhập để người dùng thấy ngay dòng mới —
       // hiệu ứng phụ: nếu đổi ngày/ca so với lần selector trước, useEffect [historyNgay,historyCa]
       // sẽ tự refetch khi quay lại hub.
@@ -393,10 +403,15 @@ export default function ConfirmKienProductionPage() {
       const result = await deleteShiftHistoryEntry(entry.transactionId);
       if (!result.success) {
         setHistoryError(result.error);
+        setToast({ message: result.error, variant: "error" });
         return;
       }
       setDeleteConfirmId(null);
       await refreshHistory();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Lỗi không xác định khi xóa giao dịch.";
+      setHistoryError(message);
+      setToast({ message, variant: "error" });
     } finally {
       setDeletingId(null);
     }
@@ -407,8 +422,8 @@ export default function ConfirmKienProductionPage() {
     setReportGenerating(true);
     setReportError(null);
     try {
-      const data = await loadShiftReportData(factoryId, historyNgay, historyCa);
-      if (data.rows.length === 0) {
+      const data = await loadShiftReportData(factoryId, historyNgay);
+      if (data.sections.length === 0) {
         setReportError(tt("endShiftNoData"));
         return;
       }
@@ -429,8 +444,8 @@ export default function ConfirmKienProductionPage() {
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
-      const data = await loadShiftReportData(factoryId, historyNgay, historyCa);
-      if (data.rows.length === 0) {
+      const data = await loadShiftReportData(factoryId, historyNgay);
+      if (data.sections.length === 0) {
         setEndShiftError(tt("endShiftNoData"));
         return;
       }
@@ -463,8 +478,12 @@ export default function ConfirmKienProductionPage() {
   return (
     <div className="min-h-screen bg-slate-100">
       {toast && (
-        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-lg">
-          {toast}
+        <div
+          className={`fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-4 py-2 text-sm font-bold text-white shadow-lg ${
+            toast.variant === "error" ? "bg-red-600" : "bg-emerald-600"
+          }`}
+        >
+          {toast.message}
         </div>
       )}
 
@@ -524,6 +543,7 @@ export default function ConfirmKienProductionPage() {
             {view === "hub" ? (
               <HubView
                 tt={tt}
+                caLabel={caLabel}
                 historyNgay={historyNgay}
                 historyCa={historyCa}
                 onChangeNgay={setHistoryNgay}
@@ -596,7 +616,7 @@ export default function ConfirmKienProductionPage() {
                     >
                       {CA_OPTS.map((c) => (
                         <option key={c} value={c}>
-                          Ca {c}
+                          {caLabel(c)}
                         </option>
                       ))}
                     </select>
@@ -750,17 +770,20 @@ export default function ConfirmKienProductionPage() {
                   </select>
                 </Field>
 
+                {/* Loại pallet: chọn 1, không phải chọn nhiều — click lại pallet đang chọn để bỏ
+                    chọn, click pallet khác thì thay thế hoàn toàn lựa chọn cũ. Kiểu dữ liệu vẫn
+                    giữ string[] (khớp cột DB TEXT[] và logic so khớp kienMismatch dùng chung với
+                    modal sửa lô ở product/page.tsx cho phép nhiều pallet) — chỉ ràng buộc UI ở màn
+                    quét QR này còn tối đa 1 phần tử. */}
                 <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
                   <div className="flex flex-wrap gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-2.5">
                     {PALLET_OPTS.map((p) => {
-                      const checked = pallet.includes(p);
+                      const checked = pallet.length === 1 && pallet[0] === p;
                       return (
                         <button
                           key={p}
                           type="button"
-                          onClick={() =>
-                            setPallet((prev) => (checked ? prev.filter((x) => x !== p) : [...prev, p]))
-                          }
+                          onClick={() => setPallet(checked ? [] : [p])}
                           className={`rounded-full px-3.5 py-2 text-[13.2px] font-bold transition-colors ${
                             checked
                               ? "bg-emerald-600 text-white shadow-sm"
@@ -884,6 +907,7 @@ function CardMessage({ icon, text }: { icon: React.ReactNode; text: string }) {
 
 function HubView({
   tt,
+  caLabel,
   historyNgay,
   historyCa,
   onChangeNgay,
@@ -903,6 +927,7 @@ function HubView({
   onEndShift,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
+  caLabel: (c: string) => string;
   historyNgay: string;
   historyCa: string;
   onChangeNgay: (v: string) => void;
@@ -961,7 +986,7 @@ function HubView({
             >
               {CA_OPTS.map((c) => (
                 <option key={c} value={c}>
-                  Ca {c}
+                  {caLabel(c)}
                 </option>
               ))}
             </select>
@@ -1035,6 +1060,7 @@ function HubView({
           {reportGenerating ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
           {tt("viewOrRegenerateReport")}
         </button>
+        <p className="mt-1.5 text-center text-[11px] text-slate-400">{tt("reportCoversWholeDayHint")}</p>
         {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
       </div>
 

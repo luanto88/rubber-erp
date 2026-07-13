@@ -7,6 +7,7 @@ import {
   ArrowLeft, Download, Upload, Eye, EyeOff, CheckCircle2, X,
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
+  ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -20,9 +21,12 @@ import {
   LOAI_TAI_LIEU_LABEL,
   FORM_INSTANCE_STATUS_LABEL,
   FORM_INSTANCE_STATUS_COLOR,
+  SIGN_AS_OPTIONS,
+  SIGN_AS_LABEL,
   type IsoFormInstance,
   type IsoFormInstanceStatus,
   type IsoDocument,
+  type SignAsType,
 } from "../../_components/iso-types"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -35,9 +39,18 @@ type FullPlacement = {
   showSignature: boolean; showSignerName: boolean
   nameX: number; nameY: number; nameWidth: number; nameHeight: number
   qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
+  // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
+  // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
+  showPrefix?: boolean
+  prefixX?: number; prefixY?: number; prefixWidth?: number; prefixHeight?: number
 }
 
 type ElemState = { x: number; y: number; w: number; h: number }
+
+// Đọc tiền tố ký thay để hiển thị trên timeline.
+function signAsPrefixLabel(signAs: SignAsType | null | undefined): string {
+  return signAs && signAs !== "none" ? `${signAs}. ` : ""
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function profileLabel(p: ProfileOption) { return p.full_name || p.username || p.id }
@@ -161,18 +174,26 @@ function SignPlacementModal({
   signatureUrl: string | null
   userName: string
   instanceId: string
-  onConfirm: (pin: string, placement: FullPlacement) => void
+  onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType) => void
   onClose: () => void
 }) {
   const isPdf = fileType === "pdf" || urlIsPdf(sourceFileUrl)
   const showCanvas = isPdf && !!sourceFileUrl
+  // Ký thay (KT./TM./TL./TUQ.) chỉ áp dụng cho bước Phê duyệt, chỉ có ý nghĩa trên
+  // PDF (vẽ hộp riêng) — DOCX/XLSX không cần (đã xác nhận với người dùng).
+  const showSignAsPicker = action === "phe_duyet" && showCanvas
 
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
+  const [signAs, setSignAs] = useState<SignAsType>("none")
 
   // Canvas + PDF state
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfDocRef = useRef<any>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [numPages, setNumPages] = useState(1)
   const [canvasW, setCanvasW] = useState(0)
   const [canvasH, setCanvasH] = useState(0)
   const [pdfPageH, setPdfPageH] = useState(841.89) // A4 default
@@ -184,6 +205,7 @@ function SignPlacementModal({
   const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
   const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: 140, h: 24 })
   const [qrState, setQrState] = useState<ElemState>({ x: 0, y: 10, w: 80, h: 80 })
+  const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
   const [showSig, setShowSig] = useState(true)
   const [showName, setShowName] = useState(true)
 
@@ -191,6 +213,35 @@ function SignPlacementModal({
   const sigNodeRef = useRef<HTMLDivElement>(null)
   const nameNodeRef = useRef<HTMLDivElement>(null)
   const qrNodeRef = useRef<HTMLDivElement>(null)
+  const prefixNodeRef = useRef<HTMLDivElement>(null)
+
+  // Render 1 trang PDF lên canvas — tách riêng để gọi lại khi đổi trang, không
+  // phải load lại toàn bộ file. Tính lại viewport/scale mỗi lần vì kích thước
+  // trang có thể khác nhau giữa các trang.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderPdfPage = async (pdf: any, pageNum: number) => {
+    const page = await pdf.getPage(pageNum)
+    const scale = 1.5
+    const viewport = page.getViewport({ scale })
+    const cW = Math.floor(viewport.width)
+    const cH = Math.floor(viewport.height)
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.width = cW
+    canvas.height = cH
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await page.render({ canvasContext: ctx, viewport } as any).promise
+
+    const unscaledViewport = page.getViewport({ scale: 1 })
+    setCanvasW(cW)
+    setCanvasH(cH)
+    setPdfScale(scale)
+    setPdfPageH(unscaledViewport.height)
+  }
 
   // Load PDF and render to canvas
   useEffect(() => {
@@ -211,35 +262,19 @@ function SignPlacementModal({
       const pdf = await task.promise
       if (cancelled) return
 
-      const page = await pdf.getPage(1)
+      pdfDocRef.current = pdf
+      setNumPages(pdf.numPages)
+      await renderPdfPage(pdf, 1)
       if (cancelled) return
 
-      const scale = 1.5
-      const viewport = page.getViewport({ scale })
-      const cW = Math.floor(viewport.width)
-      const cH = Math.floor(viewport.height)
-
-      const canvas = canvasRef.current
-      if (!canvas || cancelled) return
-      canvas.width = cW
-      canvas.height = cH
-
-      const ctx = canvas.getContext("2d")
-      if (!ctx || cancelled) return
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await page.render({ canvasContext: ctx, viewport } as any).promise
-      if (cancelled) return
-
-      const unscaledViewport = page.getViewport({ scale: 1 })
-      setCanvasW(cW)
-      setCanvasH(cH)
-      setPdfScale(scale)
-      setPdfPageH(unscaledViewport.height)
+      const cH = canvasRef.current?.height || 0
+      const cW = canvasRef.current?.width || 0
 
       // Set default positions based on canvas size
       setSigState({ x: 60, y: cH - 120, w: 140, h: 60 })
       setNameState({ x: 60, y: cH - 55, w: 140, h: 24 })
       setQrState({ x: cW - 100, y: 10, w: 80, h: 80 })
+      setPrefixState({ x: 220, y: cH - 55, w: 60, h: 24 })
       setCanvasReady(true)
     }
 
@@ -248,6 +283,12 @@ function SignPlacementModal({
     })
     return () => { cancelled = true }
   }, [showCanvas, sourceFileUrl])
+
+  const goToPage = (p: number) => {
+    if (p < 1 || p > numPages || !pdfDocRef.current) return
+    setCurrentPage(p)
+    void renderPdfPage(pdfDocRef.current, p)
+  }
 
   // Convert canvas coords to PDF coords
   const toPdf = (canX: number, canY: number, w: number, h: number) => ({
@@ -266,7 +307,7 @@ function SignPlacementModal({
       const namePdf = toPdf(nameState.x, nameState.y, nameState.w, nameState.h)
 
       placement = {
-        page: 1,
+        page: currentPage,
         x: sigPdf.x, y: sigPdf.y, width: sigPdf.width, height: sigPdf.height,
         showSignature: showSig,
         showSignerName: showName,
@@ -280,6 +321,15 @@ function SignPlacementModal({
         placement.qrWidth = qrPdf.width
         placement.qrHeight = qrPdf.height
       }
+
+      if (showSignAsPicker && signAs !== "none") {
+        const prefixPdf = toPdf(prefixState.x, prefixState.y, prefixState.w, prefixState.h)
+        placement.showPrefix = true
+        placement.prefixX = prefixPdf.x
+        placement.prefixY = prefixPdf.y
+        placement.prefixWidth = prefixPdf.width
+        placement.prefixHeight = prefixPdf.height
+      }
     } else {
       // Office mode: no real coordinates needed, tags will be replaced
       placement = {
@@ -290,7 +340,7 @@ function SignPlacementModal({
       }
     }
 
-    onConfirm(pin, placement)
+    onConfirm(pin, placement, showSignAsPicker ? signAs : "none")
   }
 
   const stepTagMap: Record<string, { nameTag: string; sigTag: string }> = {
@@ -320,6 +370,25 @@ function SignPlacementModal({
         </div>
 
         <div className="p-5 space-y-4">
+          {showCanvas && numPages > 1 && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage <= 1}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-xs font-bold text-slate-600">Trang {currentPage} / {numPages}</span>
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage >= numPages}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
           {/* Canvas or Office message */}
           {showCanvas ? (
             <div className="overflow-auto rounded-xl border border-slate-200" style={{ maxHeight: "55vh" }}>
@@ -464,6 +533,30 @@ function SignPlacementModal({
                         </Resizable>
                       </div>
                     </Draggable>
+
+                    {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
+                    {showSignAsPicker && signAs !== "none" && (
+                      <Draggable
+                        nodeRef={prefixNodeRef as RefObject<HTMLElement>}
+                        position={{ x: prefixState.x, y: prefixState.y }}
+                        onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
+                        bounds="parent"
+                      >
+                        <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                          <Resizable
+                            size={{ width: prefixState.w, height: prefixState.h }}
+                            onResizeStop={(_, __, ___, delta) =>
+                              setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                            enable={{ right: true, bottom: true, bottomRight: true }}
+                            minWidth={36} minHeight={16}
+                          >
+                            <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
+                              <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
+                            </div>
+                          </Resizable>
+                        </div>
+                      </Draggable>
+                    )}
                   </>
                 )}
               </div>
@@ -495,6 +588,34 @@ function SignPlacementModal({
                   </div>
                 )}
                 <p className="text-sky-500 mt-1">Tag không có trong file sẽ được bỏ qua.</p>
+              </div>
+            </div>
+          )}
+
+          {showSignAsPicker && (
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="iso-form-sign-as"
+                    checked={signAs === "none"}
+                    onChange={() => setSignAs("none")}
+                  />
+                  Ký trực tiếp
+                </label>
+                {SIGN_AS_OPTIONS.map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="iso-form-sign-as"
+                      checked={signAs === opt}
+                      onChange={() => setSignAs(opt)}
+                    />
+                    {SIGN_AS_LABEL[opt]}
+                  </label>
+                ))}
               </div>
             </div>
           )}
@@ -825,7 +946,7 @@ export default function IsoFormInstancePage() {
   }
 
   // ── Sign confirm ─────────────────────────────────────────────────────────
-  const handleSignConfirm = async (pin: string, placement: FullPlacement) => {
+  const handleSignConfirm = async (pin: string, placement: FullPlacement, signAs: SignAsType) => {
     if (!factoryId || !userId || !signModal || !instance) return
 
     setSignLoading(true)
@@ -861,6 +982,7 @@ export default function IsoFormInstancePage() {
           action: signModal.action,
           placement,
           cap_tl: instance.cap_tl,
+          sign_as: signAs,
         }),
       })
       const finalizeJson = await finalizeRes.json() as { success?: boolean; trang_thai?: string; error?: string }
@@ -929,7 +1051,12 @@ export default function IsoFormInstancePage() {
     (instance.trang_thai === "cho_xem_xet" && instance.xem_xet_user_id === userId) ||
     (instance.trang_thai === "cho_phe_duyet" && instance.phe_duyet_user_id === userId)
   const isDone = instance.trang_thai === "da_phe_duyet"
-  const fileUrl = instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url
+  // Khi hồ sơ đang ở draft/tra_ve, file ký (soan_thao_signed_url/final_pdf_url...) của vòng ký
+  // TRƯỚC đó (đã bị trả về) không còn hiệu lực — luôn ưu tiên draft_file_url mới nhất (kể cả
+  // sau khi người soạn thảo thay file khác), tránh "Xem file"/"Tải xuống" hiện nhầm PDF cũ.
+  const fileUrl = isEditable
+    ? instance.draft_file_url
+    : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
   const isNguoiTao = instance.nguoi_tao === userId
 
   return (
@@ -1375,7 +1502,7 @@ export default function IsoFormInstancePage() {
                         <span className="text-slate-400 shrink-0 mr-2">Phê duyệt</span>
                         <div className="text-right">
                           <span className={`font-semibold ${instance.ky_phe_duyet_at ? "text-emerald-600" : "text-slate-700"}`}>
-                            {instance.phe_duyet}{instance.ky_phe_duyet_at ? " ✓" : ""}
+                            {signAsPrefixLabel(instance.phe_duyet_sign_as)}{instance.phe_duyet}{instance.ky_phe_duyet_at ? " ✓" : ""}
                           </span>
                           {instance.ky_phe_duyet_at && (
                             <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_phe_duyet_at)}</div>

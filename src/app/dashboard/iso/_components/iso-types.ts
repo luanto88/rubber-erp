@@ -1,5 +1,20 @@
 // Types và constants cho module Quản lý ISO
 
+// Chữ viết tắt ký thay, chọn ngay lúc ký (SignPlacementModal) — chỉ áp dụng cho bước
+// Phê duyệt cuối (phe_duyet_sign_as), ở cả Soạn thảo ISO (iso_documents) lẫn Thực hiện
+// hồ sơ ISO (iso_form_instances). Mirror đúng SignAsType của module Văn bản nội bộ
+// (src/app/dashboard/documents/_components/documents-types.ts).
+export type SignAsType = "none" | "KT" | "TM" | "TL" | "TUQ"
+
+export const SIGN_AS_OPTIONS: Exclude<SignAsType, "none">[] = ["KT", "TM", "TL", "TUQ"]
+
+export const SIGN_AS_LABEL: Record<Exclude<SignAsType, "none">, string> = {
+  KT: "KT. (Ký thay)",
+  TM: "TM. (Thay mặt)",
+  TL: "TL. (Thừa lệnh)",
+  TUQ: "TUQ. (Thừa ủy quyền)",
+}
+
 export type IsoTrangThai =
   | "draft"
   | "cho_xem_xet"
@@ -55,6 +70,7 @@ export type IsoDocument = {
   mo_ta_tim_kiem: string | null
   phan_loai_tl: string | null
   parent_doc_id?: string | null
+  phe_duyet_sign_as?: SignAsType | null
   standards?: IsoStandard[]
   auto_convert_pdf?: boolean | null
   created_by: string | null
@@ -318,6 +334,7 @@ export interface IsoFormInstance {
   ky_soan_thao_at: string | null
   xem_xet_placement: Record<string, number> | null
   phe_duyet_placement: Record<string, number> | null
+  phe_duyet_sign_as?: SignAsType | null
   auto_convert_pdf: boolean
   ghi_chu: string | null
   ly_do_tra_ve: string | null
