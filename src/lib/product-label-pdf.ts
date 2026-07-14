@@ -299,10 +299,15 @@ async function renderLabelCell(
   })
 }
 
+// Trả về Blob của PDF vừa tạo (bên cạnh việc tự tải file qua doc.save()) — dùng để upload lên
+// Storage làm bản "cố định" mở lại được qua icon mà không phải render lại (xem
+// .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14"). Chỉ predict/page.tsx đang
+// gọi 2 hàm này và không dùng giá trị trả về trước đây, nên đổi Promise<void> → Promise<Blob>
+// không phá vỡ nơi gọi khác.
 export async function downloadProductLabelPdf(
   items: ProductLabelItem[],
   options: ProductLabelPdfOptions = {},
-) {
+): Promise<Blob> {
   if (items.length === 0) throw new Error("Chưa có kiện nào để in nhãn.")
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
@@ -343,6 +348,7 @@ export async function downloadProductLabelPdf(
 
   const fileSuffix = safeName(`${items.length}-kien-${new Date().toISOString().slice(0, 10)}`)
   doc.save(`nhan-thanh-pham-${fileSuffix}.pdf`)
+  return doc.output("blob")
 }
 
 // ─── Nhãn QR nhỏ (chỉ QR + thông tin ngắn) — theo mẫu cung_cap_dl/nhãn nhỏ.png ─────────────
@@ -447,7 +453,7 @@ async function renderSmallQrCell(
   })
 }
 
-export async function downloadProductLabelSmallQrPdf(items: ProductLabelItem[]) {
+export async function downloadProductLabelSmallQrPdf(items: ProductLabelItem[]): Promise<Blob> {
   if (items.length === 0) throw new Error("Chưa có kiện nào để in nhãn.")
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
@@ -475,4 +481,5 @@ export async function downloadProductLabelSmallQrPdf(items: ProductLabelItem[]) 
 
   const fileSuffix = safeName(`${items.length}-kien-${new Date().toISOString().slice(0, 10)}`)
   doc.save(`nhan-qr-nho-${fileSuffix}.pdf`)
+  return doc.output("blob")
 }

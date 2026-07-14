@@ -325,6 +325,11 @@ export type CreateLotPredictionBatchInput = {
   trailingKienCount: number | null;
   // true = đánh dấu ngăn này "đã dự kiến xong", loại khỏi loadPredictAvailableNgans các lần sau.
   closesNgan: boolean;
+  // Override số lô bắt đầu khi KHÔNG nối tiếp lô dở dang (carryResolution="skip" hoặc không có
+  // carry-over nào) — null = tự động MAX+1 (hành vi cũ). Chỉ có ý nghĩa ở nhánh fresh-start của
+  // RPC; bị bỏ qua nếu đang continue/bridge 1 lô dở dang. Xem .claude/rules/06-module-production.md
+  // mục "Cập nhật 2026-07-14".
+  overrideStartNum: number | null;
 };
 
 export type CreateLotPredictionBatchResult =
@@ -379,6 +384,7 @@ export async function createLotPredictionBatch(
     p_real_unassignable_kien: continuation?.unassignableLetters ?? null,
     p_requested_trailing_kien: input.trailingKienCount,
     p_closes_ngan: input.closesNgan,
+    p_override_start_num: input.overrideStartNum,
   });
 
   if (error) {
@@ -453,6 +459,10 @@ export async function createLotPredictionBatchMulti(
       nganId,
       requestedLotCount: remainingCap,
       carryResolution: isFirst ? input.carryResolution : "continue",
+      // overrideStartNum chỉ có ý nghĩa cho ngăn ĐẦU TIÊN (đúng lúc chọn "bắt đầu lô mới") —
+      // các ngăn sau trong cùng thao tác luôn tự "continue" nối tiếp, không có khái niệm bắt
+      // đầu lại từ số khác.
+      overrideStartNum: isFirst ? input.overrideStartNum : null,
     });
     if (!result.ok) {
       return { ok: false, completedResults: results, failedNganId: nganId, error: result };
@@ -482,6 +492,91 @@ export async function createLotPredictionBatchMulti(
   return { ok: true, results };
 }
 
+// Gợi ý số lô kế tiếp cho tính năng "bắt đầu lô mới" — mirror ĐÚNG công thức fallback MAX+1 của
+// nhánh không-continue trong RPC (supabase/migrations/20260714_lot_prediction_fixes.sql, nhánh
+// ELSE của "IF v_continue THEN ... ELSE ..."), để UI hiển thị gợi ý trước khi submit thật.
+export async function suggestNextLotNum(
+  factoryId: string,
+  loaiCsr: string,
+  loaiBanh: number,
+  year: string,
+): Promise<number> {
+  const supabase = getSupabaseAdmin();
+  const [lotsRes, predictionRes] = await Promise.all([
+    supabase
+      .from("lots")
+      .select("num")
+      .eq("factory_id", factoryId)
+      .eq("loai_csr", loaiCsr)
+      .eq("loai_banh", loaiBanh)
+      .eq("year", year)
+      .order("num", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("lot_prediction_lots")
+      .select("num")
+      .eq("factory_id", factoryId)
+      .eq("loai_csr", loaiCsr)
+      .eq("loai_banh", loaiBanh)
+      .eq("year", year)
+      .neq("carry_over_status", "abandoned")
+      .order("num", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const maxLots = Number(lotsRes.data?.num || 0);
+  const maxPrediction = Number(predictionRes.data?.num || 0);
+  return Math.max(maxLots, maxPrediction) + 1;
+}
+
+// Kiểm tra trùng mã lô — dựng ma_lo ứng viên từ số + hậu tố + năm, kiểm tra tồn tại trong cả
+// `lots` (lô thật) và `lot_prediction_lots` (lô dự kiến, loại abandoned) trong cùng factory.
+// Dùng cho input "Số lô bắt đầu" (tính năng "bắt đầu lô mới") — validate live phía client trước
+// khi submit; RPC vẫn validate lại lần nữa ở server để tránh race condition.
+export async function checkLotNumTaken(
+  factoryId: string,
+  suffix: string,
+  year: string,
+  num: number,
+): Promise<{ taken: boolean; maLo: string }> {
+  const maLo = suffix ? `${num}${suffix}/${year}` : `${num}/${year}`;
+  const supabase = getSupabaseAdmin();
+  const [lotsRes, predictionRes] = await Promise.all([
+    supabase.from("lots").select("id").eq("factory_id", factoryId).eq("ma_lo", maLo).maybeSingle(),
+    supabase
+      .from("lot_prediction_lots")
+      .select("id")
+      .eq("factory_id", factoryId)
+      .eq("ma_lo", maLo)
+      .neq("carry_over_status", "abandoned")
+      .maybeSingle(),
+  ]);
+  return { taken: !!lotsRes.data || !!predictionRes.data, maLo };
+}
+
+// Lưu URL PDF (nhãn nhỏ/lớn) vừa render lên lot_prediction_batches — dùng cho icon "mở lại PDF
+// đã lưu" (không render lại). Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+export async function updateBatchPdfUrl(
+  factoryId: string,
+  batchId: string,
+  size: "small" | "large",
+  url: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const supabase = getSupabaseAdmin();
+  const payload =
+    size === "small"
+      ? { pdf_small_url: url, pdf_small_generated_at: new Date().toISOString() }
+      : { pdf_large_url: url, pdf_large_generated_at: new Date().toISOString() };
+  const { error } = await supabase
+    .from("lot_prediction_batches")
+    .update(payload)
+    .eq("id", batchId)
+    .eq("factory_id", factoryId);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
 export type PredictionBatchRow = {
   id: string;
   ngan_id: string;
@@ -494,6 +589,12 @@ export type PredictionBatchRow = {
   requested_lot_count: number | null;
   status: string;
   created_at: string;
+  // PDF đã render gần nhất cho đợt này (icon "mở lại PDF đã lưu", không render lại) — xem
+  // .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  pdf_small_url: string | null;
+  pdf_small_generated_at: string | null;
+  pdf_large_url: string | null;
+  pdf_large_generated_at: string | null;
   ngans?: { ma_ngan: string; ten_ngan: string } | null;
 };
 
@@ -504,7 +605,7 @@ export async function loadPredictionBatches(
   const { data, error } = await supabase
     .from("lot_prediction_batches")
     .select(
-      "id,ngan_id,day_chuyen,loai_csr,loai_banh,boc,tham,suggested_lot_count,requested_lot_count,status,created_at,ngans(ma_ngan,ten_ngan)",
+      "id,ngan_id,day_chuyen,loai_csr,loai_banh,boc,tham,suggested_lot_count,requested_lot_count,status,created_at,pdf_small_url,pdf_small_generated_at,pdf_large_url,pdf_large_generated_at,ngans(ma_ngan,ten_ngan)",
     )
     .eq("factory_id", factoryId)
     .order("created_at", { ascending: false })
@@ -528,11 +629,22 @@ export type PredictionLotRow = {
   kien_b_ngan_id: string | null;
   kien_c_ngan_id: string | null;
   kien_d_ngan_id: string | null;
+  // Batch nào THỰC SỰ gán ngăn cho từng kiện — độc lập với origin_batch_id (batch tạo dòng)
+  // vì 1 dòng có thể bị batch KHÁC "continue" thêm kiện sau này (xem migration
+  // 20260714_lot_prediction_fixes.sql). Dùng để in đúng nhãn theo đúng batch, tránh bug
+  // "batch continue thiếu kiện + batch gốc in lại lòi nhãn phantom".
+  kien_a_batch_id: string | null;
+  kien_b_batch_id: string | null;
+  kien_c_batch_id: string | null;
+  kien_d_batch_id: string | null;
   carry_over_status: string;
   trang_thai: string;
   real_lot_id: string | null;
   origin_batch_id: string;
 };
+
+const PREDICTION_LOT_COLUMNS =
+  "id,ma_lo,num,suffix,year,loai_csr,loai_banh,boc,tham,kien_weight_kg,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,kien_a_batch_id,kien_b_batch_id,kien_c_batch_id,kien_d_batch_id,carry_over_status,trang_thai,real_lot_id,origin_batch_id";
 
 export async function loadPredictionLotsForBatch(
   batchId: string,
@@ -540,10 +652,30 @@ export async function loadPredictionLotsForBatch(
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("lot_prediction_lots")
-    .select(
-      "id,ma_lo,num,suffix,year,loai_csr,loai_banh,boc,tham,kien_weight_kg,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,carry_over_status,trang_thai,real_lot_id,origin_batch_id",
-    )
+    .select(PREDICTION_LOT_COLUMNS)
     .eq("origin_batch_id", batchId)
+    .order("num", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []) as PredictionLotRow[];
+}
+
+// Dùng riêng cho IN NHÃN — khác loadPredictionLotsForBatch (chỉ lọc origin_batch_id, dùng cho
+// bảng admin xem/sửa theo đúng batch đã tạo dòng). Ở đây lấy TẤT CẢ dòng có LIÊN QUAN tới bất
+// kỳ batch nào trong danh sách, dù dòng đó không do batch này tạo (vd batch N4 "continue" 1
+// kiện của dòng do N5 tạo) — buildLabelItemsForBatches (predict/page.tsx) sau đó tự lọc từng
+// KIỆN theo đúng kien_X_batch_id, không dùng cả dòng.
+export async function loadPredictionLotsForPrint(
+  batchIds: string[],
+): Promise<PredictionLotRow[]> {
+  if (batchIds.length === 0) return [];
+  const supabase = getSupabaseAdmin();
+  const idList = batchIds.join(",");
+  const { data, error } = await supabase
+    .from("lot_prediction_lots")
+    .select(PREDICTION_LOT_COLUMNS)
+    .or(
+      `origin_batch_id.in.(${idList}),kien_a_batch_id.in.(${idList}),kien_b_batch_id.in.(${idList}),kien_c_batch_id.in.(${idList}),kien_d_batch_id.in.(${idList})`,
+    )
     .order("num", { ascending: true });
   if (error) throw new Error(error.message);
   return (data || []) as PredictionLotRow[];
@@ -585,7 +717,7 @@ export async function updatePredictionLot(
   const { data: current, error: loadError } = await supabase
     .from("lot_prediction_lots")
     .select(
-      "id,trang_thai,real_lot_id,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,unassignable_kien,carry_over_status",
+      "id,trang_thai,real_lot_id,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,unassignable_kien,carry_over_status,origin_batch_id,kien_weight_kg",
     )
     .eq("id", input.predictionLotId)
     .eq("factory_id", input.factoryId)
@@ -596,22 +728,49 @@ export async function updatePredictionLot(
     return { ok: false, message: "Lô đã được dùng, chỉ admin mới được sửa." };
   }
 
-  // Validate tỷ lệ lấp đầy của ngăn đích cho từng cột được gán mới — chỉ chặn khi vượt 110%
-  for (const nganId of Object.values(input.kienAssignments)) {
-    if (!nganId) continue;
+  const kienKeysAll = ["kien_a_ngan_id", "kien_b_ngan_id", "kien_c_ngan_id", "kien_d_ngan_id"] as const;
+
+  // Validate tỷ lệ lấp đầy của ngăn đích cho từng ngăn xuất hiện trong lần sửa này — chặn khi
+  // vượt 110%. Trước đây getNganFillPct() loại TOÀN BỘ dòng đang sửa ra khỏi predictedKg rồi
+  // check `pct > 110` mà KHÔNG cộng lại phần đóng góp MỚI của chính dòng này sau khi áp dụng
+  // kienAssignments — nên gán nhiều kiện cùng lúc vào 1 ngăn gần đầy có thể lọt qua 110% (bug
+  // đã xác nhận, xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14").
+  const affectedNganIds = new Set(Object.values(input.kienAssignments).filter((v): v is string => !!v));
+  for (const nganId of affectedNganIds) {
     const { data: ngan } = await supabase
       .from("ngans")
       .select("tong_kho")
       .eq("id", nganId)
       .maybeSingle();
     if (!ngan) continue;
-    const pct = await getNganFillPct(input.factoryId, nganId, Number(ngan.tong_kho || 0), input.predictionLotId);
+    const pctOthers = await getNganFillPct(
+      input.factoryId,
+      nganId,
+      Number(ngan.tong_kho || 0),
+      input.predictionLotId,
+    );
+    // Số kiện của CHÍNH dòng đang sửa sẽ trỏ về nganId SAU khi áp dụng thay đổi
+    const thisRowKienCount = kienKeysAll.reduce((count, key) => {
+      const mergedValue = key in input.kienAssignments ? input.kienAssignments[key] : current[key];
+      return mergedValue === nganId ? count + 1 : count;
+    }, 0);
+    const tongKho = Number(ngan.tong_kho || 0);
+    const addedPct = tongKho > 0 ? ((thisRowKienCount * Number(current.kien_weight_kg || 0)) / tongKho) * 100 : 0;
+    const pct = pctOthers + addedPct;
     if (pct > 110) {
       return { ok: false, message: `Ngăn sẽ vượt quá 110% (dự kiến ${pct.toFixed(1)}%). Không thể lưu.` };
     }
   }
 
   const updatePayload: Record<string, unknown> = { ...input.kienAssignments };
+  // Đồng bộ kien_X_batch_id theo đúng kien_X_ngan_id vừa đổi — gán mới thì attribute cho
+  // origin_batch_id của chính dòng này (đang sửa trong panel của batch nào thì batch đó nhận
+  // ghi công); bỏ gán (null) thì batch_id cũng về null.
+  for (const key of Object.keys(input.kienAssignments) as (keyof typeof input.kienAssignments)[]) {
+    const value = input.kienAssignments[key];
+    const batchKey = key.replace("_ngan_id", "_batch_id");
+    updatePayload[batchKey] = value ? current.origin_batch_id : null;
+  }
   if (input.loaiCsr) updatePayload.loai_csr = input.loaiCsr;
   if (input.loaiBanh) updatePayload.loai_banh = input.loaiBanh;
   if (input.boc !== undefined) updatePayload.boc = input.boc;
@@ -759,12 +918,16 @@ export async function loadNganCumulativeBaselines(
 
 export type DeletePredictionBatchResult = { ok: true } | { ok: false; message: string };
 
-// Xóa 1 đợt dự đoán (admin only). Chỉ cho phép khi TẤT CẢ lô thuộc đợt (origin_batch_id =
-// batchId) chưa được dùng thực tế (real_lot_id IS NULL) — nếu đã có lô thật gắn vào thì
-// chặn xóa để không làm mất dấu vết đã sản xuất. Với các lô KHÁC đợt nhưng có last_batch_id
-// trỏ vào đợt này (đợt này từng "nối tiếp" 1 lô dở dang có nguồn gốc từ đợt khác), tự trỏ lại
-// last_batch_id về đúng origin_batch_id của chính lô đó trước khi xóa — last_batch_id không
-// được đọc ở bất kỳ đâu trong code nên việc này an toàn, chỉ để tránh vi phạm FK.
+const KIEN_NGAN_KEYS = ["kien_a_ngan_id", "kien_b_ngan_id", "kien_c_ngan_id", "kien_d_ngan_id"] as const;
+const KIEN_BATCH_KEYS = ["kien_a_batch_id", "kien_b_batch_id", "kien_c_batch_id", "kien_d_batch_id"] as const;
+const KIEN_LETTERS_FOR_UNASSIGNABLE = ["a", "b", "c", "d"] as const;
+
+// Xóa 1 đợt dự đoán (admin only). Chỉ cho phép khi TẤT CẢ lô THỰC SỰ liên quan tới đợt này —
+// cả lô do chính đợt tạo (origin_batch_id = batchId) LẪN lô do đợt khác tạo nhưng có kiện được
+// đợt này "nối tiếp" (kien_X_batch_id = batchId, xem migration 20260714_lot_prediction_fixes.sql)
+// — chưa được dùng thực tế (real_lot_id IS NULL). Với nhóm thứ 2 (nối tiếp từ đợt khác), xóa
+// đợt này phải HOÀN TÁC đúng phần kiện mà đợt này đã gán (trả kien_X_ngan_id/kien_X_batch_id về
+// NULL, tính lại carry_over_status) — không được xóa cả dòng (dòng đó thuộc đợt khác).
 export async function deletePredictionBatch(
   factoryId: string,
   batchId: string,
@@ -791,13 +954,58 @@ export async function deletePredictionBatch(
     return { ok: false, message: "Đợt này có lô đã được dùng thực tế, không thể xóa." };
   }
 
-  const { data: touchedLots, error: touchedErr } = await supabase
+  const { data: kienTouchedLots, error: kienTouchedErr } = await supabase
+    .from("lot_prediction_lots")
+    .select(
+      "id,real_lot_id,origin_batch_id,unassignable_kien,carry_over_status,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,kien_a_batch_id,kien_b_batch_id,kien_c_batch_id,kien_d_batch_id",
+    )
+    .neq("origin_batch_id", batchId)
+    .or(
+      `kien_a_batch_id.eq.${batchId},kien_b_batch_id.eq.${batchId},kien_c_batch_id.eq.${batchId},kien_d_batch_id.eq.${batchId}`,
+    );
+  if (kienTouchedErr) return { ok: false, message: kienTouchedErr.message };
+  if ((kienTouchedLots || []).some((l) => l.real_lot_id)) {
+    return {
+      ok: false,
+      message: "Đợt này đã có kiện được dùng thực tế qua một lô liên kết (nối tiếp từ đợt khác), không thể xóa.",
+    };
+  }
+
+  for (const lot of kienTouchedLots || []) {
+    const revertPayload: Record<string, unknown> = { last_batch_id: lot.origin_batch_id };
+    const unassignable = new Set((lot.unassignable_kien as string[] | null) || []);
+    KIEN_NGAN_KEYS.forEach((nganKey, i) => {
+      const batchKey = KIEN_BATCH_KEYS[i];
+      if ((lot as Record<string, unknown>)[batchKey] === batchId) {
+        revertPayload[nganKey] = null;
+        revertPayload[batchKey] = null;
+      }
+    });
+    const allFilledAfterRevert = KIEN_NGAN_KEYS.every((nganKey, i) => {
+      const letter = KIEN_LETTERS_FOR_UNASSIGNABLE[i];
+      const value = nganKey in revertPayload ? revertPayload[nganKey] : (lot as Record<string, unknown>)[nganKey];
+      return !!value || unassignable.has(letter);
+    });
+    revertPayload.carry_over_status = allFilledAfterRevert ? "none" : "pending";
+    const { error: revertErr } = await supabase
+      .from("lot_prediction_lots")
+      .update(revertPayload)
+      .eq("id", lot.id);
+    if (revertErr) return { ok: false, message: revertErr.message };
+  }
+
+  // Heal FK-safety còn sót cho dữ liệu cũ trước migration này (last_batch_id trỏ vào batchId
+  // nhưng không dòng nào trong kienTouchedLots phản ánh, hiếm gặp) — last_batch_id không được
+  // đọc ở bất kỳ đâu trong code nên chỉ cần đảm bảo không trỏ vào batch sắp bị xóa.
+  const kienTouchedIds = new Set((kienTouchedLots || []).map((l) => l.id));
+  const { data: staleLastBatchLots, error: staleErr } = await supabase
     .from("lot_prediction_lots")
     .select("id,origin_batch_id")
     .eq("last_batch_id", batchId)
     .neq("origin_batch_id", batchId);
-  if (touchedErr) return { ok: false, message: touchedErr.message };
-  for (const lot of touchedLots || []) {
+  if (staleErr) return { ok: false, message: staleErr.message };
+  for (const lot of staleLastBatchLots || []) {
+    if (kienTouchedIds.has(lot.id)) continue;
     const { error: healErr } = await supabase
       .from("lot_prediction_lots")
       .update({ last_batch_id: lot.origin_batch_id })

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Trash2 } from "lucide-react";
+import { Trash2, FileText } from "lucide-react";
 import {
   getActiveFactoryId,
   hasPermission,
@@ -31,6 +31,7 @@ import {
   createLotPredictionBatchMulti,
   loadPredictionBatches,
   loadPredictionLotsForBatch,
+  loadPredictionLotsForPrint,
   loadNganCumulativeBaselines,
   loadNgansByIdsRaw,
   updatePredictionLot,
@@ -38,6 +39,9 @@ import {
   deletePredictionBatch,
   loadClosedNgans,
   reopenNganPrediction,
+  suggestNextLotNum,
+  checkLotNumTaken,
+  updateBatchPdfUrl,
   type PredictAvailableNgan,
   type PredictionBatchRow,
   type PredictionLotRow,
@@ -45,11 +49,16 @@ import {
   type ClosedNgan,
 } from "@/app/dashboard/product/predict/actions";
 
-const KIEN_COLS: { key: "kien_a_ngan_id" | "kien_b_ngan_id" | "kien_c_ngan_id" | "kien_d_ngan_id"; letter: KienLetter }[] = [
-  { key: "kien_a_ngan_id", letter: "A" },
-  { key: "kien_b_ngan_id", letter: "B" },
-  { key: "kien_c_ngan_id", letter: "C" },
-  { key: "kien_d_ngan_id", letter: "D" },
+const KIEN_COLS: {
+  key: "kien_a_ngan_id" | "kien_b_ngan_id" | "kien_c_ngan_id" | "kien_d_ngan_id";
+  // Cột batch attribution tương ứng — xem PredictionLotRow.kien_X_batch_id trong actions.ts.
+  batchKey: "kien_a_batch_id" | "kien_b_batch_id" | "kien_c_batch_id" | "kien_d_batch_id";
+  letter: KienLetter;
+}[] = [
+  { key: "kien_a_ngan_id", batchKey: "kien_a_batch_id", letter: "A" },
+  { key: "kien_b_ngan_id", batchKey: "kien_b_batch_id", letter: "B" },
+  { key: "kien_c_ngan_id", batchKey: "kien_c_batch_id", letter: "C" },
+  { key: "kien_d_ngan_id", batchKey: "kien_d_batch_id", letter: "D" },
 ];
 
 type SuffixOption = { code: string; name: string };
@@ -98,6 +107,16 @@ export default function ProductPredictPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createdBatchIds, setCreatedBatchIds] = useState<string[] | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
+  // Cảnh báo phòng vệ khi in — nếu bất kỳ kiện nào tính ra > 110% dung lượng ngăn TẠI THỜI
+  // ĐIỂM IN (có thể do ngăn bị sửa/đồng bộ lại sau khi đã dự đoán) — không chặn tải PDF, chỉ
+  // cảnh báo rõ ràng. Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  const [overflowWarning, setOverflowWarning] = useState<string | null>(null);
+  // "Số lô bắt đầu" khi chọn "Bỏ qua, bắt đầu lô mới" (hoặc không có carry-over nào) — gợi ý tự
+  // động, cho sửa tay, chặn khi trùng.
+  const [overrideStartNum, setOverrideStartNum] = useState("");
+  const [overrideStartNumSuggested, setOverrideStartNumSuggested] = useState<number | null>(null);
+  const [overrideStartNumError, setOverrideStartNumError] = useState<string | null>(null);
+  const [overrideStartNumChecking, setOverrideStartNumChecking] = useState(false);
 
   const [batches, setBatches] = useState<PredictionBatchRow[]>([]);
   const [closedNgans, setClosedNgans] = useState<ClosedNgan[]>([]);
@@ -290,6 +309,64 @@ export default function ProductPredictPage() {
     });
   }, [factoryId, loaiCsr, loaiBanh]);
 
+  // Reset "Số lô bắt đầu" mỗi khi đổi series (CSR/bành/hậu tố) — tránh giữ số cũ không còn hợp lệ
+  const overrideStartNumTouchedRef = useRef(false);
+  useEffect(() => {
+    overrideStartNumTouchedRef.current = false;
+    setOverrideStartNum("");
+    setOverrideStartNumSuggested(null);
+    setOverrideStartNumError(null);
+  }, [loaiCsr, loaiBanh, suffix]);
+
+  // Gợi ý số lô kế tiếp khi ở chế độ "bắt đầu lô mới" (carryResolution === "skip") — chỉ tự
+  // điền vào ô khi người dùng CHƯA tự gõ tay (overrideStartNumTouchedRef), giống pattern
+  // auto-suggest loaiCsr ở trên. Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  useEffect(() => {
+    if (!factoryId || !loaiCsr || !loaiBanh || carryResolution !== "skip") {
+      setOverrideStartNumSuggested(null);
+      return;
+    }
+    let alive = true;
+    void suggestNextLotNum(factoryId, loaiCsr, loaiBanh, currentYear2()).then((num) => {
+      if (!alive) return;
+      setOverrideStartNumSuggested(num);
+      if (!overrideStartNumTouchedRef.current) setOverrideStartNum(String(num));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [factoryId, loaiCsr, loaiBanh, carryResolution]);
+
+  // Kiểm tra trùng mã lô khi người dùng gõ tay "Số lô bắt đầu" — debounce 400ms, chặn Tạo dự
+  // đoán nếu trùng.
+  useEffect(() => {
+    if (!factoryId || !loaiCsr || !loaiBanh || carryResolution !== "skip" || overrideStartNum === "") {
+      setOverrideStartNumError(null);
+      return;
+    }
+    const num = Number(overrideStartNum);
+    if (!Number.isFinite(num) || num <= 0) {
+      setOverrideStartNumError("Số lô không hợp lệ.");
+      return;
+    }
+    let alive = true;
+    setOverrideStartNumChecking(true);
+    const timer = window.setTimeout(() => {
+      void checkLotNumTaken(factoryId, suffix, currentYear2(), num)
+        .then((res) => {
+          if (!alive) return;
+          setOverrideStartNumError(res.taken ? `Mã lô ${res.maLo} đã tồn tại, vui lòng chọn số khác.` : null);
+        })
+        .finally(() => {
+          if (alive) setOverrideStartNumChecking(false);
+        });
+    }, 400);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [factoryId, loaiCsr, loaiBanh, suffix, overrideStartNum, carryResolution]);
+
   // "Hết dung lượng" nghĩa là không còn đủ chỗ cho dù chỉ 1 KIỆN (kienWeightKg) — không phải
   // không còn đủ cho 1 LÔ đầy đủ (4 kiện). RPC vẫn có thể tạo hợp lệ 1 lô "dở dang" chỉ 1-3
   // kiện khi dung lượng còn giữa 1 và 4 kienWeight (suggestedLotCount lúc đó = 0 nhưng vẫn
@@ -304,7 +381,11 @@ export default function ProductPredictPage() {
   if (singleNgan && preview) {
     const capKg = singleNgan.tong_kho * 1.1;
     const usedKg = capKg - preview.availableKg;
-    const fullLots = requestedLotCount === "" ? 0 : Number(requestedLotCount);
+    // Kẹp trần theo preview.suggestedLotCount — trước đây đọc thẳng requestedLotCount không kẹp,
+    // nên gõ tay 1 số quá lớn vào ô "Số lô muốn in" làm banner xem trước hiện % vượt xa 110%
+    // (RPC vẫn tự kẹp đúng khi tạo thật, đây chỉ là bug hiển thị — xem rule "Cập nhật 2026-07-14").
+    const fullLotsRaw = requestedLotCount === "" ? 0 : Number(requestedLotCount);
+    const fullLots = Math.min(Math.max(fullLotsRaw, 0), preview.suggestedLotCount);
     const kgAfterFullLots = usedKg + fullLots * preview.lotWeightKg;
     const remainingCapKg = capKg - kgAfterFullLots;
     const maxTrailingKien = Math.min(3, Math.max(0, Math.floor(remainingCapKg / preview.kienWeightKg)));
@@ -327,6 +408,8 @@ export default function ProductPredictPage() {
     !!boc &&
     !outOfCapacity &&
     !singleNganZeroZero &&
+    !overrideStartNumError &&
+    !overrideStartNumChecking &&
     (!pendingCarry || carryResolution !== null);
 
   const handleCreate = async () => {
@@ -349,6 +432,7 @@ export default function ProductPredictPage() {
         createdBy: currentUser?.id || null,
         trailingKienCount: singleNgan && trailingKienCount !== "" ? Number(trailingKienCount) : null,
         closesNgan: closesNganChecked,
+        overrideStartNum: carryResolution === "skip" && overrideStartNum !== "" ? Number(overrideStartNum) : null,
       });
       if (!result.ok) {
         if ("emptyResult" in result) {
@@ -384,14 +468,24 @@ export default function ProductPredictPage() {
     }
   };
 
-  const buildLabelItemsFromLots = async (lots: PredictionLotRow[]): Promise<ProductLabelItem[]> => {
-    if (!factoryId) return [];
-    type RawItem = ProductLabelItem & { nganId: string; kienWeightKg: number };
+  // Thay thế buildLabelItemsFromLots(lots) cũ — vốn build nhãn từ TẤT CẢ 4 cột kien_X_ngan_id
+  // của mỗi dòng bất kể dòng đó thuộc batch nào, gây bug: batch continue (vd N4) "nối" 1 kiện
+  // của dòng do batch khác (N5) tạo bằng cách UPDATE thẳng lên dòng đó — reprint batch gốc (N5)
+  // sau đó vẫn khớp dòng (origin_batch_id không đổi) nên lòi thêm nhãn "phantom" của kiện đã bị
+  // batch sau nhận, còn batch sau lại thiếu đúng kiện đó trong lần in đầu. Fix: mỗi KIỆN chỉ
+  // được đưa vào nếu kien_X_batch_id của nó nằm trong đúng tập batchIds đang in — không dùng cả
+  // dòng làm đơn vị lọc. Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  const buildLabelItemsForBatches = async (batchIds: string[]): Promise<ProductLabelItem[]> => {
+    if (!factoryId || batchIds.length === 0) return [];
+    const targetBatchIds = new Set(batchIds);
+    const lots = await loadPredictionLotsForPrint(batchIds);
+    type RawItem = ProductLabelItem & { nganId: string; kienWeightKg: number }
     const rawItems: RawItem[] = [];
     lots.forEach((lot) => {
-      KIEN_COLS.forEach(({ key, letter }) => {
+      KIEN_COLS.forEach(({ key, batchKey, letter }) => {
         const nganId = lot[key];
-        if (!nganId) return;
+        const assigningBatchId = lot[batchKey];
+        if (!nganId || !assigningBatchId || !targetBatchIds.has(assigningBatchId)) return;
         rawItems.push({
           factoryId,
           maLo: lot.ma_lo,
@@ -448,19 +542,70 @@ export default function ProductPredictPage() {
     }));
   };
 
+  // Cảnh báo phòng vệ: dù RPC tạo dự đoán luôn kẹp ≤110% tại THỜI ĐIỂM TẠO, tỷ lệ hiển thị trên
+  // nhãn được tính LẠI mỗi lần in (loadNganCumulativeBaselines đọc trạng thái ngăn hiện tại) —
+  // nếu ngăn bị sửa/đồng bộ lại khối lượng SAU khi đã dự đoán, % lúc in có thể vượt 110% dù dữ
+  // liệu dự đoán ban đầu vốn hợp lệ. Không chặn tải PDF (nhãn có thể đã dán ngoài hiện trường),
+  // chỉ cảnh báo rõ ràng. Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  const computeOverflowWarning = (items: ProductLabelItem[]): string | null => {
+    const overflowing = items.filter((i) => (i.nganFillPercent ?? 0) > 110);
+    if (overflowing.length === 0) return null;
+    const worstByNgan = new Map<string, number>();
+    overflowing.forEach((i) => {
+      const label = i.nganMa || i.nganTen || "?";
+      const pct = Math.round(i.nganFillPercent || 0);
+      if (pct > (worstByNgan.get(label) || 0)) worstByNgan.set(label, pct);
+    });
+    const parts = Array.from(worstByNgan.entries()).map(([ma, pct]) => `${ma} (${pct}%)`);
+    return `Cảnh báo: ngăn ${parts.join(", ")} đang vượt 110% dung lượng tại thời điểm in — có thể do khối lượng ngăn đã được sửa/đồng bộ lại sau khi dự đoán. Kiểm tra lại trước khi dán nhãn.`;
+  };
+
+  // Upload PDF vừa render lên Storage (bucket order-files, cùng convention với operation-notes.ts
+  // / process/measurements/page.tsx) rồi lưu URL vào lot_prediction_batches — dùng cho icon "mở
+  // lại PDF đã lưu" (không render lại). Lỗi upload không chặn — người dùng vẫn có file vừa tải
+  // về qua downloadProductLabel*Pdf(). Xem rule "Cập nhật 2026-07-14".
+  const persistBatchPdf = async (batchIds: string[], size: "small" | "large", blob: Blob) => {
+    if (!factoryId) return;
+    try {
+      const path = `${factoryId}/product-predict/${batchIds.join("-")}/${Date.now()}-${size}.pdf`;
+      const { error: uploadErr } = await supabase.storage
+        .from("order-files")
+        .upload(path, blob, { upsert: false, contentType: "application/pdf" });
+      if (uploadErr) return;
+      const { data: urlData } = supabase.storage.from("order-files").getPublicUrl(path);
+      const url = urlData.publicUrl;
+      const nowIso = new Date().toISOString();
+      for (const batchId of batchIds) {
+        void updateBatchPdfUrl(factoryId, batchId, size, url).then((result) => {
+          if (!result.ok) return;
+          setBatches((prev) =>
+            prev.map((b) =>
+              b.id === batchId
+                ? size === "small"
+                  ? { ...b, pdf_small_url: url, pdf_small_generated_at: nowIso }
+                  : { ...b, pdf_large_url: url, pdf_large_generated_at: nowIso }
+                : b,
+            ),
+          );
+        });
+      }
+    } catch {
+      // Bỏ qua lỗi upload — không chặn tải PDF chính
+    }
+  };
+
   const handlePrintAfterCreate = async (size: "small" | "large") => {
     if (!createdBatchIds || createdBatchIds.length === 0) return;
     setPrintError(null);
-    const allLots = (
-      await Promise.all(createdBatchIds.map((id) => loadPredictionLotsForBatch(id)))
-    ).flat();
-    const items = await buildLabelItemsFromLots(allLots);
+    setOverflowWarning(null);
+    const items = await buildLabelItemsForBatches(createdBatchIds);
     if (items.length === 0) {
       setPrintError("Đợt này chưa có kiện nào để in nhãn (có thể chỉ vừa nối tiếp lô dở dang của đợt trước — vào Lịch sử dự đoán để in lại đợt gốc).");
       return;
     }
-    if (size === "small") await downloadProductLabelSmallQrPdf(items);
-    else await downloadProductLabelPdf(items);
+    setOverflowWarning(computeOverflowWarning(items));
+    const blob = size === "small" ? await downloadProductLabelSmallQrPdf(items) : await downloadProductLabelPdf(items);
+    void persistBatchPdf(createdBatchIds, size, blob);
   };
 
   const toggleExpandBatch = async (batchId: string) => {
@@ -477,14 +622,15 @@ export default function ProductPredictPage() {
 
   const handleReprintBatch = async (batchId: string, size: "small" | "large") => {
     setPrintError(null);
-    const lots = batchLots[batchId] || (await loadPredictionLotsForBatch(batchId));
-    const items = await buildLabelItemsFromLots(lots);
+    setOverflowWarning(null);
+    const items = await buildLabelItemsForBatches([batchId]);
     if (items.length === 0) {
       setPrintError("Đợt này chưa có kiện nào để in nhãn.");
       return;
     }
-    if (size === "small") await downloadProductLabelSmallQrPdf(items);
-    else await downloadProductLabelPdf(items);
+    setOverflowWarning(computeOverflowWarning(items));
+    const blob = size === "small" ? await downloadProductLabelSmallQrPdf(items) : await downloadProductLabelPdf(items);
+    void persistBatchPdf([batchId], size, blob);
   };
 
   const openEditLot = async (lot: PredictionLotRow) => {
@@ -638,6 +784,9 @@ export default function ProductPredictPage() {
               {printError && (
                 <div className="rounded-xl bg-amber-50 p-3 text-left text-sm font-bold text-amber-700">{printError}</div>
               )}
+              {overflowWarning && (
+                <div className="rounded-xl bg-red-50 p-3 text-left text-sm font-bold text-red-700">{overflowWarning}</div>
+              )}
               <div className="flex flex-col justify-center gap-3 sm:flex-row">
                 <button
                   onClick={() => void handlePrintAfterCreate("small")}
@@ -655,12 +804,14 @@ export default function ProductPredictPage() {
                   onClick={() => {
                     setCreatedBatchIds(null);
                     setPrintError(null);
+                    setOverflowWarning(null);
                     setSelectedNganIds([]);
                     setLoaiCsr("");
                     setBoc("");
                     setRequestedLotCount("");
                     setTrailingKienCount("");
                     setClosesNganChecked(true);
+                    setOverrideStartNum("");
                   }}
                   className="min-h-[44px] rounded-xl border border-slate-200 px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-50"
                 >
@@ -815,6 +966,34 @@ export default function ProductPredictPage() {
                       </div>
                     )}
 
+                    {carryResolution === "skip" && (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <label className="mb-1.5 block text-xs font-bold text-slate-600">
+                          Số lô bắt đầu (tuỳ chọn)
+                          {overrideStartNumSuggested != null && (
+                            <span className="ml-1 font-normal text-slate-400">— gợi ý: {overrideStartNumSuggested}</span>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={overrideStartNum}
+                          onChange={(e) => {
+                            overrideStartNumTouchedRef.current = true;
+                            setOverrideStartNum(e.target.value);
+                          }}
+                          placeholder={overrideStartNumSuggested != null ? String(overrideStartNumSuggested) : ""}
+                          className={`w-40 min-h-[38px] rounded-lg border px-3 py-1.5 text-sm outline-none focus:border-emerald-500 ${overrideStartNumError ? "border-red-400" : "border-slate-300"}`}
+                        />
+                        {overrideStartNumChecking && (
+                          <div className="mt-1 text-xs text-slate-400">Đang kiểm tra trùng mã lô...</div>
+                        )}
+                        {overrideStartNumError && (
+                          <div className="mt-1 text-xs font-bold text-red-600">{overrideStartNumError}</div>
+                        )}
+                      </div>
+                    )}
+
                     {previewLoading ? (
                       <div className="text-sm text-slate-400">Đang tính toán...</div>
                     ) : preview ? (
@@ -920,6 +1099,9 @@ export default function ProductPredictPage() {
           {printError && (
             <div className="rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-700">{printError}</div>
           )}
+          {overflowWarning && (
+            <div className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{overflowWarning}</div>
+          )}
           {closedNgans.length > 0 && (
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-2 text-xs font-bold text-slate-600">Ngăn đã đóng dự kiến</div>
@@ -969,6 +1151,44 @@ export default function ProductPredictPage() {
                 {expandedBatchId === batch.id && (
                   <div className="border-t border-slate-100 p-4">
                     <div className="mb-3 flex flex-wrap justify-end gap-2">
+                      {/* Icon mở PDF đã lưu (không render lại) — đặt trước "Xóa đợt" theo yêu
+                          cầu nghiệp vụ. Mờ/disabled nếu chưa từng in loại nhãn đó. */}
+                      {batch.pdf_small_url ? (
+                        <a
+                          href={batch.pdf_small_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Mở PDF nhãn nhỏ đã lưu (không render lại)"
+                          className="flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                          <FileText size={13} /> PDF nhỏ đã lưu
+                        </a>
+                      ) : (
+                        <span
+                          title="Chưa in nhãn nhỏ lần nào"
+                          className="flex min-h-[36px] cursor-not-allowed items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-300"
+                        >
+                          <FileText size={13} /> PDF nhỏ đã lưu
+                        </span>
+                      )}
+                      {batch.pdf_large_url ? (
+                        <a
+                          href={batch.pdf_large_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Mở PDF nhãn lớn đã lưu (không render lại)"
+                          className="flex min-h-[36px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                          <FileText size={13} /> PDF lớn đã lưu
+                        </a>
+                      ) : (
+                        <span
+                          title="Chưa in nhãn lớn lần nào"
+                          className="flex min-h-[36px] cursor-not-allowed items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-300"
+                        >
+                          <FileText size={13} /> PDF lớn đã lưu
+                        </span>
+                      )}
                       {isAdmin && (
                         <button
                           onClick={() => {
