@@ -782,13 +782,58 @@ con, nhưng `line2` (tên người) vẫn vẽ ở offset Y cố định tuyệt
 thêm 1 dòng → dòng giờ đè lên dòng tên.
 
 Đã fix: thêm hàm dùng chung `computeTrucCaLines(doc, raw, cellWidth)` đo số dòng THẬT của cả 2 phần
-(ngày-giờ, tên) bằng `doc.splitTextToSize()` trước khi vẽ — `didParseCell` giờ set
-`cell.text = [...line1, ...line2]` (thay vì `[]`) để `autoTable` tính đúng `rowHeight` theo tổng số
-dòng thật; `drawTrucCaCell()` vẽ tuần tự từng dòng theo `cursorY` tăng dần (không còn offset cố
-định). Cả 2 hook đều dùng chung `COLUMN_WIDTHS[TRUC_CA_COL_INDEX]` làm `cellWidth` (không đọc từ
-`cell.width`) để đảm bảo kết quả đo số dòng khớp nhau tuyệt đối giữa 2 lần gọi. Không đổi
-`COLUMN_WIDTHS`/độ rộng cột nào khác. `npx tsc --noEmit` + `npx eslint` sạch. **Chưa test tay** — cần
-mở lại "Xem phiếu PDF" cho 1 ngày có dữ liệu quét, xác nhận cột "Trực ca" không còn chồng chữ.
+(ngày-giờ, tên) bằng `doc.splitTextToSize()` trước khi vẽ; `drawTrucCaCell()` vẽ tuần tự từng dòng
+theo `cursorY` tăng dần (không còn offset cố định). Cả 2 hook đều dùng chung
+`COLUMN_WIDTHS[TRUC_CA_COL_INDEX]` làm `cellWidth` (không đọc từ `cell.width`) để đảm bảo kết quả đo
+số dòng khớp nhau tuyệt đối giữa 2 lần gọi. Không đổi `COLUMN_WIDTHS`/độ rộng cột nào khác.
+
+**Fix vòng 2 (cùng ngày, sau khi người dùng test lại và vẫn thấy chồng chữ — ảnh `cung_cap_dl/3.jpg`)**:
+bản fix đầu tiên set `hookData.cell.text = [...line1, ...line2]` (nội dung thật) trong `didParseCell`
+— đây là bug MỚI do chính fix đầu gây ra: `autoTable` luôn tự vẽ mặc định bất kỳ text nào còn lại
+trong `cell.text` (bằng font/màu mặc định của `bodyStyles`, gần đen) **trước khi** `didDrawCell`
+chạy — nên set `cell.text` thành nội dung thật khiến nó bị vẽ **2 lần chồng nhau**: 1 lần mặc định
+màu đen (không có badge, không đúng vị trí) + 1 lần màu xanh/xám tự vẽ tay ở `didDrawCell`. Đã sửa
+lại: `didParseCell` giờ set `cell.text = Array(line1.length + line2.length).fill(" ")` (placeholder
+rỗng đúng SỐ LƯỢNG dòng cần thiết) — vẫn giữ đúng `rowHeight` như tính toán từ `computeTrucCaLines`,
+nhưng không còn nội dung nhìn thấy được để `autoTable` vẽ mặc định, chỉ còn đúng 1 lớp vẽ tay của
+`drawTrucCaCell` (dấu tích xanh + dòng ngày-giờ xanh + dòng tên xám/đen bên dưới, không chồng nhau).
+
+`npx tsc --noEmit` + `npx eslint` sạch. **Chưa test tay** — cần mở lại "Xem phiếu PDF" cho 1 ngày có
+dữ liệu quét, xác nhận cột "Trực ca" chỉ còn đúng 1 lớp chữ (dấu tích xanh, dòng ngày-giờ xanh, dòng
+tên bên dưới), không còn chồng chữ hay chồng 2 lớp màu.
+
+### Fix 2026-07-15 (bug người dùng báo, tiếp) — "Kết thúc ca" báo nhầm kiện đã đủ vẫn còn thiếu
+
+**Bug 3 (hệ quả của Bug 1, không phải bug code mới)**: người dùng test "Kết thúc ca" thấy modal cảnh
+báo "Còn 2 lô dở dang chưa đủ kiện" liệt kê `1117cs/26 — Kiện A, B, C, D` (báo thiếu CẢ 4 kiện), dù
+log "Lịch sử ca" cùng lúc đó hiện rõ `1117cs/26 - Kiện B - 36 bành` đã được quét/gửi thành công (xem
+`cung_cap_dl/1.jpg` và `cung_cap_dl/2.jpg`) — tức kiện B đã đủ 36/36 bành, không nên bị liệt vào
+danh sách thiếu.
+
+**Nguyên nhân xác nhận**: `checkIncompleteLotsForDay()`/`checkLotCompleteness()`
+(`confirm/actions.ts`) đọc thẳng `lots.kien_a/b/c/d` (đã đồng bộ sẵn qua RPC — logic của 2 hàm này
+hoàn toàn đúng, không cần sửa) để so với `max_per_kien`. Nhưng đúng lúc lô `1117cs/26` được quét kiện
+B, RPC `sync_lot_master_snapshot` đang gặp Bug 1 (type-mismatch) — `saveLotTransaction()` INSERT
+`lot_transactions` thành công (round-trip độc lập, đã commit) nhưng lệnh gọi RPC theo sau để đồng bộ
+`lots.kien_b` luôn ném lỗi, khiến `lots.kien_b` của lô này bị "kẹt" ở `0` dù `lot_transactions` đã có
+đủ 36 bành thật. Vì không có giao dịch mới nào cho lô này kể từ đó để tự kích hoạt resync, dữ liệu
+`lots` vẫn sai cho tới khi được resync thủ công.
+
+**Fix — data repair, không phải code fix**: migration mới
+`supabase/migrations/20260715_resync_dodang_lots_kien.sql` — vòng lặp `PERFORM
+sync_lot_master_snapshot(lot.id)` cho **mọi lô `trang_thai IN ('Dở dang', 'Do dang')`**, tính lại
+đúng `kien_a-d`/`tong_banh`/`trang_thai` từ `lot_transactions` thật. **Migration này CẦN CHẠY THỦ
+CÔNG trên Supabase SQL Editor, và PHẢI chạy SAU migration
+`20260715_fix_sync_lot_master_snapshot_kien_types.sql`** (RPC phải đã có chữ ký đúng trước, nếu
+không sẽ gặp lại đúng lỗi type-mismatch cho mọi lô). **Cố ý KHÔNG resync lô `Hoàn thành`/`Xuất
+hàng`** — `sync_lot_master_snapshot()` tự tính lại `trang_thai` chỉ giữa `'Hoàn thành'`/`'Dở dang'`,
+không biết về `'Xuất hàng'`, nên gọi trên lô đã xuất hàng sẽ hạ nhầm về `'Hoàn thành'`.
+
+**Chưa test tay** — cần chạy đủ 3 migration theo đúng thứ tự (`..._returns_row.sql` đã có từ trước →
+`..._fix_sync_lot_master_snapshot_kien_types.sql` → `..._resync_dodang_lots_kien.sql`), sau đó vào
+lại "Kết thúc ca" cho đúng ngày/lô `1117cs/26` xác nhận modal chỉ còn báo thiếu kiện A/C/D (không còn
+B), và xác nhận lô `Xuất hàng` bất kỳ khác trong hệ thống không bị đổi trạng thái sau khi chạy
+migration repair.
 
 ## 5. Kiểm nghiệm và Xuất hàng
 

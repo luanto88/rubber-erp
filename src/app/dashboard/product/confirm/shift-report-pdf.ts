@@ -274,11 +274,15 @@ function renderCaSection(doc: jsPDF, startY: number, section: ShiftReportCaSecti
         return;
       }
       if (hookData.column.index === TRUC_CA_COL_INDEX) {
-        // Thay nội dung mặc định bằng đúng số dòng THẬT (ngày-giờ + tên, có thể wrap thêm) —
-        // để autoTable tính rowHeight đủ chỗ, tránh chồng chữ khi vẽ tay ở didDrawCell bên dưới.
+        // Đo đúng số dòng THẬT (ngày-giờ + tên, có thể wrap thêm) để autoTable tính rowHeight đủ
+        // chỗ, nhưng KHÔNG được gán thẳng nội dung thật vào cell.text — autoTable vẫn tự vẽ mặc
+        // định bất kỳ text nào còn lại trong cell.text (bằng font/màu mặc định của bodyStyles)
+        // TRƯỚC KHI didDrawCell chạy, nên nếu gán content thật ở đây sẽ bị vẽ 2 lần chồng nhau
+        // (1 lần mặc định màu đen + 1 lần màu xanh/xám tự vẽ bên dưới). Dùng placeholder rỗng
+        // đúng SỐ LƯỢNG dòng cần thiết — giữ đúng rowHeight, không render nội dung nhìn thấy được.
         const raw = String(hookData.cell.raw ?? "");
         const { line1, line2 } = computeTrucCaLines(doc, raw, COLUMN_WIDTHS[TRUC_CA_COL_INDEX]);
-        hookData.cell.text = [...line1, ...line2];
+        hookData.cell.text = Array(line1.length + line2.length).fill(" ");
       }
     },
     didDrawCell: (hookData) => {
