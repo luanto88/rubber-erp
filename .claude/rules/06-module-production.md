@@ -756,6 +756,40 @@ với người dùng qua 2 câu hỏi:
   tạm/Gửi/Đang chờ gửi). Nên cân nhắc tách làm 2 phiên: (1) DB + RPC + action lớp server trước, test
   kỹ logic gộp/validate bằng script; (2) UI sau khi backend đã ổn định.
 
+### Fix 2026-07-15 (bug người dùng báo, trước kế hoạch "Lưu tạm") — 2 bug đã fix
+
+**Bug 1 — "GỬI DỮ LIỆU" báo lỗi "Khong dong bo duoc lo: structure of query does not match function result type"**:
+migration `20260715_sync_lot_master_snapshot_returns_row.sql` khai báo `RETURNS TABLE(kien_a numeric,
+kien_b numeric, kien_c numeric, kien_d numeric, tong_banh numeric, ...)` nhưng 5 cột này trong bảng
+`lots` thật là `INTEGER` (`supabase/schema.sql`). `RETURN QUERY SELECT lots.kien_a, ...` select thẳng
+từ bảng nên trả về `integer` thật — PL/pgSQL yêu cầu kiểu trả về phải binary-coercible với khai báo
+`RETURNS TABLE`, và `int4 → numeric` chỉ là assignment-cast (không binary-coercible) nên Postgres
+raise đúng lỗi trên. Lỗi này chặn cả `saveLotTransaction()`/`confirmKienProduction()` (nút "GỬI DỮ
+LIỆU") lẫn `delete_lot_transaction()` (gọi `PERFORM sync_lot_master_snapshot(...)`), vì exception
+xảy ra ngay khi Postgres build tuple descriptor, trước khi `PERFORM` kịp bỏ qua kết quả.
+
+Đã fix bằng migration mới `supabase/migrations/20260715_fix_sync_lot_master_snapshot_kien_types.sql`
+— `DROP FUNCTION` + `CREATE FUNCTION` lại y hệt logic cũ, chỉ sửa `RETURNS TABLE` đổi 5 cột
+`kien_a/b/c/d/tong_banh` từ `numeric` sang `integer` cho khớp đúng kiểu thật của `lots`. **Migration
+này CẦN CHẠY THỦ CÔNG trên Supabase SQL Editor** — nếu chưa chạy, lỗi vẫn y nguyên trên production.
+
+**Bug 2 — Cột "Trực ca" trong PDF "Phiếu báo thành phẩm nhập kho" bị chồng chữ**: trong
+`src/app/dashboard/product/confirm/shift-report-pdf.ts`, `didParseCell` set `hookData.cell.text = []`
+cho cột Trực ca (coi cell rỗng) khiến `autoTable` tính `rowHeight` chỉ đủ 1 dòng, trong khi
+`drawTrucCaCell()` vẽ `line1` (ngày+giờ ghép 1 chuỗi) bằng `doc.text(..., {maxWidth})` — chuỗi
+`"dd/mm/yyyy hh:mm:ss"` (~19 ký tự) vượt quá `maxTextWidth` (~16.5mm) nên jsPDF tự wrap thành 2 dòng
+con, nhưng `line2` (tên người) vẫn vẽ ở offset Y cố định tuyệt đối, không biết `line1` vừa chiếm
+thêm 1 dòng → dòng giờ đè lên dòng tên.
+
+Đã fix: thêm hàm dùng chung `computeTrucCaLines(doc, raw, cellWidth)` đo số dòng THẬT của cả 2 phần
+(ngày-giờ, tên) bằng `doc.splitTextToSize()` trước khi vẽ — `didParseCell` giờ set
+`cell.text = [...line1, ...line2]` (thay vì `[]`) để `autoTable` tính đúng `rowHeight` theo tổng số
+dòng thật; `drawTrucCaCell()` vẽ tuần tự từng dòng theo `cursorY` tăng dần (không còn offset cố
+định). Cả 2 hook đều dùng chung `COLUMN_WIDTHS[TRUC_CA_COL_INDEX]` làm `cellWidth` (không đọc từ
+`cell.width`) để đảm bảo kết quả đo số dòng khớp nhau tuyệt đối giữa 2 lần gọi. Không đổi
+`COLUMN_WIDTHS`/độ rộng cột nào khác. `npx tsc --noEmit` + `npx eslint` sạch. **Chưa test tay** — cần
+mở lại "Xem phiếu PDF" cho 1 ngày có dữ liệu quét, xác nhận cột "Trực ca" không còn chồng chữ.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

@@ -170,31 +170,67 @@ const bodyStyles = {
 };
 const totalsRowStyle = { fontStyle: "bold" as const, fillColor: [241, 245, 249] as [number, number, number] };
 
-// Ký tự phân tách 2 dòng trong cell "Trực ca" — cell.text bị chặn render mặc định (didParseCell)
-// rồi tự vẽ huy hiệu tích + 2 dòng riêng qua didDrawCell (dòng 1 đậm màu xanh, dòng 2 chữ thường
-// màu xám), đúng yêu cầu tách 2 dòng khác kiểu kèm dấu tích xanh.
+// Ký tự phân tách 2 dòng logic trong cell "Trực ca" (ngày-giờ + tên). Bug đã fix (2026-07-15):
+// trước đây didParseCell set cell.text = [] (coi cell rỗng) rồi didDrawCell vẽ 2 dòng ở offset Y
+// CỐ ĐỊNH — khi chuỗi ngày-giờ quá dài tự wrap thành 2 dòng con, dòng tên bị vẽ đè lên dòng giờ vì
+// offset không biết line1 vừa chiếm thêm 1 dòng. Giờ đo số dòng THẬT của cả 2 phần bằng
+// doc.splitTextToSize() trước, dùng đúng số dòng đó để (a) báo autoTable tính rowHeight đủ chỗ và
+// (b) vẽ tuần tự từng dòng theo cursor tăng dần — không bao giờ chồng nhau dù có wrap hay không.
 const LINE_SEP = "␟";
+const TRUC_CA_FONT_SIZE_1 = 6.9; // dòng ngày-giờ, đậm, màu xanh
+const TRUC_CA_FONT_SIZE_2 = 6.7; // dòng tên người, thường, màu xám
+const TRUC_CA_LINE_HEIGHT = 2.9; // mm/dòng
+const TRUC_CA_PAD_X = 1.8;
+const TRUC_CA_BADGE_R = 1.7;
+
+function trucCaMaxTextWidth(cellWidth: number): number {
+  const textX = TRUC_CA_PAD_X + TRUC_CA_BADGE_R * 2 + 1.5;
+  return cellWidth - textX - TRUC_CA_PAD_X;
+}
+
+// Dùng CHUNG hàm này ở cả didParseCell (đo để báo rowHeight) lẫn didDrawCell (đo lại để vẽ) với
+// cùng `cellWidth` (luôn truyền COLUMN_WIDTHS[TRUC_CA_COL_INDEX], không đọc từ cell.width — tránh
+// lệch kết quả wrap giữa 2 hook nếu thời điểm gọi có sai khác nhỏ về giá trị width trên cell).
+function computeTrucCaLines(doc: jsPDF, raw: string, cellWidth: number): { line1: string[]; line2: string[] } {
+  const [part1, part2] = raw.split(LINE_SEP);
+  const maxTextWidth = trucCaMaxTextWidth(cellWidth);
+  doc.setFont(PDF_FONT_NAME, "bold");
+  doc.setFontSize(TRUC_CA_FONT_SIZE_1);
+  const line1 = doc.splitTextToSize(part1 || "", maxTextWidth) as string[];
+  doc.setFont(PDF_FONT_NAME, "normal");
+  doc.setFontSize(TRUC_CA_FONT_SIZE_2);
+  const line2 = doc.splitTextToSize(part2 || "", maxTextWidth) as string[];
+  return { line1: line1.length ? line1 : [""], line2: line2.length ? line2 : [""] };
+}
 
 function drawTrucCaCell(doc: jsPDF, cell: { x: number; y: number; width: number; height: number; raw: unknown }) {
   const raw = String(cell.raw ?? "");
-  const [line1, line2] = raw.split(LINE_SEP);
-  const { x, y, width, height } = cell;
-  const padX = 1.8;
-  const r = 1.7;
-  const badgeCx = x + padX + r;
-  const badgeCy = y + height / 2;
-  drawCheckBadge(doc, badgeCx, badgeCy, r);
+  const { x, y, height } = cell;
+  const { line1, line2 } = computeTrucCaLines(doc, raw, COLUMN_WIDTHS[TRUC_CA_COL_INDEX]);
 
-  const textX = badgeCx + r + 1.5;
-  const maxTextWidth = width - (textX - x) - padX;
+  const badgeCx = x + TRUC_CA_PAD_X + TRUC_CA_BADGE_R;
+  const badgeCy = y + height / 2;
+  drawCheckBadge(doc, badgeCx, badgeCy, TRUC_CA_BADGE_R);
+
+  const textX = badgeCx + TRUC_CA_BADGE_R + 1.5;
+  const totalLines = line1.length + line2.length;
+  let cursorY = y + (height - totalLines * TRUC_CA_LINE_HEIGHT) / 2 + TRUC_CA_LINE_HEIGHT * 0.75;
+
   doc.setFont(PDF_FONT_NAME, "bold");
-  doc.setFontSize(6.9);
+  doc.setFontSize(TRUC_CA_FONT_SIZE_1);
   doc.setTextColor(5, 150, 105);
-  doc.text(line1 || "", textX, y + height / 2 - 1.1, { maxWidth: maxTextWidth });
+  for (const ln of line1) {
+    doc.text(ln, textX, cursorY);
+    cursorY += TRUC_CA_LINE_HEIGHT;
+  }
+
   doc.setFont(PDF_FONT_NAME, "normal");
-  doc.setFontSize(6.7);
+  doc.setFontSize(TRUC_CA_FONT_SIZE_2);
   doc.setTextColor(71, 85, 105);
-  doc.text(line2 || "", textX, y + height / 2 + 2.9, { maxWidth: maxTextWidth });
+  for (const ln of line2) {
+    doc.text(ln, textX, cursorY);
+    cursorY += TRUC_CA_LINE_HEIGHT;
+  }
   doc.setTextColor(15, 23, 42);
 }
 
@@ -238,8 +274,11 @@ function renderCaSection(doc: jsPDF, startY: number, section: ShiftReportCaSecti
         return;
       }
       if (hookData.column.index === TRUC_CA_COL_INDEX) {
-        // Chặn render mặc định — tự vẽ huy hiệu + 2 dòng khác màu/khác cỡ trong didDrawCell.
-        hookData.cell.text = [];
+        // Thay nội dung mặc định bằng đúng số dòng THẬT (ngày-giờ + tên, có thể wrap thêm) —
+        // để autoTable tính rowHeight đủ chỗ, tránh chồng chữ khi vẽ tay ở didDrawCell bên dưới.
+        const raw = String(hookData.cell.raw ?? "");
+        const { line1, line2 } = computeTrucCaLines(doc, raw, COLUMN_WIDTHS[TRUC_CA_COL_INDEX]);
+        hookData.cell.text = [...line1, ...line2];
       }
     },
     didDrawCell: (hookData) => {
