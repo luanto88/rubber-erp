@@ -78,6 +78,18 @@ const DICT: Record<Lang, Record<string, string>> = {
     kienBocPalletMismatchBody:
       "Kiện {kien} được phép khác Ca SX/Số chỉ thị/Ngày SX giữa các lần nhập, nhưng bắt buộc CÙNG Bọc và Loại pallet. Giá trị đã ghi nhận trước đó: {boc} · {pallet}.",
     resetToKienValue: "Đặt lại đúng giá trị",
+    editEntry: "Sửa",
+    editEntryTitle: "Sửa giao dịch",
+    editSaving: "Đang lưu...",
+    editSave: "Lưu thay đổi",
+    editSaveError: "Lỗi không xác định khi sửa giao dịch.",
+    lotJumpWarningTitle: "Lô {maLo} còn thiếu kiện {kien}",
+    lotJumpWarningBody: "Bạn vừa chuyển sang quét lô khác. Vẫn tiếp tục được, chỉ là lưu ý để tránh bỏ sót kiện.",
+    endShiftIncompleteTitle: "Còn {count} lô dở dang chưa đủ kiện",
+    endShiftIncompleteBody: "Các lô sau trong ngày này vẫn còn thiếu kiện. Bạn có chắc muốn kết thúc ca?",
+    endShiftProceedAnyway: "Vẫn kết thúc ca",
+    endShiftFinish: "Hoàn tất, quay lại Thành phẩm",
+    endShiftStayHere: "Ở lại trang này",
   },
   km: {
     appTitle: "ផលិតផលសម្រេច",
@@ -145,6 +157,18 @@ const DICT: Record<Lang, Record<string, string>> = {
     kienBocPalletMismatchBody:
       "កញ្ចប់ {kien} អាចខុសគ្នាបាននៅវេនផលិត/លេខការណែនាំ/ថ្ងៃផលិត ប៉ុន្តែត្រូវតែដូចគ្នាទាំងស្រោប និងប្រភេទប៉ាឡែត។ តម្លៃដែលបានកត់ត្រាពីមុន៖ {boc} · {pallet}។",
     resetToKienValue: "កំណត់ត្រឡប់ទៅតម្លៃត្រឹមត្រូវ",
+    editEntry: "កែសម្រួល",
+    editEntryTitle: "កែសម្រួលប្រតិបត្តិការ",
+    editSaving: "កំពុងរក្សាទុក...",
+    editSave: "រក្សាទុកការផ្លាស់ប្តូរ",
+    editSaveError: "កំហុសមិនស្គាល់ពេលកែសម្រួលប្រតិបត្តិការ។",
+    lotJumpWarningTitle: "ឡូត៍ {maLo} នៅខ្វះកញ្ចប់ {kien}",
+    lotJumpWarningBody: "អ្នកទើបតែប្តូរទៅស្កេនឡូត៍ផ្សេង។ នៅតែបន្តបានធម្មតា គ្រាន់តែជាការរំលឹកកុំឲ្យភ្លេចកញ្ចប់។",
+    endShiftIncompleteTitle: "នៅមានឡូត៍ {count} មិនទាន់គ្រប់កញ្ចប់",
+    endShiftIncompleteBody: "ឡូត៍ខាងក្រោមក្នុងថ្ងៃនេះនៅខ្វះកញ្ចប់។ តើអ្នកប្រាកដថាចង់បញ្ចប់វេនមែនទេ?",
+    endShiftProceedAnyway: "នៅតែបញ្ចប់វេន",
+    endShiftFinish: "រួចរាល់ ត្រឡប់ទៅផលិតផលសម្រេច",
+    endShiftStayHere: "នៅទំព័រនេះទៀត",
   },
 };
 

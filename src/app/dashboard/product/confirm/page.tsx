@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
+import type jsPDF from "jspdf";
 import {
   AlertTriangle,
   Boxes,
@@ -16,6 +17,7 @@ import {
   Loader2,
   Minus,
   Package,
+  Pencil,
   Plus,
   ScanLine,
   Sun,
@@ -25,23 +27,49 @@ import {
 } from "lucide-react";
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth";
 import { getTodayISODate } from "@/lib/date-utils";
-import { getBocsForLoaiCSR } from "@/lib/product-lot-config";
+import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
+  checkIncompleteLotsForDay,
+  checkLotCompleteness,
   confirmKienProduction,
   deleteShiftHistoryEntry,
+  editShiftHistoryEntry,
   loadActiveNgansForFactory,
   loadFactoryShiftNames,
   loadShiftHistory,
   loadShiftReportData,
   loadUserChucVu,
+  loadUserShiftAssignment,
   resolveKienForConfirm,
   type ActiveNganOption,
   type ConfirmKienLookup,
+  type LotCompletenessWarning,
   type ShiftHistoryEntry,
 } from "@/app/dashboard/product/confirm/actions";
-import { shareOrDownloadShiftReportPdf } from "@/app/dashboard/product/confirm/shift-report-pdf";
+import {
+  buildShiftReportFileName,
+  buildShiftReportPdf,
+  openShiftReportPdfInNewTab,
+} from "@/app/dashboard/product/confirm/shift-report-pdf";
+import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
+
+const LAST_CA_STORAGE_KEY = "product_confirm_last_ca";
+const CA_STORAGE_VALUES = ["A", "B", "C"] as const;
+
+// Mục 6 (2026-07-15): gợi ý "Ca sản xuất" — ưu tiên phân công trực ca cố định theo tài khoản
+// (production_shift_assignments), fallback về Ca đã dùng gần nhất TRÊN CHÍNH THIẾT BỊ/trình
+// duyệt này (đã chốt với người dùng — không đoán theo khung giờ), cuối cùng mới về "A".
+function loadStoredCa(): string | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(LAST_CA_STORAGE_KEY);
+  return stored && (CA_STORAGE_VALUES as readonly string[]).includes(stored) ? stored : null;
+}
+function storeCa(ca: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LAST_CA_STORAGE_KEY, ca);
+}
 
 const QrScanner = dynamic(
   () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
@@ -142,9 +170,18 @@ export default function ConfirmKienProductionPage() {
     (c: string) => (shiftNames[c] ? `Ca ${c} — ${shiftNames[c]}` : `Ca ${c}`),
     [shiftNames],
   );
+  // Mục 6: Ca được gán sẵn cho tài khoản hiện tại qua bảng phân công trực ca cố định (Cài đặt →
+  // Cấu hình nhà máy → Phân công trực ca) — ưu tiên cao nhất khi gợi ý "Ca sản xuất" lúc mở form.
+  const [assignedCa, setAssignedCa] = useState<string | null>(null);
+  const getDefaultCa = useCallback((): string => assignedCa || loadStoredCa() || "A", [assignedCa]);
 
   const [view, setView] = useState<ViewMode>("hub");
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
+  // Mục 3: "confirm" (xác nhận ban đầu) -> "warning" (nếu phát hiện lô dở dang thiếu kiện, chờ
+  // xác nhận rõ ràng) -> "preview" (PDF đã dựng xong, chờ người dùng Chia sẻ/Tải/Hoàn tất).
+  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "warning" | "preview">("confirm");
+  const [endShiftIncomplete, setEndShiftIncomplete] = useState<LotCompletenessWarning[]>([]);
+  const [endShiftReportPreview, setEndShiftReportPreview] = useState<{ doc: jsPDF; fileName: string } | null>(null);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
   const [endShiftError, setEndShiftError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(null);
@@ -156,6 +193,10 @@ export default function ConfirmKienProductionPage() {
   const [lookup, setLookup] = useState<ConfirmKienLookup | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  // Mục 3: mã lô vừa gửi thành công gần nhất trong phiên hiện tại — dùng ref (không phải state)
+  // vì chỉ đọc trong effect lookup, không cần re-render khi đổi.
+  const lastSubmittedMaLoRef = useRef<string | null>(null);
+  const [lotJumpWarning, setLotJumpWarning] = useState<LotCompletenessWarning | null>(null);
 
   const [soBanh, setSoBanh] = useState(1);
   const [ngaySx, setNgaySx] = useState(getTodayISODate());
@@ -180,9 +221,15 @@ export default function ConfirmKienProductionPage() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Mục 2: sửa 1 dòng lịch sử đã gửi (thay vì phải xóa rồi quét lại)
+  const [editingEntry, setEditingEntry] = useState<ShiftHistoryEntry | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  // Mục 7: PDF đã dựng sẵn từ "Xem/Tạo lại phiếu" trong Hub — Chia sẻ/Tải dùng lại đúng doc này.
+  const [reportPreview, setReportPreview] = useState<{ doc: jsPDF; fileName: string } | null>(null);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -219,6 +266,7 @@ export default function ConfirmKienProductionPage() {
       setCurrentUser(user);
       loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
       loadFactoryShiftNames(fid).then(setShiftNames).catch(() => setShiftNames({}));
+      loadUserShiftAssignment(fid, user.id).then(setAssignedCa).catch(() => setAssignedCa(null));
 
       const paramLo = (searchParams.get("lo") || "").trim();
       if (paramLo) {
@@ -236,19 +284,21 @@ export default function ConfirmKienProductionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isAdmin = currentUser?.role === "admin";
+
   const refreshHistory = useCallback(async () => {
     if (!factoryId) return;
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const rows = await loadShiftHistory(factoryId, historyNgay, historyCa);
+      const rows = await loadShiftHistory(factoryId, historyNgay, historyCa, isAdmin);
       setHistory(rows);
     } catch (err) {
       setHistoryError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
       setHistoryLoading(false);
     }
-  }, [factoryId, historyNgay, historyCa]);
+  }, [factoryId, historyNgay, historyCa, isAdmin]);
 
   useEffect(() => {
     if (view !== "hub" || !factoryId) return;
@@ -258,6 +308,19 @@ export default function ConfirmKienProductionPage() {
   useEffect(() => {
     if (!factoryId || !maLo || view !== "form") return;
     let alive = true;
+
+    // Mục 3: cảnh báo "nhảy lô" — nếu vừa đổi sang mã lô khác mã lô đã gửi gần nhất trong phiên
+    // hiện tại, kiểm tra xem lô CŨ có còn thiếu kiện không. Không chặn thao tác, chỉ hiển thị
+    // banner amber; chạy song song với lookup của lô mới, không làm chậm luồng quét chính.
+    setLotJumpWarning(null);
+    if (lastSubmittedMaLoRef.current && lastSubmittedMaLoRef.current !== maLo) {
+      checkLotCompleteness(factoryId, lastSubmittedMaLoRef.current)
+        .then((res) => {
+          if (alive) setLotJumpWarning(res);
+        })
+        .catch(() => {});
+    }
+
     const run = async () => {
       setLookupLoading(true);
       setLookupError(null);
@@ -271,7 +334,7 @@ export default function ConfirmKienProductionPage() {
         if (result.status === "predicted" || result.status === "partial" || result.status === "partial_kien") {
           setSoBanh(result.status === "partial_kien" ? Math.max(1, result.remainingBanh || 1) : result.maxPerKien || 36);
           setNgaySx(getDefaultNgaySx(new Date()));
-          setCa("A");
+          setCa(getDefaultCa());
           setBoc(result.boc || "");
           setPallet(result.pallet || []);
           setChiThi(result.chiThi || "");
@@ -291,6 +354,7 @@ export default function ConfirmKienProductionPage() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, maLo, kien, view]);
 
   const bocOptions = useMemo(() => {
@@ -382,6 +446,12 @@ export default function ConfirmKienProductionPage() {
         return;
       }
       setToast({ message: tt("daGuiThanhCong"), variant: "success" });
+      // Mục 3: ghi nhớ mã lô vừa gửi thành công để lần quét TIẾP THEO (nếu đổi sang lô khác) biết
+      // đường kiểm tra lô này còn thiếu kiện hay không.
+      lastSubmittedMaLoRef.current = maLo;
+      // Mục 6: nhớ Ca vừa dùng trên chính thiết bị này làm gợi ý mặc định cho lần quét sau (chỉ
+      // khi tài khoản chưa được gán cứng qua bảng phân công — không ghi đè gợi ý ưu tiên cao hơn).
+      if (!assignedCa) storeCa(ca);
       // Đưa selector "Lịch sử ca" về đúng ngày+ca vừa nhập để người dùng thấy ngay dòng mới —
       // hiệu ứng phụ: nếu đổi ngày/ca so với lần selector trước, useEffect [historyNgay,historyCa]
       // sẽ tự refetch khi quay lại hub.
@@ -417,17 +487,67 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
+  // Mục 2: sửa 1 dòng lịch sử đã gửi. openEditEntry chỉ pre-fill state của modal Sửa (component
+  // EditEntryModal quản lý state form riêng, xem bên dưới) — không đụng tới state của form quét.
+  const openEditEntry = (entry: ShiftHistoryEntry) => {
+    setEditError(null);
+    setEditingEntry(entry);
+  };
+
+  const handleSaveEdit = async (input: {
+    nganId: string;
+    ca: string;
+    ngaySx: string;
+    soBanh: number;
+    boc: string;
+    pallet: string[];
+    chiThi: string;
+  }) => {
+    if (!factoryId || !editingEntry) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const result = await editShiftHistoryEntry({
+        transactionId: editingEntry.transactionId,
+        factoryId,
+        isAdmin,
+        nganId: input.nganId,
+        ca: input.ca,
+        ngaySx: input.ngaySx,
+        soBanh: input.soBanh,
+        boc: input.boc || null,
+        pallet: input.pallet,
+        chiThi: input.chiThi || null,
+      });
+      if (!result.success) {
+        setEditError(result.error);
+        return;
+      }
+      setEditingEntry(null);
+      setToast({ message: tt("editSave"), variant: "success" });
+      await refreshHistory();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : tt("editSaveError"));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const handleGenerateReportNow = async () => {
     if (!factoryId) return;
     setReportGenerating(true);
     setReportError(null);
+    setReportPreview(null);
     try {
       const data = await loadShiftReportData(factoryId, historyNgay);
       if (data.sections.length === 0) {
         setReportError(tt("endShiftNoData"));
         return;
       }
-      await shareOrDownloadShiftReportPdf(data);
+      const doc = await buildShiftReportPdf(data);
+      const fileName = buildShiftReportFileName(data);
+      openShiftReportPdfInNewTab(doc);
+      setReportPreview({ doc, fileName });
     } catch (err) {
       setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
     } finally {
@@ -435,7 +555,41 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
-  const handleConfirmEndShift = async () => {
+  // Mục 3 + 7: "Kết thúc ca" giờ có 3 giai đoạn — xem khai báo endShiftPhase ở trên. Bước 1 (bấm
+  // "Xác nhận" lần đầu) kiểm tra lô dở dang thiếu kiện trước khi cho phép xuất phiếu.
+  const openEndShiftModal = () => {
+    setEndShiftPhase("confirm");
+    setEndShiftIncomplete([]);
+    setEndShiftReportPreview(null);
+    setEndShiftError(null);
+    setEndShiftConfirmOpen(true);
+  };
+
+  const proceedGenerateEndShiftReport = async () => {
+    if (!factoryId) return;
+    setEndShiftGenerating(true);
+    setEndShiftError(null);
+    try {
+      const data = await loadShiftReportData(factoryId, historyNgay);
+      if (data.sections.length === 0) {
+        setEndShiftError(tt("endShiftNoData"));
+        setEndShiftPhase("confirm");
+        return;
+      }
+      const doc = await buildShiftReportPdf(data);
+      const fileName = buildShiftReportFileName(data);
+      openShiftReportPdfInNewTab(doc);
+      setEndShiftReportPreview({ doc, fileName });
+      setEndShiftPhase("preview");
+    } catch (err) {
+      setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
+      setEndShiftPhase("confirm");
+    } finally {
+      setEndShiftGenerating(false);
+    }
+  };
+
+  const handleEndShiftFirstConfirm = async () => {
     if (!factoryId) {
       setEndShiftConfirmOpen(false);
       router.push("/dashboard/product");
@@ -444,19 +598,25 @@ export default function ConfirmKienProductionPage() {
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
-      const data = await loadShiftReportData(factoryId, historyNgay);
-      if (data.sections.length === 0) {
-        setEndShiftError(tt("endShiftNoData"));
+      const incomplete = await checkIncompleteLotsForDay(factoryId, historyNgay);
+      if (incomplete.length > 0) {
+        setEndShiftIncomplete(incomplete);
+        setEndShiftPhase("warning");
+        setEndShiftGenerating(false);
         return;
       }
-      await shareOrDownloadShiftReportPdf(data);
-      setEndShiftConfirmOpen(false);
-      router.push("/dashboard/product");
+      await proceedGenerateEndShiftReport();
     } catch (err) {
       setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
-    } finally {
       setEndShiftGenerating(false);
     }
+  };
+
+  const handleFinishEndShift = () => {
+    setEndShiftConfirmOpen(false);
+    setEndShiftPhase("confirm");
+    setEndShiftReportPreview(null);
+    router.push("/dashboard/product");
   };
 
   if (loading) {
@@ -540,6 +700,24 @@ export default function ConfirmKienProductionPage() {
           </div>
 
           <div className="mx-auto max-w-xl px-4 py-5">
+            {/* Mục 3: cảnh báo "nhảy lô" — hiện xuyên suốt các trạng thái của view="form" (không
+                chặn thao tác), biến mất khi trở lại Hub hoặc khi đổi sang lô khác lần nữa. */}
+            {view === "form" && lotJumpWarning && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-extrabold text-amber-800">
+                      {tt("lotJumpWarningTitle", {
+                        maLo: lotJumpWarning.maLo,
+                        kien: lotJumpWarning.missingKien.join(", "),
+                      })}
+                    </div>
+                    <div className="mt-1 text-xs font-semibold text-amber-700">{tt("lotJumpWarningBody")}</div>
+                  </div>
+                </div>
+              </div>
+            )}
             {view === "hub" ? (
               <HubView
                 tt={tt}
@@ -556,14 +734,16 @@ export default function ConfirmKienProductionPage() {
                 onAskDelete={setDeleteConfirmId}
                 onCancelDelete={() => setDeleteConfirmId(null)}
                 onConfirmDelete={handleDeleteEntry}
+                onEdit={openEditEntry}
                 reportGenerating={reportGenerating}
                 reportError={reportError}
+                reportPreview={reportPreview}
                 onGenerateReport={handleGenerateReportNow}
                 onScan={() => {
                   setScanError(null);
                   setView("scanning");
                 }}
-                onEndShift={() => setEndShiftConfirmOpen(true)}
+                onEndShift={openEndShiftModal}
               />
             ) : lookupLoading ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
@@ -837,14 +1017,36 @@ export default function ConfirmKienProductionPage() {
       {endShiftConfirmOpen && (
         <EndShiftConfirmModal
           tt={tt}
+          phase={endShiftPhase}
           generating={endShiftGenerating}
           error={endShiftError}
+          incomplete={endShiftIncomplete}
+          reportPreview={endShiftReportPreview}
           onCancel={() => {
             if (endShiftGenerating) return;
             setEndShiftConfirmOpen(false);
             setEndShiftError(null);
           }}
-          onConfirm={handleConfirmEndShift}
+          onConfirm={handleEndShiftFirstConfirm}
+          onProceedAnyway={proceedGenerateEndShiftReport}
+          onFinish={handleFinishEndShift}
+        />
+      )}
+
+      {editingEntry && factoryId && (
+        <EditEntryModal
+          tt={tt}
+          caLabel={caLabel}
+          factoryId={factoryId}
+          entry={editingEntry}
+          saving={editSaving}
+          error={editError}
+          onCancel={() => {
+            if (editSaving) return;
+            setEditingEntry(null);
+            setEditError(null);
+          }}
+          onSave={handleSaveEdit}
         />
       )}
     </div>
@@ -920,8 +1122,10 @@ function HubView({
   onAskDelete,
   onCancelDelete,
   onConfirmDelete,
+  onEdit,
   reportGenerating,
   reportError,
+  reportPreview,
   onGenerateReport,
   onScan,
   onEndShift,
@@ -940,8 +1144,10 @@ function HubView({
   onAskDelete: (id: string) => void;
   onCancelDelete: () => void;
   onConfirmDelete: (entry: ShiftHistoryEntry) => void;
+  onEdit: (entry: ShiftHistoryEntry) => void;
   reportGenerating: boolean;
   reportError: string | null;
+  reportPreview: { doc: jsPDF; fileName: string } | null;
   onGenerateReport: () => void;
   onScan: () => void;
   onEndShift: () => void;
@@ -1015,35 +1221,47 @@ function HubView({
                       {h.soBanh} bành · {h.nguoiNhap} · {formatHMS(h.createdAt)}
                     </div>
                   </div>
-                  {h.canDelete && (
-                    deleteConfirmId === h.transactionId ? (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={deletingId === h.transactionId}
-                          onClick={() => onConfirmDelete(h)}
-                          className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-60"
-                        >
-                          {deletingId === h.transactionId ? "..." : tt("confirmAction")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onCancelDelete}
-                          className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100"
-                        >
-                          {tt("cancel")}
-                        </button>
-                      </div>
-                    ) : (
+                  {deleteConfirmId === h.transactionId ? (
+                    <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => onAskDelete(h.transactionId)}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50"
-                        title={tt("deleteEntry")}
+                        disabled={deletingId === h.transactionId}
+                        onClick={() => onConfirmDelete(h)}
+                        className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-60"
                       >
-                        <Trash2 size={14} />
+                        {deletingId === h.transactionId ? "..." : tt("confirmAction")}
                       </button>
-                    )
+                      <button
+                        type="button"
+                        onClick={onCancelDelete}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-100"
+                      >
+                        {tt("cancel")}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex shrink-0 items-center gap-1">
+                      {h.canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => onEdit(h)}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-blue-500 hover:bg-blue-50"
+                          title={tt("editEntry")}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
+                      {h.canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onAskDelete(h.transactionId)}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50"
+                          title={tt("deleteEntry")}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1062,6 +1280,11 @@ function HubView({
         </button>
         <p className="mt-1.5 text-center text-[11px] text-slate-400">{tt("reportCoversWholeDayHint")}</p>
         {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
+        {reportPreview && (
+          <div className="mt-2">
+            <ShiftReportPreviewBar doc={reportPreview.doc} fileName={reportPreview.fileName} />
+          </div>
+        )}
       </div>
 
       <div className="border-t border-dashed border-slate-300 pt-4">
@@ -1077,46 +1300,340 @@ function HubView({
   );
 }
 
+// Mục 3 + 7: 3 giai đoạn — "confirm" (xác nhận ban đầu), "warning" (lô dở dang thiếu kiện, chờ
+// xác nhận rõ ràng "Vẫn kết thúc ca"), "preview" (PDF đã dựng + mở tab xem trước, chờ Chia sẻ/
+// Tải/Hoàn tất).
 function EndShiftConfirmModal({
   tt,
+  phase,
   generating,
   error,
+  incomplete,
+  reportPreview,
   onCancel,
   onConfirm,
+  onProceedAnyway,
+  onFinish,
 }: {
-  tt: (key: string) => string;
+  tt: (key: string, vars?: Record<string, string | number>) => string;
+  phase: "confirm" | "warning" | "preview";
   generating: boolean;
   error: string | null;
+  incomplete: LotCompletenessWarning[];
+  reportPreview: { doc: jsPDF; fileName: string } | null;
   onCancel: () => void;
   onConfirm: () => void;
+  onProceedAnyway: () => void;
+  onFinish: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-        <h3 className="text-base font-extrabold text-slate-800">{tt("confirmEndShiftTitle")}</h3>
-        <p className="mt-2 text-sm text-slate-500">{tt("confirmEndShiftMessage")}</p>
+        {phase === "confirm" && (
+          <>
+            <h3 className="text-base font-extrabold text-slate-800">{tt("confirmEndShiftTitle")}</h3>
+            <p className="mt-2 text-sm text-slate-500">{tt("confirmEndShiftMessage")}</p>
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                {error}
+              </div>
+            )}
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={generating}
+                className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {tt("cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={generating}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {generating && <Loader2 size={16} className="animate-spin" />}
+                {generating ? tt("endShiftGenerating") : tt("confirmAction")}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "warning" && (
+          <>
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+              <h3 className="text-base font-extrabold text-slate-800">
+                {tt("endShiftIncompleteTitle", { count: incomplete.length })}
+              </h3>
+            </div>
+            <p className="mt-2 text-sm text-slate-500">{tt("endShiftIncompleteBody")}</p>
+            <div className="mt-3 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-2.5">
+              {incomplete.map((w) => (
+                <div key={w.maLo} className="text-xs font-semibold text-amber-800">
+                  {w.maLo} — {tt("kienLabel")} {w.missingKien.join(", ")}
+                </div>
+              ))}
+            </div>
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                {error}
+              </div>
+            )}
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={generating}
+                className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {tt("cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={onProceedAnyway}
+                disabled={generating}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {generating && <Loader2 size={16} className="animate-spin" />}
+                {generating ? tt("endShiftGenerating") : tt("endShiftProceedAnyway")}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "preview" && reportPreview && (
+          <>
+            <div className="flex items-start gap-2">
+              <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-500" />
+              <h3 className="text-base font-extrabold text-slate-800">{tt("endShiftReportReady")}</h3>
+            </div>
+            <div className="mt-3">
+              <ShiftReportPreviewBar doc={reportPreview.doc} fileName={reportPreview.fileName} />
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              >
+                {tt("endShiftStayHere")}
+              </button>
+              <button
+                type="button"
+                onClick={onFinish}
+                className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+              >
+                {tt("endShiftFinish")}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EditEntryModal({
+  tt,
+  caLabel,
+  factoryId,
+  entry,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  tt: (key: string, vars?: Record<string, string | number>) => string;
+  caLabel: (c: string) => string;
+  factoryId: string;
+  entry: ShiftHistoryEntry;
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (input: {
+    nganId: string;
+    ca: string;
+    ngaySx: string;
+    soBanh: number;
+    boc: string;
+    pallet: string[];
+    chiThi: string;
+  }) => void;
+}) {
+  const [nganId, setNganId] = useState(entry.nganId || "");
+  const [ca, setCa] = useState(entry.ca);
+  const [ngaySx, setNgaySx] = useState(entry.ngaySx);
+  const [soBanh, setSoBanh] = useState(entry.soBanh);
+  const [boc, setBoc] = useState(entry.boc || "");
+  const [pallet, setPallet] = useState<string[]>(entry.pallet || []);
+  const [chiThi, setChiThi] = useState(entry.chiThi || "");
+  // Danh sách ngăn đang hoạt động để đổi ngăn nguồn — ngăn hiện tại của giao dịch (entry.nganId)
+  // luôn được thêm vào đầu danh sách kể cả khi nó không còn "Chờ sản xuất/Đang sản xuất" (đã
+  // chuyển "Đã sản xuất"), để không mất lựa chọn hiện tại khi mở modal.
+  const [nganOptions, setNganOptions] = useState<ActiveNganOption[]>(
+    entry.nganId
+      ? [{ id: entry.nganId, ma_ngan: entry.nganMa || "—", ten_ngan: entry.nganTen || "", loai_nl: "" }]
+      : [],
+  );
+  useEffect(() => {
+    let alive = true;
+    loadActiveNgansForFactory(factoryId)
+      .then((list) => {
+        if (!alive) return;
+        setNganOptions((prev) => {
+          const merged = [...list];
+          if (entry.nganId && !merged.some((n) => n.id === entry.nganId)) {
+            merged.unshift(prev[0] || { id: entry.nganId, ma_ngan: entry.nganMa || "—", ten_ngan: entry.nganTen || "", loai_nl: "" });
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [factoryId]);
+
+  const bocOptions = useMemo(
+    () => getBocsForLoaiCSR(entry.dayChuyen || "Mủ tạp", entry.loaiCsr),
+    [entry.dayChuyen, entry.loaiCsr],
+  );
+  const maxPerKien = useMemo(
+    () => getLoaiBanhConfig(entry.loaiCsr, entry.loaiBanh).max_per_kien,
+    [entry.loaiCsr, entry.loaiBanh],
+  );
+
+  const canSave = !!nganId && soBanh > 0 && soBanh <= maxPerKien;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+        <h3 className="text-base font-extrabold text-slate-800">
+          {tt("editEntryTitle")} — {entry.maLo} {entry.kienLetters}
+        </h3>
+
+        <div className="mt-4 space-y-3">
+          <Field label={tt("ngaySanXuat")} icon={<Calendar size={13} />}>
+            <input
+              type="date"
+              value={ngaySx}
+              onChange={(e) => setNgaySx(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
+              <select
+                value={ca}
+                onChange={(e) => setCa(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              >
+                {CA_OPTS.map((c) => (
+                  <option key={c} value={c}>
+                    {caLabel(c)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={tt("chiThi")} icon={<Hash size={13} />}>
+              <input
+                type="text"
+                value={chiThi}
+                onChange={(e) => setChiThi(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              />
+            </Field>
+          </div>
+          <Field label={tt("soBanh")} icon={<Package size={13} />}>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={maxPerKien}
+              value={soBanh}
+              onChange={(e) => {
+                const parsed = Math.floor(Number(e.target.value));
+                if (Number.isFinite(parsed)) setSoBanh(Math.max(0, Math.min(maxPerKien, parsed)));
+              }}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            />
+          </Field>
+          <Field label={tt("boc")} icon={<Layers size={13} />}>
+            <select
+              value={boc}
+              onChange={(e) => setBoc(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            >
+              <option value="">{tt("chonBoc")}</option>
+              {bocOptions.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+              {boc && !bocOptions.includes(boc) && <option value={boc}>{boc}</option>}
+            </select>
+          </Field>
+          <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
+            <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+              {PALLET_OPTS.map((p) => {
+                const checked = pallet.length === 1 && pallet[0] === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPallet(checked ? [] : [p])}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                      checked ? "bg-emerald-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+          <Field label={tt("nganNguon")} icon={<Warehouse size={13} />}>
+            <select
+              value={nganId}
+              onChange={(e) => setNganId(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            >
+              <option value="">{tt("chonNgan")}</option>
+              {nganOptions.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.ma_ngan} {n.ten_ngan ? `— ${n.ten_ngan}` : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
         {error && (
           <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
             {error}
           </div>
         )}
+
         <div className="mt-5 flex gap-3">
           <button
             type="button"
             onClick={onCancel}
-            disabled={generating}
+            disabled={saving}
             className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {tt("cancel")}
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            disabled={generating}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={!canSave || saving}
+            onClick={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi })}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {generating && <Loader2 size={16} className="animate-spin" />}
-            {generating ? tt("endShiftGenerating") : tt("confirmAction")}
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? tt("editSaving") : tt("editSave")}
           </button>
         </div>
       </div>

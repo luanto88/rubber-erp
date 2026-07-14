@@ -306,12 +306,31 @@ export function buildShiftReportFileName(data: ShiftReportData): string {
   return `phieu-bao-thanh-pham-${safeName(day)}.pdf`;
 }
 
+// Mục 7 (2026-07-15): tách "xem trước" khỏi "chia sẻ/tải xuống" — trước đây bấm 1 nút là share/
+// download thẳng, không có bước xem nội dung trước. Giờ luồng chuẩn là:
+//   1. buildShiftReportPdf(data) — dựng PDF 1 lần duy nhất
+//   2. openShiftReportPdfInNewTab(doc) — mở tab mới xem trước ngay (trình duyệt PDF viewer có sẵn)
+//   3. Người dùng chủ động bấm "Chia sẻ" hoặc "Tải xuống" — dùng LẠI đúng doc đã dựng ở bước 1,
+//      không dựng lại PDF lần nữa.
+// Áp dụng đồng bộ cho cả confirm/page.tsx (Hub "Xem/Tạo lại phiếu" + "Kết thúc ca") lẫn nút "Xem
+// phiếu PDF" mới ở header nhóm ngày trong product/page.tsx.
+
+// jsPDF.output("bloburl") trả về URL blob PDF sẵn có, không cần tự tạo/thu hồi qua
+// URL.createObjectURL — mở trực tiếp trong tab mới bằng trình xem PDF gốc của trình duyệt.
+export function openShiftReportPdfInNewTab(doc: jsPDF): void {
+  if (typeof window === "undefined") return;
+  const url = doc.output("bloburl") as unknown as string;
+  window.open(url, "_blank");
+}
+
+export function downloadShiftReportPdfDoc(doc: jsPDF, fileName: string): void {
+  doc.save(fileName);
+}
+
 // Chia sẻ trực tiếp qua Web Share API (Zalo/Telegram...) nếu trình duyệt hỗ trợ, fallback tải
 // file PDF về máy — mirror đúng pattern "Chia sẻ ảnh nhanh" của module Kiểm soát quá trình
-// (measurements/page.tsx handleQuickShare).
-export async function shareOrDownloadShiftReportPdf(data: ShiftReportData): Promise<void> {
-  const doc = await buildShiftReportPdf(data);
-  const fileName = buildShiftReportFileName(data);
+// (measurements/page.tsx handleQuickShare). Nhận thẳng jsPDF doc đã dựng sẵn (không tự build lại).
+export async function shareShiftReportPdfDoc(doc: jsPDF, fileName: string): Promise<void> {
   const blob = doc.output("blob") as Blob;
   const file = new File([blob], fileName, { type: "application/pdf" });
 
@@ -324,13 +343,5 @@ export async function shareOrDownloadShiftReportPdf(data: ShiftReportData): Prom
       // Rơi xuống tải file nếu share thất bại vì lý do khác (không hỗ trợ định dạng...).
     }
   }
-  const objUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objUrl;
-  a.download = fileName;
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+  downloadShiftReportPdfDoc(doc, fileName);
 }

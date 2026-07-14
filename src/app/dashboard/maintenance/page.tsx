@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Clock, Plus, Wrench } from "lucide-react"
-import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "./_components/maintenance-shell"
 import { currencySymbol } from "./_components/maintenance-data"
@@ -66,15 +66,19 @@ export default function MaintenanceDashboardPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
-      if (!hasPermission(cachedUser, "maintenance.view")) {
+      try {
+        const authState = await hydrateActiveSession().catch(() => ({ session: null, user: null as SessionUser | null }))
+        if (!hasPermission(authState.user, "maintenance.view")) {
+          setLoading(false)
+          window.location.replace("/dashboard")
+          return
+        }
+        const fid = authState.user?.factory_id || (await getActiveFactoryId())
+        if (!fid) { setLoading(false); return }
+        setFactoryId(fid)
+      } catch {
         setLoading(false)
-        window.location.replace("/dashboard")
-        return
       }
-      const fid = await getActiveFactoryId()
-      if (!fid) { setLoading(false); return }
-      setFactoryId(fid)
     }
     void bootstrap()
   }, [])

@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ImagePlus, Loader2, Plus,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, ImagePlus, Loader2, Plus,
   Printer, QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
 } from "lucide-react"
-import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
 import {
@@ -192,9 +192,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [matCategoryFilters, setMatCategoryFilters] = useState<Record<string, string>>({})
 
   type NewItemModalContext = { lineId: string; matId: string }
-  const [newItemModal, setNewItemModal] = useState<NewItemModalContext | null>(null)
-  const [newItemForm, setNewItemForm] = useState({ code: "", name: "", unit: "" })
-  const [savingNewItem, setSavingNewItem] = useState(false)
 
   const [newExtMatModal, setNewExtMatModal] = useState<NewItemModalContext | null>(null)
   const [newExtMatForm, setNewExtMatForm] = useState({ code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "" })
@@ -232,13 +229,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [cacKhacPhucChung, setCacKhacPhucChung] = useState("")
   const [imageUrlsChung, setImageUrlsChung] = useState<string[]>([])
   const [showCommonContent, setShowCommonContent] = useState(false)
-  const [uploadingChungSlot, setUploadingChungSlot] = useState<number | null>(null)
+  const [uploadingChungSlot, setUploadingChungSlot] = useState<boolean>(false)
   const commonSlotInputRef = useRef<HTMLInputElement | null>(null)
-  const activeCommonSlotRef = useRef<number | null>(null)
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
 
   // dispatch_vehicles (Đội xe mode)
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([])
+  const [driversList, setDriversList] = useState<{ id: string; name: string }[]>([])
+  const [driverManualModes, setDriverManualModes] = useState<Record<string, boolean>>({})
 
   // Asset picker state
   const [assetSearch, setAssetSearch] = useState("")
@@ -401,33 +400,33 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleCommonSlotClick = (slot: number) => {
+  const handleCommonSlotClick = () => {
     if (!factoryId) return
-    activeCommonSlotRef.current = slot
     commonSlotInputRef.current?.click()
   }
 
   const handleCommonSlotFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    const slot = activeCommonSlotRef.current
-    if (!file || slot === null || !factoryId) { e.target.value = ""; return }
-    setUploadingChungSlot(slot)
+    const files = Array.from(e.target.files || [])
+    if (!files.length || !factoryId) { e.target.value = ""; return }
+    setUploadingChungSlot(true)
     try {
-      const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
-      const { data: uploaded, error: upErr } = await supabase.storage
-        .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
-      if (upErr) throw upErr
-      const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
+      const uploadedUrls: string[] = []
+      for (const file of files) {
+        const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
+        const { data: uploaded, error: upErr } = await supabase.storage
+          .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
+        if (upErr) throw upErr
+        const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
+        uploadedUrls.push(urlData.publicUrl)
+      }
       setImageUrlsChung((prev) => {
-        const urls = [...prev]
-        urls[slot] = urlData.publicUrl
-        return urls.filter(Boolean)
+        const existing = prev.filter(Boolean)
+        return [...existing, ...uploadedUrls].slice(0, 6)
       })
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Không tải được ảnh")
     } finally {
-      setUploadingChungSlot(null)
-      activeCommonSlotRef.current = null
+      setUploadingChungSlot(false)
       e.target.value = ""
     }
   }
@@ -497,6 +496,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     s.group_names?.some((g) => NGUOI_THUC_HIEN_GROUP_NAMES.includes(g))
   )
 
+  // Gợi ý sẵn nhân sự phụ trách khi tạo biên bản mới — chỉ set nếu field đang trống
+  // (không ghi đè lựa chọn thủ công của người dùng) và chỉ khi người được gợi ý còn
+  // active trong danh mục Nhân sự bảo trì.
+  useEffect(() => {
+    if (!isNew || staffList.length === 0) return
+    if (!nvPhuTrach) {
+      const target = boPhan === "Đội xe" ? "Chau Nho" : "Chau Kim Sêne"
+      if (eligibleStaff.some((s) => s.ten === target)) setNvPhuTrach(target)
+    }
+    if (!bgdPhuTrach && bgdPhuTrachStaff.some((s) => s.ten === "Chau Chók")) setBgdPhuTrach("Chau Chók")
+    if (!giamDoc && giamDocStaff.some((s) => s.ten === "Tô Thành Luân")) setGiamDoc("Tô Thành Luân")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, staffList, boPhan])
+
   const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }] = await Promise.all([
       supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id").eq("factory_id", fid).eq("is_active", true).order("code"),
@@ -527,6 +540,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       .eq("factory_id", fid)
       .eq("is_active", true)
       .order("sort_order")
+
+    const { data: drivers } = await supabase
+      .from("dispatch_drivers")
+      .select("id, name")
+      .eq("factory_id", fid)
+      .eq("is_active", true)
+      .order("name")
+    setDriversList((drivers || []) as { id: string; name: string }[])
 
     const { data: assignments } = await supabase
       .from("dispatch_vehicle_driver_assignments")
@@ -641,10 +662,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   useEffect(() => {
     const bootstrap = async () => {
-      const fid = await getActiveFactoryId()
+      const { user: sessionUser } = await hydrateActiveSession().catch(() => ({ session: null, user: null as SessionUser | null }))
+      if (!hasPermission(sessionUser, "maintenance.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      const fid = sessionUser?.factory_id || (await getActiveFactoryId())
       if (!fid) { setLoading(false); return }
-      const { user: sessionUser } = await hydrateActiveSession()
-      if (!sessionUser) { setLoading(false); return }
       setFactoryId(fid)
       setUser(sessionUser)
 
@@ -892,7 +917,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       const noiDungOk = l.noi_dung.trim() || (hangMuc === "Bảo dưỡng" && noiDungChung.trim())
       if (!noiDungOk) {
-        fieldViolations.push(`Thiết bị ${tenTb}: thiếu ${hangMuc === "Sửa chữa" ? "Nội dung sự cố" : "Nội dung bảo dưỡng"}`)
+        fieldViolations.push(`Thiết bị ${tenTb}: thiếu Mô tả tình trạng`)
       }
 
       if (hangMuc === "Sửa chữa" && !l.nguyen_nhan.trim()) {
@@ -1304,52 +1329,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleSaveNewItem = async () => {
-    if (!factoryId || !newItemModal) return
-    if (!newItemForm.code.trim() || !newItemForm.name.trim()) {
-      setSaveError("Vui lòng nhập mã và tên vật tư")
-      return
-    }
-    setSavingNewItem(true)
-    try {
-      const { data: inserted, error } = await supabase
-        .from("inventory_items")
-        .insert({
-          factory_id: factoryId,
-          code: newItemForm.code.trim(),
-          name: newItemForm.name.trim(),
-          unit: newItemForm.unit.trim() || null,
-          is_active: true,
-        })
-        .select("id, code, name, unit")
-        .single()
-      if (error) { setSaveError(error.message); return }
-      const newItem: InventoryItemOption = {
-        id: inserted.id,
-        code: inserted.code as string,
-        name: inserted.name as string,
-        unit: (inserted.unit as string | null) || "",
-        specification: null,
-        default_warehouse_ids: [],
-        manages_lot: false,
-        category_id: null,
-        currentStock: 0,
-      }
-      setInventoryItems((prev) => [...prev, newItem])
-      updateMaterial(newItemModal.lineId, newItemModal.matId, {
-        inventory_item_id: inserted.id,
-        ten_vat_tu: inserted.name as string,
-        dvt: (inserted.unit as string | null) || "",
-      })
-      setNewItemModal(null)
-      setNewItemForm({ code: "", name: "", unit: "" })
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư")
-    } finally {
-      setSavingNewItem(false)
-    }
-  }
-
   const handleSaveNewExtMat = async () => {
     if (!factoryId || !newExtMatModal) return
     if (!newExtMatForm.ten_vat_tu.trim()) {
@@ -1433,18 +1412,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <>
               {record.trang_thai === "da_duyet" ? (
                 <>
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan !== "Đội xe" && (
-                    <Link
-                      href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
-                      target="_blank"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                    >
-                      <Printer size={12} /> In biên bản
-                    </Link>
-                  )}
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && (() => {
+                  {record.hang_muc === "Sửa chữa" && (() => {
                     const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
-                    if (loaiSuaChua === "nho") {
+                    // Đội xe + sửa chữa nhỏ (≤200$) vẫn giữ bộ tài liệu riêng F08+F15SmallVehicle+F06
+                    if (record.bo_phan === "Đội xe" && loaiSuaChua === "nho") {
                       return (
                         <Link
                           href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
@@ -1455,23 +1426,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         </Link>
                       )
                     }
+                    // Còn lại (mọi bộ phận, kể cả Đội xe sửa chữa lớn >200$) gộp chung 1 file
+                    // F13 + F10 + F15 (+ Ảnh) — không tách "Sự cố"/"Đề nghị" thành 2 nút nữa
                     return (
-                      <>
-                        <Link
-                          href={`/dashboard/maintenance/print?type=su_co&record_id=${id}`}
-                          target="_blank"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                        >
-                          <Printer size={12} /> Sự cố
-                        </Link>
-                        <Link
-                          href={`/dashboard/maintenance/print?type=de_nghi&record_id=${id}`}
-                          target="_blank"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                        >
-                          <Printer size={12} /> Đề nghị
-                        </Link>
-                      </>
+                      <Link
+                        href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
+                        target="_blank"
+                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                      >
+                        <Printer size={12} /> In biên bản
+                      </Link>
                     )
                   })()}
                   {record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe" && (
@@ -1495,30 +1459,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 </>
               ) : (
                 <>
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" ? (
-                    lines[0]?.loai_sua_chua === "nho" ? (
-                      <span
-                        title="Chỉ in được sau khi biên bản được phê duyệt"
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                      >
-                        <Printer size={12} /> Sửa chữa nhỏ
-                      </span>
-                    ) : (
-                      <>
-                        <span
-                          title="Chỉ in được sau khi biên bản được phê duyệt"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                        >
-                          <Printer size={12} /> Sự cố
-                        </span>
-                        <span
-                          title="Chỉ in được sau khi biên bản được phê duyệt"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                        >
-                          <Printer size={12} /> Đề nghị
-                        </span>
-                      </>
-                    )
+                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && lines[0]?.loai_sua_chua === "nho" ? (
+                    <span
+                      title="Chỉ in được sau khi biên bản được phê duyệt"
+                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
+                    >
+                      <Printer size={12} /> Sửa chữa nhỏ
+                    </span>
                   ) : (
                     <span
                       title="Chỉ in được sau khi biên bản được phê duyệt"
@@ -1963,53 +1910,50 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
 
-              {/* 6 slot ảnh chung */}
+              {/* Ảnh chung — chọn nhiều ảnh cùng lúc, giống khối ảnh riêng từng thiết bị */}
               <div>
-                <label className="text-[10px] font-bold text-amber-700 block mb-1.5">
-                  4/ Ảnh chung
-                  <span className="font-normal text-amber-500 ml-1">({imageUrlsChung.filter(Boolean).length}/6)</span>
-                </label>
-                <div className="grid grid-cols-6 gap-2">
-                  {Array.from({ length: 6 }).map((_, slotIdx) => {
-                    const url = imageUrlsChung[slotIdx]
-                    const isUploading = uploadingChungSlot === slotIdx
-                    return (
-                      <div key={slotIdx} className="relative aspect-square">
-                        {url ? (
-                          <>
-                            <img
-                              src={url}
-                              alt={`Ảnh chung ${slotIdx + 1}`}
-                              loading="lazy"
-                              decoding="async"
-                              className="w-full h-full object-cover rounded-xl border border-amber-200 cursor-pointer hover:opacity-90"
-                              onClick={() => window.open(url, "_blank")}
-                            />
-                            {!isReadOnly && (
-                              <button
-                                onClick={() => setImageUrlsChung((prev) => prev.filter((_, i) => i !== slotIdx))}
-                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
-                              >
-                                <X size={10} />
-                              </button>
-                            )}
-                          </>
-                        ) : (
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-[10px] font-bold text-amber-700">
+                    4/ Ảnh chung
+                    <span className="font-normal text-amber-500 ml-1">({imageUrlsChung.filter(Boolean).length}/6)</span>
+                  </label>
+                  {!isReadOnly && imageUrlsChung.filter(Boolean).length < 6 && (
+                    <button
+                      disabled={uploadingChungSlot}
+                      onClick={handleCommonSlotClick}
+                      className="flex items-center gap-1 px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 text-xs font-bold rounded-lg disabled:opacity-40"
+                    >
+                      {uploadingChungSlot
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <ImagePlus size={11} />}
+                      Thêm ảnh
+                    </button>
+                  )}
+                </div>
+                {imageUrlsChung.filter(Boolean).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {imageUrlsChung.filter(Boolean).map((url, slotIdx) => (
+                      <div key={slotIdx} className="relative w-14 h-14">
+                        <img
+                          src={url}
+                          alt={`Ảnh chung ${slotIdx + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover rounded-lg border border-amber-200 cursor-pointer hover:opacity-80"
+                          onClick={() => setZoomImageUrl(url)}
+                        />
+                        {!isReadOnly && (
                           <button
-                            disabled={isReadOnly || isUploading}
-                            onClick={() => handleCommonSlotClick(slotIdx)}
-                            className="w-full h-full rounded-xl border-2 border-dashed border-amber-200 hover:border-amber-400 hover:bg-amber-50 flex flex-col items-center justify-center gap-0.5 transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={() => setImageUrlsChung((prev) => prev.filter((_, i) => i !== slotIdx))}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
                           >
-                            {isUploading
-                              ? <Loader2 size={16} className="animate-spin text-amber-400" />
-                              : <ImagePlus size={15} className="text-amber-300" />}
-                            <span className="text-[9px] text-amber-300">{slotIdx + 1}</span>
+                            <X size={10} />
                           </button>
                         )}
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2058,22 +2002,54 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {line.expanded && (
             <div className="p-5 space-y-4">
               {/* Vehicle driver */}
-              {boPhan === "Đội xe" && (
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài xế</label>
-                  <input
-                    value={line.ten_tai_xe}
-                    onChange={(e) => updateLine(line.id, { ten_tai_xe: e.target.value })}
-                    disabled={isReadOnly}
-                    className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-                    placeholder="Tên tài xế"
-                  />
-                </div>
-              )}
+              {boPhan === "Đội xe" && (() => {
+                const isDriverManual = !!driverManualModes[line.id]
+                const selectedDriver = driversList.find((d) => d.name === line.ten_tai_xe)
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-600">Tài xế</label>
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => setDriverManualModes((prev) => ({ ...prev, [line.id]: !isDriverManual }))}
+                          className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-orange-400 hover:text-orange-600"
+                        >
+                          {isDriverManual ? "← Chọn danh sách" : "+ Nhập tên khác"}
+                        </button>
+                      )}
+                    </div>
+                    {isDriverManual ? (
+                      <input
+                        value={line.ten_tai_xe}
+                        onChange={(e) => updateLine(line.id, { ten_tai_xe: e.target.value })}
+                        disabled={isReadOnly}
+                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                        placeholder="Tên tài xế"
+                      />
+                    ) : (
+                      <select
+                        value={line.ten_tai_xe}
+                        onChange={(e) => updateLine(line.id, { ten_tai_xe: e.target.value })}
+                        disabled={isReadOnly}
+                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                      >
+                        <option value="">— Chọn tài xế —</option>
+                        {driversList.map((d) => (
+                          <option key={d.id} value={d.name}>{d.name}</option>
+                        ))}
+                        {line.ten_tai_xe && !selectedDriver && (
+                          <option value={line.ten_tai_xe}>{line.ten_tai_xe}</option>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                )
+              })()}
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-600">Nội dung {hangMuc === "Sửa chữa" ? "sự cố" : "bảo dưỡng"} riêng</label>
+                  <label className="text-xs font-bold text-slate-600">Mô tả tình trạng</label>
                   {hangMuc === "Bảo dưỡng" && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim()) && (
                     <span className="text-[10px] text-amber-600 font-semibold">Để trống = dùng nội dung chung</span>
                   )}
@@ -2088,9 +2064,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
 
-              {hangMuc === "Sửa chữa" && (
+              {(hangMuc === "Sửa chữa" || (hangMuc === "Bảo dưỡng" && boPhan === "Đội xe")) && (
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguyên nhân</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    {hangMuc === "Sửa chữa" ? "Nguyên nhân" : "Lý do bảo dưỡng"}
+                  </label>
                   <textarea
                     value={line.nguyen_nhan}
                     onChange={(e) => updateLine(line.id, { nguyen_nhan: e.target.value })}
@@ -2236,9 +2214,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 )
               })()}
 
-              {/* Km/giờ + Chất lượng (Đội xe — Sửa chữa nhỏ) */}
-              {boPhan === "Đội xe" && hangMuc === "Sửa chữa" && (
-                <div className="grid grid-cols-2 gap-3">
+              {/* Km/giờ (Đội xe — Sửa chữa) + Chất lượng sau sửa chữa (mọi hạng mục/bộ phận) */}
+              <div className="grid grid-cols-2 gap-3">
+                {boPhan === "Đội xe" && hangMuc === "Sửa chữa" && (
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Chỉ số đồng hồ Km/giờ</label>
                     <input
@@ -2250,37 +2228,37 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
                     />
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Chất lượng sau sửa chữa</label>
-                    <div className="flex items-center gap-4 h-[38px]">
-                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                        <input
-                          type="radio"
-                          name={`chat_luong_${line.id}`}
-                          value="Đạt"
-                          checked={line.chat_luong !== "Không đạt"}
-                          onChange={() => updateLine(line.id, { chat_luong: "Đạt" })}
-                          disabled={isReadOnly}
-                          className="h-4 w-4 text-emerald-600"
-                        />
-                        <span className="text-sm font-semibold text-emerald-700">Đạt</span>
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                        <input
-                          type="radio"
-                          name={`chat_luong_${line.id}`}
-                          value="Không đạt"
-                          checked={line.chat_luong === "Không đạt"}
-                          onChange={() => updateLine(line.id, { chat_luong: "Không đạt" })}
-                          disabled={isReadOnly}
-                          className="h-4 w-4 text-red-500"
-                        />
-                        <span className="text-sm font-semibold text-red-600">Không đạt</span>
-                      </label>
-                    </div>
+                )}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chất lượng sau sửa chữa</label>
+                  <div className="flex items-center gap-4 h-[38px]">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name={`chat_luong_${line.id}`}
+                        value="Đạt"
+                        checked={line.chat_luong !== "Không đạt"}
+                        onChange={() => updateLine(line.id, { chat_luong: "Đạt" })}
+                        disabled={isReadOnly}
+                        className="h-4 w-4 text-emerald-600"
+                      />
+                      <span className="text-sm font-semibold text-emerald-700">Đạt</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name={`chat_luong_${line.id}`}
+                        value="Không đạt"
+                        checked={line.chat_luong === "Không đạt"}
+                        onChange={() => updateLine(line.id, { chat_luong: "Không đạt" })}
+                        disabled={isReadOnly}
+                        className="h-4 w-4 text-red-500"
+                      />
+                      <span className="text-sm font-semibold text-red-600">Không đạt</span>
+                    </label>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Materials */}
               <div>
@@ -2291,7 +2269,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       onClick={() => addMaterial(line.id)}
                       className="flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
                     >
-                      <Plus size={11} /> Thêm vật tư
+                      <Plus size={11} /> Thêm dòng vật tư
                     </button>
                   )}
                 </div>
@@ -2308,21 +2286,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : "Vật tư bên ngoài"}</label>
                         {!isReadOnly && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isKho) {
-                                setNewItemModal({ lineId: line.id, matId: mat.id })
-                                setNewItemForm({ code: "", name: "", unit: mat.dvt })
-                              } else {
+                          isKho ? (
+                            <Link
+                              href="/dashboard/inventory/receipts"
+                              target="_blank"
+                              title="Mở trang Nhập kho để tạo mã vật tư mới và nhập số lượng thực tế"
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                            >
+                              <ExternalLink size={10} /> Nhập kho vật tư mới
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
                                 setNewExtMatModal({ lineId: line.id, matId: mat.id })
                                 setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: mat.dvt || "", specification: "", category_id: "" })
-                              }
-                            }}
-                            className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
-                          >
-                            <Plus size={10} /> Thêm mới
-                          </button>
+                              }}
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                            >
+                              <Plus size={10} /> Thêm mã vật tư ngoài
+                            </button>
+                          )
                         )}
                       </div>
                       {/* Single compact row: all fields */}
@@ -2367,7 +2351,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             <span className={mat.ten_vat_tu ? "text-slate-800 truncate" : "text-slate-400"}>
                               {mat.ten_vat_tu || "— Chọn vật tư —"}
                             </span>
-                            <ChevronDown size={12} className="shrink-0 ml-1 text-slate-400" />
+                            <span className="flex items-center gap-1 shrink-0 ml-1">
+                              {isKho && mat.inventory_item_id && (
+                                <span className="text-slate-400">Tồn: {inventoryItems.find((i) => i.id === mat.inventory_item_id)?.currentStock ?? 0}</span>
+                              )}
+                              <ChevronDown size={12} className="text-slate-400" />
+                            </span>
                           </button>
                           {activeMaterialDropdown === mat.id && (
                             <div className="absolute z-50 bottom-full mb-1 left-0 w-full min-w-[280px] bg-white border border-slate-200 rounded-xl shadow-2xl">
@@ -2431,8 +2420,24 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           />
                           {mat.nguon === "trong_kho" && mat.inventory_item_id && (() => {
                             const item = inventoryItems.find(i => i.id === mat.inventory_item_id)
-                            if (item && parseFloat(mat.so_luong) > item.currentStock)
-                              return <p className="text-red-500 text-[9px] mt-0.5">Vượt ({item.currentStock})</p>
+                            if (!item) return null
+                            const insufficient = item.currentStock === 0 || parseFloat(mat.so_luong) > item.currentStock
+                            if (!insufficient) return null
+                            return (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <p className="text-red-500 text-[9px]">
+                                  {item.currentStock === 0 ? "Hết tồn" : `Vượt (${item.currentStock})`}
+                                </p>
+                                <Link
+                                  href="/dashboard/inventory/receipts"
+                                  target="_blank"
+                                  title="Nhập thêm vật tư này vào kho"
+                                  className="text-red-500 hover:text-red-600"
+                                >
+                                  <ExternalLink size={10} />
+                                </Link>
+                              </div>
+                            )
                           })()}
                         </div>
                         {/* Đơn giá + Loại tiền (chỉ ben_ngoai) */}
@@ -2506,7 +2511,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           loading="lazy"
                           decoding="async"
                           className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-80"
-                          onClick={() => window.open(url, "_blank")}
+                          onClick={() => setZoomImageUrl(url)}
                         />
                         {!isReadOnly && (
                           <button
@@ -2546,65 +2551,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         ref={commonSlotInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
+        multiple
         className="hidden"
         onChange={handleCommonSlotFileChange}
       />
 
-      {/* Modal thêm vật tư mới vào inventory_items */}
-      {newItemModal && (
-        <ModalShell
-          title="Thêm vật tư mới"
-          onClose={() => setNewItemModal(null)}
-          maxWidth="sm"
-          footer={
-            <>
-              <button
-                onClick={() => setNewItemModal(null)}
-                className="flex-1 px-4 py-2 border border-slate-300 text-slate-600 font-bold rounded-xl text-sm hover:bg-slate-50"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleSaveNewItem}
-                disabled={savingNewItem}
-                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm disabled:opacity-50"
-              >
-                {savingNewItem ? "Đang lưu..." : "Lưu vật tư"}
-              </button>
-            </>
-          }
+      {/* Lightbox phóng to ảnh — dùng chung cho ảnh riêng từng thiết bị và ảnh chung */}
+      {zoomImageUrl && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center"
+          onClick={() => setZoomImageUrl(null)}
         >
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Mã vật tư *</label>
-                <input
-                  autoFocus
-                  value={newItemForm.code}
-                  onChange={(e) => setNewItemForm((p) => ({ ...p, code: e.target.value }))}
-                  placeholder="VD: VT001"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Tên vật tư *</label>
-                <input
-                  value={newItemForm.name}
-                  onChange={(e) => setNewItemForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Tên đầy đủ của vật tư"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Đơn vị tính</label>
-                <input
-                  value={newItemForm.unit}
-                  onChange={(e) => setNewItemForm((p) => ({ ...p, unit: e.target.value }))}
-                  placeholder="Cái, kg, lít..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-        </ModalShell>
+          <img
+            src={zoomImageUrl}
+            alt="Phóng to"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setZoomImageUrl(null)}
+            className="absolute top-4 right-4 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center"
+          >
+            <X size={20} />
+          </button>
+        </div>
       )}
 
       {newExtMatModal && (

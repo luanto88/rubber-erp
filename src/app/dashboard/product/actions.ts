@@ -98,22 +98,22 @@ function revalidateLotScreens() {
 //
 // Fix: chuyển toàn bộ phép tính SUM + ghi lots thành 1 hàm Postgres atomic
 // (sync_lot_master_snapshot, migration 20260712_sync_lot_master_snapshot_rpc.sql), khóa dòng
-// lots bằng FOR UPDATE trước khi tính — loại bỏ hoàn toàn khoảng hở đọc-tính-ghi. Hàm JS này giờ
-// chỉ gọi RPC rồi đọc lại lots để trả về snapshot cho caller.
+// lots bằng FOR UPDATE trước khi tính — loại bỏ hoàn toàn khoảng hở đọc-tính-ghi.
+//
+// Tối ưu 2026-07-15 (migration 20260715_sync_lot_master_snapshot_returns_row.sql): RPC giờ
+// RETURNS TABLE và trả thẳng snapshot ngay trong cùng lệnh gọi — bỏ hẳn round-trip SELECT lots
+// theo sau (trước đây luôn là 2 round-trip riêng biệt cho mỗi lần lưu/sửa/xóa giao dịch thành
+// phẩm, quan trọng nhất với luồng quét QR liên tục).
 async function syncLotMasterSnapshot(lotId: string) {
   const supabase = getSupabaseAdmin();
 
-  const { error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotId });
+  const { data, error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotId });
   if (rpcError) throw new Error(`Khong dong bo duoc lo: ${rpcError.message}`);
 
-  const { data: lot, error: lotError } = await supabase
-    .from("lots")
-    .select("kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ca, ngan_id, ngay_ht, boc, pallet, chi_thi")
-    .eq("id", lotId)
-    .single();
-  if (lotError || !lot) throw new Error(`Khong doc duoc lo sau khi dong bo: ${lotError?.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error("Khong dong bo duoc lo: RPC khong tra ve du lieu.");
 
-  return { ...lot, lotId };
+  return { ...row, lotId };
 }
 
 export async function saveLotTransaction(input: SaveLotTransactionInput) {
@@ -241,7 +241,9 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
         },
         { onConflict: "id" },
       )
-      .select("id, lot_id, ngan_id, so_banh, so_kg")
+      // created_at thêm vào select để caller (confirmKienProduction) không phải query lại
+      // riêng chỉ để lấy đúng giá trị này (giảm 1 round-trip Supabase mỗi lần quét QR).
+      .select("id, lot_id, ngan_id, so_banh, so_kg, created_at")
       .single();
 
     if (saveTransactionError) {

@@ -19,6 +19,7 @@ import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
+import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -175,7 +176,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 
@@ -663,6 +664,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     "quality-targets": {
       // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
       filename: "muc_tieu_chat_luong.csv",
+      rows: [],
+    },
+    "shift-assignments": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "phan_cong_truc_ca.csv",
       rows: [],
     },
   }
@@ -3076,7 +3082,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && configTab !== "quality-targets" && (
+              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -3160,6 +3166,7 @@ export default function SettingsPage() {
                   { key: "delivery-points" as const, label: "Điểm giao nhận" },
                   { key: "forest-plots" as const, label: "Lô vườn" },
                   { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
+                  { key: "shift-assignments" as const, label: "Phân công trực ca" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -3462,6 +3469,15 @@ export default function SettingsPage() {
                 </ResponsiveTableWrapper>
               ) : configTab === "quality-targets" ? (
                 <QualityTargetsTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "shift-assignments" ? (
+                <ShiftAssignmentsTab
+                  factoryId={factoryId}
+                  canManage={canManageSettings}
+                  userOptions={activeProfilesForLink.map((p) => ({
+                    id: p.id,
+                    label: p.full_name ? `${p.full_name} (${p.username})` : p.username,
+                  }))}
+                />
               ) : null}
             </div>
           </div>

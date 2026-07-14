@@ -74,18 +74,34 @@ export async function loadNgansByIdsRaw(ids: string[]): Promise<PredictAvailable
 
 // Export để tái dùng ở src/app/dashboard/product/confirm/actions.ts (luồng quét QR xác nhận
 // sản xuất) — tránh viết lại cùng 1 query tính KL thật đã ghi nhận trong ngăn.
+//
+// Phân trang bằng .range() — một ngăn hiếm khi vượt 1000 giao dịch trong vòng đời của nó, nhưng
+// không có gì đảm bảo tuyệt đối (ngăn tồn tại lâu, nhiều lần top-up từng kiện qua quét QR liên
+// tục). PostgREST mặc định cắt kết quả ở 1000 dòng và không báo lỗi — xem
+// .claude/rules/04-code-patterns.md mục "Phân trang khi query bảng lớn". Không dùng .order() ở
+// đây vì range() chỉ cần đọc hết toàn bộ tập hợp để SUM, không quan tâm thứ tự.
 export async function getExistingRealKg(
   factoryId: string,
   nganId: string,
 ): Promise<number> {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("lot_transactions")
-    .select("so_kg, lots!inner(factory_id)")
-    .eq("ngan_id", nganId)
-    .eq("lots.factory_id", factoryId);
-  if (error) throw new Error(error.message);
-  return (data || []).reduce((sum, row) => sum + Number(row.so_kg || 0), 0);
+  let total = 0;
+  let from = 0;
+  const PAGE_SIZE = 1000;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("lot_transactions")
+      .select("so_kg, lots!inner(factory_id)")
+      .eq("ngan_id", nganId)
+      .eq("lots.factory_id", factoryId)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    total += rows.reduce((sum, row) => sum + Number(row.so_kg || 0), 0);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return total;
 }
 
 async function getExistingPredictedKg(

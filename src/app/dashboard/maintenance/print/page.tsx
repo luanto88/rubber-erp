@@ -278,7 +278,9 @@ function PrintSuCo({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: str
   if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
   if (record.bgd_phu_trach) participants.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
   if (record.nv_phu_trach) participants.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
-  if (record.phu_trach_bao_tri) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+  // phu_trach_bao_tri chỉ là cột mirror của nv_phu_trach từ 2026-07-14 (cùng 1 dropdown) —
+  // chỉ push thành dòng riêng nếu thực sự khác nv_phu_trach (dữ liệu cũ trước đó), tránh trùng tên
+  if (record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach) participants.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
   for (const name of toTruongCoDien) {
     participants.push({ name, role: staffMap.get(name) || toTruongRoleLabel })
   }
@@ -514,13 +516,10 @@ function PrintF10({ record, qrUrl }: { record: RecordData; qrUrl: string }) {
 
 function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
-  // "Chất lượng sau sửa chữa" chỉ thực sự được người dùng chọn khi Sửa chữa + Đội xe
-  // (xem gate boPhan==="Đội xe" && hangMuc==="Sửa chữa" ở records/[id]/page.tsx) — chỉ tick
-  // theo dữ liệu khi đúng trường hợp này, tránh tick nhầm "Đạt" mặc định cho các trường hợp
-  // chưa từng được xác nhận.
-  const isBoDoi = record.bo_phan === "Đội xe"
-  const isChatLuongDat = isBoDoi && record.lines.every((l) => l.chat_luong !== "Không đạt")
-  const isChatLuongKhongDat = isBoDoi && record.lines.some((l) => l.chat_luong === "Không đạt")
+  // "Chất lượng sau sửa chữa" nay áp dụng cho mọi bộ phận/hạng mục (không chỉ Đội xe) —
+  // xem records/[id]/page.tsx. Tick theo đúng dữ liệu chat_luong của từng dòng thiết bị.
+  const isChatLuongDat = record.lines.every((l) => l.chat_luong !== "Không đạt")
+  const isChatLuongKhongDat = record.lines.some((l) => l.chat_luong === "Không đạt")
 
   return (
     <div className="print-page font-serif">
@@ -582,7 +581,7 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
         {record.giam_doc && <p>Ông: <strong>{record.giam_doc}</strong> – {staffMap.get(record.giam_doc) || "Giám đốc Nhà máy"}</p>}
         {record.bgd_phu_trach && <p>Ông: <strong>{record.bgd_phu_trach}</strong> – {staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách"}</p>}
         {record.nv_phu_trach && <p>Ông: <strong>{record.nv_phu_trach}</strong> – {staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách"}</p>}
-        {record.phu_trach_bao_tri && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – {staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì"}</p>}
+        {record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – {staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì"}</p>}
         {!record.nv_phu_trach && !record.phu_trach_bao_tri && (
           <p>Ông: <strong>.................................</strong> – Tổ trưởng cơ điện</p>
         )}
@@ -873,7 +872,11 @@ function mergeNoidung(common: string | null | undefined, own: string | null | un
 
 function PrintF03({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: string; staffMap: Map<string, string> }) {
   const { dd, mm, yyyy } = fmtDateParts(record.ngay)
-  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap)
+  const isBoDoi = record.bo_phan === "Đội xe"
+  // Bảo dưỡng Đội xe: "Tổ cơ điện" đổi thành "Tổ cơ khí" — mirror đúng logic PrintSuCo (F13)
+  const toGroupKeyword = isBoDoi ? "cơ khí" : "cơ điện"
+  const toRoleLabel = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
+  const toTruongCoDien = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, toGroupKeyword)
   return (
     <div className="print-page font-serif">
       <CompanyHeader boPhan={record.bo_phan} />
@@ -936,7 +939,7 @@ function PrintF03({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
         { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
         { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
         { role: "Giám đốc nhà máy", name: record.giam_doc },
-        { role: "Tổ cơ điện", name: toTruongCoDien[0] || "" },
+        { role: toRoleLabel, name: toTruongCoDien[0] || "" },
       ]} />
 
       <DocumentFooter code="KHXD-QT02-F03" />
@@ -950,6 +953,8 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
   const { dd, mm, yyyy } = fmtDateParts(record.ngay_duyet || record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
   const firstTaiXe = isBoDoi ? (record.lines[0]?.ten_tai_xe || null) : null
+  const isChatLuongDat = record.lines.every((l) => l.chat_luong !== "Không đạt")
+  const isChatLuongKhongDat = record.lines.some((l) => l.chat_luong === "Không đạt")
 
   const participants: { name: string; role: string }[] = []
   if (record.giam_doc) participants.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc Nhà máy" })
@@ -1044,10 +1049,10 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
         <div className="mt-2 flex items-center gap-6">
           <span className="font-semibold">Chất lượng:</span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Đạt yêu cầu
+            <span className="inline-flex items-center justify-center w-4 h-4 border border-slate-600 align-middle text-[12.65px] font-bold leading-none">{isChatLuongDat ? "✓" : ""}</span> Đạt yêu cầu
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-4 border border-slate-600 align-middle" /> Không đạt
+            <span className="inline-flex items-center justify-center w-4 h-4 border border-slate-600 align-middle text-[12.65px] font-bold leading-none">{isChatLuongKhongDat ? "✓" : ""}</span> Không đạt
           </span>
         </div>
 
@@ -1440,7 +1445,7 @@ function PrintF15SmallVehicle({ record, qrUrl, staffMap }: { record: RecordData;
         {record.giam_doc && <p>Ông: <strong>{record.giam_doc}</strong> – {staffMap.get(record.giam_doc) || "Giám đốc Nhà máy"}</p>}
         {record.bgd_phu_trach && <p>Ông: <strong>{record.bgd_phu_trach}</strong> – {staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách"}</p>}
         {record.nv_phu_trach && <p>Ông: <strong>{record.nv_phu_trach}</strong> – {staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách"}</p>}
-        {record.phu_trach_bao_tri && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – {staffMap.get(record.phu_trach_bao_tri) || "Đội trưởng đội xe"}</p>}
+        {record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach && <p>Ông: <strong>{record.phu_trach_bao_tri}</strong> – {staffMap.get(record.phu_trach_bao_tri) || "Đội trưởng đội xe"}</p>}
         {record.lines[0]?.ten_tai_xe && <p>Ông: <strong>{record.lines[0].ten_tai_xe}</strong> – Lái xe</p>}
 
         <p className="mt-2">Cùng tiến hành nghiệm thu kết quả sửa chữa. Kết quả như sau:</p>

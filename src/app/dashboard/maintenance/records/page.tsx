@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { Filter, Plus, Search, Wrench } from "lucide-react"
-import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
-import { getFreshAuthSession } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
 import { BO_PHAN_LIST, trangThaiLabel } from "../_components/maintenance-data"
@@ -60,13 +59,15 @@ export default function MaintenanceRecordsPage() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const fid = await getActiveFactoryId()
-        if (!fid) { setLoading(false); return }
-        const session = await getFreshAuthSession()
-        if (session?.user) {
-          const { data: profile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
-          if (profile) setUser(profile as SessionUser)
+        const authState = await hydrateActiveSession().catch(() => ({ session: null, user: null as SessionUser | null }))
+        setUser(authState.user)
+        if (!hasPermission(authState.user, "maintenance.view")) {
+          setLoading(false)
+          window.location.replace("/dashboard")
+          return
         }
+        const fid = authState.user?.factory_id || (await getActiveFactoryId())
+        if (!fid) { setLoading(false); return }
         setFactoryId(fid)
       } catch {
         setLoading(false)

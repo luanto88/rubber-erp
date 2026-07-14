@@ -625,6 +625,64 @@ Người dùng báo: dự đoán ngăn N5 kết thúc `1083cs/26` kiện C, dự
 - Test "Bỏ qua, bắt đầu lô mới": xác nhận số gợi ý đúng, sửa tay được, nhập trùng số đã có bị chặn kèm thông báo rõ mã lô trùng.
 - Test xóa batch đã continue từ batch khác: xác nhận kiện được hoàn tác đúng, `findPendingCarryLot` gợi ý lại đúng lô đó ở lần tạo tiếp theo.
 
+### Cập nhật 2026-07-15 — 7 cải tiến module "Quét QR xác nhận sản xuất" (`product/confirm/`)
+
+**1. Giảm round-trip Supabase**:
+
+- `resolveKienForConfirm` (`confirm/actions.ts`): query `lot_prediction_batches` lấy `day_chuyen` giờ chỉ chạy khi thực sự cần (`!lot || !lot.day_chuyen`), không còn vô điều kiện. Nhánh `lot` tồn tại: `lot_transactions` + tra ngăn cho cả 2 khả năng (`lot.ngan_id` và `nganIdForPartial`) chạy song song qua `Promise.all` thay vì tuần tự (2 lookup ngăn chỉ thực sự tốn round-trip khi 2 giá trị khác nhau, trường hợp hiếm). Nhánh `predicted` (lô mới): gộp `loadNganInfo` + `loadSuggestedChiThiForNewLot` bằng `Promise.all`.
+- `confirmKienProduction`: 3 query đọc đầu tiên (`lots` theo `ma_lo`, `ngans` theo `nganId`, `getExistingRealKg`) không phụ thuộc lẫn nhau — gộp `Promise.all` thay vì tuần tự. Lookup `lot_prediction_lots` (kiểm tra có dòng dự đoán khớp `ma_lo` không) chạy song song với chính `saveLotTransaction()` thay vì đợi nó xong (chỉ thực sự cần `lotId` từ kết quả save ở bước `markLotPredictionRealized` sau đó).
+- `saveLotTransaction()` (`product/actions.ts`) — `.select()` của upsert `lot_transactions` thêm cột `created_at`, `confirmKienProduction` dùng thẳng giá trị này thay vì query lại riêng.
+- **Migration `20260715_sync_lot_master_snapshot_returns_row.sql`** (cần chạy thủ công): RPC `sync_lot_master_snapshot` đổi từ `RETURNS void` sang `RETURNS TABLE(...)` — trả thẳng snapshot ngay trong cùng lệnh gọi, bỏ hẳn round-trip `SELECT lots` theo sau mà `product/actions.ts` từng phải làm riêng. Đổi return type bắt buộc `DROP FUNCTION` trước `CREATE` (Postgres không cho `CREATE OR REPLACE` đổi kiểu trả về); `delete_lot_transaction()` gọi hàm này qua `PERFORM` nên không cần sửa gì thêm (PERFORM chạy được với hàm trả về table/setof, chỉ bỏ qua kết quả).
+- `getExistingRealKg` (`predict/actions.ts`, dùng chung bởi cả module Dự đoán số lô lẫn `confirmKienProduction`) thêm phân trang `.range()` — trước đây query không giới hạn, rủi ro bug cắt 1000 dòng của PostgREST nếu 1 ngăn tích lũy quá 1000 giao dịch trong vòng đời (xem `.claude/rules/04-code-patterns.md`).
+
+**2. Sửa dữ liệu quét sai (thêm nút Sửa, trước đây chỉ có Xóa)**:
+
+- Server action mới `editShiftHistoryEntry()` (`confirm/actions.ts`) — sửa `ngan_id/ca/ngay_nhap/kien_X/so_banh/so_kg/boc/pallet/chi_thi` của 1 dòng `lot_transactions`, re-validate đầy đủ ở server (không tin cờ phía client): tổng bành của đúng kiện (trừ phần đóng góp của chính dòng đang sửa) không vượt `max_per_kien`, và capacity 110% của ngăn đích (trừ phần `so_kg` cũ nếu vẫn ở cùng ngăn). Ghi xong gọi lại RPC `sync_lot_master_snapshot` để đồng bộ `lots`.
+- Quyền: **user thường** chỉ sửa được khi lô vẫn `"Dở dang"` (mirror đúng điều kiện `canDelete` sẵn có). **Admin** sửa được ở MỌI trạng thái, TRỪ KHI lô đồng thời (1) đã `"Xuất hàng"` VÀ (2) đã có `qc_results` gắn vào (đối chiếu cả `lot_id` lẫn `ma_lo` — dữ liệu cũ có thể có nhiều bản ghi `lots` cùng `ma_lo`, xem `pickCanonicalLot`) — cả 2 điều kiện phải CÙNG đúng mới chặn.
+- `ShiftHistoryEntry` (`loadShiftHistory`) thêm `canEdit` (tính theo đúng rule trên, cần `isAdmin` truyền vào hàm) và snapshot đầy đủ của giao dịch (`nganId/nganMa/nganTen/ca/ngaySx/boc/pallet/chiThi/loaiCsr/loaiBanh/dayChuyen`) để modal Sửa pre-fill không cần load lại riêng. `nganMa/nganTen` tra theo batch 1 lần cho toàn bộ danh sách (không query riêng từng dòng).
+- UI: icon `Pencil` cạnh icon `Trash2` trong "Lịch sử ca" (Hub), chỉ hiện khi `h.canEdit`. Modal `EditEntryModal` (`confirm/page.tsx`) — form đầy đủ Ngày/Ca/Số chỉ thị/Số bành/Bọc/Loại pallet/Ngăn nguồn (dropdown ngăn dùng `loadActiveNgansForFactory` + luôn giữ ngăn hiện tại của giao dịch làm 1 option dù ngăn đó không còn "Chờ/Đang sản xuất").
+
+**3. Cảnh báo "nhảy lô" (bỏ sót kiện khi trực ca chuyển sang lô khác)**:
+
+- 2 server action mới, cả 2 đọc thẳng `lots.kien_a-d` (luôn đồng bộ sẵn qua `sync_lot_master_snapshot`, không tự `SUM` lại `lot_transactions`):
+  - `checkLotCompleteness(factoryId, maLo)` — 1 lô có còn thiếu kiện không (null nếu không tồn tại/đã qua "Dở dang"/đã đủ 4 kiện).
+  - `checkIncompleteLotsForDay(factoryId, ngaySx)` — quét mọi lô có giao dịch trong 1 ngày (mọi ca), trả về danh sách lô còn "Dở dang" kèm kiện thiếu.
+- **Lúc quét, phát hiện đổi mã lô** (`confirm/page.tsx`, effect lookup): dùng `lastSubmittedMaLoRef` (ref, không phải state — tránh re-trigger effect chính) lưu mã lô vừa gửi thành công gần nhất trong phiên. Khi resolve 1 mã lô MỚI khác giá trị này, gọi `checkLotCompleteness` cho mã lô CŨ, hiện banner amber non-blocking ("Lô X còn thiếu kiện Y") ngay trên form — không chặn thao tác.
+- **Lúc "Kết thúc ca"**: `handleEndShiftFirstConfirm` gọi `checkIncompleteLotsForDay` TRƯỚC khi build PDF — nếu có lô dở dang, modal chuyển sang giai đoạn `"warning"` liệt kê từng lô + kiện thiếu, yêu cầu bấm rõ ràng "Vẫn kết thúc ca" (nút riêng, không phải nút mặc định) mới cho tiếp tục xuất phiếu.
+
+**4. Sắp xếp "Lịch sử ca" theo lô thay vì theo thời gian quét**:
+
+- `loadShiftHistory()` đổi sort từ `createdAt DESC` (mới nhất lên đầu) sang theo `num` (số lô, tách từ `ma_lo` bằng regex `/^(\d+)/`) tăng dần, rồi `maLo` (tie-break), rồi kiện A→D — quét kiện D trước A/B/C không còn bị đẩy xuống cuối danh sách, dễ theo dõi tiến độ theo lô hơn. `loadShiftReportData` (phiếu PDF) giữ nguyên sort cũ theo `hoanThanhAt` trong từng section — không đổi, chỉ áp dụng cho danh sách Hub.
+
+**5. Phân công trực ca cố định theo nhà máy**:
+
+- Bảng mới `production_shift_assignments` (migration `20260715_production_shift_assignments.sql`, cần chạy thủ công) — `(factory_id, ca)` unique, `assigned_user_id` (FK `auth.users`, nullable) + `assigned_name` (text dự phòng khi chưa có tài khoản) + `ghi_chu` + `is_active`. Cố ý ĐƠN GIẢN, không có lịch sử `effective_from/to` như `dispatch_vehicle_driver_assignments` — mỗi ca chỉ có 1 dòng active tại một thời điểm.
+- RLS: SELECT `USING (true)` (mirror "Allow all" đã dùng cho `ngans`/`lots`/`lot_prediction_lots` — mọi user cần tự tra "mình trực ca nào"); ghi qua Supabase browser client trong Cài đặt, gate bằng permission `settings.manage_config` ở tầng UI (không tạo permission riêng).
+- Quản trị: sub-tab mới **"Phân công trực ca"** trong `Cài đặt → Cấu hình nhà máy` (cạnh "Mục tiêu chất lượng") — component `src/app/dashboard/settings/_components/shift-assignments-tab.tsx`, đúng 3 dòng cố định (Ca A/B/C), mỗi dòng chọn tài khoản (dropdown từ `activeProfilesForLink` đã có sẵn trong `settings/page.tsx`) hoặc chỉ ghi tên hiển thị nếu chưa có tài khoản.
+
+**6. Gợi ý đúng Ca sản xuất khi mở form quét** (thay hard-code `"A"`):
+
+- Đã hỏi người dùng cách fallback khi tài khoản chưa được gán ca nào (vd nhiều người dùng chung 1 máy quét) — **chốt: nhớ Ca đã dùng gần nhất TRÊN CHÍNH THIẾT BỊ/trình duyệt đó** (không đoán theo khung giờ ca).
+- `loadUserShiftAssignment(factoryId, userId)` (`confirm/actions.ts`) tra `production_shift_assignments` theo `assigned_user_id + is_active=true`.
+- `confirm/page.tsx`: `getDefaultCa()` ưu tiên `assignedCa` (bảng phân công) → `loadStoredCa()` (localStorage key `product_confirm_last_ca`) → `"A"`. Áp dụng khi effect lookup set `ca` mặc định cho mỗi lần quét mới (thay `setCa("A")` cứng). Sau khi gửi thành công, `storeCa(ca)` — nhưng CHỈ khi `!assignedCa` (không ghi đè gợi ý ưu tiên cao hơn từ bảng phân công bằng lựa chọn tay tạm thời).
+- Cố ý **không đổi** giá trị mặc định của `historyCa` (bộ lọc "Lịch sử ca" trong Hub, dùng để browse/filter chứ không phải nhập mới) — giữ khởi tạo trung lập `"A"`.
+
+**7. Xem trước PDF trước khi chia sẻ/tải + nút "Xem phiếu PDF" ở header ngày (module Thành phẩm)**:
+
+- `shift-report-pdf.ts`: bỏ hẳn `shareOrDownloadShiftReportPdf()` (share/download thẳng không cho xem trước), thay bằng 3 hàm tách biệt: `openShiftReportPdfInNewTab(doc)` (dùng `doc.output("bloburl")`, mở tab mới bằng trình xem PDF gốc của trình duyệt — không cần thư viện nhúng), `downloadShiftReportPdfDoc(doc, fileName)`, `shareShiftReportPdfDoc(doc, fileName)` — cả 2 hàm sau nhận thẳng `jsPDF` đã dựng sẵn, không tự build lại.
+- Component dùng chung mới `shift-report-preview-bar.tsx` (`ShiftReportPreviewBar`) — thanh 2 nút Chia sẻ/Tải xuống, tái sử dụng ở cả `confirm/page.tsx` (Hub "Xem/Tạo lại phiếu" + modal "Kết thúc ca" giai đoạn `"preview"`) lẫn modal mới trong `product/page.tsx`.
+- `handleGenerateReportNow`/`proceedGenerateEndShiftReport` (`confirm/page.tsx`) giờ: build PDF 1 lần → `openShiftReportPdfInNewTab` → lưu `{doc, fileName}` vào state → hiện `ShiftReportPreviewBar`. "Kết thúc ca" chỉ thực sự đóng modal + điều hướng khi người dùng bấm "Hoàn tất, quay lại Thành phẩm" (`handleFinishEndShift`) — có thêm nút "Ở lại trang này" để đóng modal không điều hướng.
+- `product/page.tsx`: nút mới **"Xem phiếu PDF"** trong header mỗi nhóm ngày (cạnh "Thêm"/"Sửa"/"Xóa", luôn hiển thị kể cả khi đang ở chế độ xóa, ẩn khi `date === "Chưa có ngày"`) — `openReportPdfModal(date)` gọi `loadShiftReportData(factoryId, date)` rồi cùng luồng xem-trước-rồi-mới-chia-sẻ ở trên, hiển thị trong `ModalShell`.
+
+**Chưa test tay** — toàn bộ nội dung mục "Cập nhật 2026-07-15" mới qua `npx tsc --noEmit` + `npx eslint` + `npm run build` (đều sạch), chưa chạy `npm run dev` xác nhận trên trình duyệt/dữ liệu thật. Cần đặc biệt:
+- Chạy 2 migration `20260715_sync_lot_master_snapshot_returns_row.sql` và `20260715_production_shift_assignments.sql` trên Supabase SQL Editor TRƯỚC khi deploy code — nếu chưa chạy migration đầu, MỌI lần lưu/sửa/xóa giao dịch thành phẩm (cả nhập tay lẫn quét QR) sẽ lỗi ngay lập tức vì `syncLotMasterSnapshot()` giờ mong đợi RPC trả về hàng dữ liệu thay vì `void`.
+- Test tốc độ thực tế trước/sau trên mạng chậm (throttle DevTools) để xác nhận cảm nhận được sự khác biệt.
+- Test nút Sửa: user thường chỉ sửa được lô "Dở dang"; admin sửa được lô "Hoàn thành"; admin BỊ CHẶN sửa lô "Xuất hàng" đã có KN, admin sửa ĐƯỢC lô "Xuất hàng" chưa có KN.
+- Test cảnh báo nhảy lô: quét dở 1 lô (còn thiếu kiện) rồi quét sang lô khác → banner amber hiện đúng; quét đủ 4 kiện rồi mới đổi lô → không có banner.
+- Test "Kết thúc ca" với ngày có lô dở dang → modal chuyển giai đoạn "warning" đúng, danh sách lô/kiện thiếu đúng; bấm "Vẫn kết thúc ca" → sang giai đoạn "preview" bình thường.
+- Test phân công trực ca: gán tài khoản A vào Ca B trong Cài đặt → đăng nhập tài khoản đó, mở form quét QR → dropdown "Ca sản xuất" tự chọn "Ca B"; tài khoản chưa gán → dùng đúng Ca đã lưu localStorage lần quét trước trên máy đó.
+- Test nút "Xem phiếu PDF" mới ở header ngày trong module Thành phẩm — mở đúng phiếu của đúng ngày, xem trước ở tab mới, Chia sẻ/Tải xuống hoạt động.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

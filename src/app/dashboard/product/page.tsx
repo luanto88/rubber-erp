@@ -1,7 +1,15 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import type jsPDF from "jspdf";
 import { supabase } from "@/lib/supabase";
+import { loadShiftReportData } from "@/app/dashboard/product/confirm/actions";
+import {
+  buildShiftReportFileName,
+  buildShiftReportPdf,
+  openShiftReportPdfInNewTab,
+} from "@/app/dashboard/product/confirm/shift-report-pdf";
+import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
 import {
   getActiveFactoryId,
   hasPermission,
@@ -52,6 +60,8 @@ import {
   RefreshCw,
   Minus,
   Wand2,
+  FileDown,
+  Loader2,
 } from "lucide-react";
 
 // Types
@@ -1244,6 +1254,12 @@ export default function ProductPage() {
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(
     new Set(),
   );
+  // Mục 7: "Xem phiếu PDF" ở header nhóm ngày — tái dùng loadShiftReportData (confirm/actions.ts)
+  // + luồng xem-trước-rồi-mới-chia-sẻ/tải (mirror confirm/page.tsx).
+  const [pdfReportDate, setPdfReportDate] = useState<string | null>(null);
+  const [pdfReportLoading, setPdfReportLoading] = useState(false);
+  const [pdfReportError, setPdfReportError] = useState<string | null>(null);
+  const [pdfReportPreview, setPdfReportPreview] = useState<{ doc: jsPDF; fileName: string } | null>(null);
   const nganMetaById = useMemo(() => {
     const map = new Map<string, Ngan>();
     ngans.forEach((ngan) => {
@@ -3016,6 +3032,32 @@ export default function ProductPage() {
       image_code_2: firstLot?.image_code_2 || "",
     });
     setEditDateModal(date);
+  };
+
+  // Mục 7: "Xem phiếu PDF" — dựng phiếu báo thành phẩm của đúng ngày này (gồm tất cả ca có phát
+  // sinh trong ngày, giống hệt "Xem/Tạo lại phiếu" ở Hub quét QR), mở xem trước ở tab mới trước
+  // khi cho Chia sẻ/Tải xuống — không điều hướng sang route confirm.
+  const openReportPdfModal = async (date: string) => {
+    if (!factoryId || date === "Chưa có ngày") return;
+    setPdfReportDate(date);
+    setPdfReportLoading(true);
+    setPdfReportError(null);
+    setPdfReportPreview(null);
+    try {
+      const data = await loadShiftReportData(factoryId, date);
+      if (data.sections.length === 0) {
+        setPdfReportError("Ngày này chưa có dữ liệu để lập phiếu báo thành phẩm.");
+        return;
+      }
+      const doc = await buildShiftReportPdf(data);
+      const fileName = buildShiftReportFileName(data);
+      openShiftReportPdfInNewTab(doc);
+      setPdfReportPreview({ doc, fileName });
+    } catch (err) {
+      setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
+    } finally {
+      setPdfReportLoading(false);
+    }
   };
 
   const handleDateHeaderSave = async () => {
@@ -5019,6 +5061,18 @@ export default function ProductPage() {
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
+                    {date !== "Chưa có ngày" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openReportPdfModal(date);
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
+                        title="Xem phiếu báo thành phẩm PDF của ngày này"
+                      >
+                        <FileDown size={12} /> Xem phiếu PDF
+                      </button>
+                    )}
                     {deleteMode === date ? (
                       <>
                         <span className="text-xs text-red-600 font-bold shrink-0">
@@ -5282,6 +5336,30 @@ export default function ProductPage() {
           </div>
         )}
       </div>
+
+      {pdfReportDate && (
+        <ModalShell
+          title={`Phiếu báo thành phẩm — ${new Date(pdfReportDate).toLocaleDateString("vi-VN")}`}
+          onClose={() => {
+            setPdfReportDate(null);
+            setPdfReportPreview(null);
+            setPdfReportError(null);
+          }}
+          maxWidth="sm"
+        >
+          {pdfReportLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
+              <Loader2 size={18} className="animate-spin" /> Đang tổng hợp phiếu...
+            </div>
+          ) : pdfReportError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
+              {pdfReportError}
+            </div>
+          ) : pdfReportPreview ? (
+            <ShiftReportPreviewBar doc={pdfReportPreview.doc} fileName={pdfReportPreview.fileName} />
+          ) : null}
+        </ModalShell>
+      )}
 
       {editModal && (
         <ModalShell
