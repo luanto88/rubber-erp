@@ -683,6 +683,79 @@ Người dùng báo: dự đoán ngăn N5 kết thúc `1083cs/26` kiện C, dự
 - Test phân công trực ca: gán tài khoản A vào Ca B trong Cài đặt → đăng nhập tài khoản đó, mở form quét QR → dropdown "Ca sản xuất" tự chọn "Ca B"; tài khoản chưa gán → dùng đúng Ca đã lưu localStorage lần quét trước trên máy đó.
 - Test nút "Xem phiếu PDF" mới ở header ngày trong module Thành phẩm — mở đúng phiếu của đúng ngày, xem trước ở tab mới, Chia sẻ/Tải xuống hoạt động.
 
+### Kế hoạch phiên sau (chưa làm) — Quét theo lượt: "Lưu tạm" nhiều kiện rồi "Gửi" 1 lần
+
+**Bối cảnh**: người dùng quan sát thói quen thực tế — trực ca quét vài kiện liên tục rồi ngưng, vài
+tiếng sau quay lại quét tiếp. Đề xuất: mỗi lần quét xong 1 kiện, xem thông tin rồi bấm **"Lưu tạm"**
+(không ghi DB thật ngay) thay vì "Gửi" ngay lập tức; lặp lại cho nhiều kiện/nhiều lô; cuối lượt bấm
+**"Gửi"** một lần duy nhất — các kiện CÙNG lô có CÙNG toàn bộ thông tin (ngăn/bọc/pallet/ngày/ca/chỉ
+thị) sẽ gộp thành 1 dòng `lot_transactions` (giống cách module Thành phẩm nhập tay multi-kiện trước
+khi có tính năng quét QR), thay vì mỗi kiện luôn là 1 dòng riêng như hiện tại.
+
+**Đánh giá**: ý tưởng hợp lý, giảm số lần chờ round-trip mỗi kiện, chịu được mạng yếu giữa các lượt
+quét (Lưu tạm không cần validate tồn kho ngay). Rủi ro chính đã lường trước và đã chốt hướng xử lý
+với người dùng qua 2 câu hỏi:
+
+1. **Nơi lưu nháp — đã chốt: bảng nháp trên server** (không dùng localStorage) — bền hơn khi đổi
+   máy/trình duyệt, đồng bộ được nếu nhiều người dùng chung ca. Đánh đổi: mỗi lần "Lưu tạm" vẫn tốn
+   1 round-trip nhẹ (nhưng KHÔNG có validate tồn kho/capacity — chỉ ghi nhận, xem mục RPC bên dưới).
+2. **Xử lý lỗi khi Gửi cả lượt — đã chốt: chặn toàn bộ (all-or-nothing)** — nếu bất kỳ dòng nào
+   trong lượt gửi bị từ chối (ngăn đã đầy, kiện đã có người khác nhập giữa lúc chờ...), KHÔNG dòng
+   nào được ghi, giữ nguyên toàn bộ nháp để người dùng sửa rồi gửi lại. Không có khái niệm "gửi được
+   phần nào hay phần đó" — nhất quán, đơn giản hơn cho người dùng hiểu, tránh trạng thái nửa vời.
+
+**Thiết kế đề xuất (chưa code, cần rà lại đầu phiên sau trước khi bắt tay)**:
+
+- Bảng mới `product_confirm_drafts` — `factory_id`, `created_by` (auth.uid()), `ma_lo`, `kien`,
+  `is_new_lot`, `ngan_id`, `loai_csr`, `loai_banh`, `day_chuyen`, `so_banh`, `ngay_sx`, `ca`, `boc`,
+  `pallet text[]`, `chi_thi`, `tham`, `ghi_chu`, `created_at`. RLS: chỉ chủ nháp (`created_by =
+  auth.uid()`) đọc/sửa/xóa nháp của chính mình — đây là staging cá nhân, không phải dữ liệu chung.
+- Action `saveDraftKien(input)` — chỉ INSERT, KHÔNG chạy check tồn kho/max_per_kien (đó là lý do
+  "Lưu tạm" nhanh hơn "Gửi" hiện tại) — vẫn có thể chạy `resolveKienForConfirm` lúc quét để hiển thị
+  thông tin tham khảo, nhưng phải ghi rõ trên UI đây là thông tin **tại thời điểm quét, không đảm
+  bảo còn đúng lúc Gửi thật** (đặc biệt vì có thể cách nhau vài tiếng).
+- Action `loadDrafts(factoryId, userId)` / `deleteDraft(draftId)` — cho khối UI mới "Đang chờ gửi"
+  trong Hub (tách biệt hẳn với "Lịch sử ca" — khối đó chỉ hiện dữ liệu ĐÃ gửi thật).
+- **RPC atomic mới** (bắt buộc — không được viết bằng N lệnh gọi `saveLotTransaction()` tuần tự từ
+  JS, vì sẽ tái tạo đúng loại race/partial-write mà `sync_lot_master_snapshot`/`delete_lot_transaction`/
+  `create_lot_prediction_batch` đã từng phải sửa): `submit_confirm_draft_batch(p_draft_ids uuid[])`
+  chạy trong 1 transaction Postgres duy nhất:
+  1. Khóa các dòng `lots` liên quan (`FOR UPDATE`), gộp draft theo khóa `(ma_lo, ngan_id, ngay_sx,
+     ca, boc, pallet, chi_thi)` — chỉ gộp khi TẤT CẢ các trường này giống hệt nhau; khác bất kỳ
+     trường nào (kể cả 2 kiện cùng lô nhưng khác ngăn/bọc/pallet — vẫn là tình huống hợp lệ theo
+     rule cũ "khác kiện được phép khác bọc/pallet") thì giữ thành dòng riêng.
+  2. Trong mỗi nhóm, 1 chữ cái kiện (A/B/C/D) không được xuất hiện quá 1 lần — nếu trùng (quét lại
+     cùng kiện 2 lần trong cùng lượt chưa gửi), coi là lỗi cần người dùng tự xóa bớt nháp trùng
+     trước khi gửi lại (không tự động cộng dồn hay tự chọn dòng nào "đúng hơn").
+  3. Re-validate TỪNG dòng đã gộp bằng ĐÚNG logic hiện có của `confirmKienProduction`: tổng bành
+     mỗi kiện so với `max_per_kien` (cộng dồn với dữ liệu thật hiện có), và capacity 110% của ngăn
+     đích — **capacity phải cộng dồn TÍCH LŨY qua toàn bộ các dòng trong CÙNG 1 lượt gửi cùng chạm
+     1 ngăn** (2 lô khác nhau nhưng cùng ngăn trong 1 lượt gửi, mỗi dòng tự nó "vừa" nhưng cộng lại
+     có thể vượt 110% — phải tính lũy kế khi duyệt tuần tự trong transaction, mirror kỹ thuật đã
+     dùng ở `create_lot_prediction_batch`).
+  4. Nếu BẤT KỲ dòng nào không hợp lệ → `RAISE EXCEPTION` với thông tin rõ ràng (mã lô + kiện + lý
+     do) → toàn bộ transaction rollback, KHÔNG dòng nào được ghi, nháp giữ nguyên (đúng quyết định
+     "chặn toàn bộ" đã chốt).
+  5. Nếu tất cả hợp lệ → ghi từng dòng gộp vào `lot_transactions` (tạo lô mới nếu cần, giống nhánh
+     insert của `saveLotTransaction`), gọi `sync_lot_master_snapshot` cho từng lô bị ảnh hưởng, rồi
+     XÓA toàn bộ draft đã tiêu thụ trong `p_draft_ids` — tất cả trong cùng transaction.
+- UI: nút "GỬI DỮ LIỆU" ở form quét đổi thành "LƯU TẠM" (primary trong luồng quét); Hub có thêm
+  block "Đang chờ gửi (N)" liệt kê nháp + nút xóa từng dòng + nút to "Gửi tất cả (N)" gọi RPC trên.
+  Khi Gửi thất bại, hiện danh sách lỗi rõ theo từng dòng (mã lô/kiện/lý do), giữ nguyên toàn bộ nháp.
+- **Cần rà lại tương tác với 3 tính năng vừa làm ở phiên 2026-07-15**:
+  - Cảnh báo "nhảy lô" (`checkLotCompleteness`) hiện chỉ đọc `lots.kien_a-d` (dữ liệu ĐÃ gửi thật) —
+    cần cân nhắc có nên cộng thêm cả kiện đang nằm trong nháp CHƯA gửi hay không (advisory, vì nháp
+    chưa chắc gửi thành công) trước khi coi 1 lô là "đã đủ kiện".
+  - "Kết thúc ca" nên cảnh báo/chặn nếu vẫn còn nháp chưa gửi (rất dễ quên bấm "Gửi tất cả" cuối
+    ca) — gợi ý hỏi rõ "Còn N nháp chưa gửi — gửi ngay bây giờ?" trước khi cho xuất phiếu.
+  - Rule "cùng kiện lần sau phải cùng bọc/pallet với lần trước" (`existingKienBoc/existingKienPallet`)
+    hiện chỉ so với `lot_transactions` thật trong DB — nếu 2 nháp CHƯA gửi của cùng kiện có bọc/pallet
+    khác nhau, cần phát hiện mismatch ngay lúc "Lưu tạm" (không đợi tới lúc Gửi mới báo lỗi).
+- **Quy mô**: đây là thay đổi kiến trúc lớn hơn hẳn 7 mục đã làm ở phiên 2026-07-15 (bảng DB mới +
+  RPC atomic phức tạp xử lý gộp/validate/ghi nhiều dòng trong 1 transaction + UI rework luồng Lưu
+  tạm/Gửi/Đang chờ gửi). Nên cân nhắc tách làm 2 phiên: (1) DB + RPC + action lớp server trước, test
+  kỹ logic gộp/validate bằng script; (2) UI sau khi backend đã ổn định.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:
