@@ -477,9 +477,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   }
 
   // Staff categories
-  const bgdStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("giám đốc"))
-  // "Nhân viên phụ trách": toàn bộ nhân sự đang hoạt động của nhà máy hiện tại, không lọc theo nhóm.
-  const eligibleStaff = staffList
+  // So khớp CHÍNH XÁC (không phải chuỗi con) để tách rõ Giám đốc / Phó giám đốc, tự động loại
+  // "Tổng giám đốc"/"Phó tổng giám đốc" (cấp công ty, không phê duyệt biên bản cấp nhà máy) vì
+  // so khớp chính xác không coi "tổng giám đốc" bằng "giám đốc". Kiểm tra cả chuc_vu lẫn
+  // chuc_vu_chinh_quyen vì có trường hợp chuc_vu bị điền nhầm (vd điền email) nhưng
+  // chuc_vu_chinh_quyen vẫn đúng chức danh thật.
+  const matchesChucVu = (s: MaintenanceStaff, target: string) =>
+    s.chuc_vu?.trim().toLowerCase() === target || s.chuc_vu_chinh_quyen?.trim().toLowerCase() === target
+  const giamDocStaff = staffList.filter((s) => matchesChucVu(s, "giám đốc"))
+  const bgdPhuTrachStaff = staffList.filter((s) => matchesChucVu(s, "phó giám đốc"))
+  // "Nhân viên phụ trách": chỉ nhân sự có Chức vụ chứa "nhân viên" (Nhân viên cơ điện, Nhân
+  // viên kỹ thuật, Nhân viên kế toán...) — không hiển thị toàn bộ nhân sự nhà máy (Bảo vệ, Tổ
+  // trưởng, Giám đốc, Trưởng phòng... không thuộc diện này).
+  const eligibleStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("nhân viên"))
   // "Người thực hiện": chỉ người thuộc nhóm Cơ điện / Bảo trì / Cơ khí (gán qua Cài đặt → Bảo trì
   // → Nhân sự bảo trì) — thay cho so khớp chuỗi chuc_vu cũ (dễ lọt nhân sự quản lý cấp cao như
   // Phó Tổng Giám đốc vào danh sách).
@@ -2738,14 +2748,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <label className="text-xs font-bold text-slate-600 block mb-1.5">BGĐ phụ trách</label>
             <select value={bgdPhuTrach} onChange={(e) => setBgdPhuTrach(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
               <option value="">— Chọn —</option>
-              {bgdStaff.filter((s) => s.ten !== giamDoc).map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+              {bgdPhuTrachStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
             </select>
           </div>
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Giám đốc</label>
             <select value={giamDoc} onChange={(e) => setGiamDoc(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
               <option value="">— Chọn —</option>
-              {bgdStaff.filter((s) => s.ten !== bgdPhuTrach).map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+              {giamDocStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
             </select>
           </div>
         </div>

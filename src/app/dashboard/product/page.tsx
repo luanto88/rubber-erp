@@ -3449,22 +3449,29 @@ export default function ProductPage() {
       setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú");
     }
   };
-  const handleDelete = async (uid: string) => {
-    if (!factoryId) return;
+  const handleDelete = async (
+    uid: string,
+    options?: { skipReload?: boolean },
+  ): Promise<{ success: boolean; maLo: string; error?: string }> => {
+    if (!factoryId) return { success: false, maLo: "", error: "Chưa xác định được nhà máy." };
 
     const contribution = contributions.find((item) => item.uid === uid);
     if (!contribution) {
-      setSaveError("Không tìm thấy dòng session cần xóa.");
+      const msg = "Không tìm thấy dòng session cần xóa.";
+      setSaveError(msg);
       setDelConfirm(null);
-      return;
+      return { success: false, maLo: "", error: msg };
     }
+    const maLoFallback = contribution.ma_lo || "";
 
     const lot = lots.find((l) => l.id === contribution.id);
     if (!lot) {
-      setSaveError("Không tìm thấy lô gốc của dòng session này.");
+      const msg = "Không tìm thấy lô gốc của dòng session này.";
+      setSaveError(msg);
       setDelConfirm(null);
-      return;
+      return { success: false, maLo: maLoFallback, error: msg };
     }
+    const maLo = lot.ma_lo || maLoFallback;
 
     const transactionId = contribution?.transaction_id;
     const transactionCount = lot.lot_transactions?.length || 0;
@@ -3475,7 +3482,7 @@ export default function ProductPage() {
         if (!result.success) {
           setSaveError(result.error);
           setDelConfirm(null);
-          return;
+          return { success: false, maLo, error: result.error };
         }
         const affectedNganIds = Array.from(
           new Set([result.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
@@ -3484,13 +3491,14 @@ export default function ProductPage() {
           await syncNganStatusAfterLotEdit(nganId);
         }
       } catch (err) {
-        setSaveError(getErrorMessage(err));
+        const msg = getErrorMessage(err);
+        setSaveError(msg);
         setDelConfirm(null);
-        return;
+        return { success: false, maLo, error: msg };
       }
       setDelConfirm(null);
-      loadData(factoryId);
-      return;
+      if (!options?.skipReload) loadData(factoryId);
+      return { success: true, maLo };
     }
 
     if (transactionCount === 0) {
@@ -3502,45 +3510,89 @@ export default function ProductPage() {
       try {
         const { error: delError } = await supabase.rpc("delete_orphan_lot", { p_lot_id: contribution.id });
         if (delError) {
-          setSaveError(
+          const msg =
             delError.code === "23503"
               ? "Không thể xóa lô này vì đã có phiếu kiểm nghiệm hoặc đơn xuất hàng liên quan. Xóa các dữ liệu đó trước."
-              : delError.message,
-          );
+              : delError.message;
+          setSaveError(msg);
           setDelConfirm(null);
-          return;
+          return { success: false, maLo, error: msg };
         }
         if (lot.ngan_id) {
           await syncNganStatusAfterLotEdit(lot.ngan_id);
         }
       } catch (err) {
-        setSaveError(getErrorMessage(err));
+        const msg = getErrorMessage(err);
+        setSaveError(msg);
         setDelConfirm(null);
-        return;
+        return { success: false, maLo, error: msg };
       }
     } else {
-      setSaveError("Dòng session này không có transaction_id hợp lệ để xóa riêng.");
+      const msg = "Dòng session này không có transaction_id hợp lệ để xóa riêng.";
+      setSaveError(msg);
       setDelConfirm(null);
-      return;
+      return { success: false, maLo, error: msg };
     }
 
     setDelConfirm(null);
-    loadData(factoryId);
+    if (!options?.skipReload) loadData(factoryId);
+    return { success: true, maLo };
   };
   const handleBulkDelete = async () => {
-    const deletable = Array.from(selectedDeleteIds).filter(
-      (id) => {
-        const contribution = contributions.find((item) => item.uid === id);
-        return !lotsBlockedByKn.includes(contribution?.id || id);
-      },
-    );
+    if (!factoryId) return;
+    setSaveError(null);
+    setSyncMsg(null);
+
+    const selectedIds = Array.from(selectedDeleteIds);
+    const maLoOf = (id: string) => contributions.find((item) => item.uid === id)?.ma_lo || id;
+
+    const blockedIds = selectedIds.filter((id) => {
+      const contribution = contributions.find((item) => item.uid === id);
+      return lotsBlockedByKn.includes(contribution?.id || id);
+    });
+    const deletable = selectedIds.filter((id) => !blockedIds.includes(id));
+
+    const blockedMaLos = Array.from(new Set(blockedIds.map(maLoOf)));
+    const succeeded: string[] = [];
+    const failed: { maLo: string; error: string }[] = [];
+
     for (const id of deletable) {
-      await handleDelete(id);
+      const result = await handleDelete(id, { skipReload: true });
+      if (result.success) {
+        succeeded.push(result.maLo || maLoOf(id));
+      } else {
+        failed.push({ maLo: result.maLo || maLoOf(id), error: result.error || "Lỗi không xác định" });
+      }
     }
+
+    if (succeeded.length > 0) {
+      void loadData(factoryId);
+    }
+
     setLotsBlockedByKn([]);
     setDeleteMode(null);
     setSelectedDeleteIds(new Set());
     setDelConfirm(null);
+
+    if (failed.length === 0 && blockedMaLos.length === 0) {
+      if (succeeded.length > 0) {
+        setSyncMsg(`Đã xóa thành công ${succeeded.length} dòng.`);
+      }
+      return;
+    }
+
+    const parts: string[] = [];
+    if (succeeded.length > 0) parts.push(`Đã xóa ${succeeded.length} dòng.`);
+    if (blockedMaLos.length > 0) {
+      parts.push(
+        `Bỏ qua ${blockedIds.length} dòng vì đã có phiếu kiểm nghiệm liên quan (mã lô: ${blockedMaLos.join(", ")}).`,
+      );
+    }
+    if (failed.length > 0) {
+      const uniqueErrors = Array.from(new Set(failed.map((f) => `${f.maLo}: ${f.error}`)));
+      parts.push(`Lỗi ${failed.length} dòng — ${uniqueErrors.join("; ")}`);
+    }
+    setSaveError(parts.join(" "));
   };
 
   const handleDeletePreCheck = async () => {
@@ -4535,6 +4587,26 @@ export default function ProductPage() {
   // ------------------------------
   return (
     <div>
+      {saveError && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span className="text-sm font-bold">{saveError}</span>
+          <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {syncMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl max-w-xl">
+          <RefreshCw size={16} className="shrink-0" />
+          <span className="text-sm font-bold">{syncMsg}</span>
+          <button onClick={() => setSyncMsg(null)} className="ml-2 hover:opacity-70">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>

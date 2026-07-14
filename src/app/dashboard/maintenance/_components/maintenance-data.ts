@@ -141,11 +141,18 @@ export async function loadMaintenanceStaff(factoryId: string): Promise<Maintenan
     .select("staff_id, group_id, personnel_groups(id, name, code)")
     .eq("factory_id", factoryId)
 
+  type PersonnelGroupRef = { id: string; name: string | null; code: string | null }
   const groupMap = new Map<string, { group_ids: string[]; group_names: string[] }>()
-  for (const row of (groupMemberData || []) as Array<{ staff_id: string; group_id: string; personnel_groups: Array<{ id: string; name: string | null; code: string | null }> | null }>) {
+  for (const row of (groupMemberData || []) as Array<{ staff_id: string; group_id: string; personnel_groups: PersonnelGroupRef | PersonnelGroupRef[] | null }>) {
     const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [] }
     if (row.group_id && !existing.group_ids.includes(row.group_id)) existing.group_ids.push(row.group_id)
-    const groupName = row.personnel_groups?.[0]?.name?.trim()
+    // Quan hệ personnel_group_members → personnel_groups là many-to-one (1 group_id), nên
+    // PostgREST trả về personnel_groups dạng OBJECT đơn, không phải mảng — không được dùng
+    // `?.[0]` (luôn undefined trên object, khiến group_names không bao giờ điền được dù dữ
+    // liệu personnel_group_members đã có sẵn). Xử lý an toàn cả 2 dạng để phòng hờ.
+    const groupRef = row.personnel_groups
+    const groupRecord = Array.isArray(groupRef) ? groupRef[0] : groupRef
+    const groupName = groupRecord?.name?.trim()
     if (groupName && !existing.group_names.includes(groupName)) existing.group_names.push(groupName)
     groupMap.set(row.staff_id, existing)
   }

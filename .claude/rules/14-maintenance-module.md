@@ -150,26 +150,33 @@ ALTER TABLE maintenance_staff ADD COLUMN IF NOT EXISTS email TEXT;
 
 Seed từ `cung_cap_dl/kho_bao_tri/bao_tri/danh_sach_nm.xlsx` (14 người).
 
-Phân loại nhân sự theo `chuc_vu` (dùng trong UI):
+Phân loại nhân sự (dùng trong UI) — cập nhật 2026-07-14, thay thế bảng cũ (`bgdStaff`/`nvStaff`/`workerStaff` không còn tồn tại trong code):
 
-| Nhóm          | Điều kiện                              | Dùng cho trường                        |
-| ------------- | -------------------------------------- | -------------------------------------- |
-| `bgdStaff`    | `chuc_vu` chứa `"giám đốc"`            | BGĐ phụ trách, Giám đốc                |
-| `nvStaff`     | `chuc_vu` chứa `"nhân viên"`           | Nhân viên phụ trách, Phụ trách bảo trì |
-| `workerStaff` | còn lại (Tổ trưởng, Công nhân, Bảo vệ) | Người thực hiện (chips)                |
+| Nhóm                | Điều kiện                                                                                     | Dùng cho trường          |
+| ------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
+| `giamDocStaff`       | `chuc_vu` HOẶC `chuc_vu_chinh_quyen` khớp **chính xác** (không phải chuỗi con) `"giám đốc"`     | Giám đốc                 |
+| `bgdPhuTrachStaff`   | `chuc_vu` HOẶC `chuc_vu_chinh_quyen` khớp **chính xác** `"phó giám đốc"`                        | BGĐ phụ trách            |
+| `eligibleStaff`      | `chuc_vu` chứa `"nhân viên"`                                                                    | Nhân viên phụ trách      |
+| `nguoiThucHienStaff` | `group_names` (nhóm nhân sự gán qua Cài đặt → Bảo trì → Nhân sự bảo trì) chứa "Cơ điện"/"Bảo trì"/"Cơ khí" | Người thực hiện (chips) |
 
 ```typescript
-const bgdStaff = staffList.filter((s) =>
-  s.chuc_vu?.toLowerCase().includes("giám đốc"),
+const matchesChucVu = (s: MaintenanceStaff, target: string) =>
+  s.chuc_vu?.trim().toLowerCase() === target || s.chuc_vu_chinh_quyen?.trim().toLowerCase() === target;
+const giamDocStaff = staffList.filter((s) => matchesChucVu(s, "giám đốc"));
+const bgdPhuTrachStaff = staffList.filter((s) => matchesChucVu(s, "phó giám đốc"));
+const eligibleStaff = staffList.filter((s) => s.chuc_vu?.toLowerCase().includes("nhân viên"));
+const nguoiThucHienStaff = staffList.filter((s) =>
+  s.group_names?.some((g) => NGUOI_THUC_HIEN_GROUP_NAMES.includes(g)),
 );
-const nvStaff = staffList.filter((s) =>
-  s.chuc_vu?.toLowerCase().includes("nhân viên"),
-);
-const workerStaff = staffList.filter((s) => {
-  const cv = s.chuc_vu?.toLowerCase() || "";
-  return !cv.includes("giám đốc") && !cv.includes("nhân viên");
-});
 ```
+
+Ghi chú quan trọng:
+
+- `giamDocStaff`/`bgdPhuTrachStaff` dùng **so khớp chính xác**, không phải chuỗi con — nhờ vậy tự động loại "Tổng giám đốc"/"Phó tổng giám đốc" (cấp công ty, không phê duyệt biên bản cấp nhà máy) ra khỏi cả 2 dropdown mà không cần logic loại trừ riêng, vì `"tổng giám đốc" !== "giám đốc"`. Trước đây dùng `chuc_vu?.includes("giám đốc")` (chuỗi con) làm gộp cả 3 vai trò vào 1 danh sách.
+- Kiểm tra cả `chuc_vu` lẫn `chuc_vu_chinh_quyen` vì thực tế có nhân sự bị điền nhầm `chuc_vu` (vd điền email) nhưng `chuc_vu_chinh_quyen` vẫn đúng chức danh thật.
+- Admin cần đảm bảo Chức vụ được gõ đúng nguyên văn `"Giám đốc"` hoặc `"Phó giám đốc"` (không thêm hậu tố như "nhà máy") ở 1 trong 2 cột trên trong Cài đặt → Bảo trì → Nhân sự bảo trì để được nhận diện đúng.
+- `nguoiThucHienStaff` dựa trên `personnel_groups`/`personnel_group_members` (bảng `Bảo trì`/`Cơ điện`/`Cơ khí`/`Trực ca`/`Bảo vệ`, xem mục "Update 2026-07-14" bên dưới) — **không** dùng `chuc_vu` string-match nữa, để tránh lọt nhân sự quản lý cấp cao (vd Phó Tổng Giám đốc) vào danh sách như trước.
+- `eligibleStaff` ("Nhân viên phụ trách") và `nv_phu_trach`/`phu_trach_bao_tri` DB column: 2 cột DB vẫn tồn tại riêng, nhưng UI chỉ còn 1 dropdown — khi lưu, giá trị chọn được ghi cùng lúc vào cả `nv_phu_trach` và `phu_trach_bao_tri` để không phá vỡ dữ liệu/mẫu in cũ đang đọc cột `phu_trach_bao_tri`.
 
 **Quy tắc loại trừ**: `bgd_phu_trach` và `giam_doc` không được chọn cùng một người — dropdown của field này lọc bỏ giá trị đã chọn ở field kia.
 
@@ -901,12 +908,12 @@ Font tất cả labels và inputs vật tư: `text-xs` (không dùng `text-[10px
 - Logic `checked`: `line.chat_luong !== "Không đạt"` → Đạt; `line.chat_luong === "Không đạt"` → Không đạt
 - Màu emerald cho "Đạt", màu đỏ cho "Không đạt"
 
-### Nhân sự
+### Nhân sự (cập nhật 2026-07-14)
 
-- `nguoi_thuc_hien`: chip multi-select, chỉ hiển thị `workerStaff`
-- `nv_phu_trach` / `phu_trach_bao_tri`: `<select>` từ `nvStaff`
-- `bgd_phu_trach`: `<select>` từ `bgdStaff`, loại trừ giá trị đã chọn ở `giam_doc`
-- `giam_doc`: `<select>` từ `bgdStaff`, loại trừ giá trị đã chọn ở `bgd_phu_trach`
+- `nguoi_thuc_hien`: chip multi-select, chỉ hiển thị `nguoiThucHienStaff`
+- `nv_phu_trach` (UI chỉ còn 1 field "Nhân viên phụ trách", đã bỏ field "Phụ trách bảo trì" trùng lặp): `<select>` từ `eligibleStaff`; khi lưu ghi cùng giá trị vào cả `nv_phu_trach` và `phu_trach_bao_tri`
+- `bgd_phu_trach`: `<select>` từ `bgdPhuTrachStaff` (không còn loại trừ theo `giam_doc` — 2 danh sách nay đã tách biệt tự nhiên)
+- `giam_doc`: `<select>` từ `giamDocStaff` (không còn loại trừ theo `bgd_phu_trach`)
 
 ### QR code
 
