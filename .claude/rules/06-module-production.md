@@ -1050,6 +1050,79 @@ bị chặn ngay khi bấm "Lưu tạm" (không chờ tới lúc Gửi); quét 1
 1080cs (cùng `loai_csr`) đang dở dang kiện D thiếu 15 bành → xác nhận banner sky-blue hiện đúng,
 không biến mất dù không thao tác gì thêm, và không chặn việc quét/Lưu tạm kiện đang làm.
 
+### Cập nhật 2026-07-16 — Fix 3 bug thật đã xác nhận: kiện dở dang bị báo "Đã sản xuất", song ngữ trang Tra cứu, dọn cảnh báo "nhảy lô" chết + đơn giản hóa filter cảnh báo lô khác
+
+**Bug 1 (nghiêm trọng nhất, đã fix) — `resolveProductLabelLookupTarget` (`src/lib/product-label.ts`)**:
+hàm này (dùng bởi trang công khai `/product-label`, trang worker thấy ĐẦU TIÊN khi quét QR vật lý
+trên nhãn) xác định trạng thái kiện chỉ bằng `.find(row => kien_X > 0)` — "có tồn tại giao dịch nào
+> 0" — thay vì SUM tất cả giao dịch rồi so với `max_per_kien` như `resolveKienForConfirm` (hàm tương
+đương dùng cho form nhập liệu thật, vốn đã đúng từ trước). Hệ quả: kiện có `kien_c = 8/36` bị coi là
+`"produced"` (đã sản xuất) chỉ vì có 1 giao dịch > 0, dù còn thiếu 28 bành — và vì nút "Xác nhận sản
+xuất" ở `ProductLabelClient` chỉ hiện khi `status === "predicted" || "partial"`, worker bị kẹt hoàn
+toàn, không có đường vào form nhập liệu tiếp. Đã fix: thêm status mới `"partial_kien"` (mirror đúng
+tên `ConfirmKienStatus` ở `confirm/actions.ts`), tính `existingBanh` bằng SUM (không phải `.find()`),
+so với `maxPerKien` qua `getLoaiBanhConfig(lot.loai_csr, lot.loai_banh)` — `existingBanh >= maxPerKien`
+mới là `"produced"`; `0 < existingBanh < maxPerKien` là `"partial_kien"` (mới); `existingBanh === 0`
+vẫn là `"partial"` như cũ. `ProductLabelLookupResult` thêm `existingBanh: number`, `maxPerKien: number
+| null`.
+
+**Bug 2 (yêu cầu, đã làm) — song ngữ Việt/Khmer cho `/product-label` + hiển thị rõ số bành đã có**:
+`ProductLabelClient` trước đây thuần Việt, không có cơ chế song ngữ nào — đã tái dùng trực tiếp hệ
+thống `Lang`/`t(lang,key,vars)`/`LANG_OPTIONS`/`loadStoredLang`/`storeLang` sẵn có ở
+`confirm/i18n.ts` (đang dùng cho module quét QR), thêm 17 key mới (`plPageTitle`, `plStatusPartialKien`,
+`plDaSanXuatBanhCa`...) vào cả `DICT.vi`/`DICT.km`, đặt `LangToggle` góc trên card. Khi
+`status === "partial_kien"`, card hiện ngay dòng amber "Đã sản xuất {existingBanh} bành — Ca {ca}"
+ngay dưới header "{maLo} — Kiện {kien}" đúng thứ tự người dùng yêu cầu; nút "Xác nhận sản xuất" và
+khối Ngày SX/Ca SX thật giờ mở rộng điều kiện hiện thị bao gồm cả `"partial_kien"` (trước chỉ
+`"produced"`).
+
+**Bug 3 (2 vấn đề độc lập, đã fix) — cảnh báo "lô khác còn dở dang" không nhất quán giữa 2 lần quét**:
+- **3a. Code chết đã xóa hẳn**: cơ chế "cảnh báo nhảy lô" (`lastSubmittedMaLoRef`, `lotJumpWarning`,
+  `checkLotCompleteness`) không bao giờ chạy được từ khi refactor sang luồng "Lưu tạm" (commit
+  `565fcf9` xóa nhầm dòng `lastSubmittedMaLoRef.current = maLo` — xác nhận qua `git log -p -S`), vì
+  điều kiện `if (lastSubmittedMaLoRef.current && ...)` mãi mãi `false`. Đã xóa hẳn: state + effect
+  logic + JSX banner trong `confirm/page.tsx`, hàm `checkLotCompleteness` trong `confirm/actions.ts`
+  (xác nhận qua grep đây là call site duy nhất trong `src/`), 2 key i18n `lotJumpWarningTitle`/
+  `lotJumpWarningBody`. **Giữ nguyên** type `LotCompletenessWarning` (vẫn dùng bởi
+  `checkIncompleteLotsForDay`, cơ chế cảnh báo lúc "Kết thúc ca" — độc lập, không đụng).
+- **3b. Filter `day_chuyen` dư thừa đã bỏ**: cảnh báo người dùng THỰC SỰ thấy đến từ
+  `checkOtherIncompleteLotsForCategory` (đang hoạt động, không phải code chết) — hàm này có filter
+  phụ `if (dayChuyen) query = query.eq("day_chuyen", dayChuyen)`. Vì `loai_csr` đã tự nhiên phân tách
+  Mủ tạp/Mủ nước, filter `day_chuyen` gần như dư thừa và là nguồn gây kết quả không nhất quán giữa
+  các lần gọi (dữ liệu `day_chuyen` cũ/nhập tay có thể không đồng nhất). Đã bỏ tham số `dayChuyen` và
+  điều kiện filter này — chữ ký hàm đổi thành `checkOtherIncompleteLotsForCategory(factoryId,
+  loaiCsr, excludeMaLo)`, chỉ còn lọc theo `loai_csr`.
+
+`npx tsc --noEmit`, `npx eslint` (6 file: `product-label.ts`, `product-label-client.tsx`,
+`product-label/page.tsx`, `confirm/i18n.ts`, `confirm/actions.ts`, `confirm/page.tsx`), và
+`npm run build` toàn bộ project đều sạch/pass. **Chưa test tay** — cần đúng 2 kịch bản người dùng đã
+báo cáo:
+- Mở `/product-label?f=...&lo=1078cs/26&kien=C` (kiện C = 8/36 bành thật) → phải thấy badge "Dở
+  dang" (không phải "Đã sản xuất"), dòng "Đã sản xuất 8 bành — Ca ...", nút "Xác nhận sản xuất" hiển
+  thị và dẫn đúng sang form nhập liệu với giới hạn tối đa 28 bành còn lại; toggle VI/KM đổi đúng toàn
+  bộ chữ, không vỡ layout.
+- Quét 2 kiện liên tiếp của cùng 1 lô (vd A rồi B của `1079cs/26`) → banner sky-blue "lô khác còn dở
+  dang" phải liệt kê NHẤT QUÁN cùng danh sách ở cả 2 lần quét (không còn hiện tượng lúc có lúc không);
+  xác nhận không còn banner amber "nhảy lô" nào xuất hiện; "Kết thúc ca" vẫn hoạt động bình thường.
+
+**Xác nhận bổ sung (cùng ngày, tiếp)**: sau khi fix trên được ship, đã dùng thêm 2 Explore agent độc
+lập audit lại toàn bộ giả thuyết bug 3 (1 agent đọc lại `resolveKienForConfirm` + tìm dead code sót
+lại, 1 agent audit chuyên sâu khả năng race condition/stale-state ở tầng React trong effect gọi
+`checkOtherIncompleteLotsForCategory`) để loại trừ khả năng còn nguyên nhân khác trước khi coi bug 3
+là đã đóng hẳn. Cả 2 đều xác nhận: (1) effect gọi hàm này (`confirm/page.tsx`) đã có đầy đủ pattern
+chuẩn — `alive` flag, reset `setOtherIncompleteLots([])` đồng bộ trước await, cleanup khi effect
+re-run — không có race condition; (2) `resolveKienForConfirm` trả `loai_csr` ổn định, không đổi giữa
+2 lần quét cùng lô; (3) filter `day_chuyen` đã bỏ đúng là root cause duy nhất và đã đủ giải quyết,
+không cần sửa thêm logic nghiệp vụ nào. Nếu tương lai còn quan sát thấy banner "lô khác dở dang"
+khác nhau giữa 2 lần quét CÙNG tham số, nguyên nhân hợp lý nhất KHÔNG phải bug mà là dữ liệu thật đã
+đổi giữa 2 thời điểm — `checkOtherIncompleteLotsForCategory` cố ý tính cả `product_confirm_drafts`
+(nháp "Lưu tạm") của **mọi người dùng**, không chỉ người đang quét, để cảnh báo real-time đa người
+dùng (đúng thiết kế, không phải bug).
+
+Đã dọn thêm 1 comment mồ côi ở `confirm/actions.ts` (nhắc tới hàm `checkLotCompleteness` đã xóa) —
+đổi thành mô tả tự đủ nghĩa cho tham số `pendingByMaLo` của `checkIncompleteLotsForDay`, không đổi
+hành vi. `npx tsc --noEmit`/`npx eslint` sạch sau thay đổi này.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

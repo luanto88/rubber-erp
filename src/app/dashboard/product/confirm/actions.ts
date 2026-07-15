@@ -725,50 +725,13 @@ async function loadDayTransactions(factoryId: string, ngaySx: string): Promise<S
 
 export type LotCompletenessWarning = { maLo: string; missingKien: KienLetter[] };
 
-// Kiểm tra 1 lô có còn thiếu kiện hay không — dùng `lots.kien_a-d` (luôn được đồng bộ đúng qua
-// sync_lot_master_snapshot sau MỌI lần lưu/sửa/xóa giao dịch, xem product/actions.ts) thay vì tự
-// SUM lại lot_transactions, nên chỉ cần 1 query nhẹ. Trả về null khi lô không tồn tại, đã qua
-// khỏi "Dở dang" (Hoàn thành/Xuất hàng — không còn ý nghĩa "thiếu" theo nghĩa cảnh báo này), hoặc
-// đã đủ cả 4 kiện. Dùng cho cảnh báo "nhảy lô" khi trực ca quét sang mã lô khác (mục 3).
-// `pendingKien`: các kiện đang nằm trong nháp CHƯA gửi (product_confirm_drafts) của lô này — coi
-// như "đã có" khi tính missingKien, tránh cảnh báo sai "còn thiếu kiện" trong khi thực ra kiện đó
-// đã được Lưu tạm nhưng chưa Gửi. Optional, mặc định rỗng giữ nguyên hành vi cũ (100% tương thích
-// ngược với các call site chưa biết về tính năng nháp).
-export async function checkLotCompleteness(
-  factoryId: string,
-  maLoRaw: string,
-  pendingKien: KienLetter[] = [],
-): Promise<LotCompletenessWarning | null> {
-  const maLo = maLoRaw.trim();
-  if (!factoryId || !maLo) return null;
-  const supabase = getSupabaseAdmin();
-  const { data: lot } = await supabase
-    .from("lots")
-    .select("ma_lo, loai_csr, loai_banh, trang_thai, kien_a, kien_b, kien_c, kien_d")
-    .eq("factory_id", factoryId)
-    .eq("ma_lo", maLo)
-    .maybeSingle();
-  if (!lot || normalizeLotStatus(lot.trang_thai) !== "Dở dang") return null;
-  const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined);
-  const totals: Record<KienLetter, number> = {
-    A: Number(lot.kien_a || 0),
-    B: Number(lot.kien_b || 0),
-    C: Number(lot.kien_c || 0),
-    D: Number(lot.kien_d || 0),
-  };
-  const missingKien = (Object.keys(totals) as KienLetter[]).filter(
-    (k) => totals[k] < config.max_per_kien && !pendingKien.includes(k),
-  );
-  if (missingKien.length === 0) return null;
-  return { maLo: lot.ma_lo, missingKien };
-}
-
 // Quét tất cả lô CÓ GIAO DỊCH trong 1 ngày sản xuất (mọi ca) để tìm lô nào vẫn "Dở dang" với
 // kiện chưa đủ — dùng cho cảnh báo lúc "Kết thúc ca" (mục 3). Không chặn cứng, chỉ để UI hiện
 // danh sách và yêu cầu xác nhận rõ ràng trước khi tiếp tục xuất phiếu. Dùng `lots.kien_a-d` (đã
 // đồng bộ sẵn) thay vì tự SUM transactions — chỉ cần 1 query bổ sung cho danh sách lot_id.
-// `pendingByMaLo`: map ma_lo -> các kiện đang nằm trong nháp CHƯA gửi của lô đó — cùng mục đích với
-// tham số `pendingKien` của checkLotCompleteness ở trên. Optional, mặc định rỗng giữ nguyên hành vi cũ.
+// `pendingByMaLo`: map ma_lo -> các kiện đang nằm trong nháp CHƯA gửi của lô đó (từ mọi người
+// dùng) — cộng thêm vào phần "đã có" khi xét 1 lô có còn thiếu kiện hay không. Optional, mặc
+// định rỗng giữ nguyên hành vi cũ (chỉ xét dữ liệu đã gửi thật trong `lots`).
 export async function checkIncompleteLotsForDay(
   factoryId: string,
   ngaySx: string,
@@ -806,28 +769,32 @@ export async function checkIncompleteLotsForDay(
 export type OtherIncompleteLotKien = { kien: KienLetter; missingBanh: number };
 export type OtherIncompleteLot = { maLo: string; missing: OtherIncompleteLotKien[] };
 
-// Cảnh báo (KHÔNG chặn) các lô KHÁC cùng loai_csr (và day_chuyen nếu có) đang "Dở dang" — bất kể
-// đã làm ngày nào (dù cùng ngày hay khác ngày với lô đang quét). Tính cả bành đang nằm trong nháp
-// CHƯA gửi của BẤT KỲ ai khi xác định kiện nào còn thiếu, để không báo sai "còn thiếu" nếu thực ra
-// đã có người Lưu tạm (chỉ chưa Gửi). Gọi song song với resolveKienForConfirm mỗi lần quét 1 kiện,
-// hiển thị như banner nhắc nhở — không chặn thao tác của kiện đang quét.
+// Cảnh báo (KHÔNG chặn) các lô KHÁC cùng loai_csr đang "Dở dang" — bất kể đã làm ngày nào (dù
+// cùng ngày hay khác ngày với lô đang quét). Tính cả bành đang nằm trong nháp CHƯA gửi của BẤT
+// KỲ ai khi xác định kiện nào còn thiếu, để không báo sai "còn thiếu" nếu thực ra đã có người Lưu
+// tạm (chỉ chưa Gửi). Gọi song song với resolveKienForConfirm mỗi lần quét 1 kiện, hiển thị như
+// banner nhắc nhở — không chặn thao tác của kiện đang quét.
+//
+// Fix 2026-07-16: đã bỏ filter phụ theo `day_chuyen` (trước đây `if (dayChuyen) query =
+// query.eq("day_chuyen", dayChuyen)`) — đây là nguyên nhân khiến banner hiện KHÔNG NHẤT QUÁN giữa
+// các lần quét cùng 1 lô (report thật: quét kiện A không thấy cảnh báo 1 lô dở dang cùng loại,
+// quét kiện B của CÙNG lô đó lại thấy). `loai_csr` (CSR10/20 = Mủ tạp, CSRL/3L/CV50/CV60 = Mủ
+// nước) đã tự nhiên phân tách 2 dây chuyền, filter `day_chuyen` chỉ thêm rủi ro loại nhầm 1 lô có
+// `day_chuyen` không khớp/rỗng do dữ liệu cũ — bỏ hẳn để kết quả xác định (deterministic).
 export async function checkOtherIncompleteLotsForCategory(
   factoryId: string,
   loaiCsr: string,
-  dayChuyen: string | null,
   excludeMaLo: string,
 ): Promise<OtherIncompleteLot[]> {
   if (!factoryId || !loaiCsr) return [];
   const supabase = getSupabaseAdmin();
-  let query = supabase
+  const { data: lots } = await supabase
     .from("lots")
-    .select("ma_lo, loai_csr, loai_banh, trang_thai, day_chuyen, kien_a, kien_b, kien_c, kien_d")
+    .select("ma_lo, loai_csr, loai_banh, trang_thai, kien_a, kien_b, kien_c, kien_d")
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .neq("ma_lo", excludeMaLo)
     .in("trang_thai", ["Dở dang", "Do dang"]);
-  if (dayChuyen) query = query.eq("day_chuyen", dayChuyen);
-  const { data: lots } = await query;
   const rows = lots || [];
   if (rows.length === 0) return [];
 

@@ -39,10 +39,9 @@ export default async function PublicProductLabelLookupPage(props: ProductLabelPa
       <meta httpEquiv="Expires" content="0" />
       <div className="min-h-screen bg-slate-100 px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-2xl">
-          <div className="mb-5">
-            <h1 className="text-2xl font-extrabold text-slate-900">Tra cứu kiện thành phẩm</h1>
-            <p className="mt-1 text-sm text-slate-500">Mở từ QR trên nhãn kiện để xem nguồn gốc nguyên liệu.</p>
-          </div>
+          {/* Tiêu đề + phụ đề đã chuyển vào ProductLabelClient (client component) để hỗ trợ đổi
+              ngôn ngữ Việt/Khmer — page.tsx là Server Component nên không thể tự phản ứng theo
+              state ngôn ngữ. */}
           <ProductLabelClient factoryId={factoryId} maLo={maLo} kien={kien} />
         </div>
       </div>

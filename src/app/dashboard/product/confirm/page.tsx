@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import type jsPDF from "jspdf";
@@ -34,7 +34,6 @@ import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   checkIncompleteLotsForDay,
-  checkLotCompleteness,
   checkOtherIncompleteLotsForCategory,
   deleteDraft,
   deleteShiftHistoryEntry,
@@ -204,10 +203,6 @@ export default function ConfirmKienProductionPage() {
   const [lookup, setLookup] = useState<ConfirmKienLookup | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  // Mục 3: mã lô vừa gửi thành công gần nhất trong phiên hiện tại — dùng ref (không phải state)
-  // vì chỉ đọc trong effect lookup, không cần re-render khi đổi.
-  const lastSubmittedMaLoRef = useRef<string | null>(null);
-  const [lotJumpWarning, setLotJumpWarning] = useState<LotCompletenessWarning | null>(null);
   // Cảnh báo (không chặn) các lô KHÁC cùng chủng loại (loai_csr) đang dở dang — tính cả nháp chưa
   // gửi của bất kỳ ai — để "ca sau" biết ngay còn lô nào cần hoàn tất, dù cùng ngày hay khác ngày.
   const [otherIncompleteLots, setOtherIncompleteLots] = useState<OtherIncompleteLot[]>([]);
@@ -351,17 +346,6 @@ export default function ConfirmKienProductionPage() {
     if (!factoryId || !maLo || view !== "form") return;
     let alive = true;
 
-    // Mục 3: cảnh báo "nhảy lô" — nếu vừa đổi sang mã lô khác mã lô đã gửi gần nhất trong phiên
-    // hiện tại, kiểm tra xem lô CŨ có còn thiếu kiện không. Không chặn thao tác, chỉ hiển thị
-    // banner amber; chạy song song với lookup của lô mới, không làm chậm luồng quét chính.
-    setLotJumpWarning(null);
-    if (lastSubmittedMaLoRef.current && lastSubmittedMaLoRef.current !== maLo) {
-      checkLotCompleteness(factoryId, lastSubmittedMaLoRef.current)
-        .then((res) => {
-          if (alive) setLotJumpWarning(res);
-        })
-        .catch(() => {});
-    }
     setOtherIncompleteLots([]);
 
     const run = async () => {
@@ -390,7 +374,7 @@ export default function ConfirmKienProductionPage() {
         // Cảnh báo lô khác cùng chủng loại còn dở dang — không chặn thao tác, không đợi trước khi
         // hạ lookupLoading (chạy độc lập, có thể trễ hơn 1 nhịp so với form chính).
         if (result.status !== "not_found" && result.loaiCsr) {
-          checkOtherIncompleteLotsForCategory(factoryId, result.loaiCsr, result.dayChuyen, maLo)
+          checkOtherIncompleteLotsForCategory(factoryId, result.loaiCsr, maLo)
             .then((rows) => {
               if (alive) setOtherIncompleteLots(rows);
             })
@@ -837,24 +821,6 @@ export default function ConfirmKienProductionPage() {
           </div>
 
           <div className="mx-auto max-w-xl px-4 py-5">
-            {/* Mục 3: cảnh báo "nhảy lô" — hiện xuyên suốt các trạng thái của view="form" (không
-                chặn thao tác), biến mất khi trở lại Hub hoặc khi đổi sang lô khác lần nữa. */}
-            {view === "form" && lotJumpWarning && (
-              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-extrabold text-amber-800">
-                      {tt("lotJumpWarningTitle", {
-                        maLo: lotJumpWarning.maLo,
-                        kien: lotJumpWarning.missingKien.join(", "),
-                      })}
-                    </div>
-                    <div className="mt-1 text-xs font-semibold text-amber-700">{tt("lotJumpWarningBody")}</div>
-                  </div>
-                </div>
-              </div>
-            )}
             {/* Cảnh báo (không chặn) các lô KHÁC cùng chủng loại còn dở dang — kể cả nháp chưa gửi
                 của bất kỳ ai đều được tính, để "ca sau" luôn thấy đúng tiến độ dù cùng ngày hay khác
                 ngày với lô đang quét. Hiện xuyên suốt mọi trạng thái của kiện đang quét. */}
