@@ -134,10 +134,6 @@ export default function MeasurementsPage() {
   const [formLoaiCsr, setFormLoaiCsr] = useState("")
   const [defaultCheDo, setDefaultCheDo] = useState("")
   const [cheDoWarning, setCheDoWarning] = useState<string | null>(null)
-  // Buộc effect fetch chế độ sấy chạy lại mỗi lần mở form tạo/thêm mẫu, kể cả khi
-  // formDayChuyen/formLoaiCsr trùng giá trị mặc định của phiên trước (không đổi state
-  // thì effect không tự rerun) — tránh gợi ý bị "kẹt" ở giá trị cũ/rỗng.
-  const [cheDoRefreshTick, setCheDoRefreshTick] = useState(0)
   const [rows, setRows] = useState<MeasurementRowDraft[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -249,37 +245,47 @@ export default function MeasurementsPage() {
     void loadCount()
   }, [factoryId, formNgay, formDayChuyen])
 
-  // Lấy chế độ sấy mặc định từ process_params gần nhất.
+  // Lấy chế độ sấy mặc định từ process_params gần nhất cho đúng (dây chuyền, Loại CSR).
   // Chạy song song 2 query: bản khớp đúng Loại CSR đang chọn + bản mới nhất của cả dây chuyền
   // (bất kể CSR) — vì cột loai_csr là optional, bản mới nhất có thể bị bỏ sót nếu lọc cứng theo CSR.
+  // Tách thành hàm riêng (không chỉ nằm trong effect) để openCreate/openAddRows có thể await
+  // trực tiếp ngay lúc mở form — nếu chỉ dựa vào effect phản ứng theo formDayChuyen/formLoaiCsr,
+  // mở phiếu mới với đúng dây chuyền/CSR mặc định trùng phiên trước sẽ không đổi state, effect
+  // không tự rerun, khiến gợi ý bị "kẹt" ở giá trị rỗng/cũ dù process_params đã có bản ghi mới hơn.
+  const fetchCheDoSuggestion = useCallback(async (fid: string, dayChuyen: string, csr: string): Promise<{ value: string; warning: string | null }> => {
+    const selectCols = "nhiet_do_dau_1, nhiet_do_dau_2, thoi_gian_say, ngay, created_at, loai_csr"
+    const [csrRes, anyRes] = await Promise.all([
+      csr
+        ? supabase.from("process_params").select(selectCols)
+            .eq("factory_id", fid).eq("day_chuyen", dayChuyen).eq("loai_csr", csr)
+            .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1)
+        : Promise.resolve({ data: null as CheDoRow[] | null }),
+      supabase.from("process_params").select(selectCols)
+        .eq("factory_id", fid).eq("day_chuyen", dayChuyen)
+        .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1),
+    ])
+    const csrMatch = (csrRes.data?.[0] as CheDoRow | undefined) ?? null
+    const latestAny = (anyRes.data?.[0] as CheDoRow | undefined) ?? null
+
+    if (!csr) {
+      return { value: latestAny ? fmtCheDo(latestAny.nhiet_do_dau_1, latestAny.nhiet_do_dau_2, latestAny.thoi_gian_say) : "", warning: null }
+    }
+    const { row, warning } = resolveCheDoSuggestion(csrMatch, latestAny, csr, formatDate)
+    return { value: row ? fmtCheDo(row.nhiet_do_dau_1, row.nhiet_do_dau_2, row.thoi_gian_say) : "", warning }
+  }, [])
+
+  // Effect phản ứng khi người dùng đổi dropdown Dây chuyền/Loại CSR ngay trong form đang mở —
+  // trường hợp này luôn là một thay đổi giá trị thật (onChange), effect luôn rerun đúng.
   useEffect(() => {
     if (!factoryId || !formDayChuyen) { setDefaultCheDo(""); setCheDoWarning(null); return }
-    const fetchCheDo = async () => {
-      const selectCols = "nhiet_do_dau_1, nhiet_do_dau_2, thoi_gian_say, ngay, created_at, loai_csr"
-      const [csrRes, anyRes] = await Promise.all([
-        formLoaiCsr
-          ? supabase.from("process_params").select(selectCols)
-              .eq("factory_id", factoryId).eq("day_chuyen", formDayChuyen).eq("loai_csr", formLoaiCsr)
-              .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1)
-          : Promise.resolve({ data: null as CheDoRow[] | null }),
-        supabase.from("process_params").select(selectCols)
-          .eq("factory_id", factoryId).eq("day_chuyen", formDayChuyen)
-          .order("ngay", { ascending: false }).order("created_at", { ascending: false }).limit(1),
-      ])
-      const csrMatch = (csrRes.data?.[0] as CheDoRow | undefined) ?? null
-      const latestAny = (anyRes.data?.[0] as CheDoRow | undefined) ?? null
-
-      if (!formLoaiCsr) {
-        setDefaultCheDo(latestAny ? fmtCheDo(latestAny.nhiet_do_dau_1, latestAny.nhiet_do_dau_2, latestAny.thoi_gian_say) : "")
-        setCheDoWarning(null)
-        return
-      }
-      const { row, warning } = resolveCheDoSuggestion(csrMatch, latestAny, formLoaiCsr, formatDate)
-      setDefaultCheDo(row ? fmtCheDo(row.nhiet_do_dau_1, row.nhiet_do_dau_2, row.thoi_gian_say) : "")
+    let alive = true
+    void fetchCheDoSuggestion(factoryId, formDayChuyen, formLoaiCsr).then(({ value, warning }) => {
+      if (!alive) return
+      setDefaultCheDo(value)
       setCheDoWarning(warning)
-    }
-    void fetchCheDo()
-  }, [factoryId, formDayChuyen, formLoaiCsr, cheDoRefreshTick])
+    })
+    return () => { alive = false }
+  }, [factoryId, formDayChuyen, formLoaiCsr, fetchCheDoSuggestion])
 
   // Auto-fill chế độ sấy vào dòng còn trống
   useEffect(() => {
@@ -332,15 +338,20 @@ export default function MeasurementsPage() {
     setFormDayChuyen("Mủ tạp")
     setFormLoaiCsr("10")
     setDefaultCheDo("")
-    setCheDoRefreshTick(t => t + 1)
+    setCheDoWarning(null)
     setSaveError(null)
 
-    const suggestion = await suggestNgan(today)
-    const firstRow = emptyMeasurementRow(currentUserName, "", CHI_TIEU_BY_CSR["10"])
+    const [suggestion, cheDo] = await Promise.all([
+      suggestNgan(today),
+      factoryId ? fetchCheDoSuggestion(factoryId, "Mủ tạp", "10") : Promise.resolve({ value: "", warning: null }),
+    ])
+    const firstRow = emptyMeasurementRow(currentUserName, cheDo.value, CHI_TIEU_BY_CSR["10"])
     if (suggestion) {
       firstRow.ngan_id = suggestion.ngan_id
       firstRow.so_ngay_luu = suggestion.so_ngay_luu
     }
+    setDefaultCheDo(cheDo.value)
+    setCheDoWarning(cheDo.warning)
     setRows([firstRow])
     setView("create")
   }
@@ -376,17 +387,24 @@ export default function MeasurementsPage() {
     setFormDayChuyen(sheet.day_chuyen || "")
     setFormLoaiCsr(sheet.loai_csr || "")
     setDefaultCheDo("")
-    setCheDoRefreshTick(t => t + 1)
+    setCheDoWarning(null)
     setExistingRowIds(new Set())
     setExistingRowCount(sheet.rows?.length ?? 0)
 
     const csrForRow = sheet.loai_csr ? (CHI_TIEU_BY_CSR[sheet.loai_csr] || []) : []
-    const suggestion = await suggestNgan(sheet.ngay)
-    const firstRow = emptyMeasurementRow(currentUserName, "", csrForRow)
+    const [suggestion, cheDo] = await Promise.all([
+      suggestNgan(sheet.ngay),
+      factoryId && sheet.day_chuyen
+        ? fetchCheDoSuggestion(factoryId, sheet.day_chuyen, sheet.loai_csr || "")
+        : Promise.resolve({ value: "", warning: null }),
+    ])
+    const firstRow = emptyMeasurementRow(currentUserName, cheDo.value, csrForRow)
     if (suggestion) {
       firstRow.ngan_id = suggestion.ngan_id
       firstRow.so_ngay_luu = suggestion.so_ngay_luu
     }
+    setDefaultCheDo(cheDo.value)
+    setCheDoWarning(cheDo.warning)
     setRows([firstRow])
     setEditingSheetId(sheet.id)
     setEditingSheet(sheet)
@@ -1236,7 +1254,9 @@ function MeasurementRowForm({
           </div>
         </div>
 
-        {/* Row 2: ket_qua + ngan (if mat tap) + nguoi_do + ghi_chu — cùng breakpoint 2→3 cột với header phiếu */}
+        {/* Row 2: ket_qua + ngan (if mat tap, mở rộng col-span-2 cho dễ đọc tên ngăn dài) + ghi_chu.
+            "Người đo" đã bỏ khỏi form — luôn tự điền theo tài khoản đăng nhập (row.nguoi_do), không
+            cần hiển thị/sửa tay; vẫn hiện ở cột "Người đo" trong bảng danh sách/chi tiết phiếu. */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {row.chi_tieu.map(ct => (
             <div key={ct}>
@@ -1249,7 +1269,7 @@ function MeasurementRowForm({
             </div>
           ))}
           {isMatTap && (
-            <div>
+            <div className="col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngăn lưu (Mủ tạp)</label>
               <select value={row.ngan_id} onChange={e => onChange({ ngan_id: e.target.value })}
                 className="w-full px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500">
@@ -1265,12 +1285,6 @@ function MeasurementRowForm({
               )}
             </div>
           )}
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Người đo</label>
-            <input value={row.nguoi_do} readOnly
-              title="Tự động điền theo tài khoản đang đăng nhập"
-              className="w-full px-2 py-2 border border-slate-200 bg-slate-100 text-slate-500 rounded-xl text-sm outline-none cursor-not-allowed" />
-          </div>
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
             <input value={row.ghi_chu} onChange={e => onChange({ ghi_chu: e.target.value })}

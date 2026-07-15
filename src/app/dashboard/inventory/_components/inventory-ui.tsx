@@ -92,7 +92,10 @@ export function MultiSelectField({
   }, [normalizedSearch, options])
 
   return (
-    <div ref={rootRef} className="relative z-[70]">
+    // z-index nâng lên khi mở (thay vì cố định z-[70] cho mọi instance) — 2 MultiSelectField xếp
+    // chồng theo chiều dọc (vd "Phân loại vật tư" trên "Mã vật tư" ở màn hẹp) có cùng z-index tĩnh
+    // sẽ để phần tử đứng sau trong DOM (Mã vật tư) đè lên dropdown đang mở của phần tử đứng trước.
+    <div ref={rootRef} className={`relative ${open ? "z-[130]" : "z-[70]"}`}>
       <label className="mb-1.5 block text-xs font-bold text-slate-600">{label}</label>
       <div className="group relative z-[70]">
         <button
