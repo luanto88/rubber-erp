@@ -68,6 +68,12 @@ const DICT: Record<Lang, Record<string, string>> = {
     daSanXuatRoi: "Kiện {kien} của lô {maLo} đã được ghi nhận sản xuất trước đó. Không cần gửi lại.",
     scanAnotherKien: "Quét kiện khác",
     kienDaCoMotPhan: "Kiện {kien} đã có {existingBanh} bành, lần này nhập tối đa {max} bành.",
+    kienDaCoMotPhanWithPending:
+      "Kiện {kien}: {existingBanh} bành đã gửi + {pendingBanh} bành đang chờ gửi (bởi {by}) — lần này chỉ được nhập tối đa {max} bành.",
+    kienDaDuNhap:
+      "Kiện {kien} của lô {maLo} đã đủ {max} bành (đang chờ gửi bởi {by}, chưa gửi thật). Không cần quét thêm cho kiện này.",
+    otherIncompleteLotsTitle: "Lô khác cùng chủng loại còn dở dang",
+    missingBanhLabel: "thiếu {missingBanh} bành",
     chiThi: "Số chỉ thị",
     dangTai: "Đang tải thông tin kiện...",
     xemTatCaLichSu: "Xem tất cả lịch sử",
@@ -160,6 +166,12 @@ const DICT: Record<Lang, Record<string, string>> = {
     daSanXuatRoi: "កញ្ចប់ {kien} នៃឡូត៍ {maLo} ត្រូវបានកត់ត្រាផលិតរួចហើយ។ មិនចាំបាច់ផ្ញើម្តងទៀតទេ។",
     scanAnotherKien: "ស្កេនកញ្ចប់ផ្សេងទៀត",
     kienDaCoMotPhan: "កញ្ចប់ {kien} មានរួចហើយ {existingBanh} បន្ទះ លើកនេះបញ្ចូលបានយ៉ាងច្រើន {max} បន្ទះ។",
+    kienDaCoMotPhanWithPending:
+      "កញ្ចប់ {kien}៖ {existingBanh} បន្ទះបានផ្ញើ + {pendingBanh} បន្ទះកំពុងរង់ចាំផ្ញើ (ដោយ {by}) — លើកនេះបញ្ចូលបានយ៉ាងច្រើន {max} បន្ទះ។",
+    kienDaDuNhap:
+      "កញ្ចប់ {kien} នៃឡូត៍ {maLo} មានគ្រប់ {max} បន្ទះហើយ (កំពុងរង់ចាំផ្ញើដោយ {by} មិនទាន់ផ្ញើពិតប្រាកដ)។ មិនចាំបាច់ស្កេនបន្ថែមសម្រាប់កញ្ចប់នេះទេ។",
+    otherIncompleteLotsTitle: "ឡូត៍ផ្សេងទៀតប្រភេទដូចគ្នានៅខ្វះ",
+    missingBanhLabel: "ខ្វះ {missingBanh} បន្ទះ",
     chiThi: "លេខការណែនាំ",
     dangTai: "កំពុងផ្ទុកព័ត៌មានកញ្ចប់...",
     xemTatCaLichSu: "មើលប្រវត្តិទាំងអស់",

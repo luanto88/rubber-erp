@@ -15,9 +15,12 @@ const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = {
   D: "d",
 };
 
-// "partial_kien": kiện đã có MỘT PHẦN bành (do top-up dở dang trước đó) — vẫn cho quét lại,
-// nhưng số bành tối đa cho phép nhập = maxPerKien - existingBanh (xem mục 5 rule 06-module-production.md).
-export type ConfirmKienStatus = "predicted" | "partial" | "partial_kien" | "produced" | "not_found";
+// "partial_kien": kiện đã có MỘT PHẦN bành (do top-up dở dang trước đó, tính CẢ committed lẫn nháp
+// chưa gửi của bất kỳ ai — xem loadPendingDraftAggregateForKien) — vẫn cho quét lại, nhưng số bành
+// tối đa cho phép nhập = maxPerKien - (existingBanh + pendingDraftBanh) (mục 5 rule 06-module-production.md).
+// "drafted_full": kiện đã đủ maxPerKien nhưng phần lớn/toàn bộ là NHÁP CHƯA GỬI (chưa thật sự sản
+// xuất) — khác "produced" (đã gửi thật) để tránh thông báo sai là "đã sản xuất".
+export type ConfirmKienStatus = "predicted" | "partial" | "partial_kien" | "drafted_full" | "produced" | "not_found";
 
 export type ConfirmKienLookup = {
   status: ConfirmKienStatus;
@@ -38,15 +41,20 @@ export type ConfirmKienLookup = {
   nganTen: string | null;
   maxPerKien: number | null;
   kienWeightKg: number | null;
-  // Số bành kiện này đã có sẵn (chỉ > 0 khi status = "partial_kien") và số bành còn được phép
-  // nhập thêm (= maxPerKien - existingBanh) — dùng để clamp stepper + hiện cảnh báo trên UI.
+  // Số bành kiện này ĐÃ GỬI THẬT (committed, lot_transactions) — giữ nguyên ý nghĩa cũ, KHÔNG gồm
+  // nháp chưa gửi (xem pendingDraftBanh). remainingBanh giờ đã trừ luôn cả nháp chưa gửi.
   existingBanh: number;
   remainingBanh: number | null;
-  // Bọc/Pallet của ĐÚNG kiện đang xác nhận (không phải toàn lô) — chỉ có giá trị khi
-  // status = "partial_kien" (kiện này đã có giao dịch trước đó). Quy tắc đã chốt: các lần nhập
-  // tiếp theo của CÙNG 1 kiện được phép khác Ca SX/Số chỉ thị/Ngày SX, nhưng BẮT BUỘC cùng
-  // Bọc/Pallet với lần nhập trước của chính kiện đó (loại bành đã cố định theo lô nên không cần
-  // check thêm) — UI dùng 2 field này để pre-fill và cảnh báo khi người dùng chọn khác đi.
+  // Số bành đang nằm trong nháp CHƯA GỬI của đúng kiện này — tính từ TẤT CẢ người dùng trong nhà
+  // máy (không chỉ người đang quét), để ca sau biết chính xác ca trước đã "giữ chỗ" bao nhiêu dù
+  // chưa Gửi. pendingDraftBy là tên hiển thị của những người đang có nháp đó (rỗng nếu không ai).
+  pendingDraftBanh: number;
+  pendingDraftBy: string[];
+  // Bọc/Pallet "gần nhất" của ĐÚNG kiện đang xác nhận (không phải toàn lô) — ưu tiên nháp chưa gửi
+  // mới nhất nếu có, else dữ liệu đã gửi gần nhất. Chỉ có giá trị khi kiện này đã có đóng góp trước
+  // đó (committed hoặc nháp). Quy tắc đã chốt: các lần nhập tiếp theo của CÙNG 1 kiện được phép khác
+  // Ca SX/Số chỉ thị/Ngày SX, nhưng BẮT BUỘC cùng Bọc/Pallet với lần nhập trước của chính kiện đó —
+  // UI dùng 2 field này để pre-fill và cảnh báo khi người dùng chọn khác đi.
   existingKienBoc: string | null;
   existingKienPallet: string[] | null;
 };
@@ -73,6 +81,8 @@ function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
     kienWeightKg: null,
     existingBanh: 0,
     remainingBanh: null,
+    pendingDraftBanh: 0,
+    pendingDraftBy: [],
     existingKienBoc: null,
     existingKienPallet: null,
   };
@@ -103,6 +113,42 @@ async function loadNganInfo(nganId: string | null) {
     .eq("id", nganId)
     .maybeSingle();
   return { nganMa: data?.ma_ngan ?? null, nganTen: data?.ten_ngan ?? null };
+}
+
+type PendingDraftAgg = {
+  totalBanh: number;
+  lastBoc: string | null;
+  lastPallet: string[] | null;
+  byNames: string[];
+};
+
+// Tổng hợp nháp CHƯA GỬI của đúng (ma_lo, kiện) — từ TẤT CẢ người dùng trong nhà máy, không chỉ
+// người đang quét. Đây là phần lõi để "ca sau" biết chính xác "ca trước" đã giữ chỗ bao nhiêu bành
+// dù chưa Gửi, tránh nhập vượt maxPerKien khi cộng cả phần đã gửi lẫn phần đang chờ gửi.
+async function loadPendingDraftAggregateForKien(
+  factoryId: string,
+  maLo: string,
+  kien: KienLetter,
+): Promise<PendingDraftAgg> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("product_confirm_drafts")
+    .select("so_banh, boc, pallet, created_by, created_at")
+    .eq("factory_id", factoryId)
+    .eq("ma_lo", maLo)
+    .eq("kien", kien)
+    .order("created_at", { ascending: true });
+  const rows = data || [];
+  const totalBanh = rows.reduce((sum, r) => sum + Number(r.so_banh || 0), 0);
+  const last = rows.length > 0 ? rows[rows.length - 1] : null;
+  const creatorIds = [...new Set(rows.map((r) => r.created_by).filter((v): v is string => !!v))];
+  const nameMap = creatorIds.length > 0 ? await resolveProfileNames(creatorIds) : new Map<string, string>();
+  return {
+    totalBanh,
+    lastBoc: last?.boc ?? null,
+    lastPallet: last?.pallet ?? null,
+    byNames: creatorIds.map((id) => nameMap.get(id) || "—"),
+  };
 }
 
 export async function resolveKienForConfirm(
@@ -159,7 +205,7 @@ export async function resolveKienForConfirm(
     const nganIdForPartial = predictedNganId || lot.ngan_id || null;
     const needsSecondNganLookup = !!lot.ngan_id && !!nganIdForPartial && lot.ngan_id !== nganIdForPartial;
 
-    const [{ data: txRows }, primaryNganInfo, secondaryNganInfo] = await Promise.all([
+    const [{ data: txRows }, primaryNganInfo, secondaryNganInfo, pendingAgg] = await Promise.all([
       supabase
         .from("lot_transactions")
         .select("kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
@@ -167,6 +213,9 @@ export async function resolveKienForConfirm(
         .order("created_at", { ascending: true }),
       loadNganInfo(lot.ngan_id),
       needsSecondNganLookup ? loadNganInfo(nganIdForPartial) : Promise.resolve(null),
+      // Nháp CHƯA GỬI của đúng kiện này, từ BẤT KỲ ai — để ca sau thấy đúng phần ca trước đã giữ
+      // chỗ dù chưa Gửi (xem loadPendingDraftAggregateForKien).
+      loadPendingDraftAggregateForKien(factoryId, maLo, kien),
     ]);
     const rows = (txRows || []) as Array<{
       kien_a: number; kien_b: number; kien_c: number; kien_d: number;
@@ -177,14 +226,19 @@ export async function resolveKienForConfirm(
       0,
     );
     // Bọc/Pallet của lần nhập GẦN NHẤT của ĐÚNG kiện này (không phải toàn lô) — dùng để bắt buộc
-    // các lần nhập sau của cùng kiện phải đồng nhất (xem ghi chú ở ConfirmKienLookup).
+    // các lần nhập sau của cùng kiện phải đồng nhất (xem ghi chú ở ConfirmKienLookup). Ưu tiên nháp
+    // chưa gửi mới nhất (pendingAgg) nếu có — nó luôn mới hơn dữ liệu đã gửi vì workflow tuần tự
+    // theo thời gian (không ai top-up một kiện đã gửi bằng cách quay lại quét cũ hơn).
     const kienField = `kien_${kienKey}` as "kien_a" | "kien_b" | "kien_c" | "kien_d";
     const lastKienTx = [...rows].reverse().find((row) => Number(row[kienField] || 0) > 0) || null;
-    const existingKienBoc = lastKienTx?.boc ?? null;
-    const existingKienPallet = lastKienTx?.pallet ?? null;
+    const committedKienBoc = lastKienTx?.boc ?? null;
+    const committedKienPallet = lastKienTx?.pallet ?? null;
+    const existingKienBoc = pendingAgg.lastBoc ?? committedKienBoc;
+    const existingKienPallet = pendingAgg.lastPallet ?? committedKienPallet;
 
     const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null;
     const maxPerKien = config?.max_per_kien ?? 36;
+    const totalClaimed = existingBanh + pendingAgg.totalBanh;
 
     if (existingBanh >= maxPerKien) {
       const { nganMa, nganTen } = primaryNganInfo;
@@ -209,16 +263,50 @@ export async function resolveKienForConfirm(
         kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
         existingBanh,
         remainingBanh: 0,
+        pendingDraftBanh: pendingAgg.totalBanh,
+        pendingDraftBy: pendingAgg.byNames,
         existingKienBoc,
         existingKienPallet,
       };
     }
 
-    // Lô đã tồn tại, kiện này chưa đủ (chưa có gì hoặc có một phần) — ưu tiên ngăn theo dòng dự
+    // Kiện đã ĐỦ maxPerKien nếu tính cả nháp chưa gửi (nhưng chưa thật sự sản xuất) — khác "produced"
+    // để không báo nhầm là đã sản xuất; chặn quét thêm cho tới khi nháp được gửi hoặc xóa.
+    if (totalClaimed >= maxPerKien) {
+      const { nganMa, nganTen } = secondaryNganInfo ?? primaryNganInfo;
+      return {
+        status: "drafted_full",
+        maLo,
+        kien,
+        isNewLot: false,
+        lotId: lot.id,
+        loaiCsr: lot.loai_csr,
+        loaiBanh: lot.loai_banh,
+        dayChuyen: lot.day_chuyen ?? dayChuyenFromBatch,
+        boc: existingKienBoc ?? lot.boc,
+        tham: lot.tham,
+        pallet: existingKienPallet ?? lot.pallet,
+        chiThi: lot.chi_thi,
+        ghiChu: lot.ghi_chu,
+        nganId: nganIdForPartial,
+        nganMa,
+        nganTen,
+        maxPerKien: config?.max_per_kien ?? null,
+        kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
+        existingBanh,
+        remainingBanh: 0,
+        pendingDraftBanh: pendingAgg.totalBanh,
+        pendingDraftBy: pendingAgg.byNames,
+        existingKienBoc,
+        existingKienPallet,
+      };
+    }
+
+    // Lô đã tồn tại, kiện này chưa đủ dù đã tính cả nháp chưa gửi — ưu tiên ngăn theo dòng dự
     // đoán per-kiện, fallback về ngan_id chung của lô (đúng thứ tự ưu tiên đã chốt trong plan).
     const nganId = nganIdForPartial;
     const { nganMa, nganTen } = secondaryNganInfo ?? primaryNganInfo;
-    const isPartialKien = existingBanh > 0;
+    const isPartialKien = totalClaimed > 0;
     return {
       status: isPartialKien ? "partial_kien" : "partial",
       maLo,
@@ -241,7 +329,9 @@ export async function resolveKienForConfirm(
       maxPerKien: config?.max_per_kien ?? null,
       kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
       existingBanh,
-      remainingBanh: maxPerKien - existingBanh,
+      remainingBanh: maxPerKien - totalClaimed,
+      pendingDraftBanh: pendingAgg.totalBanh,
+      pendingDraftBy: pendingAgg.byNames,
       existingKienBoc,
       existingKienPallet,
     };
@@ -249,12 +339,46 @@ export async function resolveKienForConfirm(
 
   if (predicted) {
     const config = getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined);
-    const [{ nganMa, nganTen }, chiThi] = await Promise.all([
+    const [{ nganMa, nganTen }, chiThi, pendingAgg] = await Promise.all([
       loadNganInfo(predictedNganId),
       loadSuggestedChiThiForNewLot(factoryId),
+      loadPendingDraftAggregateForKien(factoryId, maLo, kien),
     ]);
+    const totalClaimed = pendingAgg.totalBanh; // lot chưa tồn tại nên existingBanh committed = 0
+
+    if (totalClaimed >= config.max_per_kien) {
+      return {
+        status: "drafted_full",
+        maLo,
+        kien,
+        isNewLot: true,
+        lotId: null,
+        loaiCsr: predicted.loai_csr,
+        loaiBanh: predicted.loai_banh,
+        dayChuyen: dayChuyenFromBatch,
+        boc: pendingAgg.lastBoc ?? predicted.boc,
+        tham: predicted.tham,
+        pallet: pendingAgg.lastPallet,
+        chiThi,
+        ghiChu: null,
+        nganId: predictedNganId,
+        nganMa,
+        nganTen,
+        maxPerKien: config.max_per_kien,
+        kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
+        existingBanh: 0,
+        remainingBanh: 0,
+        pendingDraftBanh: pendingAgg.totalBanh,
+        pendingDraftBy: pendingAgg.byNames,
+        existingKienBoc: pendingAgg.lastBoc,
+        existingKienPallet: pendingAgg.lastPallet,
+      };
+    }
+
     return {
-      status: "predicted",
+      // Nếu đã có nháp chưa gửi cho kiện này (dù lô thật chưa tồn tại), coi như "partial_kien" thay
+      // vì "predicted" thuần túy — để bắt buộc đồng nhất Bọc/Pallet với nháp đó (mirror nhánh lot).
+      status: totalClaimed > 0 ? "partial_kien" : "predicted",
       maLo,
       kien,
       isNewLot: true,
@@ -262,9 +386,9 @@ export async function resolveKienForConfirm(
       loaiCsr: predicted.loai_csr,
       loaiBanh: predicted.loai_banh,
       dayChuyen: dayChuyenFromBatch,
-      boc: predicted.boc,
+      boc: pendingAgg.lastBoc ?? predicted.boc,
       tham: predicted.tham,
-      pallet: null,
+      pallet: pendingAgg.lastPallet,
       chiThi,
       ghiChu: null,
       nganId: predictedNganId,
@@ -273,9 +397,11 @@ export async function resolveKienForConfirm(
       maxPerKien: config.max_per_kien,
       kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
       existingBanh: 0,
-      remainingBanh: config.max_per_kien,
-      existingKienBoc: null,
-      existingKienPallet: null,
+      remainingBanh: config.max_per_kien - totalClaimed,
+      pendingDraftBanh: pendingAgg.totalBanh,
+      pendingDraftBy: pendingAgg.byNames,
+      existingKienBoc: pendingAgg.lastBoc,
+      existingKienPallet: pendingAgg.lastPallet,
     };
   }
 
@@ -675,6 +801,66 @@ export async function checkIncompleteLotsForDay(
     if (missingKien.length > 0) warnings.push({ maLo: lot.ma_lo, missingKien });
   }
   return warnings.sort((a, b) => a.maLo.localeCompare(b.maLo));
+}
+
+export type OtherIncompleteLotKien = { kien: KienLetter; missingBanh: number };
+export type OtherIncompleteLot = { maLo: string; missing: OtherIncompleteLotKien[] };
+
+// Cảnh báo (KHÔNG chặn) các lô KHÁC cùng loai_csr (và day_chuyen nếu có) đang "Dở dang" — bất kể
+// đã làm ngày nào (dù cùng ngày hay khác ngày với lô đang quét). Tính cả bành đang nằm trong nháp
+// CHƯA gửi của BẤT KỲ ai khi xác định kiện nào còn thiếu, để không báo sai "còn thiếu" nếu thực ra
+// đã có người Lưu tạm (chỉ chưa Gửi). Gọi song song với resolveKienForConfirm mỗi lần quét 1 kiện,
+// hiển thị như banner nhắc nhở — không chặn thao tác của kiện đang quét.
+export async function checkOtherIncompleteLotsForCategory(
+  factoryId: string,
+  loaiCsr: string,
+  dayChuyen: string | null,
+  excludeMaLo: string,
+): Promise<OtherIncompleteLot[]> {
+  if (!factoryId || !loaiCsr) return [];
+  const supabase = getSupabaseAdmin();
+  let query = supabase
+    .from("lots")
+    .select("ma_lo, loai_csr, loai_banh, trang_thai, day_chuyen, kien_a, kien_b, kien_c, kien_d")
+    .eq("factory_id", factoryId)
+    .eq("loai_csr", loaiCsr)
+    .neq("ma_lo", excludeMaLo)
+    .in("trang_thai", ["Dở dang", "Do dang"]);
+  if (dayChuyen) query = query.eq("day_chuyen", dayChuyen);
+  const { data: lots } = await query;
+  const rows = lots || [];
+  if (rows.length === 0) return [];
+
+  const maLoList = rows.map((r) => r.ma_lo);
+  const { data: draftRows } = await supabase
+    .from("product_confirm_drafts")
+    .select("ma_lo, kien, so_banh")
+    .eq("factory_id", factoryId)
+    .in("ma_lo", maLoList);
+  const pendingByKey = new Map<string, number>();
+  for (const d of draftRows || []) {
+    const key = `${d.ma_lo}::${d.kien}`;
+    pendingByKey.set(key, (pendingByKey.get(key) || 0) + Number(d.so_banh || 0));
+  }
+
+  const result: OtherIncompleteLot[] = [];
+  for (const lot of rows) {
+    const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined);
+    const committed: Record<KienLetter, number> = {
+      A: Number(lot.kien_a || 0),
+      B: Number(lot.kien_b || 0),
+      C: Number(lot.kien_c || 0),
+      D: Number(lot.kien_d || 0),
+    };
+    const missing: OtherIncompleteLotKien[] = [];
+    for (const k of KIEN_ORDER) {
+      const pending = pendingByKey.get(`${lot.ma_lo}::${k}`) || 0;
+      const missingBanh = config.max_per_kien - (committed[k] + pending);
+      if (missingBanh > 0) missing.push({ kien: k, missingBanh });
+    }
+    if (missing.length > 0) result.push({ maLo: lot.ma_lo, missing });
+  }
+  return result.sort((a, b) => a.maLo.localeCompare(b.maLo));
 }
 
 async function resolveProfileNames(profileIds: string[]): Promise<Map<string, string>> {
@@ -1273,6 +1459,35 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     const supabase = getSupabaseAdmin();
     const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
     const soKg = Math.round(input.soBanh * input.loaiBanh * 100) / 100;
+
+    // Chặn cứng vượt max_per_kien NGAY LÚC LƯU TẠM (khác 110% ngăn/hạn mức tổng thể — vẫn để RPC
+    // Gửi validate cuối cùng) — tính cả bành đã gửi thật lẫn bành đang nằm trong nháp CHƯA gửi của
+    // BẤT KỲ ai khác cho đúng (ma_lo, kiện) này, để "ca sau" không thể nhập vượt số còn lại dù
+    // "ca trước" chưa Gửi (mục đích chính của tính năng này).
+    const kienKey = KIEN_LOWER[input.kien];
+    const [{ data: existingLot }, pendingAgg] = await Promise.all([
+      supabase.from("lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", maLo).maybeSingle(),
+      loadPendingDraftAggregateForKien(input.factoryId, maLo, input.kien),
+    ]);
+    let committedBanh = 0;
+    if (existingLot) {
+      const { data: txRows } = await supabase
+        .from("lot_transactions")
+        .select(`kien_${kienKey}`)
+        .eq("lot_id", existingLot.id);
+      committedBanh = (txRows || []).reduce(
+        (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
+        0,
+      );
+    }
+    const totalClaimed = committedBanh + pendingAgg.totalBanh;
+    if (totalClaimed + input.soBanh > config.max_per_kien) {
+      const remaining = Math.max(0, config.max_per_kien - totalClaimed);
+      return {
+        success: false,
+        error: `Kiện ${input.kien} của lô ${maLo} đã có ${totalClaimed} bành (đã gửi + đang chờ gửi), chỉ được lưu thêm tối đa ${remaining} bành.`,
+      };
+    }
 
     const { data, error } = await supabase
       .from("product_confirm_drafts")

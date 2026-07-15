@@ -35,6 +35,7 @@ import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   checkIncompleteLotsForDay,
   checkLotCompleteness,
+  checkOtherIncompleteLotsForCategory,
   deleteDraft,
   deleteShiftHistoryEntry,
   editShiftHistoryEntry,
@@ -52,6 +53,7 @@ import {
   type ConfirmDraftRow,
   type ConfirmKienLookup,
   type LotCompletenessWarning,
+  type OtherIncompleteLot,
   type ShiftHistoryEntry,
 } from "@/app/dashboard/product/confirm/actions";
 import {
@@ -206,6 +208,9 @@ export default function ConfirmKienProductionPage() {
   // vì chỉ đọc trong effect lookup, không cần re-render khi đổi.
   const lastSubmittedMaLoRef = useRef<string | null>(null);
   const [lotJumpWarning, setLotJumpWarning] = useState<LotCompletenessWarning | null>(null);
+  // Cảnh báo (không chặn) các lô KHÁC cùng chủng loại (loai_csr) đang dở dang — tính cả nháp chưa
+  // gửi của bất kỳ ai — để "ca sau" biết ngay còn lô nào cần hoàn tất, dù cùng ngày hay khác ngày.
+  const [otherIncompleteLots, setOtherIncompleteLots] = useState<OtherIncompleteLot[]>([]);
 
   const [soBanh, setSoBanh] = useState(1);
   const [ngaySx, setNgaySx] = useState(getTodayISODate());
@@ -357,6 +362,7 @@ export default function ConfirmKienProductionPage() {
         })
         .catch(() => {});
     }
+    setOtherIncompleteLots([]);
 
     const run = async () => {
       setLookupLoading(true);
@@ -380,6 +386,15 @@ export default function ConfirmKienProductionPage() {
             const ngans = await loadActiveNgansForFactory(factoryId);
             if (alive) setActiveNgans(ngans);
           }
+        }
+        // Cảnh báo lô khác cùng chủng loại còn dở dang — không chặn thao tác, không đợi trước khi
+        // hạ lookupLoading (chạy độc lập, có thể trễ hơn 1 nhịp so với form chính).
+        if (result.status !== "not_found" && result.loaiCsr) {
+          checkOtherIncompleteLotsForCategory(factoryId, result.loaiCsr, result.dayChuyen, maLo)
+            .then((rows) => {
+              if (alive) setOtherIncompleteLots(rows);
+            })
+            .catch(() => {});
         }
       } catch (err) {
         if (alive) setLookupError(err instanceof Error ? err.message : "Lỗi không xác định");
@@ -840,6 +855,29 @@ export default function ConfirmKienProductionPage() {
                 </div>
               </div>
             )}
+            {/* Cảnh báo (không chặn) các lô KHÁC cùng chủng loại còn dở dang — kể cả nháp chưa gửi
+                của bất kỳ ai đều được tính, để "ca sau" luôn thấy đúng tiến độ dù cùng ngày hay khác
+                ngày với lô đang quét. Hiện xuyên suốt mọi trạng thái của kiện đang quét. */}
+            {view === "form" && otherIncompleteLots.length > 0 && (
+              <div className="mb-4 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-sky-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-extrabold text-sky-800">{tt("otherIncompleteLotsTitle")}</div>
+                    <div className="mt-1 space-y-0.5">
+                      {otherIncompleteLots.map((lot) => (
+                        <div key={lot.maLo} className="text-xs font-semibold text-sky-700">
+                          {lot.maLo}:{" "}
+                          {lot.missing
+                            .map((m) => `${tt("kienLabel")} ${m.kien} (${tt("missingBanhLabel", { missingBanh: m.missingBanh })})`)
+                            .join(", ")}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {view === "hub" ? (
               <HubView
                 tt={tt}
@@ -888,6 +926,29 @@ export default function ConfirmKienProductionPage() {
                 <CardMessage
                   icon={<CheckCircle2 size={24} className="text-emerald-600" />}
                   text={tt("daSanXuatRoi", { kien: lookup.kien, maLo: lookup.maLo })}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanError(null);
+                    setView("scanning");
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
+                >
+                  <ScanLine size={20} />
+                  {tt("scanAnotherKien")}
+                </button>
+              </div>
+            ) : lookup.status === "drafted_full" ? (
+              <div className="space-y-4">
+                <CardMessage
+                  icon={<Inbox size={24} className="text-amber-500" />}
+                  text={tt("kienDaDuNhap", {
+                    kien: lookup.kien,
+                    maLo: lookup.maLo,
+                    max: lookup.maxPerKien ?? 0,
+                    by: lookup.pendingDraftBy.join(", ") || "—",
+                  })}
                 />
                 <button
                   type="button"
@@ -1003,11 +1064,19 @@ export default function ConfirmKienProductionPage() {
 
                 {lookup.status === "partial_kien" && (
                   <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-700">
-                    {tt("kienDaCoMotPhan", {
-                      kien: lookup.kien,
-                      existingBanh: lookup.existingBanh,
-                      max: lookup.remainingBanh ?? 0,
-                    })}
+                    {lookup.pendingDraftBanh > 0
+                      ? tt("kienDaCoMotPhanWithPending", {
+                          kien: lookup.kien,
+                          existingBanh: lookup.existingBanh,
+                          pendingBanh: lookup.pendingDraftBanh,
+                          by: lookup.pendingDraftBy.join(", ") || "—",
+                          max: lookup.remainingBanh ?? 0,
+                        })
+                      : tt("kienDaCoMotPhan", {
+                          kien: lookup.kien,
+                          existingBanh: lookup.existingBanh,
+                          max: lookup.remainingBanh ?? 0,
+                        })}
                   </div>
                 )}
 

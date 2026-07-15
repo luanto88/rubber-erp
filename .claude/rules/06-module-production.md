@@ -993,6 +993,63 @@ max_per_kien/110% rồi Gửi tất cả cùng các nháp hợp lệ khác → x
 message rõ ràng, danh sách nháp vẫn còn nguyên; bấm "Kết thúc ca" khi còn nháp chưa gửi → xác nhận
 đúng giai đoạn cảnh báo mới hiện ra, thử cả 2 nhánh "Gửi nháp ngay" và "Bỏ qua, vẫn kết thúc ca".
 
+### Cập nhật 2026-07-15 (tiếp) — Cảnh báo vượt hạn mức + tiến độ ca trước (nháp chưa gửi, cross-user)
+
+Sau khi test tay Phase 1+2, người dùng phát hiện 1 gap thật: `resolveKienForConfirm()` (hàm tính
+giới hạn bành khi quét) chỉ đọc `lot_transactions` (đã gửi), **không biết gì về `product_confirm_drafts`
+(nháp chưa gửi)** — kể cả nháp của chính người đang quét. Và `loadDrafts()` chỉ trả nháp của đúng
+`created_by = userId`, nên ca sau không thấy nháp ca trước để lại nếu ca trước chỉ Lưu tạm mà chưa
+Gửi. Ví dụ cụ thể: ca A Lưu tạm lô 1081cs kiện A 15 bành (chưa Gửi) → ca B quét đúng kiện A phải bị
+chặn không vượt quá 21 bành (36−15), nhưng hệ thống cũ cho phép tới 36 vì không biết có nháp đó.
+
+**2 tính năng đã thêm** (`confirm/actions.ts` + `confirm/page.tsx`, không đổi schema DB):
+
+1. **`resolveKienForConfirm()` giờ "draft-aware"** — hàm mới `loadPendingDraftAggregateForKien(factoryId,
+   maLo, kien)` SUM `so_banh` từ `product_confirm_drafts` của đúng `(ma_lo, kiện)` **từ TẤT CẢ người
+   dùng trong nhà máy** (không filter theo `created_by`), kèm tên hiển thị của những người đang có
+   nháp đó. Cả 2 nhánh (`lot` tồn tại và chỉ có `predicted`) giờ tính `totalClaimed = existingBanh
+   (đã gửi) + pendingDraftBanh (đang chờ gửi, mọi người)` để suy ra `remainingBanh` (clamp stepper)
+   và trạng thái:
+   - `existingBanh >= maxPerKien` → `"produced"` (không đổi — đã gửi thật, đủ).
+   - `totalClaimed >= maxPerKien` (đủ nhưng phần lớn/toàn bộ là nháp chưa gửi) → status **mới
+     `"drafted_full"`** — khác `"produced"` để không báo nhầm "đã sản xuất"; UI hiện CardMessage +
+     nút "Quét kiện khác", không cho nhập thêm.
+   - Còn lại → `"partial"`/`"partial_kien"` như cũ, nhưng `isPartialKien` giờ dựa vào
+     `totalClaimed > 0` (không chỉ `existingBanh > 0`) — một lô CHƯA TỪNG tồn tại trong `lots`
+     (chỉ có `lot_prediction_lots`) nhưng đã có nháp chưa gửi cũng chuyển sang `partial_kien` thay
+     vì `predicted` thuần túy, để bắt buộc đồng nhất Bọc/Pallet với nháp đó.
+   - `existingKienBoc`/`existingKienPallet` (dùng để pre-fill + chặn lệch Bọc/Pallet khi top-up)
+     giờ ưu tiên dữ liệu nháp MỚI NHẤT nếu có, fallback về dữ liệu đã gửi gần nhất — đóng luôn 1 gap
+     khác đã phát hiện lúc thiết kế: trước đây 2 ca dùng Bọc khác nhau cho cùng kiện có thể "lách"
+     qua nhau nếu 1 bên chỉ Lưu tạm (không được RPC Gửi kiểm tra vì chỉ so với `lot_transactions`).
+   - `ConfirmKienLookup` thêm 2 field: `pendingDraftBanh: number`, `pendingDraftBy: string[]`.
+2. **`saveDraftKien()` chặn cứng vượt `max_per_kien` ngay lúc Lưu tạm** (khác 110% ngăn/hạn mức tổng
+   thể — vẫn để RPC Gửi validate cuối) — tính `committedBanh` (query `lots`+`lot_transactions`) +
+   `pendingAgg.totalBanh` (nháp mọi người) trước khi cho phép insert; từ chối với message rõ ràng
+   nếu `totalClaimed + soBanh > maxPerKien`. Đây là bài test race hiếm gặp duy nhất còn tồn tại
+   (2 người Lưu tạm cùng lúc trong vài mili-giây) — chấp nhận được vì RPC Gửi vẫn là nguồn chân lý
+   cuối cùng, atomic, sẽ rollback toàn batch nếu thực sự vượt.
+3. **`checkOtherIncompleteLotsForCategory(factoryId, loaiCsr, dayChuyen, excludeMaLo)`** — hàm mới,
+   không chặn thao tác: quét TẤT CẢ lô khác (không phải lô đang quét) cùng `loai_csr` (+ `day_chuyen`
+   nếu có) đang `Dở dang`, **bất kể làm ngày nào** (dù cùng ngày hay khác ngày với lô đang quét) —
+   tính cả nháp chưa gửi (mọi người) khi xác định kiện nào thực sự còn thiếu bao nhiêu bành, để
+   không báo sai nếu thực ra đã có người Lưu tạm. Gọi song song mỗi lần quét 1 kiện (không đợi, chạy
+   độc lập với `lookupLoading`), hiện banner màu sky **thường trực** (không tự tắt, chỉ đổi khi đổi
+   `maLo`) liệt kê từng lô + kiện + số bành còn thiếu — đúng ví dụ người dùng đưa ra ("lô 1080cs
+   đang dở dang kiện D thiếu 15 bành"), không chặn thao tác của kiện đang quét.
+
+**i18n mới**: `kienDaCoMotPhanWithPending`, `kienDaDuNhap`, `otherIncompleteLotsTitle`,
+`missingBanhLabel` (cả `vi`/`km`) — `kienDaCoMotPhan` cũ giữ nguyên, chỉ dùng khi
+`pendingDraftBanh === 0` (thuần túy dữ liệu đã gửi, không có nháp liên quan).
+
+**Trạng thái xác nhận**: `npx tsc --noEmit`, `npx eslint`, `npm run build` toàn bộ project đều
+sạch/pass. **Chưa test tay** — cần đúng kịch bản người dùng mô tả: ca A Lưu tạm lô 1081cs kiện A 15
+bành (KHÔNG Gửi) → ca B (tài khoản khác) quét đúng kiện A → xác nhận stepper chỉ cho tối đa 21 bành
+và banner "Kiện A: 0 bành đã gửi + 15 bành đang chờ gửi (bởi Ca A)" hiện đúng; thử nhập 22 bành →
+bị chặn ngay khi bấm "Lưu tạm" (không chờ tới lúc Gửi); quét 1 kiện của lô 1081cs trong khi lô
+1080cs (cùng `loai_csr`) đang dở dang kiện D thiếu 15 bành → xác nhận banner sky-blue hiện đúng,
+không biến mất dù không thao tác gì thêm, và không chặn việc quét/Lưu tạm kiện đang làm.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:
