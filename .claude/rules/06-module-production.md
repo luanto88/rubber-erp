@@ -939,6 +939,60 @@ chỉ "có lỗi" mà đúng lỗi kỳ vọng: test 2 nhắc "vượt quá...b�
 `20260716_product_confirm_drafts.sql` đã chạy thành công trên Supabase — **Phase 1 hoàn tất**,
 chuyển sang Phase 2 (UI) khi được yêu cầu.
 
+### Cập nhật 2026-07-15 (tiếp) — Phase 2 (UI) cho "Lưu tạm nhiều kiện rồi Gửi 1 lần" (ĐÃ CODE)
+
+Đã triển khai đúng phác thảo Phase 2 ở mục "Kế hoạch phiên sau" phía trên, trên nền Phase 1 đã xác
+nhận PASS:
+
+- **`confirm/page.tsx` — form quét**: nút "GỬI DỮ LIỆU" đổi thành **"LƯU TẠM"**, gọi `saveDraftKien()`
+  thay vì `confirmKienProduction()` (hàm cũ vẫn giữ nguyên trong `confirm/actions.ts`, không xóa —
+  chỉ không còn được gọi từ UI này). Điều kiện enable nút đổi tên `canSubmit` → `canSaveDraft`,
+  **giữ nguyên y hệt** các điều kiện cũ (không có gì để "bỏ 110%/max_per_kien" thật sự — client vốn
+  chưa từng tự check 110% ngăn, chỉ có `stepperMax` là clamp `max_per_kien` phía client, vẫn giữ).
+  Toast thành công đổi sang key `daLuuTamThanhCong`.
+- **Hub — khối mới "Đang chờ gửi (N)"**: đặt ngay dưới nút "Quét QR", trên khối "Log dữ liệu đã gửi"
+  (nền amber để phân biệt "cần hành động" khỏi phần lịch sử). Danh sách từ `loadDrafts()` (tự refetch
+  mỗi khi vào Hub, cùng effect pattern với `refreshHistory`), mỗi dòng có nút xóa (`deleteDraft`).
+  Nút "Gửi tất cả (N)" gọi `submitConfirmDraftBatch()` — khi lỗi hiện đúng 1 message (đúng bản chất
+  all-or-nothing của RPC), giữ nguyên toàn bộ danh sách nháp để sửa/xóa rồi thử lại; khi thành công
+  refetch cả `pendingDrafts` lẫn `history` (dòng vừa gửi hiện ngay trong "Lịch sử ca" nếu đang xem
+  đúng ngày/ca đó).
+- **"Kết thúc ca" — thêm giai đoạn mới `"pendingDrafts"`** (chèn giữa `"confirm"` và `"warning"` cũ,
+  `endShiftPhase` giờ có 4 giá trị): `handleEndShiftFirstConfirm()` tái dùng thẳng state `pendingDrafts`
+  đã được Hub tải sẵn (không fetch lại — vì modal này luôn mở trong lúc `view` vẫn là `"hub"`) — nếu
+  còn nháp, chặn ở giai đoạn này với 2 lựa chọn: **"Gửi nháp ngay"** (gọi `submitConfirmDraftBatch`
+  rồi tự động tiếp tục sang bước kiểm tra lô dở dang cũ) hoặc **"Bỏ qua, vẫn kết thúc ca"** (bỏ qua
+  nháp, dữ liệu trong các nháp đó sẽ KHÔNG có trong phiếu vì chưa từng ghi DB — đúng cảnh báo đã hiện
+  rõ trong modal). Logic kiểm tra lô dở dang cũ được tách thành hàm dùng chung
+  `continueEndShiftAfterDrafts()`, gọi lại từ cả nhánh "không có nháp" lẫn 2 nhánh xử lý nháp trên.
+- **i18n**: thêm 12 key mới (cả `vi`/`km`) — `luuTam`, `dangLuu`, `daLuuTamThanhCong`,
+  `pendingDraftsTitle`, `noPendingDrafts`, `submitAllDrafts`, `submittingAllDrafts`,
+  `submitAllSuccess`, `pendingDraftsBlockingTitle`, `pendingDraftsBlockingBody`, `sendDraftsNow`,
+  `endShiftIgnorePending`. 3 key cũ (`guiDuLieu`, `dangGui`, `daGuiThanhCong`) giữ nguyên trong từ
+  điển dù không còn được gọi từ `page.tsx` (không xóa — chỉ là data trong `DICT`, không phải code
+  chết cần dọn, và vẫn hữu ích nếu sau này có nơi khác dùng lại `confirmKienProduction`).
+
+**Quyết định cố ý KHÔNG làm trong Phase 2 này**: "cảnh báo nhảy lô" (`lotJumpWarning`,
+`checkLotCompleteness` gọi trong lookup effect khi đổi `maLo`) **giữ nguyên hoàn toàn không đụng
+tới** — không wire tham số `pendingKien` mới (đã thêm ở Phase 1) vào đây, và **không** cập nhật
+`lastSubmittedMaLoRef.current` trong `handleSaveDraft`. Lý do: nếu cập nhật ref này mà không đồng
+thời wire `pendingKien`, cảnh báo sẽ **luôn báo sai** mỗi lần đổi lô sau một lần Lưu tạm (vì
+`lots.kien_a-d` trong DB chưa đổi, chỉ có nháp chưa gửi) — tệ hơn cả việc không có cảnh báo. Chọn
+phương án an toàn nhất: để cảnh báo này ở trạng thái "ngủ" (không còn gì kích hoạt nó từ form quét
+nữa, vì hành động chính giờ là Lưu tạm chứ không phải Gửi ngay) thay vì sửa nó sai. Đây là thay đổi
+hành vi cần lưu ý — nếu người dùng muốn khôi phục cảnh báo này, cần thiết kế lại có wire pendingKien
+(đã có sẵn tham số ở `checkLotCompleteness`/`checkIncompleteLotsForDay`, chỉ chưa có nơi gọi truyền
+vào).
+
+**Trạng thái xác nhận**: `npx tsc --noEmit`, `npx eslint` (toàn bộ `confirm/page.tsx`,
+`confirm/i18n.ts`, `confirm/actions.ts`), và `npm run build` đều sạch/pass. **CHƯA test tay trên
+trình duyệt/điện thoại thật** — cần: quét 1 kiện → Lưu tạm → xác nhận toast + quay về Hub + khối
+"Đang chờ gửi" hiện đúng dòng vừa lưu; lặp lại 2-3 kiện khác lô → bấm "Gửi tất cả" → xác nhận thành
+công, khối "Đang chờ gửi" trống, "Lịch sử ca" hiện các dòng mới; cố tình tạo 1 nháp vượt
+max_per_kien/110% rồi Gửi tất cả cùng các nháp hợp lệ khác → xác nhận TOÀN BỘ bị từ chối với đúng 1
+message rõ ràng, danh sách nháp vẫn còn nguyên; bấm "Kết thúc ca" khi còn nháp chưa gửi → xác nhận
+đúng giai đoạn cảnh báo mới hiện ra, thử cả 2 nhánh "Gửi nháp ngay" và "Bỏ qua, vẫn kết thúc ca".
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

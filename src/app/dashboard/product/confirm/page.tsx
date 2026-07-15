@@ -13,13 +13,16 @@ import {
   Clock,
   FileDown,
   Hash,
+  Inbox,
   Layers,
   Loader2,
   Minus,
   Package,
   Pencil,
   Plus,
+  Save,
   ScanLine,
+  Send,
   Sun,
   Trash2,
   User,
@@ -32,17 +35,21 @@ import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   checkIncompleteLotsForDay,
   checkLotCompleteness,
-  confirmKienProduction,
+  deleteDraft,
   deleteShiftHistoryEntry,
   editShiftHistoryEntry,
   loadActiveNgansForFactory,
+  loadDrafts,
   loadFactoryShiftNames,
   loadShiftHistory,
   loadShiftReportData,
   loadUserChucVu,
   loadUserShiftAssignment,
   resolveKienForConfirm,
+  saveDraftKien,
+  submitConfirmDraftBatch,
   type ActiveNganOption,
+  type ConfirmDraftRow,
   type ConfirmKienLookup,
   type LotCompletenessWarning,
   type ShiftHistoryEntry,
@@ -179,7 +186,9 @@ export default function ConfirmKienProductionPage() {
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
   // Mục 3: "confirm" (xác nhận ban đầu) -> "warning" (nếu phát hiện lô dở dang thiếu kiện, chờ
   // xác nhận rõ ràng) -> "preview" (PDF đã dựng xong, chờ người dùng Chia sẻ/Tải/Hoàn tất).
-  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "warning" | "preview">("confirm");
+  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "pendingDrafts" | "warning" | "preview">(
+    "confirm",
+  );
   const [endShiftIncomplete, setEndShiftIncomplete] = useState<LotCompletenessWarning[]>([]);
   const [endShiftReportPreview, setEndShiftReportPreview] = useState<{ doc: jsPDF; fileName: string } | null>(null);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
@@ -208,8 +217,17 @@ export default function ConfirmKienProductionPage() {
   const [manualNganId, setManualNganId] = useState("");
   const [activeNgans, setActiveNgans] = useState<ActiveNganOption[]>([]);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  // "Lưu tạm" — ghi nhanh 1 nháp, không validate tồn kho/capacity (xem saveDraftKien).
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaveError, setDraftSaveError] = useState<string | null>(null);
+
+  // Khối "Đang chờ gửi" trong Hub — danh sách nháp CHƯA gửi của user hiện tại + "Gửi tất cả".
+  const [pendingDrafts, setPendingDrafts] = useState<ConfirmDraftRow[]>([]);
+  const [pendingDraftsLoading, setPendingDraftsLoading] = useState(false);
+  const [pendingDraftsError, setPendingDraftsError] = useState<string | null>(null);
+  const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
+  const [submittingBatch, setSubmittingBatch] = useState(false);
+  const [submitBatchError, setSubmitBatchError] = useState<string | null>(null);
 
   // "Lịch sử ca" trong Hub — luôn truy vấn lại DB theo (Ngày SX, Ca), KHÔNG theo người nhập, vì
   // 1 ca có thể có nhiều người trực nối tiếp nhau (đã chốt với người dùng). Selector này cũng
@@ -305,6 +323,25 @@ export default function ConfirmKienProductionPage() {
     void refreshHistory();
   }, [view, factoryId, historyNgay, historyCa, refreshHistory]);
 
+  const refreshPendingDrafts = useCallback(async () => {
+    if (!factoryId || !currentUser) return;
+    setPendingDraftsLoading(true);
+    setPendingDraftsError(null);
+    try {
+      const rows = await loadDrafts(factoryId, currentUser.id);
+      setPendingDrafts(rows);
+    } catch (err) {
+      setPendingDraftsError(err instanceof Error ? err.message : "Lỗi không xác định");
+    } finally {
+      setPendingDraftsLoading(false);
+    }
+  }, [factoryId, currentUser]);
+
+  useEffect(() => {
+    if (view !== "hub" || !factoryId || !currentUser) return;
+    void refreshPendingDrafts();
+  }, [view, factoryId, currentUser, refreshPendingDrafts]);
+
   useEffect(() => {
     if (!factoryId || !maLo || view !== "form") return;
     let alive = true;
@@ -325,7 +362,7 @@ export default function ConfirmKienProductionPage() {
       setLookupLoading(true);
       setLookupError(null);
       setLookup(null);
-      setSubmitError(null);
+      setDraftSaveError(null);
       setManualNganId("");
       try {
         const result = await resolveKienForConfirm(factoryId, maLo, kien);
@@ -384,7 +421,11 @@ export default function ConfirmKienProductionPage() {
     if (lookup.existingKienPallet) setPallet(lookup.existingKienPallet);
   };
 
-  const canSubmit =
+  // Điều kiện cho phép "Lưu tạm" — chỉ check field bắt buộc + !kienMismatch, KHÔNG check tồn
+  // kho/capacity (110% ngăn) vì đó là validate atomic dành riêng cho lúc "Gửi tất cả" qua RPC
+  // submit_confirm_draft_batch (xem confirm/actions.ts). stepperMax vẫn giữ vì nó là clamp
+  // max_per_kien phía client, không phải capacity check.
+  const canSaveDraft =
     !!lookup &&
     (lookup.status === "predicted" || lookup.status === "partial" || lookup.status === "partial_kien") &&
     !!effectiveNganId &&
@@ -415,12 +456,14 @@ export default function ConfirmKienProductionPage() {
     [factoryId, tt],
   );
 
-  const handleSubmit = async () => {
-    if (!factoryId || !lookup) return;
-    setSubmitting(true);
-    setSubmitError(null);
+  // "Lưu tạm" — thay cho gửi ngay: ghi 1 nháp rẻ (không validate tồn kho/capacity), cho phép quét
+  // liên tục nhiều kiện rồi mới "Gửi tất cả" 1 lần từ Hub (xem saveDraftKien, submitConfirmDraftBatch).
+  const handleSaveDraft = async () => {
+    if (!factoryId || !lookup || !currentUser) return;
+    setSavingDraft(true);
+    setDraftSaveError(null);
     try {
-      const result = await confirmKienProduction({
+      const result = await saveDraftKien({
         factoryId,
         maLo,
         kien,
@@ -438,30 +481,64 @@ export default function ConfirmKienProductionPage() {
         pallet,
         chiThi,
         tham: lookup.tham,
-        ghiChu: lookup.isNewLot ? (ghiChu || null) : undefined,
-        userId: currentUser?.id ?? null,
+        ghiChu: lookup.isNewLot ? (ghiChu || null) : null,
+        userId: currentUser.id,
       });
       if (!result.success) {
-        setSubmitError(result.error);
+        setDraftSaveError(result.error);
         return;
       }
-      setToast({ message: tt("daGuiThanhCong"), variant: "success" });
-      // Mục 3: ghi nhớ mã lô vừa gửi thành công để lần quét TIẾP THEO (nếu đổi sang lô khác) biết
-      // đường kiểm tra lô này còn thiếu kiện hay không.
-      lastSubmittedMaLoRef.current = maLo;
+      setToast({ message: tt("daLuuTamThanhCong"), variant: "success" });
       // Mục 6: nhớ Ca vừa dùng trên chính thiết bị này làm gợi ý mặc định cho lần quét sau (chỉ
       // khi tài khoản chưa được gán cứng qua bảng phân công — không ghi đè gợi ý ưu tiên cao hơn).
       if (!assignedCa) storeCa(ca);
-      // Đưa selector "Lịch sử ca" về đúng ngày+ca vừa nhập để người dùng thấy ngay dòng mới —
-      // hiệu ứng phụ: nếu đổi ngày/ca so với lần selector trước, useEffect [historyNgay,historyCa]
-      // sẽ tự refetch khi quay lại hub.
-      setHistoryNgay(ngaySx);
-      setHistoryCa(ca);
       setView("hub");
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setDraftSaveError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
-      setSubmitting(false);
+      setSavingDraft(false);
+    }
+  };
+
+  const handleDeleteDraft = async (draftId: string) => {
+    if (!currentUser) return;
+    setDeletingDraftId(draftId);
+    try {
+      const result = await deleteDraft(draftId, currentUser.id);
+      if (!result.success) {
+        setPendingDraftsError(result.error);
+        return;
+      }
+      await refreshPendingDrafts();
+    } catch (err) {
+      setPendingDraftsError(err instanceof Error ? err.message : "Lỗi không xác định khi xóa nháp.");
+    } finally {
+      setDeletingDraftId(null);
+    }
+  };
+
+  // "Gửi tất cả" — validate + ghi atomic toàn bộ nháp qua submitConfirmDraftBatch. All-or-nothing:
+  // 1 nháp lỗi thì hiện đúng 1 message lỗi, giữ nguyên toàn bộ danh sách nháp để sửa/xóa rồi thử lại.
+  const handleSubmitAllDrafts = async () => {
+    if (!factoryId || !currentUser || pendingDrafts.length === 0) return;
+    setSubmittingBatch(true);
+    setSubmitBatchError(null);
+    try {
+      const result = await submitConfirmDraftBatch(
+        factoryId,
+        currentUser.id,
+        pendingDrafts.map((d) => d.id),
+      );
+      if (!result.success) {
+        setSubmitBatchError(result.error);
+        return;
+      }
+      setToast({ message: tt("submitAllSuccess", { count: result.count }), variant: "success" });
+      await Promise.all([refreshPendingDrafts(), refreshHistory()]);
+    } catch (err) {
+      setSubmitBatchError(err instanceof Error ? err.message : "Lỗi không xác định khi gửi nháp.");
+    } finally {
+      setSubmittingBatch(false);
     }
   };
 
@@ -555,8 +632,9 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
-  // Mục 3 + 7: "Kết thúc ca" giờ có 3 giai đoạn — xem khai báo endShiftPhase ở trên. Bước 1 (bấm
-  // "Xác nhận" lần đầu) kiểm tra lô dở dang thiếu kiện trước khi cho phép xuất phiếu.
+  // Mục 3 + 7: "Kết thúc ca" giờ có 4 giai đoạn — xem khai báo endShiftPhase ở trên. Bước 1 (bấm
+  // "Xác nhận" lần đầu) kiểm tra còn nháp CHƯA gửi trước, rồi mới tới lô dở dang thiếu kiện, trước
+  // khi cho phép xuất phiếu.
   const openEndShiftModal = () => {
     setEndShiftPhase("confirm");
     setEndShiftIncomplete([]);
@@ -589,12 +667,10 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
-  const handleEndShiftFirstConfirm = async () => {
-    if (!factoryId) {
-      setEndShiftConfirmOpen(false);
-      router.push("/dashboard/product");
-      return;
-    }
+  // Tiếp tục luồng Kết thúc ca SAU KHI đã xử lý xong phần nháp (gửi hết hoặc người dùng chủ động bỏ
+  // qua) — kiểm tra lô dở dang thiếu kiện như cũ rồi mới xuất phiếu.
+  const continueEndShiftAfterDrafts = async () => {
+    if (!factoryId) return;
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
@@ -610,6 +686,52 @@ export default function ConfirmKienProductionPage() {
       setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
       setEndShiftGenerating(false);
     }
+  };
+
+  const handleEndShiftFirstConfirm = async () => {
+    if (!factoryId) {
+      setEndShiftConfirmOpen(false);
+      router.push("/dashboard/product");
+      return;
+    }
+    // Mục "Kết thúc ca nên cảnh báo còn nháp chưa gửi": dùng lại state pendingDrafts đã được Hub
+    // tự tải (view vẫn là "hub" trong lúc modal này mở) — nếu còn nháp, chặn lại ở giai đoạn riêng
+    // trước khi kiểm tra lô dở dang, để tránh xuất phiếu thiếu dữ liệu do quên gửi.
+    if (pendingDrafts.length > 0) {
+      setEndShiftPhase("pendingDrafts");
+      return;
+    }
+    await continueEndShiftAfterDrafts();
+  };
+
+  // "Gửi nháp ngay" từ giai đoạn cảnh báo còn nháp — gửi xong mới tiếp tục kiểm tra lô dở dang.
+  const handleEndShiftSendDraftsAndContinue = async () => {
+    if (!factoryId || !currentUser) return;
+    setEndShiftGenerating(true);
+    setEndShiftError(null);
+    try {
+      const result = await submitConfirmDraftBatch(
+        factoryId,
+        currentUser.id,
+        pendingDrafts.map((d) => d.id),
+      );
+      if (!result.success) {
+        setEndShiftError(result.error);
+        setEndShiftGenerating(false);
+        return;
+      }
+      await Promise.all([refreshPendingDrafts(), refreshHistory()]);
+      await continueEndShiftAfterDrafts();
+    } catch (err) {
+      setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
+      setEndShiftGenerating(false);
+    }
+  };
+
+  // "Bỏ qua, vẫn kết thúc ca" từ giai đoạn cảnh báo còn nháp — không gửi nháp, tiếp tục như bình
+  // thường (dữ liệu trong các nháp bị bỏ qua này sẽ KHÔNG có trong phiếu vì chưa từng ghi vào DB).
+  const handleEndShiftIgnoreDraftsAndContinue = async () => {
+    await continueEndShiftAfterDrafts();
   };
 
   const handleFinishEndShift = () => {
@@ -744,6 +866,14 @@ export default function ConfirmKienProductionPage() {
                   setView("scanning");
                 }}
                 onEndShift={openEndShiftModal}
+                pendingDrafts={pendingDrafts}
+                pendingDraftsLoading={pendingDraftsLoading}
+                pendingDraftsError={pendingDraftsError}
+                deletingDraftId={deletingDraftId}
+                onDeleteDraft={handleDeleteDraft}
+                submittingBatch={submittingBatch}
+                submitBatchError={submitBatchError}
+                onSubmitAllDrafts={handleSubmitAllDrafts}
               />
             ) : lookupLoading ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
@@ -993,20 +1123,20 @@ export default function ConfirmKienProductionPage() {
                   </Field>
                 )}
 
-                {submitError && (
+                {draftSaveError && (
                   <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-semibold text-red-600">
-                    {submitError}
+                    {draftSaveError}
                   </div>
                 )}
 
                 <button
                   type="button"
-                  disabled={!canSubmit || submitting}
-                  onClick={handleSubmit}
+                  disabled={!canSaveDraft || savingDraft}
+                  onClick={handleSaveDraft}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  <CheckCircle2 size={20} />
-                  {submitting ? tt("dangGui") : tt("guiDuLieu")}
+                  <Save size={20} />
+                  {savingDraft ? tt("dangLuu") : tt("luuTam")}
                 </button>
               </div>
             )}
@@ -1021,6 +1151,7 @@ export default function ConfirmKienProductionPage() {
           generating={endShiftGenerating}
           error={endShiftError}
           incomplete={endShiftIncomplete}
+          pendingDrafts={pendingDrafts}
           reportPreview={endShiftReportPreview}
           onCancel={() => {
             if (endShiftGenerating) return;
@@ -1028,6 +1159,8 @@ export default function ConfirmKienProductionPage() {
             setEndShiftError(null);
           }}
           onConfirm={handleEndShiftFirstConfirm}
+          onSendDraftsAndContinue={handleEndShiftSendDraftsAndContinue}
+          onIgnoreDraftsAndContinue={handleEndShiftIgnoreDraftsAndContinue}
           onProceedAnyway={proceedGenerateEndShiftReport}
           onFinish={handleFinishEndShift}
         />
@@ -1129,6 +1262,14 @@ function HubView({
   onGenerateReport,
   onScan,
   onEndShift,
+  pendingDrafts,
+  pendingDraftsLoading,
+  pendingDraftsError,
+  deletingDraftId,
+  onDeleteDraft,
+  submittingBatch,
+  submitBatchError,
+  onSubmitAllDrafts,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
   caLabel: (c: string) => string;
@@ -1151,6 +1292,14 @@ function HubView({
   onGenerateReport: () => void;
   onScan: () => void;
   onEndShift: () => void;
+  pendingDrafts: ConfirmDraftRow[];
+  pendingDraftsLoading: boolean;
+  pendingDraftsError: string | null;
+  deletingDraftId: string | null;
+  onDeleteDraft: (draftId: string) => void;
+  submittingBatch: boolean;
+  submitBatchError: string | null;
+  onSubmitAllDrafts: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -1162,6 +1311,63 @@ function HubView({
         <ScanLine size={26} />
         {tt("scanQr")}
       </button>
+
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-amber-800">
+          <Inbox size={16} />
+          {tt("pendingDraftsTitle", { count: pendingDrafts.length })}
+        </div>
+
+        {pendingDraftsLoading ? (
+          <p className="py-3 text-center text-xs text-amber-700">{tt("dangTai")}</p>
+        ) : pendingDraftsError ? (
+          <p className="py-2 text-center text-xs font-semibold text-red-600">{pendingDraftsError}</p>
+        ) : pendingDrafts.length === 0 ? (
+          <p className="py-3 text-center text-xs text-amber-700">{tt("noPendingDrafts")}</p>
+        ) : (
+          <div className="space-y-2">
+            {pendingDrafts.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-bold text-slate-800">
+                    {d.maLo} - {tt("kienLabel")} {d.kien}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {d.soBanh} bành · {d.nganMa || "—"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={deletingDraftId === d.id}
+                  onClick={() => onDeleteDraft(d.id)}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50 disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {submitBatchError && (
+          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+            {submitBatchError}
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={pendingDrafts.length === 0 || submittingBatch}
+          onClick={onSubmitAllDrafts}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {submittingBatch ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+          {submittingBatch ? tt("submittingAllDrafts") : tt("submitAllDrafts", { count: pendingDrafts.length })}
+        </button>
+      </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-emerald-700">
@@ -1309,20 +1515,26 @@ function EndShiftConfirmModal({
   generating,
   error,
   incomplete,
+  pendingDrafts,
   reportPreview,
   onCancel,
   onConfirm,
+  onSendDraftsAndContinue,
+  onIgnoreDraftsAndContinue,
   onProceedAnyway,
   onFinish,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
-  phase: "confirm" | "warning" | "preview";
+  phase: "confirm" | "pendingDrafts" | "warning" | "preview";
   generating: boolean;
   error: string | null;
   incomplete: LotCompletenessWarning[];
+  pendingDrafts: ConfirmDraftRow[];
   reportPreview: { doc: jsPDF; fileName: string } | null;
   onCancel: () => void;
   onConfirm: () => void;
+  onSendDraftsAndContinue: () => void;
+  onIgnoreDraftsAndContinue: () => void;
   onProceedAnyway: () => void;
   onFinish: () => void;
 }) {
@@ -1356,6 +1568,59 @@ function EndShiftConfirmModal({
                 {generating && <Loader2 size={16} className="animate-spin" />}
                 {generating ? tt("endShiftGenerating") : tt("confirmAction")}
               </button>
+            </div>
+          </>
+        )}
+
+        {phase === "pendingDrafts" && (
+          <>
+            <div className="flex items-start gap-2">
+              <Inbox size={20} className="mt-0.5 shrink-0 text-amber-500" />
+              <h3 className="text-base font-extrabold text-slate-800">
+                {tt("pendingDraftsBlockingTitle", { count: pendingDrafts.length })}
+              </h3>
+            </div>
+            <p className="mt-2 text-sm text-slate-500">{tt("pendingDraftsBlockingBody")}</p>
+            <div className="mt-3 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-2.5">
+              {pendingDrafts.map((d) => (
+                <div key={d.id} className="text-xs font-semibold text-amber-800">
+                  {d.maLo} — {tt("kienLabel")} {d.kien} ({d.soBanh} bành)
+                </div>
+              ))}
+            </div>
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                {error}
+              </div>
+            )}
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={onSendDraftsAndContinue}
+                disabled={generating}
+                className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {generating && <Loader2 size={16} className="animate-spin" />}
+                {generating ? tt("endShiftGenerating") : tt("sendDraftsNow")}
+              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  disabled={generating}
+                  className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {tt("cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onIgnoreDraftsAndContinue}
+                  disabled={generating}
+                  className="flex-1 rounded-xl border border-red-300 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {tt("endShiftIgnorePending")}
+                </button>
+              </div>
             </div>
           </>
         )}
