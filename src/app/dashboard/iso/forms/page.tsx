@@ -548,10 +548,10 @@ export default function IsoFormsPage() {
             <Sparkles size={16} className="text-violet-500" />
             <span className="text-sm font-bold text-slate-700">Tìm kiếm biểu mẫu bằng AI</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <input
               ref={searchInputRef}
-              className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 transition-colors"
+              className="flex-1 min-w-0 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 transition-colors"
               placeholder="Ví dụ: biểu mẫu mục tiêu chất lượng, phiếu kiểm tra sản phẩm..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -560,7 +560,7 @@ export default function IsoFormsPage() {
             <button
               onClick={handleSearch}
               disabled={searching || !searchQuery.trim() || !factoryId}
-              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+              className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
             >
               {searching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
               Tìm kiếm

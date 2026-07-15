@@ -134,6 +134,10 @@ export default function MeasurementsPage() {
   const [formLoaiCsr, setFormLoaiCsr] = useState("")
   const [defaultCheDo, setDefaultCheDo] = useState("")
   const [cheDoWarning, setCheDoWarning] = useState<string | null>(null)
+  // Buộc effect fetch chế độ sấy chạy lại mỗi lần mở form tạo/thêm mẫu, kể cả khi
+  // formDayChuyen/formLoaiCsr trùng giá trị mặc định của phiên trước (không đổi state
+  // thì effect không tự rerun) — tránh gợi ý bị "kẹt" ở giá trị cũ/rỗng.
+  const [cheDoRefreshTick, setCheDoRefreshTick] = useState(0)
   const [rows, setRows] = useState<MeasurementRowDraft[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -275,7 +279,7 @@ export default function MeasurementsPage() {
       setCheDoWarning(warning)
     }
     void fetchCheDo()
-  }, [factoryId, formDayChuyen, formLoaiCsr])
+  }, [factoryId, formDayChuyen, formLoaiCsr, cheDoRefreshTick])
 
   // Auto-fill chế độ sấy vào dòng còn trống
   useEffect(() => {
@@ -328,6 +332,7 @@ export default function MeasurementsPage() {
     setFormDayChuyen("Mủ tạp")
     setFormLoaiCsr("10")
     setDefaultCheDo("")
+    setCheDoRefreshTick(t => t + 1)
     setSaveError(null)
 
     const suggestion = await suggestNgan(today)
@@ -371,6 +376,7 @@ export default function MeasurementsPage() {
     setFormDayChuyen(sheet.day_chuyen || "")
     setFormLoaiCsr(sheet.loai_csr || "")
     setDefaultCheDo("")
+    setCheDoRefreshTick(t => t + 1)
     setExistingRowIds(new Set())
     setExistingRowCount(sheet.rows?.length ?? 0)
 
@@ -1218,7 +1224,7 @@ function MeasurementRowForm({
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Chế độ sấy</label>
             <input value={row.che_do_say} onChange={e => onChange({ che_do_say: e.target.value })}
-              placeholder="122-119-9.5" className="w-full px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
+              placeholder="VD: 122-119-9,5" className="w-full px-2 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
           </div>
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Ca SX</label>

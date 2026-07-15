@@ -604,9 +604,14 @@ export type LotCompletenessWarning = { maLo: string; missingKien: KienLetter[] }
 // SUM lại lot_transactions, nên chỉ cần 1 query nhẹ. Trả về null khi lô không tồn tại, đã qua
 // khỏi "Dở dang" (Hoàn thành/Xuất hàng — không còn ý nghĩa "thiếu" theo nghĩa cảnh báo này), hoặc
 // đã đủ cả 4 kiện. Dùng cho cảnh báo "nhảy lô" khi trực ca quét sang mã lô khác (mục 3).
+// `pendingKien`: các kiện đang nằm trong nháp CHƯA gửi (product_confirm_drafts) của lô này — coi
+// như "đã có" khi tính missingKien, tránh cảnh báo sai "còn thiếu kiện" trong khi thực ra kiện đó
+// đã được Lưu tạm nhưng chưa Gửi. Optional, mặc định rỗng giữ nguyên hành vi cũ (100% tương thích
+// ngược với các call site chưa biết về tính năng nháp).
 export async function checkLotCompleteness(
   factoryId: string,
   maLoRaw: string,
+  pendingKien: KienLetter[] = [],
 ): Promise<LotCompletenessWarning | null> {
   const maLo = maLoRaw.trim();
   if (!factoryId || !maLo) return null;
@@ -625,7 +630,9 @@ export async function checkLotCompleteness(
     C: Number(lot.kien_c || 0),
     D: Number(lot.kien_d || 0),
   };
-  const missingKien = (Object.keys(totals) as KienLetter[]).filter((k) => totals[k] < config.max_per_kien);
+  const missingKien = (Object.keys(totals) as KienLetter[]).filter(
+    (k) => totals[k] < config.max_per_kien && !pendingKien.includes(k),
+  );
   if (missingKien.length === 0) return null;
   return { maLo: lot.ma_lo, missingKien };
 }
@@ -634,9 +641,12 @@ export async function checkLotCompleteness(
 // kiện chưa đủ — dùng cho cảnh báo lúc "Kết thúc ca" (mục 3). Không chặn cứng, chỉ để UI hiện
 // danh sách và yêu cầu xác nhận rõ ràng trước khi tiếp tục xuất phiếu. Dùng `lots.kien_a-d` (đã
 // đồng bộ sẵn) thay vì tự SUM transactions — chỉ cần 1 query bổ sung cho danh sách lot_id.
+// `pendingByMaLo`: map ma_lo -> các kiện đang nằm trong nháp CHƯA gửi của lô đó — cùng mục đích với
+// tham số `pendingKien` của checkLotCompleteness ở trên. Optional, mặc định rỗng giữ nguyên hành vi cũ.
 export async function checkIncompleteLotsForDay(
   factoryId: string,
   ngaySx: string,
+  pendingByMaLo: Record<string, KienLetter[]> = {},
 ): Promise<LotCompletenessWarning[]> {
   const dayRows = await loadDayTransactions(factoryId, ngaySx);
   const lotIds = [...new Set(dayRows.map((r) => r.lot_id))];
@@ -658,7 +668,10 @@ export async function checkIncompleteLotsForDay(
       C: Number(lot.kien_c || 0),
       D: Number(lot.kien_d || 0),
     };
-    const missingKien = (Object.keys(totals) as KienLetter[]).filter((k) => totals[k] < config.max_per_kien);
+    const pendingKien = pendingByMaLo[lot.ma_lo] || [];
+    const missingKien = (Object.keys(totals) as KienLetter[]).filter(
+      (k) => totals[k] < config.max_per_kien && !pendingKien.includes(k),
+    );
     if (missingKien.length > 0) warnings.push({ maLo: lot.ma_lo, missingKien });
   }
   return warnings.sort((a, b) => a.maLo.localeCompare(b.maLo));
@@ -1214,4 +1227,263 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
     tongKg: Math.round(allRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
     byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
   };
+}
+
+// ============================================================================
+// "Lưu tạm nhiều kiện rồi Gửi 1 lần" — xem .claude/rules/06-module-production.md mục
+// "Quét theo lượt: 'Lưu tạm' nhiều kiện rồi 'Gửi' 1 lần".
+// ============================================================================
+
+export type SaveDraftKienInput = {
+  factoryId: string;
+  maLo: string;
+  kien: KienLetter;
+  isNewLot: boolean;
+  nganId: string;
+  loaiCsr: string;
+  loaiBanh: number;
+  dayChuyen: string | null;
+  soBanh: number;
+  ngaySx: string;
+  ca: string;
+  boc: string;
+  pallet: string[];
+  chiThi: string | null;
+  tham: string | null;
+  ghiChu: string | null;
+  userId: string;
+};
+
+export type SaveDraftKienResult = { success: true; draftId: string } | { success: false; error: string };
+
+// "Lưu tạm" — ghi nhanh 1 nháp, KHÔNG validate tồn kho/capacity (rẻ, để quét liên tục nhiều kiện
+// trước khi gửi cả lượt). Chỉ chặn khi thiếu các trường bắt buộc (giống canSubmit hiện có, trừ phần
+// capacity). Validate đầy đủ (max_per_kien, 110% ngăn, đồng nhất bọc/pallet theo kiện) chỉ diễn ra
+// atomic lúc "Gửi tất cả" qua RPC submit_confirm_draft_batch (xem submitConfirmDraftBatch bên dưới).
+export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraftKienResult> {
+  const maLo = input.maLo.trim();
+  if (!maLo) return { success: false, error: "Thiếu mã lô." };
+  if (!input.nganId) return { success: false, error: "Chưa xác định ngăn nguồn cho kiện này." };
+  if (!input.soBanh || input.soBanh <= 0) return { success: false, error: "Số bành phải lớn hơn 0." };
+  if (!input.boc) return { success: false, error: "Chưa chọn bọc." };
+  if (!input.pallet || input.pallet.length === 0) return { success: false, error: "Chưa chọn loại pallet." };
+  if (!input.userId) return { success: false, error: "Không xác định được người dùng." };
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+    const soKg = Math.round(input.soBanh * input.loaiBanh * 100) / 100;
+
+    const { data, error } = await supabase
+      .from("product_confirm_drafts")
+      .insert({
+        factory_id: input.factoryId,
+        created_by: input.userId,
+        ma_lo: maLo,
+        kien: input.kien,
+        is_new_lot: input.isNewLot,
+        ngan_id: input.nganId,
+        loai_csr: input.loaiCsr,
+        loai_banh: input.loaiBanh,
+        day_chuyen: input.dayChuyen,
+        so_banh: input.soBanh,
+        so_kg: soKg,
+        max_per_kien: config.max_per_kien,
+        ngay_sx: input.ngaySx,
+        ca: input.ca,
+        boc: input.boc,
+        pallet: input.pallet,
+        chi_thi: input.chiThi,
+        tham: input.tham,
+        ghi_chu: input.ghiChu,
+      })
+      .select("id")
+      .single();
+    if (error || !data) return { success: false, error: error?.message || "Không lưu được nháp." };
+    return { success: true, draftId: data.id };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Lỗi không xác định khi lưu nháp.",
+    };
+  }
+}
+
+export type ConfirmDraftRow = {
+  id: string;
+  maLo: string;
+  kien: KienLetter;
+  isNewLot: boolean;
+  nganId: string;
+  nganMa: string | null;
+  nganTen: string | null;
+  loaiCsr: string;
+  loaiBanh: number;
+  dayChuyen: string | null;
+  soBanh: number;
+  soKg: number;
+  maxPerKien: number;
+  ngaySx: string;
+  ca: string;
+  boc: string | null;
+  pallet: string[] | null;
+  chiThi: string | null;
+  tham: string | null;
+  ghiChu: string | null;
+  createdAt: string | null;
+};
+
+// Danh sách nháp CHƯA gửi của đúng user hiện tại — dùng cho khối "Đang chờ gửi" trong Hub.
+export async function loadDrafts(factoryId: string, userId: string): Promise<ConfirmDraftRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("product_confirm_drafts")
+    .select(
+      "id,ma_lo,kien,is_new_lot,ngan_id,loai_csr,loai_banh,day_chuyen,so_banh,so_kg,max_per_kien,ngay_sx,ca,boc,pallet,chi_thi,tham,ghi_chu,created_at",
+    )
+    .eq("factory_id", factoryId)
+    .eq("created_by", userId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  const rows = data || [];
+
+  const nganIds = [...new Set(rows.map((r) => r.ngan_id).filter(Boolean))];
+  let nganInfoById = new Map<string, { ma_ngan: string; ten_ngan: string }>();
+  if (nganIds.length > 0) {
+    const { data: nganRows } = await supabase.from("ngans").select("id, ma_ngan, ten_ngan").in("id", nganIds);
+    nganInfoById = new Map((nganRows || []).map((n) => [n.id, { ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan }]));
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    maLo: r.ma_lo,
+    kien: r.kien as KienLetter,
+    isNewLot: r.is_new_lot,
+    nganId: r.ngan_id,
+    nganMa: nganInfoById.get(r.ngan_id)?.ma_ngan ?? null,
+    nganTen: nganInfoById.get(r.ngan_id)?.ten_ngan ?? null,
+    loaiCsr: r.loai_csr,
+    loaiBanh: Number(r.loai_banh),
+    dayChuyen: r.day_chuyen,
+    soBanh: Number(r.so_banh),
+    soKg: Number(r.so_kg),
+    maxPerKien: Number(r.max_per_kien),
+    ngaySx: r.ngay_sx,
+    ca: r.ca,
+    boc: r.boc,
+    pallet: r.pallet,
+    chiThi: r.chi_thi,
+    tham: r.tham,
+    ghiChu: r.ghi_chu,
+    createdAt: r.created_at,
+  }));
+}
+
+export type DeleteDraftResult = { success: true } | { success: false; error: string };
+
+// Xóa 1 nháp CHƯA gửi — chỉ chủ nháp mới xóa được (re-check qua created_by, không tin caller).
+export async function deleteDraft(draftId: string, userId: string): Promise<DeleteDraftResult> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("product_confirm_drafts")
+      .delete()
+      .eq("id", draftId)
+      .eq("created_by", userId)
+      .select("id");
+    if (error) return { success: false, error: error.message };
+    if (!data || data.length === 0) {
+      return { success: false, error: "Không tìm thấy nháp hoặc không có quyền xóa." };
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Lỗi không xác định khi xóa nháp.",
+    };
+  }
+}
+
+export type SubmitDraftBatchResult =
+  | { success: true; count: number; touchedLots: Array<{ maLo: string; lotId: string; isNewLot: boolean }> }
+  | { success: false; error: string };
+
+// "Gửi tất cả" — validate + ghi atomic toàn bộ nháp đã chọn qua RPC submit_confirm_draft_batch.
+// All-or-nothing: 1 nháp lỗi thì toàn bộ batch rollback ở tầng DB, không nháp nào bị xóa/ghi.
+export async function submitConfirmDraftBatch(
+  factoryId: string,
+  userId: string,
+  draftIds: string[],
+): Promise<SubmitDraftBatchResult> {
+  if (draftIds.length === 0) return { success: false, error: "Không có nháp nào để gửi." };
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: draftRows, error: draftError } = await supabase
+      .from("product_confirm_drafts")
+      .select("id, ma_lo, loai_csr, loai_banh, is_new_lot")
+      .in("id", draftIds)
+      .eq("created_by", userId)
+      .eq("factory_id", factoryId);
+    if (draftError) return { success: false, error: draftError.message };
+    if (!draftRows || draftRows.length !== draftIds.length) {
+      return { success: false, error: "Một số nháp không còn tồn tại — vui lòng tải lại danh sách." };
+    }
+
+    // max_per_kien luôn tính MỚI ngay trước khi gửi (không tin cột đã lưu từ lúc Lưu tạm) — tránh
+    // lệch dữ liệu nếu mapping loai_csr/loai_banh -> max_per_kien từng thay đổi giữa 2 thời điểm.
+    const recomputed = draftRows.map((d) => ({
+      draft_id: d.id,
+      max_per_kien: getLoaiBanhConfig(d.loai_csr, Number(d.loai_banh)).max_per_kien,
+    }));
+
+    const { data: resultRows, error: rpcError } = await supabase.rpc("submit_confirm_draft_batch", {
+      p_draft_ids: draftIds,
+      p_user_id: userId,
+      p_recomputed: recomputed,
+    });
+    if (rpcError) {
+      const isDeadlock = (rpcError as { code?: string }).code === "40P01";
+      return {
+        success: false,
+        error: isDeadlock
+          ? "Hệ thống đang bận xử lý một lượt gửi khác, vui lòng thử lại sau vài giây."
+          : rpcError.message,
+      };
+    }
+
+    const rows = (resultRows || []) as Array<{
+      draft_id: string;
+      lot_id: string;
+      ma_lo: string;
+      kien: string;
+      so_kg: number;
+    }>;
+    const draftById = new Map(draftRows.map((d) => [d.id, d]));
+    const touchedLotsMap = new Map<string, { maLo: string; lotId: string; isNewLot: boolean }>();
+    for (const row of rows) {
+      const draft = draftById.get(row.draft_id);
+      const isNewLot = !!draft?.is_new_lot;
+      const existing = touchedLotsMap.get(row.lot_id);
+      touchedLotsMap.set(row.lot_id, {
+        maLo: row.ma_lo,
+        lotId: row.lot_id,
+        isNewLot: isNewLot || existing?.isNewLot || false,
+      });
+    }
+    const touchedLots = [...touchedLotsMap.values()];
+
+    // Chuyển dự kiến -> thật cho các lô mới tạo trong batch — idempotent, best-effort (không chặn
+    // kết quả thành công của "Gửi tất cả" nếu bước phụ này lỗi, mirror đúng cách confirmKienProduction
+    // đang xử lý markLotPredictionRealized cho luồng không-nháp).
+    await Promise.allSettled(
+      touchedLots.filter((t) => t.isNewLot).map((t) => markLotPredictionRealized(factoryId, t.maLo, t.lotId)),
+    );
+
+    return { success: true, count: rows.length, touchedLots };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Lỗi không xác định khi gửi nháp.",
+    };
+  }
 }

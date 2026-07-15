@@ -835,6 +835,110 @@ lại "Kết thúc ca" cho đúng ngày/lô `1117cs/26` xác nhận modal chỉ 
 B), và xác nhận lô `Xuất hàng` bất kỳ khác trong hệ thống không bị đổi trạng thái sau khi chạy
 migration repair.
 
+### Cập nhật 2026-07-15 (tiếp) — Phase 1 backend cho "Lưu tạm nhiều kiện rồi Gửi 1 lần" (ĐÃ CODE, CHƯA CHẠY MIGRATION)
+
+Đã triển khai đúng thiết kế ở mục "Kế hoạch phiên sau" phía trên, phần Phase 1 (DB + RPC + server
+actions). Phase 2 (UI: đổi nút "GỬI DỮ LIỆU" → "LƯU TẠM", khối "Đang chờ gửi" trong Hub, cảnh báo
+"còn nháp chưa gửi" ở "Kết thúc ca") **cố ý chưa làm** — dừng đúng theo yêu cầu tách 2 bước.
+
+**Quyết định thiết kế quan trọng, khác 1 chi tiết so với mô tả gốc ở "Kế hoạch phiên sau"**:
+KHÔNG gộp nhiều kiện (A/B/C/D) khác nhau của cùng 1 lô vào chung 1 dòng `lot_transactions` khi Gửi
+cả lượt (mô tả gốc nói "các kiện cùng lô có cùng ngăn/bọc/pallet/... sẽ tự gộp thành 1 dòng"). Lý
+do: `editShiftHistoryEntry()` giả định mỗi dòng `lot_transactions` chỉ thuộc đúng 1 kiện
+(`kienKeyEntries.find(([, v]) => v > 0)` — chỉ lấy kiện khác-0 đầu tiên); nếu gộp 2 kiện vào 1
+dòng, nút "Sửa" trong "Lịch sử ca" sẽ âm thầm mất dữ liệu của kiện thứ 2. Mỗi nháp luôn tạo đúng 1
+dòng `lot_transactions` khi Gửi (khớp 100% cách `confirmKienProduction` đang ghi hôm nay).
+
+**Migration `supabase/migrations/20260716_product_confirm_drafts.sql` (CẦN CHẠY THỦ CÔNG, CHƯA CHẠY)**:
+
+- Bảng `product_confirm_drafts` — nháp cá nhân trên thiết bị quét, RLS chỉ chủ nháp
+  (`created_by = auth.uid()`), không có ngoại lệ admin (khác `operation_notes`). Thực tế mọi truy
+  cập đi qua server actions dùng `getSupabaseAdmin()` (bypass RLS) nên quyền sở hữu được enforce
+  chính bằng tham số `p_user_id` tường minh trong RPC, RLS chỉ là lớp phòng vệ bổ sung.
+- RPC atomic `submit_confirm_draft_batch(p_draft_ids UUID[], p_user_id UUID, p_recomputed JSONB)`
+  — validate + ghi toàn bộ nháp đã chọn trong 1 transaction, all-or-nothing (1 nháp lỗi thì rollback
+  toàn bộ, giữ nguyên mọi nháp kể cả các nháp hợp lệ đứng trước trong cùng batch). Nội dung:
+  - Pre-check `p_draft_ids` không rỗng/không trùng/tất cả tồn tại và thuộc `p_user_id`.
+  - Lock trước `ngans`/`lots` liên quan (order theo `id`/`ma_lo`) để tránh deadlock khi nhiều thiết
+    bị cùng "Gửi tất cả" chạm chung ngăn/lô — mirror `create_lot_prediction_batch`, mở rộng cho
+    nhiều dòng/1 lệnh gọi.
+  - Trong vòng lặp từng nháp: `pg_advisory_xact_lock` theo `(factory_id, ma_lo)` trước khi tạo lô
+    mới (bảng `lots` không có UNIQUE constraint thật trên `(factory_id, ma_lo)` — rủi ro có sẵn ở
+    `saveLotTransaction`, batch làm tăng khả năng va chạm nên khóa thêm ở đây); resolve/tạo lô
+    (parse `ma_lo` bằng `regexp_match`, chặn nếu lô đã tồn tại và không phải "Dở dang"/"Do dang");
+    check tổng bành đúng kiện so với `max_per_kien` LẤY TỪ `p_recomputed` (không tin cột
+    `max_per_kien` đã lưu ở bảng nháp từ lúc Lưu tạm — RPC luôn nhận giá trị JS tính lại NGAY
+    TRƯỚC khi gọi, tránh lệch nếu mapping `loai_csr/loai_banh → max_per_kien` từng đổi giữa lúc Lưu
+    tạm và Gửi, có thể cách nhau cả ca); check đồng nhất Bọc/Pallet với dòng gần nhất của đúng kiện
+    (dùng `IS DISTINCT FROM`, không dùng `<>` vì `<>` trả `NULL` khi 1 vế `NULL` sẽ im lặng bỏ qua
+    lỗi); check 110% ngăn. Cả 2 phép SUM (tổng bành theo kiện, tổng kg theo ngăn) tự động lũy kế
+    đúng trong batch nhờ Postgres "read-your-own-writes" trong cùng transaction, không cần biến
+    accumulator riêng.
+  - `INSERT lot_transactions` (chỉ 1 cột kiện khác 0) + `DELETE` nháp vừa xử lý ngay trong vòng lặp
+    — nếu 1 nháp sau đó fail, transaction rollback tự khôi phục cả các `DELETE`/`INSERT` trước đó.
+  - Sau vòng lặp: `sync_lot_master_snapshot()` cho từng lô DISTINCT đã chạm.
+- `src/app/dashboard/product/confirm/actions.ts` thêm (không sửa hàm cũ): `saveDraftKien()` (ghi 1
+  nháp, chỉ validate field bắt buộc, KHÔNG validate tồn kho/capacity — đúng tinh thần "Lưu tạm rẻ"),
+  `loadDrafts()`, `deleteDraft()`, `submitConfirmDraftBatch()` (tính lại `max_per_kien` fresh qua
+  `getLoaiBanhConfig()` rồi mới gọi RPC; bắt riêng lỗi deadlock Postgres `40P01` thành message thân
+  thiện "thử lại"; sau khi RPC thành công, gọi `markLotPredictionRealized()` best-effort cho các lô
+  mới tạo trong batch qua `Promise.allSettled`, không chặn kết quả thành công của action).
+- `checkLotCompleteness()`/`checkIncompleteLotsForDay()` (cùng file) thêm tham số optional
+  `pendingKien`/`pendingByMaLo` — coi kiện đang nằm trong nháp CHƯA gửi là "đã có" khi tính
+  `missingKien`, tránh cảnh báo "nhảy lô"/"còn thiếu kiện" sai. Backward-compatible 100% (default
+  rỗng giữ nguyên hành vi cũ) — Phase 2 (UI) sẽ truyền danh sách nháp thật vào 2 tham số này.
+- `scripts/test-confirm-draft-batch.mjs` — script kiểm tra RPC trên dữ liệu thật (tự tạo 1 ngăn tạm
+  + các lô/nháp test riêng biệt, mã lô luôn có suffix `test` + năm `99` để không đụng dữ liệu sản
+  xuất thật, tự cleanup trong `finally` kể cả khi có test fail giữa chừng). 4 kịch bản: (1) batch
+  hợp lệ 3 kiện khác nhau → đúng 1 lô + 3 dòng + nháp bị xóa hết; (2) vượt `max_per_kien` lũy kế
+  trong batch → rollback toàn bộ, không lô nào được tạo, cả 3 nháp còn nguyên; (3) lệch Bọc giữa 2
+  lần nhập cùng kiện trong batch → rollback toàn bộ; (4) gọi RPC với `p_user_id` không khớp
+  `created_by` thật → bị chặn ở ownership pre-check, không ghi gì.
+
+**Trạng thái xác nhận**: `npx tsc --noEmit` và `npx eslint` sạch trên `confirm/actions.ts` và script
+mới. **CHƯA chạy migration `20260716_product_confirm_drafts.sql` trên Supabase** (không có Supabase
+CLI/kết nối Postgres trực tiếp trong môi trường này, đúng convention dự án — mọi migration DDL đều
+phải chạy tay qua Supabase SQL Editor) — do đó **`scripts/test-confirm-draft-batch.mjs` cũng CHƯA
+được chạy thật**, chỉ mới viết xong và qua lint/tsc. Việc cần làm trước khi coi Phase 1 hoàn tất:
+
+1. Chạy `supabase/migrations/20260716_product_confirm_drafts.sql` trong Supabase SQL Editor.
+2. Chạy `node --env-file=.env.local scripts/test-confirm-draft-batch.mjs`, xác nhận cả 4 test PASS
+   (đặc biệt test 2/3 — bài test all-or-nothing rollback là quan trọng nhất).
+3. Sau khi Phase 1 xác nhận ổn định, mới làm Phase 2 (UI) — xem mô tả Phase 2 ở mục "Kế hoạch phiên
+   sau" phía trên (chưa cần sửa lại mục đó, vẫn còn đúng làm phác thảo cho Phase 2).
+
+**Bug đã fix sau lần chạy thử đầu tiên (2026-07-15, cùng ngày)**: chạy migration + script lần đầu
+báo lỗi `column reference "ma_lo" is ambiguous` ở test 1. Nguyên nhân: `RETURNS TABLE(draft_id,
+lot_id, ma_lo, kien, so_kg)` tự khai báo các OUT parameter cùng tên với cột thật của `lots`/
+`lot_transactions`/`product_confirm_drafts` — bất kỳ tham chiếu **không qualify alias** tới
+`ma_lo`/`lot_id` bên trong thân hàm đều bị Postgres coi là ambiguous (đúng landmine đã gặp và ghi
+lại ở `delete_lot_transaction`, xem `20260714_fix_delete_lot_transaction_ambiguous_column.sql`) —
+tôi đã đọc bug đó trước khi viết RPC này nhưng vẫn bỏ sót 3 chỗ. Đã sửa (qualify bằng alias
+`lk`/`pcdk`/`l`/`ltk`) ở 3 vị trí trong `20260716_product_confirm_drafts.sql`: (1) câu lock trước
+`lots` theo `ma_lo` (dùng alias `lk` cho `lots`, `pcdk` cho `product_confirm_drafts`); (2) câu
+resolve/tìm lô theo `ma_lo` trong vòng lặp (alias `l`); (3) câu SUM tổng bành theo kiện từ
+`lot_transactions` (alias `ltk`). Đồng thời đã siết lại `scripts/test-confirm-draft-batch.mjs` —
+test 2/3/4 giờ **assert cả nội dung message lỗi** (không chỉ `error` truthy), vì phát hiện ra rằng
+bug ambiguous-column này có thể khiến các test đó "PASS nhầm lý do" (lỗi bất kỳ nào cũng thỏa mãn
+`assert(!!error)`, kể cả lỗi SQL không liên quan gì đến business logic đang test).
+
+**Bug thứ 2 phát hiện ngay sau đó (cùng ngày, lần chạy tiếp theo)**: sau khi fix ambiguous-column,
+cả 3 test 1/2/3 đều fail với cùng lỗi `Mã lô "899001test1083a/99" không hợp lệ.` — hóa ra là bug
+trong CHÍNH SCRIPT TEST, không phải RPC: `maLoFor()` bản đầu nhúng timestamp (`RUN_SUFFIX = "test" +
+Date.now()...`) vào giữa phần suffix của mã lô, tạo ra chuỗi như `"899001test1083a"` — phần sau số
+gốc lẫn cả chữ lẫn số, không khớp `^(\d+)([a-z]*)\/(\d{2,4})$` (suffix phải là chữ thường THUẦN
+TÚY). RPC từ chối đúng theo thiết kế; bug là ở dữ liệu test tự tạo, không phải logic RPC. Đã sửa
+`maLoFor()` để mã lô test luôn hợp lệ: `${RUN_ID}${testIndex}test/99` — toàn bộ phần số (RUN_ID +
+testIndex) đứng trước, suffix cố định `"test"` (chữ thường thuần túy) đứng sau, năm cố định `"99"`.
+
+**Trạng thái cuối cùng — ĐÃ XÁC NHẬN PASS trên dữ liệu thật**: chạy lại
+`node --env-file=.env.local scripts/test-confirm-draft-batch.mjs` sau cả 2 fix trên, kết quả
+**"Tất cả 4 test PASS"** — bao gồm cả assertion nội dung message lỗi đã siết ở test 2/3/4 (không
+chỉ "có lỗi" mà đúng lỗi kỳ vọng: test 2 nhắc "vượt quá...bành", test 3 nhắc "Bọc", test 4 nhắc
+"quyền"). Script tự cleanup dữ liệu test sau khi chạy (đã xác nhận log "Đã dọn dẹp xong."). Migration
+`20260716_product_confirm_drafts.sql` đã chạy thành công trên Supabase — **Phase 1 hoàn tất**,
+chuyển sang Phase 2 (UI) khi được yêu cầu.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

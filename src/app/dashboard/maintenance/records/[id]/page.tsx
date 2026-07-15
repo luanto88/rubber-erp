@@ -1383,8 +1383,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   return (
     <MaintenanceShell>
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-start gap-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-2">
+        <div className="flex flex-wrap items-start gap-4">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
               <Wrench size={20} className="text-orange-500" />
@@ -1407,7 +1407,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {!isNew && record && (
             <>
               {record.trang_thai === "da_duyet" ? (

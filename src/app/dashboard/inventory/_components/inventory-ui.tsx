@@ -231,10 +231,11 @@ export function AddItemButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-[42px] items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+      title="Thêm mới"
+      className="inline-flex h-[42px] items-center justify-center gap-0 sm:gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 sm:px-4 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Plus size={16} />
-      Thêm mới
+      <span className="hidden sm:inline">Thêm mới</span>
     </button>
   )
 }

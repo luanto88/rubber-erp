@@ -119,12 +119,12 @@ export function totalKho(r: Pick<ProductionRecord, "mn_kho"|"ct_kho"|"dct_kho"|"
 }
 
 export const WARN_LABELS: Record<string, string> = {
-  NO_DISPATCH_DATE: "Khong co bang dieu xe ngay nay",
-  VEHICLE_NOT_FOUND: "Xe khong co trong dieu xe",
-  CHUYEN_NOT_FOUND: "Khong tim thay chuyen nay trong dieu xe",
-  DOI_MISMATCH: "Doi khong khop diem giao nhan",
-  ZERO_KL: "Tat ca KL bang 0",
-  DUPLICATE_IN_FILE: "Trung xe+chuyen trong cung file",
+  NO_DISPATCH_DATE: "Không có bảng điều xe ngày này",
+  VEHICLE_NOT_FOUND: "Xe không có trong điều xe",
+  CHUYEN_NOT_FOUND: "Không tìm thấy chuyến này trong điều xe",
+  DOI_MISMATCH: "Đội không khớp điểm giao nhận",
+  ZERO_KL: "Tất cả KL bằng 0",
+  DUPLICATE_IN_FILE: "Trùng xe+chuyến trong cùng file",
 }
 
 export const WARN_SEVERITY: Record<string, "red" | "amber" | "slate"> = {
@@ -136,7 +136,7 @@ export const WARN_SEVERITY: Record<string, "red" | "amber" | "slate"> = {
   DUPLICATE_IN_FILE: "amber",
 }
 
-WARN_LABELS.DUPLICATE_IN_SYSTEM = "Da co san luong trung trong he thong"
+WARN_LABELS.DUPLICATE_IN_SYSTEM = "Đã có sản lượng trùng trong hệ thống"
 WARN_SEVERITY.DUPLICATE_IN_SYSTEM = "amber"
 
 type DispatchKg = {
@@ -219,7 +219,7 @@ export async function writeBackToDispatch(
 ): Promise<void> {
   const normalizedNgay = normalizeDateInput(ngay)
   if (!normalizedNgay) {
-    throw new Error(`Ngay khong hop le: ${formatDateDisplay(ngay) || ngay}`)
+    throw new Error(`Ngày không hợp lệ: ${formatDateDisplay(ngay) || ngay}`)
   }
 
   const { data: prods, error: prodsError } = await supabase
