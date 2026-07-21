@@ -179,6 +179,17 @@ const renumberChuyenForVehicle = (rows: DxRow[], so_xe: string): DxRow[] => {
 - `downloadDispatchStatsPdf()` và `buildStatsContext()` trong `src/lib/dispatch-pdf.ts` nhận `selectedDois?: string[]` / `selectedVehicles?: string[]`. Context line PDF ghép nhiều giá trị bằng `", "`; tên file PDF ghép nhiều giá trị đã `safeName()` hoá bằng `-`.
 - Khi sửa tiếp các hàm này, phải đồng bộ type ở tất cả nơi gọi (`page.tsx` ↔ `dispatch-analytics.ts` ↔ `dispatch-pdf.ts`) — đúng bài học lỗi build `selectedNote` đã ghi ở trên.
 
+## ⚠️ Đính chính quan trọng 2026-07-21 — `dispatch_entries.rows` (JSONB) mới là nguồn thật, KHÔNG phải `dispatch_entry_rows` (bảng vật lý)
+
+Toàn bộ mô tả "`dispatch_entry_rows` là source of truth, `dispatch_entries.rows` chỉ là cache legacy" ở phía trên (và ở `.claude/rules/03-database-schema.md`, `01-project-overview.md`) **đã lỗi thời kể từ migration `supabase/migrations/20260612_restore_dispatch_entries_rows_source.sql`**. Đã xác nhận bằng cách đọc trực tiếp code hiện tại và verify bằng script query dữ liệu thật (2026-07-21):
+
+- `20260611_drop_dispatch_entries_rows.sql` từng DROP cột `dispatch_entries.rows` (với comment "runtime code now hydrates trip rows directly from dispatch_entry_rows").
+- Ngay hôm sau, `20260612_restore_dispatch_entries_rows_source.sql` phải **thêm lại** cột này, backfill 1 lần từ `dispatch_entry_rows`, và ghi rõ comment DB: `'SOURCE OF TRUTH for dispatch trip rows. Application runtime must read/write this column only.'` — tức là bản drop ngày 11 đã gây lỗi và bị rollback ngay ngày 12.
+- Code hiện tại đúng như comment đó: `writeBackToDispatch()` (`src/app/dashboard/output/_components/output-types.ts`) và `loadDispatchEntriesWithResolvedRows()` (`src/lib/dispatch-entry-rows.ts`) đều **chỉ đọc/ghi `dispatch_entries.rows` (JSONB)** — không đụng tới bảng vật lý `dispatch_entry_rows` ở bất kỳ đâu trong 2 hàm này.
+- Hệ quả: bảng vật lý `dispatch_entry_rows` **đã bị đóng băng (stale) kể từ 2026-06-12** — mọi thay đổi điều xe/sản lượng sau ngày đó chỉ phản ánh trong JSONB, không còn ghi vào bảng vật lý. Bất kỳ code/script nào query trực tiếp `dispatch_entry_rows` để lấy dữ liệu "hiện tại" sẽ nhận về số liệu cũ/thiếu (đã verify: tổng `kl_dck` tháng 6/2026 từ bảng vật lý chỉ ra ~498k kg, trong khi JSONB + `production_records` khớp đúng ~1.117k kg).
+- **Quy tắc cho code mới**: đọc/ghi chi tiết chuyến điều xe phải qua `loadDispatchEntriesWithResolvedRows()` (đọc `dispatch_entries.rows`) hoặc trực tiếp `dispatch_entries.select("id,ngay,rows")` — **không** query `dispatch_entry_rows` nữa cho dữ liệu runtime. Không xóa bảng vật lý (có thể vẫn được tham chiếu ở đâu đó hoặc giữ cho mục đích lịch sử), nhưng không coi nó là nguồn tin cậy.
+- Ref liên kết trip vào ngăn lưu (`ngans.trips[]`, `buildDispatchTripRef`) dùng `rowId = row.row_id || row.uid` lấy từ chính JSONB — nếu đối chiếu bằng script, phải dùng đúng field này (giá trị dạng `"r47_0"` kiểu cũ), không phải `dispatch_entry_rows.id` (UUID) hay `uid_legacy`.
+
 ## Bug nghiêm trọng đã fix 2026-07-11: `cloneRow`/`cloneRowsTemplate` làm trùng `row_id`, gây "mất" chuyến xe ở module Kho nguyên liệu
 
 ### Triệu chứng
@@ -204,3 +215,13 @@ Quét toàn bộ factory `phuochoa_kt` phát hiện **12/165 phiếu điều xe 
 ### Quy tắc chung cho code mới
 
 Bất kỳ hàm nào nhân bản/duplicate 1 dòng `DxRow` trong tương lai đều phải reset `row_id` (set `undefined`) giống `uid` — không được spread `{...src}` rồi chỉ đổi `uid` mà quên `row_id`, nếu không sẽ tái tạo đúng bug này.
+
+## Ghi chú từng dòng chuyến bắt buộc chọn từ danh mục (Cập nhật 2026-07-22)
+
+Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-settings-master-data.md` mục "4.11. Ghi chú bắt buộc". Tóm tắt riêng phạm vi Điều xe:
+
+- Ô "Ghi chú" của từng dòng chuyến trong bảng điều xe (`dispatch_entry_rows.ghi_chu`, qua JSONB `dispatch_entries.rows[].ghi_chu`) đổi từ `<input list="dispatch-required-notes">` sang `RequiredNoteSelect` (`src/app/dashboard/_components/required-note-select.tsx`) — chỉ chọn được từ `required_notes`, có quick-add tích hợp riêng cho từng dòng.
+- Nút toolbar "+ Thêm ghi chú" sẵn có (gọi `handleAddRequiredNote`, chỉ thêm vào danh mục, không gán vào dòng nào) **vẫn giữ nguyên, không xóa** — không xung đột với quick-add tích hợp trong component mới, cả 2 cùng ghi vào chung bảng `required_notes`.
+- Kỹ thuật định vị dropdown: vì ô này nằm trong `<td>` của bảng có thể cuộn ngang/nhiều dòng, `RequiredNoteSelect` dùng `createPortal` + `position: fixed` (mirror đúng kỹ thuật của `SmartMultiSelect` đã có sẵn trong file này) để panel không bị cắt hình bởi bảng — không dùng `position: absolute` kiểu `FilterMultiSelect` (sẽ bị kẹt trong vùng nhìn thấy của dòng/bảng).
+- Filter "Ghi chú" (`filterGhiChu`, `<select>` Pattern A ở tab Danh sách/Thống kê) **không đổi** — vẫn build option từ `required_notes` như cũ, không liên quan tới thay đổi này.
+- `tripNoteOptions` trong module Kho nguyên liệu (`storage/page.tsx`, phần "Chuyến xe từ Điều xe" khi tạo/sửa ngăn) đổi nguồn thành hợp `required_notes ∪ giá trị lịch sử còn tồn tại trong dữ liệu điều xe` — xem `.claude/rules/storage.md` mục liên quan.

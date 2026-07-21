@@ -4,13 +4,13 @@ import { useState, useEffect } from "react"
 import { AlertTriangle, CheckCircle } from "lucide-react"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
-import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import type { ProductionRecord, OutputFormState } from "./output-types"
 import { emptyOutputForm, parseVehicleCode } from "./output-types"
 import { formatDateDisplay, getTodayISODate, normalizeDateInput } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
@@ -49,7 +49,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
   const [dispatchLoading, setDispatchLoading] = useState(false)
   const [enteredKeys, setEnteredKeys] = useState<Set<string>>(new Set())
-  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
 
   useEffect(() => {
     if (record) {
@@ -124,19 +123,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     void fetchForDate()
   }, [form.ngay, factoryId])
 
-  useEffect(() => {
-    if (!factoryId) return
-    const run = async () => {
-      try {
-        const rows = await loadRequiredNotes(supabase, factoryId)
-        setRequiredNotes(rows.map((row) => row.content))
-      } catch {
-        setRequiredNotes([])
-      }
-    }
-    void run()
-  }, [factoryId])
-
   // Auto-fill tài xế khi chọn xe + chuyến từ dispatch
   useEffect(() => {
     if (!form.so_xe || !form.chuyen || dispatchVehicles.length === 0) return
@@ -203,18 +189,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
   // Banner tiến độ
   const daXuat = dispatchVehicles.filter(d => enteredKeys.has(`${d.so_xe}:${d.chuyen}`)).length
   const chuaNhap = dispatchVehicles.length - daXuat
-  const handleAddRequiredNote = async () => {
-    if (!factoryId) return
-    const input = window.prompt("Nhập ghi chú mới")
-    if (!input || !input.trim()) return
-    try {
-      const row = await createRequiredNote(supabase, factoryId, input)
-      setRequiredNotes((prev) => prev.includes(row.content) ? prev : [...prev, row.content])
-      setField("ghi_chu", row.content)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không thêm được ghi chú")
-    }
-  }
 
   return (
     <ModalShell
@@ -414,22 +388,14 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
           </div>
 
           <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-600 block">Ghi chú</label>
-              <button type="button" onClick={() => void handleAddRequiredNote()} className="text-xs font-bold text-amber-700 hover:text-amber-800">
-                + Thêm ghi chú mới
-              </button>
-            </div>
-            <input
-              list="output-required-notes"
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
+            <RequiredNoteSelect
+              factoryId={factoryId}
               value={form.ghi_chu}
-              onChange={e => setField("ghi_chu", e.target.value)}
+              onChange={(v) => setField("ghi_chu", v)}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              placeholder="Ghi chú (tùy chọn)"
+              onError={setError}
             />
-            <datalist id="output-required-notes">
-              {requiredNotes.map(note => <option key={note} value={note} />)}
-            </datalist>
           </div>
 
           {error && (

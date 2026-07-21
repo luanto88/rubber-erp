@@ -248,6 +248,16 @@ Xem thêm quyết định thiết kế/plan implementation gốc tại lịch s�
 - **Quy tắc cho code mới**: bất kỳ thư viện nào phụ thuộc trực tiếp vào `window`/`document` ở top-level module (leaflet, các thư viện vẽ bản đồ/canvas khác) khi dùng trong cây component có khả năng bị Next.js server-render (page không đánh dấu client-only ở tầng route) đều phải import qua `next/dynamic({ ssr: false })`, không import tĩnh trực tiếp.
 - **Chưa deploy lên production** — fix này mới nằm trong working tree (`git status` sẽ thấy `storage-detail-client.tsx` modified), cần commit + deploy để khôi phục tính năng tra cứu QR trên `qlsxkpt.vercel.app`.
 
+## 15b. Điều tra 2026-07-21 — Vì sao "KL nguyên liệu khô" của Báo cáo cân đối ngăn lưu theo kỳ luôn thấp hơn tổng Sản lượng cùng kỳ/cùng loại NL
+
+Đây là hành vi **đúng thiết kế, không phải bug tính toán** — nhưng dễ gây hiểu nhầm nên ghi lại rõ nguyên nhân đã verify bằng dữ liệu thật (factory `phuochoa_kt`, kỳ 01/06–30/06/2026, loại NL "Mủ đông chén"):
+
+- `downloadStoragePeriodReportPdf()` (`src/lib/storage-pdf.ts`) cộng `ngan.tong_kho` của các ngăn **đủ điều kiện** (`ngay_bd >= tu_ngay AND ngay_kt <= den_ngay`, xem mục 6) — con số này chỉ phản ánh nguyên liệu đang nằm trong các ngăn **đã đóng trọn trong kỳ VÀ đã được người vận hành gán chuyến xe vào ngăn đó**.
+- Module Sản lượng tính tổng khô theo `production_records` lọc thuần theo **ngày cân xe**, không quan tâm chuyến đó đã được "Sửa ngăn" gán vào ngăn nào hay chưa.
+- Nếu có chuyến xe đã cân nguyên liệu trong kỳ nhưng **chưa từng được gán vào bất kỳ ngăn nào** (`ngans.trips[]` không chứa ref của chuyến đó), khối lượng của chuyến đó hoàn toàn vô hình với báo cáo ngăn lưu — không rơi vào cả nhóm "ngăn đủ điều kiện" lẫn "ngăn không đủ điều kiện", vì nó chưa thuộc ngăn nào cả.
+- Verify bằng script đối chiếu `dispatch_entries.rows` (nguồn thật, xem đính chính ở `.claude/rules/19-dispatch-module.md`) với `ngans.trips[]`: `tổng kl_dck tháng 6 = tổng đã gán vào ngăn + tổng CHƯA gán vào ngăn nào` khớp tuyệt đối đến 2 chữ số thập phân — xác nhận đây là nguyên nhân duy nhất của chênh lệch, không có lỗi tính toán/trùng lặp nào khác.
+- Cách xử lý khi người dùng báo "báo cáo ngăn lưu thấp hơn sản lượng thực tế": vào **Kho nguyên liệu → Sửa ngăn tương ứng ngày/loại NL nghi ngờ → bảng "Chuyến xe từ Điều xe"** → kiểm tra có chuyến nào của những ngày đó bị bỏ sót (thường là "chuyến 2" của cùng 1 xe trong ngày, dễ bị quên khi thao tác nhanh) → tick bổ sung. Không có cách nào "tự động" phát hiện chuyến mồ côi qua UI hiện tại — chỉ phát hiện được bằng cách đối chiếu số liệu như trên hoặc rà thủ công.
+
 ## 15. Cập nhật 2026-07-11 — Bug "chuyến xe bị ẩn" đã fix (nguồn gốc thật ở Điều xe, không phải Storage), + 3 tính năng bổ sung
 
 ### Bug "chỉ chuyến 1 hiển thị" khi chọn chuyến xe cho ngăn
@@ -276,3 +286,18 @@ Xem thêm quyết định thiết kế/plan implementation gốc tại lịch s�
 
 - `canMarkProduced` trong `storage/page.tsx` (nút "Đã SX" trên thẻ ngăn, chỉ admin thấy) đổi điều kiện từ `tpPct >= 100 && tpPct <= 110` sang `tpPct >= 50` (không giới hạn trên).
 - **Chỉ áp dụng cho nút thủ công này** — ngưỡng `100%-110%` của banner hậu lưu trong module Thành phẩm (`product/page.tsx`, sau khi lưu phiếu thành phẩm) giữ nguyên không đổi, đây là 2 cơ chế độc lập nhau. Chi tiết xem `.claude/rules/06-module-production.md` mục "Rule lưu thành phẩm và trạng thái ngăn".
+
+## 16. Ghi chú ngăn bắt buộc chọn từ danh mục (Cập nhật 2026-07-22)
+
+Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-settings-master-data.md` mục "4.11. Ghi chú bắt buộc". Tóm tắt riêng phạm vi Kho nguyên liệu:
+
+- Ô "Ghi chú" khi tạo/sửa ngăn (`ngans.ghi_chu`) đổi từ `<input list="storage-required-notes">` sang `RequiredNoteSelect` (`src/app/dashboard/_components/required-note-select.tsx`) — chỉ chọn được từ `required_notes`, quick-add tích hợp sẵn. Đã bỏ hàm `handleAddRequiredNote` cục bộ và nút "+ Thêm ghi chú mới" rời (logic đó nay nằm trong component).
+- `requiredNotes` state (`string[]`) trong `storage/page.tsx` **vẫn giữ nguyên** — vẫn cần cho filter `<select>` danh sách ngăn (Pattern A) và cho `tripNoteOptions` (xem dưới), không liên quan tới input đã đổi.
+- **`tripNoteOptions`** (dùng cho bộ lọc "Chuyến xe từ Điều xe" khi tạo/sửa ngăn — lọc theo `ghi_chu` của từng chuyến điều xe, KHÁC với `ngans.ghi_chu`): đổi nguồn từ chỉ-dữ-liệu-thực-tế (`new Set(dispatchTrips.map(t => t.ghi_chu))`) sang **hợp của `required_notes` ∪ giá trị lịch sử còn tồn tại trong `dispatchTrips`**:
+  ```ts
+  const tripNoteOptions = useMemo(() => {
+    const historical = dispatchTrips.map((trip) => trip.ghi_chu.trim()).filter(Boolean)
+    return [EMPTY_NOTE_FILTER, ...new Set([...requiredNotes, ...historical])]
+  }, [dispatchTrips, requiredNotes])
+  ```
+  Lý do KHÔNG chỉ dùng riêng `required_notes`: đây là **filter**, không phải input tạo dữ liệu mới — cần giữ khả năng lọc các chuyến điều xe cũ mang ghi chú tự do (trước khi ô Ghi chú của Điều xe chuyển sang dropdown cứng, xem `.claude/rules/19-dispatch-module.md`). Đánh đổi: danh sách filter có thể tạm thời có nhiều option gần giống nhau (đúng vấn đề gốc mà `required_notes` sinh ra để giải quyết) nhưng giảm dần theo thời gian khi dữ liệu điều xe mới luôn khớp danh mục.

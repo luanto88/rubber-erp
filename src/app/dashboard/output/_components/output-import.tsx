@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
-import { Upload, AlertTriangle, CheckCircle, FileSpreadsheet, ChevronRight } from "lucide-react"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { AlertTriangle, CheckCircle, ChevronRight, FileSpreadsheet, Plus, Upload } from "lucide-react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import type { MatchedSlRow, ParsedSlRow, WarnCode } from "./output-types"
 import {
   buildProductionRecordKey,
@@ -13,6 +14,7 @@ import {
   writeBackToDispatch,
 } from "./output-types"
 import { normalizeDateInput } from "@/lib/date-utils"
+import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 
 // ────────────────────────────────────────────────────────────────
 // Excel helpers
@@ -228,6 +230,31 @@ export function matchRows(
 }
 
 // ────────────────────────────────────────────────────────────────
+// Kiểm tra ghi_chu theo danh mục required_notes — bắt buộc chọn từ danh mục, không tự do
+// (xem .claude/rules/15-output-module.md). Rỗng luôn hợp lệ vì ghi_chu là optional.
+// ────────────────────────────────────────────────────────────────
+
+function isNoteKnown(note: string, catalog: string[]): boolean {
+  const trimmed = note.trim()
+  if (!trimmed) return true
+  return catalog.some((content) => content.trim().toLowerCase() === trimmed.toLowerCase())
+}
+
+export function applyNoteWarnings(rows: MatchedSlRow[], catalog: string[]): MatchedSlRow[] {
+  return rows.map((row) => {
+    const known = isNoteKnown(row.ghi_chu, catalog)
+    const hasWarn = row.warn_codes.includes("UNKNOWN_NOTE")
+    if (known === !hasWarn) return row
+    return {
+      ...row,
+      warn_codes: known
+        ? row.warn_codes.filter((c) => c !== "UNKNOWN_NOTE")
+        : [...row.warn_codes, "UNKNOWN_NOTE" as WarnCode],
+    }
+  })
+}
+
+// ────────────────────────────────────────────────────────────────
 // Warn badge component
 // ────────────────────────────────────────────────────────────────
 
@@ -270,7 +297,9 @@ export function OutputImport({
     updated: number
     deduped: number
     warn: number
+    skippedInvalidNote: number
   } | null>(null)
+  const [requiredNotes, setRequiredNotes] = useState<string[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFile = useCallback(async (file: File) => {
@@ -284,7 +313,11 @@ export function OutputImport({
         const key = buildProductionRecordKey(row)
         existingKeyCounts.set(key, (existingKeyCounts.get(key) ?? 0) + 1)
       }
-      const result = matchRows(parsed, dispatches, deliveryPoints, existingKeyCounts)
+      const noteRows = await loadRequiredNotes(supabase, factoryId).catch(() => [])
+      const noteCatalog = noteRows.map((row) => row.content)
+      setRequiredNotes(noteCatalog)
+      const matchedRows = matchRows(parsed, dispatches, deliveryPoints, existingKeyCounts)
+      const result = applyNoteWarnings(matchedRows, noteCatalog)
       setMatched(result)
       setFileName(file.name)
       setStep(2)
@@ -299,7 +332,59 @@ export function OutputImport({
     if (f) handleFile(f)
   }, [handleFile])
 
-  const handleConfirm = async () => {
+  // Lớp 1 — sửa ghi_chu trực tiếp tại đúng dòng trong bảng xem trước.
+  const updateMatchedRowNote = (index: number, ghiChu: string) => {
+    setMatched((prev) => prev.map((row, i) => {
+      if (i !== index) return row
+      const known = isNoteKnown(ghiChu, requiredNotes)
+      return {
+        ...row,
+        ghi_chu: ghiChu,
+        warn_codes: known
+          ? row.warn_codes.filter((c) => c !== "UNKNOWN_NOTE")
+          : row.warn_codes.includes("UNKNOWN_NOTE") ? row.warn_codes : [...row.warn_codes, "UNKNOWN_NOTE" as WarnCode],
+      }
+    }))
+    setRequiredNotes((prev) => (
+      ghiChu.trim() && !prev.some((n) => n.trim().toLowerCase() === ghiChu.trim().toLowerCase())
+        ? [...prev, ghiChu.trim()]
+        : prev
+    ))
+  }
+
+  // Lớp 2 — thêm 1 giá trị ghi_chu lạ vào danh mục, áp dụng cho TẤT CẢ dòng đang dùng
+  // đúng giá trị đó cùng lúc (tránh phải sửa từng dòng khi nhiều dòng dùng chung 1 ghi
+  // chú mới hợp lệ).
+  const [addingNoteContent, setAddingNoteContent] = useState<string | null>(null)
+  const handleBulkAddNote = async (content: string) => {
+    if (!factoryId) return
+    setAddingNoteContent(content)
+    try {
+      const row = await createRequiredNote(supabase, factoryId, content)
+      setRequiredNotes((prev) => (prev.some((n) => n.toLowerCase() === row.content.toLowerCase()) ? prev : [...prev, row.content]))
+      setMatched((prev) => prev.map((r) => (
+        r.ghi_chu.trim().toLowerCase() === content.trim().toLowerCase()
+          ? { ...r, warn_codes: r.warn_codes.filter((c) => c !== "UNKNOWN_NOTE") }
+          : r
+      )))
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Không thêm được ghi chú")
+    } finally {
+      setAddingNoteContent(null)
+    }
+  }
+
+  const unknownNoteGroups = useMemo(() => {
+    const map = new Map<string, number>()
+    matched.forEach((row) => {
+      if (!row.warn_codes.includes("UNKNOWN_NOTE")) return
+      const key = row.ghi_chu.trim()
+      map.set(key, (map.get(key) ?? 0) + 1)
+    })
+    return [...map.entries()].map(([content, count]) => ({ content, count }))
+  }, [matched])
+
+  const handleConfirm = async (options?: { skipInvalidNotes?: boolean }) => {
     setImporting(true)
     setImportError(null)
     try {
@@ -308,8 +393,18 @@ export function OutputImport({
         throw new Error(`File đang có ${duplicateInFileCount} dòng trùng khóa ngày + đội + xe + chuyến. Vui lòng xử lý file trước khi import.`)
       }
 
+      const unresolvedNoteRows = matched.filter((row) => row.warn_codes.includes("UNKNOWN_NOTE"))
+      if (unresolvedNoteRows.length > 0 && !options?.skipInvalidNotes) {
+        throw new Error(`Còn ${unresolvedNoteRows.length} dòng có ghi chú chưa có trong danh mục. Sửa ở cột Ghi chú bên trên, thêm vào danh mục, hoặc bấm "Nhập phần hợp lệ, bỏ qua phần lỗi".`)
+      }
+
+      const rowsToImport = options?.skipInvalidNotes
+        ? matched.filter((row) => !row.warn_codes.includes("UNKNOWN_NOTE"))
+        : matched
+      const skippedInvalidNote = matched.length - rowsToImport.length
+
       const batchId = crypto.randomUUID()
-      const rows = matched.map(r => ({
+      const rows = rowsToImport.map(r => ({
         factory_id: factoryId,
         ngay: r.ngay,
         doi: r.doi,
@@ -326,7 +421,7 @@ export function OutputImport({
         import_batch_id: batchId,
         ghi_chu: r.ghi_chu || null,
       }))
-      const existingRows = await loadExistingRecords(supabase, factoryId, matched)
+      const existingRows = await loadExistingRecords(supabase, factoryId, rowsToImport)
       const existingByKey = new Map<string, ExistingProductionRecord[]>()
       for (const row of existingRows) {
         const key = buildProductionRecordKey(row)
@@ -386,6 +481,7 @@ export function OutputImport({
         updated,
         deduped,
         warn: rows.filter(r => r.warn_codes.length > 0).length,
+        skippedInvalidNote,
       })
       setStep(3)
       onImported()
@@ -400,6 +496,9 @@ export function OutputImport({
   const redCount = matched.filter(r =>
     r.warn_codes.some(c => WARN_SEVERITY[c] === "red")
   ).length
+  const hasDuplicateInFile = matched.some(r => r.warn_codes.includes("DUPLICATE_IN_FILE"))
+  const unresolvedNoteCount = matched.filter(r => r.warn_codes.includes("UNKNOWN_NOTE")).length
+  const validCount = matched.length - unresolvedNoteCount
 
   return (
     <ModalShell
@@ -422,7 +521,7 @@ export function OutputImport({
       onClose={onClose}
       maxWidth="5xl"
       footer={(step === 1 || step === 2) && (
-        <div className="flex items-center justify-between w-full">
+        <div className="flex flex-col items-end gap-2 w-full sm:flex-row sm:items-center sm:justify-between">
           <button
             onClick={() => { if (step === 2) setStep(1); else onClose() }}
             className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
@@ -430,13 +529,31 @@ export function OutputImport({
             {step === 2 ? "← Chọn lại file" : "Hủy"}
           </button>
           {step === 2 && (
-            <button
-              onClick={handleConfirm}
-              disabled={importing}
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all"
-            >
-              {importing ? "Đang nhập..." : `Nhập ${matched.length} bản ghi${warnCount > 0 ? ` (${warnCount} cảnh báo)` : ""}`}
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              {unresolvedNoteCount > 0 && !hasDuplicateInFile && (
+                <button
+                  onClick={() => handleConfirm({ skipInvalidNotes: true })}
+                  disabled={importing || validCount === 0}
+                  className="px-4 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 rounded-xl transition-all"
+                >
+                  Nhập {validCount} dòng hợp lệ, bỏ qua {unresolvedNoteCount} dòng lỗi
+                </button>
+              )}
+              <button
+                onClick={() => handleConfirm()}
+                disabled={importing || hasDuplicateInFile || unresolvedNoteCount > 0}
+                title={
+                  hasDuplicateInFile
+                    ? "File đang trùng khóa, không thể nhập"
+                    : unresolvedNoteCount > 0
+                      ? `Còn ${unresolvedNoteCount} dòng ghi chú chưa hợp lệ — sửa ở bảng trên hoặc bỏ qua các dòng này`
+                      : undefined
+                }
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all"
+              >
+                {importing ? "Đang nhập..." : `Nhập ${matched.length} bản ghi${warnCount > 0 ? ` (${warnCount} cảnh báo)` : ""}`}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -496,6 +613,31 @@ export function OutputImport({
                 )}
               </div>
 
+              {unknownNoteGroups.length > 0 && (
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs font-bold text-red-700 mb-2">
+                    {unknownNoteGroups.length} ghi chú trong file chưa có trong danh mục — bấm &quot;Thêm vào danh mục&quot; để duyệt hàng loạt, hoặc sửa từng dòng ở cột Ghi chú bên dưới.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {unknownNoteGroups.map(({ content, count }) => (
+                      <div key={content} className="flex items-center gap-2 bg-white border border-red-200 rounded-lg pl-3 pr-1.5 py-1">
+                        <span className="text-xs font-semibold text-slate-700">{content}</span>
+                        <span className="text-[10px] font-bold text-red-500">×{count}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleBulkAddNote(content)}
+                          disabled={addingNoteContent === content}
+                          className="flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-60 text-emerald-700 text-[10px] font-bold rounded-md transition-colors"
+                        >
+                          <Plus size={10} />
+                          {addingNoteContent === content ? "Đang thêm..." : "Thêm vào danh mục"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <ResponsiveTableWrapper className="rounded-xl">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -527,7 +669,19 @@ export function OutputImport({
                           <td className="px-3 py-1.5 text-slate-600">{r.tai_xe || <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-1.5 text-right text-slate-700">{totalTuoi > 0 ? totalTuoi.toLocaleString("vi-VN") : "—"}</td>
                           <td className="px-3 py-1.5 text-right font-bold text-emerald-700">{totalKho > 0 ? totalKho.toLocaleString("vi-VN") : "—"}</td>
-                          <td className="px-3 py-1.5 text-slate-500">{r.ghi_chu || <span className="text-slate-300">—</span>}</td>
+                          <td className="px-3 py-1.5 text-slate-500 min-w-[140px]">
+                            {r.warn_codes.includes("UNKNOWN_NOTE") ? (
+                              <RequiredNoteSelect
+                                factoryId={factoryId}
+                                value={r.ghi_chu}
+                                onChange={(v) => updateMatchedRowNote(i, v)}
+                                className="w-full px-2 py-1 border border-red-300 rounded-lg text-xs"
+                                onError={setImportError}
+                              />
+                            ) : (
+                              r.ghi_chu || <span className="text-slate-300">—</span>
+                            )}
+                          </td>
                           <td className="px-3 py-1.5">
                             {r.warn_codes.map(c => <WarnBadge key={c} code={c} />)}
                           </td>
@@ -557,6 +711,11 @@ export function OutputImport({
                   <> &nbsp;·&nbsp; <span className="font-bold text-amber-600">{importResult.warn}</span> dòng có cảnh báo</>
                 )}
               </p>
+              {importResult.skippedInvalidNote > 0 && (
+                <p className="text-sm text-red-600 max-w-md text-center">
+                  <span className="font-bold">{importResult.skippedInvalidNote}</span> dòng đã bị bỏ qua do ghi chú không hợp lệ — vào Danh sách sản lượng và sửa tay các dòng đó qua ô Ghi chú (chọn từ danh mục).
+                </p>
+              )}
               <button onClick={onClose} className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
                 Đóng
               </button>

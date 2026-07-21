@@ -57,7 +57,12 @@ export function ShiftAssignmentsTab({
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [error, setError] = useState("")
-  const [savedRowId, setSavedRowId] = useState<string | null>(null)
+  // Tập hợp id các dòng ĐANG hiện "Đã lưu" — trước đây dùng 1 state đơn `savedRowId`, khiến lưu
+  // dòng B làm mất badge "Đã lưu" của dòng A đã lưu trước đó (chỉ dòng lưu gần nhất mới hiện).
+  // Đổi sang Set để mỗi dòng tự giữ trạng thái "đã lưu" độc lập; tự gỡ khỏi Set ngay khi người
+  // dùng sửa lại bất kỳ field nào của dòng đó (updateRow) — tránh hiện "Đã lưu" sai khi dữ liệu
+  // trên form đã khác với dữ liệu thật trong DB.
+  const [savedRowIds, setSavedRowIds] = useState<Set<string>>(new Set())
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -92,6 +97,12 @@ export function ShiftAssignmentsTab({
       ...prev,
       [ca]: (prev[ca] || []).map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
     }))
+    setSavedRowIds((prev) => {
+      if (!prev.has(rowId)) return prev
+      const next = new Set(prev)
+      next.delete(rowId)
+      return next
+    })
   }
 
   const handleSaveRow = async (ca: string, rowId: string) => {
@@ -100,7 +111,6 @@ export function ShiftAssignmentsTab({
     if (!row) return
     setError("")
     setSavingRowId(rowId)
-    setSavedRowId(null)
     try {
       const payload = {
         factory_id: factoryId,
@@ -118,14 +128,14 @@ export function ShiftAssignmentsTab({
           .single()
         if (err) { setError(err.message); return }
         updateRow(ca, rowId, { id: data.id, isNew: false })
-        setSavedRowId(data.id)
+        setSavedRowIds((prev) => new Set(prev).add(data.id))
       } else {
         const { error: err } = await supabase
           .from("production_shift_assignments")
           .update(payload)
           .eq("id", row.id)
         if (err) { setError(err.message); return }
-        setSavedRowId(row.id)
+        setSavedRowIds((prev) => new Set(prev).add(row.id))
       }
       void loadData(factoryId)
     } finally {
@@ -147,6 +157,12 @@ export function ShiftAssignmentsTab({
       const { error: err } = await supabase.from("production_shift_assignments").delete().eq("id", rowId)
       if (err) { setError(err.message); return }
       setConfirmDeleteId(null)
+      setSavedRowIds((prev) => {
+        if (!prev.has(rowId)) return prev
+        const next = new Set(prev)
+        next.delete(rowId)
+        return next
+      })
       if (factoryId) void loadData(factoryId)
     } finally {
       setDeletingRowId(null)
@@ -286,7 +302,7 @@ export function ShiftAssignmentsTab({
                         </div>
                       )
                     )}
-                    {savedRowId === row.id && !row.isNew && (
+                    {savedRowIds.has(row.id) && !row.isNew && (
                       <p className="text-center text-xs font-bold text-emerald-600">Đã lưu</p>
                     )}
                   </div>

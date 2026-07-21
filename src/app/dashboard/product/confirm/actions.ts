@@ -1198,10 +1198,11 @@ export type ShiftReportGroupRow = {
 };
 
 // 1 section = 1 ca sản xuất trong ngày (chỉ những ca thực sự có giao dịch trong ngày mới có
-// section riêng). caLabel là số thứ tự hiển thị ("Ca 1", "Ca 2"...) theo đúng thứ tự thời gian
-// trong ngày (Ca A luôn bắt đầu buổi sáng, Ca B bắt đầu buổi chiều chạy xuyên đêm — xem CA_ORDER),
-// KHÔNG phải theo alphabet của mã ca. caName là tên ca do nhà máy tự đặt (Cài đặt → Danh mục →
-// Thông tin công ty → "Tên ca sản xuất"), rỗng nếu chưa cấu hình.
+// section riêng). caLabel là số thứ tự hiển thị ("Ca 1", "Ca 2"...) suy ra từ giao dịch (created_at)
+// SỚM NHẤT của mỗi ca trong đúng ngày đó — ca nào có giao dịch đầu tiên sớm hơn thì là "Ca 1", bất
+// kể mã ca (A/B/C) là gì. Không hard-code A luôn là "Ca 1": nếu lịch đảo (Ca B làm ca ngày, Ca A
+// làm ca đêm) thì Ca B sẽ tự thành "Ca 1" đúng thực tế hôm đó. caName là tên ca do nhà máy tự đặt
+// (Cài đặt → Danh mục → Thông tin công ty → "Tên ca sản xuất"), rỗng nếu chưa cấu hình.
 export type ShiftReportCaSection = {
   ca: string;
   caLabel: string;
@@ -1220,9 +1221,10 @@ export type ShiftReportData = {
   byGroup: ShiftReportGroupRow[];
 };
 
-// Thứ tự cố định của các ca trong 1 ngày sản xuất — Ca A bắt đầu buổi sáng, Ca B bắt đầu buổi
-// chiều và chạy xuyên đêm (đã chốt với người dùng). Mã ca nào không nằm trong danh sách này (dữ
-// liệu cũ/hiếm gặp) được xếp cuối theo alphabet, không làm gãy báo cáo.
+// Fallback A→B→C — chỉ dùng làm tie-breaker khi 2 ca có cùng (hoặc thiếu) mốc created_at sớm nhất
+// (về lý thuyết gần như không xảy ra vì created_at có độ chính xác mili-giây), KHÔNG còn là nguồn
+// sắp xếp chính. Xem loadShiftReportData() — nguồn chính là created_at sớm nhất của mỗi ca trong
+// đúng ngày đang in phiếu (đã chốt với người dùng 2026-07-21, xem rule mục 3).
 const CA_ORDER = ["A", "B", "C"];
 function compareCaCode(a: string, b: string): number {
   const ia = CA_ORDER.indexOf(a);
@@ -1298,12 +1300,18 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
   >();
   const nganIdSet = new Set<string>();
   const chiThiSet = new Set<string>();
+  // created_at SỚM NHẤT của mỗi ca trong ngày — dùng để suy ra "Ca 1"/"Ca 2" theo đúng thứ tự
+  // sản xuất thật, thay vì hard-code A→B→C (xem CA_ORDER ở trên). `rows` đã được loadDayTransactions
+  // sort sẵn theo created_at tăng dần, nên dòng đầu tiên gặp của mỗi ca chính là dòng sớm nhất —
+  // không cần query/sort thêm.
+  const earliestCreatedAtByCa = new Map<string, string>();
 
   for (const row of rows) {
     const lotInfo = Array.isArray(row.lots) ? row.lots[0] : row.lots;
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
     if (row.ngan_id) nganIdSet.add(row.ngan_id);
+    if (!earliestCreatedAtByCa.has(row.ca)) earliestCreatedAtByCa.set(row.ca, row.created_at || "");
     // Fallback lot-level khi giao dịch không tự mang boc/pallet/chi_thi riêng — luôn đúng với dòng
     // nhập tay qua product/page.tsx (xem ghi chú ở ShiftTxLotInfo) — nếu không, phiếu báo thành
     // phẩm hiện trống Bọc/Pallet/Số chỉ thị cho mọi lô có ít nhất 1 giao dịch nhập tay.
@@ -1372,7 +1380,11 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
   }
 
   const sections: ShiftReportCaSection[] = [...bySection.keys()]
-    .sort(compareCaCode)
+    .sort((a, b) => {
+      const ta = earliestCreatedAtByCa.get(a) || "";
+      const tb = earliestCreatedAtByCa.get(b) || "";
+      return ta.localeCompare(tb) || compareCaCode(a, b);
+    })
     .map((ca, idx) => {
       const caRows = (bySection.get(ca) || []).sort((a, b) => (a.hoanThanhAt || "").localeCompare(b.hoanThanhAt || ""));
       return {

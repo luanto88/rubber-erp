@@ -49,6 +49,7 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 - `suffixes` — Hậu tố lô (đổi tên từ "Hậu tố mã lô")
 - `factories` — Thông tin công ty (đọc từ factory hiện tại, sub-tab "Thông tin công ty")
 - `customers` — Khách hàng
+- `required_notes` — Ghi chú bắt buộc (dùng chung 4 module: Kho nguyên liệu, Điều xe, Sản lượng, Thành phẩm)
 
 ### Tab Bảo trì
 
@@ -178,6 +179,16 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 - Khóa duy nhất: `(factory_id, nam, chi_tieu, san_pham)`
 - Ngưỡng mục tiêu độc lập với ngưỡng chấm Kiểm nghiệm chính thức (TCCS/TCVN) — không dùng chung nguồn
 - Chi tiết đầy đủ (fallback năm trước, công thức tính, 2 loại báo cáo in): `.claude/rules/25-quality-targets-reports-module.md`
+
+### 4.11. Ghi chú bắt buộc
+
+- Bảng: `required_notes` — `(id, factory_id, content, sort_order, is_active)`, unique `(factory_id, lower(content))`
+- Vai trò: danh mục ghi chú chuẩn dùng chung cho `ghi_chu` ở 4 module: Kho nguyên liệu (`ngans.ghi_chu`), Điều xe (`dispatch_entry_rows.ghi_chu` qua JSONB `dispatch_entries.rows[]`), Sản lượng (`production_records.ghi_chu`), Thành phẩm (`lots.ghi_chu` + `product_confirm_drafts.ghi_chu` ở luồng quét QR mobile)
+- Quản trị tại: `Cài đặt → Danh mục → Ghi chú bắt buộc`
+- Helper dùng chung: `src/lib/required-notes.ts` — `loadRequiredNotes()`, `createRequiredNote()` (dùng `.ilike` check trùng case-insensitive, kích hoạt lại nếu đã tồn tại nhưng `is_active=false`)
+- **Cập nhật 2026-07-22**: mọi ô `ghi_chu` nghiệp vụ ở 4 module trên PHẢI dùng component dùng chung `RequiredNoteSelect` (`src/app/dashboard/_components/required-note-select.tsx`) — dropdown "cứng" chỉ cho chọn từ danh mục theo đúng `factory_id`, **không cho gõ tay** giá trị ngoài danh mục; muốn thêm giá trị mới phải qua nút quick-add tích hợp sẵn trong component (ghi vào `required_notes` trước, rồi tự chọn luôn). Trước đó mọi nơi chỉ dùng `<input list="...">` (HTML datalist) — chỉ GỢI Ý, không CHẶN gõ tự do, nên bản chất vẫn tự do và không lọc chính xác được (`src/lib/note-filter.ts`'s `matchesNoteFilter` là exact-match sau trim, không gộp được các giá trị gõ lệch nhau).
+- Dữ liệu ghi chú tự do đã tồn tại trước thời điểm 2026-07-22 được **giữ nguyên, không migrate** — `RequiredNoteSelect` tự hiện giá trị cũ không khớp danh mục ở đầu danh sách kèm badge "giá trị cũ", vẫn chọn lại được, nhưng không cho gõ giá trị khác ngoài danh mục.
+- Chi tiết từng module: `.claude/rules/06-module-production.md` (Thành phẩm), `.claude/rules/15-output-module.md` (Sản lượng, gồm cơ chế chặn ghi chú lạ khi import Excel), `.claude/rules/19-dispatch-module.md` (Điều xe), `.claude/rules/storage.md` (Kho nguyên liệu).
 
 ## 5. Quy định khi dùng trong Điều xe
 

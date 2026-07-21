@@ -16,6 +16,7 @@ import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-sele
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
 
 // Types
@@ -2158,18 +2159,17 @@ export default function DispatchPage() {
                   {row.so_km ? `${row.so_km} km` : "—"}
                 </td>
 
-                {/* Ghi chĂº */}
+                {/* Ghi chú */}
                 <td className="px-2 py-1.5 min-w-[150px]">
                   {row.locked
                     ? <span className="text-slate-500 text-xs">{row.ghi_chu || "—"}</span>
-                    : <>
-                        <input list="dispatch-required-notes" value={row.ghi_chu || ""} onChange={e => updateRow(idx,"ghi_chu",e.target.value)}
-                          placeholder="Ghi chú..."
-                          className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"/>
-                        <datalist id="dispatch-required-notes">
-                          {requiredNotes.map(note => <option key={note} value={note} />)}
-                        </datalist>
-                      </>
+                    : <RequiredNoteSelect
+                        factoryId={factoryId}
+                        value={row.ghi_chu || ""}
+                        onChange={v => updateRow(idx,"ghi_chu",v)}
+                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
+                        onError={showToast}
+                      />
                   }
                 </td>
 

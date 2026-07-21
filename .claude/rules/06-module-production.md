@@ -1314,21 +1314,30 @@ gán được đúng 1 tài khoản cho mỗi ca. `ShiftAssignmentsTab` chỉ c�
   không an toàn nếu gặp đúng trường hợp đó — không phải lỗi mới phát sinh do migration.
 - Đã grep toàn repo `production_shift_assignments` — không còn nơi nào khác giả định quan hệ 1-1.
 
-`npx tsc --noEmit`, `npx eslint`, và `npm run build` đều sạch. **Chưa test tay** — cần: chạy
-migration trên Supabase SQL Editor trước; vào Cài đặt → Cấu hình nhà máy → Phân công trực ca, gán
-2 tài khoản khác nhau cho cùng Ca A → lưu từng dòng → tải lại trang xác nhận cả 2 còn nguyên; xóa 1
-người (dòng đã lưu) → xác nhận confirm inline hoạt động, dòng biến mất sau khi xác nhận; thêm 1
-dòng mới rồi bấm Xóa TRƯỚC khi Lưu → xác nhận không gọi DB, chỉ biến mất khỏi UI; đăng nhập bằng 1
-trong 2 tài khoản vừa gán Ca A → mở `/dashboard/product/confirm`, xác nhận dropdown "Ca sản xuất"
-tự chọn đúng "Ca A".
+**Test tay 2026-07-21 (đã deploy + verify thật)**: xác nhận hoạt động đúng — nhưng phát hiện 1 bug
+UI: bấm "Lưu" cho 1 dòng thì badge "Đã lưu" hiện đúng dưới dòng đó; bấm "Lưu" tiếp cho dòng KHÁC
+(người khác, kể cả khác ca) thì badge "Đã lưu" nhảy sang dòng vừa lưu, còn dòng đã lưu trước đó bị
+mất badge dù dữ liệu của nó vẫn đúng trong DB (xem ảnh chụp: Ca B có "Tô Thành Lộc" không hiện "Đã
+lưu" trong khi "Danh Ngàn" hiện, dù cả 2 đều đã lưu thành công).
 
-#### 3. Phiếu báo thành phẩm — "Ca 1"/"Ca 2" phải sắp theo THỜI GIAN SẢN XUẤT THẬT trong ngày, không phải theo A→B→C cố định
+**Root cause đã fix (cùng ngày)**: `savedRowId` là 1 state `string | null` DÙNG CHUNG cho toàn bộ
+các dòng của cả 3 ca — mỗi lần lưu ghi đè giá trị này, nên chỉ dòng lưu gần nhất mới khớp điều kiện
+render `savedRowId === row.id`. Đã đổi sang `savedRowIds: Set<string>` — mỗi dòng lưu thành công tự
+thêm `id` của nó vào Set (không xóa của dòng khác); badge "Đã lưu" check qua `savedRowIds.has(row.id)`
+nên nhiều dòng cùng hiện "Đã lưu" độc lập nhau. Bổ sung thêm: `updateRow()` tự gỡ `id` khỏi Set
+ngay khi người dùng sửa lại BẤT KỲ field nào của dòng đó (tránh hiện "Đã lưu" sai khi form đã khác
+dữ liệu thật trong DB do chưa bấm Lưu lại); `handleDeleteRow()` cũng gỡ khỏi Set khi xóa dòng đã
+lưu (dọn dẹp, không ảnh hưởng hành vi vì dòng đã biến mất khỏi UI).
 
-**Hiện trạng** (`src/app/dashboard/product/confirm/actions.ts`): hằng số `CA_ORDER = ["A", "B",
-"C"]` (~dòng 1220) và `compareCaCode()` (~dòng 1221) sắp xếp section theo **chỉ số cố định trong
-mảng này** — Ca A luôn được gán nhãn "Ca 1" nếu có mặt trong ngày, bất kể ca đó thực tế làm buổi
-sáng hay buổi tối hôm đó. Dùng ở `loadShiftReportData()` (~dòng 1369, `.sort(compareCaCode)`) để
-gán `caLabel: "Ca ${idx+1}"` cho từng section trong phiếu PDF.
+`npx tsc --noEmit`, `npx eslint` sạch sau fix. **Chưa test tay lại fix này** — cần: lưu 2 dòng khác
+nhau (khác ca hoặc cùng ca) → xác nhận CẢ 2 cùng hiện "Đã lưu"; sửa 1 field của dòng đã có "Đã lưu"
+(chưa bấm Lưu lại) → xác nhận badge biến mất ngay; bấm Lưu lại → badge quay lại.
+
+#### 3. Phiếu báo thành phẩm — "Ca 1"/"Ca 2" phải sắp theo THỜI GIAN SẢN XUẤT THẬT trong ngày — ĐÃ FIX (2026-07-21)
+
+**Bug gốc** (`src/app/dashboard/product/confirm/actions.ts`): hằng số `CA_ORDER = ["A", "B", "C"]`
+và `compareCaCode()` sắp xếp section theo **chỉ số cố định trong mảng này** — Ca A luôn được gán
+nhãn "Ca 1" nếu có mặt trong ngày, bất kể ca đó thực tế làm buổi sáng hay buổi tối hôm đó.
 
 **Yêu cầu thật** (người dùng đưa 2 ví dụ đối xứng): "Ca 1" trong phiếu phải là ca nào **thực sự sản
 xuất trước trong ngày hôm đó** — nếu hôm nay Ca A làm ca ngày (5h-16h) và Ca B làm ca đêm
@@ -1336,15 +1345,45 @@ xuất trước trong ngày hôm đó** — nếu hôm nay Ca A làm ca ngày (5
 thì Ca B phải là "Ca 1" — tức **không được hard-code A luôn là Ca 1**, phải suy ra động theo dữ liệu
 sản xuất thật của đúng ngày đang in phiếu.
 
-**Hướng fix đề xuất**: `lot_transactions` không có cột giờ thật (chỉ có `ngay_nhap DATE` + `ca` +
-`created_at TIMESTAMPTZ` — thời điểm ghi nhận, không phải giờ sản xuất khai báo). Dùng `created_at`
-sớm nhất của MỖI ca trong ngày đó làm proxy hợp lý cho "ca nào bắt đầu báo cáo trước": thay
-`compareCaCode` (so theo index cố định) bằng 1 comparator động — với mỗi `ca` trong `byGroupKey`
-(hoặc trước khi build `sections`), tính `earliestCreatedAt = MIN(created_at)` của các dòng thuộc ca
-đó trong `rows` (đã có sẵn từ `loadDayTransactions`), rồi sort các section theo `earliestCreatedAt`
-tăng dần thay vì theo `CA_ORDER`. Cần verify với người dùng: có chấp nhận dùng `created_at` (giờ
-quét/nhập liệu) làm proxy cho "giờ sản xuất thật" không, hay cần thêm 1 cột giờ khai báo riêng (rủi
-ro: nếu nhập liệu trễ/dồn cuối ca thì `created_at` không phản ánh đúng thứ tự thật).
+**Đã fix** (`loadShiftReportData()`) — đúng phương án dùng `created_at` làm proxy, đã xác nhận lại
+với người dùng trước khi code:
+
+- Thêm `earliestCreatedAtByCa: Map<string, string>` — trong CHÍNH vòng lặp đang duyệt qua `rows`
+  để build `byGroupKey` (không thêm vòng lặp/query nào mới): với mỗi `row`, nếu ca đó chưa có
+  trong map thì ghi `row.created_at`. Vì `loadDayTransactions()` đã `.order("created_at", {
+  ascending: true })` từ trước, dòng ĐẦU TIÊN gặp của mỗi ca trong vòng lặp chính là dòng sớm nhất
+  — không cần `MIN()`/sort riêng.
+- `[...bySection.keys()].sort(compareCaCode)` đổi thành sort theo `earliestCreatedAtByCa.get(ca)`
+  tăng dần (so sánh chuỗi ISO timestamp bằng `localeCompare`), `compareCaCode` chỉ còn là
+  tie-breaker phụ khi 2 ca trùng/thiếu mốc thời gian (gần như không xảy ra vì `created_at` chính
+  xác tới mili-giây). `caLabel: "Ca ${idx+1}"` giữ nguyên logic, chỉ khác nguồn thứ tự `idx`.
+- Rủi ro đã biết và chấp nhận: nếu trực ca nhập liệu trễ/dồn cuối ca (quét QR sau khi đã sản xuất
+  xong nhiều giờ), `created_at` không phản ánh đúng giờ sản xuất thật — đây là hạn chế cố hữu vì
+  `lot_transactions` không có cột giờ sản xuất khai báo riêng, chỉ có `created_at` (thời điểm ghi
+  nhận). Chấp nhận được vì đây là dữ liệu thời gian thực tế DUY NHẤT đang có.
+
+`npx tsc --noEmit`, `npx eslint`, và `npm run build` đều sạch. **Chưa test tay** — cần: 1 ngày có
+cả Ca A và Ca B, Ca B có giao dịch đầu tiên SỚM HƠN Ca A (giả lập lịch đảo ca ngày/đêm) → xác nhận
+phiếu in ra đúng "Ca 1: B..." đứng trước "Ca 2: A...". Trường hợp thường ngày (Ca A làm trước Ca B
+như thường lệ) → xác nhận vẫn ra đúng "Ca 1: A" như trước, không có regression.
+
+**⚠️ Cập nhật quan trọng (2026-07-22) — bug vẫn tái hiện trên bản deploy, nghi ngờ do CHƯA PUSH/DEPLOY**:
+người dùng gửi phiếu PDF thật `cung_cap_dl/ptp.pdf` (sinh ngày 21/07/2026) chứng minh bug vẫn còn:
+Ca A (Sok Khum) có giao dịch đầu tiên lúc `18:50:51` nhưng vẫn bị in thành "Ca 1", trong khi Ca B
+(Binh Ban) có giao dịch đầu tiên SỚM HƠN nhiều — `10:40:21` cùng ngày — lại bị xuống "Ca 2" (ngược
+hoàn toàn với thứ tự thời gian thật, đúng kịch bản lỗi mục này mô tả).
+
+Đã đối chiếu lại code hiện tại (`loadShiftReportData()` trong `confirm/actions.ts`) — logic
+`earliestCreatedAtByCa` + sort theo thời gian sớm nhất **vẫn đang có mặt trong working tree và đọc
+đúng về mặt logic** (đã trace lại thủ công với đúng 2 mốc giờ trên: `"...T10:40:21..."` <
+`"...T18:50:51..."` nên Ca B phải ra "Ca 1" — khớp đúng kỳ vọng, không phát hiện lỗi logic mới).
+Nhưng `git log origin/main..HEAD` cho thấy **không có commit nào chưa push** — tức 5 commit gần nhất
+(kể cả `d61e1ec`) đã lên `origin/main` — trong khi `git status` lại cho thấy **chính đoạn code fix
+này (và nhiều thay đổi khác) vẫn đang nằm ở working tree CHƯA COMMIT**. Kết luận nhiều khả năng nhất:
+bản deploy production (nơi sinh ra `ptp.pdf`) đang chạy code **CŨ hơn** cả commit `d61e1ec`, tức fix
+này chưa từng được commit + push + deploy — không phải lỗi logic tái phát. Session sau cần xác minh
+lại giả thuyết này trước khi sửa code thêm (xem chi tiết việc cần làm ở cuối file, mục "Kế hoạch
+phiên sau").
 
 #### 4. UX "Đang chờ gửi" — không có lối vào trực tiếp sau khi thoát app, và Sửa chỉ áp dụng cho giao dịch đã gửi (chưa áp dụng cho draft)
 
@@ -1553,3 +1592,12 @@ Dùng khi người dùng báo lô hiển thị sai trạng thái sau khi thao t�
 - Danh sách hiển thị theo ngày, bấm mở rộng mới thấy chi tiết từng dòng.
 - Header ngày phải có tổng `Tươi/Khô` và action của ngày.
 - Thống kê phải hiển thị được khối lượng các loại nguyên liệu tươi/khô.
+
+## 8. Ghi chú lô (`lots.ghi_chu`) bắt buộc chọn từ danh mục (Cập nhật 2026-07-22)
+
+Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-settings-master-data.md` mục "4.11. Ghi chú bắt buộc". Tóm tắt riêng phạm vi Thành phẩm:
+
+- 3 nơi nhập `ghi_chu` của lô đều đổi từ `<input list="...">` (datalist) sang `RequiredNoteSelect` (`src/app/dashboard/_components/required-note-select.tsx`): form tạo phiên sản lượng mới (`product/page.tsx`, field `session.ghi_chu`), modal "Sửa theo ngày" (`dateEditHeader.ghi_chu`), và `product/confirm/page.tsx` (luồng quét QR mobile, `product_confirm_drafts.ghi_chu` — trước đó là `<textarea>` tự do hoàn toàn, không có gợi ý/quick-add).
+- **Modal "Sửa transaction thành phẩm"** (`editModal`/`editForm` trong `product/page.tsx`) **KHÔNG có và KHÔNG cần thêm** field sửa `ghi_chu` — banner amber trong chính modal đó đã ghi rõ: "Header chung như ngày SX, hậu tố, ngăn và ghi chú được sửa ở modal theo ngày. Màn này chỉ sửa chi tiết riêng của transaction đang chọn." `editForm.ghi_chu` tồn tại trong state/type/payload chỉ để pass-through giữ nguyên giá trị hiện có của lô khi lưu transaction, không phải field còn thiếu UI.
+- Đã bỏ 3 hàm `handleAddRequiredNote`/`handleAddSessionRequiredNote` cục bộ (mỗi hàm lặp lại y hệt logic `window.prompt` + `createRequiredNote`) — nay nằm gọn trong `RequiredNoteSelect`.
+- State `requiredNotes: string[]` trong `product/page.tsx` vẫn giữ nguyên — vẫn cần cho filter `<select>` (Pattern A, lọc danh sách theo `ghi_chu`), không liên quan tới các input đã đổi.

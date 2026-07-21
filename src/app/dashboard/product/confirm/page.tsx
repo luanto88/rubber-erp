@@ -63,6 +63,7 @@ import {
 } from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
 
 const LAST_CA_STORAGE_KEY = "product_confirm_last_ca";
 const CA_STORAGE_VALUES = ["A", "B", "C"] as const;
@@ -1214,12 +1215,12 @@ export default function ConfirmKienProductionPage() {
 
                 {lookup.isNewLot && (
                   <Field label={tt("ghiChu")}>
-                    <textarea
+                    <RequiredNoteSelect
+                      factoryId={factoryId}
                       value={ghiChu}
-                      onChange={(e) => setGhiChu(e.target.value)}
-                      rows={2}
-                      placeholder={tt("ghiChuPlaceholder")}
+                      onChange={setGhiChu}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                      onError={setDraftSaveError}
                     />
                   </Field>
                 )}

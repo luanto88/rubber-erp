@@ -9,6 +9,7 @@ export type WarnCode =
   | "ZERO_KL"
   | "DUPLICATE_IN_FILE"
   | "DUPLICATE_IN_SYSTEM"
+  | "UNKNOWN_NOTE"
 
 export interface ProductionRecord {
   id: string
@@ -138,6 +139,16 @@ export const WARN_SEVERITY: Record<string, "red" | "amber" | "slate"> = {
 
 WARN_LABELS.DUPLICATE_IN_SYSTEM = "Đã có sản lượng trùng trong hệ thống"
 WARN_SEVERITY.DUPLICATE_IN_SYSTEM = "amber"
+
+WARN_LABELS.UNKNOWN_NOTE = "Ghi chú lạ — chưa có trong danh mục"
+WARN_SEVERITY.UNKNOWN_NOTE = "red"
+
+// 2 mã DUY NHẤT thực sự chặn import (throw Error trong handleConfirm), khác với phần còn
+// lại của warn_codes vốn chỉ là thông tin tham khảo, không chặn nghiệp vụ (xem
+// .claude/rules/15-output-module.md). DUPLICATE_IN_FILE chặn toàn bộ file (lỗi cấu trúc,
+// không thể bỏ qua từng dòng); UNKNOWN_NOTE chặn theo từng dòng, có thể "Nhập phần hợp lệ,
+// bỏ qua phần lỗi" ở bước xem trước.
+export const BLOCKING_WARN_CODES: ReadonlySet<WarnCode> = new Set(["DUPLICATE_IN_FILE", "UNKNOWN_NOTE"])
 
 type DispatchKg = {
   mn_tuoi: number

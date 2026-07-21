@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
-import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import {
   addDaysISO,
@@ -246,10 +247,13 @@ export default function StoragePage() {
     () => new Set(dispatchTrips.map((trip) => trip.ref).filter(Boolean)),
     [dispatchTrips],
   )
-  const tripNoteOptions = useMemo(
-    () => [EMPTY_NOTE_FILTER, ...new Set(dispatchTrips.map((trip) => trip.ghi_chu.trim()).filter(Boolean))],
-    [dispatchTrips],
-  )
+  // Hợp của danh mục required_notes ∪ giá trị lịch sử còn tồn tại trong dữ liệu điều xe —
+  // giữ khả năng lọc các chuyến cũ mang ghi chú tự do (trước khi ô Ghi chú của Điều xe
+  // chuyển sang dropdown cứng), không chỉ dùng riêng danh mục chuẩn.
+  const tripNoteOptions = useMemo(() => {
+    const historical = dispatchTrips.map((trip) => trip.ghi_chu.trim()).filter(Boolean)
+    return [EMPTY_NOTE_FILTER, ...new Set([...requiredNotes, ...historical])]
+  }, [dispatchTrips, requiredNotes])
   const noteFilteredTrips = useMemo(
     () => dispatchTrips.filter((trip) => matchesNoteFilterMulti(trip.ghi_chu, tripNoteFilter)),
     [dispatchTrips, tripNoteFilter],
@@ -657,18 +661,6 @@ export default function StoragePage() {
   const [nganStatusSavingId, setNganStatusSavingId] = useState<string | null>(null)
   const [nganSyncingId, setNganSyncingId] = useState<string | null>(null)
   const [nganSyncMessage, setNganSyncMessage] = useState<Record<string, string>>({})
-  const handleAddRequiredNote = async () => {
-    if (!factoryId) return
-    const input = window.prompt("Nhập ghi chú mới")
-    if (!input || !input.trim()) return
-    try {
-      const row = await createRequiredNote(supabase, factoryId, input)
-      setRequiredNotes((prev) => prev.includes(row.content) ? prev : [...prev, row.content])
-      updateForm({ ghi_chu: row.content })
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú")
-    }
-  }
 
   const handleSave = async () => {
     if (!factoryId) return
@@ -1934,17 +1926,14 @@ export default function StoragePage() {
 
               {/* Mã ngăn (auto-generated, read-only) */}
               <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-600 block">Ghi chú</label>
-                  <button type="button" onClick={() => void handleAddRequiredNote()} className="text-xs font-bold text-amber-700 hover:text-amber-800">
-                    + Thêm ghi chú mới
-                  </button>
-                </div>
-                <input list="storage-required-notes" value={form.ghi_chu} onChange={e => updateForm({ ghi_chu: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="Ghi chú (tùy chọn)" />
-                <datalist id="storage-required-notes">
-                  {requiredNotes.map(note => <option key={note} value={note} />)}
-                </datalist>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
+                <RequiredNoteSelect
+                  factoryId={factoryId}
+                  value={form.ghi_chu}
+                  onChange={(v) => updateForm({ ghi_chu: v })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  onError={setSaveError}
+                />
               </div>
 
               <div>

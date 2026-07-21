@@ -24,11 +24,12 @@ import {
   dedupeLotsByMaLo,
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
-import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes";
+import { loadRequiredNotes } from "@/lib/required-notes";
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
+import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
 import {
   InventoryImageUploadGroup,
 } from "@/app/dashboard/inventory/_components/inventory-image-upload";
@@ -3582,20 +3583,6 @@ export default function ProductPage() {
     }
   };
 
-  const handleAddSessionRequiredNote = async () => {
-    if (!factoryId) return;
-    const input = window.prompt("Nhập ghi chú mới");
-    if (!input || !input.trim()) return;
-    try {
-      const row = await createRequiredNote(supabase, factoryId, input);
-      setRequiredNotes((prev) =>
-        prev.includes(row.content) ? prev : [...prev, row.content],
-      );
-      updateSession({ ghi_chu: row.content });
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Không thêm được ghi chú");
-    }
-  };
   const handleDelete = async (
     uid: string,
     options?: { skipReload?: boolean },
@@ -4001,29 +3988,16 @@ export default function ProductPage() {
           </div>
 
           <div className="mb-3">
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-600 block">
-                Ghi chú
-              </label>
-              <button
-                type="button"
-                onClick={() => void handleAddSessionRequiredNote()}
-                className="text-xs font-bold text-amber-700 hover:text-amber-800"
-              >
-                + Thêm ghi chú mới
-              </button>
-            </div>
-            <input
-              list="product-session-required-notes"
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              Ghi chú
+            </label>
+            <RequiredNoteSelect
+              factoryId={factoryId}
               value={session.ghi_chu}
-              onChange={(e) => updateSession({ ghi_chu: e.target.value })}
+              onChange={(v) => updateSession({ ghi_chu: v })}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+              onError={setSaveError}
             />
-            <datalist id="product-session-required-notes">
-              {requiredNotes.map((note) => (
-                <option key={note} value={note} />
-              ))}
-            </datalist>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
@@ -6052,14 +6026,16 @@ export default function ProductPage() {
                         <label className="text-xs font-bold text-slate-600 block mb-1.5">
                           Ghi chú
                         </label>
-                        <input
+                        <RequiredNoteSelect
+                          factoryId={factoryId}
                           value={dateEditHeader.ghi_chu}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setDateEditHeader((prev) =>
-                              prev ? { ...prev, ghi_chu: e.target.value } : prev,
+                              prev ? { ...prev, ghi_chu: v } : prev,
                             )
                           }
                           className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                          onError={setSaveError}
                         />
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">

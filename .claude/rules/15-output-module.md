@@ -307,6 +307,12 @@ const loadDispatches = useCallback(async (fid: string) => {
 
 ---
 
+## Bug đã fix 2026-07-21 — RLS `production_records` chặn user được cấp quyền qua Cài đặt
+
+- Migration `supabase/migrations/20260721_production_records_permission_rls.sql` (**cần chạy thủ công**) — trước đó policy ghi (`production_records_write_manager`) hard-code `role in ('admin','manager')`, bỏ qua hoàn toàn `user_permissions`/`role_permissions`. Tài khoản `role='user'` được admin cấp riêng `output.create`/`output.import`/`output.edit` qua `Cài đặt → Phân quyền` vẫn bị Postgres chặn với lỗi `new row violates row-level security policy for table "production_records"` dù UI (`hasPermission()`) đã cho phép — chỉ admin (role thật `admin`) mới qua được.
+- Đã thay bằng hàm `current_profile_has_permission(p_code)` (mirror đúng logic `fetchPermissionCodesForUser()` ở `src/lib/auth.ts`: có cấp quyền tường minh thì CHỈ dùng đúng tập đó, không cộng thêm `role_permissions`) + 3 policy insert/update/delete riêng theo đúng `output.create`/`output.edit`/`output.delete`, cộng `output.import` OR vào cả 3 (vì `output-import.tsx` vừa insert dòng mới, vừa update dòng trùng khóa, vừa delete dòng trùng lịch sử trong 1 lượt import).
+- Nếu tạo bảng mới có RLS ghi trong tương lai và bảng đó có permission code riêng (`<module>.create/edit/delete`), **không** hard-code `role in (...)` trong policy — phải dùng `current_profile_has_permission()` để tôn trọng quyền cấp riêng qua Cài đặt, đúng như thiết kế hệ thống phân quyền `module + action`.
+
 ## Quy tắc quan trọng
 
 - Mọi query phải filter `factory_id`
@@ -355,3 +361,17 @@ const loadDispatches = useCallback(async (fid: string) => {
 - `dispatch_entry_rows` la source of truth cho chi tiet dieu xe, gom `diem_gn`, `tai_xe`, `so_xe`, `chuyen` va cac truong KL/DRC.
 - `dispatch_entries.rows` chi con la cache legacy. Neu he thong van con giu cot nay, write-back cap nhat `dispatch_entry_rows` truoc roi moi sync lai cache.
 - Banner doi soat, form manual, thong ke va PDF phai so sanh tren tap rows da resolve tu `dispatch_entry_rows`, khong duoc coi `dispatch_entries.rows` la nguon chinh.
+
+> **Đính chính 2026-07-21**: mô tả trên đã lỗi thời. Cột JSONB `dispatch_entries.rows` mới là nguồn thật hiện tại (`writeBackToDispatch` trong `output-types.ts` đọc/ghi thẳng cột này, không đụng bảng vật lý `dispatch_entry_rows`) — xem đính chính đầy đủ tại `.claude/rules/19-dispatch-module.md` mục "Đính chính quan trọng 2026-07-21".
+
+## Ghi chú (`production_records.ghi_chu`) bắt buộc chọn từ danh mục (Cập nhật 2026-07-22)
+
+Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-settings-master-data.md` mục "4.11. Ghi chú bắt buộc". Tóm tắt riêng phạm vi Sản lượng:
+
+- Form nhập/sửa thủ công (`output-form.tsx`) đổi từ `<input list="...">` sang `RequiredNoteSelect` (`src/app/dashboard/_components/required-note-select.tsx`) — chỉ chọn được từ `required_notes`, quick-add tích hợp sẵn (đã bỏ hàm `handleAddRequiredNote` cục bộ).
+- **Import Excel (`output-import.tsx`) — ghi chú lạ CHẶN import, khác các `warn_codes` còn lại**: thêm `WarnCode` mới `UNKNOWN_NOTE` (chưa khớp `required_notes`, case-insensitive sau trim; rỗng luôn hợp lệ vì `ghi_chu` optional) và hằng số `BLOCKING_WARN_CODES = new Set(["DUPLICATE_IN_FILE", "UNKNOWN_NOTE"])` trong `output-types.ts`. Câu quy tắc cũ bên dưới ("Bản ghi có cảnh báo vẫn được lưu... không chặn nghiệp vụ") **có ngoại lệ 2 mã này** — `handleConfirm()` đã chặn cứng `DUPLICATE_IN_FILE` từ trước (throw Error, code cũ hơn tài liệu), nay `UNKNOWN_NOTE` cũng chặn tương tự nhưng theo cơ chế khác (xem dưới).
+- UX xử lý `UNKNOWN_NOTE` ở bước Xem trước (3 lớp, không phải chặn cứng vô điều kiện):
+  1. **Sửa trực tiếp từng dòng**: ô "Ghi chú" của dòng có cảnh báo tự đổi thành `RequiredNoteSelect` compact ngay trong bảng preview — chọn giá trị đúng hoặc quick-add tại chỗ, tự xóa cảnh báo của đúng dòng đó.
+  2. **Panel duyệt hàng loạt**: phía trên bảng liệt kê từng GIÁ TRỊ ghi chú lạ khác nhau kèm số dòng bị ảnh hưởng, nút "Thêm vào danh mục" xử lý 1 lần cho tất cả dòng cùng giá trị đó (`handleBulkAddNote`).
+  3. **Van an toàn**: nút phụ "Nhập N dòng hợp lệ, bỏ qua M dòng lỗi" (`handleConfirm({ skipInvalidNotes: true })`) — chỉ loại các dòng còn `UNKNOWN_NOTE`, không đụng logic `DUPLICATE_IN_FILE` (mã đó vẫn chặn toàn bộ file, không cho bỏ qua từng dòng vì là lỗi cấu trúc file). Kết quả Bước 3 hiện thêm dòng "N dòng đã bị bỏ qua do ghi chú không hợp lệ" nếu có (`importResult.skippedInvalidNote`).
+- Nút xác nhận chính bị `disabled` khi còn `DUPLICATE_IN_FILE` hoặc `UNKNOWN_NOTE` chưa xử lý; nút "Nhập phần hợp lệ" chỉ hiện khi có `UNKNOWN_NOTE` và KHÔNG có `DUPLICATE_IN_FILE` đồng thời.
