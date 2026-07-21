@@ -24,6 +24,7 @@ import {
   type ProductLabelItem,
 } from "@/lib/product-label-pdf";
 import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
+import { countPendingCarryOpenKien } from "@/app/dashboard/product/predict/lot-prediction-utils";
 import {
   loadPredictAvailableNgans,
   previewLotPrediction,
@@ -244,6 +245,13 @@ export default function ProductPredictPage() {
     void loadClosed(factoryId);
   }, [factoryId, loadNgans, loadHistory, loadClosed]);
 
+  // Số kiện sẽ được RPC gán cho ngăn tiêu thụ đầu tiên nếu người dùng chọn "Tiếp tục lô dở
+  // dang" — dùng cả trong preview effect (tính usedKg) lẫn banner hiển thị breakdown bên dưới.
+  const continuationOpenKienCount = useMemo(
+    () => (pendingCarry && carryResolution === "continue" ? countPendingCarryOpenKien(pendingCarry) : 0),
+    [pendingCarry, carryResolution],
+  );
+
   // Bước 2 → tính preview N_max (ước tính: tổng dung lượng khả dụng của TẤT CẢ ngăn đã
   // chọn / KL 1 lô — kết quả thật có thể lệch chút do làm tròn từng ranh giới ngăn, nhưng
   // đủ để tham khảo trước khi tạo dự đoán thật)
@@ -254,9 +262,22 @@ export default function ProductPredictPage() {
     }
     let alive = true;
     setPreviewLoading(true);
+    // Ngăn tiêu thụ ĐẦU TIÊN (theo đúng thứ tự orderedNganIds mà createLotPredictionBatchMulti
+    // sẽ dùng) là ngăn duy nhất nhận continuation khi người dùng chọn "Tiếp tục lô dở dang" —
+    // cộng đúng KL đó vào preview của riêng ngăn này TRƯỚC khi tạo thật, tránh bug % hiển thị
+    // sai lúc chọn ngăn (chỉ đúng sau khi tạo xong, lúc in nhãn mới đọc lại trạng thái ngăn
+    // thật). Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-21".
+    const firstNganId = orderedNganIds[0];
     Promise.all(
       selectedNgans.map((n) =>
-        previewLotPrediction({ factoryId, nganId: n.id, tongKho: n.tong_kho, loaiCsr, loaiBanh }),
+        previewLotPrediction({
+          factoryId,
+          nganId: n.id,
+          tongKho: n.tong_kho,
+          loaiCsr,
+          loaiBanh,
+          continuationKienCount: n.id === firstNganId ? continuationOpenKienCount : 0,
+        }),
       ),
     )
       .then((results) => {
@@ -293,7 +314,7 @@ export default function ProductPredictPage() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [factoryId, selectedNganIds, loaiCsr, loaiBanh]);
+  }, [factoryId, selectedNganIds, loaiCsr, loaiBanh, continuationOpenKienCount, orderedNganIds]);
 
   // Kiểm tra carry-over pending mỗi khi đổi series (CSR + bành)
   useEffect(() => {
@@ -450,6 +471,7 @@ export default function ProductPredictPage() {
             kien_b_ngan_id: null,
             kien_c_ngan_id: null,
             kien_d_ngan_id: null,
+            unassignable_kien: [],
           });
           setCarryResolution(null);
         } else {
@@ -1010,6 +1032,14 @@ export default function ProductPredictPage() {
                         {!outOfCapacity && singleNgan && liveCalc && (
                           <div className="mt-1 text-xs font-bold text-emerald-700">
                             Tỷ lệ ngăn sau khi tạo: ~{liveCalc.livePct.toFixed(1)}% (mục tiêu 100-105%)
+                          </div>
+                        )}
+                        {continuationOpenKienCount > 0 && pendingCarry && (
+                          <div className="mt-1 text-xs font-semibold text-amber-700">
+                            Đã cộng ~{Math.round(continuationOpenKienCount * preview.kienWeightKg)} kg
+                            ({continuationOpenKienCount} kiện) tiếp tục lô dở dang{" "}
+                            <span className="font-mono">{pendingCarry.ma_lo}</span> vào ngăn{" "}
+                            <span className="font-mono">{ngansById.get(orderedNganIds[0])?.ma_ngan}</span> ở trên.
                           </div>
                         )}
                         {!outOfCapacity && (

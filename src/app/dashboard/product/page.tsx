@@ -62,6 +62,7 @@ import {
   Wand2,
   FileDown,
   Loader2,
+  ScanLine,
 } from "lucide-react";
 
 // Types
@@ -4778,6 +4779,14 @@ export default function ProductPage() {
               className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
             >
               <Wand2 size={15} /> Dự đoán số lô
+            </Link>
+          )}
+          {hasPermission(currentUser, "product.confirm_scan") && (
+            <Link
+              href="/dashboard/product/confirm"
+              className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
+            >
+              <ScanLine size={15} /> Quét QR xác nhận SX
             </Link>
           )}
           <button

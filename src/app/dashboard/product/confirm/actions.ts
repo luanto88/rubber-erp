@@ -650,6 +650,11 @@ export async function loadUserChucVu(factoryId: string, profileId: string | null
 // production_shift_assignments) — dùng để tự gợi ý đúng "Ca sản xuất" khi mở form quét QR thay
 // vì luôn mặc định "A". Trả về null khi chưa được gán/không active — page.tsx tự fallback sang
 // Ca đã dùng gần nhất trên chính thiết bị (localStorage), rồi cuối cùng mới về "A".
+//
+// Dùng .limit(1) thay .maybeSingle() — kể cả trước khi cho phép nhiều người/ca (migration
+// 20260721), 1 user vẫn có thể được gán cho NHIỀU ca khác nhau cùng lúc (không có ràng buộc nào
+// chặn 1 assigned_user_id xuất hiện ở cả 3 dòng A/B/C), nên .maybeSingle() vốn đã không an toàn
+// nếu gặp đúng trường hợp đó. Chỉ cần 1 gợi ý mặc định, lấy dòng cũ nhất cho ổn định.
 export async function loadUserShiftAssignment(factoryId: string, userId: string | null): Promise<string | null> {
   if (!userId) return null;
   const supabase = getSupabaseAdmin();
@@ -659,8 +664,9 @@ export async function loadUserShiftAssignment(factoryId: string, userId: string 
     .eq("factory_id", factoryId)
     .eq("assigned_user_id", userId)
     .eq("is_active", true)
-    .maybeSingle();
-  return data?.ca ?? null;
+    .order("created_at", { ascending: true })
+    .limit(1);
+  return data?.[0]?.ca ?? null;
 }
 
 const KIEN_ORDER: KienLetter[] = ["A", "B", "C", "D"];
@@ -1604,6 +1610,110 @@ export async function deleteDraft(draftId: string, userId: string): Promise<Dele
     return {
       success: false,
       error: error instanceof Error ? error.message : "Lỗi không xác định khi xóa nháp.",
+    };
+  }
+}
+
+export type UpdateDraftKienInput = {
+  draftId: string;
+  factoryId: string;
+  userId: string;
+  nganId: string;
+  soBanh: number;
+  ngaySx: string;
+  ca: string;
+  boc: string;
+  pallet: string[];
+  chiThi: string | null;
+  tham: string | null;
+  ghiChu: string | null;
+};
+
+export type UpdateDraftKienResult = { success: true } | { success: false; error: string };
+
+// Sửa 1 nháp CHƯA gửi — chỉ chủ nháp mới sửa được (re-check qua created_by, không tin caller).
+// Vì nháp chưa từng qua RPC submit_confirm_draft_batch (chưa ghi lot_transactions/sync trạng
+// thái lô), sửa nháp đơn giản hơn nhiều so với sửa giao dịch đã gửi (editShiftHistoryEntry) —
+// không cần lo sync_lot_master_snapshot hay điều kiện "lô còn Dở dang" (draft luôn thuộc lô
+// chưa tròn theo bản chất), chỉ UPDATE thẳng product_confirm_drafts sau khi re-check lại đúng
+// max_per_kien (cộng bành đã gửi thật + nháp KHÁC của BẤT KỲ ai cho cùng kiện, TRỪ chính nháp
+// đang sửa — mirror cách saveDraftKien tính totalClaimed). Xem
+// .claude/rules/06-module-production.md mục "4b".
+export async function updateDraftKien(input: UpdateDraftKienInput): Promise<UpdateDraftKienResult> {
+  if (!input.soBanh || input.soBanh <= 0) return { success: false, error: "Số bành phải lớn hơn 0." };
+  if (!input.nganId) return { success: false, error: "Chưa xác định ngăn nguồn cho kiện này." };
+  if (!input.boc) return { success: false, error: "Chưa chọn bọc." };
+  if (!input.pallet || input.pallet.length === 0) return { success: false, error: "Chưa chọn loại pallet." };
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: draft, error: draftErr } = await supabase
+      .from("product_confirm_drafts")
+      .select("id, ma_lo, kien, loai_csr, loai_banh, created_by, factory_id")
+      .eq("id", input.draftId)
+      .maybeSingle();
+    if (draftErr || !draft) return { success: false, error: "Không tìm thấy nháp cần sửa." };
+    if (draft.created_by !== input.userId) return { success: false, error: "Không có quyền sửa nháp này." };
+    if (draft.factory_id !== input.factoryId) return { success: false, error: "Nháp không thuộc nhà máy hiện tại." };
+
+    const kien = draft.kien as KienLetter;
+    const config = getLoaiBanhConfig(draft.loai_csr, Number(draft.loai_banh));
+    const soKg = Math.round(input.soBanh * Number(draft.loai_banh) * 100) / 100;
+
+    const [{ data: existingLot }, { data: otherDraftRows }] = await Promise.all([
+      supabase.from("lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", draft.ma_lo).maybeSingle(),
+      supabase
+        .from("product_confirm_drafts")
+        .select("so_banh")
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", draft.ma_lo)
+        .eq("kien", kien)
+        .neq("id", input.draftId),
+    ]);
+    let committedBanh = 0;
+    if (existingLot) {
+      const kienKey = KIEN_LOWER[kien];
+      const { data: txRows } = await supabase
+        .from("lot_transactions")
+        .select(`kien_${kienKey}`)
+        .eq("lot_id", existingLot.id);
+      committedBanh = (txRows || []).reduce(
+        (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
+        0,
+      );
+    }
+    const otherDraftBanh = (otherDraftRows || []).reduce((sum, r) => sum + Number(r.so_banh || 0), 0);
+    const totalClaimed = committedBanh + otherDraftBanh;
+    if (totalClaimed + input.soBanh > config.max_per_kien) {
+      const remaining = Math.max(0, config.max_per_kien - totalClaimed);
+      return {
+        success: false,
+        error: `Kiện ${kien} của lô ${draft.ma_lo} đã có ${totalClaimed} bành (đã gửi + nháp khác), chỉ được sửa tối đa ${remaining} bành.`,
+      };
+    }
+
+    const { error: updateError } = await supabase
+      .from("product_confirm_drafts")
+      .update({
+        ngan_id: input.nganId,
+        so_banh: input.soBanh,
+        so_kg: soKg,
+        ngay_sx: input.ngaySx,
+        ca: input.ca,
+        boc: input.boc,
+        pallet: input.pallet,
+        chi_thi: input.chiThi,
+        tham: input.tham,
+        ghi_chu: input.ghiChu,
+      })
+      .eq("id", input.draftId)
+      .eq("created_by", input.userId);
+    if (updateError) return { success: false, error: updateError.message };
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Lỗi không xác định khi sửa nháp.",
     };
   }
 }

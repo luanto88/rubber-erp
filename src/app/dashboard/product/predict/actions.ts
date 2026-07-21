@@ -266,6 +266,10 @@ export type PendingCarryLot = {
   kien_b_ngan_id: string | null;
   kien_c_ngan_id: string | null;
   kien_d_ngan_id: string | null;
+  // Kiện đã có thật ngoài đời (không qua dự đoán) — không được tính vào số kiện "sẽ tiếp tục".
+  // Dùng bởi countPendingCarryOpenKien() để ước tính đúng KL cộng thêm vào preview % khi người
+  // dùng chọn "Tiếp tục lô dở dang". Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-21".
+  unassignable_kien: string[];
 };
 
 export async function findPendingCarryLot(
@@ -277,7 +281,7 @@ export async function findPendingCarryLot(
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("lot_prediction_lots")
-    .select("id,ma_lo,num,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
+    .select("id,ma_lo,num,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id,unassignable_kien")
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .eq("loai_banh", loaiBanh)
@@ -296,6 +300,12 @@ export type PredictPreviewInput = {
   tongKho: number;
   loaiCsr: string;
   loaiBanh: number;
+  // Số kiện sẽ được RPC gán cho ĐÚNG ngăn này nếu người dùng chọn "Tiếp tục lô dở dang" — cộng
+  // thêm vào usedKg TRƯỚC khi tính availableKg, để preview % không còn bị hụt so với thực tế
+  // sau khi tạo (bug đã xác nhận: preview cũ không biết gì về continuation, chỉ đúng lúc in
+  // nhãn). Chỉ truyền non-zero cho ngăn tiêu thụ ĐẦU TIÊN — xem countPendingCarryOpenKien() và
+  // .claude/rules/06-module-production.md mục "Cập nhật 2026-07-21".
+  continuationKienCount?: number;
 };
 
 export type PredictPreview = {
@@ -317,7 +327,8 @@ export async function previewLotPrediction(
     getNganReservedKg(input.factoryId, input.nganId),
   ]);
   const capKg = Number(input.tongKho || 0) * 1.1;
-  const usedKg = existingRealKg + existingPredictedKg + reservedKg;
+  const continuationKg = (input.continuationKienCount || 0) * kienW;
+  const usedKg = existingRealKg + existingPredictedKg + reservedKg + continuationKg;
   const availableKg = Math.max(0, capKg - usedKg);
   const suggestedLotCount = Math.floor(availableKg / lotW);
   return { kienWeightKg: kienW, lotWeightKg: lotW, availableKg, suggestedLotCount };

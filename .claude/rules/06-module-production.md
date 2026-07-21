@@ -1205,6 +1205,261 @@ thêm ở tầng UI.
   nhận pre-fill đúng. Mở "Xem/Tạo lại phiếu PDF" cho cùng ngày → xác nhận PDF hiện đúng Bọc/Pallet/
   Số chỉ thị cho các dòng nhập tay.
 
+### Kế hoạch phiên sau (2026-07-21) — 5 mục CHƯA LÀM, mới khảo sát + định vị code
+
+Người dùng báo 5 vấn đề/yêu cầu tiếp theo sau đợt fix ở trên. Phiên này **chỉ khảo sát và định vị
+chính xác vị trí code liên quan**, chưa sửa gì — ghi lại đầy đủ để phiên sau bắt tay ngay không phải
+dò lại từ đầu.
+
+#### 1. Dự đoán số lô — tỷ lệ % hiển thị lúc chọn ngăn KHÔNG cộng phần lô dở dang sẽ "tiếp tục"
+
+**ĐÃ FIX (2026-07-21)** — đúng theo hướng fix đề xuất bên dưới:
+
+- `PredictPreviewInput` (`predict/actions.ts`) thêm `continuationKienCount?: number`;
+  `previewLotPrediction()` cộng `continuationKienCount * kienW` vào `usedKg` TRƯỚC khi tính
+  `availableKg`/`suggestedLotCount`.
+- `PendingCarryLot` thêm field `unassignable_kien: string[]` (đã bổ sung vào `SELECT` của
+  `findPendingCarryLot()`); hàm mới `countPendingCarryOpenKien(pending)` mirror đúng điều kiện
+  của nhánh `v_continue` trong RPC (`kien_X_ngan_id IS NULL AND kien X không nằm trong
+  unassignable_kien`) để đếm đúng số kiện sẽ thực sự được gán khi "Tiếp tục". Hàm này **không**
+  đặt trong `predict/actions.ts` (file `"use server"` — mọi export ở đây bắt buộc phải là async
+  function theo ràng buộc build-time của Next.js Server Actions, `npm run build` chặn cứng nếu
+  vi phạm dù `tsc`/`eslint` không phát hiện) — tách sang file thuần mới
+  `predict/lot-prediction-utils.ts`, import `type PendingCarryLot` từ `actions.ts`.
+- `predict/page.tsx`: `useMemo` `continuationOpenKienCount` (chỉ > 0 khi `pendingCarry` tồn tại
+  VÀ `carryResolution === "continue"`) truyền vào `previewLotPrediction()` **chỉ cho
+  `orderedNganIds[0]`** (ngăn tiêu thụ đầu tiên theo đúng thứ tự `createLotPredictionBatchMulti`
+  sẽ dùng) — các ngăn khác trong lựa chọn nhiều-ngăn truyền `0`, đúng quy tắc "carry-over chỉ áp
+  dụng cho ngăn đầu tiên". Effect tính preview thêm `continuationOpenKienCount`/`orderedNganIds`
+  vào dependency array — đổi lựa chọn "Tiếp tục"/"Bỏ qua" giờ tự động tính lại % ngay lập tức,
+  không cần đợi tạo xong mới thấy đúng số.
+- Thêm banner breakdown màu amber ngay dưới dòng "Tỷ lệ ngăn sau khi tạo" khi
+  `continuationOpenKienCount > 0`: "Đã cộng ~X kg (N kiện) tiếp tục lô dở dang {ma_lo} vào ngăn
+  {ma_ngan} ở trên." — giải thích tại sao % tăng đột ngột sau khi chọn "Tiếp tục", đúng yêu cầu ở
+  mục "Hướng fix đề xuất".
+
+`npx tsc --noEmit`/`npx eslint` sạch. **Chưa test tay** — cần đúng kịch bản gốc: ngăn có lô dở
+dang cùng series đang chờ tiếp tục (banner amber "Có lô dở dang... đang chờ nối tiếp" xuất hiện)
+→ preview % TRƯỚC khi bấm "Tiếp tục" phải khớp đúng con số cũ (không tính continuation) → bấm
+"Tiếp tục lô dở dang" → preview % phải NHẢY LÊN NGAY LẬP TỨC phản ánh đúng phần cộng thêm, kèm
+banner breakdown giải thích rõ; bấm lại "Bỏ qua, bắt đầu lô mới" → % phải quay về đúng số cũ. Đối
+chiếu số cuối cùng sau khi bấm "Tạo dự đoán" (đọc qua tab Lịch sử hoặc lúc in nhãn) phải khớp với
+số preview đã hiển thị trước đó.
+
+**Triệu chứng thật (mô tả bug gốc, tham chiếu lịch sử)** (người dùng mô tả): ngăn 5.1, `tong_kho` quy khô 19.220 kg. Dự đoán 3 lô mới
+(mỗi lô 4 kiện) = 16.380 kg → hiện đúng 85,22%. Khi hệ thống phát hiện có lô dở dang `1140` cùng
+series (đã có kiện A, còn thiếu B/C/D) và người dùng chọn "Tiếp tục lô dở dang", RPC
+`create_lot_prediction_batch` **thực sự cộng thêm** 3 kiện của lô 1140 vào cùng đợt tạo — tổng tiêu
+thụ thật của ngăn lên tới 104,89% — nhưng **con số 85,22% không được cập nhật lại** ở bất kỳ đâu
+trong lúc người dùng còn đang thao tác; chỉ tới khi in nhãn (đọc lại state ngăn thật sự) mới thấy
+đúng 104,89%. Người dùng ra quyết định (số lô muốn tạo, số kiện lẻ...) dựa trên con số sai suốt cả
+quá trình.
+
+**Root cause đã xác định chính xác qua đọc code** (`src/app/dashboard/product/predict/`):
+
+- `actions.ts`, hàm `previewLotPrediction()` (~dòng 308-324): tính `availableKg = capKg -
+  existingRealKg - existingPredictedKg - reservedKg` — **hoàn toàn không biết gì về lô dở dang đang
+  chờ tiếp tục** (`findPendingCarryLot()`/`findRealContinuationForSeries()`, cũng trong file này,
+  không được gọi ở đây).
+- `page.tsx`, biến `liveCalc` (~dòng 380-396): `livePct` tính thuần từ `preview.availableKg` —
+  thừa hưởng đúng lỗ hổng trên vì không có input nào về continuation.
+- Quyết định "Tiếp tục lô dở dang" (biến `carryResolution`/banner hỏi người dùng) diễn ra **sau**
+  khi ngăn/CSR đã chọn và preview đã hiển thị — về mặt luồng, thời điểm hỏi carry-over và thời điểm
+  tính preview % là 2 bước tách rời, preview không "biết trước" người dùng sẽ chọn continue.
+  Nhánh `v_continue` trong RPC (SQL, xem mục "4.6" phần trên) mới là nơi DUY NHẤT cộng đúng số kiện
+  còn thiếu của lô dở dang vào tổng — không có bản sao logic này ở phía client để preview trước.
+- Con số ĐÚNG cuối cùng chỉ xuất hiện khi in nhãn, qua `loadNganCumulativeBaselines()`
+  (`actions.ts` ~dòng 901) — hàm này đọc lại **trạng thái ngăn thật sau khi đã tạo xong** (real +
+  predicted + reserved kg), nên luôn đúng nhưng luôn TRỄ (sau khi đã tạo, không phải lúc còn xem
+  trước).
+
+**Hướng fix đề xuất cho phiên sau** (chưa code, cần rà lại kỹ trước khi làm):
+
+- Trước hoặc trong `previewLotPrediction()`, gọi thêm `findPendingCarryLot()` (và/hoặc
+  `findRealContinuationForSeries()`) cho đúng `(loaiCsr, loaiBanh, year)` đang preview — nếu có kết
+  quả, cộng thêm ước tính KL của các kiện còn thiếu (`openLetters.length × kienWeightKg`) vào
+  `usedKg` TRƯỚC khi tính `availableKg`/`suggestedLotCount`, để `livePct` hiển thị đúng ngay từ đầu.
+- Cẩn thận: continuation chỉ áp dụng cho **ngăn ĐẦU TIÊN** trong 1 lần tạo nhiều ngăn (xem mục 4.6
+  "Chọn nhiều ngăn cùng lúc" — carry-over giữa các ngăn trong CÙNG thao tác tự "continue", không hỏi
+  lại) — logic cộng thêm vào preview phải khớp đúng quy tắc này, không cộng nhầm cho ngăn thứ 2 trở
+  đi nếu ngăn đó không phải là nơi tiếp nhận continuation.
+- Cần UI hiển thị rõ ràng breakdown (vd "16.380 kg lô mới + 3.024 kg tiếp tục lô 1140 dở dang =
+  19.404 kg / 19.220 kg (~104,89%)") thay vì chỉ 1 con số gộp, để người dùng hiểu tại sao % tăng đột
+  ngột sau khi chọn "Tiếp tục" — tránh gây hoang mang giống lý do bug này bị phát hiện.
+
+#### 2. Cài đặt → Phân công trực ca — ĐÃ FIX (2026-07-21), giờ multi-select nhiều người/ca
+
+**Trước đây**: `production_shift_assignments` có `UNIQUE (factory_id, ca)` — đúng 1 dòng/ca, chỉ
+gán được đúng 1 tài khoản cho mỗi ca. `ShiftAssignmentsTab` chỉ có 1 form/ca.
+
+**Đã fix**:
+
+- Migration `supabase/migrations/20260721_production_shift_assignments_multi.sql` — `DROP
+  CONSTRAINT production_shift_assignments_factory_id_ca_key` (đúng tên constraint mặc định
+  Postgres sinh ra cho `UNIQUE (factory_id, ca)` khai báo inline trong `CREATE TABLE`). Không
+  thêm bảng con — mỗi dòng vốn đã độc lập theo người, chỉ cần bỏ ràng buộc unique cứng. **Cần
+  chạy thủ công trên Supabase SQL Editor.**
+- `ShiftAssignmentsTab` (`src/app/dashboard/settings/_components/shift-assignments-tab.tsx`) viết
+  lại hoàn toàn: state đổi từ `Record<ca, CaFormState>` (1 form/ca) sang `Record<ca,
+  EditableRow[]>` (danh sách nhiều dòng/ca). Mỗi ca có nút "+ Thêm người" (thêm 1 dòng trắng chỉ
+  tồn tại phía client, đánh dấu `isNew`, temp `id` qua `crypto.randomUUID()`), mỗi dòng có nút
+  "Lưu" riêng (INSERT nếu `isNew`, UPDATE theo `id` nếu không) và nút Xóa (dòng chưa lưu → chỉ bỏ
+  khỏi state; dòng đã lưu → confirm inline trong dòng rồi `DELETE` + reload). Dropdown chọn tài
+  khoản disable (không chặn cứng) các user đã được gán ở dòng khác CÙNG ca, để giảm khả năng gán
+  trùng ngoài ý muốn.
+- `loadUserShiftAssignment()` (`confirm/actions.ts`) đổi `.maybeSingle()` → `.order("created_at",
+  { ascending: true }).limit(1)`, lấy `data?.[0]?.ca` — an toàn hơn: kể cả TRƯỚC migration này, 1
+  user vẫn có thể được gán cho nhiều ca khác nhau cùng lúc (unique cũ chỉ ràng buộc theo
+  `(factory_id, ca)`, không ràng buộc `assigned_user_id` là duy nhất), nên `.maybeSingle()` vốn đã
+  không an toàn nếu gặp đúng trường hợp đó — không phải lỗi mới phát sinh do migration.
+- Đã grep toàn repo `production_shift_assignments` — không còn nơi nào khác giả định quan hệ 1-1.
+
+`npx tsc --noEmit`, `npx eslint`, và `npm run build` đều sạch. **Chưa test tay** — cần: chạy
+migration trên Supabase SQL Editor trước; vào Cài đặt → Cấu hình nhà máy → Phân công trực ca, gán
+2 tài khoản khác nhau cho cùng Ca A → lưu từng dòng → tải lại trang xác nhận cả 2 còn nguyên; xóa 1
+người (dòng đã lưu) → xác nhận confirm inline hoạt động, dòng biến mất sau khi xác nhận; thêm 1
+dòng mới rồi bấm Xóa TRƯỚC khi Lưu → xác nhận không gọi DB, chỉ biến mất khỏi UI; đăng nhập bằng 1
+trong 2 tài khoản vừa gán Ca A → mở `/dashboard/product/confirm`, xác nhận dropdown "Ca sản xuất"
+tự chọn đúng "Ca A".
+
+#### 3. Phiếu báo thành phẩm — "Ca 1"/"Ca 2" phải sắp theo THỜI GIAN SẢN XUẤT THẬT trong ngày, không phải theo A→B→C cố định
+
+**Hiện trạng** (`src/app/dashboard/product/confirm/actions.ts`): hằng số `CA_ORDER = ["A", "B",
+"C"]` (~dòng 1220) và `compareCaCode()` (~dòng 1221) sắp xếp section theo **chỉ số cố định trong
+mảng này** — Ca A luôn được gán nhãn "Ca 1" nếu có mặt trong ngày, bất kể ca đó thực tế làm buổi
+sáng hay buổi tối hôm đó. Dùng ở `loadShiftReportData()` (~dòng 1369, `.sort(compareCaCode)`) để
+gán `caLabel: "Ca ${idx+1}"` cho từng section trong phiếu PDF.
+
+**Yêu cầu thật** (người dùng đưa 2 ví dụ đối xứng): "Ca 1" trong phiếu phải là ca nào **thực sự sản
+xuất trước trong ngày hôm đó** — nếu hôm nay Ca A làm ca ngày (5h-16h) và Ca B làm ca đêm
+(16h30-5h hôm sau), thì Ca A = "Ca 1". Nhưng nếu lịch đảo ngược (Ca B làm ca ngày, Ca A làm ca đêm)
+thì Ca B phải là "Ca 1" — tức **không được hard-code A luôn là Ca 1**, phải suy ra động theo dữ liệu
+sản xuất thật của đúng ngày đang in phiếu.
+
+**Hướng fix đề xuất**: `lot_transactions` không có cột giờ thật (chỉ có `ngay_nhap DATE` + `ca` +
+`created_at TIMESTAMPTZ` — thời điểm ghi nhận, không phải giờ sản xuất khai báo). Dùng `created_at`
+sớm nhất của MỖI ca trong ngày đó làm proxy hợp lý cho "ca nào bắt đầu báo cáo trước": thay
+`compareCaCode` (so theo index cố định) bằng 1 comparator động — với mỗi `ca` trong `byGroupKey`
+(hoặc trước khi build `sections`), tính `earliestCreatedAt = MIN(created_at)` của các dòng thuộc ca
+đó trong `rows` (đã có sẵn từ `loadDayTransactions`), rồi sort các section theo `earliestCreatedAt`
+tăng dần thay vì theo `CA_ORDER`. Cần verify với người dùng: có chấp nhận dùng `created_at` (giờ
+quét/nhập liệu) làm proxy cho "giờ sản xuất thật" không, hay cần thêm 1 cột giờ khai báo riêng (rủi
+ro: nếu nhập liệu trễ/dồn cuối ca thì `created_at` không phản ánh đúng thứ tự thật).
+
+#### 4. UX "Đang chờ gửi" — không có lối vào trực tiếp sau khi thoát app, và Sửa chỉ áp dụng cho giao dịch đã gửi (chưa áp dụng cho draft)
+
+**4a. ĐÃ FIX (2026-07-21)** — thêm nút "Quét QR xác nhận SX" (icon `ScanLine`, `bg-teal-600`) vào
+header `/dashboard/product/page.tsx`, cạnh nút "Dự đoán số lô", dẫn thẳng tới `/dashboard/product/confirm`
+(bare, không tham số) — chỉ hiện khi `hasPermission(currentUser, "product.confirm_scan")`. Mô tả bug
+gốc bên dưới vẫn giữ nguyên làm lịch sử; chỉ phần "Hướng fix đề xuất" ở cuối mục này là đã triển khai,
+không còn là đề xuất. `npx tsc --noEmit`/`npx eslint` sạch. **Chưa test tay** — cần xác nhận nút hiện
+đúng theo quyền, click vào mở đúng Hub (không có `lo`/`kien` trên URL nên vào thẳng `view: "hub"`).
+
+**Không có lối tắt quay lại Hub (mô tả bug gốc, tham chiếu lịch sử)**: `/dashboard/product/confirm` **bỏ qua hoàn toàn sidebar**
+(`dashboard/layout.tsx` dòng 427: `pathname.startsWith("/dashboard/product/confirm")` → render
+thẳng `{children}`, không có nav). Đã verify: **không có bất kỳ link/nút nào trong app** (sidebar,
+`/dashboard/product`, hay nơi khác) trỏ tới `/dashboard/product/confirm` mà không kèm `?lo=&kien=`.
+Lối vào DUY NHẤT là quét QR vật lý trên nhãn — mà QR luôn mã hóa `lo`/`kien` cụ thể
+(`buildProductLabelLookupUrl`) nên luôn nhảy thẳng vào `view: "form"` của đúng kiện đó (xem
+bootstrap trong `confirm/page.tsx` dòng ~289-298: có `paramLo` → `setView("form")`; không có →
+`setView("hub")`). Vì trang này không có sidebar để bấm "quay lại danh sách", người dùng không rành
+công nghệ không biết làm sao để tới thẳng "hub" (nơi có "Đang chờ gửi") — phải quét nhầm 1 nhãn bất
+kỳ trước, xem lookup xong mới có nút "← quay lại" để vào form rồi mới về hub được.
+
+Hướng fix đề xuất: thêm 1 nút/link rõ ràng, dễ thấy dẫn tới `/dashboard/product/confirm` (bare, không
+tham số) — đặt ở `/dashboard/product/page.tsx` (trang "Thành phẩm" chính, có sidebar, mọi người dùng
+đã biết cách vào) — ví dụ nút "Quét QR xác nhận sản xuất" trong header, cạnh các nút hành động khác.
+Cân nhắc thêm: PWA "Thêm vào màn hình chính" hoặc hướng dẫn bookmark cho công nhân xưởng (nằm ngoài
+phạm vi code, chỉ là gợi ý vận hành).
+
+**4b. ĐÃ FIX (2026-07-21)**:
+
+- `confirm/actions.ts` thêm `updateDraftKien(input)` — re-validate `soBanh > 0`, `nganId`, `boc`,
+  `pallet.length > 0`, và re-check `max_per_kien` (cộng bành đã gửi thật qua `lots` +
+  `lot_transactions` LẪN nháp KHÁC của bất kỳ ai cho cùng `(ma_lo, kien)`, TRỪ chính nháp đang
+  sửa — mirror đúng công thức `totalClaimed` của `saveDraftKien`) trước khi `UPDATE
+  product_confirm_drafts`. Re-check `created_by === userId` và `factory_id` ở server, không tin
+  caller. Không cần gọi `sync_lot_master_snapshot`/check trạng thái lô như
+  `editShiftHistoryEntry()` — nháp chưa từng ghi `lot_transactions`.
+- `confirm/page.tsx`: state `editingDraft`/`draftEditSaving`/`draftEditError`, handler
+  `openEditDraft()`/`handleSaveEditDraft()`. Component mới `EditDraftModal` (cuối file) mirror gần
+  như y hệt `EditEntryModal` (cùng field: Ngày SX/Ca SX/Số chỉ thị/Số bành/Bọc/Loại pallet/Ngăn
+  nguồn), chỉ khác nguồn dữ liệu (`ConfirmDraftRow`) và action gọi (`updateDraftKien` thay
+  `editShiftHistoryEntry`).
+- Nút "Sửa" (icon `Pencil`, màu amber) trong khối "Đang chờ gửi" (`HubView`) **chỉ hiện khi nhóm
+  hiển thị đúng 1 draft gốc** (`g.draftIds.length === 1`) — `groupPendingDrafts()` có thể gộp
+  nhiều kiện khác nhau (mỗi kiện có ngăn/số bành/ca riêng) vào 1 dòng hiển thị, sửa nhiều kiện
+  cùng lúc qua 1 form đơn không có ý nghĩa. Nhóm gộp ≥2 draft vẫn xóa được cả nhóm như cũ, chỉ
+  không sửa được — người dùng phải xóa rồi quét lại nếu cần sửa 1 kiện trong nhóm gộp.
+- Không có gate theo trạng thái lô (khác `editShiftHistoryEntry`'s `canEdit`) — đúng nhận định đã
+  chốt: draft luôn thuộc lô chưa tròn theo bản chất, mặc định luôn cho sửa.
+
+**Lưu ý kỹ thuật quan trọng phát hiện khi build**: `countPendingCarryOpenKien()` (mục 1 phía trên)
+ban đầu đặt trong `predict/actions.ts` — `tsc`/`eslint` sạch nhưng `npm run build` fail vì mọi
+export ở file `"use server"` bắt buộc phải là async function (ràng buộc Next.js Server Actions,
+không phải TypeScript). Đã tách hàm thuần này sang file mới `predict/lot-prediction-utils.ts`
+(không có `"use server"`), import `type PendingCarryLot` từ `actions.ts`. Xem thêm
+`feedback_code.md` trong memory — bài học áp dụng cho MỌI file `"use server"` trong repo, không
+chỉ module này: khi thêm 1 hàm thuần đồng bộ cần import trực tiếp vào client component, luôn kiểm
+tra bằng `npm run build`, không chỉ `tsc`/`eslint`.
+
+`npx tsc --noEmit`, `npx eslint`, và `npm run build` đều sạch. **Chưa test tay** — cần: Lưu tạm 1
+kiện → bấm "Sửa" trong "Đang chờ gửi" → đổi Số bành/Bọc/Ngăn → Lưu → xác nhận danh sách cập nhật
+đúng; thử sửa vượt `max_per_kien` (tính cả nháp khác của người khác cho cùng kiện) → bị chặn đúng
+message; Lưu tạm 2+ kiện cùng lô/pallet/bành/bọc (gộp thành 1 dòng hiển thị) → xác nhận nút "Sửa"
+KHÔNG hiện (chỉ Xóa còn hoạt động).
+
+#### 5. Quét QR — ĐÃ FIX (2026-07-21), nhưng khác hẳn ý định ban đầu ghi ở mục này
+
+**Đính chính quan trọng**: 3 câu hỏi thiết kế đặt ra ở phiên trước ("ảnh gắn theo kiện hay lô",
+"bắt buộc hay tùy chọn", "camera trực tiếp hay cho chọn từ thư viện") đều dựa trên cách hiểu SAI
+ý định người dùng — phiên trước tưởng đây là tính năng "đính kèm ảnh bằng chứng hiện trường" (như
+Bảo trì/Kiểm soát quá trình). Khi hỏi lại (2026-07-21), người dùng làm rõ: **đây là tính năng cho
+màn hình QUÉT QR** — thêm khả năng **tải lên 1 ảnh chụp sẵn CHỨA MÃ QR** (ví dụ công nhân đã chụp
+ảnh nhãn từ trước để tiện thao tác) và **giải mã QR trực tiếp từ ảnh tĩnh đó**, thay vì bắt buộc
+phải đưa camera trực tiếp vào đúng vị trí nhãn thật. Đây là bổ sung cho bước QUÉT (trước khi vào
+form nhập liệu), không phải thêm trường ảnh bằng chứng vào `product_confirm_drafts`/
+`lot_transactions` — 3 câu hỏi cũ về schema ảnh-theo-kiện/theo-lô vì vậy không còn áp dụng, không
+đụng tới schema nào cả.
+
+**Đã cài đặt**:
+
+- `src/app/dashboard/product/confirm/qr-scanner.tsx` (`QrScanner` component, dùng `html5-qrcode`
+  — đã có sẵn từ trước cho camera live) — dùng thêm API tĩnh `Html5Qrcode.scanFile(file,
+  showImage): Promise<string>` của cùng thư viện để giải mã QR từ 1 file ảnh, không cần camera.
+  Cần 1 `Html5Qrcode` **instance riêng** (không phải `scannerRef` đang chạy camera) gắn vào 1
+  `<div id={FILE_REGION_ID} className="hidden">` luôn tồn tại trong DOM (constructor của thư viện
+  bắt buộc phải có element tồn tại sẵn, kể cả khi `showImage=false` không thực render ảnh) — tránh
+  tranh chấp canvas nội bộ với luồng camera đang chạy song song.
+- Nút **"Tải ảnh chứa QR"** (icon `ImageUp`) đặt **luôn hiển thị** ở cuối màn quét, dưới 1 divider
+  "hoặc" ngăn cách với khung camera — **không đặt trong nhánh `cameraError`** mà đặt ngoài điều
+  kiện đó, để nút này vừa là lối vào thay thế lúc camera hoạt động bình thường, vừa là lối thoát
+  khi camera bị từ chối quyền/lỗi mở (trước đây nhánh lỗi camera chỉ có 1 nút "Hủy quét", giờ có
+  thêm lối này). Nhánh lỗi camera bỏ bớt nút "Hủy quét" cục bộ (đã trùng với nút chung ở footer).
+  Input file dùng `<input type="file" accept="image/*">` **không** có `capture` — để trình duyệt
+  mở đúng picker cho phép chọn cả Camera lẫn Thư viện ảnh có sẵn (đã chốt "Cả 2" khi hỏi lại).
+  `e.target.value = ""` reset ngay sau khi đọc `file` để chọn lại đúng file cũ (ảnh không đổi) vẫn
+  kích hoạt `onChange` lần nữa.
+  - `handleFileChange()`: decode xong gọi **chung `onDecoded()`** với luồng camera — mọi validate
+    ở `confirm/page.tsx` (`parseScannedQr`, kiểm tra đúng định dạng URL, đúng `factory_id`) áp
+    dụng đồng nhất cho cả 2 nguồn ảnh, không viết lại logic riêng. Lỗi giải mã (không tìm thấy QR
+    trong ảnh, hoặc file không phải ảnh hợp lệ) hiện banner đỏ riêng `fileScanError` (tách khỏi
+    `scanError` của luồng camera) với message `uploadQrImageNotFound`.
+  - `decodedRef` (cờ chống double-decode, đã có sẵn cho luồng camera) được dùng chung — tự reset
+    sau 1.5s giống hệt cơ chế cũ, để không khoá cứng nếu người dùng thử ảnh khác ngay sau đó.
+- 4 key i18n mới (cả `vi`/`km`) trong `confirm/i18n.ts`: `uploadQrImage`, `uploadQrImageScanning`,
+  `uploadQrImageNotFound`, `orDivider`.
+- `confirm/page.tsx` truyền 4 prop mới (`uploadButtonText/uploadScanningText/uploadNotFoundText/
+  orDividerText`) vào `<QrScanner>` — không đổi gì ở `handleDecoded()` (dùng chung).
+
+`npx tsc --noEmit`, `npx eslint`, và `npm run build` đều sạch. **Chưa test tay trên thiết bị
+thật** — cần: mở màn quét QR → xác nhận nút "Tải ảnh chứa QR" hiện đúng ngay cả khi camera đang
+hoạt động bình thường lẫn khi camera bị từ chối quyền; chọn 1 ảnh chụp sẵn nhãn QR hợp lệ từ thư
+viện → xác nhận decode đúng và chuyển sang form nhập liệu giống hệt luồng camera; chọn 1 ảnh không
+chứa QR (hoặc QR không đúng định dạng URL của app) → xác nhận banner đỏ hiện đúng, không crash,
+thử lại được ngay; xác nhận trên Android/iOS trình duyệt thật hiện đúng lựa chọn "Camera"/"Thư
+viện ảnh" khi bấm nút (không bị ép thẳng vào camera do thiếu `capture`).
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

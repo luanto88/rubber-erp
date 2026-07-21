@@ -48,6 +48,7 @@ import {
   resolveKienForConfirm,
   saveDraftKien,
   submitConfirmDraftBatch,
+  updateDraftKien,
   type ActiveNganOption,
   type ConfirmDraftRow,
   type ConfirmKienLookup,
@@ -228,6 +229,12 @@ export default function ConfirmKienProductionPage() {
   const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null);
   const [submittingBatch, setSubmittingBatch] = useState(false);
   const [submitBatchError, setSubmitBatchError] = useState<string | null>(null);
+  // Sửa 1 nháp CHƯA gửi (mục 4b rule 06-module-production.md) — chỉ áp dụng cho nhóm hiển thị
+  // đúng 1 draft gốc (groupPendingDrafts có thể gộp nhiều kiện vào 1 dòng hiển thị; sửa nhiều
+  // kiện cùng lúc không có ý nghĩa 1 form đơn, nên chỉ cho sửa khi nhóm không bị gộp).
+  const [editingDraft, setEditingDraft] = useState<ConfirmDraftRow | null>(null);
+  const [draftEditSaving, setDraftEditSaving] = useState(false);
+  const [draftEditError, setDraftEditError] = useState<string | null>(null);
 
   // "Lịch sử ca" trong Hub — luôn truy vấn lại DB theo (Ngày SX, Ca), KHÔNG theo người nhập, vì
   // 1 ca có thể có nhiều người trực nối tiếp nhau (đã chốt với người dùng). Selector này cũng
@@ -520,6 +527,52 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
+  const openEditDraft = (draft: ConfirmDraftRow) => {
+    setDraftEditError(null);
+    setEditingDraft(draft);
+  };
+
+  const handleSaveEditDraft = async (input: {
+    nganId: string;
+    ca: string;
+    ngaySx: string;
+    soBanh: number;
+    boc: string;
+    pallet: string[];
+    chiThi: string;
+  }) => {
+    if (!factoryId || !currentUser || !editingDraft) return;
+    setDraftEditSaving(true);
+    setDraftEditError(null);
+    try {
+      const result = await updateDraftKien({
+        draftId: editingDraft.id,
+        factoryId,
+        userId: currentUser.id,
+        nganId: input.nganId,
+        soBanh: input.soBanh,
+        ngaySx: input.ngaySx,
+        ca: input.ca,
+        boc: input.boc,
+        pallet: input.pallet,
+        chiThi: input.chiThi || null,
+        tham: editingDraft.tham,
+        ghiChu: editingDraft.ghiChu,
+      });
+      if (!result.success) {
+        setDraftEditError(result.error);
+        return;
+      }
+      setEditingDraft(null);
+      setToast({ message: tt("editSave"), variant: "success" });
+      await refreshPendingDrafts();
+    } catch (err) {
+      setDraftEditError(err instanceof Error ? err.message : tt("editSaveError"));
+    } finally {
+      setDraftEditSaving(false);
+    }
+  };
+
   // "Gửi tất cả" — validate + ghi atomic toàn bộ nháp qua submitConfirmDraftBatch. All-or-nothing:
   // 1 nháp lỗi thì hiện đúng 1 message lỗi, giữ nguyên toàn bộ danh sách nháp để sửa/xóa rồi thử lại.
   const handleSubmitAllDrafts = async () => {
@@ -782,6 +835,10 @@ export default function ConfirmKienProductionPage() {
           hintText={tt("scanningHint")}
           cancelText={tt("scanCancel")}
           cameraErrorText={tt("cameraError")}
+          uploadButtonText={tt("uploadQrImage")}
+          uploadScanningText={tt("uploadQrImageScanning")}
+          uploadNotFoundText={tt("uploadQrImageNotFound")}
+          orDividerText={tt("orDivider")}
           scanError={scanError}
         />
       ) : (
@@ -879,6 +936,7 @@ export default function ConfirmKienProductionPage() {
                 pendingDraftsError={pendingDraftsError}
                 deletingDraftId={deletingDraftId}
                 onDeleteDraft={handleDeleteDraft}
+                onEditDraft={openEditDraft}
                 submittingBatch={submittingBatch}
                 submitBatchError={submitBatchError}
                 onSubmitAllDrafts={handleSubmitAllDrafts}
@@ -1225,6 +1283,23 @@ export default function ConfirmKienProductionPage() {
           onSave={handleSaveEdit}
         />
       )}
+
+      {editingDraft && factoryId && (
+        <EditDraftModal
+          tt={tt}
+          caLabel={caLabel}
+          factoryId={factoryId}
+          draft={editingDraft}
+          saving={draftEditSaving}
+          error={draftEditError}
+          onCancel={() => {
+            if (draftEditSaving) return;
+            setEditingDraft(null);
+            setDraftEditError(null);
+          }}
+          onSave={handleSaveEditDraft}
+        />
+      )}
     </div>
   );
 }
@@ -1361,6 +1436,7 @@ function HubView({
   pendingDraftsError,
   deletingDraftId,
   onDeleteDraft,
+  onEditDraft,
   submittingBatch,
   submitBatchError,
   onSubmitAllDrafts,
@@ -1391,6 +1467,7 @@ function HubView({
   pendingDraftsError: string | null;
   deletingDraftId: string | null;
   onDeleteDraft: (draftIds: string[]) => void;
+  onEditDraft: (draft: ConfirmDraftRow) => void;
   submittingBatch: boolean;
   submitBatchError: string | null;
   onSubmitAllDrafts: () => void;
@@ -1434,14 +1511,30 @@ function HubView({
                     {g.totalSoBanh} bành · {g.nganLabel} · {tt("caSanXuat")} {g.caLetters}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={!!deletingDraftId && g.draftIds.includes(deletingDraftId)}
-                  onClick={() => onDeleteDraft(g.draftIds)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50 disabled:opacity-50"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {/* Sửa chỉ khả dụng khi nhóm hiển thị đúng 1 draft gốc — 1 nhóm gộp nhiều kiện
+                      không có ý nghĩa 1 form sửa đơn (mỗi kiện có ngăn/số bành/ca riêng). */}
+                  {g.draftIds.length === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const draft = pendingDrafts.find((d) => d.id === g.draftIds[0]);
+                        if (draft) onEditDraft(draft);
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-amber-600 hover:bg-amber-100"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!!deletingDraftId && g.draftIds.includes(deletingDraftId)}
+                    onClick={() => onDeleteDraft(g.draftIds)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-red-500 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1873,6 +1966,216 @@ function EditEntryModal({
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         <h3 className="text-base font-extrabold text-slate-800">
           {tt("editEntryTitle")} — {entry.maLo} {entry.kienLetters}
+        </h3>
+
+        <div className="mt-4 space-y-3">
+          <Field label={tt("ngaySanXuat")} icon={<Calendar size={13} />}>
+            <input
+              type="date"
+              value={ngaySx}
+              onChange={(e) => setNgaySx(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            />
+          </Field>
+          <div className="grid grid-cols-5 gap-3">
+            <div className="col-span-3">
+              <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
+                <select
+                  value={ca}
+                  onChange={(e) => setCa(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                >
+                  {CA_OPTS.map((c) => (
+                    <option key={c} value={c}>
+                      {caLabel(c)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label={tt("chiThi")} icon={<Hash size={13} />}>
+                <input
+                  type="text"
+                  value={chiThi}
+                  onChange={(e) => setChiThi(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                />
+              </Field>
+            </div>
+          </div>
+          <Field label={tt("soBanh")} icon={<Package size={13} />}>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={maxPerKien}
+              value={soBanh}
+              onChange={(e) => {
+                const parsed = Math.floor(Number(e.target.value));
+                if (Number.isFinite(parsed)) setSoBanh(Math.max(0, Math.min(maxPerKien, parsed)));
+              }}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            />
+          </Field>
+          <Field label={tt("boc")} icon={<Layers size={13} />}>
+            <select
+              value={boc}
+              onChange={(e) => setBoc(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            >
+              <option value="">{tt("chonBoc")}</option>
+              {bocOptions.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+              {boc && !bocOptions.includes(boc) && <option value={boc}>{boc}</option>}
+            </select>
+          </Field>
+          <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
+            <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+              {PALLET_OPTS.map((p) => {
+                const checked = pallet.length === 1 && pallet[0] === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPallet(checked ? [] : [p])}
+                    className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                      checked ? "bg-emerald-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+          <Field label={tt("nganNguon")} icon={<Warehouse size={13} />}>
+            <select
+              value={nganId}
+              onChange={(e) => setNganId(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+            >
+              <option value="">{tt("chonNgan")}</option>
+              {nganOptions.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.ma_ngan} {n.ten_ngan ? `— ${n.ten_ngan}` : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {tt("cancel")}
+          </button>
+          <button
+            type="button"
+            disabled={!canSave || saving}
+            onClick={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi })}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? tt("editSaving") : tt("editSave")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mục 4b (rule 06-module-production.md): sửa 1 nháp CHƯA gửi — mirror gần như y hệt
+// EditEntryModal (giao dịch đã gửi thật), chỉ khác nguồn dữ liệu (ConfirmDraftRow thay
+// ShiftHistoryEntry) và action gọi (updateDraftKien thay editShiftHistoryEntry).
+function EditDraftModal({
+  tt,
+  caLabel,
+  factoryId,
+  draft,
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  tt: (key: string, vars?: Record<string, string | number>) => string;
+  caLabel: (c: string) => string;
+  factoryId: string;
+  draft: ConfirmDraftRow;
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (input: {
+    nganId: string;
+    ca: string;
+    ngaySx: string;
+    soBanh: number;
+    boc: string;
+    pallet: string[];
+    chiThi: string;
+  }) => void;
+}) {
+  const [nganId, setNganId] = useState(draft.nganId || "");
+  const [ca, setCa] = useState(draft.ca);
+  const [ngaySx, setNgaySx] = useState(draft.ngaySx);
+  const [soBanh, setSoBanh] = useState(draft.soBanh);
+  const [boc, setBoc] = useState(draft.boc || "");
+  const [pallet, setPallet] = useState<string[]>(draft.pallet || []);
+  const [chiThi, setChiThi] = useState(draft.chiThi || "");
+  const [nganOptions, setNganOptions] = useState<ActiveNganOption[]>(
+    draft.nganId
+      ? [{ id: draft.nganId, ma_ngan: draft.nganMa || "—", ten_ngan: draft.nganTen || "", loai_nl: "" }]
+      : [],
+  );
+  useEffect(() => {
+    let alive = true;
+    loadActiveNgansForFactory(factoryId)
+      .then((list) => {
+        if (!alive) return;
+        setNganOptions((prev) => {
+          const merged = [...list];
+          if (draft.nganId && !merged.some((n) => n.id === draft.nganId)) {
+            merged.unshift(prev[0] || { id: draft.nganId, ma_ngan: draft.nganMa || "—", ten_ngan: draft.nganTen || "", loai_nl: "" });
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [factoryId]);
+
+  const bocOptions = useMemo(
+    () => getBocsForLoaiCSR(draft.dayChuyen || "Mủ tạp", draft.loaiCsr),
+    [draft.dayChuyen, draft.loaiCsr],
+  );
+  const maxPerKien = useMemo(
+    () => getLoaiBanhConfig(draft.loaiCsr, draft.loaiBanh).max_per_kien,
+    [draft.loaiCsr, draft.loaiBanh],
+  );
+
+  const canSave = !!nganId && soBanh > 0 && soBanh <= maxPerKien && !!boc && pallet.length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+        <h3 className="text-base font-extrabold text-slate-800">
+          {tt("editEntryTitle")} — {draft.maLo} {draft.kien}
         </h3>
 
         <div className="mt-4 space-y-3">
