@@ -1123,6 +1123,88 @@ dùng (đúng thiết kế, không phải bug).
 đổi thành mô tả tự đủ nghĩa cho tham số `pendingByMaLo` của `checkIncompleteLotsForDay`, không đổi
 hành vi. `npx tsc --noEmit`/`npx eslint` sạch sau thay đổi này.
 
+### Cập nhật 2026-07-21 — Fix toggle ngôn ngữ bị cắt chữ Khmer, tỷ lệ Ca/Chỉ thị, gộp dòng hiển thị, bug thật Bọc/Số chỉ thị trống với lô nhập tay
+
+**1. Toggle ngôn ngữ trên `/product-label` bị cắt mất nút "ខ្មែរ"** (`product-label-client.tsx`):
+root cause là classic CSS bug — `LangToggle` có `overflow-hidden` trên chính div flex-item của nó
+trong hàng header `flex items-start justify-between`; khi tiêu đề dài đủ chiếm hết chỗ (đặc biệt màn
+hình hẹp), trình duyệt tự đặt `min-width: 0` cho flex-item có `overflow != visible`, cho phép nó co
+lại nhỏ hơn nội dung thật và CẮT (không phải wrap) nút thứ 2. Fix: bọc `<LangToggle>` trong
+`<div className="shrink-0">` (ngăn co lại) + đổi header sang `flex-col sm:flex-row` (tự xuống dòng
+trên mobile thay vì chen chúc cùng hàng với tiêu đề dài).
+
+**2. Tỷ lệ cột "Ca sản xuất"/"Số chỉ thị"** (`confirm/page.tsx`, cả form quét chính lẫn
+`EditEntryModal`): đổi từ `grid-cols-2` (50/50) sang `grid-cols-5` với Ca chiếm `col-span-3` (60%),
+Số chỉ thị `col-span-2` (40%) — lý do: "Ca sản xuất" có thể dài hơn nhiều khi nhà máy đặt tên ca
+(`"Ca A — Sok Khum"`), "Số chỉ thị" thường chỉ 1-2 ký tự.
+
+**3+4. Danh sách "Đang chờ gửi" (pending drafts) — thêm Ca + gộp dòng cùng lô/pallet/bành/chủng
+loại/bọc**: hàm mới `groupPendingDrafts()` (`confirm/page.tsx`) gộp các nháp CHƯA gửi theo khóa
+`(ma_lo, loai_csr, loai_banh, boc, pallet đã sort)` thành 1 dòng hiển thị — kiện gộp dạng "A, B",
+tổng bành cộng dồn, ngăn/Ca hiển thị dạng danh sách distinct (`"N5, N8"`, `"A/B"`). **Chỉ gộp ở tầng
+hiển thị** — mỗi kiện vẫn là 1 draft riêng trong DB, không đổi cách lưu/gửi. Nút xóa của 1 dòng đã
+gộp giờ xóa NGUYÊN NHÓM (`handleDeleteDraft` đổi tham số từ `draftId: string` sang
+`draftIds: string[]`, lặp xóa tuần tự rồi refresh 1 lần).
+
+**5. Gộp dòng tương tự trong bảng "Danh sách" của Thành phẩm** (`product/page.tsx`) — theo yêu cầu
+"đẩy lên thành phẩm cũng hiển thị tương tự nhưng không làm gãy logic cảnh báo/tính toán hiện tại":
+hàm mới `groupContributionsForDisplay(caContribs, resolveNganLabel)` (module-level, thuần hàm) gộp
+các dòng trong bảng chi tiết theo `ngày → ca` (cùng khóa `ma_lo/loai_csr/loai_banh/boc/pallet` như
+mục 3+4) thành 1 dòng hiển thị — cộng dồn `tong_banh_cua_ca/tong_kg_cua_ca` và từng `disp_a/b/c/d`,
+gộp danh sách ngăn nguồn (nếu 2 kiện của cùng lô đến từ 2 ngăn khác nhau — case hợp lệ theo mục
+"Kiện dở dang một phần"), chọn đúng `trang_thai` thật của lô (chỉ 1 thành viên trong nhóm mang giá
+trị khác "Dở dang" — xem `contributions` useMemo, giao dịch không phải cuối cùng luôn hiện "Dở
+dang"). **Tuyệt đối không đụng** `contributions`/`filteredContribs`/`groupedByDateAndCa`/`stats`/
+`nganKgMap`/mọi cảnh báo khác — tất cả vẫn tính trên dữ liệu gốc từng giao dịch, hàm gộp chỉ nhận
+`caContribs` (mảng đã lọc sẵn) làm input và trả về nhóm hiển thị cho riêng phần render bảng, không
+ghi ngược lại state nào. Checkbox chế độ Xóa theo ngày đổi từ so khớp 1 `uid` sang
+`g.uids.every(id => selectedDeleteIds.has(id))` (toàn nhóm), toggle add/remove tất cả `uids` trong
+nhóm cùng lúc — logic xóa thật sự (`handleDeletePreCheck`) không đổi, vẫn nhận `Set<string>` các uid
+riêng lẻ như trước. Đã bỏ icon `Lock` khỏi cột "Kiện" (trường `locked_a/b/c/d` trên `LotContribution`
+thực ra luôn `undefined` ở render này — `Lot` type từ DB không có field này, chỉ tồn tại ở
+`LotDraft`/form tạo mới — nên trước đây các icon khóa này chưa từng hiển thị; xác nhận bằng đọc code,
+không phải hành vi mới).
+
+**6. Bug thật đã xác nhận qua dữ liệu — "Lịch sử ca" và "Phiếu báo thành phẩm" hiện trống Bọc/Pallet/
+Số chỉ thị cho MỌI lô có giao dịch nhập tay** (`confirm/actions.ts`, hàm `loadShiftHistory` và
+`loadShiftReportData`): đã verify trực tiếp trên DB thật (factory `phuochoa_kt`, script Node qua
+service role) — **0/1100 lô có `lots.boc` hoặc `lots.chi_thi` rỗng** (cột lot-level luôn được điền
+đúng, kể cả khi TOÀN BỘ giao dịch của lô là nhập tay và `lot_transactions.boc/chi_thi` = NULL cho tất
+cả — đúng thiết kế `COALESCE(v_last_boc, lots.boc)` trong RPC `sync_lot_master_snapshot`, xem mục
+"Cập nhật 2026-07-15"). Nhưng 2 hàm trên đọc **trực tiếp `row.boc`/`row.pallet`/`row.chi_thi`** (cấp
+giao dịch — `lot_transactions`) **KHÔNG có fallback** về giá trị lot-level khi null — vì nhập tay qua
+`product/page.tsx` không bao giờ gửi 3 cột này ở cấp giao dịch (chỉ ghi ở cấp `lots` lúc tạo lô mới,
+xem `product/actions.ts` dòng ~174-177), mọi lô có bất kỳ giao dịch nhập tay nào sẽ hiện Bọc/Pallet/
+Số chỉ thị TRỐNG trong "Lịch sử ca" (Hub) và "Phiếu báo thành phẩm" (PDF) — kể cả khi `lots.boc` thật
+sự có giá trị đúng. Bug này độc lập với mọi bug đã fix trước đó, chưa từng được phát hiện vì các
+điều tra trước chỉ kiểm tra `lots.boc`/`confirm/actions.ts`'s `resolveKienForConfirm` (hàm đó ĐÃ có
+fallback `?? lot.boc` đúng từ trước, không phải nguồn bug).
+
+Fix: thêm `boc,pallet,chi_thi` vào `lots!inner(...)` trong cả 2 câu SELECT của `loadShiftTransactions`
+và `loadDayTransactions` (kiểu `ShiftTxLotInfo` mới); `loadShiftHistory` đổi
+`boc: row.boc ?? lotInfo?.boc ?? null` (tương tự pallet/chiThi); `loadShiftReportData` đổi
+`rowBoc = row.boc || lotInfo?.boc || ""` (tương tự pallet), và `chiThiSet` giờ cộng cả
+`lotInfo?.chi_thi` khi `row.chi_thi` rỗng. `EditEntryModal` (sửa giao dịch trong Hub) tự động nhận
+đúng giá trị pre-fill vì đọc từ `ShiftHistoryEntry` do `loadShiftHistory` trả về — không cần sửa
+thêm ở tầng UI.
+
+`npx tsc --noEmit`, `npx eslint` (4 file: `product-label-client.tsx`, `confirm/page.tsx`,
+`confirm/actions.ts`, `product/page.tsx`), và `npm run build` đều sạch/pass. **Chưa test tay** — cần:
+- Mở `/product-label` trên điện thoại/màn hình hẹp, xác nhận nút "ខ្មែរ" hiện đầy đủ, không bị cắt.
+- Form quét QR: xác nhận cột "Ca sản xuất" rộng hơn rõ rệt so với "Số chỉ thị", không tràn khi chọn
+  ca có tên dài.
+- Lưu tạm 2+ kiện cùng lô/pallet/bành/bọc → xác nhận "Đang chờ gửi" gộp thành 1 dòng, hiện đúng Ca
+  (dạng "A/B" nếu khác ca), xóa dòng gộp xóa đúng hết các draft liên quan.
+- Vào Thành phẩm, mở 1 ngày có lô nhiều kiện cùng bọc/pallet/bành/CSR (cả nhập tay lẫn quét QR) →
+  xác nhận bảng chi tiết gộp đúng 1 dòng, tổng bành/kg đúng, cột "Kiện (A/B/C/D)" đúng số thật; bật
+  chế độ Xóa, tick 1 dòng gộp → xác nhận xóa đúng toàn bộ giao dịch liên quan, không sót.
+- Xác nhận các cảnh báo/tính toán khác (banner ngăn dở dang, KPI tổng bành/kg đầu trang, tab Thống
+  kê...) không đổi so với trước khi gộp hiển thị.
+- Mở "Lịch sử ca" (Hub, confirm/page.tsx) cho 1 ngày+ca có giao dịch nhập tay từ `product/page.tsx`
+  → xác nhận cột Bọc/Số chỉ thị hiện đúng giá trị (không còn trống); mở modal Sửa 1 dòng đó → xác
+  nhận pre-fill đúng. Mở "Xem/Tạo lại phiếu PDF" cho cùng ngày → xác nhận PDF hiện đúng Bọc/Pallet/
+  Số chỉ thị cho các dòng nhập tay.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

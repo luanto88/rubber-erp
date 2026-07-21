@@ -682,9 +682,24 @@ type ShiftTxRow = {
   ngan_id: string | null;
   created_at: string | null;
   created_by: string | null;
-  lots:
-    | { ma_lo: string; loai_csr: string; loai_banh: number; trang_thai: string; day_chuyen: string | null }
-    | { ma_lo: string; loai_csr: string; loai_banh: number; trang_thai: string; day_chuyen: string | null }[];
+  lots: ShiftTxLotInfo | ShiftTxLotInfo[];
+};
+
+// boc/pallet/chi_thi CỦA LÔ (lot-level, snapshot mới nhất suy bởi sync_lot_master_snapshot) — dùng
+// làm fallback khi CHÍNH giao dịch (lot_transactions.boc/pallet/chi_thi) là null, trường hợp luôn
+// đúng với các dòng nhập tay qua product/page.tsx (không bao giờ gửi 3 cột này ở cấp giao dịch,
+// xem product/actions.ts). Thiếu fallback này khiến "Lịch sử ca" và "Phiếu báo thành phẩm" hiện
+// trống Bọc/Pallet/Số chỉ thị cho MỌI lô có ít nhất 1 giao dịch nhập tay (bug đã xác nhận qua dữ
+// liệu thật 2026-07-16 — lots.boc/chi_thi không hề rỗng, chỉ lot_transactions.boc/chi_thi rỗng).
+type ShiftTxLotInfo = {
+  ma_lo: string;
+  loai_csr: string;
+  loai_banh: number;
+  trang_thai: string;
+  day_chuyen: string | null;
+  boc: string | null;
+  pallet: string[] | null;
+  chi_thi: string | null;
 };
 
 // Toàn bộ giao dịch của MỘT ngày sản xuất + ca — KHÔNG lọc theo người nhập, vì 1 ca có thể có
@@ -696,7 +711,7 @@ async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: stri
   const { data, error } = await supabase
     .from("lot_transactions")
     .select(
-      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,factory_id)",
+      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
     )
     .eq("lots.factory_id", factoryId)
     .eq("ngay_nhap", ngaySx)
@@ -714,7 +729,7 @@ async function loadDayTransactions(factoryId: string, ngaySx: string): Promise<S
   const { data, error } = await supabase
     .from("lot_transactions")
     .select(
-      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,factory_id)",
+      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
     )
     .eq("lots.factory_id", factoryId)
     .eq("ngay_nhap", ngaySx)
@@ -947,9 +962,11 @@ export async function loadShiftHistory(
         nganTen: row.ngan_id ? nganInfoById.get(row.ngan_id)?.ten_ngan ?? null : null,
         ca: row.ca,
         ngaySx: row.ngay_nhap,
-        boc: row.boc,
-        pallet: row.pallet,
-        chiThi: row.chi_thi,
+        // Fallback lot-level khi giao dịch không tự mang boc/pallet/chi_thi riêng — luôn đúng với
+        // dòng nhập tay qua product/page.tsx (xem ghi chú ở ShiftTxLotInfo).
+        boc: row.boc ?? lotInfo?.boc ?? null,
+        pallet: row.pallet ?? lotInfo?.pallet ?? null,
+        chiThi: row.chi_thi ?? lotInfo?.chi_thi ?? null,
         loaiCsr: lotInfo?.loai_csr || "",
         loaiBanh: Number(lotInfo?.loai_banh) || 35,
         dayChuyen: lotInfo?.day_chuyen ?? null,
@@ -1281,10 +1298,15 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
     if (row.ngan_id) nganIdSet.add(row.ngan_id);
-    if (row.chi_thi) chiThiSet.add(row.chi_thi);
+    // Fallback lot-level khi giao dịch không tự mang boc/pallet/chi_thi riêng — luôn đúng với dòng
+    // nhập tay qua product/page.tsx (xem ghi chú ở ShiftTxLotInfo) — nếu không, phiếu báo thành
+    // phẩm hiện trống Bọc/Pallet/Số chỉ thị cho mọi lô có ít nhất 1 giao dịch nhập tay.
+    const rowChiThi = row.chi_thi || lotInfo?.chi_thi || "";
+    if (rowChiThi) chiThiSet.add(rowChiThi);
 
-    const rowBoc = row.boc || "";
-    const rowPallet = row.pallet && row.pallet.length > 0 ? row.pallet.join(", ") : "";
+    const rowBoc = row.boc || lotInfo?.boc || "";
+    const rowPalletArr = row.pallet && row.pallet.length > 0 ? row.pallet : lotInfo?.pallet || [];
+    const rowPallet = rowPalletArr.length > 0 ? rowPalletArr.join(", ") : "";
     const key = `${row.ca}||${maLo}||${rowBoc}||${rowPallet}`;
     const entry = byGroupKey.get(key) || {
       ca: row.ca,

@@ -499,14 +499,18 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
-  const handleDeleteDraft = async (draftId: string) => {
-    if (!currentUser) return;
-    setDeletingDraftId(draftId);
+  // Nhận cả 1 hoặc nhiều draftId cùng lúc — dòng đã gộp trong "Đang chờ gửi" (cùng lô + pallet +
+  // loại bành + chủng loại + bọc) xóa nguyên nhóm chỉ bằng 1 lần bấm.
+  const handleDeleteDraft = async (draftIds: string[]) => {
+    if (!currentUser || draftIds.length === 0) return;
+    setDeletingDraftId(draftIds[0]);
     try {
-      const result = await deleteDraft(draftId, currentUser.id);
-      if (!result.success) {
-        setPendingDraftsError(result.error);
-        return;
+      for (const draftId of draftIds) {
+        const result = await deleteDraft(draftId, currentUser.id);
+        if (!result.success) {
+          setPendingDraftsError(result.error);
+          return;
+        }
       }
       await refreshPendingDrafts();
     } catch (err) {
@@ -944,28 +948,32 @@ export default function ConfirmKienProductionPage() {
                   </div>
                 </Field>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
-                    <select
-                      value={ca}
-                      onChange={(e) => setCa(e.target.value)}
-                      className={highlightFieldClass}
-                    >
-                      {CA_OPTS.map((c) => (
-                        <option key={c} value={c}>
-                          {caLabel(c)}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label={tt("chiThi")} icon={<Hash size={13} />}>
-                    <input
-                      type="text"
-                      value={chiThi}
-                      onChange={(e) => setChiThi(e.target.value)}
-                      className={highlightFieldClass}
-                    />
-                  </Field>
+                <div className="grid grid-cols-5 gap-3">
+                  <div className="col-span-3">
+                    <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
+                      <select
+                        value={ca}
+                        onChange={(e) => setCa(e.target.value)}
+                        className={highlightFieldClass}
+                      >
+                        {CA_OPTS.map((c) => (
+                          <option key={c} value={c}>
+                            {caLabel(c)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label={tt("chiThi")} icon={<Hash size={13} />}>
+                      <input
+                        type="text"
+                        value={chiThi}
+                        onChange={(e) => setChiThi(e.target.value)}
+                        className={highlightFieldClass}
+                      />
+                    </Field>
+                  </div>
                 </div>
 
                 {/* Thẻ gộp Mã lô + Kiện + Số bành — số bành nhập tay được (xóa/gõ số khác), không
@@ -1275,6 +1283,57 @@ function CardMessage({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
+type PendingDraftGroup = {
+  key: string;
+  draftIds: string[];
+  maLo: string;
+  kienLetters: string;
+  totalSoBanh: number;
+  nganLabel: string;
+  caLetters: string;
+};
+
+// Dồn các nháp CHƯA gửi cùng lô + pallet + loại bành + chủng loại (CSR) + bọc thành 1 dòng hiển
+// thị — mỗi kiện vẫn là 1 draft riêng trong DB (không đổi cách lưu/gửi), chỉ gộp ở tầng hiển thị.
+// Ca sản xuất được PHÉP khác nhau giữa các kiện cùng nhóm (đúng rule top-up), nên không nằm trong
+// khóa gộp — hiển thị gộp lại dạng "A/B" nếu có nhiều giá trị.
+function groupPendingDrafts(drafts: ConfirmDraftRow[]): PendingDraftGroup[] {
+  const map = new Map<
+    string,
+    { maLo: string; draftIds: string[]; kienSet: Set<string>; totalSoBanh: number; nganSet: Set<string>; caSet: Set<string> }
+  >();
+  for (const d of drafts) {
+    const palletKey = [...(d.pallet || [])].sort().join(",");
+    const key = `${d.maLo}||${d.loaiCsr}||${d.loaiBanh}||${d.boc || ""}||${palletKey}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.draftIds.push(d.id);
+      existing.totalSoBanh += d.soBanh;
+      existing.kienSet.add(d.kien);
+      if (d.nganMa) existing.nganSet.add(d.nganMa);
+      existing.caSet.add(d.ca);
+    } else {
+      map.set(key, {
+        maLo: d.maLo,
+        draftIds: [d.id],
+        kienSet: new Set([d.kien]),
+        totalSoBanh: d.soBanh,
+        nganSet: new Set(d.nganMa ? [d.nganMa] : []),
+        caSet: new Set([d.ca]),
+      });
+    }
+  }
+  return [...map.entries()].map(([key, g]) => ({
+    key,
+    draftIds: g.draftIds,
+    maLo: g.maLo,
+    kienLetters: [...g.kienSet].sort().join(", "),
+    totalSoBanh: g.totalSoBanh,
+    nganLabel: g.nganSet.size > 0 ? [...g.nganSet].join(", ") : "—",
+    caLetters: [...g.caSet].sort().join("/"),
+  }));
+}
+
 function HubView({
   tt,
   caLabel,
@@ -1331,11 +1390,12 @@ function HubView({
   pendingDraftsLoading: boolean;
   pendingDraftsError: string | null;
   deletingDraftId: string | null;
-  onDeleteDraft: (draftId: string) => void;
+  onDeleteDraft: (draftIds: string[]) => void;
   submittingBatch: boolean;
   submitBatchError: string | null;
   onSubmitAllDrafts: () => void;
 }) {
+  const pendingDraftGroups = useMemo(() => groupPendingDrafts(pendingDrafts), [pendingDrafts]);
   return (
     <div className="space-y-4">
       <button
@@ -1361,23 +1421,23 @@ function HubView({
           <p className="py-3 text-center text-xs text-amber-700">{tt("noPendingDrafts")}</p>
         ) : (
           <div className="space-y-2">
-            {pendingDrafts.map((d) => (
+            {pendingDraftGroups.map((g) => (
               <div
-                key={d.id}
+                key={g.key}
                 className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-sm"
               >
                 <div className="min-w-0">
                   <div className="truncate font-bold text-slate-800">
-                    {d.maLo} - {tt("kienLabel")} {d.kien}
+                    {g.maLo} - {tt("kienLabel")} {g.kienLetters}
                   </div>
                   <div className="text-xs text-slate-500">
-                    {d.soBanh} bành · {d.nganMa || "—"}
+                    {g.totalSoBanh} bành · {g.nganLabel} · {tt("caSanXuat")} {g.caLetters}
                   </div>
                 </div>
                 <button
                   type="button"
-                  disabled={deletingDraftId === d.id}
-                  onClick={() => onDeleteDraft(d.id)}
+                  disabled={!!deletingDraftId && g.draftIds.includes(deletingDraftId)}
+                  onClick={() => onDeleteDraft(g.draftIds)}
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50 disabled:opacity-50"
                 >
                   <Trash2 size={14} />
@@ -1824,28 +1884,32 @@ function EditEntryModal({
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
-              <select
-                value={ca}
-                onChange={(e) => setCa(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-              >
-                {CA_OPTS.map((c) => (
-                  <option key={c} value={c}>
-                    {caLabel(c)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={tt("chiThi")} icon={<Hash size={13} />}>
-              <input
-                type="text"
-                value={chiThi}
-                onChange={(e) => setChiThi(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-              />
-            </Field>
+          <div className="grid grid-cols-5 gap-3">
+            <div className="col-span-3">
+              <Field label={tt("caSanXuat")} icon={<Sun size={13} />}>
+                <select
+                  value={ca}
+                  onChange={(e) => setCa(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                >
+                  {CA_OPTS.map((c) => (
+                    <option key={c} value={c}>
+                      {caLabel(c)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label={tt("chiThi")} icon={<Hash size={13} />}>
+                <input
+                  type="text"
+                  value={chiThi}
+                  onChange={(e) => setChiThi(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                />
+              </Field>
+            </div>
           </div>
           <Field label={tt("soBanh")} icon={<Package size={13} />}>
             <input

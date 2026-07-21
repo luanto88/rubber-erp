@@ -89,12 +89,14 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
 
   return (
     <div>
-      <div className="mb-5 flex items-start justify-between gap-3">
-        <div>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-slate-900">{tt("plPageTitle")}</h1>
           <p className="mt-1 text-sm text-slate-500">{tt("plPageSubtitle")}</p>
         </div>
-        <LangToggle lang={lang} onChange={switchLang} />
+        <div className="shrink-0">
+          <LangToggle lang={lang} onChange={switchLang} />
+        </div>
       </div>
 
       {loading ? (

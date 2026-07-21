@@ -320,6 +320,110 @@ type LotContribution = Lot & {
   disp_d: number;
 };
 
+type ContribDisplayGroupNgan = { main: string; sub: string | null };
+
+type ContribDisplayGroup = {
+  key: string;
+  uids: string[];
+  maLo: string;
+  loaiCsr: string;
+  boc: string;
+  tongBanhCuaCa: number;
+  tongKgCuaCa: number;
+  dispA: number;
+  dispB: number;
+  dispC: number;
+  dispD: number;
+  trangThai: string;
+  nganList: ContribDisplayGroupNgan[];
+};
+
+// Dồn các dòng giao dịch (mỗi dòng = 1 kiện quét QR, hoặc 1 phiên nhập tay nhiều kiện) cùng lô +
+// pallet + loại bành + chủng loại (CSR) + bọc thành 1 dòng hiển thị trong bảng "Danh sách" — mirror
+// đúng cách gộp "Đang chờ gửi" ở confirm/page.tsx (groupPendingDrafts). CHỈ gộp ở tầng hiển thị:
+// contributions/filteredContribs/groupedByDateAndCa/stats/dorDangCountByNganId và mọi cảnh báo khác
+// vẫn tính trên dữ liệu gốc từng giao dịch, không đổi — hàm này chỉ nhận vào 1 mảng đã lọc sẵn
+// (caContribs) và trả về nhóm hiển thị, không ghi ngược lại state nào.
+function groupContributionsForDisplay(
+  caContribs: LotContribution[],
+  resolveNganLabel: (c: LotContribution) => ContribDisplayGroupNgan,
+): ContribDisplayGroup[] {
+  const map = new Map<
+    string,
+    {
+      uids: string[];
+      maLo: string;
+      loaiCsr: string;
+      boc: string;
+      tongBanhCuaCa: number;
+      tongKgCuaCa: number;
+      dispA: number;
+      dispB: number;
+      dispC: number;
+      dispD: number;
+      // Trạng thái THẬT của lô chỉ nằm trên đúng 1 contribution (giao dịch cuối cùng của lô — xem
+      // contributions useMemo, các giao dịch còn lại luôn hiện "Dở dang"). Group ưu tiên hiển thị
+      // đúng trạng thái thật nếu có bất kỳ thành viên nào mang nó.
+      trangThaiReal: string | null;
+      nganKeys: string[];
+      nganByKey: Map<string, ContribDisplayGroupNgan>;
+    }
+  >();
+  for (const c of caContribs) {
+    const palletKey = [...(c.pallet || [])].sort().join(",");
+    const key = `${c.ma_lo}||${c.loai_csr}||${c.loai_banh}||${c.boc || ""}||${palletKey}`;
+    const nganLabel = resolveNganLabel(c);
+    const nganKey = `${nganLabel.main}||${nganLabel.sub || ""}`;
+    const isRealStatus = normalizeLotStatus(c.trang_thai) !== "Dở dang";
+    const existing = map.get(key);
+    if (existing) {
+      existing.uids.push(c.uid);
+      existing.tongBanhCuaCa += c.tong_banh_cua_ca;
+      existing.tongKgCuaCa += c.tong_kg_cua_ca;
+      existing.dispA += c.disp_a || 0;
+      existing.dispB += c.disp_b || 0;
+      existing.dispC += c.disp_c || 0;
+      existing.dispD += c.disp_d || 0;
+      if (isRealStatus) existing.trangThaiReal = c.trang_thai;
+      if (!existing.nganByKey.has(nganKey)) {
+        existing.nganKeys.push(nganKey);
+        existing.nganByKey.set(nganKey, nganLabel);
+      }
+    } else {
+      map.set(key, {
+        uids: [c.uid],
+        maLo: c.ma_lo,
+        loaiCsr: c.loai_csr,
+        boc: c.boc || "",
+        tongBanhCuaCa: c.tong_banh_cua_ca,
+        tongKgCuaCa: c.tong_kg_cua_ca,
+        dispA: c.disp_a || 0,
+        dispB: c.disp_b || 0,
+        dispC: c.disp_c || 0,
+        dispD: c.disp_d || 0,
+        trangThaiReal: isRealStatus ? c.trang_thai : null,
+        nganKeys: [nganKey],
+        nganByKey: new Map([[nganKey, nganLabel]]),
+      });
+    }
+  }
+  return [...map.entries()].map(([key, g]) => ({
+    key,
+    uids: g.uids,
+    maLo: g.maLo,
+    loaiCsr: g.loaiCsr,
+    boc: g.boc,
+    tongBanhCuaCa: g.tongBanhCuaCa,
+    tongKgCuaCa: g.tongKgCuaCa,
+    dispA: g.dispA,
+    dispB: g.dispB,
+    dispC: g.dispC,
+    dispD: g.dispD,
+    trangThai: g.trangThaiReal || "Dở dang",
+    nganList: g.nganKeys.map((k) => g.nganByKey.get(k)!),
+  }));
+}
+
 type LotSeries = {
   loai_csr: string;
   loai_banh: number;
@@ -5200,42 +5304,43 @@ export default function ProductPage() {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                  {caContribs.map((c) => {
+                                  {groupContributionsForDisplay(caContribs, (c) => {
                                     const contributionNgan = c.ngan_id
                                       ? nganMetaById.get(c.ngan_id)
                                       : null;
-                                    const contributionNganMain =
+                                    const main =
                                       contributionNgan?.ma_ngan ||
                                       contributionNgan?.ten_ngan ||
                                       c.ngans?.ma_ngan ||
                                       c.ngans?.ten_ngan ||
                                       "-";
-                                    const contributionNganSub =
+                                    const sub =
                                       contributionNgan?.ma_ngan && contributionNgan?.ten_ngan
                                         ? contributionNgan.ten_ngan
                                         : contributionNgan?.ma_ngan
                                           ? null
                                           : contributionNgan?.ten_ngan || c.ngans?.ten_ngan || null;
+                                    return { main, sub };
+                                  }).map((g) => {
+                                    const allSelected =
+                                      g.uids.length > 0 && g.uids.every((id) => selectedDeleteIds.has(id));
                                     return (
                                     <tr
-                                      key={c.uid}
-                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && selectedDeleteIds.has(c.uid) ? "bg-red-50" : ""}`}
+                                      key={g.key}
+                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && allSelected ? "bg-red-50" : ""}`}
                                     >
                                       {deleteMode === date && (
                                         <td className="px-3 py-2.5">
                                           <input
                                             type="checkbox"
-                                            checked={selectedDeleteIds.has(
-                                              c.uid,
-                                            )}
+                                            checked={allSelected}
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
-                                                if (next.has(c.uid)) {
-                                                  next.delete(c.uid);
-                                                } else {
-                                                  next.add(c.uid);
-                                                }
+                                                g.uids.forEach((id) => {
+                                                  if (allSelected) next.delete(id);
+                                                  else next.add(id);
+                                                });
                                                 return next;
                                               })
                                             }
@@ -5244,75 +5349,51 @@ export default function ProductPage() {
                                         </td>
                                       )}
                                       <td className="px-4 py-2.5 font-bold text-slate-700">
-                                        {c.ma_lo}
+                                        {g.maLo}
                                       </td>
                                       <td className="px-4 py-2.5 text-xs">
-                                        <div className="font-bold text-slate-700">
-                                          {contributionNganMain}
-                                        </div>
-                                        {contributionNganSub ? (
-                                          <div className="text-slate-500">
-                                            {contributionNganSub}
+                                        {g.nganList.map((n, idx) => (
+                                          <div key={`${n.main}-${idx}`}>
+                                            <div className="font-bold text-slate-700">{n.main}</div>
+                                            {n.sub ? (
+                                              <div className="text-slate-500">{n.sub}</div>
+                                            ) : null}
                                           </div>
-                                        ) : null}
+                                        ))}
                                       </td>
                                       <td className="px-4 py-2.5">
                                         <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
-                                          {c.loai_csr}
+                                          {g.loaiCsr}
                                         </span>
                                       </td>
                                       <td
                                         className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate"
-                                        title={c.boc || ""}
+                                        title={g.boc || ""}
                                       >
-                                        {c.boc || "-"}
+                                        {g.boc || "-"}
                                       </td>
                                       <td className="px-4 py-2.5 font-extrabold text-blue-700">
-                                        +{c.tong_banh_cua_ca}{" "}
+                                        +{g.tongBanhCuaCa}{" "}
                                         <span className="text-xs font-normal text-slate-500">
-                                          ({fmtKg(c.tong_kg_cua_ca)})
+                                          ({fmtKg(g.tongKgCuaCa)})
                                         </span>
                                       </td>
                                       <td className="px-4 py-2.5 text-xs text-slate-500">
                                         <span className="flex items-center gap-0.5 flex-wrap">
-                                          {c.locked_a && (
-                                            <Lock
-                                              size={9}
-                                              className="text-indigo-400 shrink-0"
-                                            />
-                                          )}
-                                          <span>{c.disp_a}</span>
+                                          <span>{g.dispA}</span>
                                           <span>/</span>
-                                          {c.locked_b && (
-                                            <Lock
-                                              size={9}
-                                              className="text-indigo-400 shrink-0"
-                                            />
-                                          )}
-                                          <span>{c.disp_b}</span>
+                                          <span>{g.dispB}</span>
                                           <span>/</span>
-                                          {c.locked_c && (
-                                            <Lock
-                                              size={9}
-                                              className="text-indigo-400 shrink-0"
-                                            />
-                                          )}
-                                          <span>{c.disp_c}</span>
+                                          <span>{g.dispC}</span>
                                           <span>/</span>
-                                          {c.locked_d && (
-                                            <Lock
-                                              size={9}
-                                              className="text-indigo-400 shrink-0"
-                                            />
-                                          )}
-                                          <span>{c.disp_d}</span>
+                                          <span>{g.dispD}</span>
                                         </span>
                                       </td>
                                       <td className="px-4 py-2.5">
                                         <span
-                                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getLotStatusBadgeClass(c.trang_thai)}`}
+                                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getLotStatusBadgeClass(g.trangThai)}`}
                                         >
-                                          {normalizeLotStatus(c.trang_thai)}
+                                          {normalizeLotStatus(g.trangThai)}
                                         </span>
                                       </td>
                                     </tr>
