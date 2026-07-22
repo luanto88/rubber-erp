@@ -2049,6 +2049,102 @@ export default function ExportPage() {
   // -- RENDER: ADD / EDIT ----------------------------------------------------
   const selCust = customers.find((c) => c.id === form.customer_id);
 
+  // Dùng chung cho cả 2 vị trí hiển thị: ngay dưới phần "Xe" trên mobile
+  // (để không phải kéo hết danh sách lô mới thấy), và ở cuối trang trên desktop
+  // (giữ nguyên vị trí cũ, dưới cả 2 cột).
+  const summarySaveBlock = (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-500">Tổng bành</div>
+            <div className="text-2xl font-extrabold text-emerald-600">
+              {totalBanh.toLocaleString()}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng tấn</div>
+            <div className="text-2xl font-extrabold text-emerald-700">
+              {totalTan.toFixed(3)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng lô</div>
+            <div className="text-2xl font-extrabold text-slate-700">
+              {[...new Set(form.assignments.map((a) => a.lot_id))].length}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Tổng xe</div>
+            <div className="text-2xl font-extrabold text-slate-700">
+              {form.vehicles.length}
+            </div>
+          </div>
+        </div>
+        {form.vehicles.length > 0 && form.assignments.length > 0 && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="text-xs font-bold text-slate-500 mb-2">Chi tiết theo xe</div>
+            <ResponsiveTableWrapper>
+              <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-400">
+                  <th className="text-left pb-1 font-medium">Xe</th>
+                  <th className="text-right pb-1 font-medium">Bành</th>
+                  <th className="text-right pb-1 font-medium">Tấn</th>
+                  <th className="text-right pb-1 font-medium">Lô</th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.vehicles.map((v, idx) => (
+                  <tr key={v.id} className="border-t border-slate-50">
+                    <td className="py-0.5 text-slate-600 font-medium">
+                      {v.bien_truoc || `Xe ${idx + 1}`}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].banh.toLocaleString()}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].tan.toFixed(3)}
+                    </td>
+                    <td className="text-right text-slate-700">
+                      {vehicleStats[idx].lo}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+              </ResponsiveTableWrapper>
+          </div>
+        )}
+      </div>
+
+      {/* Save bar */}
+      <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-white pt-4 sm:flex-row sm:justify-end">
+        <button
+          onClick={() => {
+            setView("list");
+            setEditId(null);
+          }}
+          className="w-full px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl sm:w-auto"
+        >
+          Hủy
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50 sm:w-auto"
+        >
+          {saving
+            ? "Đang lưu..."
+            : editId
+              ? "Lưu thay đổi"
+              : `Lưu đơn xuất (${totalBanh.toLocaleString()} bành)`}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div>
       <Toast />
@@ -2177,9 +2273,9 @@ export default function ExportPage() {
           {/* Thông tin đơn */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-700 mb-4">Thông tin đơn</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-3">
               {/* Khách hàng */}
-              <div className="col-span-2">
+              <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
                   Khách hàng
                 </label>
@@ -2218,7 +2314,7 @@ export default function ExportPage() {
               </div>
 
               {/* Mã đơn */}
-              <div className="col-span-2">
+              <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
                   Mã đơn (tự động)
                 </label>
@@ -2230,103 +2326,112 @@ export default function ExportPage() {
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Ngày xuất
-                </label>
-                <input
-                  type="date"
-                  value={form.ngay}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, ngay: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Số thông báo *
-                </label>
-                <input
-                  value={form.so_thong_bao}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, so_thong_bao: e.target.value }))
-                  }
-                  placeholder="VD: TB-001-2026"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại CSR
-                </label>
-                <select
-                  value={form.chung_loai}
-                  onChange={(e) => {
-                    const cl = e.target.value;
-                    const bOpts = getBocOpts(cl);
-                    setForm((p) => ({
-                      ...p,
-                      chung_loai: cl,
-                      loai_banh: getLoaiBanhOptions(cl)[0],
-                      loai_boc: bOpts[1] || bOpts[0],
-                      assignments: [],
-                    }));
-                  }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                >
-                  {csrOpts.map((l) => (
-                    <option key={l}>{l}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại pallet xuất
-                </label>
-                <select
-                  value={form.loai_pallet}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, loai_pallet: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                >
-                  {palletOpts.map((l) => (
-                    <option key={l}>{l}</option>
-                  ))}
-                </select>
-                <div className="flex gap-1.5 mt-1.5">
+              {/* Ngày xuất - Số thông báo (tỷ lệ 7:3) */}
+              <div className="grid grid-cols-10 gap-3">
+                <div className="col-span-7">
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Ngày xuất
+                  </label>
                   <input
-                    value={newPalletInput}
-                    onChange={(e) => setNewPalletInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newPalletInput.trim()) {
+                    type="date"
+                    value={form.ngay}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, ngay: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Số thông báo *
+                  </label>
+                  <input
+                    value={form.so_thong_bao}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, so_thong_bao: e.target.value }))
+                    }
+                    placeholder="VD: TB-001-2026"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Loại CSR - Loại pallet xuất (tỷ lệ 5:5) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Loại CSR
+                  </label>
+                  <select
+                    value={form.chung_loai}
+                    onChange={(e) => {
+                      const cl = e.target.value;
+                      const bOpts = getBocOpts(cl);
+                      setForm((p) => ({
+                        ...p,
+                        chung_loai: cl,
+                        loai_banh: getLoaiBanhOptions(cl)[0],
+                        loai_boc: bOpts[1] || bOpts[0],
+                        assignments: [],
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
+                    {csrOpts.map((l) => (
+                      <option key={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Loại pallet xuất
+                  </label>
+                  <select
+                    value={form.loai_pallet}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, loai_pallet: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
+                    {palletOpts.map((l) => (
+                      <option key={l}>{l}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-1.5 mt-1.5">
+                    <input
+                      value={newPalletInput}
+                      onChange={(e) => setNewPalletInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newPalletInput.trim()) {
+                          const v = newPalletInput.trim();
+                          if (!palletOpts.includes(v))
+                            setPalletExtra((p) => [...p, v]);
+                          setForm((p) => ({ ...p, loai_pallet: v }));
+                          setNewPalletInput("");
+                        }
+                      }}
+                      placeholder="Thêm loại khác..."
+                      className="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
                         const v = newPalletInput.trim();
+                        if (!v) return;
                         if (!palletOpts.includes(v))
                           setPalletExtra((p) => [...p, v]);
                         setForm((p) => ({ ...p, loai_pallet: v }));
                         setNewPalletInput("");
-                      }
-                    }}
-                    placeholder="Thêm loại khác..."
-                    className="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-400"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = newPalletInput.trim();
-                      if (!v) return;
-                      if (!palletOpts.includes(v))
-                        setPalletExtra((p) => [...p, v]);
-                      setForm((p) => ({ ...p, loai_pallet: v }));
-                      setNewPalletInput("");
-                    }}
-                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
-                  >
-                    <Plus size={12} />
-                  </button>
+                      }}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              {/* Số hóa đơn - Số hợp đồng: mỗi trường 1 dòng riêng */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
                   Số hóa đơn
@@ -2351,6 +2456,8 @@ export default function ExportPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
               </div>
+
+              {/* Loại bành - Loại bọc: mỗi trường 1 dòng riêng */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
                   Loại bành (kg)
@@ -2423,12 +2530,12 @@ export default function ExportPage() {
                 {form.yeu_cau_chi_tieu.map((req) => (
                   <div
                     key={req.ten}
-                    className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"
+                    className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"
                   >
-                    <span className="text-xs font-bold text-amber-700 w-20 shrink-0">
+                    <span className="text-xs font-bold text-amber-700 shrink-0">
                       {req.ten}
                     </span>
-                    <div className="flex items-center gap-2 flex-1">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <label className="text-xs text-slate-500">Min</label>
                       <input
                         type="number"
@@ -2437,8 +2544,10 @@ export default function ExportPage() {
                           updateChiTieu(req.ten, "min", e.target.value)
                         }
                         placeholder="-"
-                        className="w-20 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
+                        className="w-16 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
                       />
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <label className="text-xs text-slate-500">Max</label>
                       <input
                         type="number"
@@ -2447,12 +2556,12 @@ export default function ExportPage() {
                           updateChiTieu(req.ten, "max", e.target.value)
                         }
                         placeholder="-"
-                        className="w-20 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
+                        className="w-16 px-2 py-1 border border-amber-200 rounded-lg text-xs outline-none focus:border-amber-400 text-center"
                       />
                     </div>
                     <button
                       onClick={() => toggleChiTieu(req.ten)}
-                      className="text-amber-400 hover:text-red-500"
+                      className="text-amber-400 hover:text-red-500 ml-auto shrink-0"
                     >
                       <X size={12} />
                     </button>
@@ -2861,6 +2970,9 @@ export default function ExportPage() {
               })}
             </div>
           </div>
+
+          {/* Tổng hợp + Lưu đơn (mobile) — ngay dưới phần Xe, trước khi kéo tới danh sách lô */}
+          <div className="lg:hidden">{summarySaveBlock}</div>
         </div>
 
         {/* --- RIGHT PANEL: Lot picker ------------------------------------ */}
@@ -3018,94 +3130,8 @@ export default function ExportPage() {
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 mt-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-slate-500">Tổng bành</div>
-            <div className="text-2xl font-extrabold text-emerald-600">
-              {totalBanh.toLocaleString()}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Tổng tấn</div>
-            <div className="text-2xl font-extrabold text-emerald-700">
-              {totalTan.toFixed(3)}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Tổng lô</div>
-            <div className="text-2xl font-extrabold text-slate-700">
-              {[...new Set(form.assignments.map((a) => a.lot_id))].length}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">Tổng xe</div>
-            <div className="text-2xl font-extrabold text-slate-700">
-              {form.vehicles.length}
-            </div>
-          </div>
-        </div>
-        {form.vehicles.length > 0 && form.assignments.length > 0 && (
-          <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="text-xs font-bold text-slate-500 mb-2">Chi tiết theo xe</div>
-            <ResponsiveTableWrapper>
-              <table className="w-full text-xs">
-              <thead>
-                <tr className="text-slate-400">
-                  <th className="text-left pb-1 font-medium">Xe</th>
-                  <th className="text-right pb-1 font-medium">Bành</th>
-                  <th className="text-right pb-1 font-medium">Tấn</th>
-                  <th className="text-right pb-1 font-medium">Lô</th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.vehicles.map((v, idx) => (
-                  <tr key={v.id} className="border-t border-slate-50">
-                    <td className="py-0.5 text-slate-600 font-medium">
-                      {v.bien_truoc || `Xe ${idx + 1}`}
-                    </td>
-                    <td className="text-right text-slate-700">
-                      {vehicleStats[idx].banh.toLocaleString()}
-                    </td>
-                    <td className="text-right text-slate-700">
-                      {vehicleStats[idx].tan.toFixed(3)}
-                    </td>
-                    <td className="text-right text-slate-700">
-                      {vehicleStats[idx].lo}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-              </ResponsiveTableWrapper>
-          </div>
-        )}
-      </div>
-
-      {/* Save bar */}
-      <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-white mt-4 pt-4 sm:flex-row sm:justify-end">
-        <button
-          onClick={() => {
-            setView("list");
-            setEditId(null);
-          }}
-          className="w-full px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl sm:w-auto"
-        >
-          Hủy
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50 sm:w-auto"
-        >
-          {saving
-            ? "Đang lưu..."
-            : editId
-              ? "Lưu thay đổi"
-              : `Lưu đơn xuất (${totalBanh.toLocaleString()} bành)`}
-        </button>
-      </div>
+      {/* Tổng hợp + Lưu đơn (desktop) — giữ nguyên vị trí cũ, dưới cả 2 cột */}
+      <div className="hidden lg:block mt-4">{summarySaveBlock}</div>
     </div>
   );
 }

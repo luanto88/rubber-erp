@@ -572,11 +572,11 @@ export default function OutputPage() {
         className="mb-5"
         activeCount={[filterFrom, filterTo, filterDoi, filterXe].filter(Boolean).length + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
       >
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <CalendarDays size={15} />
-            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
-            <span className="text-slate-300">→</span>
-            <DateTextInput value={filterTo} onChange={setFilterTo} className="rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <CalendarDays size={15} className="shrink-0" />
+            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="w-[128px] md:w-auto rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <span className="text-slate-300 shrink-0">→</span>
+            <DateTextInput value={filterTo} onChange={setFilterTo} className="w-[128px] md:w-auto rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
           </div>
 
           {(tab === "list" || tab === "stats") && (

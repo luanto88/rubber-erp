@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import "./globals.css"
 // Import ở root layout (không tied vào next/dynamic ssr:false của từng module bản đồ)
 // để đảm bảo CSS Leaflet luôn có trong bundle chính — tránh nguy cơ blank map do
@@ -12,6 +12,14 @@ export const metadata: Metadata = {
     shortcut: "/logo-nha-may-5.jpg",
     apple: "/logo-nha-may-5.jpg",
   },
+}
+// Thiếu viewport meta khiến trình duyệt mobile (đặc biệt webview Zalo/Facebook) render
+// ở layout viewport ảo ~980px rồi tự zoom-out để vừa màn hình — kích hoạt sai các
+// breakpoint sm:/md: của Tailwind và làm mọi field/nút bị ép nhỏ dù code responsive đã đúng.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

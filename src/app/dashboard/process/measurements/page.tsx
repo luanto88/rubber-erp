@@ -36,6 +36,22 @@ function formatDate(d: string) {
   return `${day}/${m}/${y}`
 }
 
+function pad2(n: number) {
+  return n.toString().padStart(2, "0")
+}
+
+// "dd/mm/yyyy hh:mm:ss" — ngày lấy từ trường "Ngày đo" nghiệp vụ (chỉ có ngày, không giờ),
+// giờ:phút:giây lấy từ created_at (nguồn giờ thật duy nhất, vì "Ngày đo" chỉ là <input type="date">).
+function formatDateWithCreatedAtTime(ngay: string, createdAt: string) {
+  const datePart = formatDate(ngay)
+  const d = new Date(createdAt)
+  if (Number.isNaN(d.getTime())) return datePart
+  const hh = pad2(d.getHours())
+  const mi = pad2(d.getMinutes())
+  const ss = pad2(d.getSeconds())
+  return `${datePart} ${hh}:${mi}:${ss}`
+}
+
 function getMaPhieuPreview(day_chuyen: string, ngay: string, count: number) {
   if (!ngay) return ""
   const prefix = getMaPhieuPrefix(day_chuyen)
@@ -748,7 +764,7 @@ export default function MeasurementsPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
             <div>
               <span className="text-xs font-bold text-slate-500 block mb-1">Ngày đo</span>
-              <span className="font-bold text-slate-800">{formatDate(selected.ngay)}</span>
+              <span className="font-bold text-slate-800">{formatDateWithCreatedAtTime(selected.ngay, selected.created_at)}</span>
             </div>
             <div>
               <span className="text-xs font-bold text-slate-500 block mb-1">Dây chuyền</span>

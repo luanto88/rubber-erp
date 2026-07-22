@@ -262,6 +262,8 @@ type CustomerRow = {
   ten_kh_en: string | null
   email: string | null
   dia_chi: string | null
+  quoc_gia: string | null
+  nguoi_lien_he: string | null
 }
 
 type CustomerForm = {
@@ -269,6 +271,8 @@ type CustomerForm = {
   ten_kh_en: string
   email: string
   dia_chi: string
+  quoc_gia: string
+  nguoi_lien_he: string
 }
 
 type RequiredNoteForm = {
@@ -799,7 +803,7 @@ export default function SettingsPage() {
   const [customerLoaded, setCustomerLoaded] = useState(false)
   const [customerModal, setCustomerModal] = useState<"add" | "edit" | null>(null)
   const [customerEditId, setCustomerEditId] = useState<string | null>(null)
-  const [customerForm, setCustomerForm] = useState<CustomerForm>({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "" })
+  const [customerForm, setCustomerForm] = useState<CustomerForm>({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "", quoc_gia: "", nguoi_lien_he: "" })
   const [customerSaving, setCustomerSaving] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [customerDelConfirm, setCustomerDelConfirm] = useState<{ id: string; label: string } | null>(null)
@@ -1051,7 +1055,7 @@ export default function SettingsPage() {
   const loadCustomers = useCallback(async (fid: string) => {
     setCustomerLoading(true)
     try {
-      const { data } = await supabase.from("customers").select("id, factory_id, ma_kh, ten_kh_en, email, dia_chi").eq("factory_id", fid).order("ten_kh_en")
+      const { data } = await supabase.from("customers").select("id, factory_id, ma_kh, ten_kh_en, email, dia_chi, quoc_gia, nguoi_lien_he").eq("factory_id", fid).order("ten_kh_en")
       setCustomers((data || []) as CustomerRow[])
       setCustomerLoaded(true)
     } finally {
@@ -2158,7 +2162,7 @@ export default function SettingsPage() {
     if (!customerForm.ten_kh_en.trim()) { setCustomerError("Tên khách hàng không được để trống"); return }
     setCustomerSaving(true); setCustomerError("")
     try {
-      const payload = { factory_id: factoryId, ma_kh: customerForm.ma_kh.trim() || null, ten_kh_en: customerForm.ten_kh_en.trim(), email: customerForm.email.trim() || null, dia_chi: customerForm.dia_chi.trim() || null }
+      const payload = { factory_id: factoryId, ma_kh: customerForm.ma_kh.trim() || null, ten_kh_en: customerForm.ten_kh_en.trim(), email: customerForm.email.trim() || null, dia_chi: customerForm.dia_chi.trim() || null, quoc_gia: customerForm.quoc_gia.trim() || null, nguoi_lien_he: customerForm.nguoi_lien_he.trim() || null }
       const result = customerEditId
         ? await supabase.from("customers").update(payload).eq("id", customerEditId).eq("factory_id", factoryId)
         : await supabase.from("customers").insert(payload)
@@ -3635,10 +3639,10 @@ export default function SettingsPage() {
                 {[
                   { label: "Tên công ty (tiếng Anh)", field: "full_name_en", colSpan: true },
                   { label: "Địa chỉ", field: "address_en", colSpan: true },
-                  { label: "Người liên hệ", field: "contact_person", colSpan: false },
-                  { label: "Email", field: "contact_email", colSpan: false },
-                  { label: "Website", field: "website", colSpan: false },
-                  { label: "Quốc gia", field: "country_en", colSpan: false },
+                  { label: "Người liên hệ", field: "contact_person", colSpan: true },
+                  { label: "Email", field: "contact_email", colSpan: true },
+                  { label: "Website", field: "website", colSpan: true },
+                  { label: "Quốc gia", field: "country_en", colSpan: true },
                 ].map(({ label, field, colSpan }) => (
                   <div key={field} className={colSpan ? "col-span-2" : ""}>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
@@ -3701,7 +3705,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => {
                     setCustomerEditId(null)
-                    setCustomerForm({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "" })
+                    setCustomerForm({ ma_kh: "", ten_kh_en: "", email: "", dia_chi: "", quoc_gia: "", nguoi_lien_he: "" })
                     setCustomerError("")
                     setCustomerModal("add")
                   }}
@@ -3748,7 +3752,7 @@ export default function SettingsPage() {
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setCustomerEditId(c.id)
-                                    setCustomerForm({ ma_kh: c.ma_kh || "", ten_kh_en: c.ten_kh_en || "", email: c.email || "", dia_chi: c.dia_chi || "" })
+                                    setCustomerForm({ ma_kh: c.ma_kh || "", ten_kh_en: c.ten_kh_en || "", email: c.email || "", dia_chi: c.dia_chi || "", quoc_gia: c.quoc_gia || "", nguoi_lien_he: c.nguoi_lien_he || "" })
                                     setCustomerError("")
                                     setCustomerModal("edit")
                                   }}
@@ -3773,6 +3777,8 @@ export default function SettingsPage() {
                                 <div><span className="font-bold text-slate-600">Mã KH: </span><span className="text-slate-800">{c.ma_kh || "—"}</span></div>
                                 <div><span className="font-bold text-slate-600">Tên: </span><span className="text-slate-800">{c.ten_kh_en || "—"}</span></div>
                                 <div><span className="font-bold text-slate-600">Email: </span><span className="text-slate-800">{c.email || "—"}</span></div>
+                                <div><span className="font-bold text-slate-600">Quốc gia: </span><span className="text-slate-800">{c.quoc_gia || "—"}</span></div>
+                                <div><span className="font-bold text-slate-600">Người liên hệ: </span><span className="text-slate-800">{c.nguoi_lien_he || "—"}</span></div>
                                 <div className="col-span-2"><span className="font-bold text-slate-600">Địa chỉ: </span><span className="text-slate-800">{c.dia_chi || "—"}</span></div>
                               </div>
                             </td>
@@ -4809,19 +4815,25 @@ export default function SettingsPage() {
         >
             <div className="space-y-4">
               {customerError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{customerError}</div>}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã khách hàng</label>
-                  <input value={customerForm.ma_kh} onChange={e => setCustomerForm(p => ({ ...p, ma_kh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: OLAM" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Email</label>
-                  <input value={customerForm.email} onChange={e => setCustomerForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="email@company.com" />
-                </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã khách hàng</label>
+                <input value={customerForm.ma_kh} onChange={e => setCustomerForm(p => ({ ...p, ma_kh: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: OLAM" />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên khách hàng *</label>
                 <input value={customerForm.ten_kh_en} onChange={e => setCustomerForm(p => ({ ...p, ten_kh_en: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: OLAM International" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Email</label>
+                <input value={customerForm.email} onChange={e => setCustomerForm(p => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="email@company.com" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Người liên hệ</label>
+                <input value={customerForm.nguoi_lien_he} onChange={e => setCustomerForm(p => ({ ...p, nguoi_lien_he: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="Nguyễn Văn A" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Quốc gia</label>
+                <input value={customerForm.quoc_gia} onChange={e => setCustomerForm(p => ({ ...p, quoc_gia: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Korea" />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Địa chỉ</label>
