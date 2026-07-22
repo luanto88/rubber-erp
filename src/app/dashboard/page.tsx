@@ -76,12 +76,12 @@ export default function DashboardPage() {
           >
             <Map size={16} /> Bản đồ lô
           </button>
-          {hasPermission(currentUser, "product.create") && (
+          {hasPermission(currentUser, "settings.manage_config") && (
             <button
-              onClick={() => router.push("/dashboard/product")}
+              onClick={() => router.push("/dashboard/settings?tab=cau_hinh_nha_may&sub=lo_vuon&action=add")}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm shadow-md transition-all"
             >
-              <Plus size={16} /> Tạo lô mới
+              <Plus size={16} /> Tạo Polygon mới
             </button>
           )}
         </div>
@@ -92,11 +92,11 @@ export default function DashboardPage() {
         <OverviewKpiStrip {...widgetProps} />
       </div>
 
-      <div ref={revealRef} className="grid grid-cols-1 lg:grid-cols-4 gap-4 scroll-reveal">
-        <div className="lg:col-span-1">
+      <div ref={revealRef} className="grid grid-cols-1 lg:grid-cols-4 gap-4 scroll-reveal items-stretch">
+        <div className="lg:col-span-1 h-full">
           <QuickActionsPanel {...widgetProps} />
         </div>
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-3 h-full">
           <ProcessDryingWidget {...widgetProps} />
         </div>
       </div>

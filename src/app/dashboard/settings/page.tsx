@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
+import { useSearchParams } from "next/navigation"
 
 const PolygonDrawMap = dynamic(
   () => import("./_components/PolygonDrawMap"),
@@ -688,6 +689,7 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
 }
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams()
   const [tab, setTab] = useState<SettingsTab>("system")
   const [systemTab, setSystemTab] = useState<SystemTab>("users")
   const [masterDataTab, setMasterDataTab] = useState<MasterDataTab>("suffixes")
@@ -1695,6 +1697,27 @@ export default function SettingsPage() {
   useEffect(() => {
     bootstrap()
   }, [bootstrap])
+
+  // Deep-link từ nút "Tạo Polygon mới" ở Dashboard: ?tab=cau_hinh_nha_may&sub=lo_vuon&action=add
+  const deepLinkHandledRef = useRef(false)
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return
+    if (!factoryId || !user) return
+    const qTab = searchParams.get("tab")
+    const qSub = searchParams.get("sub")
+    const qAction = searchParams.get("action")
+    if (!qTab && !qSub && !qAction) return
+    deepLinkHandledRef.current = true
+    if (qTab === "cau_hinh_nha_may") setTab("factory-config")
+    if (qSub === "lo_vuon") setConfigTab("forest-plots")
+    if (qSub === "lo_vuon" && qAction === "add" && (isAdmin || hasPermission(user, "settings.manage_config"))) {
+      setConfigError("")
+      setConfigEditId(null)
+      setForestPlotForm(emptyForestPlotForm())
+      setForestPlotGeometry(null)
+      setConfigModal("forest-plot")
+    }
+  }, [searchParams, factoryId, user, isAdmin])
 
   useEffect(() => {
     if (tab === "factory-config" && factoryId && !configLoaded && !configLoading) {

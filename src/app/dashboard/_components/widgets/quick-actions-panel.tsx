@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRight, FileOutput, Map, Package, QrCode, Tag, Truck, X } from "lucide-react"
+import { ArrowRight, FileOutput, FilePlus2, FileText, Package, QrCode, Tag, Truck, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hasPermission } from "@/lib/auth"
 import { downloadStorageBulkQrPdf } from "@/lib/storage-pdf"
@@ -126,14 +126,15 @@ export function QuickActionsPanel({ factoryId, user }: WidgetProps) {
   const actions = [
     { label: "Tạo lô thành phẩm", path: "/dashboard/product", icon: Package, color: "emerald", permission: "product.create" },
     { label: "Tạo đơn xuất hàng", path: "/dashboard/export", icon: FileOutput, color: "blue", permission: "export.create" },
-    { label: "Xem bản đồ lô", path: "/dashboard/map", icon: Map, color: "purple" },
+    { label: "Tạo tài liệu ISO", path: "/dashboard/iso/documents/new", icon: FileText, color: "violet", permission: "iso.create" },
+    { label: "Soạn thảo văn bản mới", path: "/dashboard/documents/new", icon: FilePlus2, color: "sky", permission: "documents.create" },
     { label: "Bảng phân xe", path: "/dashboard/dispatch", icon: Truck, color: "amber", permission: "dispatch.view" },
   ].filter((a) => !a.permission || hasPermission(user, a.permission))
 
   const canPrintLabel = hasPermission(user, "product.predict_view")
 
   return (
-    <WidgetCard title="Thao tác nhanh">
+    <WidgetCard title="Thao tác nhanh" className="h-full">
       <div className="space-y-1">
         {actions.map((action) => (
           <button

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
 import { DocumentsShell } from "../../_components/documents-shell"
 import {
   LOAI_VAN_BAN_KY_HIEU,
@@ -17,7 +17,7 @@ import {
   type VanBanDocumentType,
   type SignAsType,
 } from "../../_components/documents-types"
-import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2 } from "lucide-react"
+import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2, Shield, Lock } from "lucide-react"
 
 const STORAGE_BUCKET = "iso-documents"
 
@@ -109,6 +109,8 @@ function parseVanBanFileName(fileName: string, docTypes: VanBanDocumentType[]): 
 export default function UploadVanBanPage() {
   const router = useRouter()
   const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [userFullName, setUserFullName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [docTypes, setDocTypes] = useState<VanBanDocumentType[]>([])
   const [saving, setSaving] = useState(false)
@@ -122,9 +124,12 @@ export default function UploadVanBanPage() {
     ngay_phe_duyet: "",
     ghi_chu: "",
     pham_vi: "Cong_ty" as "Cong_ty" | "Don_vi",
+    cap_tl: "Cấp 1",
+    phan_loai: "Thuong",
     soan_thao_user_id: "",
     phe_duyet_user_id: "",
   })
+  const isMat = form.phan_loai === "Mat"
   // Văn bản upload ký tay không đi qua SignPlacementModal (không có bước ký live) —
   // chọn ký thay ngay tại đây, ghi trực tiếp vào phe_duyet_sign_as lúc lưu.
   const [pheDuyetSignAs, setPheDuyetSignAs] = useState<SignAsType>("none")
@@ -192,11 +197,32 @@ export default function UploadVanBanPage() {
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
+      const { user: sessionUser } = await hydrateActiveSession()
+      if (sessionUser) {
+        setUserId(sessionUser.id)
+        setUserFullName(sessionUser.full_name || sessionUser.username || null)
+      }
       await Promise.all([loadTypes(), loadApprovers(fid)])
       setLoading(false)
     }
     void bootstrap()
   }, [loadTypes, loadApprovers])
+
+  // Người lập (Nội bộ đơn vị): mặc định là chính người đang upload nếu họ thuộc đúng phòng ban
+  // đã chọn — vẫn cho đổi tay (vd admin nhập hộ văn bản giấy của người khác trong phòng ban).
+  // Cũng tự làm sạch lựa chọn cũ nếu đổi phòng ban khiến người đã chọn không còn hợp lệ.
+  // Dùng đúng danh sách "eligible" (loại người phê duyệt) khớp với option thật sự render trong
+  // dropdown bên dưới — nếu không, effect có thể set 1 giá trị không có option tương ứng, khiến
+  // <select> hiển thị sai (xem bug tương tự đã gặp ở product-predict, ghi trong CLAUDE.md).
+  useEffect(() => {
+    if (form.pham_vi !== "Don_vi") return
+    const eligible = donViUsers.filter((u) => u.id !== form.phe_duyet_user_id)
+    const stillValid = eligible.some((u) => u.id === form.soan_thao_user_id)
+    if (stillValid) return
+    const nextVal = userId && eligible.some((u) => u.id === userId) ? userId : ""
+    if (nextVal === form.soan_thao_user_id) return
+    setForm((f) => ({ ...f, soan_thao_user_id: nextVal }))
+  }, [donViUsers, userId, form.pham_vi, form.phe_duyet_user_id, form.soan_thao_user_id])
 
   // Người phê duyệt (Nội bộ đơn vị) — auto-detect lãnh đạo phòng ban
   const loadDeptLeaderCandidates = useCallback(async (fid: string, dept: string) => {
@@ -464,13 +490,19 @@ export default function UploadVanBanPage() {
         nam,
         trang_thai: "da_phe_duyet",
         is_uploaded: true,
+        cap_tl: form.pham_vi === "Don_vi" ? "Cấp 1" : form.cap_tl,
+        phan_loai: form.pham_vi === "Don_vi" ? "Thuong" : form.phan_loai,
         ngay_phe_duyet: form.ngay_phe_duyet || null,
         file_signed_pdf_url: ext === "pdf" ? fileUrl : null,
         file_goc_url: ext !== "pdf" ? fileUrl : null,
         ghi_chu: form.ghi_chu.trim() || null,
         pham_vi: form.pham_vi,
-        soan_thao_user_id: form.pham_vi === "Don_vi" ? (form.soan_thao_user_id || null) : null,
-        nguoi_soan_thao_display: form.pham_vi === "Don_vi" ? (soanThaoUser?.full_name || soanThaoUser?.username || null) : null,
+        // "Người lập" luôn mặc định là người đang thực hiện upload — với Nội bộ đơn vị vẫn ưu
+        // tiên lựa chọn tay trong dropdown (có thể khác người đang đăng nhập, vd admin nhập hộ).
+        soan_thao_user_id: form.pham_vi === "Don_vi" ? (form.soan_thao_user_id || userId || null) : (userId || null),
+        nguoi_soan_thao_display: form.pham_vi === "Don_vi"
+          ? (soanThaoUser?.full_name || soanThaoUser?.username || userFullName || null)
+          : (userFullName || null),
         phe_duyet_user_id: form.phe_duyet_user_id || null,
         phe_duyet: pheDuyetName || null,
         phe_duyet_sign_as: pheDuyetSignAs === "none" ? null : pheDuyetSignAs,
@@ -608,6 +640,87 @@ export default function UploadVanBanPage() {
                 )}
               </div>
 
+              {/* Phạm vi lưu hành — quyết định luồng ký, đặt sớm để các section bên dưới hiện đúng nhánh */}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
+                <div className="flex rounded-xl overflow-hidden border border-slate-200">
+                  {[
+                    { val: "Cong_ty" as const, label: "Nội bộ công ty" },
+                    { val: "Don_vi" as const, label: "Nội bộ đơn vị" },
+                  ].map(({ val, label }) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={`flex-1 py-2 text-sm font-bold transition-all ${
+                        form.pham_vi === val
+                          ? "bg-blue-600 text-white"
+                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                      }`}
+                      onClick={() => {
+                        setForm((f) => ({
+                          ...f,
+                          pham_vi: val,
+                          phe_duyet_user_id: "",
+                          soan_thao_user_id: "",
+                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
+                        }))
+                        setSteps([])
+                        setDeptLeaderCandidates([])
+                        setDeptLeaderQueried(false)
+                        setDonViUsers([])
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {form.pham_vi === "Don_vi" && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    Văn bản chỉ lưu hành trong đơn vị. Người trong phòng ban ký xác nhận tuần tự.
+                  </p>
+                )}
+              </div>
+
+              {/* Phân loại Thường/Mật — chỉ áp dụng Nội bộ công ty, giống new/page.tsx */}
+              {form.pham_vi !== "Don_vi" && (
+                <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
+                  <label className="text-xs font-bold text-slate-600 block mb-2.5">
+                    Phân loại <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, phan_loai: "Thuong" }))}
+                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
+                        !isMat
+                          ? "bg-slate-700 text-white border-slate-700 shadow-md"
+                          : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Shield size={17} />
+                      Thường
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, phan_loai: "Mat" }))}
+                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
+                        isMat
+                          ? "bg-red-600 text-white border-red-600 shadow-md"
+                          : "bg-white text-red-500 border-red-300 hover:bg-red-50"
+                      }`}
+                    >
+                      <Lock size={17} />
+                      Mật
+                    </button>
+                  </div>
+                  <p className={`text-xs mt-2 ${isMat ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                    {isMat
+                      ? "Văn bản Mật: đóng dấu MẬT khi in và hiển thị badge cảnh báo trên trang chi tiết."
+                      : "Văn bản Thường."}
+                  </p>
+                </div>
+              )}
+
               {/* Loại văn bản */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -691,35 +804,20 @@ export default function UploadVanBanPage() {
                 />
               </div>
 
-              {/* Phạm vi lưu hành */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
-                <div className="flex rounded-xl overflow-hidden border border-slate-200">
-                  {[
-                    { val: "Cong_ty" as const, label: "Nội bộ công ty" },
-                    { val: "Don_vi" as const, label: "Nội bộ đơn vị" },
-                  ].map(({ val, label }) => (
-                    <button
-                      key={val}
-                      type="button"
-                      className={`flex-1 py-2 text-sm font-bold transition-all ${
-                        form.pham_vi === val
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      }`}
-                      onClick={() => {
-                        setForm((f) => ({ ...f, pham_vi: val, phe_duyet_user_id: "", soan_thao_user_id: "" }))
-                        setSteps([])
-                        setDeptLeaderCandidates([])
-                        setDeptLeaderQueried(false)
-                        setDonViUsers([])
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {/* Cấp văn bản — chỉ áp dụng Nội bộ công ty, khóa cứng "Cấp 1" cho Nội bộ đơn vị */}
+              {form.pham_vi !== "Don_vi" && (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp văn bản</label>
+                  <select
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    value={form.cap_tl}
+                    onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
+                  >
+                    <option value="Cấp 1">Cấp 1 — Có vòng ký phòng ban trước khi phê duyệt</option>
+                    <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
+                  </select>
                 </div>
-              </div>
+              )}
 
               {/* Ngày phê duyệt */}
               <div>
@@ -957,6 +1055,11 @@ export default function UploadVanBanPage() {
                       <option key={u.id} value={u.id}>{u.full_name || u.username}</option>
                     ))}
                   </select>
+                  {form.soan_thao_user_id && form.soan_thao_user_id === userId && (
+                    <p className="text-xs text-emerald-600 mt-1.5">
+                      Mặc định: bạn — người đang tải lên. Có thể đổi nếu nhập hộ người khác.
+                    </p>
+                  )}
                   {donViUsers.length === 0 && (
                     <p className="text-xs text-slate-400 mt-1.5">Chưa có nhân sự nào trong phòng ban này.</p>
                   )}

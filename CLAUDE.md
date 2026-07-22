@@ -457,3 +457,95 @@ Trang `/dashboard` được viết lại toàn bộ thành bảng điều khiể
 - Widget "Chế độ sấy & đo nhanh" lặp qua `CSR_BY_DAY_CHUYEN` (từ `process/_components/process-types.ts`) và dùng lại `resolveCheDoSuggestion` — không hardcode danh sách CSR riêng, tự bỏ qua tổ hợp không có dữ liệu.
 - **Lưu ý eslint**: rule `react-hooks/set-state-in-effect` báo lỗi khi effect gọi `setState` đồng bộ ở nhánh early-return NHƯNG phần async phía sau kết thúc bằng `if (alive) { setX(); setLoading(false) }` thay vì `try/finally` — đổi sang `try { ... } finally { if (alive) setLoading(false) }` là hết lỗi (xem `overview-kpi-strip.tsx`). Chưa rõ nguyên nhân chính xác của rule, nhưng pattern `try/finally` luôn an toàn.
 - **Chưa test tay trên trình duyệt thật** — cần: chạy migration trên Supabase SQL Editor trước; đăng nhập admin xác nhận toàn bộ khối hiển thị đúng; thu hồi `dashboard.view` của 1 tài khoản test xác nhận thấy đúng màn "Chọn module"; thu hồi riêng 1 quyền module (vd `quality.view`) xác nhận chỉ đúng khối đó biến mất; test "In QR ngăn nhanh" tải đúng file PDF; test "In nhãn lô nhanh" điều hướng đúng sang `/dashboard/product/predict`.
+
+## Kế hoạch phiên sau (2026-07-22) — Dashboard v2 + Upload văn bản ký tay
+
+Người dùng đã xem bản Dashboard đầu tiên (ảnh chụp `cung_cap_dl/ds.png`) và yêu cầu 5 điểm cải tiến dưới đây. **Chưa code gì ở phiên này** — chỉ ghi lại yêu cầu để phiên sau triển khai.
+
+### 1. Nút header "Tạo lô mới" gây nhầm lẫn với "thêm lô vườn mới"
+
+- Hiện `/dashboard/page.tsx` có 2 nút góc phải: "Bản đồ lô" (giữ nguyên, không đổi) và "Tạo lô mới" (điều hướng `/dashboard/product`, tạo lô **thành phẩm**).
+- Người dùng muốn: nút thứ 2 đổi hẳn ý nghĩa, trở thành đúng chức năng "Thêm mới" của **Lô vườn (EUDR forest plot)** hiện có tại `Cài đặt → Cấu hình nhà máy → Lô vườn → Thêm mới` (vẽ polygon trên bản đồ bằng leaflet + geoman, xem `.claude/rules/04-settings-master-data.md` mục 4.5). Đổi nhãn nút thành **"Tạo Polygon mới"**.
+- Modal "Thêm lô vườn" hiện nằm sâu trong `settings/page.tsx` (file rất lớn, nhiều state dùng chung). Hướng làm an toàn: deep-link kèm query param (vd `/dashboard/settings?tab=cau_hinh_nha_may&sub=lo_vuon&action=add`) để trang Settings tự mở đúng tab + modal khi mount — **không** tách modal ra component dùng chung ngay ở bước đầu (rủi ro đụng cấu trúc lớn của Settings). Cần đọc kỹ `settings/page.tsx` phần state điều khiển tab/modal Lô vườn trước khi sửa.
+- Cần xác nhận đúng permission gate cho nút này (khả năng cao là quyền hiện đang gate mục Lô vườn trong Settings, chưa kiểm chứng ở phiên này).
+
+### 2. Panel "Thao tác nhanh" (`quick-actions-panel.tsx`)
+
+- Bỏ mục "Xem bản đồ lô" khỏi panel — trùng với nút "Bản đồ lô" đã có ở header.
+- Thêm 2 mục mới:
+  - "Tạo tài liệu ISO" → `/dashboard/iso/documents/new`, gate `iso.create`.
+  - "Soạn thảo văn bản mới" → `/dashboard/documents/new`, gate `documents.create`.
+- Không đụng mục "Tạo lô thành phẩm" trong panel (khác với nút header ở mục 1 — 2 nút độc lập, không xung đột sau khi đổi nút header).
+
+### 3. Hai thẻ đầu trang chưa bằng chiều cao trên desktop
+
+- `page.tsx` hiện đặt `QuickActionsPanel` (col-span-1) và `ProcessDryingWidget` (col-span-3) trong cùng 1 hàng `grid lg:grid-cols-4` — ảnh chụp cho thấy 2 thẻ cao thấp lệch nhau rõ rệt trên desktop.
+- Yêu cầu: 2 thẻ cao bằng nhau. Hướng làm: đảm bảo cả 2 `<div>` item và `WidgetCard` bên trong đều `h-full` (grid item mặc định `align-items: stretch` nên chỉ cần không có gì chặn `h-full` lan xuống) — không set chiều cao cứng vì nội dung 2 bên tải bất đồng bộ và số dòng khác nhau.
+
+### 4. Widget "Chế độ sấy & đo nhanh chỉ tiêu" — 2 sửa đổi
+
+1. **Ẩn hẳn tổ hợp CSR không có dữ liệu riêng** (ảnh minh họa: card CSR20 hiện vẫn hiển thị dù ghi "Chưa có dữ liệu riêng cho CSR 20, đang dùng chế độ gần nhất của dây chuyền..." và "5 kết quả đo gần nhất: Chưa có dữ liệu"). Nguyên nhân: `process-drying-widget.tsx`'s `loadCombo()` dùng `resolveCheDoSuggestion(csrMatch, latestAny, ...)` — khi không có `csrMatch` riêng, hàm fallback về `latestAny` (chế độ của CSR khác cùng dây chuyền) nên `row` vẫn non-null, card vẫn render. Với mục đích tóm tắt trên Dashboard (khác mục đích gốc của hàm này — auto-fill form ở module Process, nơi fallback hữu ích), cần đổi điều kiện render thành: **chỉ hiện card khi có `csrMatch` thật** (bỏ qua `warning`/fallback), bất kể `resolveCheDoSuggestion` trả gì.
+2. **Thiết kế lại layout mỗi thẻ** — hiện đang thừa khoảng trắng, dòng "ngày · ca" và "Po/Mo" bị tách dòng lộn xộn khi `min-w-[260px]` không đủ rộng cho nội dung `flex justify-between`. Cần bố cục rõ ràng, chắc chắn không vỡ dòng (ví dụ bảng 2 cột cố định thay vì flex, hoặc tăng min-width thẻ, hoặc rút gọn hiển thị kết quả đo dạng chip nhỏ).
+
+### 5. Upload văn bản nội bộ ký tay — đồng bộ quy tắc ẩn/hiện field với Soạn thảo mới
+
+- Trang `/dashboard/documents/new/upload` (đã rework nhiều lần, xem mục "Upload văn bản ký tay" phía trên) có luồng nhập liệu riêng — người dùng nhận thấy logic ẩn/hiện các trường **chưa nhất quán** với `/dashboard/documents/new`.
+- Yêu cầu: áp dụng đúng các quy tắc đã chuẩn hóa ở luồng Soạn thảo mới vào trang Upload này — ví dụ: khối "Phân loại Thường/Mật" chỉ hiện khi `pham_vi = "Cong_ty"`; `cap_tl` khóa cứng `"Cấp 1"` khi `pham_vi = "Don_vi"`; tiền tố ký thay KT./TM./TL./TUQ. (xem mục "Tổng quát hóa 'KT.'" trong `.claude/rules/22-documents-module.md`)... — cần đối chiếu kỹ từng field giữa 2 trang trước khi sửa, không đoán.
+- Việc cần làm đầu tiên ở phiên sau: đọc lại đồng thời `new/page.tsx` và `new/upload/page.tsx`, liệt kê rõ danh sách field nào đang lệch quy tắc, rồi mới sửa.
+
+## Cập nhật 2026-07-22 (tiếp) — Đã triển khai xong 5 mục kế hoạch ở trên
+
+Cả 5 mục đã code xong trong phiên này. `npx tsc --noEmit`, `npx eslint` (các file đã sửa), và `npm run build` đều sạch/pass. **Chưa test tay trên trình duyệt thật** — xem checklist cuối mỗi mục.
+
+### 1. Nút header đổi thành "Tạo Polygon mới"
+
+- `dashboard/page.tsx`: nút thứ 2 đổi permission gate từ `product.create` sang **`settings.manage_config`** (đã xác nhận đây đúng là quyền gate mục Lô vườn trong Settings — `canManageSettings = isAdmin || hasPermission(user, "settings.manage_config")`), điều hướng sang `/dashboard/settings?tab=cau_hinh_nha_may&sub=lo_vuon&action=add`, nhãn đổi thành "Tạo Polygon mới". Nút "Bản đồ lô" giữ nguyên không đổi.
+- `settings/page.tsx`: thêm `useSearchParams()` (mirror đúng pattern đã dùng ở `quality/page.tsx` — dùng trực tiếp trong component `"use client"`, không cần bọc `<Suspense>`, đã build thành công và route vẫn `○ Static`). Thêm effect `deepLinkHandledRef` (chỉ chạy 1 lần, đợi `factoryId && user` sẵn sàng sau bootstrap): đọc `tab=cau_hinh_nha_may` → `setTab("factory-config")`; `sub=lo_vuon` → `setConfigTab("forest-plots")`; `sub=lo_vuon&action=add` (và có `settings.manage_config`) → mở đúng modal "Thêm mới" Lô vườn (`setConfigEditId(null); setForestPlotForm(emptyForestPlotForm()); setForestPlotGeometry(null); setConfigModal("forest-plot")`) — copy y hệt logic của nút "Thêm mới" đã có sẵn tại `configTab === "forest-plots"`. Không tách modal ra component riêng, không đụng cấu trúc lớn khác của Settings.
+- **Chưa test tay**: bấm nút ở Dashboard → xác nhận vào đúng tab Cấu hình nhà máy, sub-tab Lô vườn, modal "Thêm mới" tự mở với form trống + bản đồ vẽ polygon sẵn sàng; xác nhận tài khoản không có `settings.manage_config` không thấy nút này ở Dashboard (trước đây gate theo `product.create` nên có thể khác tập user thấy nút).
+
+### 2. Panel "Thao tác nhanh"
+
+- `quick-actions-panel.tsx`: bỏ mục "Xem bản đồ lô" (`/dashboard/map`); thêm "Tạo tài liệu ISO" (`/dashboard/iso/documents/new`, gate `iso.create`, icon `FileText` tím) và "Soạn thảo văn bản mới" (`/dashboard/documents/new`, gate `documents.create`, icon `FilePlus2` xanh sky) — chèn ngay sau "Tạo đơn xuất hàng", trước "Bảng phân xe". Mục "Tạo lô thành phẩm" trong panel giữ nguyên.
+- Màu `violet`/`sky` dùng dynamic Tailwind class (`bg-${color}-100`/`text-${color}-600`) — đã xác nhận cả 2 tổ hợp lớp này đã xuất hiện literal ở nơi khác trong repo nên Tailwind JIT scanner nhận diện đúng, không bị purge.
+- **Chưa test tay**: xác nhận 2 mục mới điều hướng đúng trang, ẩn/hiện đúng theo quyền `iso.create`/`documents.create`.
+
+### 3. Hai thẻ đầu trang cao bằng nhau
+
+- `dashboard/page.tsx`: thêm `items-stretch` vào grid container + `h-full` vào 2 `<div>` item (`lg:col-span-1`, `lg:col-span-3`).
+- `quick-actions-panel.tsx` và `process-drying-widget.tsx`: truyền `className="h-full"` vào `<WidgetCard>` (chỉ 2 nơi này, không đụng `WidgetCard` mặc định hay các widget khác — tránh ảnh hưởng ngoài ý muốn tới grid `InventoryAlertsWidget`/`TasksSummaryWidget` ở cuối trang).
+- **Chưa test tay**: xem trên màn hình desktop thật, xác nhận 2 thẻ đầu trang luôn cao bằng nhau bất kể bên nào có ít/nhiều nội dung hơn (card ngắn sẽ có khoảng trắng dư ở dưới, không co lại theo nội dung).
+
+### 4. Widget "Chế độ sấy & đo nhanh chỉ tiêu"
+
+- `process-drying-widget.tsx`, `loadCombo()`: thêm `if (!csrMatch) return null` ngay sau khi lấy `csrMatchRes.data` — chỉ hiện card khi có chế độ sấy ghi nhận **riêng** cho đúng CSR đó, bỏ hẳn nhánh fallback dùng `latestAny` của CSR khác để quyết định có hiện card hay không (vẫn giữ nguyên `resolveCheDoSuggestion`/`warning` cho mục đích khác — chỉ đổi điều kiện lọc combo nào được đưa vào danh sách card).
+- Redesign layout thẻ: đổi `min-w-[260px]` → `min-w-[300px]`; khối 3 số liệu (Đầu ướt/Đầu khô/Thời gian) đổi từ `grid-cols-3` sang `<table>` 2 hàng cố định (nhãn hàng trên, số liệu hàng dưới, mỗi cột `w-1/3`) để không lệch dòng; khối "5 kết quả đo gần nhất" đổi từ 1 dòng text nối bằng `" · "` (dễ vỡ dòng) sang mỗi dòng có nhãn ngày/ca bên trái (`shrink-0 whitespace-nowrap`) + các chip nhỏ bo góc (`bg-slate-100`) bên phải cho từng chỉ tiêu, tự `flex-wrap` khi nhiều chỉ tiêu.
+- **Chưa test tay**: xác nhận card CSR không có dữ liệu riêng (dù dây chuyền có dữ liệu CSR khác) biến mất hẳn khỏi widget; xác nhận layout thẻ không còn vỡ dòng ở các độ rộng màn hình khác nhau, chip kết quả đo hiển thị gọn gàng.
+
+### 5. Đồng bộ Upload văn bản ký tay với Soạn thảo mới
+
+Đối chiếu field-by-field giữa `new/page.tsx` và `new/upload/page.tsx` phát hiện 2 quy tắc chuẩn hóa **hoàn toàn thiếu** ở trang Upload (không phải lệch nhẹ — thiếu hẳn UI/state/payload):
+
+1. **Khối "Phân loại Thường/Mật"**: `new/page.tsx` đã có, gate `pham_vi !== "Don_vi"`. `new/upload/page.tsx` **không có field `phan_loai` nào cả** — mọi văn bản upload luôn nhận `phan_loai = "Thuong"` qua DB default dù người dùng tải lên 1 văn bản giấy đã đóng dấu MẬT thật. Hệ quả: mất watermark "MẬT" khi in lại (`documents/print/page.tsx` đọc `doc.phan_loai`) và mất badge cảnh báo ở trang chi tiết. Đã thêm đúng UI/state/payload y hệt `new/page.tsx` (nút Thường/Mật với icon `Shield`/`Lock`), gate theo `pham_vi`.
+2. **`cap_tl`**: `new/page.tsx` có field + khóa cứng `"Cấp 1"` khi `Don_vi`. `new/upload/page.tsx` **không có field `cap_tl` trong state/UI/payload** — insert bỏ qua cột này hoàn toàn nên mọi văn bản upload có `cap_tl = NULL` trong DB (cột nullable, không lỗi) → trang chi tiết/in hiện "Cấp văn bản: —" thay vì "Cấp 1"/"Cấp 2" thật. Đã thêm dropdown Cấp 1/Cấp 2 gate theo `pham_vi`, khóa cứng "Cấp 1" khi chuyển sang `Don_vi` (giống hệt `onClick` của toggle `pham_vi` trong `new/page.tsx`).
+- **Đã xác nhận KHÔNG lệch** (giữ nguyên, không đụng): tiền tố ký thay KT./TM./TL./TUQ. — Upload đã có sẵn đúng theo bản tổng quát hóa (`SIGN_AS_OPTIONS`/`SIGN_AS_LABEL` từ `documents-types.ts`), chỉ khác vị trí chọn (Upload chọn ngay lúc tạo vì không có bước ký live qua `SignPlacementModal`, còn `new/page.tsx` đã bỏ hẳn chọn-lúc-soạn từ 2026-07-06 vì giờ chọn lúc ký) — đây là khác biệt CÓ CHỦ ĐÍCH đã ghi rõ trong code, không phải bug.
+- **Cố ý KHÔNG thêm**: field `mat_recipient_user_id` theo từng bước "Phòng ban đã ký" của Upload — trường này ở `new/page.tsx` chỉ phục vụ định tuyến thông báo cho bước ký **live** tiếp theo (`sign/route.ts`'s `getNextRecipients()`); văn bản upload luôn insert thẳng ở trạng thái `da_phe_duyet` (đã hoàn tất), không bao giờ chạy qua luồng ký live nên trường này không có tác dụng — thêm vào sẽ là code chết.
+- Đã sắp xếp lại thứ tự field trong card "Thông tin văn bản" của Upload để khớp trình tự `new/page.tsx` (File → Phạm vi lưu hành → Phân loại → Loại VB → Phòng ban → Mã VB → Tên VB → Cấp VB → Ngày ký/phê duyệt riêng của Upload → Ghi chú) — lý do dời "Phạm vi lưu hành" lên sớm giống `new/page.tsx`: các field Phân loại/Cấp VB mới thêm đều phụ thuộc `pham_vi` nên cần chọn trước.
+- **Chưa test tay**: tạo 1 văn bản Upload chọn "Nội bộ công ty" → xác nhận thấy cả khối Phân loại và Cấp văn bản, chọn "Mật" → lưu → mở trang chi tiết xác nhận badge "Mật" hiện đúng, in ra có watermark MẬT; chọn "Nội bộ đơn vị" → xác nhận cả 2 khối biến mất, lưu xong `cap_tl` trong DB là "Cấp 1" và `phan_loai` là "Thuong" bất kể đã chọn gì trước đó khi còn ở Cong_ty.
+
+## Cập nhật 2026-07-22 (tiếp 2) — Redesign widget Chế độ sấy + mặc định "Người lập" ở Upload ký tay
+
+Người dùng gửi 2 ảnh so sánh (bản hiện tại vs 1 ảnh tham khảo bố cục dạng dark theme) và yêu cầu redesign lại nhưng **giữ màu sắc/thông tin đúng theo dự án** (không copy nguyên dark theme, không bịa field không có trong data model). `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay.**
+
+### Widget "Chế độ sấy & đo nhanh chỉ tiêu" (`process-drying-widget.tsx`)
+
+- Giữ nguyên nền trắng/light theme của toàn app (`.claude/rules/05-ui-components.md`), chỉ mượn Ý TƯỞNG bố cục của ảnh tham khảo: header strip có icon, hàng KPI tile 3 ô, rồi bảng kết quả đo có cột rõ ràng thay vì text nối chuỗi.
+- Mỗi thẻ CSR giờ có: (1) header strip `bg-slate-50` với icon `Thermometer` trong badge tròn emerald + nhãn "{dây chuyền} · CSR{x}"; (2) 3 KPI tile màu riêng — Đầu ướt (`Droplet`, xanh dương), Đầu khô (`Flame`, cam), Thời gian (`Clock`, tím); (3) bảng thật (`<table>`) "5 kết quả đo gần nhất" với cột "Ngày đo", "Ca" (bỏ tiền tố "Ca " khỏi giá trị vì đã có ở tên cột), và **1 cột riêng cho từng chỉ tiêu** lấy từ `CHI_TIEU_BY_CSR[csr]` (hằng số đã có sẵn trong `process-types.ts`, đúng cặp chỉ tiêu chuẩn theo CSR — Po/Mo hoặc Po/Màu sắc) thay vì suy từ dữ liệu đo thực tế, để cột luôn ổn định dù có dòng thiếu kết quả.
+- Giá trị mỗi ô chỉ tiêu bọc trong badge màu nhẹ theo cột (`CHI_TIEU_COLOR`: Po=sky, Mo=emerald, Màu sắc=amber) — chỉ để phân biệt trực quan giữa các cột, **không mang ý nghĩa đạt/không đạt** (widget này không có ngưỡng so sánh, khác hẳn "Đạt hạng" ở `/product-label`).
+- Card rộng hơn (`min-w-[300px]` → `min-w-[340px]`) để đủ chỗ cho 4 cột bảng không bị chật.
+
+### Upload văn bản ký tay — mặc định "Người lập" là người đang upload
+
+- `new/upload/page.tsx`: bootstrap thêm `hydrateActiveSession()` (trước đây trang này chỉ gọi `getActiveFactoryId()`, không biết ai đang đăng nhập) → lưu `userId`/`userFullName`.
+- Nội bộ đơn vị (`Don_vi`): thêm effect tự động chọn `soan_thao_user_id = userId` nếu người đang đăng nhập nằm trong danh sách nhân sự **hợp lệ** của phòng ban đã chọn (khớp đúng danh sách đã lọc bỏ người phê duyệt — `donViUsers.filter(u => u.id !== phe_duyet_user_id)` — để tránh bug `<select>` hiện sai do set value không khớp option nào, đúng loại lỗi đã từng gặp và ghi lại ở module Dự đoán số lô). Vẫn cho đổi tay (vd admin nhập hộ văn bản giấy của đồng nghiệp khác phòng ban) — effect chỉ set lại khi lựa chọn hiện tại không còn hợp lệ (vd đổi phòng ban), không ép buộc liên tục. Có hint xanh nhỏ "Mặc định: bạn — người đang tải lên" khi giá trị đang chọn trùng `userId`.
+- Nội bộ công ty (`Cong_ty`): trang này trước đây **không lưu `soan_thao_user_id`/`nguoi_soan_thao_display` nào cả** (luôn `null`) — nghĩa là văn bản Upload phạm vi công ty không ai (trừ admin) sửa lại được sau này (`documents/[id]/page.tsx`'s `isSoanThao = doc.soan_thao_user_id === user?.id || isAdmin` luôn `false` cho user thường), và "Người soạn thảo" trên trang chi tiết luôn hiện "—". Đã sửa: payload giờ luôn set `soan_thao_user_id = userId`, `nguoi_soan_thao_display = userFullName` cho nhánh Cong_ty (không có UI chọn — mirror đúng hành vi `new/page.tsx`, nơi người soạn thảo luôn là session user, không cho chọn tay ở cả 2 `pham_vi`).
+- **Chưa test tay**: tạo Upload Nội bộ đơn vị → chọn phòng ban của chính mình → xác nhận "Người lập" tự chọn đúng tên mình kèm hint xanh; đổi sang phòng ban khác không có mình → xác nhận về "— Chọn người lập —" (không bị set nhầm); tạo Upload Nội bộ công ty → lưu xong mở trang chi tiết xác nhận "Người soạn thảo" hiện đúng tên mình (không còn "—"), và tài khoản đó (không phải admin) giờ thấy được nút "Sửa" cho đúng văn bản mình vừa upload.
