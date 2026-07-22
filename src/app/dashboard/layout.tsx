@@ -76,7 +76,7 @@ function isNavGroup(item: NavItem): item is NavGroup {
 }
 
 const NAV: NavItem[] = [
-  { key: "/dashboard", label: "Dashboard", icon: Home, hiddenForRoles: ["customer"] },
+  { key: "/dashboard", label: "Dashboard", icon: Home, permission: "dashboard.view", hiddenForRoles: ["customer"] },
   {
     key: "/dashboard/customer-portal",
     label: "Đơn hàng của tôi",

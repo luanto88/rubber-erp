@@ -531,6 +531,7 @@ function parsePointPhaseList(value: string) {
 }
 
 const PERMISSION_MODULE_LABELS: Record<string, string> = {
+  dashboard: "Bảng điều khiển",
   dispatch: "Điều xe",
   documents: "Văn bản",
   export: "Xuất hàng",

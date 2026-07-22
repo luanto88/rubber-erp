@@ -334,6 +334,7 @@ export function hasPermission(
 }
 
 export const DEFAULT_PERMISSION_CODES = [
+  "dashboard.view",
   "dispatch.view",
   "dispatch.create",
   "dispatch.edit",
@@ -397,6 +398,7 @@ export const DEFAULT_PERMISSION_CODES = [
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
   admin: DEFAULT_PERMISSION_CODES,
   manager: [
+    "dashboard.view",
     "dispatch.view",
     "dispatch.create",
     "dispatch.edit",
@@ -438,6 +440,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.delete",
   ],
   user: [
+    "dashboard.view",
     "dispatch.view",
     "storage.view",
     "inventory.view",

@@ -143,7 +143,7 @@ function thresholdFromStandard(limits: LimitRow, chiTieu: ChiTieuKey): Criterion
 
 // ─── Helpers thống kê cơ bản ────────────────────────────────────────────────
 
-function toNums(raw: (string | number)[] | undefined): number[] {
+export function toNums(raw: (string | number)[] | undefined): number[] {
   return (raw || []).map(Number).filter((v) => !Number.isNaN(v) && v > 0)
 }
 

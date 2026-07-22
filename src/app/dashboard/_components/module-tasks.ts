@@ -94,7 +94,7 @@ async function getRotHangLotCount(factoryId: string): Promise<number> {
 
 // ── ISO ──────────────────────────────────────────────────────────────────────
 // Mirror isMyPendingDoc + logic iso_form_instances ở src/app/dashboard/iso/my-tasks/page.tsx
-async function getIsoTasks(factoryId: string, userId: string): Promise<ModuleTaskSummary> {
+export async function getIsoTasks(factoryId: string, userId: string): Promise<ModuleTaskSummary> {
   const [{ data: docs }, { data: forms }] = await Promise.all([
     supabase
       .from("iso_documents")
@@ -158,7 +158,7 @@ async function resolveUserDeptCode(userId: string): Promise<string | null> {
   return null
 }
 
-async function getDocumentsTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+export async function getDocumentsTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
   const isAdmin = user.role === "admin"
   const deptCode = isAdmin ? null : await resolveUserDeptCode(user.id)
 
@@ -227,7 +227,7 @@ async function canApproveExportOrders(factoryId: string, user: SessionUser): Pro
   return EXPORT_ORDER_APPROVER_TITLES.has(normalizeText(staffRow?.chuc_vu_chinh_quyen))
 }
 
-async function getExportTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+export async function getExportTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
   const [canApprove, rotHangCount] = await Promise.all([
     canApproveExportOrders(factoryId, user),
     getRotHangLotCount(factoryId),
@@ -252,7 +252,7 @@ async function getExportTasks(factoryId: string, user: SessionUser): Promise<Mod
 // vì module không có bước approve. Cảnh báo tồn thấp/cận hạn mirror alertRows ở
 // inventory/analytics/page.tsx — tái dùng buildEffectiveStockBalances (pure function,
 // xử lý đúng case "dầu dùng chung bồn") thay vì viết lại logic gộp tồn.
-async function getInventoryTasks(factoryId: string): Promise<ModuleTaskSummary> {
+export async function getInventoryTasks(factoryId: string): Promise<ModuleTaskSummary> {
   const [{ count: draftCount }, { data: itemsRaw }, { data: rulesRaw }, { data: balancesRaw }, { data: oilPoolRaw }, { data: lotBalancesRaw }] =
     await Promise.all([
       supabase.from("inventory_documents").select("id", { count: "exact", head: true })
@@ -314,7 +314,7 @@ async function getInventoryTasks(factoryId: string): Promise<ModuleTaskSummary> 
 }
 
 // ── Chất lượng ───────────────────────────────────────────────────────────────
-async function getQualityTasks(factoryId: string): Promise<ModuleTaskSummary> {
+export async function getQualityTasks(factoryId: string): Promise<ModuleTaskSummary> {
   const count = await getRotHangLotCount(factoryId)
   return { moduleLabel: "Chất lượng", items: [{ label: "Lô đang rớt hạng", count, link: "/dashboard/quality" }] }
 }
