@@ -5,6 +5,7 @@ import { SIGN_AS_OPTIONS, type ThuTuKyStep, type SignAsType } from "@/app/dashbo
 import { PDFDocument, rgb } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
+import QRCode from "qrcode"
 import fs from "fs"
 import path from "path"
 
@@ -35,10 +36,49 @@ type SignPlacement = {
   prefixY?: number
   prefixWidth?: number
   prefixHeight?: number
+  // Vị trí QR do người ký kéo-thả chọn — CHỈ có ý nghĩa khi showQr=true (lượt ký đầu
+  // tiên của văn bản, xem hasQrPlacement ở documents/[id]/page.tsx). Server chỉ đọc
+  // các trường này đúng 1 lần (lúc chưa có placement_ky.qr) rồi lưu lại làm nguồn sự
+  // thật cho mọi lượt ký sau — không đọc lại qrX/qrY từ các lượt ký sau.
+  showQr?: boolean
+  qrX?: number
+  qrY?: number
+  qrWidth?: number
+  qrHeight?: number
 }
+
+// Vị trí QR đã "chốt" cho cả văn bản — lưu tại placement_ky.qr, thiết lập đúng 1 lần
+// ở lượt ký đầu tiên, tái dùng cho mọi lượt stamp tiếp theo (không đổi theo từng bước).
+type QrBox = { x: number; y: number; width: number; height: number }
 
 function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
   return typeof v === "string" && (SIGN_AS_OPTIONS as string[]).includes(v)
+}
+
+// Nếu văn bản CHƯA từng có QR được chốt vị trí (`base.qr`) và request này gửi kèm
+// tọa độ QR hợp lệ (`showQr: true` — chỉ SignPlacementModal gửi ở lượt ký đầu tiên
+// của cả văn bản, xem `documents/[id]/page.tsx`'s `hasQrPlacement`), chốt vị trí đó
+// vào key "qr" để mọi lượt ký/phê duyệt sau tái dùng, không đọc lại qrX/qrY của các
+// lượt sau (tránh vẽ nhiều QR ở nhiều vị trí khác nhau qua các bước — xem
+// performFileStamp/stampPdfStep).
+function mergeQrBox(
+  base: Record<string, SignPlacement | QrBox>,
+  placement: SignPlacement | null | undefined,
+): Record<string, SignPlacement | QrBox> {
+  if (base.qr) return base
+  if (!placement?.showQr) return base
+  if (
+    typeof placement.qrX !== "number" ||
+    typeof placement.qrY !== "number" ||
+    typeof placement.qrWidth !== "number" ||
+    typeof placement.qrHeight !== "number"
+  ) {
+    return base
+  }
+  return {
+    ...base,
+    qr: { x: placement.qrX, y: placement.qrY, width: placement.qrWidth, height: placement.qrHeight },
+  }
 }
 
 type VanBanRow = {
@@ -51,7 +91,9 @@ type VanBanRow = {
   buoc_hien_tai: number
   so_buoc_tong: number
   nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: string }>
-  placement_ky: Record<string, SignPlacement>
+  // Key theo số bước ("1","2",...) hoặc "phe_duyet" → SignPlacement của bước đó; key
+  // "qr" (nếu đã có) → QrBox đã chốt vị trí QR chung cho cả văn bản.
+  placement_ky: Record<string, SignPlacement | QrBox>
   soan_thao_user_id: string | null
   phe_duyet_user_id: string | null
   file_goc_url: string | null
@@ -260,6 +302,7 @@ async function stampOffice(
   imageTagName: string,
   sigBuf: Buffer | null,
   stepKey: string,
+  qrBuf: Buffer | null,
 ): Promise<Buffer> {
   const zip = await JSZip.loadAsync(fileBytes)
 
@@ -298,6 +341,12 @@ async function stampOffice(
   if (ext === "docx" && sigBuf) {
     await replaceDocxImageTag(zip, imageTagName, sigBuf, `sig_vb_${stepKey}.png`)
   }
+  // {{QR}} là tag ảnh tùy chọn (giống cơ chế các tag khác) — chỉ thay nếu template có
+  // chứa tag này, bỏ qua an toàn nếu không có (mirror cách QR hoạt động ở module ISO).
+  // XLSX chưa hỗ trợ thay ảnh trong route này (giống hạn chế sẵn có của imageTagName).
+  if (ext === "docx" && qrBuf) {
+    await replaceDocxImageTag(zip, "{{QR}}", qrBuf, `qr_vb_${stepKey}.png`)
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (await zip.generateAsync({ type: "nodebuffer" })) as any as Buffer
@@ -321,6 +370,8 @@ async function stampPdfStep(
   prefixText: string | null,
   placement: SignPlacement | null,
   defaultX: number,
+  qrBuf: Buffer | null,
+  qrBox: QrBox | null,
 ): Promise<Buffer> {
   const pdfDoc = await PDFDocument.load(fileBytes)
   pdfDoc.registerFontkit(fontkit)
@@ -387,6 +438,28 @@ async function stampPdfStep(
     } catch { /* skip */ }
   }
 
+  // QR trỏ về trang chi tiết văn bản — vẽ trên TẤT CẢ trang. Ưu tiên vị trí người
+  // ký đã kéo-thả chọn ở lượt ký đầu tiên (qrBox, đã "chốt" trong placement_ky.qr —
+  // xem SignPlacementModal); nếu chưa từng có (văn bản cũ trước khi có tính năng
+  // này, hoặc trường hợp hiếm không xác định được), fallback góc trên-phải cố định
+  // (54×54pt, mirror kích thước QR của ISO forms). Vẽ lại mỗi lượt ký là an
+  // toàn/idempotent — luôn cùng tọa độ đã chốt, không chồng lấn hay tích lũy qua các bước.
+  if (qrBuf) {
+    try {
+      const qrImage = await pdfDoc.embedPng(qrBuf)
+      for (const p of pages) {
+        const { width, height } = p.getSize()
+        const qrSize = 54
+        const margin = 20
+        const x = qrBox?.x ?? width - qrSize - margin
+        const y = qrBox?.y ?? height - qrSize - margin
+        const w = qrBox?.width ?? qrSize
+        const h = qrBox?.height ?? qrSize
+        p.drawImage(qrImage, { x, y, width: w, height: h })
+      }
+    } catch { /* skip */ }
+  }
+
   return Buffer.from(await pdfDoc.save())
 }
 
@@ -414,6 +487,12 @@ async function performFileStamp(
   if (!fileBytes) return
 
   const sigBuf = await getSigImage(factoryId, userId)
+  // QR trỏ về trang chi tiết văn bản, mirror pattern module ISO. Lỗi sinh QR không
+  // được chặn cả lượt ký — vẫn tiếp tục đóng dấu chữ ký/tên bình thường.
+  const qrBuf = await QRCode.toBuffer(`${APP_URL}/dashboard/documents/${d.id}`, {
+    width: 160,
+    margin: 1,
+  }).catch(() => null)
   const today = new Date().toLocaleDateString("vi-VN", {
     day: "2-digit",
     month: "2-digit",
@@ -423,12 +502,13 @@ async function performFileStamp(
 
   let stampedBytes: Buffer
   if (ext === "docx" || ext === "xlsx") {
-    stampedBytes = await stampOffice(fileBytes, ext, textTags, imageTagName, sigBuf, stepKey)
+    stampedBytes = await stampOffice(fileBytes, ext, textTags, imageTagName, sigBuf, stepKey, qrBuf)
   } else if (ext === "pdf") {
-    const placement = d.placement_ky?.[stepKey] ?? null
+    const placement = (d.placement_ky?.[stepKey] as SignPlacement | undefined) ?? null
+    const qrBox = (d.placement_ky?.qr as QrBox | undefined) ?? null
     const defaultX =
       stepKey === "phe_duyet" ? 460 : (parseInt(stepKey) - 1) * 120 + 30
-    stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX)
+    stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX, qrBuf, qrBox)
   } else {
     return
   }
@@ -678,7 +758,9 @@ export async function POST(req: NextRequest) {
       const done = newBuoc >= d.so_buoc_tong
       const nextStatus = done ? "cho_phe_duyet" : "cho_ky_phong_ban"
       const stepKey = String(stepIndex + 1)
-      const newPlacementKy = placement ? { ...d.placement_ky, [stepKey]: placement } : d.placement_ky
+      const newPlacementKy = placement
+        ? mergeQrBox({ ...d.placement_ky, [stepKey]: placement }, placement)
+        : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
@@ -743,7 +825,9 @@ export async function POST(req: NextRequest) {
       const signAsPD: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
 
       const today = new Date().toISOString().slice(0, 10)
-      const newPlacementKy = placement ? { ...d.placement_ky, phe_duyet: placement } : d.placement_ky
+      const newPlacementKy = placement
+        ? mergeQrBox({ ...d.placement_ky, phe_duyet: placement }, placement)
+        : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")

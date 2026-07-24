@@ -13,6 +13,8 @@ import {
   SIGN_AS_OPTIONS,
   SIGN_AS_LABEL,
   buildMaVanBan,
+  computeNextVanBanSo,
+  parseVanBanFileName,
   sanitizeStorageFileName,
   type VanBanDocumentType,
   type SignAsType,
@@ -24,87 +26,6 @@ const STORAGE_BUCKET = "iso-documents"
 type ApproverUser = { id: string; full_name: string; username: string; role: string; department: string }
 type LeaderCandidate = { id: string; full_name: string; username: string; chuc_vu: string }
 type UploadStep = { id: string; phong_ban_code: string; user_id: string }
-
-type ParsedVanBan = {
-  matched: boolean
-  loai_van_ban?: string
-  phong_ban?: string
-  so?: number
-  ten_van_ban?: string
-}
-
-const normalizeVn = (s: string) => s.normalize("NFC").toLowerCase()
-
-// Khớp 1 trong các `candidates` ở đầu chuỗi `str` (không phân biệt hoa/thường, chuẩn hóa dấu),
-// ưu tiên candidate dài nhất trước để tránh khớp nhầm khi các mã có tiền tố chung.
-function matchPrefix(str: string, candidates: string[]): { matched: string; rest: string } | null {
-  const sorted = [...candidates].filter(Boolean).sort((a, b) => b.length - a.length)
-  for (const c of sorted) {
-    if (normalizeVn(str.slice(0, c.length)) === normalizeVn(c)) {
-      return { matched: c, rest: str.slice(c.length) }
-    }
-  }
-  return null
-}
-
-// Giống matchPrefix nhưng bắt buộc ranh giới từ sau khi khớp (hết chuỗi hoặc theo sau là khoảng trắng),
-// tránh khớp nhầm 1 phần của mã phòng ban dài hơn (ví dụ "CS" trong 1 chuỗi thực ra là "CSKH").
-function matchPhongBanPrefix(str: string): { matched: string; rest: string } | null {
-  const upper = str.toUpperCase()
-  const sorted = [...PHONG_BAN_VAN_BAN_OPTIONS].sort((a, b) => b.length - a.length)
-  for (const pb of sorted) {
-    if (upper.startsWith(pb)) {
-      const rest = str.slice(pb.length)
-      if (rest.length === 0 || /^\s/.test(rest)) return { matched: pb, rest }
-    }
-  }
-  return null
-}
-
-// Windows không cho phép ký tự "/" trong tên file, nên người dùng đặt tên file theo nhiều biến thể
-// không dấu gạch chéo, ví dụ với "01/ĐN-NMCB Đề nghị thay máy lạnh...":
-//   "01 ĐN-NMCB Đề nghị thay máy lạnh..."   (dấu cách thay "/")
-//   "01ĐN-NMCB Đề nghị thay máy lạnh..."    (không có ký tự phân cách trước ký hiệu)
-//   "01ĐNNMCB Đề nghị thay máy lạnh..."     (không có ký tự phân cách nào cả)
-// Parser tách tuần tự: số thứ tự (chữ số đầu) → ký hiệu loại văn bản (so khớp docTypes/hằng số tĩnh)
-// → mã phòng ban (so khớp PHONG_BAN_VAN_BAN_OPTIONS, có ranh giới) → phần còn lại là tên/trích yếu.
-function parseVanBanFileName(fileName: string, docTypes: VanBanDocumentType[]): ParsedVanBan {
-  const base = fileName.replace(/\.[^.]+$/, "").trim()
-
-  const soMatch = base.match(/^(\d{1,4})/)
-  if (!soMatch) return { matched: false }
-  const so = parseInt(soMatch[1], 10)
-  const afterSo = base.slice(soMatch[0].length).replace(/^[\s\-/]+/, "")
-
-  const kyHieuCandidates = Array.from(
-    new Set([...docTypes.map((t) => t.ky_hieu), ...Object.values(LOAI_VAN_BAN_KY_HIEU)]),
-  )
-  const kyHieuMatch = matchPrefix(afterSo, kyHieuCandidates)
-  if (!kyHieuMatch) return { matched: false }
-
-  const matchedType = docTypes.find((t) => normalizeVn(t.ky_hieu) === normalizeVn(kyHieuMatch.matched))
-  let loai_van_ban: string | undefined = matchedType?.code
-  if (!loai_van_ban) {
-    const reverseEntry = Object.entries(LOAI_VAN_BAN_KY_HIEU).find(
-      ([, ky]) => normalizeVn(ky) === normalizeVn(kyHieuMatch.matched),
-    )
-    loai_van_ban = reverseEntry?.[0]
-  }
-
-  const afterKyHieu = kyHieuMatch.rest.replace(/^[\s\-/]+/, "")
-  const phongBanMatch = matchPhongBanPrefix(afterKyHieu)
-  if (!phongBanMatch) return { matched: false }
-
-  const ten_van_ban = phongBanMatch.rest.replace(/^[\s\-/]+/, "").trim()
-
-  return {
-    matched: true,
-    loai_van_ban,
-    phong_ban: phongBanMatch.matched,
-    so,
-    ten_van_ban: ten_van_ban || undefined,
-  }
-}
 
 export default function UploadVanBanPage() {
   const router = useRouter()
@@ -143,6 +64,12 @@ export default function UploadVanBanPage() {
   // Người lập (chỉ Nội bộ đơn vị)
   const [donViUsers, setDonViUsers] = useState<ApproverUser[]>([])
   const [donViUsersLoading, setDonViUsersLoading] = useState(false)
+
+  // Ký xác nhận (chỉ Nội bộ đơn vị) — ghi nhận lại những người đã ký tay trên giấy
+  // theo đúng thứ tự, mirror "Ký xác nhận" của new/page.tsx (tùy chọn, có thể để trống).
+  const [unitSignUsers, setUnitSignUsers] = useState<ApproverUser[]>([])
+  const [unitSignUsersLoading, setUnitSignUsersLoading] = useState(false)
+  const [selectedUnitUserIds, setSelectedUnitUserIds] = useState<string[]>([])
 
   // Phòng ban đã ký (chỉ Nội bộ công ty)
   const [steps, setSteps] = useState<UploadStep[]>([])
@@ -271,6 +198,30 @@ export default function UploadVanBanPage() {
     }
   }, [factoryId, form.phong_ban, form.pham_vi, loadDonViUsers])
 
+  // Ký xác nhận (Nội bộ đơn vị) — danh sách ứng viên đủ quyền, mirror loadUnitUsers
+  // của new/page.tsx (permission=documents.create,documents.ky_phong_ban,documents.phe_duyet)
+  const loadUnitSignUsers = useCallback(async (fid: string, dept: string) => {
+    setUnitSignUsersLoading(true)
+    try {
+      const res = await fetch(
+        `/api/documents/dept-users?factoryId=${fid}&dept=${encodeURIComponent(dept)}&leadership=false&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`,
+      )
+      setUnitSignUsers(res.ok ? ((await res.json()) as ApproverUser[]) : [])
+    } catch {
+      setUnitSignUsers([])
+    } finally {
+      setUnitSignUsersLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (factoryId && form.pham_vi === "Don_vi" && form.phong_ban) {
+      void loadUnitSignUsers(factoryId, form.phong_ban)
+    } else {
+      setUnitSignUsers([])
+    }
+  }, [factoryId, form.phong_ban, form.pham_vi, loadUnitSignUsers])
+
   // Người ký từng bước phòng ban (Nội bộ công ty) — lazy load theo mã phòng ban
   const ensureStepUsersLoaded = useCallback(async (dept: string) => {
     if (!factoryId || !dept || stepUsersCache[dept] || stepUsersLoading[dept]) return
@@ -300,17 +251,12 @@ export default function UploadVanBanPage() {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, user_id: userId } : s)))
   }
 
-  // Peek số tiếp theo khi loại + phòng ban thay đổi
+  // Peek số tiếp theo khi loại + phòng ban thay đổi — tính từ dữ liệu THẬT trong
+  // van_ban_documents (xem computeNextVanBanSo trong documents-types.ts).
   const loadNextSo = useCallback(async (fid: string, loai: string, phongBan: string) => {
     if (!loai || !phongBan) return
-    const { data } = await supabase
-      .from("van_ban_sequences")
-      .select("last_so")
-      .eq("factory_id", fid)
-      .eq("loai", loai)
-      .eq("phong_ban", phongBan)
-      .single()
-    const nextSo = (data?.last_so ?? 0) + 1
+    const nam = new Date().getFullYear()
+    const nextSo = await computeNextVanBanSo(fid, loai, phongBan, nam)
     setNextSoPreview(nextSo)
     setMaVanBanEdited((prev) => {
       if (!prev) {
@@ -441,18 +387,10 @@ export default function UploadVanBanPage() {
         const parsed = parseInt(finalMa.split("/")[0])
         soStr = isNaN(parsed) ? "01" : String(parsed).padStart(2, "0")
       } else {
-        // Lấy số atomic từ API (không race condition)
+        // Tính lại số tiếp theo NGAY TRƯỚC khi lưu, dựa trên dữ liệu thật trong
+        // van_ban_documents — giảm khoảng hở race so với dùng nextSoPreview đã tính trước đó.
         const nam = new Date().getFullYear()
-        const numRes = await fetch("/api/documents/number", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ factoryId, loai: form.loai_van_ban, phong_ban: form.phong_ban, nam }),
-        })
-        if (!numRes.ok) {
-          const err = (await numRes.json()) as { error?: string }
-          throw new Error(err.error || "Không lấy được số văn bản")
-        }
-        const { so } = (await numRes.json()) as { so: number }
+        const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
         const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
         const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
         finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
@@ -513,7 +451,16 @@ export default function UploadVanBanPage() {
               phong_ban_code: s.phong_ban_code,
               phong_ban_name: s.phong_ban_code,
             }))
-          : [],
+          : selectedUnitUserIds.map((uid, i) => {
+              const u = unitSignUsers.find((x) => x.id === uid)
+              return {
+                step: i + 1,
+                type: "ca_nhan" as const,
+                user_id: uid,
+                ten: u?.full_name || u?.username || "",
+                chuc_vu: "",
+              }
+            }),
         nguoi_ky: form.pham_vi === "Cong_ty"
           ? Object.fromEntries(steps.map((s, i) => {
               const signer = (stepUsersCache[s.phong_ban_code] || []).find((u) => u.id === s.user_id)
@@ -526,9 +473,19 @@ export default function UploadVanBanPage() {
                 },
               ]
             }))
-          : {},
-        buoc_hien_tai: form.pham_vi === "Cong_ty" ? steps.length : 0,
-        so_buoc_tong: form.pham_vi === "Cong_ty" ? steps.length : 0,
+          : Object.fromEntries(selectedUnitUserIds.map((uid, i) => {
+              const u = unitSignUsers.find((x) => x.id === uid)
+              return [
+                String(i + 1),
+                {
+                  ten: u?.full_name || u?.username || "",
+                  chuc_vu: "",
+                  ky_at: form.ngay_phe_duyet || new Date().toISOString(),
+                },
+              ]
+            })),
+        buoc_hien_tai: form.pham_vi === "Cong_ty" ? steps.length : selectedUnitUserIds.length,
+        so_buoc_tong: form.pham_vi === "Cong_ty" ? steps.length : selectedUnitUserIds.length,
         phong_ban_ky_display: form.pham_vi === "Cong_ty" && steps.length ? steps.map((s) => s.phong_ban_code) : null,
       }
       const { error: insertErr } = await supabase.from("van_ban_documents").insert(payload)
@@ -668,6 +625,8 @@ export default function UploadVanBanPage() {
                         setDeptLeaderCandidates([])
                         setDeptLeaderQueried(false)
                         setDonViUsers([])
+                        setUnitSignUsers([])
+                        setSelectedUnitUserIds([])
                       }}
                     >
                       {label}
@@ -956,6 +915,64 @@ export default function UploadVanBanPage() {
               </div>
             </div>
           </div>
+
+          {/* Ký xác nhận (chỉ Nội bộ đơn vị) — ghi nhận lại những người đã ký tay trên
+              giấy theo đúng thứ tự, mirror "Ký xác nhận" của new/page.tsx. Tùy chọn. */}
+          {form.pham_vi === "Don_vi" && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+              <h2 className="text-sm font-bold text-slate-700 mb-3">
+                Ký xác nhận
+                <span className="ml-2 text-xs font-normal text-slate-400">(tùy chọn — có thể để trống)</span>
+              </h2>
+              {!form.phong_ban ? (
+                <p className="text-xs text-amber-600">Chọn phòng ban trước để hiện danh sách người ký.</p>
+              ) : unitSignUsersLoading ? (
+                <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                  <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                  Đang tải danh sách...
+                </p>
+              ) : unitSignUsers.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  Không tìm thấy người dùng đủ điều kiện trong phòng ban <strong>{form.phong_ban}</strong>.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                  {unitSignUsers
+                    .filter((u) => u.id !== form.phe_duyet_user_id)
+                    .map((u) => {
+                      const idx = selectedUnitUserIds.indexOf(u.id)
+                      const selected = idx >= 0
+                      return (
+                        <label
+                          key={u.id}
+                          className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
+                            selected ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(e) => {
+                              setSelectedUnitUserIds((prev) =>
+                                e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                              )
+                            }}
+                            className="rounded"
+                          />
+                          {selected && (
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                              {idx + 1}
+                            </span>
+                          )}
+                          <span className="text-sm text-slate-700 flex-1">{u.full_name || u.username}</span>
+                          <span className="text-xs text-slate-400">{u.department}</span>
+                        </label>
+                      )
+                    })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Phòng ban đã ký (Cong_ty) / Người lập (Don_vi) */}
           {form.pham_vi === "Cong_ty" ? (

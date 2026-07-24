@@ -481,6 +481,42 @@ Mirror kiến trúc Văn bản (`src/app/api/documents/sign/route.ts`, `.claude/
 
 ---
 
+## Fix 2026-07-24 — Soát xét ISO mất "Tài liệu cha"/"Người soạn thảo" sau khi load lại
+
+Đã điều tra bằng cách đọc trực tiếp code `src/app/dashboard/iso/documents/[id]/page.tsx`
+và xác nhận 3 bug độc lập, cả 3 đều là lỗi hiển thị (dữ liệu DB luôn đúng, chỉ UI đọc sai
+sau mỗi lần load trang), không phải lỗi theo quyền/phiên đăng nhập của người xem:
+
+1. **TH4 (Soát xét hồ sơ con) — "Tài liệu cha (bộ quy trình)" luôn rỗng**: state
+   `reviewParentDocId` chưa từng được hydrate từ `d.parent_doc_id` trong `loadDoc()` (chỉ
+   `selectedParentDocId` — dùng cho Soạn thảo — được nạp lại). Đã fix: thêm
+   `setReviewParentDocId(d.parent_doc_id || "")` ngay sau dòng hydrate
+   `selectedParentDocId` trong `loadDoc()`.
+2. **TH3 (Soát xét tài liệu cha) — "{codeLabel}" luôn rỗng**: select dùng
+   `value={reviewDocId || form.ma_tai_lieu_cu}` nhưng option lại là UUID
+   (`<option value={item.id}>`) — `form.ma_tai_lieu_cu` là mã dạng text, không bao giờ
+   khớp UUID nên select luôn rơi về placeholder. Đã fix: đổi fallback sang
+   `parentReviewSourceDocId` (biến đã có sẵn trong file, tự resolve đúng UUID bằng cách
+   match mã tài liệu) — đúng idiom đã dùng ở chỗ khác trong cùng file (`allowExistingCodeForDoc`).
+3. **"Người soạn thảo" chỉ hiển thị đúng cho chính người soạn thảo, người khác thấy
+   "— Chọn người —"**: option của select này (`profilesAll`) được nạp bằng query
+   client-side trực tiếp `supabase.from("profiles")...`, bị RLS chặn (policy `"profiles
+   read own or admin same factory"` — non-admin chỉ đọc được đúng dòng của chính mình).
+   `profilesXemXet`/`profilesPheDuyet` (2 select còn lại) đã bypass RLS đúng cách qua
+   route `/api/iso/profiles-by-permission` từ trước — chỉ `profilesAll` bị bỏ sót. Đã fix:
+   - `route.ts` của `/api/iso/profiles-by-permission` nới điều kiện: `permCode` rỗng/thiếu
+     → trả về toàn bộ active profiles của nhà máy (không lọc quyền), dùng service-role
+     client như nhánh permCode cũ.
+   - `loadProfiles()` đổi sang gọi `loadProfilesByPermission(fid, "")` để lấy
+     `profilesAll`, chạy song song với 3 lời gọi permission-based hiện có.
+
+Cả 3 fix áp dụng đồng nhất cho **cả tài liệu cha lẫn hồ sơ con, cả luồng Soạn thảo lẫn
+Soát xét, không phân biệt Cấp 1/Cấp 2** — không có nhánh code nào giới hạn phạm vi theo
+các chiều này. `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test
+tay** — cần: soát xét cả tài liệu cha (TH3) lẫn hồ sơ con (TH4) ở cả Cấp 1/Cấp 2, xác nhận
+field nguồn soát xét giữ nguyên giá trị sau khi Lưu và khi người phê duyệt khác mở lại;
+xác nhận "Người soạn thảo" hiện đúng tên cho người xem xét/phê duyệt không phải admin.
+
 ## Nguồn ưu tiên khi có mâu thuẫn
 
 Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:

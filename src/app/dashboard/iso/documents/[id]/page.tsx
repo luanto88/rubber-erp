@@ -452,19 +452,17 @@ export default function IsoDocumentDetailPage() {
   }, [])
 
   const loadProfiles = useCallback(async (fid: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, full_name, username, role")
-      .eq("factory_id", fid)
-      .eq("status", "active")
-      .order("full_name")
-    setProfilesAll((data || []) as ProfileOption[])
-
-    const [soatXetList, xemXetList, pheDuyetList] = await Promise.all([
+    // profilesAll dùng chung cho select "Người soạn thảo" — phải bypass RLS (route
+    // service-role) như 3 danh sách quyền bên dưới, nếu không người soát xét/phê duyệt
+    // không phải admin chỉ thấy đúng 1 dòng của chính mình trong `profiles` (RLS), khiến
+    // select không khớp option nào và hiện rỗng dù giá trị thật vẫn đúng.
+    const [allList, soatXetList, xemXetList, pheDuyetList] = await Promise.all([
+      loadProfilesByPermission(fid, ""),
       loadProfilesByPermission(fid, "iso.soat_xet"),
       loadProfilesByPermission(fid, "iso.xem_xet"),
       loadProfilesByPermission(fid, "iso.phe_duyet"),
     ])
+    setProfilesAll(allList)
     setProfilesXemXet(soatXetList.length > 0 ? soatXetList : xemXetList)
     setProfilesPheDuyet(pheDuyetList)
   }, [loadProfilesByPermission])
@@ -541,6 +539,11 @@ export default function IsoDocumentDetailPage() {
     const selectedStandardIds = ((standardRows || []) as { standard_id: number }[]).map((row) => row.standard_id)
     const isCon = d.phan_loai_tl === "con" || d.loai_tai_lieu === "F"
     setSelectedParentDocId(d.parent_doc_id || "")
+    // Hydrate luôn cho luồng Soát xét — trước đây chỉ selectedParentDocId (Soạn thảo)
+    // được nạp lại, khiến select "Tài liệu cha (bộ quy trình)" ở form Soát xét hồ sơ con
+    // luôn rỗng ngay sau mỗi lần load trang (kể cả reload sau khi Lưu, kể cả người khác
+    // mở lại sau đó) dù dữ liệu đã lưu đúng trong DB.
+    setReviewParentDocId(d.parent_doc_id || "")
     if (!isCon) {
       setSiblingDocs([])
       let childrenQuery = supabase
@@ -2950,7 +2953,7 @@ export default function IsoDocumentDetailPage() {
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} <span className="text-red-500">*</span></label>
                   <select
-                    value={reviewDocId || form.ma_tai_lieu_cu}
+                    value={reviewDocId || parentReviewSourceDocId}
                     onChange={(e) => applyReviewDocument(e.target.value)}
                     disabled={!isEditable || !form.phong_ban}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"

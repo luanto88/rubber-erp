@@ -17,7 +17,7 @@ Permissions: `documents.view`, `documents.create`, `documents.edit`, `documents.
 | `20260610_van_ban_documents_extend.sql` | Mở rộng `van_ban_documents` — workflow columns, file columns, `embedding vector(768)`, `mo_ta_tim_kiem` | Cần chạy |
 | `20260610_van_ban_phan_loai.sql` | Thêm cột `phan_loai TEXT NOT NULL DEFAULT 'Thuong'` | Cần chạy |
 | `20260610_van_ban_search_rpc.sql` | Function `match_van_ban_documents` (pgvector semantic search) | Cần chạy sau khi `extend` đã chạy |
-| `20260611_van_ban_distribution.sql` | Bảng `van_ban_distribution_batches`, `van_ban_distribution_recipients`; RLS; seed permission `documents.distribute` cho admin/manager | Cần chạy |
+| `20260611_van_ban_distribution.sql` | Bảng `van_ban_distribution_batches`, `van_ban_distribution_recipients`; RLS; seed permission `documents.distribute` cho admin/manager | **Cần chạy lại** — bản gốc có bug (xem 2026-07-24) khiến chưa từng chạy thành công |
 | `20260621_van_ban_pham_vi.sql` | Thêm `pham_vi TEXT DEFAULT 'Cong_ty'` và `phe_duyet_is_kt BOOLEAN DEFAULT false` vào `van_ban_documents` | Cần chạy |
 
 **Lỗi đã biết khi chạy `types_sequences`**: `policy "van_ban_sequences_factory_read" already exists` → đã sửa bằng `DROP POLICY IF EXISTS` trước `CREATE POLICY`.
@@ -607,6 +607,51 @@ Thứ tự section mới trong card "Thông tin văn bản": **File đính kèm*
 
 ---
 
+## Cập nhật 2026-07-24 — SignPlacementModal đổi thành 2 bước (PIN trước, canvas sau), mirror ISO
+
+Người dùng phản ánh UX ký PDF của Văn bản khó dùng cho người lớn tuổi: canvas PDF + ô PIN
+hiện cùng lúc trong 1 hộp thoại `max-w-3xl`/`maxHeight:55vh`, khiến trang A4 phóng 1.5x
+(~893×1263px) tràn cả 2 chiều, sinh 2 thanh cuộn. Trong khi đó luồng ký ISO
+(`iso/documents/[id]/page.tsx`) dùng 2 modal tách rời tuần tự: `pinModal` (PIN, chặn
+trước, xác thực thật qua `POST /api/sign/verify`) → chỉ khi đúng mới mở `placementModal`
+(canvas toàn màn hình, chủ yếu chỉ cần cuộn dọc).
+
+Đã viết lại `SignPlacementModal` (`src/app/dashboard/documents/[id]/page.tsx`) theo đúng
+kiến trúc 2 bước đó, **không đổi hợp đồng props bên ngoài** (`onConfirm(pin, placement,
+signAs)`/`onClose()`, không đổi `/api/documents/sign` hay schema DB):
+
+- Thêm state `step: "pin" | "placement"` (mặc định `"pin"`) + 2 prop mới bắt buộc
+  `userId`/`docId` (truyền từ `user.id`/`doc.id` ở nơi gọi component).
+- **Bước "pin"**: dùng `ModalShell` (`maxWidth="sm"`), icon + tiêu đề + phụ đề "Nhập PIN
+  ký duyệt để xác nhận", ô PIN có nút ẩn/hiện. Nút "Xác nhận" gọi `handleVerifyPin()` —
+  `POST /api/sign/verify` với `{userId, pin, docId, docType:"van_ban"}` (route đã generic
+  sẵn từ module ISO, không cần sửa backend) để bắt lỗi PIN sai NGAY, trước khi tốn công
+  đặt vị trí chữ ký. Đúng PIN → `setStep("placement")`. `useEffect` tải PDF (`getDocument`)
+  giờ gate thêm điều kiện `step === "placement"` — không tải PDF lãng phí nếu hủy ở bước
+  PIN.
+- **Bước "placement"**: đổi từ hộp thoại `max-w-3xl` sang layout toàn màn hình
+  (`fixed inset-0 bg-black/70 flex flex-col`: header + `flex-1 overflow-auto flex
+  items-start justify-center p-4 bg-slate-100` cho canvas + thanh điều khiển dưới cùng),
+  mirror đúng `placementModal` của ISO. Toàn bộ overlay kéo-thả chữ ký/tên/tiền tố
+  (Draggable + Resizable) giữ nguyên y hệt logic cũ, chỉ đổi vị trí trong cây JSX — scale
+  canvas vẫn cố định 1.5 như trước (không tính lại theo container, đúng cách ISO đang
+  làm). Ô "PIN chữ ký" ở cuối modal (nhập lần 2) đã bị xóa hẳn — `pin` giữ nguyên trong
+  state xuyên suốt 2 bước, `onConfirm(pin, placement, signAs)` cuối cùng vẫn gửi đủ dữ
+  liệu cho `/api/documents/sign` như trước (route đó tự verify PIN lại lần nữa, không đổi).
+  Nút "Hủy" ở cả 2 bước đóng hẳn modal (`onClose()`), không có nút "quay lại bước PIN".
+- Dọn dead code phát sinh: state `canvasW`/`canvasH` (trước dùng để set inline
+  `width`/`height` cho div wrapper cũ) không còn nơi đọc sau khi đổi sang `inline-block`
+  tự nhiên theo kích thước `<canvas>` — đã xóa 2 state này cùng lời gọi
+  `setCanvasW`/`setCanvasH` trong `renderPdfPage`.
+- Giữ nguyên tông màu amber của Văn bản (không đổi sang tím của ISO) — chỉ đổi luồng
+  thao tác/bố cục.
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay** — cần: bấm
+"Ký" → xác nhận PIN modal hiện trước (chưa thấy PDF) → nhập sai PIN → báo lỗi ngay, không
+mở canvas → nhập đúng PIN → canvas toàn màn hình, chủ yếu chỉ cuộn dọc (không còn 2 thanh
+cuộn), kéo/resize chữ ký-tên-tiền tố vẫn hoạt động, PDF nhiều trang chuyển trang được →
+"Xác nhận ký" ra đúng vị trí; test cả nhánh file Office (DOCX/XLSX) vẫn qua đúng 2 bước.
+
 ## Cập nhật 2026-07-06 (bổ sung sau test tay lần 1) — fix bug canKyBuoc thật, PDF nhiều trang, KT phòng ban, Sửa/Xóa danh sách
 
 Sau khi bản "Cập nhật 2026-07-06" ở trên được test tay trên `npm run dev`, người dùng phát hiện bug "chỉ thấy Trả về" **vẫn còn** (fix 3-way match ở bản trước không đủ) cùng 3 vấn đề khác. Đã điều tra bằng 3 Explore agent song song và fix toàn bộ.
@@ -692,3 +737,112 @@ Quyết định đã xác nhận với người dùng: áp dụng cho **cả 2**
 - Test tay Phê duyệt cuối chọn "TUQ." — xác nhận PDF có tiền tố đúng, và file DOCX/XLSX (nếu test) **không** bị chèn tiền tố vào tên.
 - Test tay upload văn bản ký tay chọn "TL." — xác nhận `phe_duyet_sign_as` lưu đúng, hiển thị đúng trên timeline trang chi tiết.
 - Mở lại 1 văn bản cũ đã có `phe_duyet_is_kt = true` (trước migration) — xác nhận timeline vẫn hiện "KT. " qua fallback, không bị mất hiển thị.
+
+## Cập nhật 2026-07-24 — 5 bug/tính năng đã fix (chưa test tay)
+
+### 1. Badge "Việc của tôi" hoàn toàn thiếu ở `DocumentsShell` (khác `IsoShell`)
+
+`IsoShell` (`iso/_components/iso-shell.tsx`) có badge đỏ live-update cạnh tab "Việc của tôi" (đếm qua `postgres_changes` subscribe trên `iso_documents`), nhưng `DocumentsShell` chưa từng có badge này — đây là nguyên nhân thật của phản ánh "Việc của tôi module Văn bản không có thông báo giống ISO" (my-tasks page và chuông thông báo (`module-tasks.ts`'s `getDocumentsTasks`) vốn đã tính đúng số việc cần làm, chỉ riêng cái badge trên tab là thiếu). Đã thêm `pendingTaskCount` vào `DocumentsShell`, mirror đúng công thức đếm của `getDocumentsTasks()` (draft/tra_ve theo `soan_thao_user_id`, `cho_ky_phong_ban` khớp `thu_tu_ky_json[buoc_hien_tai]`, `cho_phe_duyet` theo `phe_duyet_user_id`), subscribe realtime trên `van_ban_documents`.
+
+### 2. QR code hoàn toàn chưa có trên file văn bản đã ký (khác ISO)
+
+`sign/route.ts` trước đây không vẽ QR ở bất kỳ đâu — đây là tính năng **thiếu hẳn**, không phải regression. Đã thêm: mọi lượt `performFileStamp()` (cả `ky_buoc` lẫn `phe_duyet`) giờ sinh QR trỏ `${APP_URL}/dashboard/documents/{docId}` (`QRCode.toBuffer`, cùng thư viện ISO đang dùng) và:
+- PDF: vẽ trên **tất cả trang** của `stampPdfStep`, góc trên-phải cố định (54×54pt, mirror kích thước QR ISO forms) — không có UI đặt vị trí như ISO (module này chưa có khái niệm placement cho QR), vẽ lại mỗi lượt ký là idempotent (cùng tọa độ).
+- DOCX: hỗ trợ thêm tag ảnh tùy chọn `{{QR}}` trong `stampOffice`/`replaceDocxImageTag` — tag có thì thay, không có thì bỏ qua (đúng nguyên tắc tag hiện có của route này). XLSX không hỗ trợ thay ảnh (giới hạn sẵn có của `imageTagName`, không mở rộng thêm).
+
+### 3. Gợi ý/cảnh báo số văn bản tiếp theo sai — luôn đề xuất "01" dù đã có văn bản
+
+**Root cause xác nhận qua đọc migration**: bảng `van_ban_sequences` (migration `20260610_van_ban_types_sequences.sql`) có cột thật `so_hien_tai`/`loai_van_ban`, nhưng `loadNextSo()` ở cả `new/page.tsx` lẫn `new/upload/page.tsx` lại query `.select("last_so")`/`.eq("loai", loai)` — tên cột **không tồn tại**. Supabase trả lỗi (không throw), `data` luôn `undefined`, nên `(data?.last_so ?? 0) + 1` luôn ra `1` — khớp đúng triệu chứng "đã có 01/TB-NMCB nhưng vẫn gợi ý 01". Bảng đếm riêng này còn bị lệch dữ liệu thật bất cứ khi nào người dùng tự sửa tay mã (`maVanBanEdited=true`, bỏ qua RPC) hoặc dùng luồng Upload ký tay theo đường tự sửa — cả 2 đều không tăng `van_ban_sequences`.
+
+**Fix — bỏ hẳn phụ thuộc `van_ban_sequences`/RPC `get_next_van_ban_so`/route `/api/documents/number`** (đã xóa route này, không còn nơi nào gọi), thay bằng hàm dùng chung `computeNextVanBanSo(fid, loai, phongBan, nam)` trong `documents-types.ts` — tính thẳng `MAX(so_van_ban parsed) + 1` từ chính `van_ban_documents`, dùng cho cả preview (`loadNextSo` ở 2 trang) lẫn lúc lưu thật (tính lại ngay trước khi insert, không tái dùng giá trị preview đã cũ để giảm khoảng hở race). Quyết định bỏ hẳn RPC thay vì giữ+đồng bộ lại: bảng `van_ban_documents` vốn không có unique constraint trên `ma_van_ban` (chỉ có app-level check `maVanBanExists`/`checkMaExists`, exact-match, chặn lưu khi trùng — không đổi), nên "tính atomic" của RPC đã là ảo tưởng một phần (2 đường bypass RPC nêu trên) — dùng thẳng dữ liệu thật là đơn giản hơn và không giảm an toàn so với hiện trạng. Không xóa migration/bảng/RPC `van_ban_sequences`/`get_next_van_ban_so` đã chạy trên DB (an toàn, chỉ còn là residue không dùng tới — không tự ý DROP schema đã chạy production mà không xác nhận).
+
+2 loại cảnh báo giữ nguyên như thiết kế cũ (không đổi UI text): **trùng mã** (exact-match, chặn lưu — `maVanBanExists`) và **nhảy số** (số nhập ≠ số tiếp theo hợp lệ, chỉ cảnh báo inline liên tục — `hasGapWarning`/`hasSoJump`), giờ đều dựa trên `nextSoPreview` đã đúng.
+
+### 4. Parser tên file Upload — đổi từ tất-cả-hoặc-không sang khớp từng phần độc lập
+
+`parseVanBanFileName()` (`new/upload/page.tsx`) trước đây: nếu ký hiệu loại văn bản không khớp được bất kỳ candidate nào (`kyHieuMatch` null), toàn bộ hàm trả `{matched:false}` ngay — cả phòng ban lẫn tên văn bản cũng bị bỏ qua dù có thể suy ra được độc lập. Đã điều tra kỹ trường hợp cụ thể người dùng báo ("02TBNMCB Chuyển đổi số bước 1", loại "TB" — xác nhận qua `cung_cap_dl/tb.png` là **đã** có sẵn trong `van_ban_document_types`, active): trace tay từng bước cho thấy parser hiện tại **lẽ ra phải khớp đúng** với dữ liệu này (kể cả trước khi sửa) — không tái hiện được root cause chắc chắn qua đọc code tĩnh (có thể do thời điểm test TB chưa tồn tại/chưa active, hoặc 1 lỗi thoáng qua khác chưa xác định). Vẫn thực hiện cải tiến an toàn: đổi parser sang khớp từng phần (`loai_van_ban`, `phong_ban`, `ten_van_ban` đều suy độc lập, chỉ phần nào khớp được mới điền phần đó) — giảm hẳn kịch bản "cả 3 trường cùng trống" bất cứ khi nào có ĐÚNG 1 phần không khớp quy ước (ví dụ ký hiệu mới chưa kịp tải/chưa đăng ký, hoặc phòng ban lạ). Nếu bug vẫn tái diễn sau fix này, cần tên file chính xác (hoặc ảnh chụp ô chọn file) để debug tiếp — không thể click-test trong môi trường này.
+
+### 5. Upload ký tay (Nội bộ đơn vị) thiếu hẳn bước "Ký xác nhận"
+
+`new/upload/page.tsx` trước đây, nhánh `Don_vi`, chỉ có card "Người lập" (1 người) + "Người phê duyệt" — hoàn toàn thiếu chuỗi "Ký xác nhận" (nhiều người ký tuần tự, `type: "ca_nhan"`) mà `new/page.tsx` đã có cho cùng `pham_vi`. Đã thêm card "Ký xác nhận" (tùy chọn, checkbox đánh số thứ tự, mirror UI của `new/page.tsx`), dùng danh sách ứng viên riêng `unitSignUsers` (qua `/api/documents/dept-users?...&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`, khác `donViUsers` không lọc quyền dùng cho "Người lập"). Vì văn bản upload đã ký xong trên giấy (không qua workflow ký số live), lưu thẳng `thu_tu_ky_json`/`nguoi_ky` với `buoc_hien_tai = so_buoc_tong = số người đã chọn` (toàn bộ coi như đã hoàn tất), mirror đúng cách "Phòng ban đã ký" (Cong_ty) đã ghi nhận người ký thật ngay lúc lưu.
+
+### Đã qua `npm run build` (sạch) — CHƯA test tay bất kỳ mục nào ở trên (mục 1-5). Cần khi test tay:
+
+- Mục 1: mở `/dashboard/documents` với 1 tài khoản đang có việc cần xử lý (draft của chính mình, hoặc đến lượt ký phòng ban, hoặc đến lượt phê duyệt) — xác nhận badge đỏ hiện đúng số, tự cập nhật khi có văn bản mới/đổi trạng thái (không cần refresh trang).
+- Mục 2: ký 1 văn bản PDF qua vòng ký phòng ban rồi phê duyệt — xác nhận QR xuất hiện đúng ở mọi trang, quét ra đúng link chi tiết văn bản; test 1 template DOCX có sẵn `{{QR}}` — xác nhận QR được chèn đúng vị trí tag.
+- Mục 3: soạn 1 văn bản mới (không sửa tay mã) sau khi đã có văn bản khác cùng loại+phòng ban+năm — xác nhận gợi ý đúng số tiếp theo (không còn luôn là "01"); thử nhập tay 1 số nhảy quãng — xác nhận cảnh báo hiện đúng, vẫn cho lưu; thử nhập trùng mã đã có — xác nhận bị chặn lưu.
+- Mục 4: upload lại đúng file "02TBNMCB Chuyển đổi số bước 1" (hoặc file thật nếu khác) — xác nhận 3 trường tự điền đúng; nếu vẫn sai, chụp lại đúng tên file hiển thị trong ô chọn file lúc đó.
+- Mục 5: tạo 1 văn bản Upload, Nội bộ đơn vị, chọn 2-3 người ở "Ký xác nhận" — lưu xong mở trang chi tiết xác nhận timeline hiện đúng thứ tự người đã chọn, kèm ngày ký (= `ngay_phe_duyet` đã nhập hoặc thời điểm lưu).
+
+## Cập nhật 2026-07-24 (tiếp) — 3 fix bổ sung sau ảnh chụp thật (chưa test tay)
+
+Người dùng gửi ảnh chụp thật xác nhận: (1) parser tên file chưa hoạt động ở đúng trang họ test, (2) QR vẽ cố định không kéo-thả được sau khi thêm ở mục 2 phía trên.
+
+### A. Root cause thật của mục 1/4 phía trên: bug nằm ở `new/page.tsx` (Soạn thảo mới), KHÔNG phải `new/upload/page.tsx`
+
+Ảnh chụp cho thấy label **"File đính kèm (tùy chọn)"** — đây là `new/page.tsx` ("Soạn thảo văn bản mới"), không phải `new/upload/page.tsx` ("Upload văn bản đã ký tay", label "File văn bản đã ký *"). `new/page.tsx`'s `handleFileChange` từ trước tới giờ **chưa từng có** `parseVanBanFileName` — chỉ lấy nguyên tên file (bỏ extension, thay `_`/`-` bằng khoảng trắng) làm `ten_van_ban`, không tách Loại VB/Phòng ban/mã. Đây là **tính năng thiếu ở trang này**, không phải bug logic của parser (parser ở Upload đã đúng, chỉ chưa từng được gọi ở Soạn thảo mới).
+
+- Đã chuyển `parseVanBanFileName`/`matchPrefix`/`matchPhongBanPrefix`/`normalizeVn`/`ParsedVanBan` từ `new/upload/page.tsx` sang `documents-types.ts` (export dùng chung), `new/upload/page.tsx` import lại thay vì định nghĩa cục bộ — không đổi hành vi.
+- `new/page.tsx`'s `handleFileChange` giờ gọi `parseVanBanFileName(f.name, docTypes)`, chỉ điền `loai_van_ban`/`phong_ban`/`ten_van_ban` vào trường đang trống — **cố ý KHÔNG lấy `so` (số) từ tên file** như Upload đang làm, vì đây là văn bản đang soạn thảo mới, mã phải luôn do hệ thống tự sinh theo số tiếp theo hợp lệ (`computeNextVanBanSo`, effect `nextSoPreview` đã có sẵn) — số trong tên file (nếu có) chỉ là số nháp người dùng tự đặt, không phải số chính thức. Khi parse ra được `loai_van_ban`/`phong_ban` mới, tự `setMaVanBanEdited(false)` để effect tính mã chạy lại đúng (mirror hành vi khi user chọn tay 2 dropdown này).
+
+### B. QR vẽ cố định (top-right, không kéo-thả được)
+
+Mục 2 phía trên (QR trong `sign/route.ts`) khi mới thêm chỉ vẽ ở **1 vị trí cố định**, không có UI đặt vị trí như chữ ký/tên/tiền tố — đúng như người dùng phản ánh. Đã bổ sung:
+
+- `SignPlacementModal` (`documents/[id]/page.tsx`) thêm hộp QR kéo-thả thứ 4 (viền tím `violet`, không có toggle ẩn/hiện vì QR là bắt buộc không tùy chọn) — nhưng **chỉ hiện ở lượt ký ĐẦU TIÊN của cả văn bản** (`allowQrPlacement = !hasQrPlacement`, tức `placement_ky.qr` chưa từng được lưu). Từ lượt ký thứ 2 trở đi (bước ký phòng ban kế tiếp, hoặc phê duyệt sau khi đã qua ≥1 bước ký phòng ban), hộp QR **không hiện lại** — vị trí đã chốt được tái dùng nguyên vẹn.
+  - Lý do bắt buộc gate theo "chỉ lượt đầu": khác chữ ký/tên (mỗi bước là 1 người ký khác nhau, nội dung khác nhau nên vẽ mới mỗi bước là đúng), QR là 1 nội dung DUY NHẤT cho cả văn bản — nếu cho đổi vị trí mỗi bước, mỗi lượt `performFileStamp` sẽ vẽ THÊM 1 QR mới tại vị trí mới lên trên file đã có QR cũ từ bước trước (không xóa được nội dung đã "nướng" vào PDF ở lượt trước) → tích lũy nhiều QR ở nhiều vị trí qua các bước.
+- Backend (`sign/route.ts`): `SignPlacement` thêm `showQr?/qrX?/qrY?/qrWidth?/qrHeight?`; helper mới `mergeQrBox()` — nếu `placement_ky` CHƯA có key `"qr"` và request gửi kèm tọa độ QR hợp lệ (`showQr: true`, chỉ đúng lượt ký đầu tiên) → chốt vào `placement_ky.qr = {x,y,width,height}`; nếu đã có sẵn thì giữ nguyên, bỏ qua tọa độ mới gửi lên (phòng hờ nếu 1 modal cũ chưa refresh vẫn gửi kèm). Áp dụng ở cả 2 nhánh `ky_buoc` và `phe_duyet`.
+- `stampPdfStep`/`performFileStamp` đổi từ vẽ QR tại toạ độ hard-code sang đọc `d.placement_ky.qr` (đã được gán lại `d.placement_ky = newPlacementKy` trước khi gọi, giống cách `prefixText`/tên đang làm) — có tọa độ đã chốt thì dùng, chưa từng có (văn bản cũ trước tính năng này, hoặc trường hợp hiếm) thì fallback về góc trên-phải cố định như cũ.
+
+**Chưa test tay** cả 3 mục A/B — cần: (A) upload lại đúng file test qua `/dashboard/documents/new` (không phải `/new/upload`), xác nhận Loại VB="Thông báo", Phòng ban="NMCB", Tên="Chuyển đổi số bước 1" tự điền đúng, mã vẫn do hệ thống tự sinh (không lấy "03" từ tên file); (B) ký 1 văn bản PDF qua ≥2 bước (ví dụ 2 bước ký phòng ban rồi phê duyệt) — xác nhận hộp QR chỉ kéo-thả được ở bước ký ĐẦU TIÊN, các bước sau không còn hộp QR nhưng file vẫn có đúng 1 QR tại vị trí đã chọn ở bước đầu (không bị vẽ thêm/lệch vị trí qua các bước).
+
+## Cập nhật 2026-07-24 (tiếp 2) — Fix hộp QR chỉ hiện khung (thiếu QR thật) + bug migration phân phối rollback toàn bộ bảng
+
+### C. Hộp QR draggable chỉ hiện khung, không hiện mã QR thật để xem trước
+
+Mục B ở trên chỉ vẽ khung viền tím + chữ "QR" — không phải mã QR thật, khác hẳn cách ISO forms làm (`QRCodeSVG` render preview thật). Đã fix: `documents/[id]/page.tsx` import `QRCodeSVG` từ `qrcode.react` (đã có sẵn trong dependencies, dùng ở ISO forms), hộp QR giờ render `<QRCodeSVG value={"${origin}/dashboard/documents/${docId}"} .../>` thật — cùng URL đích với QR sẽ được nhúng vào PDF thật (`sign/route.ts`'s `QRCode.toBuffer(\`${APP_URL}/dashboard/documents/${d.id}\`, ...)`), nền trắng đặc (không phải nền tím translucent như trước — QR cần nền trắng để quét được), kích thước SVG tự co theo `Math.min(qrState.w, qrState.h)` khi kéo-resize hộp.
+
+### D. Bug migration `20260611_van_ban_distribution.sql` — permission INSERT sai tên cột làm ROLLBACK toàn bộ 2 CREATE TABLE
+
+Lỗi thật gặp: bấm "Phân phối" sau khi phê duyệt → `Could not find the table 'public.van_ban_distribution_batches' in the schema cache`, dù rule này từ trước đã ghi "Cần chạy" đúng migration đó.
+
+**Root cause xác nhận qua đọc lại toàn bộ file**: dòng cuối migration gốc —
+`INSERT INTO permissions (code, module, action, description) VALUES (...)` — dùng
+3 cột `module`/`action`/`description` **không tồn tại** trong bảng `permissions` thật
+(chỉ có `code`/`module_name`/`action_name`, xem
+`20260429_auth_profiles_permissions.sql` dòng 22-27 — bảng gốc của toàn bộ hệ thống
+phân quyền). Khi dán nguyên file vào Supabase SQL Editor và bấm Run, toàn bộ script
+chạy trong 1 transaction ngầm — câu INSERT cuối lỗi (cột không tồn tại) khiến
+Postgres **ROLLBACK LUÔN cả 2 câu `CREATE TABLE` phía trên** (DDL trong Postgres có
+tính transactional) — giải thích chính xác vì sao migration "đã chạy" (theo ghi chú
+cũ) nhưng bảng vẫn không tồn tại.
+
+**Fix**: đã sửa trực tiếp file `20260611_van_ban_distribution.sql` (an toàn vì xác
+nhận migration này CHƯA TỪNG chạy thành công lần nào — không có state/dữ liệu nào
+của nó tồn tại trên DB thật để lo phá vỡ) — đổi `INSERT INTO permissions (code,
+module, action, description)` thành đúng `INSERT INTO permissions (code,
+module_name, action_name)` (bỏ `description`, cột đó không tồn tại). Đã grep toàn bộ
+`supabase/migrations/` xác nhận đây là migration DUY NHẤT mắc lỗi tên cột này —
+không có migration khác cần sửa tương tự.
+
+**Việc cần làm ngay**: chạy lại **toàn bộ** file `20260611_van_ban_distribution.sql`
+(bản đã sửa) trong Supabase SQL Editor — an toàn chạy lại dù trước đó có thể đã "chạy
+1 phần rồi rollback", vì mọi câu lệnh đều `IF NOT EXISTS`/`DROP POLICY IF EXISTS`/`ON
+CONFLICT DO NOTHING`, idempotent hoàn toàn.
+
+**Chưa test tay** — cần: (C) mở lại modal đặt vị trí chữ ký ở lượt ký đầu tiên, xác
+nhận hộp QR hiện đúng mã QR thật (không chỉ khung), quét thử bằng điện thoại ra đúng
+link chi tiết văn bản; (D) chạy migration đã sửa xong, bấm "Phân phối" sau khi phê
+duyệt 1 văn bản — xác nhận không còn lỗi "Could not find the table", chọn người nhận
+và gửi thành công.
+
+### E. `/api/documents/distribute` hoàn toàn không có xác thực/kiểm tra quyền ở server (đã fix)
+
+Phát hiện khi trả lời câu hỏi người dùng "user không phải admin/manager được cấp quyền Phân phối có phân phối được không" — cả GET (danh sách người nhận) lẫn POST (tạo batch) đều **không hề gọi `requireAuthUser()`**, không check quyền `documents.distribute`, và tin thẳng `distributedBy` do client gửi lên để ghi vào `distributed_by`. Nút "Phân phối" ở UI chỉ là điều kiện hiển thị — ai đăng nhập được (kể cả không có quyền) đều gọi thẳng API này thành công, và có thể giả mạo `distributedBy` thành người khác.
+
+**Fix**: thêm `requireDistributePermission()` (mirror ngữ nghĩa `fetchPermissionCodesForUser()` ở `src/lib/auth.ts` — nếu user có bất kỳ quyền explicit nào trong `user_permissions` thì CHỈ dùng đúng tập đó, không cộng thêm `role_permissions`; ngược lại fallback theo role) — áp dụng cho cả GET và POST. Đồng thời:
+- Chặn chéo nhà máy: so `factoryId` trong request với `factory_id` thật của người gọi (route dùng service role nên RLS không tự chặn giúp).
+- `distributed_by` giờ luôn lấy từ `userId` đã xác thực server-side, bỏ hẳn tin cậy trường `distributedBy` client gửi lên (đã xóa khỏi cả body type lẫn payload frontend).
+- 2 nơi gọi API ở `documents/[id]/page.tsx` (`openDistModal`, `handleDistSend`) đã thêm header `Authorization: Bearer <token>` (dùng `getAuthToken()` sẵn có trong file) — bắt buộc phải có vì `requireAuthUser()` đọc token từ header này.
+
+`npm run build`/`eslint` sạch. **Chưa test tay** — cần: (1) tài khoản role `user` được cấp `documents.distribute` qua Cài đặt → Phân quyền → phân phối thành công; (2) tài khoản KHÔNG có quyền này → nút ẩn ở UI, và nếu gọi thẳng API (devtools) → nhận đúng lỗi 403 "Bạn không có quyền phân phối văn bản"; (3) `distributed_by` lưu đúng người thực sự đăng nhập, không phụ thuộc giá trị client gửi.

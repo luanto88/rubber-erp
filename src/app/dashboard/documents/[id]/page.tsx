@@ -5,6 +5,7 @@ import type { RefObject } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
+import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
@@ -57,6 +58,11 @@ type SignPlacement = {
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng khi file là PDF
   showPrefix?: boolean
   prefixX?: number; prefixY?: number; prefixWidth?: number; prefixHeight?: number
+  // Vị trí QR (chỉ gửi kèm ở lượt ký ĐẦU TIÊN của cả văn bản — showQr=true — server
+  // tự lưu lại vào placement_ky.qr và tái dùng cho mọi lượt ký sau, không đọc lại
+  // các trường này ở lượt sau). Xem QR trong SignPlacementModal bên dưới.
+  showQr?: boolean
+  qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
 }
 type ElemState = { x: number; y: number; w: number; h: number }
 
@@ -96,6 +102,9 @@ function SignPlacementModal({
   nameTag,
   acting,
   allowSignAs,
+  allowQrPlacement,
+  userId,
+  docId,
   onConfirm,
   onClose,
 }: {
@@ -108,6 +117,12 @@ function SignPlacementModal({
   nameTag: string
   acting: boolean
   allowSignAs: boolean
+  // true khi văn bản CHƯA từng có QR được đặt vị trí (lượt ký đầu tiên) — hiện hộp
+  // QR kéo-thả để chọn vị trí; các lượt ký sau tái dùng đúng vị trí đã lưu, không
+  // hiện hộp QR nữa (tránh vẽ chồng nhiều QR ở nhiều vị trí khác nhau qua các lần ký).
+  allowQrPlacement: boolean
+  userId: string
+  docId: string
   onConfirm: (pin: string, placement: SignPlacement | null, signAs: SignAsType) => void
   onClose: () => void
 }) {
@@ -118,8 +133,15 @@ function SignPlacementModal({
   // action cho phép VÀ file đang ký là PDF.
   const showSignAsPicker = allowSignAs && showCanvas
 
+  // Luồng ký chia 2 bước, mirror iso/documents/[id]/page.tsx: PIN phải xác thực đúng
+  // (chặn, gọi /api/sign/verify) TRƯỚC khi hiện canvas PDF đặt vị trí chữ ký — tránh vừa
+  // tốn công đặt vị trí vừa phải nhập lại PIN nếu gõ sai, và không tải PDF lãng phí nếu
+  // người dùng hủy ngay ở bước nhập PIN.
+  const [step, setStep] = useState<"pin" | "placement">("pin")
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
+  const [showPin, setShowPin] = useState(false)
+  const [pinVerifying, setPinVerifying] = useState(false)
   const [signAs, setSignAs] = useState<SignAsType>("none")
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -128,8 +150,6 @@ function SignPlacementModal({
   const pdfDocRef = useRef<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [numPages, setNumPages] = useState(1)
-  const [canvasW, setCanvasW] = useState(0)
-  const [canvasH, setCanvasH] = useState(0)
   const [pdfPageH, setPdfPageH] = useState(841.89) // A4 default
   const [pdfScale, setPdfScale] = useState(1.5)
   const [canvasReady, setCanvasReady] = useState(false)
@@ -138,12 +158,14 @@ function SignPlacementModal({
   const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
   const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: 140, h: 24 })
   const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
+  const [qrState, setQrState] = useState<ElemState>({ x: 20, y: 20, w: 70, h: 70 })
   const [showSig, setShowSig] = useState(true)
   const [showName, setShowName] = useState(true)
 
   const sigNodeRef = useRef<HTMLDivElement>(null)
   const nameNodeRef = useRef<HTMLDivElement>(null)
   const prefixNodeRef = useRef<HTMLDivElement>(null)
+  const qrNodeRef = useRef<HTMLDivElement>(null)
 
   // Render 1 trang PDF lên canvas — tách riêng để gọi lại khi đổi trang, không
   // phải load lại toàn bộ file. Tính lại viewport/scale mỗi lần vì kích thước
@@ -167,14 +189,14 @@ function SignPlacementModal({
     await page.render({ canvasContext: ctx, viewport } as any).promise
 
     const unscaledViewport = page.getViewport({ scale: 1 })
-    setCanvasW(cW)
-    setCanvasH(cH)
     setPdfScale(scale)
     setPdfPageH(unscaledViewport.height)
   }
 
   useEffect(() => {
-    if (!showCanvas || !sourceFileUrl) return
+    // Chỉ tải PDF khi đã sang bước "placement" (PIN đã xác thực đúng) — tránh tải file
+    // lãng phí nếu người dùng hủy ngay ở bước nhập PIN.
+    if (!showCanvas || !sourceFileUrl || step !== "placement") return
     let cancelled = false
 
     const loadPdf = async () => {
@@ -196,10 +218,12 @@ function SignPlacementModal({
       await renderPdfPage(pdf, 1)
       if (cancelled) return
 
+      const cW = canvasRef.current?.width || 0
       const cH = canvasRef.current?.height || 0
       setSigState({ x: 60, y: cH - 120, w: 140, h: 60 })
       setNameState({ x: 60, y: cH - 55, w: 140, h: 24 })
       setPrefixState({ x: 220, y: cH - 55, w: 60, h: 24 })
+      setQrState({ x: Math.max(20, cW - 90), y: 20, w: 70, h: 70 })
       setCanvasReady(true)
     }
 
@@ -207,7 +231,7 @@ function SignPlacementModal({
       if (!cancelled) setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
     })
     return () => { cancelled = true }
-  }, [showCanvas, sourceFileUrl])
+  }, [showCanvas, sourceFileUrl, step])
 
   const goToPage = (p: number) => {
     if (p < 1 || p > numPages || !pdfDocRef.current) return
@@ -222,8 +246,38 @@ function SignPlacementModal({
     height: h / pdfScale,
   })
 
-  const handleConfirm = () => {
+  // Xác thực PIN thật qua server (mirror handlePinConfirm của
+  // iso/documents/[id]/page.tsx) TRƯỚC khi mở bước đặt vị trí chữ ký — bắt lỗi PIN sai
+  // ngay, không cần đợi tới lúc bấm "Xác nhận ký" ở cuối. /api/documents/sign vẫn tự
+  // verify lại PIN một lần nữa khi ký thật (không đổi), gọi ở đây chỉ để early-fail.
+  const handleVerifyPin = async () => {
     if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
+    setPinVerifying(true)
+    setPinError("")
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        setPinError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+        return
+      }
+      const res = await fetch("/api/sign/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ userId, pin, docId, docType: "van_ban" }),
+      })
+      const json = await res.json()
+      if (!res.ok) { setPinError(json.error || "PIN không đúng"); return }
+      setStep("placement")
+    } catch {
+      setPinError("Không thể xác thực PIN, vui lòng thử lại")
+    } finally {
+      setPinVerifying(false)
+    }
+  }
+
+  const handleConfirm = () => {
+    if (!pin.trim()) { setStep("pin"); setPinError("Vui lòng nhập lại PIN"); return }
     if (!showCanvas || !canvasReady) {
       onConfirm(pin, null, "none")
       return
@@ -232,6 +286,7 @@ function SignPlacementModal({
     const namePdf = toPdf(nameState.x, nameState.y, nameState.w, nameState.h)
     const showPrefix = signAs !== "none"
     const prefixPdf = showPrefix ? toPdf(prefixState.x, prefixState.y, prefixState.w, prefixState.h) : null
+    const qrPdf = allowQrPlacement ? toPdf(qrState.x, qrState.y, qrState.w, qrState.h) : null
     onConfirm(pin, {
       page: currentPage,
       x: sigPdf.x, y: sigPdf.y, width: sigPdf.width, height: sigPdf.height,
@@ -242,27 +297,97 @@ function SignPlacementModal({
       ...(prefixPdf
         ? { prefixX: prefixPdf.x, prefixY: prefixPdf.y, prefixWidth: prefixPdf.width, prefixHeight: prefixPdf.height }
         : {}),
+      showQr: allowQrPlacement,
+      ...(qrPdf
+        ? { qrX: qrPdf.x, qrY: qrPdf.y, qrWidth: qrPdf.width, qrHeight: qrPdf.height }
+        : {}),
     }, signAs)
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-4">
-        <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <div>
-            <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {showCanvas
-                ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
-                : "Tag chữ ký trong file Office sẽ được thay tự động khi ký"}
-            </p>
+  // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF — mirror pinModal của
+  // iso/documents/[id]/page.tsx (icon + tiêu đề + phụ đề, ô PIN có nút ẩn/hiện, footer
+  // Hủy/Xác nhận). Đúng PIN mới chuyển sang bước 2.
+  if (step === "pin") {
+    return (
+      <ModalShell
+        title={
+          <span className="flex items-center gap-3">
+            <span className="p-2 bg-amber-100 rounded-xl"><ShieldCheck size={18} className="text-amber-600" /></span>
+            <span>
+              <span className="font-extrabold text-slate-800 block">{stepLabel}</span>
+              <span className="text-xs text-slate-500 font-normal">Nhập PIN ký duyệt để xác nhận</span>
+            </span>
+          </span>
+        }
+        onClose={onClose}
+        maxWidth="sm"
+        footer={
+          <>
+            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+            <button
+              onClick={() => void handleVerifyPin()}
+              disabled={pinVerifying}
+              className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+            >
+              {pinVerifying ? <Loader2 size={13} className="animate-spin" /> : <PenLine size={13} />}
+              {pinVerifying ? "Đang xác thực..." : "Xác nhận"}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN ký duyệt</label>
+          <div className="relative">
+            <input
+              type={showPin ? "text" : "password"}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              autoFocus
+              value={pin}
+              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
+              onKeyDown={(e) => e.key === "Enter" && void handleVerifyPin()}
+              placeholder="4–6 chữ số"
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 pr-9 font-mono tracking-widest text-center text-lg"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPin((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+          {pinError && (
+            <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+              <AlertTriangle size={11} /> {pinError}
+            </p>
+          )}
         </div>
+      </ModalShell>
+    )
+  }
 
-        <div className="p-5 space-y-4">
+  // Bước 2: PIN đã xác thực đúng — hiện canvas PDF toàn màn hình để đặt vị trí chữ ký,
+  // mirror layout placementModal của iso/documents/[id]/page.tsx (fixed inset-0 flex-col,
+  // vùng canvas flex-1 overflow-auto căn giữa) thay vì hộp thoại max-w-3xl/55vh cũ vốn
+  // làm trang A4 phóng to tràn cả 2 chiều, sinh 2 thanh cuộn khó thao tác.
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex flex-col">
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-slate-100 shrink-0">
+        <div>
+          <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {showCanvas
+              ? allowQrPlacement
+                ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký, tên và mã QR trên PDF — vị trí QR sẽ giữ nguyên cho các lượt ký sau"
+                : "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
+              : "Tag chữ ký trong file Office sẽ được thay tự động khi ký"}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
           {showCanvas && numPages > 1 && (
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage <= 1}
@@ -280,14 +405,14 @@ function SignPlacementModal({
               </button>
             </div>
           )}
-          {showCanvas ? (
-            <div className="overflow-auto rounded-xl border border-slate-200" style={{ maxHeight: "55vh" }}>
-              <div
-                ref={containerRef}
-                className="relative"
-                style={{ width: canvasW || "100%", height: canvasH || 300, display: "inline-block" }}
-              >
-                <canvas ref={canvasRef} className="block" />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto flex items-start justify-center p-4 bg-slate-100">
+        {showCanvas ? (
+          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none">
+            <canvas ref={canvasRef} className="block" />
 
                 {!canvasReady && !canvasError && (
                   <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
@@ -407,12 +532,41 @@ function SignPlacementModal({
                         </div>
                       </Draggable>
                     )}
+
+                    {/* QR — chỉ hiện ở lượt ký đầu tiên của cả văn bản (allowQrPlacement),
+                        vị trí đặt ở đây được server lưu lại và tái dùng cho mọi lượt ký sau */}
+                    {allowQrPlacement && (
+                      <Draggable
+                        nodeRef={qrNodeRef as RefObject<HTMLElement>}
+                        position={{ x: qrState.x, y: qrState.y }}
+                        onStop={(_, d) => setQrState((p) => ({ ...p, x: d.x, y: d.y }))}
+                        bounds="parent"
+                      >
+                        <div ref={qrNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                          <Resizable
+                            size={{ width: qrState.w, height: qrState.h }}
+                            onResizeStop={(_, __, ___, delta) =>
+                              setQrState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                            enable={{ right: true, bottom: true, bottomRight: true }}
+                            lockAspectRatio
+                            minWidth={30} minHeight={30}
+                          >
+                            <div className="w-full h-full border-2 border-dashed border-violet-400 bg-white rounded flex items-center justify-center select-none p-1">
+                              <QRCodeSVG
+                                value={`${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/documents/${docId}`}
+                                size={Math.max(20, Math.min(qrState.w, qrState.h) - 8)}
+                                level="L"
+                              />
+                            </div>
+                          </Resizable>
+                        </div>
+                      </Draggable>
+                    )}
                   </>
                 )}
               </div>
-            </div>
           ) : (
-            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl">
+            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl max-w-md">
               <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
               <div className="space-y-1 text-xs text-sky-700">
                 <div className="flex items-center gap-2">
@@ -427,7 +581,9 @@ function SignPlacementModal({
               </div>
             </div>
           )}
+      </div>
 
+      <div className="border-t border-slate-100 bg-white px-5 py-4 space-y-3 shrink-0">
           {showSignAsPicker && (
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
@@ -456,37 +612,16 @@ function SignPlacementModal({
             </div>
           )}
 
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN chữ ký</label>
-            <input
-              type="password"
-              inputMode="numeric"
-              maxLength={6}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
-              value={pin}
-              onChange={(e) => { setPin(e.target.value); setPinError("") }}
-              onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
-              placeholder="4–6 chữ số"
-              autoFocus={!showCanvas}
-            />
-            {pinError && (
-              <div className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
-                <AlertTriangle size={11} />{pinError}
-              </div>
-            )}
+          <div className="flex gap-2 justify-end">
+            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+            <button
+              onClick={handleConfirm}
+              disabled={acting}
+              className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+            >
+              <PenLine size={13} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
+            </button>
           </div>
-        </div>
-
-        <div className="flex gap-2 justify-end px-5 pb-5">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-          <button
-            onClick={handleConfirm}
-            disabled={acting}
-            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
-          >
-            <PenLine size={13} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
-          </button>
-        </div>
       </div>
     </div>
   )
@@ -665,7 +800,10 @@ export default function DocumentDetailPage() {
     setDistSelected(new Set())
     setDistGhiChu("")
     try {
-      const res = await fetch(`/api/documents/distribute?factoryId=${factoryId}&docIds=${doc.id}`)
+      const token = await getAuthToken()
+      const res = await fetch(`/api/documents/distribute?factoryId=${factoryId}&docIds=${doc.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       const json = (await res.json()) as { users?: DistUser[] }
       setDistUsers(json.users || [])
     } catch { setDistUsers([]) }
@@ -676,12 +814,12 @@ export default function DocumentDetailPage() {
     if (!factoryId || !doc || !user || distSelected.size === 0) return
     setDistSending(true)
     try {
+      const token = await getAuthToken()
       const res = await fetch("/api/documents/distribute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           factoryId,
-          distributedBy: user.id,
           docIds: [doc.id],
           recipientUserIds: [...distSelected],
           ghiChu: distGhiChu || undefined,
@@ -774,6 +912,10 @@ export default function DocumentDetailPage() {
   const signStepKey = signModal === "phe_duyet" ? "phe_duyet" : String(doc.buoc_hien_tai + 1)
   const signSigTag = signModal === "phe_duyet" ? "{{CHU_KY_PHE_DUYET}}" : `{{CHU_KY_BUOC_${signStepKey}}}`
   const signNameTag = signModal === "phe_duyet" ? "{{TEN_PHE_DUYET}}" : `{{TEN_BUOC_${signStepKey}}}`
+  // QR chỉ được đặt vị trí ở lượt ký ĐẦU TIÊN của cả văn bản (chưa từng lưu
+  // placement_ky.qr) — các lượt ký sau tái dùng đúng vị trí đã chọn, tránh vẽ nhiều
+  // QR ở nhiều vị trí khác nhau qua các lần ký (xem sign/route.ts's performFileStamp).
+  const hasQrPlacement = !!(doc.placement_ky as Record<string, unknown> | null)?.["qr"]
 
   return (
     <DocumentsShell>
@@ -1014,6 +1156,9 @@ export default function DocumentDetailPage() {
           nameTag={signNameTag}
           acting={acting}
           allowSignAs={(signModal === "ky_buoc" && currentStep?.type === "phong_ban") || signModal === "phe_duyet"}
+          allowQrPlacement={!hasQrPlacement}
+          userId={user?.id || ""}
+          docId={doc.id}
           onConfirm={handleSignConfirm}
           onClose={() => setSignModal(null)}
         />

@@ -1,20 +1,79 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabaseAdmin } from "@/app/api/account/_lib/security"
+import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import nodemailer from "nodemailer"
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 const TG_TOKEN = process.env.ISO_TELEGRAM_BOT_TOKEN || ""
 const TG_CHAT = process.env.ISO_TELEGRAM_CHAT_ID || ""
 
+// Xác thực + kiểm tra quyền `documents.distribute` — trước đây route này hoàn toàn
+// không có bước này (chỉ ẩn/hiện nút "Phân phối" ở UI), nghĩa là bất kỳ ai đăng nhập
+// được (kể cả không có quyền) đều có thể gọi thẳng API để phân phối. Mirror đúng
+// ngữ nghĩa `fetchPermissionCodesForUser()` (src/lib/auth.ts): nếu user có BẤT KỲ
+// quyền explicit nào trong `user_permissions`, CHỈ dùng đúng tập đó (không cộng thêm
+// `role_permissions`); ngược lại mới fallback theo quyền mặc định của role. Trả kèm
+// `factoryId` thật của người gọi để chặn luôn thao tác chéo nhà máy (route dùng
+// service role nên không có RLS nào chặn giúp).
+async function requireDistributePermission(req: NextRequest) {
+  const authUser = await requireAuthUser(req)
+  const { data: profile, error: profileErr } = await supabaseAdmin
+    .from("profiles")
+    .select("role, factory_id")
+    .eq("id", authUser.id)
+    .single()
+  if (profileErr || !profile) {
+    throw new Error("Không tìm thấy hồ sơ người dùng")
+  }
+
+  const role = (profile.role as string) || ""
+  const isAdmin = role === "admin"
+
+  if (!isAdmin) {
+    const { data: explicitRows } = await supabaseAdmin
+      .from("user_permissions")
+      .select("permission_code")
+      .eq("user_id", authUser.id)
+      .eq("granted", true)
+
+    let allowed: boolean
+    if (explicitRows && explicitRows.length > 0) {
+      allowed = explicitRows.some((r) => r.permission_code === "documents.distribute")
+    } else {
+      const { data: roleRows } = await supabaseAdmin
+        .from("role_permissions")
+        .select("permission_code")
+        .eq("role", role)
+        .eq("permission_code", "documents.distribute")
+      allowed = (roleRows?.length || 0) > 0
+    }
+    if (!allowed) {
+      throw new Error("Bạn không có quyền phân phối văn bản")
+    }
+  }
+
+  return { userId: authUser.id, factoryId: (profile.factory_id as string | null) }
+}
+
+function errorStatus(msg: string): number {
+  if (msg.includes("đăng nhập")) return 401
+  if (msg.includes("quyền")) return 403
+  return 500
+}
+
 // GET: Danh sách người dùng active trong cùng factory để chọn nhận phân phối
 // + flag alreadyReceived cho từng văn bản
 export async function GET(req: NextRequest) {
   try {
+    const { factoryId: callerFactoryId } = await requireDistributePermission(req)
+
     const { searchParams } = new URL(req.url)
     const factoryId = searchParams.get("factoryId")
     const docIds = searchParams.get("docIds")?.split(",").filter(Boolean) || []
 
     if (!factoryId) return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
+    if (factoryId !== callerFactoryId) {
+      return NextResponse.json({ error: "Bạn không có quyền truy cập nhà máy này" }, { status: 403 })
+    }
 
     const { data: profiles, error } = await supabaseAdmin
       .from("profiles")
@@ -52,25 +111,35 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ users: result })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi" }, { status: 500 })
+    const msg = err instanceof Error ? err.message : "Lỗi"
+    return NextResponse.json({ error: msg }, { status: errorStatus(msg) })
   }
 }
 
 // POST: Tạo batch phân phối
 export async function POST(req: NextRequest) {
   try {
+    const { userId, factoryId: callerFactoryId } = await requireDistributePermission(req)
+
     const body = (await req.json()) as {
       factoryId: string
-      distributedBy: string
       docIds: string[]
       recipientUserIds: string[]
       ghiChu?: string
     }
 
-    const { factoryId, distributedBy, docIds, recipientUserIds, ghiChu } = body
-    if (!factoryId || !distributedBy || !docIds?.length || !recipientUserIds?.length) {
+    const { factoryId, docIds, recipientUserIds, ghiChu } = body
+    if (!factoryId || !docIds?.length || !recipientUserIds?.length) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
+    if (factoryId !== callerFactoryId) {
+      return NextResponse.json({ error: "Bạn không có quyền truy cập nhà máy này" }, { status: 403 })
+    }
+
+    // "Người phân phối" luôn lấy từ danh tính đã xác thực server-side (userId), KHÔNG
+    // tin trường distributedBy do client gửi lên — trước đây route tin thẳng giá trị
+    // này, cho phép giả mạo gán hành động phân phối cho một người dùng khác.
+    const distributedBy = userId
 
     // Tạo batch
     const { data: batch, error: batchErr } = await supabaseAdmin
@@ -218,9 +287,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, batchId: batch.id })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi không xác định" },
-      { status: 500 },
-    )
+    const msg = err instanceof Error ? err.message : "Lỗi không xác định"
+    return NextResponse.json({ error: msg }, { status: errorStatus(msg) })
   }
 }

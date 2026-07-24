@@ -11,6 +11,8 @@ import {
   LOAI_VAN_BAN_OPTIONS,
   PHONG_BAN_VAN_BAN_OPTIONS,
   buildMaVanBan,
+  computeNextVanBanSo,
+  parseVanBanFileName,
   sanitizeStorageFileName,
   type VanBanDocumentType,
   type ThuTuKyStep,
@@ -191,18 +193,11 @@ export default function NewDocumentPage() {
     }
   }, [])
 
-  // Bug 2: Peek next sequence number (không consume — đọc trực tiếp van_ban_sequences)
+  // Peek số tiếp theo — tính từ dữ liệu THẬT trong van_ban_documents (xem
+  // computeNextVanBanSo trong documents-types.ts).
   const loadNextSo = useCallback(async (fid: string, loai: string, pb: string): Promise<number> => {
     const nam = new Date().getFullYear()
-    const { data } = await supabase
-      .from("van_ban_sequences")
-      .select("last_so")
-      .eq("factory_id", fid)
-      .eq("loai", loai)
-      .eq("phong_ban", pb)
-      .eq("nam", nam)
-      .maybeSingle()
-    return (data?.last_so ?? 0) + 1
+    return computeNextVanBanSo(fid, loai, pb, nam)
   }, [])
 
   // Bug 2: Debounced duplicate check
@@ -320,14 +315,38 @@ export default function NewDocumentPage() {
   }
 
   // Bug 4: Auto-fill tên từ tên file khi trường đang trống
+  // Tự nhận diện Loại VB/Phòng ban/Tên từ tên file dạng "01/ĐN-NMCB Tên văn bản"
+  // (nhiều biến thể không dấu "/", xem parseVanBanFileName) — mirror tính năng đã
+  // có sẵn ở Upload ký tay, trước đây trang này chỉ lấy nguyên tên file làm tên văn
+  // bản (không tách được loại/phòng ban lẫn trong tên, và tên còn dính cả mã).
+  // CHỈ điền vào trường đang trống, không ghi đè lựa chọn tay. Mã văn bản KHÔNG lấy
+  // số từ tên file ở trang này (khác Upload) — mã luôn do hệ thống tự sinh theo số
+  // tiếp theo hợp lệ (qua effect nextSoPreview), vì đây là văn bản đang soạn thảo
+  // mới, số trong tên file (nếu có) chỉ là số nháp người dùng tự đặt, không phải số
+  // chính thức đã cấp.
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] || null
     setFile(f)
-    if (f && !form.ten_van_ban.trim()) {
-      const rawName = f.name.replace(/\.(pdf|docx?|xlsx?)$/i, "")
-      const suggested = rawName.replace(/[_\-]+/g, " ").trim()
-      if (suggested) setForm((prev) => ({ ...prev, ten_van_ban: suggested }))
-    }
+    if (!f) return
+
+    const parsed = parseVanBanFileName(f.name, docTypes)
+    const willFillLoai = !!parsed.loai_van_ban && !form.loai_van_ban
+    const willFillPb = !!parsed.phong_ban && !form.phong_ban
+
+    setForm((prev) => {
+      const next = { ...prev }
+      if (parsed.loai_van_ban && !prev.loai_van_ban) next.loai_van_ban = parsed.loai_van_ban
+      if (parsed.phong_ban && !prev.phong_ban) next.phong_ban = parsed.phong_ban
+      if (!prev.ten_van_ban.trim()) {
+        const fallbackTen =
+          parsed.ten_van_ban || f.name.replace(/\.(pdf|docx?|xlsx?)$/i, "").replace(/[_-]+/g, " ").trim()
+        if (fallbackTen) next.ten_van_ban = fallbackTen
+      }
+      return next
+    })
+    // Mã được auto-tính theo loai_van_ban/phong_ban mới — reset cờ "đã sửa tay" giống
+    // hệt hành vi của 2 dropdown Loại VB/Phòng ban khi người dùng tự chọn trực tiếp.
+    if (willFillLoai || willFillPb) setMaVanBanEdited(false)
   }
 
   const handleSave = async () => {
@@ -384,22 +403,14 @@ export default function NewDocumentPage() {
       let finalSo: number
 
       if (maVanBanEdited && finalMa) {
-        // User tự nhập mã — parse số từ mã, không gọi atomic API
+        // User tự nhập mã — parse số từ mã
         const match = finalMa.match(/^(\d+)\//)
         finalSo = match ? parseInt(match[1]) : 1
       } else {
-        // Gọi atomic API để lấy và tiêu thụ số thứ tự chính xác
+        // Tính lại số tiếp theo NGAY TRƯỚC khi lưu (không tái dùng nextSoPreview đã
+        // tính trước đó) để giảm khoảng hở race nếu có văn bản khác vừa được tạo.
         const nam = new Date().getFullYear()
-        const numRes = await fetch("/api/documents/number", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ factoryId, loai: form.loai_van_ban, phong_ban: form.phong_ban, nam }),
-        })
-        if (!numRes.ok) {
-          const err = (await numRes.json()) as { error?: string }
-          throw new Error(err.error || "Không lấy được số văn bản")
-        }
-        const { so } = (await numRes.json()) as { so: number }
+        const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
         finalSo = so
         const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
         const kyHieu =

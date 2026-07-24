@@ -7,14 +7,26 @@ const supabaseAdmin = createClient(
 )
 
 // GET /api/iso/profiles-by-permission?factoryId=...&permCode=...
-// Dùng service role để bypass RLS — frontend client chỉ đọc được quyền của chính mình
+// Dùng service role để bypass RLS — frontend client chỉ đọc được quyền/profile của chính
+// mình (RLS bảng `profiles` chỉ cho admin đọc toàn bộ nhà máy). Bỏ trống permCode để lấy
+// toàn bộ active profiles của nhà máy, không lọc theo quyền.
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const factoryId = searchParams.get("factoryId")
   const permCode = searchParams.get("permCode")
 
-  if (!factoryId || !permCode) {
+  if (!factoryId) {
     return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
+  }
+
+  if (!permCode) {
+    const { data } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, username, role")
+      .eq("factory_id", factoryId)
+      .eq("status", "active")
+      .order("full_name")
+    return NextResponse.json({ profiles: data || [] })
   }
 
   const [directRes, roleRes] = await Promise.all([

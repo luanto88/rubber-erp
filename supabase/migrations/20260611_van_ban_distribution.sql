@@ -44,8 +44,13 @@ CREATE POLICY "vb_dist_recipients_factory_read"
   USING (factory_id = (SELECT factory_id FROM profiles WHERE id = auth.uid() LIMIT 1));
 
 -- Permission seed: documents.distribute
-INSERT INTO permissions (code, module, action, description)
-VALUES ('documents.distribute', 'documents', 'distribute', 'Phân phối văn bản đến người dùng')
+-- Bảng permissions chỉ có cột (code, module_name, action_name) — xem
+-- 20260429_auth_profiles_permissions.sql. Bản trước dùng sai tên cột
+-- (module/action/description không tồn tại), khiến câu INSERT này lỗi và làm
+-- ROLLBACK toàn bộ migration (kể cả 2 CREATE TABLE phía trên) khi chạy nguyên
+-- file trong Supabase SQL Editor — đây là lý do bảng chưa từng được tạo thành công.
+INSERT INTO permissions (code, module_name, action_name)
+VALUES ('documents.distribute', 'documents', 'distribute')
 ON CONFLICT (code) DO NOTHING;
 
 -- Cấp cho admin và manager mặc định
