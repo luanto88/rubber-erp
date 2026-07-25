@@ -6,7 +6,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
 import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
-import { getTodayISODate, isDateInRange } from "@/lib/date-utils"
+import { formatDateDisplay, getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
@@ -17,6 +17,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
 
 // Types
@@ -715,6 +716,9 @@ export default function DispatchPage() {
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu vừa lưu vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
   const vehicleOptions = vehicles
   const driverOptions = drivers
   const handleAddRequiredNote = useCallback(async () => {
@@ -1297,6 +1301,10 @@ export default function DispatchPage() {
           deliveryPoints,
         })
         showToast("Đã thêm bảng phân xe mới")
+        setKpiPrompt({
+          recordId: inserted.id,
+          recordLabel: `Bảng phân xe ngày ${formatDateDisplay(formNgay) || formNgay}`,
+        })
       }
       setView("list")
       setEditId(null)
@@ -1536,6 +1544,18 @@ export default function DispatchPage() {
   if (view === "list") return (
     <div>
       <ToastNotification/>
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="dispatch:create"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/dispatch"
+            onDone={() => setKpiPrompt(null)}
+          />
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>

@@ -9,6 +9,7 @@ import {
   getDocumentsTasks,
   getExportTasks,
   getQualityTasks,
+  getKpiTasks,
   type ModuleTaskSummary,
 } from "@/app/dashboard/_components/module-tasks"
 import { WidgetCard, WidgetLoading, type WidgetProps } from "./widget-shared"
@@ -33,6 +34,7 @@ export function TasksSummaryWidget({ factoryId, user }: WidgetProps) {
         if (hasPermission(currentUser, "documents.view")) jobs.push(getDocumentsTasks(factoryId, currentUser))
         if (hasPermission(currentUser, "export.view")) jobs.push(getExportTasks(factoryId, currentUser))
         if (hasPermission(currentUser, "quality.view")) jobs.push(getQualityTasks(factoryId))
+        if (hasPermission(currentUser, "kpi.view")) jobs.push(getKpiTasks(factoryId, currentUser))
         const results = await Promise.all(jobs)
         if (alive) setSummaries(results)
       } finally {
@@ -49,7 +51,7 @@ export function TasksSummaryWidget({ factoryId, user }: WidgetProps) {
   const total = summaries.reduce((s, sm) => s + sm.items.reduce((s2, it) => s2 + it.count, 0), 0)
 
   return (
-    <WidgetCard title="Việc cần làm" subtitle="Tổng hợp từ ISO, Văn bản, Xuất hàng, Chất lượng">
+    <WidgetCard title="Việc cần làm" subtitle="Tổng hợp từ ISO, Văn bản, Xuất hàng, Chất lượng, Công việc & KPI">
       {loading ? (
         <WidgetLoading />
       ) : total === 0 ? (

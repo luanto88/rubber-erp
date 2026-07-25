@@ -201,6 +201,10 @@ type MaintenanceStaffRow = {
   ten: string
   group_ids: string[]
   group_names: string[]
+  // Nhóm chính dùng để chọn khung tiêu chí KPI khi tính điểm tháng (module Quản lý công việc & KPI,
+  // xem .claude/rules/27-kpi-module.md) — tái dùng personnel_group_members.is_primary, KHÔNG phải
+  // bảng/khái niệm riêng biệt.
+  primary_group_id: string | null
   chuc_vu: string | null
   gioi_tinh: string | null
   chuc_vu_chinh_quyen: string | null
@@ -230,6 +234,7 @@ type PersonnelGroupRow = {
 type PersonnelGroupMemberRow = {
   staff_id: string
   group_id: string
+  is_primary: boolean | null
   personnel_groups: Array<{
     id: string
     name: string | null
@@ -782,6 +787,7 @@ export default function SettingsPage() {
     profile_id: "",
     ten: "",
     group_ids: [] as string[],
+    primary_group_id: "",
     chuc_vu: "",
     gioi_tinh: "",
     chuc_vu_chinh_quyen: "",
@@ -945,7 +951,7 @@ export default function SettingsPage() {
         supabase.from("maintenance_assets").select("*").eq("factory_id", fid).order("bo_phan").order("ma_tb"),
         supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
         supabase.from("personnel_groups").select("id, factory_id, code, name, description, is_system, is_active, sort_order").eq("factory_id", fid).order("sort_order").order("name"),
-        supabase.from("personnel_group_members").select("staff_id, group_id, personnel_groups(id, name, code)").eq("factory_id", fid),
+        supabase.from("personnel_group_members").select("staff_id, group_id, is_primary, personnel_groups(id, name, code)").eq("factory_id", fid),
         supabase.from("maintenance_external_materials").select("*").eq("factory_id", fid).order("ten_vat_tu"),
         supabase.from("dispatch_drivers").select("*").eq("factory_id", fid).order("name"),
         supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
@@ -990,20 +996,22 @@ export default function SettingsPage() {
         setMaintError(gmRes.error.message)
       }
 
-      const groupMap = new Map<string, { group_ids: string[]; group_names: string[] }>()
+      const groupMap = new Map<string, { group_ids: string[]; group_names: string[]; primary_group_id: string | null }>()
       for (const row of (groupsUnavailable ? [] : (gmRes.data || [])) as PersonnelGroupMemberRow[]) {
-        const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [] }
+        const existing = groupMap.get(row.staff_id) || { group_ids: [], group_names: [], primary_group_id: null }
         if (row.group_id && !existing.group_ids.includes(row.group_id)) existing.group_ids.push(row.group_id)
         const groupName = row.personnel_groups?.[0]?.name?.trim()
         if (groupName && !existing.group_names.includes(groupName)) existing.group_names.push(groupName)
+        if (row.is_primary) existing.primary_group_id = row.group_id
         groupMap.set(row.staff_id, existing)
       }
-      const nextStaff = ((sRes.data || []) as Array<Omit<MaintenanceStaffRow, "group_ids" | "group_names">>).map((staff) => {
+      const nextStaff = ((sRes.data || []) as Array<Omit<MaintenanceStaffRow, "group_ids" | "group_names" | "primary_group_id">>).map((staff) => {
         const groups = groupMap.get(staff.id)
         return {
           ...staff,
           group_ids: groups?.group_ids || [],
           group_names: groups?.group_names || [],
+          primary_group_id: groups?.primary_group_id || null,
         }
       })
       setMaintStaff(nextStaff)
@@ -1148,7 +1156,12 @@ export default function SettingsPage() {
         if (staffForm.group_ids.length > 0) {
           const insertMembershipRes = await supabase
             .from("personnel_group_members")
-            .insert(staffForm.group_ids.map((groupId) => ({ factory_id: factoryId, staff_id: savedStaffId, group_id: groupId })))
+            .insert(staffForm.group_ids.map((groupId) => ({
+              factory_id: factoryId,
+              staff_id: savedStaffId,
+              group_id: groupId,
+              is_primary: groupId === staffForm.primary_group_id,
+            })))
 
           if (insertMembershipRes.error && !/personnel_group_members|does not exist|Could not find the table/i.test(insertMembershipRes.error.message)) {
             setMaintError(insertMembershipRes.error.message)
@@ -1895,6 +1908,7 @@ export default function SettingsPage() {
       profile_id: profile?.id || "",
       ten: profile?.full_name || "",
       group_ids: [],
+      primary_group_id: "",
       chuc_vu: "",
       gioi_tinh: "",
       chuc_vu_chinh_quyen: "",
@@ -1912,6 +1926,7 @@ export default function SettingsPage() {
       profile_id: nextProfileId ?? (staff.profile_id || ""),
       ten: staff.ten,
       group_ids: [...staff.group_ids],
+      primary_group_id: staff.primary_group_id || "",
       chuc_vu: staff.chuc_vu || "",
       gioi_tinh: staff.gioi_tinh || "",
       chuc_vu_chinh_quyen: staff.chuc_vu_chinh_quyen || "",
@@ -4408,7 +4423,7 @@ export default function SettingsPage() {
                     Chưa có danh mục nhóm cho nhà máy này. Hãy thêm nhóm đầu tiên để bắt đầu.
                   </div>
                 ) : (
-                  <div className="max-h-40 space-y-2 overflow-auto rounded-xl border border-slate-300 px-3 py-2">
+                  <div className="max-h-52 space-y-2 overflow-auto rounded-xl border border-slate-300 px-3 py-2">
                     {personnelGroups.filter((group) => group.is_active !== false).map((group) => {
                       const checked = staffForm.group_ids.includes(group.id)
                       return (
@@ -4421,6 +4436,11 @@ export default function SettingsPage() {
                               group_ids: e.target.checked
                                 ? [...prev.group_ids, group.id]
                                 : prev.group_ids.filter((item) => item !== group.id),
+                              // Bỏ chọn nhóm đang là "nhóm chính KPI" thì tự gỡ luôn, tránh lưu
+                              // primary_group_id trỏ vào 1 nhóm không còn được chọn.
+                              primary_group_id: !e.target.checked && prev.primary_group_id === group.id
+                                ? ""
+                                : prev.primary_group_id,
                             }))}
                           />
                           <span>{group.name}</span>
@@ -4430,6 +4450,34 @@ export default function SettingsPage() {
                   </div>
                 )}
               </div>
+              {personnelGroupsAvailable && (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm chính</label>
+                  {staffForm.group_ids.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                      Chưa tick nhóm nào ở trên — hãy tick ít nhất 1 nhóm rồi mới chọn được Nhóm chính.
+                    </div>
+                  ) : (
+                    <select
+                      value={staffForm.primary_group_id}
+                      onChange={(e) => setStaffForm((prev) => ({ ...prev, primary_group_id: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                    >
+                      <option value="">-- Chưa chọn nhóm chính --</option>
+                      {personnelGroups
+                        .filter((group) => staffForm.group_ids.includes(group.id))
+                        .map((group) => (
+                          <option key={group.id} value={group.id}>{group.name}</option>
+                        ))}
+                    </select>
+                  )}
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Dùng khi tính điểm KPI chuyên môn ở module Quản lý công việc &amp; KPI: nhóm chính có
+                    hệ số ×10, các nhóm khác đã tick ở trên (&quot;nhóm choàng&quot;) vẫn tính điểm đầy đủ
+                    với hệ số ×5 mỗi nhóm — không nhóm nào bị loại khỏi tính điểm.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ</label>
                 <input value={staffForm.chuc_vu} onChange={e => setStaffForm(p => ({ ...p, chuc_vu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Nhân viên kỹ thuật" />

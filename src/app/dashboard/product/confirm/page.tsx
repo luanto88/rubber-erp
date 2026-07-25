@@ -64,6 +64,7 @@ import {
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
 
 const LAST_CA_STORAGE_KEY = "product_confirm_last_ca";
 const CA_STORAGE_VALUES = ["A", "B", "C"] as const;
@@ -170,6 +171,9 @@ export default function ConfirmKienProductionPage() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [factoryMismatch, setFactoryMismatch] = useState(false);
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn lô vừa gửi vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null);
 
   const [chucVu, setChucVu] = useState<string | null>(null);
   // Tên ca sản xuất theo cấu hình nhà máy (Cài đặt → Danh mục → Thông tin công ty → "Tên ca sản
@@ -591,6 +595,11 @@ export default function ConfirmKienProductionPage() {
         return;
       }
       setToast({ message: tt("submitAllSuccess", { count: result.count }), variant: "success" });
+      if (result.touchedLots.length > 0) {
+        const first = result.touchedLots[0];
+        const extra = result.touchedLots.length > 1 ? ` (+${result.touchedLots.length - 1} lô khác)` : "";
+        setKpiPrompt({ recordId: first.lotId, recordLabel: `Lô thành phẩm ${first.maLo}${extra}` });
+      }
       await Promise.all([refreshPendingDrafts(), refreshHistory()]);
     } catch (err) {
       setSubmitBatchError(err instanceof Error ? err.message : "Lỗi không xác định khi gửi nháp.");
@@ -941,6 +950,9 @@ export default function ConfirmKienProductionPage() {
                 submittingBatch={submittingBatch}
                 submitBatchError={submitBatchError}
                 onSubmitAllDrafts={handleSubmitAllDrafts}
+                factoryId={factoryId}
+                kpiPrompt={kpiPrompt}
+                onKpiPromptDone={() => setKpiPrompt(null)}
               />
             ) : lookupLoading ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
@@ -1441,6 +1453,9 @@ function HubView({
   submittingBatch,
   submitBatchError,
   onSubmitAllDrafts,
+  factoryId,
+  kpiPrompt,
+  onKpiPromptDone,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
   caLabel: (c: string) => string;
@@ -1472,10 +1487,23 @@ function HubView({
   submittingBatch: boolean;
   submitBatchError: string | null;
   onSubmitAllDrafts: () => void;
+  factoryId: string | null;
+  kpiPrompt: { recordId: string; recordLabel: string } | null;
+  onKpiPromptDone: () => void;
 }) {
   const pendingDraftGroups = useMemo(() => groupPendingDrafts(pendingDrafts), [pendingDrafts]);
   return (
     <div className="space-y-4">
+      {kpiPrompt && (
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="product:create"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/product"
+          onDone={onKpiPromptDone}
+        />
+      )}
       <button
         type="button"
         onClick={onScan}

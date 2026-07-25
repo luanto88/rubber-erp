@@ -30,6 +30,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
 import {
   InventoryImageUploadGroup,
 } from "@/app/dashboard/inventory/_components/inventory-image-upload";
@@ -1316,6 +1317,9 @@ export default function ProductPage() {
     null,
   );
   const [suffixList, setSuffixList] = useState<SuffixItem[]>([]);
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn lô thành phẩm vừa lưu vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null);
 
   // Factory prefix: CSR cho NMPHK, SVR cho NMCP
   const factoryPrefix = useMemo<"CSR" | "SVR">(() => {
@@ -2906,6 +2910,7 @@ export default function ProductPage() {
     setSaving(true);
     setSaveError(null);
     let hasError = false;
+    let firstSavedLot: { lotId: string; maLo: string } | null = null;
     const affectedNganIds = new Set<string>();
     const savedKgByNganId = new Map<string, number>();
     try {
@@ -2996,6 +3001,7 @@ export default function ProductPage() {
               hasError = true;
               break;
             }
+            if (!firstSavedLot) firstSavedLot = { lotId: saveResult.lotId, maLo: ma_lo };
             affectedNganIds.add(blockNganId);
             savedKgByNganId.set(
               blockNganId,
@@ -3022,6 +3028,9 @@ export default function ProductPage() {
       setSaving(false);
       setView("list");
       loadData(factoryId);
+      if (firstSavedLot) {
+        setKpiPrompt({ recordId: firstSavedLot.lotId, recordLabel: `Lô thành phẩm ${firstSavedLot.maLo}` });
+      }
     } else {
       setSaving(false);
     }
@@ -4725,6 +4734,19 @@ export default function ProductPage() {
           <button onClick={() => setSyncMsg(null)} className="ml-2 hover:opacity-70">
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="product:create"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/product"
+            onDone={() => setKpiPrompt(null)}
+          />
         </div>
       )}
 

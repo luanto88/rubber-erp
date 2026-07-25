@@ -38,6 +38,10 @@ type InventoryItemOption = {
   manages_lot: boolean
   category_id: string | null
   currentStock: number
+  // Kho dùng để kiểm tra/ghi sổ tồn: ưu tiên kho is_primary trong
+  // inventory_item_warehouse_rules, fallback default_warehouse_ids[0]
+  primaryWarehouseId: string | null
+  primaryWarehouseCode: string | null
 }
 
 type DispatchVehicle = {
@@ -511,27 +515,84 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   }, [isNew, staffList, boPhan])
 
   const loadInventoryItems = useCallback(async (fid: string) => {
-    const [{ data: items }, { data: balances }, { data: cats }] = await Promise.all([
+    const [{ data: items }, { data: balances }, { data: cats }, { data: primaryRules }, { data: warehouses }] = await Promise.all([
       supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id").eq("factory_id", fid).eq("is_active", true).order("code"),
-      supabase.from("inventory_stock_balances").select("item_id, on_hand").eq("factory_id", fid),
+      supabase.from("inventory_stock_balances").select("item_id, warehouse_id, on_hand").eq("factory_id", fid),
       supabase.from("inventory_item_categories").select("id, code, name").eq("factory_id", fid).order("sort_order").order("code"),
+      supabase.from("inventory_item_warehouse_rules").select("item_id, warehouse_id").eq("factory_id", fid).eq("is_primary", true),
+      supabase.from("inventory_warehouses").select("id, code").eq("factory_id", fid),
     ])
 
+    // Kho dùng để kiểm tra/ghi sổ tồn cho mỗi vật tư: ưu tiên kho được đánh dấu
+    // is_primary trong inventory_item_warehouse_rules (nguồn có chủ đích cho
+    // "kho chính"), chỉ fallback về phần tử đầu của default_warehouse_ids
+    // (thứ tự mảng không được đảm bảo có ý nghĩa) khi vật tư chưa có rule nào.
+    const primaryRuleMap = new Map<string, string>()
+    for (const r of (primaryRules || []) as { item_id: string; warehouse_id: string }[]) {
+      primaryRuleMap.set(r.item_id, r.warehouse_id)
+    }
+    const warehouseCodeMap = new Map<string, string>()
+    for (const w of (warehouses || []) as { id: string; code: string }[]) {
+      warehouseCodeMap.set(w.id, w.code)
+    }
     const balanceMap = new Map<string, number>()
-    for (const b of (balances || [])) {
-      balanceMap.set(b.item_id, (balanceMap.get(b.item_id) || 0) + (b.on_hand || 0))
+    for (const b of (balances || []) as { item_id: string; warehouse_id: string; on_hand: number | null }[]) {
+      balanceMap.set(`${b.item_id}:${b.warehouse_id}`, b.on_hand || 0)
     }
 
     setInventoryItems(
-      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null }[]).map((item) => ({
-        ...item,
-        default_warehouse_ids: item.default_warehouse_ids || [],
-        manages_lot: item.manages_lot === true,
-        currentStock: balanceMap.get(item.id) || 0,
-      }))
+      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null }[]).map((item) => {
+        const default_warehouse_ids = item.default_warehouse_ids || []
+        const primaryWarehouseId = primaryRuleMap.get(item.id) || default_warehouse_ids[0] || null
+        return {
+          ...item,
+          default_warehouse_ids,
+          manages_lot: item.manages_lot === true,
+          currentStock: primaryWarehouseId ? (balanceMap.get(`${item.id}:${primaryWarehouseId}`) ?? 0) : 0,
+          primaryWarehouseId,
+          primaryWarehouseCode: primaryWarehouseId ? (warehouseCodeMap.get(primaryWarehouseId) || null) : null,
+        }
+      })
     )
     setInventoryCategories((cats || []) as InventoryCategory[])
   }, [])
+
+  // Refresh tồn kho tươi cho đúng các vật tư đang có trong form, ngay trước khi
+  // kiểm tra Lưu/Phê duyệt — tránh dùng số đã tải từ lúc mở trang (có thể lỗi
+  // thời nếu tồn kho thay đổi trong lúc đang soạn biên bản). Trả về mảng mới
+  // (không chỉ setState) để nơi gọi dùng ngay trong cùng lượt validate, tránh
+  // đọc phải state cũ do closure chưa kịp cập nhật.
+  const refreshMaterialStock = useCallback(async (fid: string, itemIds: string[]): Promise<InventoryItemOption[]> => {
+    if (itemIds.length === 0) return inventoryItems
+    const relevantWarehouseIds = Array.from(
+      new Set(
+        inventoryItems
+          .filter((i) => itemIds.includes(i.id) && i.primaryWarehouseId)
+          .map((i) => i.primaryWarehouseId as string),
+      ),
+    )
+    if (relevantWarehouseIds.length === 0) return inventoryItems
+    const { data: balances } = await supabase
+      .from("inventory_stock_balances")
+      .select("item_id, warehouse_id, on_hand")
+      .eq("factory_id", fid)
+      .in("warehouse_id", relevantWarehouseIds)
+      .in("item_id", itemIds)
+    const freshMap = new Map<string, number>()
+    for (const b of (balances || []) as { item_id: string; warehouse_id: string; on_hand: number | null }[]) {
+      freshMap.set(`${b.item_id}:${b.warehouse_id}`, b.on_hand || 0)
+    }
+    let next: InventoryItemOption[] = inventoryItems
+    setInventoryItems((prev) => {
+      next = prev.map((item) =>
+        itemIds.includes(item.id) && item.primaryWarehouseId
+          ? { ...item, currentStock: freshMap.get(`${item.id}:${item.primaryWarehouseId}`) ?? item.currentStock }
+          : item,
+      )
+      return next
+    })
+    return next
+  }, [inventoryItems])
 
   const loadDispatchVehicles = useCallback(async (fid: string) => {
     const { data: vehicles } = await supabase
@@ -892,12 +953,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setSaveError("Vui lòng chọn ít nhất một thiết bị")
       return
     }
-    // Validate tồn kho trước khi lưu
+    // Validate tồn kho trước khi lưu — refresh số tồn tươi ngay trước khi so sánh
+    const saveStockItemIds = Array.from(
+      new Set(
+        lines.flatMap((l) => l.materials.filter((m) => m.nguon === "trong_kho" && m.inventory_item_id).map((m) => m.inventory_item_id)),
+      ),
+    )
+    const freshItemsForSave = saveStockItemIds.length > 0 ? await refreshMaterialStock(factoryId, saveStockItemIds) : inventoryItems
     const stockViolations: string[] = []
     for (const ln of lines) {
       for (const mat of ln.materials) {
         if (mat.nguon === "trong_kho" && mat.inventory_item_id) {
-          const item = inventoryItems.find((i) => i.id === mat.inventory_item_id)
+          const item = freshItemsForSave.find((i) => i.id === mat.inventory_item_id)
           if (item && parseFloat(mat.so_luong) > item.currentStock) {
             stockViolations.push(`${mat.ten_vat_tu || "Vật tư"}: cần ${mat.so_luong} ${mat.dvt}, tồn ${item.currentStock}`)
           }
@@ -1104,9 +1171,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       const inStockMats = lines.flatMap((l) => l.materials.filter((m) => m.nguon === "trong_kho" && m.inventory_item_id))
       const issueGroups = new Map<string, Array<{ mat: DraftMaterial; item: InventoryItemOption }>>()
 
-      // Validate tồn kho trước khi duyệt
+      // Validate tồn kho trước khi duyệt — refresh số tồn tươi ngay trước khi so sánh
+      const approveStockItemIds = Array.from(new Set(inStockMats.map((m) => m.inventory_item_id)))
+      const freshItemsForApprove = approveStockItemIds.length > 0 ? await refreshMaterialStock(factoryId, approveStockItemIds) : inventoryItems
       for (const mat of inStockMats) {
-        const item = inventoryItems.find((i) => i.id === mat.inventory_item_id)
+        const item = freshItemsForApprove.find((i) => i.id === mat.inventory_item_id)
         if (!item) {
           setSaveError(`Không tìm thấy vật tư "${mat.ten_vat_tu || "—"}" trong danh mục kho.`)
           return
@@ -1115,7 +1184,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           setSaveError(`Vật tư "${item.name}" đang quản lý theo lô nên chưa thể xuất tự động từ biên bản bảo trì.`)
           return
         }
-        const sourceWarehouseId = item.default_warehouse_ids[0]
+        const sourceWarehouseId = item.primaryWarehouseId
         if (!sourceWarehouseId) {
           setSaveError(`Vật tư "${item.name}" chưa được gán kho mặc định trong danh mục inventory.`)
           return
@@ -2352,9 +2421,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               {mat.ten_vat_tu || "— Chọn vật tư —"}
                             </span>
                             <span className="flex items-center gap-1 shrink-0 ml-1">
-                              {isKho && mat.inventory_item_id && (
-                                <span className="text-slate-400">Tồn: {inventoryItems.find((i) => i.id === mat.inventory_item_id)?.currentStock ?? 0}</span>
-                              )}
+                              {isKho && mat.inventory_item_id && (() => {
+                                const selectedItem = inventoryItems.find((i) => i.id === mat.inventory_item_id)
+                                return (
+                                  <span className="text-slate-400">
+                                    Tồn: {selectedItem?.currentStock ?? 0}
+                                    {selectedItem?.primaryWarehouseCode ? ` (${selectedItem.primaryWarehouseCode})` : ""}
+                                  </span>
+                                )
+                              })()}
                               <ChevronDown size={12} className="text-slate-400" />
                             </span>
                           </button>
@@ -2385,7 +2460,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                   >
                                     <span className="truncate">{item.code} — {item.name}</span>
                                     {isKho && (
-                                      <span className="text-slate-400 shrink-0">Tồn: {item.currentStock}</span>
+                                      <span className="text-slate-400 shrink-0">
+                                        Tồn: {item.currentStock}{item.primaryWarehouseCode ? ` (${item.primaryWarehouseCode})` : ""}
+                                      </span>
                                     )}
                                   </button>
                                 ))}
@@ -2423,10 +2500,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             if (!item) return null
                             const insufficient = item.currentStock === 0 || parseFloat(mat.so_luong) > item.currentStock
                             if (!insufficient) return null
+                            const whCode = item.primaryWarehouseCode ? ` (${item.primaryWarehouseCode})` : ""
                             return (
                               <div className="flex items-center gap-1 mt-0.5">
                                 <p className="text-red-500 text-[9px]">
-                                  {item.currentStock === 0 ? "Hết tồn" : `Vượt (${item.currentStock})`}
+                                  {item.currentStock === 0 ? `Hết tồn${whCode}` : `Vượt (${item.currentStock}${whCode})`}
                                 </p>
                                 <Link
                                   href="/dashboard/inventory/receipts"

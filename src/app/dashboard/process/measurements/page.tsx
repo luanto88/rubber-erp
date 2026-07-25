@@ -11,6 +11,7 @@ import { isProductSelectableStorageStatus } from "@/lib/storage-status"
 import { ProcessShell } from "../_components/process-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import {
   type QuickMeasurementSheet, type QuickMeasurementRow, type MeasurementRowDraft, type CheDoRow,
   CHI_TIEU_BY_CSR, ALL_CSR_TYPES, CSR_BY_DAY_CHUYEN,
@@ -154,6 +155,9 @@ export default function MeasurementsPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [nextCount, setNextCount] = useState(1)
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu đo nhanh vừa lưu vào công việc KPI đang mở
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
 
   // Sửa phiếu / thêm mẫu vào phiếu đã có
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null)
@@ -478,6 +482,7 @@ export default function MeasurementsPage() {
         )
         const { error } = await supabase.from("quick_measurement_rows").insert(rowPayloads)
         if (error) { setSaveError(error.message); return }
+        setKpiPrompt({ recordId: editingSheetId, recordLabel: `Phiếu đo nhanh ${editingSheet?.ma_phieu || ""}` })
       } else if (editingSheetId) {
         // Sửa toàn bộ phiếu: cập nhật header + đồng bộ dòng đo (update/insert/xóa)
         const { error: headerErr } = await supabase
@@ -547,6 +552,7 @@ export default function MeasurementsPage() {
         const rowPayloads = rows.map((row, i) => rowDraftToPayload(row, sheetId, factoryId, i))
         const { error: rowsErr } = await supabase.from("quick_measurement_rows").insert(rowPayloads)
         if (rowsErr) { setSaveError(rowsErr.message); return }
+        setKpiPrompt({ recordId: sheetId, recordLabel: `Phiếu đo nhanh ${maPhieu}` })
       }
 
       setView("list")
@@ -1019,6 +1025,18 @@ export default function MeasurementsPage() {
           <AlertTriangle size={16} className="shrink-0" />
           <span className="text-sm font-bold">{listError}</span>
           <button onClick={() => setListError(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
+        </div>
+      )}
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="process:measurement"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/process/measurements"
+            onDone={() => setKpiPrompt(null)}
+          />
         </div>
       )}
       {/* Header */}

@@ -8,6 +8,7 @@ import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilter, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import {
   addDaysISO,
@@ -194,6 +195,9 @@ export default function StoragePage() {
   const [factoryId, setFactoryId]       = useState<string | null>(null)
   const [factoryCode, setFactoryCode]   = useState("")
   const [currentUser, setCurrentUser]   = useState<SessionUser | null>(null)
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn ngăn vừa tạo vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
 
   // filters
   const [search, setSearch]     = useState("")
@@ -721,8 +725,11 @@ export default function StoragePage() {
         const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
         if (error) { setSaveError(error.message); return }
       } else {
-        const { error } = await supabase.from("ngans").insert(payload)
+        const { data: inserted, error } = await supabase.from("ngans").insert(payload).select("id").single()
         if (error) { setSaveError(error.message); return }
+        if (inserted) {
+          setKpiPrompt({ recordId: inserted.id, recordLabel: `Ngăn ${normalizedPosition}` })
+        }
       }
       setModal(null)
       void loadData(factoryId)
@@ -1061,6 +1068,18 @@ export default function StoragePage() {
   // ? Render ????
   return (
     <div>
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="storage:create"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/storage"
+            onDone={() => setKpiPrompt(null)}
+          />
+        </div>
+      )}
       {/* Dây chuyến selector */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
         <label className="text-xs font-bold text-slate-600 block mb-1.5">

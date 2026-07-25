@@ -36,6 +36,7 @@ import { formatDateDisplay, getTodayISODate } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 
 interface DispatchEntry {
   id: string
@@ -187,6 +188,9 @@ export default function OutputPage() {
   const [filterLoai, setFilterLoai] = useState<string[]>([])
   const [filterWarnOnly, setFilterWarnOnly] = useState(false)
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn bản ghi vừa lưu vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
 
   const isAdmin = currentUser?.role === "admin"
 
@@ -464,10 +468,19 @@ export default function OutputPage() {
     }
 
     let error
+    let savedId: string | null = null
     if (editRecord) {
-      ({ error } = await supabase.from("production_records").update(payload).eq("id", editRecord.id))
+      const res = await supabase.from("production_records").update(payload).eq("id", editRecord.id).select("id").single()
+      error = res.error
+      savedId = res.data?.id ?? editRecord.id
     } else {
-      ({ error } = await supabase.from("production_records").upsert(payload, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" }))
+      const res = await supabase
+        .from("production_records")
+        .upsert(payload, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" })
+        .select("id")
+        .single()
+      error = res.error
+      savedId = res.data?.id ?? null
     }
     if (error) throw new Error(error.message)
 
@@ -475,6 +488,12 @@ export default function OutputPage() {
     setEditRecord(null)
     await writeBackToDispatch(factoryId, form.ngay, supabase)
     await loadRecords(factoryId)
+    if (savedId) {
+      setKpiPrompt({
+        recordId: savedId,
+        recordLabel: `Sản lượng ${form.ngay} — Xe ${form.so_xe} ch.${form.chuyen}`,
+      })
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -522,6 +541,18 @@ export default function OutputPage() {
 
   return (
     <div className="p-4 sm:p-6">
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="output:save"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/output"
+            onDone={() => setKpiPrompt(null)}
+          />
+        </div>
+      )}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-xl font-extrabold text-slate-800 sm:text-2xl">

@@ -21,6 +21,7 @@ import {
   Package,
   Settings,
   Shield,
+  Target,
   Truck,
   Warehouse,
   Wrench,
@@ -85,6 +86,7 @@ const NAV: NavItem[] = [
     onlyForRoles: ["customer"],
   },
   { key: "/dashboard/notes", label: "Ghi chú nhanh", icon: NotebookPen, permission: "notes.view" },
+  { key: "/dashboard/kpi", label: "Công việc & KPI", icon: Target, permission: "kpi.view" },
   { key: "/dashboard/map", label: "Bản đồ lô", icon: Map, hiddenForRoles: ["customer"] },
   { key: "/dashboard/eudr", label: "EUDR / Truy xuất", icon: Shield, hiddenForRoles: ["customer"] },
   {

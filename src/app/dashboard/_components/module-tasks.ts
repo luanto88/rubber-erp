@@ -319,6 +319,64 @@ export async function getQualityTasks(factoryId: string): Promise<ModuleTaskSumm
   return { moduleLabel: "Chất lượng", items: [{ label: "Lô đang rớt hạng", count, link: "/dashboard/quality" }] }
 }
 
+// ── Công việc & KPI ──────────────────────────────────────────────────────────
+// Chỉ tính trên các task còn "sống" (chưa hoàn thành/hủy) — bảng kpi_tasks không có khả
+// năng vượt 1000 dòng ở phạm vi "đang mở" của 1 nhà máy nên không cần phân trang thêm.
+// Ngưỡng "sắp đến hạn" cố định KPI_DUE_SOON_HOURS giờ trước hạn (đã chốt: chỉ badge Bell,
+// không kênh chủ động Telegram/Email — xem .claude/rules/27-kpi-module.md).
+type KpiTaskRow = { id: string; trang_thai: string; han_hoan_thanh: string; nguoi_giao_id: string }
+
+export async function getKpiTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+  const isAdmin = user.role === "admin"
+  const nowMs = Date.now()
+  const soonCutoffMs = nowMs + 24 * 3600_000
+
+  const [{ data: memberRows }, { data: taskRows }] = await Promise.all([
+    supabase.from("kpi_task_members").select("task_id").eq("user_id", user.id).eq("is_active", true),
+    supabase
+      .from("kpi_tasks")
+      .select("id, trang_thai, han_hoan_thanh, nguoi_giao_id")
+      .eq("factory_id", factoryId)
+      .in("trang_thai", ["moi_giao", "dang_thuc_hien", "cho_nghiem_thu", "tra_ve"]),
+  ])
+
+  const myActiveTaskIds = new Set((memberRows || []).map((r: { task_id: string }) => r.task_id))
+  const tasks = (taskRows || []) as KpiTaskRow[]
+
+  let pendingCount = 0
+  let approvalCount = 0
+  let dueSoonCount = 0
+  let overdueCount = 0
+
+  for (const t of tasks) {
+    const iAmMember = myActiveTaskIds.has(t.id)
+    const iAmGiver = t.nguoi_giao_id === user.id
+    if (iAmMember && (t.trang_thai === "moi_giao" || t.trang_thai === "dang_thuc_hien" || t.trang_thai === "tra_ve")) {
+      pendingCount++
+    }
+    if (t.trang_thai === "cho_nghiem_thu" && (iAmGiver || isAdmin)) {
+      approvalCount++
+    }
+    if (iAmMember || iAmGiver) {
+      const dueMs = new Date(t.han_hoan_thanh).getTime()
+      if (!Number.isNaN(dueMs)) {
+        if (dueMs < nowMs) overdueCount++
+        else if (dueMs <= soonCutoffMs) dueSoonCount++
+      }
+    }
+  }
+
+  return {
+    moduleLabel: "Công việc & KPI",
+    items: [
+      { label: "Việc cần cập nhật/nộp", count: pendingCount, link: "/dashboard/kpi/tasks?tab=mine" },
+      { label: "Việc chờ nghiệm thu", count: approvalCount, link: "/dashboard/kpi/tasks?tab=mine" },
+      { label: "Việc sắp đến hạn (24h)", count: dueSoonCount, link: "/dashboard/kpi/tasks?tab=mine" },
+      { label: "Việc đã quá hạn", count: overdueCount, link: "/dashboard/kpi/tasks?tab=mine" },
+    ],
+  }
+}
+
 // ── Entry point — switch theo tiền tố route hiện tại ───────────────────────
 export async function getModuleTasks(
   pathname: string,
@@ -332,5 +390,6 @@ export async function getModuleTasks(
   if (isUnderRoute(pathname, "/dashboard/quality") || isUnderRoute(pathname, "/dashboard/quality-analytics")) {
     return getQualityTasks(factoryId)
   }
+  if (isUnderRoute(pathname, "/dashboard/kpi")) return getKpiTasks(factoryId, user)
   return null
 }

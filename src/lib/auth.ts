@@ -393,6 +393,11 @@ export const DEFAULT_PERMISSION_CODES = [
   "notes.create",
   "notes.edit",
   "notes.delete",
+  "kpi.view",
+  "kpi.assign",
+  "kpi.evaluate",
+  "kpi.view_all",
+  "kpi.manage_config",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -438,6 +443,10 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.create",
     "notes.edit",
     "notes.delete",
+    "kpi.view",
+    "kpi.assign",
+    "kpi.evaluate",
+    "kpi.view_all",
   ],
   user: [
     "dashboard.view",
@@ -455,6 +464,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.create",
     "notes.edit",
     "notes.delete",
+    "kpi.view",
   ],
   customer: ["export.view_own"],
 }

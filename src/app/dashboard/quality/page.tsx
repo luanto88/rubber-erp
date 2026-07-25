@@ -9,6 +9,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
@@ -485,6 +486,9 @@ export default function QualityPage() {
   const [customStds,  setCustomStds]  = useState<CustomStd[]>([])
   const [loading,     setLoading]     = useState(true)
   const [saving,      setSaving]      = useState(false)
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu KN vừa lưu vào công việc KPI đang mở hôm nay
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
 
   // ── Navigation ───────────────────────────────────────────────────────────────
   const [mainTab,  setMainTab]  = useState<"xep_hang"|"giam_sat"|"thong_ke">("xep_hang")
@@ -1073,6 +1077,10 @@ export default function QualityPage() {
       }).eq("id", editingResultId)
       if (error) { showToast("Lỗi: "+error.message, false); return }
       showToast("Đã cập nhật phiếu kiểm nghiệm")
+      setKpiPrompt({
+        recordId: editingResultId,
+        recordLabel: `Phiếu KN (sửa) — ${eligibleLots[0]?.ma_lo || ""}`,
+      })
     } else {
       // Insert batch — ALL lots share same pkn + batch_id (one phiếu)
       const [batchPKN, startLoKN] = await Promise.all([
@@ -1123,6 +1131,10 @@ export default function QualityPage() {
         nextLoKN++
       }
       showToast(`Đã lưu phiếu ${formatPKN(batchPKN, createForm.ngay_kn, factoryCode)} — ${selectedLotIds.size} lô`)
+      setKpiPrompt({
+        recordId: batchId,
+        recordLabel: `Phiếu KN ${formatPKN(batchPKN, createForm.ngay_kn, factoryCode)}`,
+      })
       if (createForm.loai_kn === "kl_rot_hang" && returnTo) {
         const params = new URLSearchParams({
           draft: "restore",
@@ -1467,6 +1479,10 @@ export default function QualityPage() {
       if (okCount > 0) {
         const skippedText = warnings.length ? `, bỏ qua ${warnings.length} lô` : ""
         showToast(`Đã nhập ${okCount} lô${skippedText} — ${formatPKN(batchPKN, ngayKN, factoryCode)}`)
+        setKpiPrompt({
+          recordId: batchId,
+          recordLabel: `Phiếu KN ${formatPKN(batchPKN, ngayKN, factoryCode)} (import ${okCount} lô)`,
+        })
         loadResults(factoryId)
         loadStats(factoryId)
       } else {
@@ -1632,6 +1648,19 @@ export default function QualityPage() {
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-bold ${toast.ok?"bg-emerald-600":"bg-red-600"}`}>
           {toast.ok ? <Check size={16}/> : <AlertTriangle size={16}/>} {toast.msg}
+        </div>
+      )}
+
+      {kpiPrompt && (
+        <div className="mb-4">
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="quality:create"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/quality"
+            onDone={() => setKpiPrompt(null)}
+          />
         </div>
       )}
 
