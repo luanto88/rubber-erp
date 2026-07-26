@@ -62,7 +62,7 @@ import {
   openShiftReportPdfInNewTab,
 } from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
-import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
+import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
 
@@ -1214,7 +1214,7 @@ export default function ConfirmKienProductionPage() {
                               : "bg-white text-slate-600 hover:bg-slate-100"
                           }`}
                         >
-                          {p}
+                          {palletLabel(lang, p)}
                         </button>
                       );
                     })}
@@ -1283,6 +1283,7 @@ export default function ConfirmKienProductionPage() {
       {editingEntry && factoryId && (
         <EditEntryModal
           tt={tt}
+          lang={lang}
           caLabel={caLabel}
           factoryId={factoryId}
           entry={editingEntry}
@@ -1300,6 +1301,7 @@ export default function ConfirmKienProductionPage() {
       {editingDraft && factoryId && (
         <EditDraftModal
           tt={tt}
+          lang={lang}
           caLabel={caLabel}
           factoryId={factoryId}
           draft={editingDraft}
@@ -1919,6 +1921,7 @@ function EndShiftConfirmModal({
 
 function EditEntryModal({
   tt,
+  lang,
   caLabel,
   factoryId,
   entry,
@@ -1928,6 +1931,7 @@ function EditEntryModal({
   onSave,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
+  lang: Lang;
   caLabel: (c: string) => string;
   factoryId: string;
   entry: ShiftHistoryEntry;
@@ -2075,7 +2079,7 @@ function EditEntryModal({
                       checked ? "bg-emerald-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    {p}
+                    {palletLabel(lang, p)}
                   </button>
                 );
               })}
@@ -2132,6 +2136,7 @@ function EditEntryModal({
 // ShiftHistoryEntry) và action gọi (updateDraftKien thay editShiftHistoryEntry).
 function EditDraftModal({
   tt,
+  lang,
   caLabel,
   factoryId,
   draft,
@@ -2141,6 +2146,7 @@ function EditDraftModal({
   onSave,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
+  lang: Lang;
   caLabel: (c: string) => string;
   factoryId: string;
   draft: ConfirmDraftRow;
@@ -2285,7 +2291,7 @@ function EditDraftModal({
                       checked ? "bg-emerald-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    {p}
+                    {palletLabel(lang, p)}
                   </button>
                 );
               })}
