@@ -24,6 +24,8 @@ export type KpiTaskLogAction =
   | "tra_ve"
   | "yeu_cau_bo_sung"
   | "gan_ban_ghi"
+  | "chuyen_giao"
+  | "gia_han"
 
 export const KPI_STATUS_LABEL: Record<KpiTaskStatus, string> = {
   moi_giao: "Mới giao",
@@ -58,6 +60,8 @@ export const KPI_ACTION_LABEL: Record<KpiTaskLogAction, string> = {
   tra_ve: "Trả về",
   yeu_cau_bo_sung: "Yêu cầu bổ sung",
   gan_ban_ghi: "Gắn bằng chứng",
+  chuyen_giao: "Chuyển giao",
+  gia_han: "Gia hạn",
 }
 
 // Supabase JS (PostgREST/Storage/RPC) ném lỗi dạng plain object { message, code... }, không
@@ -84,9 +88,15 @@ export type KpiTask = {
   yeu_cau_bao_cao: KpiReportRequirement[]
   da_chuyen_giao: boolean
   trang_thai: KpiTaskStatus
+  // Việc mục tiêu số lượng chung (vd "đo 4 mẫu") — NULL = việc đơn, 1 bằng chứng là xong (hành
+  // vi gốc). Có giá trị = việc chỉ Hoàn thành khi tổng bằng chứng >= giá trị này, xem
+  // kpi_task_members.phan_loai + migration 20260725_kpi_task_quantity_target.sql.
+  muc_tieu_so_luong: number | null
   created_at: string
   updated_at: string
 }
+
+export type KpiPhanLoai = "chinh" | "choang"
 
 export type KpiTaskMember = {
   id: string
@@ -97,6 +107,10 @@ export type KpiTaskMember = {
   tien_do_nghiem_thu: number | null
   da_nop_luc: string | null
   is_active: boolean
+  // Chỉ có ý nghĩa khi kpi_tasks.muc_tieu_so_luong khác NULL — đúng 1 thành viên 'chinh' (có
+  // ngưỡng riêng, bị phạt nếu không đạt), còn lại 'choang' (không ngưỡng, luôn 100% khi việc
+  // chung xong). NULL với việc đơn hoặc dữ liệu tạo trước migration này.
+  phan_loai: KpiPhanLoai | null
   created_at: string
   updated_at: string
 }
@@ -120,9 +134,9 @@ export type KpiTaskLog = {
 }
 
 const TASK_COLS =
-  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, created_at, updated_at"
+  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, created_at, updated_at"
 const MEMBER_COLS =
-  "id, task_id, factory_id, user_id, tien_do, tien_do_nghiem_thu, da_nop_luc, is_active, created_at, updated_at"
+  "id, task_id, factory_id, user_id, tien_do, tien_do_nghiem_thu, da_nop_luc, is_active, phan_loai, created_at, updated_at"
 const LOG_COLS =
   "id, task_id, factory_id, member_user_id, nguoi_thuc_hien_id, hanh_dong, tien_do_truoc, tien_do_sau, noi_dung, image_urls, file_urls, vi_do, kinh_do, dia_diem_text, created_at"
 
@@ -144,12 +158,12 @@ export function isTaskDueSoon(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai
 }
 
 // ── Ứng viên giao việc: người (maintenance_staff có profile liên kết) + nhóm ────────────
-export type KpiTaskCandidate = { userId: string; ten: string; groupIds: string[] }
+export type KpiTaskCandidate = { userId: string; ten: string; groupIds: string[]; primaryGroupId: string | null }
 export type KpiTaskCandidateGroup = { id: string; name: string; memberUserIds: string[] }
 
 type StaffRow = { id: string; ten: string; profile_id: string | null; active: boolean | null }
 type GroupRow = { id: string; name: string; is_active: boolean | null }
-type MemberRow = { staff_id: string; group_id: string }
+type MemberRow = { staff_id: string; group_id: string; is_primary: boolean | null }
 
 export async function loadKpiTaskCandidates(
   factoryId: string,
@@ -157,7 +171,7 @@ export async function loadKpiTaskCandidates(
   const [staffRes, groupRes, memberRes] = await Promise.all([
     supabase.from("maintenance_staff").select("id, ten, profile_id, active").eq("factory_id", factoryId),
     supabase.from("personnel_groups").select("id, name, is_active").eq("factory_id", factoryId).order("sort_order").order("name"),
-    supabase.from("personnel_group_members").select("staff_id, group_id").eq("factory_id", factoryId),
+    supabase.from("personnel_group_members").select("staff_id, group_id, is_primary").eq("factory_id", factoryId),
   ])
   if (staffRes.error) throw staffRes.error
   if (groupRes.error) throw groupRes.error
@@ -168,15 +182,22 @@ export async function loadKpiTaskCandidates(
   const memberRows = (memberRes.data || []) as MemberRow[]
 
   const groupIdsByStaff = new Map<string, string[]>()
+  const primaryGroupByStaff = new Map<string, string>()
   const staffIdsByGroup = new Map<string, string[]>()
   for (const m of memberRows) {
     if (!staffById.has(m.staff_id)) continue
     groupIdsByStaff.set(m.staff_id, [...(groupIdsByStaff.get(m.staff_id) || []), m.group_id])
     staffIdsByGroup.set(m.group_id, [...(staffIdsByGroup.get(m.group_id) || []), m.staff_id])
+    if (m.is_primary) primaryGroupByStaff.set(m.staff_id, m.group_id)
   }
 
   const people: KpiTaskCandidate[] = staffRows
-    .map((s) => ({ userId: s.profile_id as string, ten: s.ten, groupIds: groupIdsByStaff.get(s.id) || [] }))
+    .map((s) => ({
+      userId: s.profile_id as string,
+      ten: s.ten,
+      groupIds: groupIdsByStaff.get(s.id) || [],
+      primaryGroupId: primaryGroupByStaff.get(s.id) || null,
+    }))
     .sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
 
   const groups: KpiTaskCandidateGroup[] = ((groupRes.data || []) as GroupRow[])
@@ -280,8 +301,20 @@ export async function createKpiTask(input: {
   hanHoanThanh: string
   yeuCauBaoCao: KpiReportRequirement[]
   memberUserIds: string[]
+  // Việc mục tiêu số lượng chung (tuỳ chọn) — xem KpiTask.muc_tieu_so_luong. Khi có giá trị,
+  // nguoiChinhId BẮT BUỘC và phải nằm trong memberUserIds — người đó nhận phan_loai='chinh',
+  // các thành viên còn lại 'choang'.
+  mucTieuSoLuong?: number | null
+  nguoiChinhId?: string | null
 }): Promise<KpiTask> {
   if (!input.memberUserIds.length) throw new Error("Vui lòng chọn ít nhất 1 người thực hiện.")
+  const mucTieu = input.mucTieuSoLuong ?? null
+  if (mucTieu !== null) {
+    if (mucTieu <= 0) throw new Error("Số lượng mục tiêu phải lớn hơn 0.")
+    if (!input.nguoiChinhId || !input.memberUserIds.includes(input.nguoiChinhId)) {
+      throw new Error("Vui lòng chọn người chính trong số người thực hiện đã chọn.")
+    }
+  }
   const maCongViec = await generateKpiTaskCode(input.factoryId, input.ngayGiao)
 
   const { data: taskRow, error: taskErr } = await supabase
@@ -295,6 +328,7 @@ export async function createKpiTask(input: {
       ngay_giao: input.ngayGiao,
       han_hoan_thanh: input.hanHoanThanh,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
+      muc_tieu_so_luong: mucTieu,
     })
     .select(TASK_COLS)
     .single()
@@ -305,11 +339,24 @@ export async function createKpiTask(input: {
     task_id: task.id,
     factory_id: input.factoryId,
     user_id: uid,
+    phan_loai: mucTieu === null ? null : uid === input.nguoiChinhId ? "chinh" : "choang",
   }))
   const { error: memberErr } = await supabase.from("kpi_task_members").insert(memberRows)
   if (memberErr) throw memberErr
 
   return task
+}
+
+/** Ngưỡng tối thiểu (số lượng) mà người "chính" phải đạt trong 1 việc mục tiêu số lượng chung
+ *  để không bị phạt điểm A — dùng để hiển thị cho người dùng, khớp đúng công thức RPC
+ *  kpi_task_link_and_complete (migration 20260726_kpi_task_evaluate_quantity_guard.sql):
+ *  ngưỡng = CEIL(mục_tiêu_số_lượng * 0.5) — tính thẳng trên TỔNG mục tiêu, KHÔNG chia theo số
+ *  thành viên trong nhóm. Người chính phải luôn tự làm ít nhất một nửa TOÀN BỘ việc, bất kể có
+ *  bao nhiêu người choàng hỗ trợ (bản trước chia theo "kỳ vọng cá nhân" = mục tiêu/số người —
+ *  sai vì nhóm càng đông, ngưỡng thật của chính so với tổng việc càng tụt thấp). CEIL đảm bảo
+ *  toán học ngưỡng luôn >= đúng 50% tổng, không bao giờ undershoot. */
+export function computeChinhThreshold(mucTieuSoLuong: number): number {
+  return Math.ceil(mucTieuSoLuong * 0.5)
 }
 
 export async function cancelKpiTask(taskId: string): Promise<void> {
@@ -358,6 +405,87 @@ export async function evaluateKpiTask(input: {
     p_noi_dung: input.noiDung?.trim() || null,
   })
   if (error) throw error
+}
+
+// ── Phase 1b: Chuyển giao việc (kpi_task_transfers) ─────────────────────────────────────
+// Xem migration 20260727_kpi_task_transfers.sql. Mỗi task một-lần chỉ chuyển được ĐÚNG 1 LẦN
+// (kpi_tasks.da_chuyen_giao) — người nhận phải chủ động chấp nhận, không có gì tự động.
+export type KpiTransferStatus = "cho_duyet" | "da_nhan" | "tu_choi"
+
+export type KpiTaskTransfer = {
+  id: string
+  factory_id: string
+  task_id: string
+  tu_nguoi_id: string
+  den_nguoi_id: string
+  tien_do_luc_chuyen: number
+  ghi_chu: string | null
+  trang_thai: KpiTransferStatus
+  ngay_chuyen: string
+  phan_hoi_luc: string | null
+  created_at: string
+}
+
+const TRANSFER_COLS =
+  "id, factory_id, task_id, tu_nguoi_id, den_nguoi_id, tien_do_luc_chuyen, ghi_chu, trang_thai, ngay_chuyen, phan_hoi_luc, created_at"
+
+export async function requestKpiTaskTransfer(input: { taskId: string; denNguoiId: string; ghiChu?: string }): Promise<string> {
+  const { data, error } = await supabase.rpc("kpi_task_transfer_request", {
+    p_task_id: input.taskId,
+    p_den_nguoi_id: input.denNguoiId,
+    p_ghi_chu: input.ghiChu?.trim() || null,
+  })
+  if (error) throw error
+  return data as string
+}
+
+export async function respondKpiTaskTransfer(input: { transferId: string; chapNhan: boolean }): Promise<void> {
+  const { error } = await supabase.rpc("kpi_task_transfer_respond", {
+    p_transfer_id: input.transferId,
+    p_chap_nhan: input.chapNhan,
+  })
+  if (error) throw error
+}
+
+export async function cancelKpiTaskTransfer(transferId: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_task_transfer_cancel", { p_transfer_id: transferId })
+  if (error) throw error
+}
+
+// Đổi hạn hoàn thành — chỉ nguoi_giao_id/admin (kiểm tra lại ở RPC, không tin client).
+export async function extendKpiTaskDeadline(input: { taskId: string; newHanHoanThanh: string; lyDo: string }): Promise<void> {
+  const { error } = await supabase.rpc("kpi_task_extend_deadline", {
+    p_task_id: input.taskId,
+    p_new_han_hoan_thanh: input.newHanHoanThanh,
+    p_ly_do: input.lyDo.trim(),
+  })
+  if (error) throw error
+}
+
+/** Toàn bộ yêu cầu chuyển giao (mọi trạng thái) của 1 task — dùng ở trang chi tiết để tìm lời
+ *  mời đang chờ (của tôi hoặc gửi bởi tôi) và hiển thị lịch sử. */
+export async function fetchTaskTransfers(taskId: string): Promise<KpiTaskTransfer[]> {
+  const { data, error } = await supabase
+    .from("kpi_task_transfers")
+    .select(TRANSFER_COLS)
+    .eq("task_id", taskId)
+    .order("created_at", { ascending: false })
+  if (error) throw error
+  return (data || []) as KpiTaskTransfer[]
+}
+
+/** Lời mời chuyển giao đang chờ TÔI phản hồi — dùng cho Bell và danh sách "Việc của tôi" (task
+ *  chưa có dòng kpi_task_members active cho tôi nên không lọt qua myActiveTaskIds bình
+ *  thường). */
+export async function fetchPendingIncomingTransfers(userId: string): Promise<KpiTaskTransfer[]> {
+  const { data, error } = await supabase
+    .from("kpi_task_transfers")
+    .select(TRANSFER_COLS)
+    .eq("den_nguoi_id", userId)
+    .eq("trang_thai", "cho_duyet")
+    .order("created_at", { ascending: false })
+  if (error) throw error
+  return (data || []) as KpiTaskTransfer[]
 }
 
 // ── "Gắn bản ghi tại chỗ" (in-context evidence linking) ─────────────────────────────────
@@ -485,10 +613,22 @@ export function toDatetimeLocalValue(value: string | null | undefined): string {
 }
 
 /** Tiến độ đại diện của 1 task để hiển thị badge % trong danh sách — trung bình các thành
- *  viên ĐANG hoạt động (ưu tiên điểm nghiệm thu nếu đã có, không thì dùng tự báo cáo). */
-export function averageTaskProgress(members: KpiTaskMember[]): number {
+ *  viên ĐANG hoạt động (ưu tiên điểm nghiệm thu nếu đã có, không thì dùng tự báo cáo).
+ *
+ *  Task có `muc_tieu_so_luong` (mục tiêu số lượng chung, xem migration
+ *  20260725_kpi_task_quantity_target.sql): KHÔNG dùng trung bình cộng — RPC
+ *  `kpi_task_link_and_complete` đã tính `tien_do` của MỖI thành viên = đóng góp của họ / TỔNG
+ *  mục tiêu × 100, nên CỘNG DỒN (SUM) qua mọi thành viên active ra đúng % hoàn thành thật của
+ *  cả việc chung. Dùng trung bình cộng ở đây (chia cho số người) sẽ cho kết quả sai — ví dụ 1
+ *  người đóng góp 1/4 mục tiêu, người còn lại 0, trung bình cộng 2 người sẽ ra 12.5% thay vì
+ *  đúng 25% thật của cả việc. */
+export function averageTaskProgress(task: Pick<KpiTask, "muc_tieu_so_luong">, members: KpiTaskMember[]): number {
   const active = members.filter((m) => m.is_active)
   if (!active.length) return 0
+  if (task.muc_tieu_so_luong !== null) {
+    const sum = active.reduce((s, m) => s + m.tien_do, 0)
+    return Math.min(100, Math.round(sum))
+  }
   const sum = active.reduce((s, m) => s + (m.tien_do_nghiem_thu ?? m.tien_do), 0)
   return Math.round(sum / active.length)
 }

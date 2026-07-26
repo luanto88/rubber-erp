@@ -157,7 +157,7 @@ export default function MeasurementsPage() {
   const [nextCount, setNextCount] = useState(1)
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu đo nhanh vừa lưu vào công việc KPI đang mở
-  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
+  const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string[]; recordLabel: string }>(null)
 
   // Sửa phiếu / thêm mẫu vào phiếu đã có
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null)
@@ -480,9 +480,13 @@ export default function MeasurementsPage() {
         const rowPayloads = rows.map((row, i) =>
           rowDraftToPayload(row, editingSheetId, factoryId, existingRowCount + i)
         )
-        const { error } = await supabase.from("quick_measurement_rows").insert(rowPayloads)
+        const { data: insertedRows, error } = await supabase.from("quick_measurement_rows").insert(rowPayloads).select("id")
         if (error) { setSaveError(error.message); return }
-        setKpiPrompt({ recordId: editingSheetId, recordLabel: `Phiếu đo nhanh ${editingSheet?.ma_phieu || ""}` })
+        // Gắn bằng chứng KPI theo từng DÒNG MẪU vừa lưu (không phải theo cả phiếu) — 1 phiếu
+        // có thể được nhiều người thêm mẫu vào nhiều lần khác nhau; nếu dùng chung ID phiếu,
+        // kpi_task_evidence_links.UNIQUE(task_id, module_code, record_id) sẽ âm thầm chặn mọi
+        // lần gắn sau (kể cả của người khác) vì trùng khóa với lần gắn đầu tiên.
+        setKpiPrompt({ recordId: (insertedRows || []).map((r) => r.id), recordLabel: `Phiếu đo nhanh ${editingSheet?.ma_phieu || ""}` })
       } else if (editingSheetId) {
         // Sửa toàn bộ phiếu: cập nhật header + đồng bộ dòng đo (update/insert/xóa)
         const { error: headerErr } = await supabase
@@ -550,9 +554,9 @@ export default function MeasurementsPage() {
 
         const sheetId = sheetData.id
         const rowPayloads = rows.map((row, i) => rowDraftToPayload(row, sheetId, factoryId, i))
-        const { error: rowsErr } = await supabase.from("quick_measurement_rows").insert(rowPayloads)
+        const { data: insertedRows, error: rowsErr } = await supabase.from("quick_measurement_rows").insert(rowPayloads).select("id")
         if (rowsErr) { setSaveError(rowsErr.message); return }
-        setKpiPrompt({ recordId: sheetId, recordLabel: `Phiếu đo nhanh ${maPhieu}` })
+        setKpiPrompt({ recordId: (insertedRows || []).map((r) => r.id), recordLabel: `Phiếu đo nhanh ${maPhieu}` })
       }
 
       setView("list")

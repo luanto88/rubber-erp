@@ -4,13 +4,16 @@
 // nhân sự (personnel_groups). Chọn nhóm chỉ là tiện ích UI mở rộng thành viên tại thời điểm
 // tạo (snapshot), không lưu liên kết nhóm nào trên chính kpi_tasks.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Users } from "lucide-react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { getTodayISODate } from "@/lib/date-utils"
+import { sendKpiNotify } from "@/lib/kpi-notify"
 import {
+  computeChinhThreshold,
   createKpiTask,
+  formatKpiDateTime,
   getKpiErrorMessage,
   KPI_REPORT_REQ_LABEL,
   type KpiReportRequirement,
@@ -44,6 +47,8 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
   const [hanHoanThanh, setHanHoanThanh] = useState(defaultDeadline())
   const [memberIds, setMemberIds] = useState<string[]>([])
   const [yeuCau, setYeuCau] = useState<KpiReportRequirement[]>([])
+  const [mucTieuSoLuong, setMucTieuSoLuong] = useState("")
+  const [nguoiChinhId, setNguoiChinhId] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -52,10 +57,22 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
     [candidates.people],
   )
   const peopleOptions = useMemo(() => candidates.people.map((p) => p.userId), [candidates.people])
+  const mucTieuNumber = mucTieuSoLuong.trim() ? Number(mucTieuSoLuong) : null
+  const isQuantityMode = !!mucTieuNumber && mucTieuNumber > 0
 
   const addGroupMembers = (group: KpiTaskCandidateGroup) => {
     setMemberIds((prev) => [...new Set([...prev, ...group.memberUserIds])])
   }
+
+  // Người chính phải nằm trong danh sách đã chọn — tự bỏ chọn nếu bị gỡ khỏi danh sách; tự
+  // chọn sẵn nếu chỉ còn đúng 1 người thực hiện (đỡ phải bấm thêm 1 bước khi task chỉ 1 người).
+  useEffect(() => {
+    if (nguoiChinhId && !memberIds.includes(nguoiChinhId)) {
+      setNguoiChinhId(memberIds.length === 1 ? memberIds[0] : "")
+    } else if (!nguoiChinhId && memberIds.length === 1) {
+      setNguoiChinhId(memberIds[0])
+    }
+  }, [memberIds, nguoiChinhId])
 
   const handleSave = async () => {
     if (!tieuDe.trim()) {
@@ -70,6 +87,10 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
       setError("Vui lòng chọn ít nhất 1 người thực hiện.")
       return
     }
+    if (isQuantityMode && !nguoiChinhId) {
+      setError("Vui lòng chọn người chính chịu trách nhiệm chính cho việc mục tiêu số lượng.")
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -82,6 +103,18 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
         hanHoanThanh: new Date(hanHoanThanh).toISOString(),
         yeuCauBaoCao: yeuCau,
         memberUserIds: memberIds,
+        mucTieuSoLuong: isQuantityMode ? mucTieuNumber : null,
+        nguoiChinhId: isQuantityMode ? nguoiChinhId : null,
+      })
+      sendKpiNotify({
+        factoryId,
+        title: "Công việc mới được giao",
+        lines: [
+          `📋 ${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`,
+          `👥 Người thực hiện: ${memberIds.map((uid) => peopleLabels[uid] || uid).join(", ")}`,
+          `⏰ Hạn: ${formatKpiDateTime(task.han_hoan_thanh)}`,
+        ],
+        link: `/dashboard/kpi/tasks/${task.id}`,
       })
       onCreated(task)
     } catch (err) {
@@ -188,6 +221,57 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
                   {peopleLabels[uid] || uid}
                 </span>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">
+            Số lượng mục tiêu chung (tuỳ chọn)
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={mucTieuSoLuong}
+            onChange={(e) => setMucTieuSoLuong(e.target.value)}
+            placeholder="VD: 4 (đo 4 mẫu — nhiều người cùng làm, tính theo tổng)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            Để trống nếu việc này chỉ cần 1 người/1 hành động là xong. Có giá trị → việc chỉ
+            &quot;Hoàn thành&quot; khi TỔNG bằng chứng của cả nhóm đạt đủ số này.
+          </p>
+
+          {isQuantityMode && (
+            <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <label className="text-xs font-bold text-violet-800 block mb-1.5">
+                Người chính (chịu trách nhiệm chính) *
+              </label>
+              <select
+                value={nguoiChinhId}
+                onChange={(e) => setNguoiChinhId(e.target.value)}
+                className="w-full px-3 py-2 border border-violet-300 rounded-xl text-sm bg-white outline-none focus:border-violet-500"
+              >
+                <option value="">-- Chọn người chính --</option>
+                {memberIds.map((uid) => (
+                  <option key={uid} value={uid}>
+                    {peopleLabels[uid] || uid}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-xs text-violet-700">
+                Người chính phải tự đóng góp ít nhất 50% TỔNG mục tiêu (bất kể nhóm có bao nhiêu
+                người choàng hỗ trợ) — không đạt sẽ bị trừ điểm cá nhân dù việc chung đã xong nhờ
+                người khác. Các thành viên còn lại (choàng) không bị ràng buộc ngưỡng, luôn được
+                ghi nhận đầy đủ khi việc chung hoàn thành.
+                {!!mucTieuNumber && (
+                  <>
+                    {" "}
+                    Ngưỡng hiện tại: <strong>{computeChinhThreshold(mucTieuNumber)}</strong> (= 50%
+                    làm tròn lên của tổng {mucTieuNumber}).
+                  </>
+                )}
+              </p>
             </div>
           )}
         </div>

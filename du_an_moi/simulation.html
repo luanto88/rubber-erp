@@ -1,276 +1,314 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mô phỏng App Nhập Liệu</title>
-    <style>
-        :root {
-            --primary-color: #059669; /* emerald-600 */
-            --primary-light: #ecfdf5; /* emerald-50 */
-            --bg-color: #f8fafc; /* slate-50 */
-            --text-dark: #1e293b; /* slate-800 */
-            --text-light: #64748b; /* slate-500 */
-            --border-color: #e2e8f0; /* slate-200 */
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        .mobile-frame {
-            width: 100%;
-            max-width: 420px;
-            height: 800px;
-            background-color: white;
-            border: 8px solid #111;
-            border-radius: 40px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            overflow: hidden;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-        }
-        .screen {
-            padding: 24px;
-            box-sizing: border-box;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        }
-        #main-screen { display: none; }
-        h1, h2 { color: var(--text-dark); margin-top: 0; }
-        p { color: var(--text-light); font-size: 14px; }
-        .input-group { margin-bottom: 16px; }
-        label {
-            display: block;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-light);
-            margin-bottom: 6px;
-        }
-        input, select {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            font-size: 16px;
-            box-sizing: border-box;
-            background-color: #f8fafc;
-        }
-        input:read-only {
-            background-color: #e2e8f0;
-            color: #475569;
-        }
-        .btn {
-            width: 100%;
-            padding: 16px;
-            border: none;
-            border-radius: 16px;
-            font-size: 16px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        .btn-primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        .btn-primary:hover { background-color: #047857; }
-        .btn-scan {
-            padding: 40px;
-            font-size: 24px;
-            margin-top: 40px;
-        }
-        #entry-form {
-            display: none;
-            margin-top: 24px;
-            padding: 20px;
-            background-color: var(--primary-light);
-            border: 1px solid #a7f3d0;
-            border-radius: 20px;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        #log-area {
-            margin-top: auto;
-            background-color: #f1f5f9;
-            border-radius: 16px;
-            padding: 16px;
-            height: 200px;
-            overflow-y: auto;
-        }
-        #log-area h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-dark); }
-        .log-item {
-            font-size: 12px;
-            background-color: white;
-            padding: 8px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            border-left: 4px solid var(--primary-color);
-        }
-    </style>
-</head>
-<body>
-    <div class="mobile-frame">
-        <!-- Màn hình đăng nhập -->
-        <div id="login-screen" class="screen">
-            <h1>Đăng nhập</h1>
-            <p>Mô phỏng đăng nhập vào hệ thống.</p>
-            <div class="input-group" style="margin-top: 40px;">
-                <label for="username">Tên đăng nhập</label>
-                <input type="text" id="username" value="truongca_a">
-            </div>
-            <button id="login-btn" class="btn btn-primary" style="margin-top: 20px;">Đăng nhập</button>
-        </div>
-
-        <!-- Màn hình chính -->
-        <div id="main-screen" class="screen">
-            <div class="header">
-                <div>
-                    <h2>Thành phẩm</h2>
-                    <p>Ghi nhận tại xưởng</p>
-                </div>
-                <div style="text-align: right;">
-                    <span id="current-user" style="font-weight: 600; font-size: 14px;"></span>
-                    <p style="margin: 4px 0 0 0;">Trực ca</p>
-                </div>
-            </div>
-
-            <button id="scan-btn" class="btn btn-primary btn-scan">Quét QR</button>
-
-            <!-- Form nhập liệu sau khi quét -->
-            <div id="entry-form">
-                <div class="input-group">
-                    <label>Mã lô</label>
-                    <input type="text" id="form-ma-lo" readonly>
-                </div>
-                <div class="input-group">
-                    <label>Kiện</label>
-                    <input type="text" id="form-kien" readonly>
-                </div>
-                <div class="input-group">
-                    <label>Ca sản xuất</label>
-                    <select id="form-ca-sx">
-                        <option value="A">Ca A</option>
-                        <option value="B">Ca B</option>
-                        <option value="C">Ca C</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label>Số bành</label>
-                    <input type="number" id="form-so-banh" value="36">
-                </div>
-                <button id="submit-btn" class="btn btn-primary">Gửi</button>
-            </div>
-
-            <!-- Log dữ liệu đã gửi -->
-            <div id="log-area">
-                <h3>Log dữ liệu đã gửi (mô phỏng)</h3>
-                <div id="log-content"></div>
-            </div>
-        </div>
-    </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quản lý công việc - Pastel Cam Điểm Nhấn</title>
+    <!-- Sử dụng Tailwind CSS qua CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
 
     <script>
-        // --- DOM Elements ---
-        const loginScreen = document.getElementById('login-screen');
-        const mainScreen = document.getElementById('main-screen');
-        const loginBtn = document.getElementById('login-btn');
-        const usernameInput = document.getElementById('username');
-        const currentUserSpan = document.getElementById('current-user');
-        const scanBtn = document.getElementById('scan-btn');
-        const entryForm = document.getElementById('entry-form');
-        const submitBtn = document.getElementById('submit-btn');
-        const logContent = document.getElementById('log-content');
-
-        // --- State ---
-        let currentUser = null;
-
-        // --- Functions ---
-        function handleLogin() {
-            const username = usernameInput.value.trim();
-            if (!username) {
-                alert('Vui lòng nhập tên đăng nhập.');
-                return;
-            }
-            currentUser = username;
-            currentUserSpan.textContent = currentUser;
-            loginScreen.style.display = 'none';
-            mainScreen.style.display = 'flex';
-        }
-
-        function handleScan() {
-            // Mô phỏng việc quét QR. Trình duyệt sẽ hiện một hộp thoại.
-            // Bạn hãy dán một trong các chuỗi QR ví dụ bên dưới vào.
-            const qrData = prompt(
-                'Mô phỏng quét QR. Dán dữ liệu QR vào đây:',
-                '1234cs/26;A' // Ví dụ mặc định
-            );
-
-            if (!qrData) {
-                alert('Hủy quét.');
-                return;
-            }
-
-            try {
-                const [ma_lo, kien] = qrData.split(';');
-                if (!ma_lo || !kien) {
-                    throw new Error('Định dạng QR không hợp lệ.');
-                }
-
-                // Điền thông tin vào form
-                document.getElementById('form-ma-lo').value = ma_lo;
-                document.getElementById('form-kien').value = kien;
-                
-                // Hiển thị form
-                entryForm.style.display = 'block';
-                scanBtn.style.display = 'none';
-
-            } catch (error) {
-                alert('Lỗi: ' + error.message + '\nDữ liệu QR phải có dạng "MA_LO;KIEN", ví dụ: "1234cs/26;A"');
-            }
-        }
-
-        function handleSubmit() {
-            // Lấy dữ liệu từ form
-            const entry = {
-                ma_lo: document.getElementById('form-ma-lo').value,
-                kien: document.getElementById('form-kien').value,
-                ca_sx: document.getElementById('form-ca-sx').value,
-                so_banh: document.getElementById('form-so-banh').value,
-                truc_ca: currentUser,
-                thoi_gian: new Date().toLocaleString('vi-VN')
-            };
-
-            // Mô phỏng gửi dữ liệu thành công
-            alert(`Gửi dữ liệu thành công!\nLô: ${entry.ma_lo}\nKiện: ${entry.kien}\nSố bành: ${entry.so_banh}`);
-
-            // Ghi vào log trên màn hình
-            const logItem = document.createElement('div');
-            logItem.className = 'log-item';
-            logItem.innerHTML = `<strong>${entry.ma_lo} - Kiện ${entry.kien}</strong><br>
-                                 ${entry.so_banh} bành · Ca ${entry.ca_sx} · ${entry.truc_ca} · ${entry.thoi_gian}`;
-            logContent.prepend(logItem);
-
-            // Reset lại giao diện để quét tiếp
-            entryForm.style.display = 'none';
-            scanBtn.style.display = 'block';
-        }
-
-        // --- Event Listeners ---
-        loginBtn.addEventListener('click', handleLogin);
-        scanBtn.addEventListener('click', handleScan);
-        submitBtn.addEventListener('click', handleSubmit);
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "sans-serif"] },
+            colors: {
+              pastel: {
+                bg: "#FBF8F1" /* Trắng kem ấm áp */,
+                purple: "#8764A0" /* Tím pastel đậm đà */,
+                purpleLight: "#E8E4EE",
+                orange: "#FF9F68" /* Cam pastel làm điểm nhấn */,
+                orangeLight: "#FFECD2",
+                green: "#6BCB77" /* Xanh lục pastel đậm hơn */,
+                greenLight: "#E6F7E8",
+              },
+            },
+          },
+        },
+      };
     </script>
-</body>
+
+    <style>
+      body {
+        background-color: #fbf8f1;
+        color: #333;
+      }
+
+      /* --- Hiệu ứng Hover cho thẻ (Card) --- */
+      .task-card {
+        background: #ffffff;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border: 1px solid rgba(135, 100, 160, 0.15);
+      }
+      .task-card:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 15px 30px rgba(255, 159, 104, 0.15); /* Bóng đổ ám cam nhẹ */
+        border-color: rgba(255, 159, 104, 0.4);
+      }
+
+      /* --- Thanh tiến độ nổi khối (3D) và chuyển màu (Gradient) --- */
+      .progress-track {
+        background-color: #eae3de;
+        border-radius: 999px;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        height: 14px;
+        width: 100%;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        /* Gradient từ Tím đậm đà sang Cam pastel */
+        background: linear-gradient(90deg, #8764a0 0%, #ff9f68 100%);
+        box-shadow:
+          inset 0 3px 3px rgba(255, 255, 255, 0.4),
+          inset 0 -3px 3px rgba(0, 0, 0, 0.15);
+        transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+      }
+
+      .progress-fill.completed {
+        /* Gradient Xanh lục đậm đà khi hoàn thành */
+        background: linear-gradient(90deg, #5db869 0%, #6bcb77 100%);
+      }
+
+      /* --- Animation khi cuộn chuột (Scroll Animation) --- */
+      .fade-in-up {
+        opacity: 0;
+        transform: translateY(30px);
+        transition:
+          opacity 0.8s ease-out,
+          transform 0.8s ease-out;
+      }
+      .fade-in-up.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* Nút Tab đang active */
+      .tab-active {
+        background-color: #ffecd2;
+        color: #d36b32; /* Cam đậm để dễ đọc chữ */
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+      <!-- Tabs điều hướng -->
+      <div class="flex gap-4 mb-8 overflow-x-auto pb-2 fade-in-up">
+        <button
+          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
+        >
+          <span class="mr-2">⊞</span> Tổng quan
+        </button>
+        <button
+          class="tab-active px-5 py-2.5 rounded-xl transition flex items-center shadow-sm"
+        >
+          <span class="mr-2">📋</span> Công việc
+        </button>
+        <button
+          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
+        >
+          <span class="mr-2">🔁</span> Việc định kỳ
+        </button>
+        <button
+          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
+        >
+          <span class="mr-2">🎯</span> Đánh giá 5S
+        </button>
+      </div>
+
+      <!-- Tiêu đề & Nút thao tác -->
+      <div
+        class="flex flex-col md:flex-row md:items-center justify-between mb-8 fade-in-up"
+        style="transition-delay: 0.1s"
+      >
+        <div>
+          <h1 class="text-3xl font-bold text-gray-800 mb-1">Công việc</h1>
+          <p class="text-gray-500 text-sm">
+            Giao việc, theo dõi tiến độ và nghiệm thu.
+          </p>
+        </div>
+        <div class="flex gap-3 mt-4 md:mt-0">
+          <button
+            class="bg-white border border-gray-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition shadow-sm"
+          >
+            ≡ Danh sách
+          </button>
+          <!-- Nút bấm chính sử dụng Cam Pastel -->
+          <button
+            class="bg-pastel-orange text-white px-5 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-lg shadow-orange-200/50"
+          >
+            + Giao việc mới
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub-tabs & Filter -->
+      <div class="flex gap-3 mb-6 fade-in-up" style="transition-delay: 0.2s">
+        <button
+          class="bg-white border border-gray-200 px-5 py-2 rounded-full text-sm font-medium shadow-sm hover:bg-pastel-orangeLight hover:text-orange-700 transition"
+        >
+          Việc của tôi
+        </button>
+        <button
+          class="bg-pastel-purple text-white px-5 py-2 rounded-full text-sm font-medium shadow-md shadow-purple-200"
+        >
+          Tất cả công việc
+        </button>
+      </div>
+
+      <div class="mb-8 fade-in-up" style="transition-delay: 0.3s">
+        <select
+          class="bg-white border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-pastel-orange focus:border-pastel-orange block w-48 p-2.5 shadow-sm outline-none"
+        >
+          <option>Tất cả trạng thái</option>
+          <option>Mới giao</option>
+          <option>Đang thực hiện</option>
+          <option>Hoàn thành</option>
+        </select>
+      </div>
+
+      <!-- Lưới Công việc (Grid) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Card 1 -->
+        <div class="task-card rounded-2xl p-5 fade-in-up shadow-sm">
+          <div class="flex justify-between items-start mb-3">
+            <span class="text-xs font-semibold text-gray-400"
+              >CV-260726/001</span
+            >
+            <span
+              class="px-2.5 py-1 text-xs font-medium bg-pastel-orangeLight text-orange-600 rounded-md"
+              >Mới giao</span
+            >
+          </div>
+          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
+            Tạo phiếu điều xe trước 17h hằng ngày
+          </h3>
+          <p class="text-sm text-gray-500 mb-5">Chau Nho</p>
+
+          <!-- Tiến độ nổi khối -->
+          <div class="mb-4">
+            <div
+              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
+            >
+              <span>Tiến độ</span>
+              <span class="text-pastel-orange font-bold">25%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width: 25%"></div>
+            </div>
+          </div>
+
+          <div
+            class="flex items-center text-xs text-orange-500 font-medium bg-white border border-orange-100 w-max px-2 py-1 rounded"
+          >
+            <span class="mr-1">⚠</span> Hạn: 27/07/2026 00:00
+          </div>
+        </div>
+
+        <!-- Card 2 -->
+        <div
+          class="task-card rounded-2xl p-5 fade-in-up shadow-sm"
+          style="transition-delay: 0.1s"
+        >
+          <div class="flex justify-between items-start mb-3">
+            <span class="text-xs font-semibold text-gray-400"
+              >CV-260726/002</span
+            >
+            <span
+              class="px-2.5 py-1 text-xs font-medium bg-pastel-purpleLight text-purple-700 rounded-md"
+              >Đang thực hiện</span
+            >
+          </div>
+          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
+            Đo mẫu tối thiểu 4 mẫu trên 1 ngày bthường 6-8 mẫu...
+          </h3>
+          <p class="text-sm text-gray-500 mb-5">Nguyễn Hữu Thọ</p>
+
+          <div class="mb-4">
+            <div
+              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
+            >
+              <span>Tiến độ</span>
+              <span class="text-pastel-orange font-bold">50%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width: 50%"></div>
+            </div>
+          </div>
+
+          <div
+            class="flex items-center text-xs text-orange-500 font-medium bg-white border border-orange-100 w-max px-2 py-1 rounded"
+          >
+            <span class="mr-1">⚠</span> Hạn: 27/07/2026 05:00
+          </div>
+        </div>
+
+        <!-- Card 3 (Hoàn thành) -->
+        <div
+          class="task-card rounded-2xl p-5 fade-in-up shadow-sm"
+          style="transition-delay: 0.2s"
+        >
+          <div class="flex justify-between items-start mb-3">
+            <span class="text-xs font-semibold text-gray-400"
+              >CV-260726/005</span
+            >
+            <span
+              class="px-2.5 py-1 text-xs font-medium bg-pastel-greenLight text-green-700 rounded-md"
+              >Hoàn thành</span
+            >
+          </div>
+          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
+            Tạo ngăn lưu
+          </h3>
+          <p class="text-sm text-gray-500 mb-5">Neang Ry Ta</p>
+
+          <div class="mb-4">
+            <div
+              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
+            >
+              <span>Tiến độ</span>
+              <span class="text-pastel-green font-bold">100%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill completed" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div class="flex items-center text-xs text-gray-400 font-medium">
+            Hạn: 27/07/2026 05:00
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Script tạo hiệu ứng Scroll -->
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("is-visible");
+              }
+            });
+          },
+          {
+            threshold: 0.1,
+          },
+        );
+
+        const hiddenElements = document.querySelectorAll(".fade-in-up");
+        hiddenElements.forEach((el) => observer.observe(el));
+      });
+    </script>
+  </body>
 </html>

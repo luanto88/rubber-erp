@@ -233,29 +233,55 @@ kpi_task_transfers (
 -- tien_do), set kpi_tasks.da_chuyen_giao=true. KHÔNG có nhắc nhở tự động đi kèm.
 ```
 
-### 5S (C) — chưa build
+### 5S (C) — ĐÃ BUILD, mô hình 2 TẦNG (đổi tên 2026-08-05 — xem mục "Cập nhật
+2026-08-05" cuối file để biết lý do và migration cần chạy)
+
+**Tầng 1 — "Vị trí 5S"** (nhỏ, đơn vị được QR-hoá để chấm điểm hàng tuần — vd
+PGĐ, PH01):
 
 ```sql
-kpi_5s_zones (
-  id, factory_id, ma_khu_vuc TEXT, ten_khu_vuc TEXT NOT NULL, vi_tri_mo_ta TEXT,
+kpi_5s_locations (   -- tên cũ: kpi_5s_zones (đã RENAME 2026-08-05)
+  id, factory_id, ma_vi_tri TEXT, ten_vi_tri TEXT NOT NULL, mo_ta TEXT,
   nguoi_don_id UUID,   -- người chịu trách nhiệm HIỆN TẠI (standing, sửa bất cứ lúc nào)
   nguoi_cham_id UUID,  -- người chấm HIỆN TẠI (standing)
+  zone_id UUID → kpi_5s_zones(id) ON DELETE SET NULL,  -- khu vực (tầng 2) chứa vị trí này, optional
   is_active BOOLEAN DEFAULT true, sort_order INTEGER DEFAULT 0, created_at, updated_at,
-  UNIQUE(factory_id, ma_khu_vuc),
+  UNIQUE(factory_id, ma_vi_tri),
   CHECK (nguoi_don_id IS NULL OR nguoi_cham_id IS NULL OR nguoi_don_id <> nguoi_cham_id)
 )
 -- Khi về tua: quản lý sửa trực tiếp nguoi_don_id trong Settings — KHÔNG có cơ chế
--- "phân công lại mỗi tuần" riêng.
+-- "phân công lại mỗi tuần" riêng (trừ khi dùng "Phân công thông minh", xem UI).
 
 kpi_5s_evaluations (
-  id, factory_id, zone_id → kpi_5s_zones, tuan_bat_dau DATE NOT NULL,
+  id, factory_id, location_id → kpi_5s_locations,   -- tên cũ: zone_id
+  tuan_bat_dau DATE NOT NULL,
   nguoi_don_id UUID NOT NULL,   -- SNAPSHOT người chịu trách nhiệm ĐÚNG TUẦN ĐÓ (mặc định lấy
-                                 -- từ zones.nguoi_don_id lúc chấm, sửa được nếu có người dọn thay)
+                                 -- từ locations.nguoi_don_id lúc chấm, sửa được nếu có người dọn thay)
   nguoi_cham_id UUID NOT NULL,
-  ket_qua TEXT NOT NULL CHECK (ket_qua IN ('dat','khong_dat')),
-  ly_do TEXT,   -- bắt buộc khi ket_qua='khong_dat'
+  ket_qua TEXT NOT NULL CHECK (ket_qua IN ('dat','tuong_doi','khong_dat')),  -- 3 mức (thêm 'tuong_doi' 2026-07-25)
+  ly_do TEXT,   -- bắt buộc khi ket_qua IN ('tuong_doi','khong_dat')
   image_urls TEXT[] DEFAULT '{}',   -- khuyến khích, KHÔNG bắt buộc
-  danh_gia_luc TIMESTAMPTZ DEFAULT now(), created_at, UNIQUE(zone_id, tuan_bat_dau)
+  danh_gia_luc TIMESTAMPTZ DEFAULT now(), created_at, UNIQUE(location_id, tuan_bat_dau)
+)
+```
+
+**Tầng 2 — "Khu vực"** (lớn, vd Văn phòng, Kho 1, Kho 2, Ca SX mủ tạp, Ca SX mủ
+nước — CHỈ dùng để giới hạn pool ứng viên khi "Phân công thông minh" random chỉ
+trong nội bộ 1 khu vực; **không** liên quan `personnel_groups`, xem đầy đủ ở mục
+"Cập nhật 2026-08-05"):
+
+```sql
+kpi_5s_zones (   -- tên MỚI (tái dùng tên bảng vừa giải phóng ở lần rename trên) —
+                  -- KHÔNG nhầm với `personnel_groups` (nhóm CHUYÊN MÔN, dùng cho D)
+  id, factory_id, ten TEXT NOT NULL, is_active BOOLEAN DEFAULT true,
+  sort_order INTEGER DEFAULT 0, created_at, updated_at,
+  UNIQUE(factory_id, lower(ten))
+)
+
+kpi_5s_zone_members (
+  id, factory_id, zone_id → kpi_5s_zones ON DELETE CASCADE,
+  user_id UUID → auth.users, created_at,
+  UNIQUE(zone_id, user_id)
 )
 ```
 
@@ -285,7 +311,7 @@ kpi_monthly_scores (   -- snapshot bất biến sau khóa sổ
 kpi_score_adjustments ( id, monthly_score_id → kpi_monthly_scores, ly_do TEXT NOT NULL,
   diem_truoc NUMERIC, diem_sau NUMERIC, nguoi_dieu_chinh_id, created_at )
 
-kpi_appeals ( id, monthly_score_id NULL, task_id NULL, zone_evaluation_id NULL,
+kpi_appeals ( id, monthly_score_id NULL, task_id NULL, location_evaluation_id NULL,  -- tên cũ: zone_evaluation_id
   nguoi_khieu_nai_id, noi_dung TEXT NOT NULL,
   trang_thai TEXT DEFAULT 'cho_xu_ly' CHECK (trang_thai IN ('cho_xu_ly','da_giai_quyet','tu_choi')),
   phan_hoi TEXT, nguoi_xu_ly_id, created_at, updated_at )
@@ -294,9 +320,11 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, zone_evaluation_id NULL,
 ## RLS (áp dụng khi build từng bảng)
 
 - Đọc rộng trong `factory_id`: `kpi_criteria_templates`, `kpi_score_weights`,
-  `kpi_5s_zones`, `kpi_5s_evaluations`, `kpi_daily_evaluations`,
-  `kpi_daily_evaluation_items`. Ghi giới hạn `kpi.evaluate` (2 bảng chấm) hoặc
-  `kpi.manage_config`/admin (còn lại).
+  `kpi_5s_locations`, `kpi_5s_zones`, `kpi_5s_zone_members`, `kpi_5s_evaluations`,
+  `kpi_daily_evaluations`, `kpi_daily_evaluation_items`. Ghi giới hạn
+  `kpi.evaluate` (chấm điểm 5S) hoặc `kpi.manage_config`/admin (còn lại) —
+  riêng `kpi_5s_evaluations` INSERT chỉ đúng người đang là `nguoi_cham_id` của
+  vị trí đó, không có ngoại lệ admin (xem "Cập nhật Phase 2").
 - `kpi_monthly_scores`: `user_id = auth.uid() OR admin OR
   current_profile_has_permission('kpi.view_all')` (tái dùng hàm có sẵn từ
   `20260721_production_records_permission_rls.sql`).
@@ -315,9 +343,11 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, zone_evaluation_id NULL,
 
 - Hệ thống → Nhân sự (đã có sẵn): dropdown **"Nhóm chính"** trong form Nhân sự,
   chỉ liệt kê nhóm đã tick.
-- Tab mới **KPI & 5S** (icon `Target`) → 3 sub-tab: Khung tiêu chí KPI (theo
-  `personnel_groups`), Trọng số công thức (A/B/C/D% + ngày chuẩn/hệ số chuyên cần
-  min-max), Khu vực 5S (CRUD `kpi_5s_zones` + nút "In QR hàng loạt").
+- Tab **KPI & 5S** (icon `Target`) — hiện có 2 sub-tab đã build: **"Vị trí 5S"**
+  (CRUD `kpi_5s_locations` + dropdown chọn "Khu vực" + nút "Phân công thông
+  minh" + nút "In QR hàng loạt") và **"Khu vực"** (CRUD `kpi_5s_zones` + "Quản lý
+  thành viên" mỗi khu vực → `kpi_5s_zone_members`). Sub-tab "Khung tiêu chí
+  KPI"/"Trọng số công thức" (Phase 3/4) vẫn **chưa build**.
 
 ### Module `/dashboard/kpi`
 
@@ -327,12 +357,16 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, zone_evaluation_id NULL,
 2. **Công việc** — "Việc của tôi"/"Tất cả công việc"; chi tiết task có timeline log
    bất biến; nút Cập nhật tiến độ/Nộp/Chuyển giao/Nghiệm thu/Điều chỉnh/Trả về/Yêu
    cầu bổ sung theo vai trò.
-3. **Đánh giá 5S** — mỗi khu vực có URL cố định `/dashboard/kpi/5s/zone/{zone_id}`
-   (bắt buộc đăng nhập, redirect login nếu chưa). QR encode thẳng URL này. Trang
-   khu vực: lịch sử Đạt/Không đạt công khai trong factory; chỉ hiện nút "Chấm điểm
-   tuần này" nếu user = `nguoi_cham_id` VÀ tuần hiện tại chưa có bản chấm. Form
-   chấm: `nguoi_don_id` mặc định = giá trị hiện tại của khu vực (sửa được nếu có
-   người dọn thay), Đạt/Không đạt, lý do bắt buộc khi Không đạt, ảnh khuyến khích.
+3. **Đánh giá 5S** — mỗi vị trí (tầng nhỏ, vd PGĐ/PH01) có URL cố định
+   `/dashboard/kpi/5s/location/{location_id}` (đổi từ `/zone/` 2026-08-05, bắt
+   buộc đăng nhập, redirect login nếu chưa). QR encode thẳng URL này. Trang vị
+   trí: lịch sử Đạt/Tương đối/Không đạt công khai trong factory; chỉ hiện nút
+   "Chấm điểm tuần này" nếu user = `nguoi_cham_id` VÀ tuần hiện tại chưa có bản
+   chấm. Form chấm: `nguoi_don_id` mặc định = giá trị hiện tại của vị trí (sửa
+   được nếu có người dọn thay), Đạt/Tương đối/Không đạt, lý do bắt buộc khi khác
+   "Đạt", ảnh khuyến khích. "Khu vực" (tầng lớn, vd Văn phòng/Kho 1) chỉ dùng để
+   giới hạn pool ứng viên của "Phân công thông minh" — không có trang chi tiết
+   riêng, quản lý trong Cài đặt → KPI & 5S → "Khu vực".
 4. **Chấm điểm chuyên môn** — nhập theo ngày, gộp nhiều ngày/lần, hỗ trợ nhiều nhóm
    choàng cùng ngày.
 5. **Bảng điểm KPI** — cá nhân + toàn nhà máy (`kpi.view_all`), breakdown A/B/C/D +
@@ -351,11 +385,27 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, zone_evaluation_id NULL,
   xong (2026-07-25, xem mục "Cập nhật Phase 1a.1" bên dưới) — THAY THẾ hoàn toàn ý
   tưởng "tự động dò hành động nghiệp vụ để đóng việc ngầm" đã bị loại bỏ khỏi thiết
   kế. `tsc`/`eslint`/`npm run build` đều sạch, **chưa test tay**.
-- **Phase 1b — Chuyển giao việc**: `kpi_task_transfers`; UI chuyển giao/nhận/từ
-  chối, chặn chuyển quá hạn/lần 2. (Không có nhắc nhở tự động trước khi VỀ TUA —
-  khác với nhắc nhở deadline ở Phase 1a, xem phân biệt ở mục trên.)
-- **Phase 2 — Đánh giá 5S**: `kpi_5s_zones`+`kpi_5s_evaluations`; Settings Khu vực
-  5S + in QR hàng loạt; trang `/dashboard/kpi/5s/zone/{zone_id}`; tab "Đánh giá 5S".
+- **Phase 1b — Chuyển giao việc** ✅ Đã code xong VÀ đã test tay (2026-07-25 code,
+  2026-07-26 test) — `kpi_task_transfers`; UI chuyển giao/nhận/từ chối/hủy, chặn
+  chuyển quá hạn/lần 2. Luồng chính (gửi/chấp nhận/từ chối) đã xác nhận đúng trên
+  localhost. (Không có nhắc nhở tự động trước khi VỀ TUA — khác với nhắc nhở
+  deadline ở Phase 1a, xem phân biệt ở mục trên.)
+- **Người thay thế tạm thời + Việc định kỳ theo nhóm** ✅ Đã code xong (2026-07-26,
+  xem mục "Việc định kỳ theo nhóm + Người thay thế tạm thời" và "Cập nhật
+  2026-07-26 (tiếp 2)" bên dưới) — `kpi_task_templates` + `kpi_user_substitutions`
+  + RPC "sinh lười" `kpi_ensure_today_task_instances`; tab mới
+  `/dashboard/kpi/templates`, kèm nút "Sinh việc hôm nay ngay" (bỏ qua cờ
+  sessionStorage) + auto-trigger sau khi Lưu template/đăng ký thay thế — fix
+  đúng bug thật đã xác nhận bằng DB (0 task từng sinh do cờ sessionStorage kẹt).
+  `tsc`/`eslint`/`npm run build` đều sạch, **chưa test tay** (đã điều tra bằng
+  query DB thật, chưa test qua UI thật).
+- **Phase 2 — Đánh giá 5S** ✅ Đã code xong (2026-07-26, xem mục "Cập nhật
+  Phase 2" bên dưới) — kiến trúc gốc 1 tầng (`kpi_5s_zones`+`kpi_5s_evaluations`,
+  route `/dashboard/kpi/5s/zone/{id}`) đã bị **đổi tên toàn bộ thành 2 tầng**
+  ngày 2026-08-05 (xem mục "Cập nhật 2026-08-05" cuối file) — schema/route hiện
+  tại là `kpi_5s_locations`+`kpi_5s_zones` (bảng mới)+`kpi_5s_zone_members`,
+  route `/dashboard/kpi/5s/location/{id}`. `tsc`/`eslint`/`npm run build` đều
+  sạch, **chưa test tay** (cả bản gốc lẫn bản đổi tên).
 - **Phase 3 — Khung tiêu chí KPI + Chấm điểm chuyên môn theo ngày**:
   `kpi_criteria_templates`+`kpi_daily_evaluations`+`kpi_daily_evaluation_items`;
   Settings Khung tiêu chí; tab "Chấm điểm chuyên môn".
@@ -734,6 +784,1396 @@ gắn thành công → task chuyển Hoàn thành; (2) vào Kiểm soát quá tr
 gắn → xác nhận hoàn thành đúng; (3) test thêm mẫu vào phiếu đã có (không phải tạo mới) cũng
 hiện banner đúng.
 
+## Cập nhật 2026-07-25 (tiếp 2) — Bug thật đã fix: "việc mục tiêu số lượng chung" đóng ngay
+khi có 1 người gắn 1 bằng chứng, dù chưa đủ số lượng/chưa đủ người
+
+### Bug đã phát hiện
+
+Người dùng test: giao "Nhóm kỹ thuật-chất lượng đo 4 mẫu trong ngày" cho 2 người (Nho, Thọ).
+Chỉ cần 1 người đo 1 mẫu (gắn 1 bằng chứng) là **cả task đóng "Hoàn thành" ngay lập tức**, dù
+mới có 1/4 mẫu và người còn lại chưa làm gì.
+
+**Nguyên nhân**: RPC gốc `kpi_task_link_and_complete` (từ migration
+`20260725_kpi_task_evidence_links.sql`, mục "Cập nhật Phase 1a.1") không có khái niệm "mục
+tiêu số lượng" — bất kỳ 1 bằng chứng nào từ bất kỳ thành viên nào cũng set thẳng
+`tien_do=100, tien_do_nghiem_thu=100` cho CHÍNH NGƯỜI ĐÓ và chuyển `kpi_tasks.trang_thai =
+'hoan_thanh'` ngay, không quan tâm còn thành viên khác hay còn thiếu số lượng. Đúng cho task
+1-người-1-hành-động ("Tạo phiếu điều xe"), nhưng sai hoàn toàn cho task nhiều người cùng làm
+1 việc cần đạt tổng số lượng ("đo 4 mẫu").
+
+### Thiết kế đã chốt — tách biệt "việc chung hoàn thành" khỏi "điểm A cá nhân"
+
+Đây là điểm mấu chốt cần nhớ khi đụng lại phần này: **2 khái niệm độc lập nhau**, không được
+nhầm lẫn hay gộp chung logic:
+
+1. **"Việc chung hoàn thành"** (`kpi_tasks.trang_thai = 'hoan_thanh'`) — chỉ phụ thuộc TỔNG số
+   bằng chứng đã gắn (`COUNT(kpi_task_evidence_links) >= kpi_tasks.muc_tieu_so_luong`), **không
+   quan tâm ai đóng góp bao nhiêu** trong tổng đó. Task "đo 4 mẫu" xong khi tổng 4 mẫu đã đo,
+   bất kể tỷ lệ đóng góp giữa Nho/Thọ là 3-1, 2-2, hay 4-0.
+2. **"Điểm A cá nhân"** (`kpi_task_members.tien_do_nghiem_thu`, dùng cho công thức A — Điểm
+   hoàn thành, xem mục "A — Điểm hoàn thành" phía trên) — tính KHÁC NHAU theo `phan_loai`:
+   - **`choang`** (thành viên phụ): **luôn được 100%** ngay khi việc chung hoàn thành, không
+     có ngưỡng, không bị phạt — kể cả nếu họ đóng góp 0. Lý do nghiệp vụ: người "choàng" chỉ
+     là hỗ trợ thêm, không phải người chịu trách nhiệm chính cho việc đó.
+   - **`chinh`** (đúng 1 người/task, chọn lúc giao việc): có **ngưỡng tối thiểu riêng = 50%
+     "kỳ vọng"** của họ. Kỳ vọng = `muc_tieu_so_luong / số thành viên active`. Ngưỡng =
+     `FLOOR(kỳ vọng × 0.5)`, tối thiểu 1 nếu kỳ vọng ≥ 1. Điểm A của chính =
+     `MIN(100, ROUND(đóng góp thật của chính / ngưỡng × 100))` — công thức này **luôn tính
+     trên đóng góp THẬT của chính**, không được "cứu" thành 100% chỉ vì việc chung đã xong
+     nhờ người khác đóng góp bù. Đây chính là cơ chế phạt nếu người chính bỏ bê phần việc của
+     mình — ví dụ: đo 0/4 thì điểm A = 0% dù việc chung đã hoàn thành nhờ người khác đo đủ.
+
+**Ví dụ đúng theo bug gốc người dùng nêu** (mục tiêu 4 mẫu, 2 thành viên, Nho = chính, Thọ =
+choàng): kỳ vọng mỗi người = 4/2 = 2, ngưỡng của Nho = FLOOR(2×0.5) = 1.
+- Nho đo 3, Thọ đo 1 → tổng 4 = đủ mục tiêu → việc chung Hoàn thành. Điểm A của Nho =
+  MIN(100, 3/1×100) = 100%. Điểm A của Thọ = 100% (choàng, không tính ngưỡng).
+- Nho đo 0, Thọ đo 4 → tổng 4 = đủ mục tiêu → việc chung Hoàn thành. Điểm A của Nho =
+  MIN(100, 0/1×100) = **0%** (bị phạt vì không đóng góp gì, dù việc chung đã xong). Điểm A
+  của Thọ = 100%.
+
+### Migration `supabase/migrations/20260725_kpi_task_quantity_target.sql` (**CẦN CHẠY THỦ CÔNG
+trên Supabase SQL Editor — CHƯA CHẠY**)
+
+- Thêm `kpi_tasks.muc_tieu_so_luong INTEGER` (`CHECK > 0`, nullable — `NULL` = giữ nguyên hành
+  vi cũ "1 bằng chứng là xong", dùng cho task 1-người-1-hành-động).
+- Thêm `kpi_task_members.phan_loai TEXT` (`CHECK IN ('chinh','choang')`, nullable). **Lưu ý
+  quan trọng**: cột này TRÙNG TÊN với `phan_loai` đã phác thảo cho Phase "Việc định kỳ"
+  (`kpi_task_templates`, xem plan `tr-c-khi-ti-p-t-c-delegated-moonbeam.md`) nhưng Ý NGHĨA
+  KHÁC — ở đó `phan_loai` so nhóm việc với nhóm chính (`is_primary`) CỦA NGƯỜI NHẬN; ở đây
+  `phan_loai` là vai trò của người đó TRONG PHẠM VI 1 task cụ thể (chọn tay lúc giao việc,
+  không liên quan `personnel_groups`). Khi Phase "Việc định kỳ" triển khai thật, phải đối
+  chiếu lại xem 2 ý nghĩa có xung đột không trước khi tái sử dụng cột này cho template.
+- `CREATE OR REPLACE FUNCTION kpi_task_link_and_complete(...)` — viết lại hoàn toàn theo đúng
+  công thức ở trên. Nhánh `muc_tieu_so_luong IS NULL` giữ nguyên hành vi cũ (backward-compat
+  với mọi task đã tạo trước migration này, và task 1-người vẫn tạo mặc định không đặt mục
+  tiêu). Nhánh có mục tiêu: cập nhật `tien_do` thô của MỌI thành viên active (tham khảo, không
+  phải điểm cuối), tính lại điểm A của đúng người `chinh` MỖI LẦN có bằng chứng mới (không chỉ
+  khi chính chính họ gắn — vì điểm của chính chỉ phụ thuộc đóng góp của chính họ + kỳ vọng
+  chung, độc lập với ai vừa thao tác), rồi kiểm tra tổng có đủ mục tiêu chưa để chốt `choang`
+  = 100% + `trang_thai = 'hoan_thanh'`. Thành viên `phan_loai IS NULL` (dữ liệu cũ, task tạo
+  trước migration nhưng lỡ có `muc_tieu_so_luong`) được xử lý như `choang` để tránh kẹt
+  `tien_do_nghiem_thu` NULL vĩnh viễn.
+
+### `src/lib/kpi-tasks.ts`
+
+- `KpiTask.muc_tieu_so_luong: number | null`, `KpiPhanLoai = "chinh" | "choang"`,
+  `KpiTaskMember.phan_loai: KpiPhanLoai | null`.
+- `createKpiTask()` nhận thêm `mucTieuSoLuong?: number | null`, `nguoiChinhId?: string | null`
+  — validate: nếu đặt mục tiêu thì `nguoiChinhId` bắt buộc và phải nằm trong
+  `memberUserIds`. Member insert payload set `phan_loai` = `"chinh"` cho đúng
+  `nguoiChinhId`, `"choang"` cho các thành viên còn lại, `null` nếu không đặt mục tiêu.
+- Hàm mới `computeChinhThreshold(mucTieuSoLuong, activeMemberCount)` — mirror chính xác công
+  thức SQL (`FLOOR(kỳ vọng × 0.5)`, sàn 1 nếu kỳ vọng ≥ 1) để hiển thị ngưỡng ngay trên UI
+  form tạo việc (live preview) và trang chi tiết, không cần round-trip DB chỉ để xem số này.
+
+### `KpiTaskFormModal` (`kpi-task-form-modal.tsx`)
+
+- Field mới "Số lượng mục tiêu chung (tuỳ chọn)" (number input) — để trống = task thường (1
+  hành động là xong). Có giá trị → hiện thêm khối "Người chính (chịu trách nhiệm chính) *"
+  (dropdown chỉ trong số `memberIds` đã chọn), kèm giải thích ngưỡng 50% + số ngưỡng tính live
+  qua `computeChinhThreshold`.
+- `useEffect` tự quản `nguoiChinhId`: tự gỡ nếu người đó bị bỏ khỏi danh sách thành viên; tự
+  chọn sẵn nếu danh sách chỉ còn đúng 1 người (đỡ 1 bước bấm khi task chỉ giao 1 người nhưng
+  vẫn muốn dùng mục tiêu số lượng — hiếm nhưng hợp lệ).
+- `handleSave` chặn lưu nếu đã nhập mục tiêu số lượng nhưng chưa chọn người chính.
+
+### Trang chi tiết `/dashboard/kpi/tasks/[id]/page.tsx`
+
+- Card "Người thực hiện" thêm badge tổng "Việc chung: X/N" (X = `evidenceLinks.length`, N =
+  `muc_tieu_so_luong`) ngay cạnh tiêu đề card, kèm 1 dòng giải thích ngắn về ngưỡng của người
+  chính.
+- Mỗi member card: badge "Chính"/"Choàng" theo `phan_loai`; khi có mục tiêu số lượng, đổi hiển
+  thị từ "Tự báo cáo: X%" sang "Đóng góp: X" (đếm qua `evidenceCountByUser`, gom từ
+  `evidenceLinks` theo `member_user_id`), với người chính hiện thêm "/ N tối thiểu"
+  (`chinhThreshold`); "Điểm A" (`tien_do_nghiem_thu`) tô đỏ nếu là người chính và điểm < 100%
+  (dấu hiệu bị phạt), tô xanh emerald cho các trường hợp còn lại.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (3 file: `kpi-tasks.ts`, `kpi-task-form-modal.tsx`,
+`kpi/tasks/[id]/page.tsx`), và `npm run build` đều sạch.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration trước
+
+1. Chạy `supabase/migrations/20260725_kpi_task_quantity_target.sql` trên Supabase SQL Editor
+   (migration này CHƯA từng chạy — nếu bỏ qua, mọi lần gắn bằng chứng cho task có/không có
+   mục tiêu số lượng đều lỗi vì RPC cũ không còn khớp cột `muc_tieu_so_luong`/`phan_loai`).
+2. Tạo lại đúng kịch bản gốc: giao "Đo 4 mẫu" cho 2 người (Nho = chính, Thọ = choàng) → xác
+   nhận form hiện đúng ngưỡng preview (kỳ vọng 2, ngưỡng 1).
+3. Đăng nhập Nho, gắn 1 bằng chứng → xác nhận task **VẪN MỞ** (không tự đóng), card hiện
+   "Việc chung: 1/4", Nho "Đóng góp: 1 / 1 tối thiểu", Điểm A Nho tạm thời chưa hiện (task
+   chưa xong nên `tien_do_nghiem_thu` vẫn NULL cho tới khi việc chung hoàn thành).
+4. Đăng nhập Thọ, gắn 3 bằng chứng liên tiếp (tổng 4/4) → xác nhận task chuyển "Hoàn thành"
+   NGAY sau lần gắn thứ 4 của TOÀN task (không phải của riêng Thọ). Card hiện đúng: Nho Đóng
+   góp 1/1, Điểm A = 100% (1 ≥ ngưỡng 1); Thọ Đóng góp 3, Điểm A = 100% (choàng).
+5. Test case phạt: tạo task khác cùng cấu hình, Nho (chính) đóng góp 0, Thọ (choàng) đóng góp
+   đủ 4/4 → xác nhận việc chung vẫn Hoàn thành (đúng thiết kế — không chặn việc chung vì
+   chính bỏ bê), nhưng Điểm A của Nho = 0% (tô đỏ), Điểm A Thọ = 100%.
+6. Test task KHÔNG đặt mục tiêu số lượng (giữ nguyên hành vi cũ) — gắn 1 bằng chứng bất kỳ →
+   xác nhận vẫn đóng thẳng "Hoàn thành" ngay như trước migration, không bị ảnh hưởng bởi thay
+   đổi này (regression check).
+7. Test edge case kỳ vọng < 1 (mục tiêu số lượng nhỏ hơn số thành viên, ví dụ mục tiêu 2 cho 3
+   người) → xác nhận người chính không bị phạt vô lý (RPC có nhánh `v_nguong_chinh <= 0 →
+   score = 100` phòng hờ chia 0).
+
+## Cập nhật 2026-07-25 (tiếp 3) — Bug thật đã fix sau test tay lần 1: thanh tiến độ tổng sai
+công thức + không đổi trạng thái + không hiện cho người giao
+
+### Bug đã phát hiện qua test tay trên localhost
+
+Người dùng giao "Đo 4 mẫu" cho Thọ (chính) và Nho (choàng), hạn 18:00 25/07/2026, **chỉ dùng
+nút "Gắn & hoàn thành"** ở banner (không bao giờ dùng form "Cập nhật tiến độ"/"Nộp" thủ công).
+Kết quả quan sát được qua nhiều bước (Nho đo 1 → Thọ đo 1 → Nho đo 1 nữa → Thọ đo 1 nữa):
+
+- Thanh tiến độ hiện **sai số** ở mọi bước (vd sau khi Nho đo 1/4 mẫu, hiện 50% thay vì đúng
+  25%; sau khi Thọ đo thêm 1 mẫu — tổng 2/4 — hiện 0% thay vì đúng 50%).
+- Ảnh chụp thẻ task trong danh sách (`cung_cap_dl/mau.png`) cho thấy thanh tím gần như ĐẦY
+  trong khi badge trạng thái vẫn ghi **"Mới giao"** — task chưa từng chuyển
+  "Đang thực hiện" dù đã có người đo mẫu nhiều lần.
+- Người giao việc mở trang chi tiết ("Việc của tôi") **luôn thấy đúng 1 giá trị cố định** bất
+  kể hai người kia đã đo bao nhiêu mẫu; Thọ luôn thấy thanh tiến độ bằng 0 dù đã đo.
+
+### Root cause 1 (đã xác nhận qua trace tay từng bước) — sai mẫu số của `tien_do`
+
+Bản RPC đầu tiên (viết trong phiên trước) tính `tien_do` (raw, mỗi thành viên) theo công thức
+`đóng góp của người đó / kỳ vọng CÁ NHÂN của họ` (`kỳ vọng = muc_tieu_so_luong / số thành viên
+active`, vd 4/2=2 mỗi người) — **không phải** theo tổng mục tiêu chung. Hệ quả: mỗi người chạm
+mốc 100% RẤT SỚM (chỉ cần đúng phần chia đều của họ, ở đây 2 mẫu/người) dù việc chung còn lâu
+mới xong (cần đủ 4). `averageTaskProgress()` khi đó lại lấy TRUNG BÌNH CỘNG các giá trị này
+qua số thành viên — 2 sai số cộng dồn khiến thanh hiển thị nhảy vọt/lệch hẳn khỏi tiến độ thật.
+
+Đã trace tay khớp đúng 100% với 4 bước người dùng báo cáo khi đổi mẫu số:
+
+- **Sửa 1 — `tien_do` chia cho TỔNG mục tiêu chung** (`v_task.muc_tieu_so_luong`, không phải
+  `v_ky_vong`), áp dụng đồng nhất cho MỌI thành viên (cả chính lẫn choàng — khác hẳn
+  `tien_do_nghiem_thu` của người chính, vẫn giữ nguyên công thức phạt riêng theo `v_ky_vong`).
+  Vì mỗi người giờ có `tien_do = đóng góp của họ / TỔNG mục tiêu × 100`, CỘNG DỒN (SUM, không
+  chia trung bình) qua tất cả thành viên active ra ĐÚNG % hoàn thành thật của cả việc — cộng
+  tính chất cơ bản của phân số cùng mẫu số.
+- **Sửa 2 — `averageTaskProgress(task, members)`** (`src/lib/kpi-tasks.ts`, đổi chữ ký nhận
+  thêm `task`): khi `task.muc_tieu_so_luong !== null` → `SUM(tien_do)` (không chia số người);
+  khi `null` (task thường) → giữ nguyên hành vi cũ (trung bình `tien_do_nghiem_thu ?? tien_do`).
+  Verify lại đúng 4 bước gốc với công thức mới, muc_tieu=4, 2 người:
+  - Nho đo 1 (choàng): Nho.tien_do=round(1/4×100)=25, Thọ.tien_do=0 → SUM=**25%** ✓ (đúng như
+    người dùng kỳ vọng "phải là 25%").
+  - Thọ đo 1 (chính, tổng 2/4): Nho.tien_do=25, Thọ.tien_do=25 → SUM=**50%** ✓.
+  - Nho đo tiếp 1 (tổng 3/4): Nho.tien_do=50, Thọ.tien_do=25 → SUM=**75%** ✓.
+  - Thọ đo tiếp 1 (tổng 4/4=đủ mục tiêu): SUM=**100%**, task chuyển Hoàn thành ✓.
+- Trong khối "việc chung hoàn thành" của RPC, đã **bỏ việc ghi đè `tien_do=100` cho thành viên
+  choàng** — chỉ còn ghi đè `tien_do_nghiem_thu=100` (Điểm A). Lý do: `tien_do` của mọi thành
+  viên tại thời điểm hoàn thành đã tự động đúng và tự SUM ra 100% (chứng minh ở trên); ép riêng
+  choàng thành 100 sẽ làm SUM vượt quá 100% (vd chính đóng góp 25% thật + choàng bị ép 100% =
+  125%), làm sai thanh tiến độ tổng ngay tại thời điểm hoàn thành.
+
+### Root cause 2 — task kẹt mãi "Mới giao" dù đã có bằng chứng
+
+RPC nhánh mục tiêu số lượng trước đây **không bao giờ đụng `kpi_tasks.trang_thai`** cho tới
+lúc hoàn thành hẳn — khác với nhánh task thường (`kpi_task_member_update`) vốn tự chuyển
+"Đang thực hiện" ngay khi có cập nhật đầu tiên. Đã fix: thêm bước
+`IF v_task.trang_thai IN ('moi_giao','tra_ve') THEN UPDATE ... trang_thai = 'dang_thuc_hien'`
+ngay sau khi ghi log bằng chứng (trước khi tính `tien_do`), áp dụng cho MỌI lần gắn bằng chứng
+đầu tiên của task, không chỉ lần đầu tiên tuyệt đối.
+
+### Migration bị sửa trực tiếp, KHÔNG tạo file mới
+
+`supabase/migrations/20260725_kpi_task_quantity_target.sql` (từ phiên trước) **CHƯA từng
+chạy trên Supabase** (đã xác nhận ở phiên trước, ghi rõ "CHƯA CHẠY") — an toàn để sửa trực
+tiếp file cũ thay vì tạo migration nối tiếp, đúng convention repo khi migration chưa áp dụng
+lần nào (mirror cách xử lý `20260709_lot_predictions.sql` từng làm, xem
+`.claude/rules/06-module-production.md` mục 4.6). Không tạo file
+`20260725_kpi_task_quantity_target_v2.sql` hay tương tự.
+
+### `src/lib/kpi-tasks.ts` — `averageTaskProgress()`
+
+Chữ ký đổi từ `averageTaskProgress(members)` sang
+`averageTaskProgress(task: Pick<KpiTask, "muc_tieu_so_luong">, members)`. Duy nhất 1 call site
+trong repo (`src/app/dashboard/kpi/tasks/page.tsx`, thẻ task trong danh sách) — đã cập nhật
+theo chữ ký mới.
+
+### `/dashboard/kpi/tasks/[id]/page.tsx` — 3 thay đổi UI/UX bổ sung
+
+1. **Thanh tiến độ tổng thật (không chỉ badge số)**: thêm 1 thanh bar tím ngay dưới tiêu đề
+   card "Người thực hiện" (trên badge "Việc chung: X/N" đã có từ phiên trước) — dùng
+   `averageTaskProgress(task, members)`, **hiện cho MỌI người xem** (giao/chính/choàng), không
+   gate theo vai trò — trả lời trực tiếp yêu cầu "người giao việc phải thấy đc thanh tiến độ".
+2. **Ẩn `ProgressForm` (form "Cập nhật tiến độ của bạn" thủ công) khi task có mục tiêu số
+   lượng** — thay bằng 1 banner tím hướng dẫn ngắn giải thích tiến độ tự tính qua "Gắn bằng
+   chứng", không cần tự nhập %. Lý do: form thủ công cho phép kéo slider % tùy ý rồi gọi RPC
+   `kpi_task_member_update` — RPC đó ghi đè thẳng `tien_do` theo giá trị người dùng tự chọn,
+   sẽ phá vỡ ngay công thức "SUM đúng bằng % hoàn thành thật" nếu ai đó lỡ dùng nhầm form này
+   cho task mục tiêu số lượng. Chặn ở tầng UI (ẩn hẳn form) thay vì chỉ cảnh báo.
+3. **Refetch khi tab quay lại `visible`/`focus`** (cả trang chi tiết lẫn trang danh sách
+   `/dashboard/kpi/tasks`) — bằng chứng thường được gắn từ MODULE KHÁC (Điều xe/Sản
+   lượng/Kiểm nghiệm/Kho nguyên liệu/Thành phẩm/Kiểm soát quá trình), không phải từ chính
+   trang KPI — nếu người xem để tab KPI mở nền rồi quay lại mà không có cơ chế này, dữ liệu cũ
+   trong React state sẽ không tự đổi. Đây là hướng xử lý phòng vệ cho phần "Đóng góp: 0" hiển
+   thị sai sau khi Thọ đã đo mẫu (nghi ngờ do xem trang từ trước khi bằng chứng của Thọ kịp
+   ghi nhận) — **chưa xác nhận chắc chắn đây là nguyên nhân duy nhất**, cần test lại sau fix.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (`kpi-tasks.ts`, `kpi/tasks/page.tsx`,
+`kpi/tasks/[id]/page.tsx`), và `npm run build` đều sạch.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy lại migration đã sửa
+
+Vì migration vẫn chưa từng chạy, chỉ cần chạy 1 lần bản mới nhất (không cần chạy 2 lần).
+
+1. Chạy `supabase/migrations/20260725_kpi_task_quantity_target.sql` (bản đã sửa) trên
+   Supabase SQL Editor.
+2. Lặp lại đúng kịch bản test đã thất bại: giao "Đo 4 mẫu" cho Thọ (chính) + Nho (choàng) →
+   Nho đo 1 → xác nhận thanh tiến độ (cả ở thẻ danh sách lẫn trang chi tiết) hiện đúng **25%**,
+   badge trạng thái đổi từ "Mới giao" sang "Đang thực hiện".
+3. Thọ đo 1 (tổng 2/4) → xác nhận thanh tiến độ **50%**; Thọ (đăng nhập chính mình) và giao
+   việc (đăng nhập khác) đều thấy CÙNG 1 con số 50% (không còn lệch giữa các người xem).
+4. Nho đo tiếp 1 (tổng 3/4) → **75%**. Thọ đo tiếp 1 (tổng 4/4) → **100%**, badge chuyển
+   "Hoàn thành" ngay, Điểm A Nho=100% (choàng), Điểm A Thọ tính theo đóng góp thật của Thọ so
+   ngưỡng (2 đóng góp / ngưỡng 1 = 100%, vì Thọ đã vượt ngưỡng tối thiểu).
+5. Test case phạt lại (đã pass ở thiết kế công thức, cần xác nhận UI hiển thị đúng): chính chỉ
+   đóng góp dưới ngưỡng, việc chung vẫn hoàn thành nhờ choàng bù đủ → xác nhận Điểm A của chính
+   < 100% (tô đỏ), choàng vẫn 100%.
+6. Xác nhận form "Cập nhật tiến độ của bạn" KHÔNG còn hiện ở task mục tiêu số lượng (thay bằng
+   banner tím hướng dẫn); task KHÔNG đặt mục tiêu số lượng vẫn hiện form như cũ (regression
+   check).
+7. Test refetch-on-focus: mở trang chi tiết task ở 1 tab, để nền; ở thiết bị/tài khoản khác
+   gắn thêm 1 bằng chứng; quay lại tab đầu (chuyển sang rồi focus lại) → xác nhận số liệu tự
+   cập nhật KHÔNG cần bấm F5.
+
+## Cập nhật 2026-07-25 (tiếp 4) — Bug thật đã fix: "Đóng góp" kẹt/mất do trùng `record_id`
+cấp PHIẾU thay vì cấp MẪU trong module Kiểm soát quá trình
+
+### Bug đã phát hiện qua test tay lần 2 (sau 2 fix ở "tiếp 2"/"tiếp 3")
+
+Task "Đo 4 mẫu" (Thọ=chính, Nho=choàng): Nho đo mẫu 1/2/3 đều hiện "Đóng góp: 1" (không tăng
+lên 2, 3); Thọ đo mẫu thứ 4 vẫn hiện "Đóng góp: 0" — dù khối "Nhật ký xử lý" ghi đủ **4** dòng
+"Gắn bằng chứng" (3 của Nho lúc 18:38, 1 của Thọ lúc 18:42), tất cả cùng nhắc
+"Phiếu đo nhanh MT-250726/003".
+
+### Root cause — `record_id` dùng ID của cả PHIẾU, không phải từng DÒNG MẪU
+
+`kpi_task_evidence_links` có `UNIQUE(task_id, module_code, record_id)` — đúng 1 bộ 3 khóa này
+chỉ được tồn tại **1 dòng duy nhất** trong bảng, bất kể ai là người gắn (constraint không có
+`member_user_id`). Đây là thiết kế ĐÚNG cho 5 module hook còn lại (Điều xe/Sản lượng/Kho
+nguyên liệu: mỗi lần Lưu tạo 1 document/id MỚI; lưu lại document CŨ = cố ý dedupe, không
+credit 2 lần cho cùng 1 hành động).
+
+Nhưng `src/app/dashboard/process/measurements/page.tsx` (`handleSave()`) trước đây set
+`recordId = editingSheetId` (nhánh "thêm mẫu vào phiếu đã có") / `recordId = sheetId` (nhánh
+"tạo phiếu mới") — tức ID của CẢ PHIẾU (`quick_measurements` header), không phải ID từng dòng
+`quick_measurement_rows` (mẫu) vừa lưu. Vì tính năng "thêm mẫu vào phiếu đã có" vốn được thiết
+kế để **nhiều người cùng đo chung 1 phiếu trong ngày** (xem comment sẵn có trong chính file
+này, mục "Cập nhật phiên 3" ở `.claude/rules/06-module-production.md`), MỌI lần lưu — dù của
+Nho hay Thọ, dù mẫu thứ mấy — đều tạo ra CÙNG bộ khóa `(task_id, "process:measurement",
+sheetId)`. Chỉ lần INSERT đầu tiên thành công; các lần sau `ON CONFLICT (task_id, module_code,
+record_id) DO NOTHING` trong RPC `kpi_task_link_and_complete` âm thầm bỏ qua — **kể cả khi
+người gắn là NGƯỜI KHÁC với đóng góp thật khác** (giải thích chính xác vì sao Thọ hiện
+"Đóng góp: 0" dù đã đo — INSERT của Thọ bị conflict với dòng Nho đã tạo trước đó, chưa từng
+được ghi). `kpi_task_logs` vẫn ghi đủ 4 dòng vì đó là INSERT không điều kiện, độc lập hoàn
+toàn với evidence-link — giải thích tại sao log đúng nhưng "Đóng góp" (đếm từ
+`kpi_task_evidence_links`) sai.
+
+Đã rà thêm 5 module hook còn lại (Điều xe/Sản lượng/Kho nguyên liệu dùng ID document mới sinh
+mỗi lần Lưu — không dính bug này). Kiểm nghiệm (`handleSaveBatch`/`handleImport`, dùng
+`batchId` chung cho N lô trong 1 đợt) và Thành phẩm (2 luồng, cố ý chỉ lấy lô đầu tiên đại
+diện) có cùng KIỂU giới hạn nhưng **chưa có bằng chứng lỗi thật** — người dùng đã xác nhận
+**chỉ sửa Kiểm soát quá trình trong lần này**, không đụng 2 module kia.
+
+### Fix — đổi granularity bằng chứng từ "phiếu" sang "từng dòng mẫu", không đổi schema
+
+Không cần migration mới, không đổi `UNIQUE` constraint — mỗi dòng `quick_measurement_rows` có
+`id` (UUID) do Postgres tự sinh, dùng ID DÒNG làm `record_id` sẽ không bao giờ trùng giữa 2
+người/2 lượt khác nhau một cách tự nhiên, nên constraint hiện tại vẫn đúng vai trò "chặn
+double-credit đúng 1 dòng bị gắn 2 lần" mà không cần sửa.
+
+- `process/measurements/page.tsx`: 2 câu `.insert(rowPayloads)` (nhánh "tạo phiếu mới" và
+  nhánh "thêm mẫu vào phiếu đã có") thêm `.select("id")` để lấy lại ID thật của TỪNG dòng vừa
+  insert. `kpiPrompt` state đổi từ `{ recordId: string; recordLabel }` sang
+  `{ recordId: string[]; recordLabel }` — set bằng `(insertedRows || []).map(r => r.id)`,
+  `recordLabel` giữ nguyên theo phiếu (`Phiếu đo nhanh ${maPhieu}`) cho dễ đọc, chỉ khóa định
+  danh (`record_id`) đổi cấp độ. Nhánh "sửa toàn bộ phiếu đã có" không đổi (không gọi
+  `setKpiPrompt`, đúng từ trước — thuần chỉnh sửa dữ liệu cũ, không phải "đang làm việc mới").
+- `src/app/dashboard/_components/kpi-link-prompt.tsx`: prop `recordId: string` đổi thành
+  `recordId: string | string[]` — **backward-compatible**, 5 module hook còn lại vẫn truyền
+  `string` đơn, không cần sửa gì ở các file đó. `handleConfirm()` chuẩn hoá thành mảng, lặp
+  tuần tự gọi `linkKpiTaskEvidenceAndComplete()` cho từng id (cùng 1 `taskId` đã chọn 1 lần).
+  Nếu 1 lần gọi giữa chừng lỗi đúng thông điệp chứa "đã kết thúc" (task vừa đạt đủ mục tiêu số
+  lượng từ chính batch này) → dừng vòng lặp êm, không coi là lỗi thật (các bản ghi còn lại
+  không cần gắn nữa vì việc đã đóng). Banner thành công khi gắn >1 bản ghi thêm hậu tố
+  `"(đã gắn N/M bản ghi)"`.
+
+### Dữ liệu test cũ đã hỏng — không migrate, cần task mới để test lại
+
+Task "Đo 4 mẫu" (Thọ/Nho) hiện có đã mang `kpi_task_evidence_links` chỉ 1 dòng (do bug) và
+`tien_do` các thành viên bị kẹt sai theo dữ liệu đó — fix code không tự "sửa lại quá khứ".
+Không viết script sửa dữ liệu — cần tạo 1 task "Đo N mẫu" MỚI để test lại đúng kịch bản, hoặc
+admin xóa/hủy task cũ nếu không cần giữ.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint kpi-link-prompt.tsx process/measurements/page.tsx`, và
+`npm run build` đều sạch. Không cần chạy migration nào (không đổi schema).
+
+### Test tay — kết quả (2026-07-25, trên localhost)
+
+**Đã xác nhận PASS**: nhập nhiều mẫu vào CÙNG 1 phiếu (nhiều người/nhiều lượt) và nhập mẫu ở
+CÁC PHIẾU TÁCH RIÊNG trong cùng ngày — cả 2 kịch bản đều hiển thị đúng tỷ lệ "Đóng góp"/thanh
+tiến độ tổng. Bug chính (mục 1-2 dưới) coi như đã đóng.
+
+**Còn lại — chưa xác nhận riêng, nên test thêm nếu có dịp**:
+
+3. X thêm 2 dòng mẫu trong 1 lần Lưu (dùng nút "+ Thêm dòng" 2 lần rồi Lưu 1 lần) → xác nhận
+   CẢ 2 dòng đều được tính (banner hiện "đã gắn 2/2 bản ghi"), "Đóng góp" của X tăng thêm đúng
+   2, tổng tiến độ nhảy đúng theo số mẫu thật (không phải chỉ +1 như trước fix).
+4. Trường hợp 1 lần Lưu nhiều dòng khiến task đạt đủ mục tiêu GIỮA vòng lặp (vd còn thiếu 1
+   mẫu nhưng Lưu 1 lần 2 dòng) → xác nhận banner vẫn hiện đúng số đã gắn thành công, không báo
+   lỗi dù dòng thứ 2 bị RPC từ chối vì task đã đóng ở dòng đầu.
+5. Test 1 module khác (vd Điều xe, `recordId` vẫn truyền dạng string đơn) — xác nhận không có
+   regression, "Gắn & hoàn thành" vẫn hoạt động bình thường (đổi API `KpiLinkPrompt` sang
+   `string | string[]` không phá luồng cũ).
+
+## Cập nhật 2026-07-25 (tiếp 5) — Fix qua static review: chặn Nghiệm thu/Điều chỉnh tay cho
+việc mục tiêu số lượng + ngưỡng "chính" đổi FLOOR → CEIL (**cần chạy migration mới**)
+
+Rà soát code (không phải test tay) phát hiện thêm 1 bug thật: `kpi_task_evaluate` (RPC xử lý
+Nghiệm thu/Điều chỉnh/Trả về/Yêu cầu bổ sung) hoàn toàn không biết `kpi_tasks.muc_tieu_so_luong`
+tồn tại. UI (`kpi/tasks/[id]/page.tsx`) hiển thị 4 nút này **vô điều kiện** cho người giao, kể
+cả với việc mục tiêu số lượng chung — người giao có thể bấm "Nghiệm thu" tay cho từng thành
+viên với điểm tùy ý, đóng thẳng cả task "Hoàn thành" ngay cả khi tổng bằng chứng thật CHƯA đạt
+đủ mục tiêu, vô hiệu hóa hoàn toàn cơ chế công bằng vừa fix ở mục "tiếp 4" phía trên. Ví dụ: giao
+"Đo 4 mẫu" cho Thọ (chính) + Nho (choàng), Nho mới gắn 1/4 mẫu (25% thật) — người giao lỡ bấm
+"Nghiệm thu" cho cả 2 (điểm tùy chọn) → task nhảy "Hoàn thành" ngay dù thực tế mới 25%.
+
+**Migration `supabase/migrations/20260726_kpi_task_evaluate_quantity_guard.sql` (CẦN CHẠY THỦ
+CÔNG, CHƯA CHẠY)** — `CREATE OR REPLACE` lại cả 2 hàm (chữ ký không đổi, chỉ sửa thân hàm):
+
+1. `kpi_task_evaluate`: thêm chặn cứng — nếu `v_task.muc_tieu_so_luong IS NOT NULL` và
+   `p_hanh_dong IN ('nghiem_thu', 'dieu_chinh')` → `RAISE EXCEPTION`. "Trả về"/"Yêu cầu bổ sung"
+   vẫn cho phép (không đụng `tien_do`/`tien_do_nghiem_thu`, chỉ đổi `trang_thai` của cả task).
+   Điểm A/trạng thái hoàn thành của việc mục tiêu số lượng từ nay chỉ đi qua đúng 1 đường:
+   `kpi_task_link_and_complete` (gắn bằng chứng).
+2. `kpi_task_link_and_complete`: ngưỡng "chính" đổi từ `FLOOR(kỳ_vọng * 0.5)` sang
+   `CEIL(kỳ_vọng * 0.5)` — theo yêu cầu người dùng "ngưỡng tối thiểu của người chính phải bằng
+   hoặc lớn hơn 50% số việc". `FLOOR` có thể cho ra ngưỡng THẤP HƠN 50% thật khi kỳ vọng lẻ (vd
+   kỳ_vọng=3 → `FLOOR(1.5)=1`, chỉ 33.3%; kỳ_vọng=5 → `FLOOR(2.5)=2`, chỉ 40%) — vi phạm đúng
+   yêu cầu ">= 50%". `CEIL` đảm bảo toán học `ceil(x) >= x` nên luôn >= đúng 50%, chỉ có thể
+   overshoot (kỳ_vọng=3 → `CEIL(1.5)=2` = 66.7%), không bao giờ undershoot. Nhánh "kỳ vọng < 1
+   (nhiều thành viên hơn mục tiêu) → chính tự động đạt" tách thành `IF v_ky_vong < 1 THEN` riêng
+   thay vì suy ra từ "ngưỡng <= 0" như bản cũ — vì `CEIL` không bao giờ cho ra ngưỡng <= 0 với kỳ
+   vọng dương (khác `FLOOR`, có thể ra 0).
+
+**`src/lib/kpi-tasks.ts`'s `computeChinhThreshold()`** đổi theo đúng công thức CEIL mới (dùng để
+hiển thị preview ngưỡng ở form tạo việc và trang chi tiết, không round-trip DB).
+
+**`kpi/tasks/[id]/page.tsx`**: 2 nút "Nghiệm thu"/"Điều chỉnh" trong khối hành động của mỗi
+thành viên giờ chỉ hiện khi `task.muc_tieu_so_luong === null` — với việc mục tiêu số lượng,
+thay bằng dòng chữ nhỏ "Điểm tự tính qua gắn bằng chứng — không nghiệm thu/điều chỉnh tay". Nút
+"Trả về"/"Yêu cầu bổ sung" giữ nguyên, luôn hiện.
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay** — cần: chạy
+migration trên Supabase SQL Editor trước; tạo 1 việc mục tiêu số lượng, xác nhận 2 nút "Nghiệm
+thu"/"Điều chỉnh" không còn hiện cho thành viên của việc đó (chỉ còn "Trả về"/"Yêu cầu bổ sung");
+thử gọi thẳng RPC `kpi_task_evaluate` với `p_hanh_dong='nghiem_thu'` cho 1 task có
+`muc_tieu_so_luong` (qua devtools) → phải bị chặn đúng lỗi mới; xác nhận việc KHÔNG có mục tiêu
+số lượng vẫn Nghiệm thu/Điều chỉnh bình thường (regression check).
+
+## Cập nhật 2026-07-25 (tiếp 6) — Ngưỡng "chính" sửa LẦN 2: tính trên TỔNG mục tiêu, không chia
+theo số người (test tay lần 1 của mục "tiếp 5" cho kết quả chưa đúng ý)
+
+Test tay bản "CEIL(kỳ vọng cá nhân × 0.5)" ở mục "tiếp 5" cho đúng kịch bản: mục tiêu 3 mẫu, 2
+thành viên (Thọ=chính, Nho=choàng) — ngưỡng hiển thị vẫn ra **1** (kỳ vọng mỗi người = 3/2 = 1.5,
+`CEIL(1.5×0.5)=CEIL(0.75)=1`), tức chỉ 33% TỔNG mục tiêu, không đạt "≥ 50% số việc" như yêu cầu.
+Nguyên nhân: công thức đó lấy 50% của "kỳ vọng cá nhân" (mục tiêu chia đều cho số người), nên
+nhóm càng đông người thì ngưỡng thật của người chính so với TỔNG việc càng tụt xuống thấp (case
+cực đoan: mục tiêu 4 chia 10 người choàng, kỳ vọng mỗi người 0.4 < 1 → chính coi như auto-pass dù
+0 đóng góp).
+
+**Đã sửa lại đúng theo yêu cầu gốc**: ngưỡng của "chính" giờ tính thẳng trên TỔNG
+`muc_tieu_so_luong`, **không** chia theo số thành viên nữa — `ngưỡng = CEIL(muc_tieu_so_luong ×
+0.5)`. Người chính phải luôn tự đóng góp ít nhất một nửa TOÀN BỘ việc, bất kể có bao nhiêu người
+choàng hỗ trợ. Với ví dụ trên: ngưỡng = `CEIL(3×0.5) = 2` (66.7% tổng, đạt yêu cầu ≥50%).
+
+Vì `muc_tieu_so_luong` luôn nguyên dương (`CHECK > 0`), `CEIL(x×0.5)` luôn ≥ 1 — bỏ hẳn nhánh đặc
+biệt "kỳ vọng < 1 → auto-pass" của bản trước (khái niệm "kỳ vọng cá nhân" không còn dùng cho công
+thức này nữa).
+
+- **Migration `20260726_kpi_task_evaluate_quantity_guard.sql` được SỬA TRỰC TIẾP** (không tạo file
+  mới) — an toàn vì `CREATE OR REPLACE FUNCTION` là idempotent, chạy lại file này (dù trước đó đã
+  chạy bản "kỳ vọng cá nhân" hay chưa từng chạy) đều cho đúng kết quả cuối cùng. **Vẫn cần chạy
+  (lại) file này trên Supabase SQL Editor.**
+- `kpi_task_link_and_complete`: bỏ hẳn biến `v_active_count`/`v_ky_vong` (không còn dùng ở đâu
+  trong hàm) — `v_nguong_chinh := CEIL(v_task.muc_tieu_so_luong::numeric * 0.5)` tính thẳng, không
+  qua bước chia số người.
+- `src/lib/kpi-tasks.ts`'s `computeChinhThreshold()` đổi chữ ký — bỏ tham số `activeMemberCount`
+  (không còn cần thiết): `computeChinhThreshold(mucTieuSoLuong: number): number`. Cả 2 call site
+  (`kpi-task-form-modal.tsx`, `kpi/tasks/[id]/page.tsx`) đã cập nhật theo chữ ký mới; biến
+  `activeMemberCount` ở trang chi tiết đã bỏ hẳn (không còn nơi nào dùng).
+- Text giải thích ở form tạo việc (`kpi-task-form-modal.tsx`) đổi từ "50% phần việc kỳ vọng của
+  họ" sang "50% TỔNG mục tiêu"; dòng preview ngưỡng đổi từ "(trên tổng X, chia Y người)" sang
+  "(= 50% làm tròn lên của tổng X)".
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch.
+
+### Test tay — kết quả (2026-07-26)
+
+**Đã chạy migration `20260726_kpi_task_evaluate_quantity_guard.sql` trên Supabase, đã xác nhận
+PASS đúng kịch bản gốc** (mục tiêu 3 mẫu/2 người) — ngưỡng của người chính hiển thị đúng **2**
+(không còn 1), khớp yêu cầu "≥ 50% tổng số việc". Coi bug ngưỡng "chính" là đã đóng.
+
+**Còn lại — chưa xác nhận riêng, nên test thêm nếu có dịp** (không chặn tiếp tục các việc khác):
+
+- Case đông người (vd mục tiêu 4, 5 người) → ngưỡng phải ra `CEIL(4×0.5)=2`, không tụt xuống 1
+  hay 0 chỉ vì nhóm đông.
+- Case cũ "kỳ vọng < 1" (nhiều thành viên hơn mục tiêu, vd mục tiêu 2 cho 5 người) → xác nhận
+  không còn auto-pass ngầm, chính vẫn cần đóng góp `CEIL(2×0.5)=1` để đạt 100%.
+- 2 nút "Nghiệm thu"/"Điều chỉnh" (mục "tiếp 5") — xác nhận đã biến mất khỏi thành viên của việc
+  mục tiêu số lượng, chỉ còn "Trả về"/"Yêu cầu bổ sung"; thử gọi thẳng RPC `kpi_task_evaluate`
+  với `p_hanh_dong='nghiem_thu'` cho task có `muc_tieu_so_luong` (qua devtools) → phải bị chặn.
+- Task KHÔNG đặt mục tiêu số lượng vẫn Nghiệm thu/Điều chỉnh bình thường (regression check).
+
+## Fix nhỏ 2026-07-25 — Bell badge "Việc chờ nghiệm thu" cho admin
+
+Đã xác nhận qua trao đổi trực tiếp với người dùng (2 câu hỏi quyết định trước khi
+code tiếp Phase 1b):
+
+- Bell badge: `getKpiTasks()` đếm `approvalCount` gồm cả task mà admin KHÔNG phải
+  `nguoi_giao_id` (admin thấy toàn bộ hàng chờ duyệt qua `isAdmin` OR-condition có
+  sẵn), nhưng link luôn trỏ `?tab=mine` — admin bấm vào không thấy đúng việc đó
+  trong tab "Việc của tôi" (`visibleTasks` lọc theo `nguoi_giao_id === user.id ||
+  myActiveTaskIds.has(t.id)`, không có nhánh admin-thấy-tất-cả). Đã fix: thêm biến
+  `approvalLink` — `isAdmin` → `?tab=all`, còn lại giữ `?tab=mine` như cũ. Chỉ đổi
+  link của đúng 1 item "Việc chờ nghiệm thu"; 3 item còn lại (`pendingCount`,
+  `dueSoonCount`, `overdueCount`) không có vấn đề tương tự (đều lọc theo
+  `iAmMember || iAmGiver`, không có nhánh admin-mở-rộng) nên giữ nguyên `?tab=mine`.
+- `kpi.evaluate` permission (đã seed/khai báo nhưng chưa nơi nào dùng để gate —
+  Nghiệm thu/Điều chỉnh/Trả về hiện chỉ cho `nguoi_giao_id` hoặc admin): **xác nhận
+  đây là cố ý, giữ nguyên không dùng permission này** — không mở rộng thêm ai khác
+  ngoài đúng người giao việc/admin được xử lý các bước này, dù họ có được cấp
+  `kpi.evaluate` hay không. Không cần sửa gì thêm cho quyết định này.
+
+## Cập nhật Phase 1b (2026-07-25) — Chuyển giao việc (`kpi_task_transfers`), đã code xong
+
+Migration `supabase/migrations/20260727_kpi_task_transfers.sql` (**cần chạy thủ
+công**, chưa chạy) — theo đúng schema đã phác thảo ở mục "Database Schema" phía
+trên, không lệch cột nào.
+
+### RLS quan trọng — người được mời (chưa chấp nhận) phải xem được task
+
+`kpi_tasks_select` trước đây chỉ cho người giao/active member/admin/`kpi.view_all`
+đọc — người đang được mời chuyển giao (`den_nguoi_id`, CHƯA phải active member cho
+tới khi họ bấm "Chấp nhận") sẽ bị chặn xem trang chi tiết (`fetchKpiTaskDetail`
+báo "Không tìm thấy công việc") đúng lúc họ cần xem để quyết định phản hồi. Đã
+thêm hàm `SECURITY DEFINER` mới `kpi_is_task_pending_transfer_target(task_id,
+user_id)` (mirror `kpi_is_task_owner`/`kpi_is_task_active_member`, tránh vòng
+tham chiếu chéo RLS giữa `kpi_tasks` và `kpi_task_transfers`) và OR thêm điều
+kiện này vào `kpi_tasks_select` (DROP + CREATE lại policy). Không đụng
+`kpi_task_members_select`/`kpi_task_logs_select` — người được mời chưa có dòng
+`kpi_task_members` nào nên không cần mở rộng 2 policy đó (đúng, vì họ chưa "làm"
+gì trên task để cần xem log/evidence).
+
+### 3 RPC `SECURITY DEFINER`
+
+- `kpi_task_transfer_request(p_task_id, p_den_nguoi_id, p_ghi_chu)` — chỉ chính
+  người đang là thành viên `is_active=true` gọi được cho chính mình
+  (`auth.uid()`, không tin tham số). Chặn: task đã `hoan_thanh`/`huy`, đã quá
+  `han_hoan_thanh`, `kpi_tasks.da_chuyen_giao=true` (mỗi task chỉ chuyển 1 lần —
+  đúng cột đã có sẵn từ Phase 1a, trước đó chưa được RPC nào dùng tới), chuyển cho
+  chính mình, người nhận không active/khác nhà máy, người nhận đã là active
+  member, hoặc đã có 1 yêu cầu `cho_duyet` khác từ chính người gửi cho đúng task
+  đó. Trả về `id` của dòng vừa tạo.
+- `kpi_task_transfer_respond(p_transfer_id, p_chap_nhan)` — chỉ chính
+  `den_nguoi_id = auth.uid()`. Từ chối: chỉ đổi `trang_thai='tu_choi'`. Chấp
+  nhận: hạ `is_active=false` dòng `kpi_task_members` của `tu_nguoi_id`, upsert
+  dòng cho `den_nguoi_id` (insert mới hoặc update lại nếu đã tồn tại dòng cũ do
+  UNIQUE(task_id,user_id) — hiếm nhưng xử lý an toàn cả 2 nhánh), **giữ nguyên
+  `phan_loai`** của dòng gốc (chính/choàng gắn với bản chất việc, không phải
+  người — đúng quyết định đã ghi sẵn trong plan gốc), set
+  `kpi_tasks.da_chuyen_giao=true`, ghi 1 dòng `kpi_task_logs` hành động mới
+  `'chuyen_giao'` (`member_user_id = nguoi_thuc_hien_id = den_nguoi_id`, tự resolve
+  tên người gửi qua `profiles.full_name`/`username` để nhúng vào `noi_dung`).
+- `kpi_task_transfer_cancel(p_transfer_id)` — chỉ chính `tu_nguoi_id = auth.uid()`,
+  chỉ khi còn `cho_duyet` — cho phép người gửi tự rút lại yêu cầu trước khi có
+  phản hồi (không có trong plan gốc, thêm vì UX: nếu không có cách hủy, 1 yêu cầu
+  gửi nhầm sẽ chặn vĩnh viễn khả năng gửi yêu cầu khác cho tới khi người kia phản
+  hồi). Dùng chung giá trị `trang_thai='tu_choi'` với nhánh từ chối của người nhận
+  — phân biệt bằng RPC nào được gọi, không thêm trạng thái thứ 4 vào CHECK
+  constraint.
+- Thêm `'chuyen_giao'` vào CHECK constraint `kpi_task_logs.hanh_dong` (DROP +
+  ADD CONSTRAINT, cùng kỹ thuật đã dùng ở `20260725_kpi_task_evidence_links.sql`).
+
+### `src/lib/kpi-tasks.ts`
+
+Thêm `KpiTransferStatus`, `KpiTaskTransfer`, `requestKpiTaskTransfer()`,
+`respondKpiTaskTransfer()`, `cancelKpiTaskTransfer()`, `fetchTaskTransfers(taskId)`
+(toàn bộ yêu cầu của 1 task, mọi trạng thái), `fetchPendingIncomingTransfers(userId)`
+(chỉ `cho_duyet`, dùng cho Bell + danh sách). `KpiTaskLogAction`/`KPI_ACTION_LABEL`
+thêm `chuyen_giao: "Chuyển giao"`.
+
+### UI trang chi tiết (`kpi/tasks/[id]/page.tsx`)
+
+- Component mới `TransferModal` (mirror `EvaluateModal`) — `<select>` chọn người
+  nhận từ `candidates` đã loại trừ các active member hiện tại, ô ghi chú tuỳ chọn.
+- Banner tím đầu trang (dưới card thông tin task, trên card "Người thực hiện") khi
+  `myIncomingTransfer` tồn tại (tôi là `den_nguoi_id` của 1 yêu cầu `cho_duyet`) —
+  hiện tên người gửi, tiến độ giữ nguyên, ghi chú, 2 nút Chấp nhận/Từ chối.
+- Mỗi dòng member: nếu có yêu cầu `cho_duyet` đang chờ do đúng người đó gửi
+  (`outgoingTransferByMember`, map theo `tu_nguoi_id`) → hiện dòng nhỏ "Đang chờ
+  {tên} phản hồi", kèm nút "Hủy yêu cầu" nếu đó là chính mình. Nút "Chuyển giao"
+  (mở `TransferModal`) chỉ hiện cho `isMe && m.is_active && open &&
+  !task.da_chuyen_giao && !outTransfer` — độc lập với khối nút
+  Nghiệm thu/Điều chỉnh/Trả về/Yêu cầu bổ sung (khối đó vẫn chỉ dành cho
+  `isOwner`, không đổi).
+- Refetch on focus/visibility (đã có sẵn từ Phase 1a.1) tự động bao gồm
+  `fetchTaskTransfers` — không cần thêm effect riêng.
+
+### UI danh sách (`kpi/tasks/page.tsx`)
+
+- `pendingIncomingTaskIds` (Set, từ `fetchPendingIncomingTransfers(uid)`) được
+  OR thêm vào điều kiện lọc tab "mine" (`visibleTasks`) — nếu không, người được
+  mời (chưa phải active member) sẽ không thấy task đó trong "Việc của tôi" dù RLS
+  đã cho phép họ đọc được, và link Bell `?tab=mine` sẽ dẫn tới danh sách trống
+  đúng việc họ cần xử lý.
+- Card task có badge tím nhỏ "Có lời mời chuyển giao chờ bạn phản hồi" khi
+  `pendingIncomingTaskIds.has(t.id)`.
+
+### Bell (`module-tasks.ts`)
+
+Thêm item "Lời mời chuyển giao chờ phản hồi" — đếm qua
+`kpi_task_transfers` (`den_nguoi_id=uid AND trang_thai='cho_duyet'`, `count:
+"exact", head: true`), độc lập với vòng lặp `kpi_tasks` hiện có (vì người được
+mời chưa có dòng `kpi_task_members` active nên không lọt qua các item khác). Link
+`?tab=mine` — hoạt động đúng nhờ thay đổi ở `visibleTasks` nêu trên.
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch (đã chạy sau khi hoàn
+tất cả 5 phần: migration, `kpi-tasks.ts`, trang chi tiết, trang danh sách, Bell).
+
+### Test tay — kết quả (2026-07-26)
+
+**Đã chạy migration `20260727_kpi_task_transfers.sql` trên Supabase, đã test trên
+localhost: chuyển giao và chấp nhận/từ chối hoạt động đúng như ý.** Coi luồng
+chính (gửi yêu cầu → chấp nhận → dữ liệu chuyển đúng người; gửi yêu cầu → từ chối
+→ giữ nguyên người cũ) là đã xác nhận, không cần lặp lại.
+
+**Còn lại — chưa xác nhận riêng, nên test thêm nếu có dịp** (không chặn tiếp tục
+các việc khác): mục 5 ("Hủy yêu cầu" tự rút lại trước khi có phản hồi), mục 6
+(chặn đúng khi quá hạn/`da_chuyen_giao=true`), mục 7 (số đếm Bell chính xác), mục
+8 (race 2 yêu cầu chuyển giao đồng thời trên task nhiều thành viên).
+
+1. Chạy `supabase/migrations/20260727_kpi_task_transfers.sql` trên Supabase SQL
+   Editor.
+2. Đăng nhập tài khoản A (đang là active member 1 task một-lần, còn hạn, chưa
+   `da_chuyen_giao`) → bấm "Chuyển giao" → chọn tài khoản B → gửi → xác nhận dòng
+   member của A hiện "Đang chờ B phản hồi" + nút "Hủy yêu cầu"; nút "Chuyển giao"
+   biến mất trong lúc đang chờ.
+3. Đăng nhập tài khoản B → vào `/dashboard/kpi/tasks?tab=mine` → xác nhận thấy
+   đúng task đó kèm badge "Có lời mời chuyển giao chờ bạn phản hồi" (dù B CHƯA
+   phải active member) → mở chi tiết → xác nhận banner tím hiện đúng tên A + tiến
+   độ giữ nguyên → bấm "Chấp nhận" → xác nhận: dòng A chuyển "Đã chuyển giao"
+   (mờ, `is_active=false`), dòng B xuất hiện active với đúng tiến độ đã giữ, badge
+   `phan_loai` (nếu có) giữ nguyên như của A, `kpi_tasks.da_chuyen_giao=true`
+   (nút "Chuyển giao" không còn khả dụng cho B nữa), timeline có dòng "Chuyển
+   giao — Đã nhận chuyển giao từ {tên A}".
+4. Test nhánh Từ chối: lặp lại bước 2-3 nhưng B bấm "Từ chối" → xác nhận A vẫn còn
+   active với tiến độ cũ, `da_chuyen_giao` vẫn `false`, nút "Chuyển giao" của A
+   xuất hiện lại (được gửi yêu cầu mới).
+5. Test "Hủy yêu cầu" (A tự hủy trước khi B phản hồi) → xác nhận trạng thái quay
+   về như trước khi gửi, A gửi lại được yêu cầu khác.
+6. Test chặn: task đã quá `han_hoan_thanh` → nút "Chuyển giao" không hiện (do
+   `open` check ở tầng `isTaskOpen`, cần xác nhận cả trường hợp `open=true`
+   nhưng đã quá hạn — RPC vẫn phải tự chặn nếu bằng cách nào đó nút vẫn hiện);
+   task đã `da_chuyen_giao=true` (sau bước 3) → không ai còn thấy nút "Chuyển
+   giao" nữa dù đổi sang tài khoản khác đang active member (task multi-member).
+7. Test Bell: tài khoản B trước khi vào trang chi tiết → xác nhận badge "Lời mời
+   chuyển giao chờ phản hồi" hiện đúng số ở mọi route `/dashboard/kpi*`.
+8. Test task nhiều thành viên: 2 người cùng active, cả 2 cùng gửi yêu cầu chuyển
+   giao cho 2 người khác nhau gần như đồng thời → người nhận đầu tiên chấp nhận
+   trước → xác nhận `da_chuyen_giao=true` → người nhận thứ 2 bấm "Chấp nhận" →
+   phải bị chặn với lỗi "Công việc này đã được chuyển giao trước đó."; yêu cầu
+   thứ 2 vẫn ở trạng thái `cho_duyet` treo lại (không tự động huỷ) — xác nhận đây
+   là hành vi chấp nhận được, không phải bug (người giao/admin cần biết để xử lý
+   tay nếu cần).
+
+## Cập nhật (2026-07-26) — Việc định kỳ theo nhóm + Người thay thế tạm thời, đã code xong
+
+Migration `supabase/migrations/20260728_kpi_task_templates.sql` (**cần chạy thủ
+công, chưa chạy**) — theo đúng schema đã phác thảo ở plan gốc, với 1 lệch có chủ
+đích: **KHÔNG có cột `auto_action_type`**. Mục "Tự động hoàn thành khi có thao tác
+nghiệp vụ khớp" (mục 3 của plan gốc) đã bị loại bỏ hoàn toàn khỏi thiết kế module
+từ trước (thay bằng "Gắn bản ghi tại chỗ", Phase 1a.1) — task sinh từ template
+hoạt động HỆT task tạo tay một-lần: người phụ trách tự thao tác ở đúng module
+nghiệp vụ rồi bấm "Gắn & hoàn thành" ở banner (`KpiLinkPrompt` đã tự tìm mọi task
+đang mở của họ qua `fetchOpenKpiTasksForUser`, không phân biệt nguồn gốc task) —
+không cần thêm cơ chế tự động riêng cho việc định kỳ.
+
+### Schema
+
+- `kpi_task_templates` — `group_id` (nhóm quyết định phân loại chính/choàng, KHÔNG
+  bắt buộc người nhận phải thuộc nhóm này), `assigned_user_id` (người nhận cố
+  định), `tieu_de`/`mo_ta`, `apply_weekdays INTEGER[]` (1=Thứ 2..7=CN, ISODOW),
+  `gio_han TIME` (hạn trong ngày), `yeu_cau_bao_cao`, `is_active`, `created_by`.
+  RLS: SELECT rộng trong factory (minh bạch); INSERT/UPDATE/DELETE chỉ
+  `kpi.manage_config`/admin (seed hiện tại: chỉ `admin` có quyền này, `manager`
+  không).
+- `kpi_user_substitutions` — `original_user_id`/`substitute_user_id`,
+  `template_id` NULL (áp dụng mọi việc định kỳ của người đó) hoặc có giá trị (chỉ 1
+  việc cụ thể), `tu_ngay`/`den_ngay`, `ly_do`, `created_by`. RLS SELECT mở rộng
+  hơn plan gốc: thêm `created_by = auth.uid()` (không chỉ
+  `original_user_id`/`substitute_user_id`/admin/`kpi.view_all`) — để người có
+  `kpi.assign` đăng ký HỘ người khác vẫn xem/hủy lại được đăng ký đó sau này, nếu
+  không họ sẽ mất quyền nhìn thấy chính đăng ký mình vừa tạo. INSERT: tự đăng ký
+  (`original_user_id = auth.uid()`) hoặc admin/`kpi.assign` đăng ký hộ. DELETE:
+  `original_user_id`/`created_by`/admin.
+- `kpi_tasks.template_id` (nullable, `ON DELETE SET NULL` — xóa template không xóa
+  lịch sử task/log đã sinh ra từ nó) + unique index `(template_id, ngay_giao) WHERE
+  template_id IS NOT NULL` — chặn sinh trùng cho cùng 1 ngày.
+
+### RPC "sinh lười" `kpi_ensure_today_task_instances(p_factory_id)`
+
+`SECURITY DEFINER`, gọi được bởi bất kỳ profile active nào của đúng nhà máy
+(không cần quyền đặc biệt — đây là thao tác "hộ hệ thống"). Với mỗi template
+active có `EXTRACT(ISODOW FROM CURRENT_DATE)` nằm trong `apply_weekdays` và chưa
+sinh cho hôm nay:
+
+1. Resolve người thay thế — ưu tiên dòng `kpi_user_substitutions` khớp đúng
+   `template_id` cụ thể hơn dòng `NULL` (áp dụng chung), trong khoảng
+   `tu_ngay <= hôm nay <= den_ngay`. Không có dòng nào khớp → dùng
+   `template.assigned_user_id` gốc.
+2. Tính `phan_loai` (chính/choàng) bằng cách so `template.group_id` với nhóm
+   `is_primary=true` HIỆN TẠI của **người cuối cùng nhận việc** (người thay thế
+   nếu có — đúng người thực sự làm việc hôm đó, không phải người gốc).
+3. Sinh mã `CV-ddmmyy/XXX` theo đúng counter tuần tự dùng chung với task tạo tay
+   (đếm `LIKE prefix/%` trong `kpi_tasks`, không phải mã riêng cho task định kỳ) —
+   để task định kỳ và task một-lần cùng chia sẻ 1 dãy số liền mạch, dễ theo dõi.
+4. INSERT `kpi_tasks` (`nguoi_giao_id = template.created_by`,
+   `han_hoan_thanh = hôm nay lúc gio_han`) + `kpi_task_members` (1 dòng, đúng
+   `user_id`/`phan_loai` đã resolve).
+
+Gọi ở đâu: `dashboard/layout.tsx` bootstrap, effect riêng phụ thuộc
+`user?.id`/`user?.factory_id` — dynamic `import("@/lib/kpi-templates")` (tránh kéo
+thêm code vào bundle chính cho user không dùng module KPI), cờ `sessionStorage`
+`kpi_ensured_${factory_id}_${todayISO}` để đỡ round-trip khi mở nhiều trang trong
+cùng ngày (RPC tự idempotent qua unique index nên gọi lặp không hại, cờ chỉ tối
+ưu). Lỗi bị nuốt im lặng (`.catch(() => {})`) — không được làm chậm/gãy bootstrap
+chính.
+
+### `src/lib/kpi-templates.ts` (file mới, tách riêng khỏi `kpi-tasks.ts` đã khá lớn)
+
+Types `KpiTaskTemplate`/`KpiUserSubstitution`/`KpiGroupOption`, hằng số
+`KPI_WEEKDAY_OPTIONS`/`KPI_WEEKDAY_LABEL`, CRUD đầy đủ cho cả 2 bảng,
+`loadAllPersonnelGroups(factoryId)` (mọi nhóm active — khác
+`loadKpiTaskCandidates().groups` vốn lọc chỉ nhóm có thành viên đã liên kết
+profile, không phù hợp cho dropdown "Nhóm" của template vì nhóm mới tạo có thể
+chưa có ai), `ensureTodayKpiTaskInstances(factoryId)` (wrapper RPC, ném lỗi bình
+thường — caller ở `layout.tsx` tự `.catch(() => {})`).
+
+### UI
+
+- `kpi-shell.tsx` thêm tab "Việc định kỳ" (icon `Repeat`) trỏ
+  `/dashboard/kpi/templates` — luôn hiển thị (không ẩn theo quyền ở tầng shell,
+  trang tự gate nội dung bên trong).
+- `/dashboard/kpi/templates/page.tsx` — gate cơ bản `kpi.view` (như mọi trang
+  KPI khác), 2 sub-tab:
+  - **"Việc định kỳ"**: danh sách card (nhóm, người nhận, tiêu đề, chip 7 thứ,
+    giờ hạn, yêu cầu báo cáo, trạng thái Đang áp dụng/Tạm ngưng) — CRUD (Thêm/
+    Sửa/Tạm ngưng-Kích hoạt lại/Xóa) chỉ hiện khi `canManageTemplates` (admin
+    hoặc `kpi.manage_config`); người không có quyền vẫn xem được danh sách
+    (minh bạch, không có nút thao tác).
+  - **"Người thay thế tạm thời"**: danh sách đăng ký (người đi vắng → người thay
+    thế, khoảng ngày, phạm vi áp dụng, lý do), nút "Đăng ký" luôn hiện cho mọi
+    người (tự đăng ký cho chính mình); dropdown "Người đi vắng" chỉ mở khóa chọn
+    người khác khi `canChooseOriginal` (admin/`kpi.assign`), còn lại khóa cứng =
+    chính mình. Nút "Hủy đăng ký" mỗi dòng chỉ hiện khi
+    `isAdmin || original_user_id === mình || created_by === mình`.
+  - `TemplateFormModal`/`SubstitutionFormModal` (2 file trong
+    `templates/_components/`) — mirror phong cách `KpiTaskFormModal` đã có.
+    `SubstitutionFormModal` có 2 effect tự reset: bỏ chọn template không còn
+    khớp `originalUserId` mới, và gỡ `substituteUserId` nếu trùng
+    `originalUserId` sau khi đổi (tránh bug `<select>` hiển thị sai do value
+    không khớp option nào — đã ghi trong `feedback_code.md`).
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file mới/đã sửa), và `npm run build`
+đều sạch — `/dashboard/kpi/templates` build thành công (static).
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Chạy `supabase/migrations/20260728_kpi_task_templates.sql` trên Supabase SQL
+   Editor.
+2. Admin tạo 1 việc định kỳ thuộc nhóm "Đội xe cơ khí", giao cho 1 người CÓ nhóm
+   chính KHÁC nhóm đó (test nhãn "choàng" khi sinh), thứ áp dụng gồm hôm nay,
+   giờ hạn bất kỳ → mở app bằng TÀI KHOẢN BẤT KỲ (không cần là người được giao)
+   → xác nhận `kpi_tasks` hôm nay tự sinh đúng 1 task (kiểm tra qua
+   `/dashboard/kpi/tasks?tab=all` nếu có quyền, hoặc trực tiếp DB), mở lại nhiều
+   lần/nhiều tài khoản không tạo trùng.
+3. Sửa nhóm chính của người được giao khớp đúng `group_id` của template rồi xóa
+   task hôm nay (hoặc đợi sang ngày khác) → mở app lại → xác nhận task mới sinh
+   ra có `phan_loai='chinh'`.
+4. Test "về tua": đăng ký `kpi_user_substitutions` cho người đang được giao,
+   khoảng ngày phủ từ NGÀY MAI (để không ảnh hưởng task hôm nay đã sinh trước
+   khi đăng ký — đúng thiết kế, sửa riêng ngày đó phải dùng "Chuyển giao" ở
+   Phase 1b), người thay thế là ai đó khác → giả lập/đợi sang ngày mai, đăng
+   nhập TRƯỚC người thay thế mở app → xác nhận instance hôm đó sinh thẳng cho
+   người thay thế, `phan_loai` tính theo nhóm chính của NGƯỜI THAY THẾ (không
+   phải người gốc). Hết `den_ngay` → xác nhận ngày kế tiếp tự quay lại đúng
+   người gốc.
+5. Test đăng ký thay thế giới hạn 1 template cụ thể (`template_id` có giá trị) —
+   xác nhận chỉ đúng việc định kỳ đó bị ảnh hưởng, các việc định kỳ khác của
+   cùng người gốc vẫn sinh bình thường cho người gốc.
+6. Test quyền: tài khoản `role=user` không có `kpi.manage_config` → vào tab
+   "Việc định kỳ" vẫn xem được danh sách nhưng không thấy nút Thêm/Sửa/Xóa; vẫn
+   tự đăng ký "Người thay thế" được cho chính mình (dropdown "Người đi vắng"
+   khóa cứng = chính họ).
+7. Test xóa 1 template đã từng sinh task — xác nhận các task/log lịch sử cũ vẫn
+   còn nguyên (không bị xóa theo), chỉ không sinh thêm task mới từ ngày mai.
+8. Đăng nhập đúng người đang phụ trách (gốc hoặc thay thế) của 1 task định kỳ đã
+   sinh → vào đúng module nghiệp vụ tương ứng thao tác lưu 1 bản ghi → xác nhận
+   banner "Gắn & hoàn thành" xuất hiện đúng như task một-lần bình thường, gắn
+   xong task chuyển "Hoàn thành".
+
+## Kế hoạch phiên sau (2026-07-26, tiếp) — Bug/hiểu lầm thật đã phát hiện khi test tay đầu tiên
+
+Người dùng test ngay sau khi code xong (chưa chạy migration `20260728_...` — chỉ
+mới đọc code/suy luận, **CHƯA verify bằng dữ liệu DB thật**) và báo lại 2 tình
+huống. Cả 2 đều **có lời giải thích hợp lý từ chính logic RPC đã viết**, nhưng
+**session này chưa xác nhận bằng cách query DB thật** — việc đầu tiên của phiên
+sau là xác nhận đúng nguyên nhân trước khi sửa bất cứ gì.
+
+### Tình huống 1 — "Chưa biết phân việc tự động hay phải lãnh đạo kích hoạt; vừa
+tạo xong, đăng xuất/đăng nhập lại liệu có tác dụng không?"
+
+**Trả lời từ code**: phân việc là **hoàn toàn tự động, không có bước "kích
+hoạt"** — bất kỳ ai (không riêng lãnh đạo) mở 1 trang Dashboard bất kỳ trong
+ngày sẽ tự kích `kpi_ensure_today_task_instances` qua effect trong
+`dashboard/layout.tsx`.
+
+Nhưng: **đăng xuất rồi đăng nhập lại KHÔNG có tác dụng re-trigger**, vì cờ chặn
+gọi lặp là `sessionStorage` (`kpi_ensured_${factory_id}_${todayISO}`) — cờ này
+sống theo **tab trình duyệt**, hoàn toàn độc lập với trạng thái đăng nhập. Nếu
+tab đó đã tự sinh việc 1 lần trong ngày (trước khi tạo template mới), việc mới
+tạo sau đó **sẽ không được sinh ngay** trong tab đó — phải mở tab mới/trình
+duyệt ẩn danh, hoặc đợi sang ngày hôm sau, cờ mới hết hạn.
+
+**Việc cần làm — đã có hướng giải quyết rõ, chỉ cần code**: thêm nút **"Sinh
+việc hôm nay ngay"** trong `/dashboard/kpi/templates` (chỉ hiện khi
+`canManageTemplates`) — gọi thẳng `ensureTodayKpiTaskInstances(factoryId)`
+(không qua cờ `sessionStorage`, không cần tab mới), hiện toast "Đã sinh N việc
+mới hôm nay". Giải quyết dứt điểm cả nhu cầu test lẫn nhu cầu thực tế (admin
+tạo template lúc 9h sáng, muốn có hiệu lực ngay, không muốn phụ thuộc "may rủi"
+ai đó mở tab mới).
+
+### Tình huống 2 — RyTa có việc cố định "Tạo ngăn", đăng ký Hữu Thọ thay thế
+RyTa, nhưng Hữu Thọ tạo ngăn xong KHÔNG thấy việc đó trong dropdown "Gắn bằng
+chứng"
+
+**Giả thuyết có cơ sở vững nhất từ code (chưa verify DB)**: mỗi template chỉ
+sinh **đúng 1 task/ngày**, chặn bằng unique index `(template_id, ngay_giao)` +
+điều kiện `IF EXISTS (... WHERE template_id=... AND ngay_giao=hôm nay) THEN
+CONTINUE` trong RPC. Khi RyTa "có việc Tạo ngăn" đã được xác nhận nhìn thấy →
+nghĩa là task HÔM NAY của template đó **đã được sinh và gán cứng cho RyTa**
+(`kpi_task_members.user_id = RyTa`) từ trước. Đăng ký "Người thay thế" SAU thời
+điểm đó chỉ ảnh hưởng tới **các task được sinh ra SAU khi đăng ký** (từ ngày
+mai, hoặc từ ngay lúc đó nếu hôm nay CHƯA từng sinh) — nó **không** tự động đổi
+lại task hôm nay đã tồn tại. Vì Hữu Thọ chưa từng có dòng `kpi_task_members`
+cho đúng task đó, `fetchOpenKpiTasksForUser(factoryId, huuThoId)` đúng là sẽ
+không trả về nó — dropdown "Gắn bằng chứng" của Hữu Thọ trống đúng theo logic
+hiện tại. **Đây nhiều khả năng KHÔNG phải bug code, mà là hành vi đúng thiết kế
+nhưng thiếu cảnh báo/lối thoát rõ ràng cho người dùng.**
+
+**Việc cần làm — theo đúng thứ tự**:
+
+1. **Xác nhận bằng dữ liệu thật trước khi sửa gì**: query `kpi_tasks` +
+   `kpi_task_members` + `kpi_user_substitutions` của factory test, lọc theo
+   `template_id`/`ngay_giao = hôm đó` — xác nhận đúng là task hôm đó đã tồn tại
+   và gán cho RyTa TRƯỚC thời điểm `created_at` của dòng
+   `kpi_user_substitutions`. Nếu KHÔNG khớp giả thuyết trên (vd task hôm đó
+   chưa từng tồn tại, hoặc substitution đăng ký trước khi RyTa từng mở app) thì
+   đây là bug thật khác, cần điều tra lại từ đầu — không giả định đúng ngay.
+2. **Hỏi lại người dùng để chốt quyết định thiết kế** (chưa tự quyết trong
+   phiên trước, xem "Đã chốt với người dùng" ở plan gốc — plan gốc CHỈ nói về
+   sinh instance MỚI, không nói rõ trường hợp instance HÔM NAY ĐÃ TỒN TẠI):
+   khi đăng ký 1 substitution có `tu_ngay <= hôm nay <= den_ngay`, và phát hiện
+   template đó ĐÃ có task hôm nay đang gán cho `original_user_id` — có nên
+   **tự động reassign ngay lập tức** (đổi thẳng `kpi_task_members.user_id` từ
+   RyTa sang Hữu Thọ, tương tự nhánh "chấp nhận" của `kpi_task_transfer_respond`
+   nhưng KHÔNG cần bước "yêu cầu/chấp nhận" vì đây là thao tác admin/kpi.assign
+   đã được ủy quyền đăng ký thay thế, không phải thương lượng ngang hàng giữa 2
+   nhân viên) hay không? Nếu có, cần 1 RPC mới (hoặc mở rộng
+   `kpi_user_substitutions` insert flow) xử lý atomic việc này.
+3. Nếu người dùng xác nhận muốn tự động reassign: thêm logic vào ngay bước
+   INSERT `kpi_user_substitutions` (hoặc 1 RPC riêng gọi liền sau) — tìm task
+   hôm nay (nếu có) của đúng `(template_id nếu chỉ định, hoặc TẤT CẢ template
+   của original_user_id)` đang gán cho `original_user_id`, chuyển thẳng sang
+   `substitute_user_id` (giữ nguyên `phan_loai`, set `is_active=false` cho
+   dòng cũ, tạo/kích hoạt dòng mới cho substitute — mirror đúng đoạn code đã có
+   trong `kpi_task_transfer_respond`).
+4. Dù chọn hướng nào ở bước 2, **bắt buộc thêm cảnh báo rõ trong
+   `SubstitutionFormModal`**: khi `tu_ngay` là hôm nay, hiện dòng chữ giải
+   thích rõ ràng (không để người dùng tự suy luận như lần này) — ví dụ: "Nếu
+   việc định kỳ hôm nay đã được sinh cho người đi vắng, [tự động chuyển ngay
+   cho người thay thế / bạn cần dùng nút Chuyển giao ở trang chi tiết việc đó
+   để chuyển tay]" — nội dung câu chữ phụ thuộc quyết định ở bước 2.
+
+## Cập nhật 2026-07-26 (tiếp 2) — Đã điều tra bằng dữ liệu DB thật: giả thuyết
+tình huống 2 ở trên SAI, nguyên nhân thật khác hẳn; đã fix cả 2 tình huống
+
+Đã chạy migration `20260728_kpi_task_templates.sql`. Trước khi sửa bất cứ gì,
+đã query trực tiếp DB thật (`scripts/investigate-kpi-substitution.mjs`, read-
+only, giữ lại trong repo để tái dùng cho lần điều tra KPI khác) theo đúng yêu
+cầu "xác nhận bằng dữ liệu thật trước khi sửa gì" ở mục trên.
+
+**Kết quả — KHÔNG khớp giả thuyết gốc**: `kpi_tasks` với `template_id IS NOT
+NULL` trả về **0 dòng** — nghĩa là chưa từng có bất kỳ task nào được tự động
+sinh ra từ 5 template đang active (kể cả template "Tạo ngăn lưu" gán cho RyTa),
+dù các template đã tồn tại ~30-50 phút trước thời điểm điều tra. Vậy task
+"Tạo ngăn" **chưa từng tồn tại** cho RyTa lẫn Hữu Thọ ở thời điểm Hữu Thọ tạo
+ngăn và tìm nó trong dropdown "Gắn bằng chứng" — hoàn toàn khác giả thuyết ban
+đầu ("task đã sinh và gán cứng cho RyTa từ trước"). Kiểm tra chéo bằng cách gọi
+thẳng RPC `kpi_ensure_today_task_instances` qua service-role key xác nhận hàm
+tồn tại và hoạt động đúng logic (`auth.uid() IS NULL` dưới service role →
+return 0 ngay, không lỗi) — không phải bug trong chính RPC.
+
+**Nguyên nhân thật**: đúng như tình huống 1 đã mô tả — cờ `sessionStorage`
+(`kpi_ensured_${factory_id}_${todayISO}`) sống theo tab, và rất có thể tab của
+RyTa/Hữu Thọ/admin đã tự set cờ này TRƯỚC khi 5 template được tạo (do đã mở
+Dashboard sớm hơn trong cùng ngày UTC để test các tính năng KPI khác) — khiến
+`kpi_ensure_today_task_instances` chưa từng được một phiên đăng nhập thật nào
+gọi lại kể từ lúc tạo template. Tình huống 1 và 2 hóa ra là **cùng một gốc rễ**.
+
+Đã xác nhận thêm 1 điểm không phải nguyên nhân (loại trừ, không cần sửa):
+`getTodayISODate()` (`src/lib/date-utils.ts`) và cờ `sessionStorage` trong
+`dashboard/layout.tsx` đều dùng `new Date().toISOString().slice(0,10)` — tức
+ngày UTC — nhất quán với `CURRENT_DATE` mặc định UTC của Postgres/Supabase.
+Không có lệch múi giờ client/server ở đây; chỉ riêng khoảng 00:00–07:00 giờ
+Campuchia (UTC+7) thì "ngày lịch" theo UTC vẫn là hôm qua trong khi người dùng
+cảm nhận đã sang ngày mới — đã ghi nhận là hạn chế đã biết, không sửa trong đợt
+này (rủi ro thấp, không phải nguyên nhân của bug đang xử lý).
+
+**Đã code (không cần hỏi thêm, đúng tình huống 1)**:
+
+- Nút **"Sinh việc hôm nay ngay"** (icon `RefreshCw`, teal) ở đầu trang
+  `/dashboard/kpi/templates`, chỉ hiện khi `canManageTemplates` — gọi thẳng
+  `ensureTodayKpiTaskInstances(factoryId)` (bỏ qua hoàn toàn cờ
+  `sessionStorage`), hiện thông báo "Đã sinh N việc định kỳ mới cho hôm nay."
+  hoặc "Không có việc mới nào cần sinh...", rồi `loadData()` lại.
+- **Robustness bổ sung** (không có trong plan gốc nhưng tự nhiên nối tiếp tình
+  huống 1, không cần hỏi thêm): sau khi Lưu thành công 1 template
+  (`TemplateFormModal`) hoặc 1 đăng ký thay thế (`SubstitutionFormModal`),
+  `onSaved` giờ gọi `syncTodaySilently(factoryId)` (bọc `ensureTodayKpiTaskInstances`
+  trong try/catch im lặng) TRƯỚC khi `loadData()` — nhờ đó admin vừa tạo/sửa
+  template hoặc vừa đăng ký thay thế sẽ có việc sinh ra ngay trong chính phiên
+  đăng nhập của họ (đã authenticated), không phải chờ ai đó mở tab mới.
+
+**Đã hỏi người dùng (AskUserQuestion) về câu hỏi thiết kế ở mục 2 phía trên —
+đã CHỐT: không tự động reassign.** Task "đã sinh cho người gốc trước khi đăng
+ký thay thế phủ đúng ngày đó" sẽ **giữ nguyên người gốc** — người đi vắng (hoặc
+admin) phải tự bấm "Chuyển giao" ở trang chi tiết việc đó (Phase 1b, đã có sẵn)
+nếu muốn chuyển ngay hôm đó. Từ ngày hôm sau, việc định kỳ tự sinh đúng cho
+người thay thế như thiết kế ban đầu — không cần code gì thêm cho mục 3.
+
+**Đã code mục 4** — `SubstitutionFormModal` thêm banner cảnh báo màu amber, chỉ
+hiện khi khoảng `[tu_ngay, den_ngay]` bao gồm hôm nay
+(`getTodayISODate()`, cùng chuẩn UTC như trên) — giải thích rõ: nếu việc định
+kỳ hôm nay đã được sinh sẵn cho người đi vắng, đăng ký này **không** tự đổi
+người ngay, cần dùng "Chuyển giao" hoặc đợi ngày mai tự động đúng.
+
+`npx tsc --noEmit`, `npx eslint` (các file đã sửa/thêm:
+`kpi/templates/page.tsx`, `kpi/templates/_components/substitution-form-modal.tsx`,
+`scripts/investigate-kpi-substitution.mjs`), và `npm run build` đều sạch.
+
+**Chưa test tay** — cần, theo đúng kịch bản gốc đã báo lỗi:
+
+1. Đăng nhập tài khoản `canManageTemplates` (admin/`kpi.manage_config`), vào
+   `/dashboard/kpi/templates` → bấm "Sinh việc hôm nay ngay" → xác nhận thông
+   báo hiện đúng số việc vừa sinh (kỳ vọng 5, khớp 5 template active hiện có,
+   nếu chưa từng sinh cho hôm nay) → kiểm tra `kpi_tasks` có task "Tạo ngăn lưu"
+   với thành viên là **Hữu Thọ** (không phải RyTa), đúng theo đăng ký thay thế
+   đang hiệu lực.
+2. Đăng nhập Hữu Thọ, tạo 1 ngăn lưu ở module Kho nguyên liệu → xác nhận banner
+   "Gắn bản ghi tại chỗ" giờ hiện đúng việc "Tạo ngăn lưu" trong dropdown, gắn
+   xong task chuyển Hoàn thành.
+3. Tạo 1 template mới hoặc sửa 1 template có sẵn → xác nhận không cần bấm nút
+   "Sinh việc hôm nay ngay" riêng, việc mới đã tự xuất hiện ngay sau khi Lưu
+   (kiểm tra qua tab "Việc của tôi" của đúng người được giao, hoặc DB).
+4. Đăng ký 1 "Người thay thế" mới có `tu_ngay` = hôm nay cho 1 template CHƯA
+   từng sinh việc hôm nay → xác nhận banner amber hiện đúng trong modal trước
+   khi lưu, và sau khi lưu, việc hôm nay (được `syncTodaySilently` sinh ngay)
+   đã gán đúng cho người thay thế (vì lúc lưu, chưa hề có task cũ nào để giữ
+   nguyên — case "chưa sinh" hoạt động đúng như thiết kế ban đầu).
+5. Test case "đã sinh trước, đăng ký sau" (đúng câu hỏi thiết kế đã chốt): bấm
+   "Sinh việc hôm nay ngay" trước để tạo task cho người gốc → sau đó đăng ký 1
+   substitution mới phủ đúng hôm nay cho đúng người/template đó → xác nhận task
+   đã sinh **vẫn giữ nguyên người gốc** (không tự đổi) → xác nhận nút "Chuyển
+   giao" ở trang chi tiết việc đó vẫn hoạt động bình thường để chuyển tay nếu
+   cần.
+6. Test qua khung giờ 00:00–07:00 giờ Campuchia (nếu tiện) để xác nhận hạn chế
+   UTC-day-boundary đã ghi nhận ở trên không gây hậu quả nghiêm trọng hơn dự
+   kiến (task sinh ra với `ngay_giao` là "ngày UTC" có thể trễ hơn ngày lịch
+   địa phương 1 ngày trong khung giờ này — chấp nhận được, không chặn gì).
+
+## Cập nhật 2026-07-26 (tiếp 3) — Test tay xác nhận đúng kịch bản "đã sinh trước,
+đăng ký sau"; Q&A về ngày kế tiếp (27/07) sau khi hết hạn "đã sinh trước"
+
+### Kết quả test tay của người dùng (khớp mục 1/2/5 của checklist trên)
+
+Kịch bản thật: template "Tạo ngăn lưu" gán cho RyTa được sinh **trước** (task
+ngày 26/07 đã tồn tại, gán cho RyTa) → sau đó đăng ký "Người thay thế" RyTa→Thọ,
+`tu_ngay=26/07`, `den_ngay=30/07` (bao trùm cả ngày task đã sinh). Kết quả quan
+sát được:
+
+- RyTa tạo ngăn lưu ngày 26 → **vẫn thấy** "Tạo ngăn lưu" trong dropdown "Gắn
+  bản ghi tại chỗ" → gắn xong, task Hoàn thành.
+- Thọ tạo ngăn lưu (cùng ngày 26) → **KHÔNG thấy** "Tạo ngăn lưu" trong dropdown
+  của mình.
+
+**Đây là hành vi ĐÚNG theo quyết định đã chốt ở mục "Cập nhật 2026-07-26 (tiếp
+2)"** — không phải bug. Task ngày 26 đã sinh và gán cứng cho RyTa TRƯỚC khi
+đăng ký thay thế được lưu, nên giữ nguyên người gốc; hệ thống không tự động
+reassign. Nếu muốn Thọ làm thay đúng NGÀY 26, RyTa (hoặc admin) phải bấm
+"Chuyển giao" ở trang chi tiết task đó — đăng ký "Người thay thế" một mình
+không đủ để chuyển 1 task ĐÃ TỒN TẠI, chỉ có tác dụng cho các task SINH MỚI
+sau đó.
+
+### Trả lời 2 câu hỏi của người dùng (dự đoán theo đúng logic RPC, xem
+`kpi_ensure_today_task_instances` trong `20260728_kpi_task_templates.sql`)
+
+**Câu 1 — "Ngày 27, nếu Thọ tạo ngăn, Thọ có thấy 'Tạo ngăn lưu' trong dropdown
+không?"** → **CÓ**, với điều kiện task ngày 27 của template đó đã được sinh ra
+(bởi BẤT KỲ ai mở 1 trang dashboard nào trong ngày 27, hoặc bấm "Sinh việc hôm
+nay ngay", hoặc sau khi ai đó Lưu 1 template/đăng ký thay thế — tất cả đều gọi
+chung `ensureTodayKpiTaskInstances`). Vì tới ngày 27 CHƯA có task nào của
+template này tồn tại cho ngày đó (`UNIQUE(template_id, ngay_giao)` chỉ chặn
+sinh trùng cho CÙNG 1 ngày, ngày 26 và 27 là 2 dòng độc lập), RPC sẽ chạy đúng
+nhánh "sinh mới" (không phải "đã tồn tại, giữ nguyên") — tra `kpi_user_substitutions`
+thấy `tu_ngay(26) <= 27 <= den_ngay(30)` vẫn còn hiệu lực → gán thẳng task
+ngày 27 cho Thọ ngay từ lúc sinh, không cần "Chuyển giao" gì cả.
+
+**Câu 2 — "RyTa ở nhà mở app, tạo ngăn ngày 27, RyTa còn thấy 'Tạo ngăn lưu'
+trong dropdown không?"** → **KHÔNG**. Task ngày 27 (dù do chính RyTa mở app
+kích hoạt sinh ra, hay do Thọ/admin) đều được gán cho **Thọ**, không phải
+RyTa — vì việc gán người dựa vào tra cứu đăng ký thay thế tại thời điểm SINH
+(không phải tại thời điểm AI LÀ NGƯỜI GỌI RPC). RyTa không có trong
+`kpi_task_members` của instance ngày 27 nên `fetchOpenKpiTasksForUser(RyTa)`
+không trả về nó — dropdown của RyTa sẽ không có "Tạo ngăn lưu" ngày 27. Đây là
+đúng thiết kế (RyTa đang trong diện đăng ký "đi vắng" nên không được ghi nhận
+việc này).
+
+**Lưu ý kèm theo**: nếu RyTa (dù đang "đi vắng" theo đăng ký) vẫn thực sự tạo
+1 ngăn lưu ngày 27 vì lý do nào đó (vd về sớm, hoặc hỗ trợ tay), việc đó KHÔNG
+được tính là hoàn thành "Tạo ngăn lưu" cho anh — vì banner "Gắn bản ghi tại
+chỗ" sẽ không hiện gợi ý task đó cho anh (không phải thành viên). Đây là hệ
+quả tất yếu của thiết kế hiện tại, không phải bug — nhưng cần lưu ý khi hướng
+dẫn người dùng thực tế: đăng ký "Người thay thế" nên phản ánh đúng ai THỰC SỰ
+làm việc ngày hôm đó.
+
+### Đã xác nhận (2026-07-26, tiếp 4) — kịch bản "sinh MỚI khi thay thế đã có
+hiệu lực" đã kiểm chứng bằng lệnh gọi RPC THẬT, không phải suy luận tĩnh
+
+Không đợi được tới ngày thật 27/07 (agent không có khả năng chờ 1 ngày lịch),
+và RPC `kpi_ensure_today_task_instances` dùng cứng `CURRENT_DATE` (không nhận
+tham số ngày) nên không "giả lập" được bằng cách đổi `tu_ngay`/`den_ngay` sang
+tương lai — phải test đúng ngày hôm đó mới trigger được nhánh sinh mới.
+
+Thay vào đó đã dựng lại đúng tiền đề của kịch bản ("đăng ký thay thế đã tồn tại
+TRƯỚC khi task lần đầu được sinh") bằng dữ liệu TEST tạo mới hoàn toàn tách biệt
+với dữ liệu thật, verify bằng script gọi **thẳng RPC thật** (không mock, không
+suy luận logic bằng tay) dưới 1 phiên đăng nhập auth thật (magic link +
+`verifyOtp` lấy access token, không dùng service-role vì RPC đòi `auth.uid()`
+non-null):
+
+- Tạo 1 `kpi_task_templates` test (gán cho RyTa, nhóm "Nhóm sản lượng" — đúng
+  nhóm chính thật của RyTa) + 1 `kpi_user_substitutions` test (RyTa → Thọ, phủ
+  đúng hôm nay, gắn riêng `template_id` này) — cả 2 tạo XONG rồi mới gọi RPC,
+  đúng thứ tự "đăng ký có trước khi sinh".
+- Gọi `kpi_ensure_today_task_instances` thật qua `supabase.rpc(...)` với JWT
+  của tài khoản `luanto` (bất kỳ ai active trong nhà máy đều gọi được, không
+  cần là RyTa/Thọ — đúng thiết kế "thao tác hộ hệ thống").
+- Script: `scripts/verify-kpi-substitution-new-generation.mjs` (giữ lại để tái
+  dùng nếu cần kiểm chứng lại sau này; tự dọn sạch toàn bộ dữ liệu test ở cuối,
+  kể cả khi lỗi giữa chừng — đã xác nhận DB sạch sau khi chạy, dữ liệu thật của
+  RyTa/Thọ không bị đụng).
+
+**Kết quả — 6/6 assertion PASS**:
+
+1. Trước khi gọi RPC: chưa có task nào cho template test hôm nay (đúng tiền đề).
+2. RPC sinh đúng 1 task mới cho template test.
+3. Task đó chỉ có **đúng 1 thành viên**, và thành viên đó là **Thọ (substitute)**
+   — không phải RyTa (original) — khớp đúng dự đoán "Câu 1" ở mục "tiếp 3".
+4. `phan_loai` của Thọ trong task này = `'choang'` — đúng vì nhóm template là
+   "Nhóm sản lượng" (nhóm chính của RyTa) nhưng KHÔNG phải nhóm chính của Thọ
+   (nhóm chính thật của Thọ là "Nhóm kỹ thuật - Chất lượng") — xác nhận
+   `phan_loai` được tính theo nhóm chính của **NGƯỜI CUỐI CÙNG nhận việc**
+   (người thay thế), đúng thiết kế đã ghi trong RPC comment.
+
+Vì kết quả thật cho thấy task chỉ có **đúng 1 dòng thành viên duy nhất** (Thọ),
+"Câu 2" (RyTa không được thấy việc này trong dropdown "Gắn bản ghi tại chỗ") là
+**hệ quả tất yếu** của chính kết quả trên — `fetchOpenKpiTasksForUser(RyTa)`
+join theo `kpi_task_members.user_id = RyTa` nên chắc chắn không trả về task này
+vì RyTa không có mặt trong bảng thành viên của nó. Không cần test UI riêng cho
+điều này — đã được chứng minh trực tiếp qua dữ liệu.
+
+**Kết luận**: cơ chế "Việc định kỳ + Người thay thế tạm thời" đã kiểm chứng đầy
+đủ cả 2 nhánh — (a) task đã sinh TRƯỚC khi đăng ký thay thế → giữ nguyên người
+gốc, cần "Chuyển giao" thủ công (đã test tay UI thật, xem mục "tiếp 3"); (b)
+task sinh MỚI SAU khi đăng ký thay thế đã có hiệu lực → tự động gán đúng người
+thay thế ngay từ đầu, `phan_loai` tính đúng theo người thay thế (đã kiểm chứng
+bằng RPC thật ở mục này). Coi Phase "Việc định kỳ theo nhóm + Người thay thế
+tạm thời" là **hoàn tất, không còn hạng mục nào cần test lại**.
+
+## Cập nhật Phase 2 (2026-07-26) — Đánh giá 5S, đã code xong
+
+Đã build đúng theo schema/UI phác thảo sẵn ở mục "Database Schema" (5S) và "UI"
+phía trên — không có sai lệch thiết kế nào so với plan gốc, chỉ chốt thêm vài
+quyết định nhỏ chưa ghi rõ trong plan (liệt kê dưới).
+
+### Migration `supabase/migrations/20260729_kpi_5s_zones.sql` (**cần chạy thủ
+công, CHƯA CHẠY**)
+
+- `kpi_5s_zones` đúng schema đã phác thảo — `nguoi_don_id`/`nguoi_cham_id` là
+  "standing" (sửa trực tiếp trong Cài đặt khi về tua, không có cơ chế phân công
+  lại theo tuần riêng, đúng comment đã ghi sẵn trong plan).
+- `kpi_5s_evaluations` đúng schema — **quyết định thêm** (plan gốc không ghi rõ):
+  không có policy UPDATE/DELETE nào cho client (kể cả admin) — bản chấm là log
+  bất biến, đúng tinh thần "công bằng, minh bạch, có log bất biến" nêu ở mục
+  "Phạm vi" đầu file. `zone_id` **không** `ON DELETE CASCADE` (mặc định `NO
+  ACTION`) — xóa 1 khu vực đã có lịch sử chấm điểm sẽ bị chặn bởi FK, buộc dùng
+  "Tạm ngưng" (`is_active=false`) thay vì xóa, để không mất lịch sử minh bạch.
+- RLS INSERT của `kpi_5s_evaluations`: chỉ đúng người đang là `nguoi_cham_id`
+  HIỆN TẠI của khu vực đó (`z.nguoi_cham_id = auth.uid()`) — **không có ngoại lệ
+  admin** (khác nhiều bảng khác trong app luôn có nhánh admin bypass) — quyết
+  định có chủ đích: nếu admin muốn tự chấm, phải tự gán mình làm `nguoi_cham_id`
+  của khu vực trong Cài đặt, để giữ đúng "ai chấm là người đã được phân công".
+- CHECK constraint bắt buộc `ly_do` khi `ket_qua='khong_dat'` nằm ngay ở tầng DB
+  (không chỉ validate JS) — chặn được cả trường hợp ai đó gọi thẳng API bỏ qua
+  UI.
+
+### `src/lib/date-utils.ts` — thêm 3 helper tuần dùng chung
+
+`addDaysISO()`, `getIsoWeekStart()` (Thứ Hai của tuần chứa 1 ngày, tính bằng
+thành phần UTC y/m/d giống `getTodayISODate()` để tránh lệch múi giờ — **kế
+thừa đúng hạn chế đã biết** "khung giờ 00:00–07:00 giờ Campuchia có thể lệch 1
+ngày lịch" đã ghi ở module Thành phẩm/Kiểm soát quá trình, chấp nhận được),
+`formatWeekRangeLabel()` (hiển thị "dd/mm/yyyy — dd/mm/yyyy").
+
+### `src/lib/kpi-5s.ts` + `src/lib/kpi-5s-pdf.ts`
+
+- CRUD zones/evaluations đầy đủ + `buildKpi5sZoneUrl(zoneId)` (dùng
+  `window.location.origin`, mirror `buildStorageLookupUrl`) +
+  `uploadKpi5sEvaluationImage(factoryId, zoneId, file)` (bucket `order-files`,
+  path `{factory_id}/kpi/5s/{zone_id}/...`, mirror `uploadKpiEvidenceImage`).
+- `fetchLatestKpi5sEvaluationsByZoneIds(zoneIds)` — 1 query duy nhất lấy kết quả
+  tuần gần nhất của NHIỀU khu vực cùng lúc (order theo `tuan_bat_dau DESC` rồi
+  chỉ giữ dòng đầu tiên mỗi `zone_id` ở tầng JS) — tránh N+1 query khi render
+  danh sách khu vực.
+- `downloadKpi5sZoneBulkQrPdf(zones)` (`kpi-5s-pdf.ts`) — **cố ý KHÔNG refactor
+  gộp** với `downloadStorageBulkQrPdf` (`storage-pdf.ts`) dù thuật toán lưới
+  giống hệt nhau — tách file riêng để không đụng code Storage đang chạy ổn định
+  trên production, đúng nguyên tắc "không sửa code đang chạy tốt chỉ để tái
+  dùng, nếu rủi ro vượt lợi ích". Nhãn QR khu vực khác nhãn ngăn lưu: 2 dòng
+  (mã khu vực đậm + tên khu vực thường) thay vì 1 dòng mã ngăn.
+
+### UI
+
+- `KpiShell` thêm tab "Đánh giá 5S" (icon `Sparkles`, prefix
+  `/dashboard/kpi/5s`).
+- `/dashboard/kpi/5s/page.tsx` — grid card khu vực (mã, tên, vị trí, người dọn/
+  chấm hiện tại, badge kết quả tuần gần nhất hoặc "Chưa chấm"), badge riêng
+  "Cần bạn chấm điểm tuần này" khi `user.id === zone.nguoi_cham_id` và tuần
+  hiện tại (`getIsoWeekStart()`) chưa có trong `latestByZone`. Link "Quản lý
+  khu vực" (chỉ `kpi.manage_config`/admin) sang `/dashboard/settings?tab=kpi_5s`
+  — đã nối vào `deepLinkHandledRef` sẵn có của Settings (mirror deep-link
+  `?tab=cau_hinh_nha_may` đã có cho "Tạo Polygon mới").
+- `/dashboard/kpi/5s/zone/[id]/page.tsx` — QR thật (`QRCodeSVG`) + nút "Tải QR"
+  (gọi lại `downloadKpi5sZoneBulkQrPdf([zone])`, tái dùng hàm bulk cho đúng 1
+  khu vực thay vì viết hàm single riêng); nút "Chấm điểm tuần này" chỉ hiện khi
+  `zone.is_active && user.id === zone.nguoi_cham_id && !currentWeekEvaluation`;
+  form chấm chọn "Người chịu trách nhiệm dọn tuần này" (mặc định
+  `zone.nguoi_don_id`, sửa được), Đạt/Không đạt (2 nút lớn), lý do bắt buộc khi
+  Không đạt, `Kpi5sImagePicker` (ảnh khuyến khích, tối đa 6); lịch sử chấm điểm
+  hiển thị đầy đủ công khai (không gate quyền xem, đúng RLS SELECT rộng trong
+  factory).
+- `src/app/dashboard/kpi/5s/_components/kpi-5s-image-picker.tsx` — mirror
+  `NoteImagePicker`/`KpiEvidencePicker`, ảnh-only, tối đa 6.
+- `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx` — CRUD zones
+  (card grid + modal `ModalShell`, mirror `TemplateFormModal`/`QualityTargetsTab`)
+  + checkbox chọn nhiều khu vực + nút "In QR hàng loạt (N)" gọi
+  `downloadKpi5sZoneBulkQrPdf`. Dropdown "Người dọn"/"Người chấm" dùng
+  `userOptions` từ `activeProfilesForLink` (state `profiles` sẵn có của trang
+  Settings — chỉ trang này mới đọc được toàn bộ `profiles` trong nhà máy, xem
+  `.claude/rules/16-iso-vanban-module.md` mục RLS `profiles`), **khác** với
+  `loadKpiTaskCandidates()` (nguồn `maintenance_staff`) dùng ở các trang
+  `/dashboard/kpi/*` — 2 nguồn khác nhau nhưng cùng trỏ về `auth.users.id` nên
+  tương thích lẫn nhau (không có xung đột khi 1 trang ghi bằng nguồn này, trang
+  khác đọc bằng nguồn kia).
+- Settings: thêm top-level tab mới **"KPI & 5S"** (icon `Target`, gate
+  `canManageKpiConfig = isAdmin || hasPermission(user, "kpi.manage_config")`) —
+  **đã mở rộng guard tổng ở đầu `bootstrap()`** để thêm điều kiện
+  `kpi.manage_config` vào danh sách OR (trước đó tài khoản chỉ có
+  `kpi.manage_config`, không có bất kỳ quyền Settings nào khác, sẽ bị guard tổng
+  redirect ra `/dashboard` ngay cả khi có quyền quản lý khu vực 5S — bug tiềm ẩn
+  đã phát hiện và fix ngay lúc code, chưa từng ship ra production). Sub-tab bar
+  hiện chỉ có đúng 1 mục "Khu vực 5S" (mirror cấu trúc sub-tab của tab
+  "ISO & Văn bản" — cũng chỉ 1 sub-tab "Chữ ký cá nhân" — để dễ thêm "Khung tiêu
+  chí KPI"/"Trọng số công thức" ở Phase 3/4 mà không phải đổi cấu trúc).
+- `kpi/page.tsx` — bỏ "Công việc" và "Đánh giá 5S" khỏi danh sách "Sắp có" (đã
+  có tab riêng, không còn là roadmap "chưa build" nữa), chỉ còn "Chấm điểm
+  chuyên môn" và "Bảng điểm KPI".
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file mới/đã sửa), và `npm run build`
+đều sạch — đã đối chiếu `git stash` xác nhận các warning còn lại trong
+`settings/page.tsx` (biến `Calendar`/`_fid`/`driverAssignedVehiclesMap` không
+dùng, 1 cảnh báo `<img>`) là pre-existing, không liên quan thay đổi lần này.
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Chạy `supabase/migrations/20260729_kpi_5s_zones.sql` trên Supabase SQL
+   Editor.
+2. Tài khoản `kpi.manage_config` (không có bất kỳ quyền Settings nào khác) mở
+   `/dashboard/settings` → xác nhận vào được (không bị guard tổng chặn), thấy
+   đúng 1 tab "KPI & 5S" → thêm 1 khu vực test (mã, tên, người dọn, người chấm
+   khác nhau) → lưu → xác nhận card hiện đúng.
+3. Từ `/dashboard/kpi/5s` bấm "Quản lý khu vực" → xác nhận điều hướng đúng sang
+   Settings, tự mở đúng tab "KPI & 5S" (deep-link `?tab=kpi_5s`).
+4. Đăng nhập đúng tài khoản là `nguoi_cham_id` của khu vực vừa tạo → vào
+   `/dashboard/kpi/5s` → xác nhận card hiện badge "Cần bạn chấm điểm tuần này"
+   → mở chi tiết → thấy nút "Chấm điểm tuần này" → chấm "Đạt" (không cần lý do)
+   → lưu → xác nhận chuyển vào lịch sử đúng, nút biến mất, banner "Tuần này đã
+   được chấm" hiện đúng.
+5. Đăng nhập tài khoản KHÁC (không phải `nguoi_cham_id`) → mở cùng khu vực →
+   xác nhận KHÔNG thấy nút "Chấm điểm tuần này", thấy đúng banner "chỉ {tên}
+   mới được chấm".
+6. Thử chấm "Không đạt" mà không nhập lý do → xác nhận bị chặn ở cả UI (validate
+   JS) lẫn nếu cố tình bỏ qua UI gọi thẳng API (CHECK constraint DB) → nhập lý
+   do → lưu thành công, xác nhận lý do hiển thị đúng trong lịch sử.
+7. Test đổi "Người chịu trách nhiệm dọn tuần này" khác với `zone.nguoi_don_id`
+   mặc định (mô phỏng "có người dọn thay") → lưu → xác nhận lịch sử ghi đúng
+   người đã chọn (snapshot), không đổi `zone.nguoi_don_id` gốc.
+8. Test tải ảnh khi chấm điểm (tối đa 6) → xác nhận ảnh hiện đúng trong lịch sử,
+   click mở lightbox phóng to hoạt động.
+9. Test "In QR hàng loạt" ở Settings: chọn 2-3 khu vực → in → xác nhận PDF có
+   đúng số nhãn, QR quét ra đúng URL zone, nhãn 2 dòng (mã đậm + tên) không vỡ
+   khi tên khu vực dài. Test nút "Tải QR" đơn lẻ ở trang chi tiết khu vực cũng
+   ra đúng file tương tự (chỉ 1 nhãn).
+10. Test xóa 1 khu vực ĐÃ có lịch sử chấm điểm → xác nhận bị chặn với thông báo
+    rõ ràng hướng dẫn dùng "Tạm ngưng"; test "Tạm ngưng" → xác nhận khu vực biến
+    mất khỏi `/dashboard/kpi/5s` (chỉ `fetchKpi5sZones` mặc định `is_active`)
+    nhưng vẫn xem được trực tiếp qua URL (`fetchKpi5sZone` không lọc
+    `is_active`), và không còn chấm được (banner "Khu vực đang tạm ngưng").
+11. Test xóa 1 khu vực CHƯA có lịch sử chấm điểm nào → xác nhận xóa được bình
+    thường.
+
+## Cập nhật (2026-07-26, tiếp) — Phân công thông minh 5S + Gia hạn + Khiếu nại +
+Thông báo Telegram + Redesign giao diện module KPI, đã code xong
+
+Người dùng nêu vấn đề thực tế: quá nhiều khu vực 5S thì lãnh đạo không thể ngồi
+gán tay từng người dọn/người chấm, và đề xuất "vòng quay ngẫu nhiên đầu tuần".
+Đã phân tích trực tiếp với người dùng (xem hội thoại) — random thuần túy có 2 lỗ
+hổng (không cân tải thực chất, không tránh được người dọn/chấm "cùng phe") — và
+đề xuất thay bằng **random có trọng số + ràng buộc, luôn cho xem trước/sửa tay
+trước khi ghi thật**, đã được chấp nhận và triển khai đúng như mô tả bên dưới.
+Cùng đợt: xây thêm 2 tính năng còn thiếu mà thông báo Telegram cần tới ("gia
+hạn", "khiếu nại" — build tối giản đủ dùng, `kpi_appeals` xây SỚM HƠN lịch trong
+roadmap Phase 5 vì không phụ thuộc `kpi_monthly_scores`), 1 kênh thông báo
+Telegram dùng chung cho toàn bộ vòng đời công việc/5S, và redesign giao diện
+**chỉ trong phạm vi `/dashboard/kpi/*`** (không đụng module khác, không đụng
+Settings dù `kpi-5s-zones-tab.tsx` nằm trong `/dashboard/settings`).
+
+### A. Phân công thông minh cho khu vực 5S
+
+- `src/lib/kpi-5s-auto-assign.ts` — thuật toán thuần (`buildAutoAssignSuggestions`):
+  random **có trọng số nghịch đảo theo tải hiện tại** (ai đang phụ trách ít khu
+  vực hơn có xác suất được chọn cao hơn — KHÔNG phải random đều 100%), ràng buộc
+  cứng `người dọn ≠ người chấm`, ràng buộc mềm "tránh người chấm cùng nhóm chính
+  với người dọn" (tự động nới lỏng nếu hết ứng viên khác, đánh dấu
+  `groupConstraintRelaxed` để UI cảnh báo — không được để trống khu vực chỉ vì
+  ràng buộc mềm). Cố ý KHÔNG dùng thuật toán tối ưu ghép cặp (Hungarian...) — đây
+  chỉ là công cụ ĐỀ XUẤT, người dùng luôn xem lại/sửa tay trước khi xác nhận.
+- `loadKpiTaskCandidates()` (`kpi-tasks.ts`) mở rộng thêm field `primaryGroupId`
+  per candidate (trước đó chỉ có `groupIds` — tất cả nhóm, không phân biệt
+  nhóm chính) — cần cho ràng buộc "tránh cùng nhóm chính".
+- `src/app/dashboard/settings/_components/kpi-5s-auto-assign-modal.tsx` — modal
+  2 bước: (1) chọn phạm vi (chỉ khu vực chưa gán đủ / toàn bộ) + tùy chọn tránh
+  cùng nhóm → "Tạo đề xuất"; (2) bảng preview mỗi khu vực có 2 dropdown (người
+  dọn/người chấm) đã điền sẵn theo thuật toán nhưng **sửa tay được**, nút
+  "Random lại" (tạo lại đề xuất mới), "Xác nhận & Giao (N thay đổi)" chỉ ghi
+  đúng những dòng thực sự thay đổi so với hiện trạng (không ghi đè toàn bộ vô
+  ích). Nút mở modal đặt trong `kpi-5s-zones-tab.tsx` (Cài đặt → KPI & 5S → Khu
+  vực 5S), cạnh nút "Thêm khu vực".
+- Nguồn ứng viên của công cụ này là `loadKpiTaskCandidates()`
+  (`maintenance_staff`-based, có `primaryGroupId`) — **khác** `userOptions`
+  dùng cho modal Thêm/Sửa khu vực thủ công (`activeProfilesForLink`,
+  `profiles`-based, không lọc theo nhóm) — tập ứng viên của công cụ tự động có
+  thể hẹp hơn (chỉ người đã liên kết `maintenance_staff` + có nhóm), chấp nhận
+  được vì mục đích chính là công bằng theo nhóm.
+
+### B. "Gia hạn" (đổi hạn hoàn thành) — tính năng mới, chưa có trong roadmap gốc
+
+- Migration `supabase/migrations/20260730_kpi_task_extend_deadline.sql` (**cần
+  chạy thủ công, CHƯA CHẠY**): thêm `'gia_han'` vào CHECK constraint
+  `kpi_task_logs.hanh_dong`; RPC `SECURITY DEFINER`
+  `kpi_task_extend_deadline(p_task_id, p_new_han_hoan_thanh, p_ly_do)` — chỉ
+  `nguoi_giao_id`/admin, chặn khi task đã `hoan_thanh`/`huy`, bắt buộc lý do.
+  Ghi **1 dòng log cho MỖI thành viên active** (không phải 1 dòng chung) — vì
+  đổi hạn ảnh hưởng trực tiếp tất cả người đang làm, mỗi người cần thấy sự kiện
+  này trong dòng thời gian của chính họ (khác `chuyen_giao`/`gan_ban_ghi` vốn
+  gắn với đúng 1 người).
+- `extendKpiTaskDeadline()` (`kpi-tasks.ts`) + nút "Gia hạn" (icon
+  `CalendarClock`) ngay dưới field "Hạn hoàn thành" ở trang chi tiết công việc
+  (chỉ `isOwner && open`) → `ExtendDeadlineModal` (input `datetime-local` mặc
+  định = hạn hiện tại qua `toDatetimeLocalValue()`, lý do bắt buộc).
+
+### C. "Khiếu nại" (kpi_appeals) — xây SỚM HƠN lịch Phase 5, tối giản đủ dùng
+
+- Migration `supabase/migrations/20260731_kpi_appeals.sql` (**cần chạy thủ
+  công, CHƯA CHẠY**): bảng `kpi_appeals` — gắn với `task_id` HOẶC
+  `zone_evaluation_id` (cột `monthly_score_id` giữ chỗ cho Phase 5, KHÔNG dùng
+  ở bản này). RLS: SELECT (chủ khiếu nại thấy của mình; admin/kpi.manage_config
+  thấy tất cả); INSERT chỉ người THỰC SỰ liên quan (thành viên/người giao của
+  task, hoặc người dọn/người chấm của ĐÚNG lần chấm 5S đó — chặn spam khiếu nại
+  không liên quan); UPDATE (xử lý — đổi `trang_thai`/`phan_hoi`) chỉ
+  admin/kpi.manage_config, **không có** policy cho phép người khiếu nại tự sửa
+  lại nội dung sau khi gửi (giữ đúng bản chất "log", tránh sửa đổi sau tranh
+  chấp).
+- `src/lib/kpi-appeals.ts` — CRUD tối giản (`fetchKpiAppeals`,
+  `createKpiAppealForTask`, `createKpiAppealForZoneEvaluation`,
+  `resolveKpiAppeal`).
+- Nút "Khiếu nại" (icon `Flag`) ở header trang chi tiết công việc (chỉ
+  `isOwner || myMember`) → `AppealModal`. Nút "Khiếu nại" ở mỗi dòng lịch sử
+  chấm điểm 5S (chỉ hiện khi `user.id === nguoi_don_id || nguoi_cham_id` của
+  ĐÚNG lần chấm đó) → modal inline trong chính trang chi tiết khu vực.
+- Trang mới `/dashboard/kpi/appeals` + tab "Khiếu nại" trong `KpiShell` — danh
+  sách (RLS tự lọc phạm vi xem), nút "Đã giải quyết"/"Từ chối" (chỉ
+  admin/kpi.manage_config, chỉ khi `cho_xu_ly`) mở modal nhập phản hồi. Cố gắng
+  resolve tiêu đề công việc/tên khu vực để hiển thị link — **best-effort**
+  (`taskRefs`/`zoneRefs`, query riêng sau khi có danh sách khiếu nại) vì người
+  xử lý có thể không có quyền SELECT trực tiếp bản ghi `kpi_tasks` gốc nếu
+  không phải owner/member/admin/kpi.view_all — chấp nhận được, phần THỰC SỰ
+  hành động (nội dung khiếu nại + xử lý) không phụ thuộc việc resolve này.
+
+### D. Thông báo Telegram — CHỈ Telegram, dùng bot riêng `QL_CONG_VIEC_CHAT_TOKEN`/`QL_CONG_VIEC_CHAT_ID`
+
+- `src/app/api/kpi/notify/route.ts` — **cố ý đơn giản hơn nhiều** so với
+  `/api/iso/forms/notify`/`/api/documents/notify` (những route đó fan-out 3
+  kênh: in-app + Telegram + Email, cần resolve danh sách `recipientUserIds` cụ
+  thể). Ở đây:
+  - **Chỉ Telegram** (đúng yêu cầu người dùng) — không insert vào bảng
+    `notifications` dùng chung. Lý do: Bell badge của module KPI đã là
+    "live-computed" (`module-tasks.ts`, xem
+    `.claude/rules/24-notification-bell-module-tasks.md`), không persist; ghi
+    thêm vào `notifications` sẽ tạo 1 luồng song song không đồng bộ với chuông,
+    dễ trùng lặp/khó hiểu.
+  - **Không cần resolve người nhận** — vì đích đến là 1 NHÓM CHAT CHUNG (không
+    phải tin nhắn riêng từng người), mọi thành viên trong nhóm Telegram đó tự
+    thấy tin nhắn broadcast. Route chỉ nhận `{factoryId?, title, lines[],
+    link?}` từ phía gọi (đã có sẵn đầy đủ ngữ cảnh) rồi ghép khung tin nhắn cố
+    định (`🔔 <b>title — tên nhà máy</b>` + các dòng + link) — tránh 1 map
+    tiêu đề/nội dung khổng lồ ở server như ISO Forms từng làm cho 4 loại sự
+    kiện (module KPI có >10 loại sự kiện, map kiểu đó sẽ rất cồng kềnh).
+  - Chưa cấu hình bot (thiếu env) → trả `{ok:true, skipped:...}` êm, không chặn
+    hành động nghiệp vụ. Lỗi Telegram → HTTP 207, cũng không chặn (route được
+    gọi fire-and-forget từ client qua `sendKpiNotify()`,
+    `src/lib/kpi-notify.ts`).
+- Đã nối `sendKpiNotify()` vào **tất cả** action đã liệt kê + 2 action bổ sung
+  hợp lý (chấm điểm 5S, xử lý khiếu nại — không có trong yêu cầu gốc nhưng là
+  phần tự nhiên của "khiếu nại"/"5S" đã yêu cầu):
+  - Giao việc mới (`kpi-task-form-modal.tsx`, sau `createKpiTask()`).
+  - Cập nhật tiến độ + Nộp (`ProgressForm`, task detail).
+  - Nghiệm thu/Điều chỉnh/Trả về/Yêu cầu bổ sung (`EvaluateModal`, task detail
+    — không có trong yêu cầu gốc theo tên gọi, nhưng là phần lõi của "cập nhật
+    tiến độ" từ phía người giao).
+  - Chuyển giao: gửi yêu cầu (`TransferModal`) + chấp nhận/từ chối
+    (`handleRespondTransfer`).
+  - Đăng ký người thay thế tạm thời (`SubstitutionFormModal`, kpi/templates).
+  - Gia hạn (`ExtendDeadlineModal`).
+  - Khiếu nại: gửi mới (task lẫn 5S) + xử lý (`kpi/appeals/page.tsx`).
+  - Phân công thông minh 5S (`kpi-5s-auto-assign-modal.tsx`, sau khi ghi xong).
+  - Chấm điểm 5S hàng tuần (`kpi/5s/zone/[id]/page.tsx`).
+- **Không** wire "sinh việc định kỳ tự động" (`kpi_ensure_today_task_instances`)
+  — hàm đó chạy ngầm mỗi khi có ai mở app, bắn Telegram mỗi lần sẽ rất ồn ào
+  (nhiều lần/ngày, nhiều người); nằm ngoài phạm vi yêu cầu gốc.
+
+### E. Redesign giao diện — CHỈ `/dashboard/kpi/*`, không đụng module khác
+
+- **Không tạo hệ thống animation mới** — tái dùng nguyên vẹn các utility class
+  đã có sẵn toàn app (`src/app/globals.css` + hook `useScrollReveal` dùng
+  chung ở Dashboard/Inventory/Storage): `.hover-lift` (thẻ nổi lên khi hover),
+  `.row-hover` (dòng bảng), `.scroll-reveal` + `revealRef` (animation khi cuộn
+  tới) — đúng nguyên tắc "không dùng animation framework rời rạc ngoài
+  scroll-reveal đã có sẵn" (`.claude/rules/05-ui-components.md`).
+- **Quy tắc an toàn đã tuân thủ nghiêm ngặt** (xem cảnh báo có sẵn trong
+  05-ui-components.md: "React re-render dễ làm mất class `revealed`, gây ẩn dữ
+  liệu"): `.scroll-reveal` **CHỈ** áp cho các khối có className TĨNH (không nội
+  suy biến state ngay trong CHÍNH class string đó) như header trang, card banner
+  tĩnh — **tuyệt đối không** áp cho grid danh sách task/khu vực 5S/khiếu nại
+  (những khối này phụ thuộc dữ liệu tải async + filter, đúng loại bị cấm theo
+  rule). Danh sách card đó chỉ dùng `.hover-lift`/`.row-hover` (an toàn tuyệt
+  đối, thuần CSS, không phụ thuộc class JS thêm vào).
+- `src/app/dashboard/kpi/_components/kpi-progress-bar.tsx` (component MỚI,
+  `KpiProgressBar`) — thanh tiến độ "nổi khối": track có `shadow-inner` (rãnh
+  lõm), phần fill có `boxShadow` + lớp phủ gradient trắng bán trong suốt phía
+  trên (`bg-gradient-to-b from-white/45 to-transparent`) tạo cảm giác nổi/bóng.
+  Màu **tính bằng nội suy HSL thật** (không phải vài mốc màu rời rạc): hue chạy
+  0%→50% từ tím thương hiệu KPI (262°) sang hổ phách (38°), 50%→100% từ hổ
+  phách sang xanh lá (152°), giữ `s=68% l=50%` để ra tông "pastel đậm đà" (bão
+  hòa cao hơn pastel-100 mặc định nhưng vẫn không chói). Áp dụng ở: card danh
+  sách công việc (`kpi/tasks/page.tsx`, size `sm`) và thanh tiến độ tổng của
+  việc mục tiêu số lượng (`kpi/tasks/[id]/page.tsx`, size `md`, thay thanh
+  phẳng 1 màu tím cố định trước đó).
+- `kpi-shell.tsx` — mỗi tab có tông pastel đậm RIÊNG (trước đó mọi tab active
+  đều cùng 1 màu tím): Tổng quan=tím, Công việc=xanh dương, Việc định kỳ=xanh
+  ngọc, Đánh giá 5S=hổ phách, Khiếu nại=hồng — kèm `.hover-lift` trên mọi tab.
+- Mỗi trang trong `/dashboard/kpi/*` (Tổng quan, Công việc, chi tiết công việc,
+  Việc định kỳ, Đánh giá 5S danh sách + chi tiết, Khiếu nại): header đổi từ chữ
+  trơn sang icon trong khung tròn gradient pastel đậm (màu riêng theo trang,
+  khớp màu tab tương ứng) + `scroll-reveal`; toàn bộ thẻ card (task/khu vực/
+  khiếu nại/template/substitution/member row) thêm `.hover-lift` hoặc
+  `.row-hover`.
+- **KHÔNG đụng** `kpi-5s-zones-tab.tsx`/`kpi-5s-auto-assign-modal.tsx`
+  (`/dashboard/settings/_components/`) — dù thuộc module KPI về nghiệp vụ,
+  nằm vật lý trong route `/dashboard/settings/*` nên NGOÀI phạm vi
+  `/dashboard/kpi/*` đã chốt với người dùng; giữ nguyên style Settings hiện có
+  để nhất quán với các tab Cài đặt khác.
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file mới/đã sửa của cả A+B+C+D+E), và
+`npm run build` đều sạch qua từng phần (chạy riêng sau mỗi phần A, B, C để dễ
+khoanh vùng nếu lỗi — đều pass ngay từ lần đầu, không phải sửa lại).
+
+### Chưa test tay — cần làm ở phiên sau (theo đúng thứ tự, một số bước phụ thuộc bước trước)
+
+1. Chạy đủ 3 migration theo thứ tự: `20260730_kpi_task_extend_deadline.sql` →
+   `20260731_kpi_appeals.sql` (không phụ thuộc nhau nhưng nên chạy cả 2 trước
+   khi test) — cộng migration Phase 2 `20260729_kpi_5s_zones.sql` nếu chưa chạy
+   từ phiên trước.
+2. Cấu hình `QL_CONG_VIEC_CHAT_TOKEN`/`QL_CONG_VIEC_CHAT_ID` trong môi trường
+   Vercel production nếu chưa có (đã xác nhận có sẵn trong `.env.local` local,
+   cần kiểm tra đã đồng bộ lên production hay chưa).
+3. **Phân công thông minh**: tạo ≥4 khu vực 5S test, để trống người dọn/chấm →
+   Cài đặt → KPI & 5S → "Phân công thông minh" → chọn "Toàn bộ" → "Tạo đề xuất"
+   → xác nhận preview hiện đủ, sửa tay 1-2 dòng → "Xác nhận & Giao" → xác nhận
+   chỉ đúng số dòng đã thay đổi được ghi, banner tóm tắt đúng, Telegram nhận
+   được tin nhắn liệt kê đúng người/khu vực. Test lại lần 2 với 1 người đã có
+   tải cao — xác nhận thuật toán có xu hướng né người đó (không tuyệt đối, vì
+   vẫn là random có trọng số).
+4. **Gia hạn**: mở 1 công việc đang mở, bấm "Gia hạn" → đổi hạn + lý do → xác
+   nhận hạn cập nhật đúng, mỗi thành viên active có 1 dòng log riêng trong dòng
+   thời gian của họ, Telegram nhận tin đúng nội dung hạn cũ/mới.
+5. **Khiếu nại**: từ 1 công việc (thành viên hoặc người giao) → "Khiếu nại" →
+   gửi → xác nhận xuất hiện ở `/dashboard/kpi/appeals` (chủ khiếu nại thấy của
+   mình, tài khoản khác không phải admin/kpi.manage_config KHÔNG thấy), Telegram
+   nhận tin. Tài khoản admin/kpi.manage_config xử lý (Đã giải quyết/Từ chối +
+   phản hồi) → xác nhận trạng thái cập nhật đúng, Telegram nhận tin phản hồi.
+   Lặp lại tương tự cho khiếu nại từ 1 lần chấm điểm 5S (chỉ nguoi_don/
+   nguoi_cham của đúng lần chấm đó mới thấy nút Khiếu nại).
+6. **Redesign UI**: xem trên trình duyệt thật từng trang `/dashboard/kpi/*` —
+   xác nhận thanh tiến độ đổi màu đúng theo % (thấp=tím, giữa=hổ phách,
+   cao=xanh lá), hover vào card thấy nổi lên rõ ràng, cuộn trang thấy header
+   fade-in đúng 1 lần (không lặp lại khi cuộn qua lại), tab bar mỗi tab đúng
+   màu riêng. Xác nhận KHÔNG có card/danh sách nào bị "biến mất" do lỗi
+   scroll-reveal (test bằng cách filter/tải lại dữ liệu nhiều lần liên tiếp).
+7. Test tổng hợp: 1 kịch bản đầy đủ từ đầu đến cuối — Phân công thông minh 2
+   khu vực → 1 người chấm điểm "Không đạt" kèm lý do → người dọn khiếu nại →
+   admin xử lý → suốt quá trình xác nhận Telegram luôn nhận đủ, đúng thứ tự,
+   không tin nào bị thiếu do lỗi mạng/env.
+
 ## Chưa test tay (Phase 0)
 
 - Chạy migration `20260724_kpi_module_phase0.sql` + `20260724_kpi_seed_groups.sql`
@@ -748,3 +2188,488 @@ hiện banner đúng.
   Tài khoản không có `kpi.view` → sidebar ẩn "Công việc & KPI", truy cập thẳng URL
   bị redirect `/dashboard`.
 - `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch.
+
+## Cập nhật 2026-07-26 (tiếp) — 2 bug thật + mức "Tương đối" + Nhóm khu vực cho Phân công thông minh
+
+Người dùng test Phase 2 (Đánh giá 5S) trên dữ liệu thật (RyTa/Nho, factory
+`phuochoa_kt`) và báo 2 bug thật + 2 yêu cầu tính năng. Đã fix/triển khai đầy đủ,
+`npx tsc --noEmit`/`npx eslint`/`npm run build` đều sạch. **Chưa test tay** — xem
+checklist cuối mục.
+
+### Bug 1 — Nút "Khiếu nại" hiện cho cả người CHẤM lẫn người BỊ chấm
+
+Trước đó điều kiện hiện nút là `user.id === e.nguoi_don_id || user.id ===
+e.nguoi_cham_id` (OR) — dữ liệu thật xác nhận cả người dọn (RyTa) lẫn người chấm
+(Nho) đều tự khiếu nại được về cùng 1 lần chấm, dù người chấm khiếu nại về chính
+lần chấm do họ tạo ra là vô lý.
+
+- `src/app/dashboard/kpi/5s/zone/[id]/page.tsx`: nút "Khiếu nại" giờ chỉ hiện khi
+  `user.id === e.nguoi_don_id`.
+- Migration `supabase/migrations/20260801_kpi_appeals_fix_insert_policy.sql`
+  (**cần chạy thủ công**) — thắt lại RLS `kpi_appeals_insert`: bỏ nhánh
+  `e.nguoi_cham_id = auth.uid()` khỏi điều kiện cho `zone_evaluation_id`, chỉ giữ
+  `e.nguoi_don_id = auth.uid()`. Bắt buộc sửa cả RLS (không chỉ ẩn nút UI) — nếu
+  không, gọi thẳng `createKpiAppealForZoneEvaluation` qua devtools vẫn insert
+  được cho người chấm. Nhánh `task_id` (khiếu nại công việc) giữ nguyên.
+- Case "người chấm tự phát hiện chấm sai" (không còn nút Khiếu nại cho họ) được
+  giải quyết bằng nút **"Sửa kết quả"** mới — xem Bug 2.
+
+### Bug 2 — "Đã giải quyết" khiếu nại không sửa lại kết quả 5S gốc
+
+Trước đó `resolveKpiAppeal()` chỉ UPDATE bảng `kpi_appeals`
+(`trang_thai`/`phan_hoi`/`nguoi_xu_ly_id`) — không có cơ chế nào sửa lại
+`kpi_5s_evaluations.ket_qua` gây tranh chấp (bảng cố ý thiết kế bất biến, không
+RLS UPDATE cho client). Dữ liệu thật xác nhận: khiếu nại của RyTa đã
+`trang_thai='da_giai_quyet'` nhưng `ket_qua` vẫn `'khong_dat'`.
+
+- Migration `supabase/migrations/20260802_kpi_5s_evaluation_correct.sql` (**cần
+  chạy thủ công, SAU** `20260803_kpi_5s_result_tuong_doi.sql`) — RPC
+  `SECURITY DEFINER` mới `kpi_5s_evaluation_correct(p_zone_evaluation_id,
+  p_new_ket_qua, p_new_ly_do, p_ghi_chu, p_appeal_id DEFAULT NULL)`, chỉ
+  admin/`kpi.manage_config`. Đây là **ngoại lệ DUY NHẤT** được phép sửa
+  `kpi_5s_evaluations` — chỉ đi qua đúng 1 cửa RPC, không mở lại RLS UPDATE.
+  - `p_appeal_id` có giá trị: đang xử lý 1 khiếu nại `cho_xu_ly` có sẵn → sửa
+    `ket_qua`/`ly_do` VÀ đóng khiếu nại đó thành `da_giai_quyet` trong cùng
+    transaction (`FOR UPDATE` khóa cả 2 bảng, chặn xử lý 2 lần).
+  - `p_appeal_id` là NULL: admin tự sửa trực tiếp (case Bug 1 nêu trên) → tự
+    `INSERT` 1 dòng `kpi_appeals` mới đã `da_giai_quyet` ngay, nội dung "Admin
+    tự sửa kết quả (không qua khiếu nại)" — dùng lại `kpi_appeals` làm audit
+    trail duy nhất, không thêm cột mới vào `kpi_5s_evaluations`.
+- `src/lib/kpi-appeals.ts` thêm 2 wrapper: `resolveKpiZoneEvaluationAppeal()`
+  (truyền `p_appeal_id`) và `correctKpi5sEvaluationDirect()` (không truyền).
+  `resolveKpiAppeal()` cũ giữ nguyên, vẫn dùng cho khiếu nại `task_id` và cho
+  nhánh "Từ chối" của khiếu nại 5S (không sửa kết quả khi từ chối).
+- `src/app/dashboard/kpi/appeals/page.tsx`: modal "Đánh dấu đã giải quyết" —
+  khi appeal gắn `zone_evaluation_id` VÀ đang chọn "Đã giải quyết", hiện thêm
+  `Kpi5sResultPicker` (mặc định = kết quả hiện tại, câu SELECT `zoneRefs` đã mở
+  rộng lấy thêm `ket_qua, ly_do`), gọi `resolveKpiZoneEvaluationAppeal` thay vì
+  `resolveKpiAppeal`.
+- `src/app/dashboard/kpi/5s/zone/[id]/page.tsx`: thêm nút nhỏ **"Sửa kết quả"**
+  (icon `Pencil`) trên mỗi dòng lịch sử, chỉ hiện khi
+  `isAdmin || hasPermission(user, "kpi.manage_config")`, mở modal riêng gọi
+  `correctKpi5sEvaluationDirect`. Tách biệt hoàn toàn với nút "Khiếu nại".
+
+### Mức trung gian "Tương đối" (Đạt/Tương đối/Không đạt)
+
+- Migration `supabase/migrations/20260803_kpi_5s_result_tuong_doi.sql` (**cần
+  chạy thủ công, TRƯỚC** migration Bug 2 ở trên) — dùng `DO` block dò và drop
+  toàn bộ CHECK constraint tham chiếu cột `ket_qua` (thay vì đoán tên constraint
+  mặc định Postgres tự sinh, an toàn hơn hard-code), tạo lại 2 constraint có tên
+  tường minh: `ket_qua IN ('dat','tuong_doi','khong_dat')` và **bắt buộc lý do
+  cho cả `tuong_doi` lẫn `khong_dat`** (đã chốt với người dùng — giữ lịch sử
+  minh bạch, dễ tra cứu vì sao không đạt tuyệt đối).
+- `src/lib/kpi-5s.ts`: `Kpi5sResult` thêm `"tuong_doi"`, `KPI_5S_RESULT_LABEL`
+  thêm `"Tương đối"`. Thêm hằng số dùng chung mới `KPI_5S_RESULT_BADGE_CLASS`
+  (dat=emerald, tuong_doi=amber, khong_dat=rose) — mọi nơi hiển thị badge kết
+  quả đều dùng chung, không hard-code lại màu.
+- Component dùng chung mới `src/app/dashboard/kpi/_components/kpi-5s-result-picker.tsx`
+  (`Kpi5sResultPicker`) — 3 nút Đạt/Tương đối/Không đạt + ô lý do (bắt buộc khi
+  khác "Đạt"). Dùng ở **3 nơi**: form "Chấm điểm tuần này" (zone detail), modal
+  "Sửa kết quả" (Bug 2, zone detail), modal resolve-appeal (trang Khiếu nại) —
+  tránh viết lại 3 lần cùng 1 logic.
+- `src/app/dashboard/kpi/5s/zone/[id]/page.tsx` và `src/app/dashboard/kpi/5s/page.tsx`:
+  badge màu kết quả trong lịch sử/card danh sách đổi từ hard-code 2 màu
+  (`ket_qua === "dat" ? emerald : rose`) sang lookup `KPI_5S_RESULT_BADGE_CLASS`.
+- **Công thức "C — Điểm 5S" cập nhật** (thuần tài liệu — Phase 4 chấm điểm tháng
+  chưa build, không có engine code để đụng): `Đạt=100, Tương đối=50, Không
+  đạt=0` — khớp đúng quy ước 1.0/0.5/0 đã dùng sẵn cho công thức "D — Điểm
+  chuyên môn" (`kpi_daily_evaluation_items`, cũng chưa build).
+
+### Nhóm khu vực 5S theo khu vực vật lý — random chỉ trong nội bộ nhóm
+
+Trước đó "Phân công thông minh" coi TOÀN BỘ khu vực + TOÀN BỘ nhân sự là 1 pool
+duy nhất khi random — không có cách nào giới hạn random chỉ trong 1 khu vực vật
+lý (vd "Kho 1" chỉ đổi với "Kho 1", không lẫn "Văn phòng").
+
+**Kiến trúc đã chốt**: tái dùng nguyên `personnel_groups`/`personnel_group_members`
+đã có sẵn (đúng quyết định gốc Phase 0 — không tạo bảng nhóm mới). Admin tự tạo
+các nhóm MỚI thuần túy cho mục đích 5S (vd "Văn phòng", "Kho 1", "Kho 2", "Ca SX
+mủ tạp", "Ca SX mủ nước"...) qua UI Cài đặt → Hệ thống → Nhân sự đã có sẵn —
+không cần migration seed, không cần code CRUD mới cho bước tạo nhóm.
+
+- Migration `supabase/migrations/20260804_kpi_5s_zones_eligible_group.sql`
+  (**cần chạy thủ công**) — thêm cột `kpi_5s_zones.eligible_group_id UUID
+  REFERENCES personnel_groups(id) ON DELETE SET NULL`. `NULL` = hành vi cũ
+  (pool toàn nhà máy) — backward-compatible với khu vực đã tạo trước đó.
+- `src/lib/kpi-5s.ts`: `Kpi5sZone`/`ZONE_COLS`/`Kpi5sZoneInput` thêm
+  `eligible_group_id: string | null`.
+- `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx`: tự load
+  `loadAllPersonnelGroups(factoryId)` (đã có sẵn trong `src/lib/kpi-templates.ts`,
+  dùng cho `/dashboard/kpi/templates`) song song với zones trong `loadData` —
+  **không cần sửa `settings/page.tsx`** (component tự fetch, không cần prop mới
+  từ cha). Thêm dropdown "Nhóm khu vực (random nội bộ)" trong form Thêm/Sửa (kèm
+  text hướng dẫn ngắn), hiển thị tên nhóm trên card khu vực nếu đã gán.
+- **Đã chốt với người dùng**: form Thêm/Sửa khu vực (chọn tay Người dọn/Người
+  chấm) **KHÔNG** bị giới hạn theo `eligible_group_id` — chỉ thuật toán random
+  tôn trọng ràng buộc này.
+- `src/lib/kpi-5s-auto-assign.ts`: `AutoAssignCandidate` thêm `groupIds: string[]`
+  (đã có sẵn từ `loadKpiTaskCandidates`, chỉ truyền qua); `AutoAssignZoneInput`
+  thêm `eligible_group_id`; `AutoAssignSuggestion` thêm cờ mới `areaPoolRelaxed`
+  (song song `groupConstraintRelaxed` đã có, ý nghĩa khác — relax vì pool khu
+  vực <2 người, không phải vì trùng nhóm chính). Mỗi zone tự tính `areaPool =
+  people.filter(p => p.groupIds.includes(zone.eligible_group_id))`; nếu
+  `areaPool.length < 2` → dùng lại toàn bộ `people` + đánh dấu
+  `areaPoolRelaxed`. Ràng buộc "tránh cùng nhóm chính" (`avoidSameGroup`) áp
+  dụng SAU, độc lập, BÊN TRONG `areaPool` đã lọc — 2 tầng ràng buộc lồng nhau,
+  mỗi tầng có cờ relax riêng. Trọng số random (`loadByUser`, ai đang tải ít hơn
+  có xác suất cao hơn) vẫn tính trên tải TOÀN NHÀ MÁY như cũ — chỉ phạm vi ứng
+  viên hợp lệ bị thu hẹp theo nhóm.
+- `src/app/dashboard/settings/_components/kpi-5s-auto-assign-modal.tsx`: truyền
+  thêm `eligible_group_id`/`groupIds` khi gọi `buildAutoAssignSuggestions`; hiện
+  cảnh báo `areaPoolRelaxed` (icon `AlertTriangle` hổ phách) cho CẢ 2 dropdown
+  Người dọn/Người chấm — khác `groupConstraintRelaxed` chỉ ảnh hưởng Người chấm.
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Chạy đủ 4 migration mới theo đúng thứ tự: `20260801_...` (bug 1, độc lập) →
+   `20260803_...` (mức Tương đối) → `20260802_...` (bug 2, phụ thuộc 20260803)
+   → `20260804_...` (nhóm khu vực, độc lập) trên Supabase SQL Editor.
+2. Đăng nhập Nho (người chấm) mở lại khu vực có lịch sử chấm điểm của chính họ
+   — xác nhận KHÔNG còn thấy nút "Khiếu nại"; đăng nhập RyTa (người dọn) — vẫn
+   thấy nút bình thường. Thử insert thẳng qua devtools với tư cách Nho — phải
+   bị RLS chặn.
+3. Admin mở lại khiếu nại cũ của RyTa (hoặc tạo appeal mới), chọn "Đã giải
+   quyết" kèm đổi kết quả sang "Đạt" — xác nhận `kpi_5s_evaluations.ket_qua`
+   đổi đúng ngay lập tức, badge lịch sử cập nhật đúng màu ở cả trang chi tiết
+   khu vực lẫn card `/dashboard/kpi/5s`. Test nút "Sửa kết quả" độc lập (không
+   qua khiếu nại có sẵn) trên trang chi tiết khu vực — xác nhận tạo đúng 1
+   khiếu nại tự động "Đã giải quyết" với nội dung "Admin tự sửa...".
+4. Chấm 1 tuần mới chọn "Tương đối" mà không nhập lý do — phải bị chặn (bắt
+   buộc như "Không đạt"); nhập lý do xong lưu được, badge màu amber đúng.
+5. ~~Tạo 2 nhóm mới ở Cài đặt → Nhân sự (vd "Kho 1", "Kho 2")...~~ — **ĐÃ HỦY,
+   xem mục "Kế hoạch phiên sau (viết 2026-07-26) — Tách 'Nhóm khu vực 5S' khỏi
+   personnel_groups" ngay bên dưới.** Người dùng phát hiện đúng lúc test tay:
+   kiến trúc "tái dùng `personnel_groups`" cho `eligible_group_id` là **bug
+   thiết kế thật**, không chỉ là chi tiết UX — phải làm lại theo hướng tách
+   riêng hoàn toàn trước khi test lại mục 5 này.
+
+## Kế hoạch phiên sau (viết 2026-07-26) — Tách "Nhóm khu vực 5S" khỏi personnel_groups
+
+### Bug đã xác nhận (không chỉ là UX rối mắt — có rủi ro sai điểm KPI thật)
+
+Người dùng phát hiện ngay khi mở form "Thêm khu vực 5S" (chưa kịp tạo dữ liệu
+thật — đã verify qua DB: cả 2 khu vực `PH01`/`PGĐ` hiện có vẫn `eligible_group_id
+= NULL`, không có dữ liệu test nào cần dọn): dropdown "Nhóm khu vực (random nội
+bộ)" trong `kpi-5s-zones-tab.tsx` tái dùng thẳng `personnel_groups` — đúng bảng
+đang được dùng cho **hệ số điểm KPI chuyên môn** (nhóm chính ×10, nhóm choàng ×5,
+xem mục "D — Điểm chuyên môn"). Đã xác nhận qua đọc code (`settings/page.tsx`
+dòng 4560-4596, form Thêm/Sửa "Nhóm"): đây là **1 danh sách phẳng dùng chung**,
+không có cột nào phân biệt "loại nhóm" — `personnel_groups` chỉ có
+`id, factory_id, code, name, description, is_system, is_active, sort_order`
+(`supabase/migrations/20260607_create_personnel_groups.sql`).
+
+Hệ quả 2 tầng:
+
+1. **UX**: tạo 1 nhóm "Kho 1" cho mục đích 5S sẽ hiện lẫn trong Cài đặt → Hệ
+   thống → Nhân sự cùng các nhóm chuyên môn thật (Cơ điện, Bảo trì, Trực ca...)
+   — đúng phản ánh của người dùng: "Nhóm" (bao quát toàn nhà máy, chỉ 1 nhóm
+   người làm được việc đó) và "Khu vực" (5S, phân công dọn dẹp/đánh giá theo
+   khu vực vật lý) là **2 trục khái niệm hoàn toàn khác nhau**, không nên dùng
+   chung 1 danh mục.
+2. **Đúng đắn dữ liệu (nghiêm trọng hơn)**: vì cùng 1 bảng, nhóm "Kho 1" sẽ
+   XUẤT HIỆN trong chính dropdown "Nhóm chính"/tick-chọn-nhóm ở form Nhân sự
+   (dùng để tính hệ số KPI chuyên môn) — admin có thể lỡ tay tick "Kho 1" làm
+   nhóm chuyên môn của 1 nhân viên, khiến công thức D (`%đạt×10` cho nhóm
+   chính) tính sai hoàn toàn dựa trên 1 nhóm chưa từng có ý nghĩa "chuyên môn"
+   nào — sai điểm KPI thật, không chỉ rối giao diện.
+
+**Quyết định đã chốt với người dùng**: tách hoàn toàn — tạo danh mục "Nhóm khu
+vực 5S" MỚI, độc lập 100% với `personnel_groups`, không hiện trong Cài đặt →
+Nhân sự, không thể bị chọn nhầm cho KPI chuyên môn.
+
+### Thiết kế kỹ thuật
+
+**Migration mới** (vd `20260805_kpi_5s_zone_groups.sql`, cần chạy thủ công):
+
+- Bảng `kpi_5s_zone_groups` — `id, factory_id, ten TEXT NOT NULL, is_active
+  BOOLEAN DEFAULT true, sort_order INTEGER DEFAULT 0, created_at, updated_at`,
+  `UNIQUE(factory_id, lower(ten))`. RLS mirror `kpi_5s_zones`: SELECT rộng trong
+  factory, INSERT/UPDATE/DELETE chỉ admin/`kpi.manage_config`.
+- Bảng `kpi_5s_zone_group_members` — `id, factory_id, zone_group_id →
+  kpi_5s_zone_groups(id) ON DELETE CASCADE, user_id UUID REFERENCES
+  auth.users(id), created_at`, `UNIQUE(zone_group_id, user_id)`. **Dùng
+  `user_id` (auth.users) trực tiếp, KHÔNG dùng `staff_id` (maintenance_staff)
+  như `personnel_group_members`** — để nhất quán với toàn bộ model candidate
+  của module KPI (`kpi_5s_zones.nguoi_don_id`, `kpi_task_members.user_id`...
+  đều dùng thẳng `auth.users.id`, resolve tên qua `loadKpiTaskCandidates`). RLS
+  mirror bảng trên.
+- `kpi_5s_zones`: đổi cột `eligible_group_id` (hiện `NULL` ở mọi khu vực, xác
+  nhận không có dữ liệu cần backfill) — `DROP COLUMN eligible_group_id` (bỏ FK
+  cũ trỏ `personnel_groups`) rồi `ADD COLUMN zone_group_id UUID REFERENCES
+  kpi_5s_zone_groups(id) ON DELETE SET NULL`. **Đổi tên cột** (không giữ
+  `eligible_group_id`) để không còn gợi nhớ tới `personnel_groups` — tên mới
+  phản ánh đúng bảng đích.
+
+**File cần sửa (rename `eligible_group_id` → `zone_group_id` xuyên suốt +
+đổi nguồn dữ liệu):**
+
+- `src/lib/kpi-5s.ts` — `Kpi5sZone`/`ZONE_COLS`/`Kpi5sZoneInput`: đổi tên field.
+- **File mới** `src/lib/kpi-5s-zone-groups.ts` — CRUD `kpi_5s_zone_groups`
+  (`fetchKpi5sZoneGroups`, `createKpi5sZoneGroup`, `updateKpi5sZoneGroup`,
+  `deleteKpi5sZoneGroup`) + membership (`fetchKpi5sZoneGroupMembers(zoneGroupId)`
+  hoặc `fetchAllZoneGroupMemberships(factoryId): Map<zoneGroupId, userId[]>`,
+  `addKpi5sZoneGroupMember`, `removeKpi5sZoneGroupMember`) — KHÔNG thêm vào
+  `kpi-5s.ts` (giữ tách file để rõ ràng đây là khái niệm độc lập, đúng tinh
+  thần "tách hoàn toàn").
+- `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx` — dropdown đổi
+  nguồn từ `loadAllPersonnelGroups` sang `fetchKpi5sZoneGroups`; đổi nhãn field
+  form thành `zone_group_id`; text hướng dẫn đổi lại trỏ đúng
+  "Cài đặt → KPI & 5S → Nhóm khu vực 5S" (KHÔNG còn nhắc "Cài đặt → Hệ thống →
+  Nhân sự").
+- **Component mới** `src/app/dashboard/settings/_components/kpi-5s-zone-groups-tab.tsx`
+  — CRUD danh sách nhóm khu vực (card + modal Thêm/Sửa, mirror
+  `kpi-5s-zones-tab.tsx`) + nút "Quản lý thành viên" mỗi card mở modal checklist
+  (dùng `loadKpiTaskCandidates` lấy danh sách người, tick/bỏ tick gọi
+  `addKpi5sZoneGroupMember`/`removeKpi5sZoneGroupMember`).
+- `src/app/dashboard/settings/page.tsx` — thêm sub-tab thứ 2 "Nhóm khu vực 5S"
+  vào mảng sub-tab của `tab === "kpi-5s"` (dòng ~5864, hiện chỉ có 1 phần tử
+  `"khu-vuc"`), mở rộng type `kpi5sTab` (dòng 847) từ `"khu-vuc"` thành
+  `"khu-vuc" | "nhom-khu-vuc"`, thêm block render mirror khối `khu-vuc` hiện có
+  (dòng 5881-5892).
+- `src/lib/kpi-5s-auto-assign.ts`:
+  - `AutoAssignZoneInput.eligible_group_id` → `zone_group_id`.
+  - `AutoAssignCandidate` thêm field mới `zoneGroupIds: string[]` (membership
+    trong `kpi_5s_zone_groups`) — **KHÔNG đụng `primaryGroupId`/`groupIds`
+    hiện có** (vẫn giữ nguyên trỏ `personnel_groups`, dùng cho ràng buộc mềm
+    "tránh người chấm cùng nhóm CHUYÊN MÔN chính với người dọn" — đây là 1 mục
+    đích hợp lệ khác, không liên quan gì tới nhóm khu vực, không được gộp lại
+    lần nữa).
+  - Lọc pool đổi từ `p.groupIds.includes(zone.eligible_group_id)` sang
+    `p.zoneGroupIds.includes(zone.zone_group_id)`.
+- `src/app/dashboard/settings/_components/kpi-5s-auto-assign-modal.tsx` — thêm
+  bước tải `fetchAllZoneGroupMemberships(factoryId)` (song song
+  `loadKpiTaskCandidates`), merge `zoneGroupIds` vào từng candidate trước khi
+  gọi `buildAutoAssignSuggestions`; đổi `eligible_group_id` → `zone_group_id`
+  khi map `zones`.
+
+### Việc cần làm ở phiên sau (theo đúng thứ tự)
+
+1. Viết + chạy migration `20260805_kpi_5s_zone_groups.sql` trên Supabase SQL
+   Editor (không cần backfill — xác nhận 0 khu vực nào đang dùng
+   `eligible_group_id`).
+2. Code đủ các file liệt kê ở trên, ưu tiên: lib mới → rename field `kpi-5s.ts`
+   → `kpi-5s-auto-assign.ts` → 2 file UI khu vực đã có → component mới "Nhóm
+   khu vực 5S" → `settings/page.tsx` (thêm sub-tab, mechanical).
+3. `npx tsc --noEmit`, `npx eslint`, `npm run build` — đều phải sạch.
+4. Test tay: tạo 2 "Nhóm khu vực 5S" (vd "Kho 1", "Kho 2") tại đúng sub-tab
+   mới — xác nhận **KHÔNG** xuất hiện ở Cài đặt → Hệ thống → Nhân sự, và
+   **KHÔNG** xuất hiện trong dropdown "Nhóm chính"/tick-nhóm của form Nhân sự.
+   Gán vài người vào mỗi nhóm qua "Quản lý thành viên". Gán "Nhóm khu vực" cho
+   2-3 khu vực 5S theo đúng 2 nhóm trên → mở "Phân công thông minh" → xác nhận
+   random chỉ chọn đúng người trong nhóm khu vực tương ứng, không lẫn người
+   ngoài; thử 1 nhóm chỉ có 1 thành viên → xác nhận `areaPoolRelaxed` vẫn hoạt
+   động đúng (nới lỏng, không treo). Xác nhận form Thêm/Sửa khu vực (chọn tay
+   Người dọn/Người chấm) vẫn tự do, không bị giới hạn theo nhóm khu vực.
+
+## Cập nhật 2026-08-05 — Sửa nhầm lẫn tầng khái niệm: "Vị trí" vs "Khu vực" +
+triển khai xong "tách khỏi personnel_groups" (thay thế kế hoạch phía trên)
+
+Mục kế hoạch ngay phía trên ("Tách 'Nhóm khu vực 5S' khỏi personnel_groups",
+viết 2026-07-26) đã được triển khai, nhưng **trong lúc code lại phát hiện thêm
+1 nhầm lẫn nghiêm trọng hơn** ở chính tầng đặt tên gốc — không chỉ là vấn đề
+"nhóm khu vực nên tách khỏi personnel_groups" như kế hoạch cũ mô tả.
+
+### Nhầm lẫn được phát hiện
+
+Người dùng chỉ ra trực tiếp: **"Đúng là khu vực văn phòng có phòng PGĐ, phòng
+PH01 chứ không phải PGĐ, PH01 là khu vực"**. Tức là bảng `kpi_5s_zones` gốc
+(mỗi dòng như "PGĐ"/"PH01", có 1 QR riêng để chấm điểm hàng tuần) đã bị gọi
+**sai tầng** — đây là tầng NHỎ (1 vị trí/phòng cụ thể cần dọn dẹp), không phải
+"khu vực". "Khu vực" đúng nghĩa là tầng LỚN (Văn phòng, Kho 1, Kho 2, Ca SX mủ
+tạp, Ca SX mủ nước — đúng như yêu cầu gốc của người dùng khi lần đầu đề xuất
+tính năng "Phân công thông minh"), CHỨA nhiều vị trí nhỏ bên trong.
+
+Đã hỏi lại và chốt 2 quyết định trước khi code:
+
+- Tầng nhỏ (PGĐ, PH01...) đổi tên thành **"Vị trí"** ("Vị trí 5S") — thuật ngữ
+  trung tính, dùng được cho cả phòng (Văn phòng) lẫn các điểm cụ thể trong
+  Kho 1/Kho 2/trạm sản xuất (không phải lúc nào cũng là "phòng").
+- Đổi **TOÀN BỘ nhất quán** — cả nhãn UI lẫn route/tên bảng/tên hàm kỹ thuật —
+  vì xác nhận **chưa in/phát QR nào ra hiện trường thật** (chỉ 2 vị trí test
+  PGĐ/PH01), đổi ngay lúc này ít tốn kém nhất.
+
+### Kỹ thuật "tái dùng tên đã giải phóng"
+
+Sau `ALTER TABLE kpi_5s_zones RENAME TO kpi_5s_locations`, tên `kpi_5s_zones`
+được giải phóng — dùng lại đúng tên đó cho bảng MỚI của tầng lớn "Khu vực"
+(khớp tự nhiên tiếng Anh zone=khu vực lớn, location=vị trí cụ thể). Áp dụng
+tương tự cho file UI (`kpi-5s-zones-tab.tsx` cũ đổi tên thành
+`kpi-5s-locations-tab.tsx`, tên file `kpi-5s-zones-tab.tsx` được tái dùng cho
+UI MỚI của tầng lớn) và tên hàm lib (`fetchKpi5sZones`/`createKpi5sZone`/...
+tái dùng cho tầng lớn). Vì vậy **kết quả cuối cùng khác tên so với kế hoạch
+"Nhóm khu vực 5S" (`kpi_5s_zone_groups`) mô tả ở mục ngay phía trên** — bảng
+tầng lớn thật sự tên là `kpi_5s_zones`/`kpi_5s_zone_members`, không phải
+`kpi_5s_zone_groups`/`kpi_5s_zone_group_members`. Nội dung/logic bên trong kế
+hoạch cũ (tách khỏi `personnel_groups`, dùng `auth.users.id` trực tiếp, RLS
+mirror, thuật toán không đổi) được giữ nguyên và áp dụng đúng.
+
+### Migration `supabase/migrations/20260805_kpi_5s_rename_locations_and_zones.sql`
+(**cần chạy thủ công, CHƯA CHẠY — phải chạy SAU 4 migration `20260801-04`**)
+
+Gồm 2 phần trong cùng 1 file:
+
+**Phần 1 — rename tầng nhỏ**: `ALTER TABLE kpi_5s_zones RENAME TO
+kpi_5s_locations`; đổi tên cột `ma_khu_vuc→ma_vi_tri`, `ten_khu_vuc→ten_vi_tri`,
+`vi_tri_mo_ta→mo_ta`; `DROP COLUMN eligible_group_id` (cột thêm ở migration
+`20260804`, thiết kế tái dùng `personnel_groups` đã huỷ — xác nhận cả 2 dòng
+PGĐ/PH01 hiện `NULL`, xoá an toàn không mất dữ liệu); `ALTER TABLE
+kpi_5s_evaluations RENAME COLUMN zone_id TO location_id`; `ALTER TABLE
+kpi_appeals RENAME COLUMN zone_evaluation_id TO location_evaluation_id`; DROP +
+CREATE lại tường minh mọi RLS policy liên quan (đổi tên bảng/cột lẫn tên
+policy). **Quan trọng nhất**: `CREATE OR REPLACE FUNCTION
+kpi_5s_evaluation_correct(...)` phải viết lại với tham số
+`p_location_evaluation_id` (đổi từ `p_zone_evaluation_id`) — vì PL/pgSQL
+function body là **raw SQL text**, KHÔNG tự động cascade theo tên cột như RLS
+policy/VIEW/CHECK/FK (những thứ đó là parsed expression tree gắn theo OID) —
+bỏ qua bước này hàm sẽ lỗi "column does not exist" ngay khi user bấm "Sửa kết
+quả"/"Đánh dấu đã giải quyết" sau migration.
+
+**Phần 2 — tạo tầng lớn (nối tiếp trong cùng file, sau khi rename xong)**:
+`CREATE TABLE kpi_5s_zones (id, factory_id, ten TEXT NOT NULL, is_active,
+sort_order, created_at, updated_at)`, `UNIQUE(factory_id, lower(ten))`, RLS
+SELECT rộng trong factory + INSERT/UPDATE/DELETE chỉ admin/`kpi.manage_config`;
+`CREATE TABLE kpi_5s_zone_members (id, factory_id, zone_id → kpi_5s_zones ON
+DELETE CASCADE, user_id UUID → auth.users, created_at)`,
+`UNIQUE(zone_id, user_id)`, RLS mirror; `ALTER TABLE kpi_5s_locations ADD
+COLUMN zone_id UUID REFERENCES kpi_5s_zones(id) ON DELETE SET NULL`.
+
+### File đã đổi (đầy đủ, đã build sạch)
+
+- Route đổi tên: `src/app/dashboard/kpi/5s/zone/[id]/` →
+  `src/app/dashboard/kpi/5s/location/[id]/page.tsx` (viết lại toàn bộ theo tên
+  mới, dùng `buildKpi5sLocationUrl`/`fetchKpi5sLocation`/
+  `Kpi5sLocation`/`downloadKpi5sLocationBulkQrPdf`/
+  `createKpiAppealForLocationEvaluation`).
+- `src/lib/kpi-5s.ts` — viết lại theo tầng nhỏ: `Kpi5sLocation`, `LOCATION_COLS`,
+  `fetchKpi5sLocations/fetchKpi5sLocation/createKpi5sLocation/
+  updateKpi5sLocation/deleteKpi5sLocation`, `Kpi5sEvaluation.location_id`,
+  `fetchKpi5sEvaluations(locationId)`, `fetchLatestKpi5sEvaluationsByLocationIds`,
+  `buildKpi5sLocationUrl` (path `/dashboard/kpi/5s/location/${id}`),
+  `uploadKpi5sEvaluationImage(factoryId, locationId, file)`. `Kpi5sResult`/
+  `KPI_5S_RESULT_LABEL`/`KPI_5S_RESULT_BADGE_CLASS` (3 mức, từ 2026-07-25)
+  không đổi.
+- `src/lib/kpi-5s-pdf.ts` — `downloadKpi5sZoneBulkQrPdf` →
+  `downloadKpi5sLocationBulkQrPdf`, tham số `zones`→`locations`.
+- **File mới** `src/lib/kpi-5s-zones.ts` (tái dùng tên file giải phóng) — CRUD
+  tầng lớn `kpi_5s_zones` (`fetchKpi5sZones/createKpi5sZone/updateKpi5sZone/
+  deleteKpi5sZone`) + `fetchAllZoneMemberships(factoryId): Map<zoneId,
+  userId[]>`, `addKpi5sZoneMember`, `removeKpi5sZoneMember`. Header comment ghi
+  rõ tách biệt hoàn toàn khỏi `personnel_groups`.
+- `src/app/dashboard/kpi/5s/page.tsx` — danh sách vị trí, link
+  `/dashboard/kpi/5s/location/${id}`.
+- `src/lib/kpi-appeals.ts` — `KpiAppeal.location_evaluation_id`,
+  `createKpiAppealForLocationEvaluation`, `resolveKpiLocationEvaluationAppeal`
+  (RPC key `p_location_evaluation_id`), `correctKpi5sEvaluationDirect` (RPC key
+  `p_location_evaluation_id`).
+- `src/app/dashboard/kpi/appeals/page.tsx` — `LocationEvalRef`/`LocationRef`,
+  query `.from("kpi_5s_locations").select("id, ma_vi_tri, ten_vi_tri")`.
+- `src/app/dashboard/kpi/5s/_components/kpi-5s-image-picker.tsx` — prop
+  `zoneId`→`locationId`.
+- `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx` (file cũ) đổi
+  tên thành `kpi-5s-locations-tab.tsx` — `Kpi5sLocationsTab`, dropdown "Khu
+  vực" mới trong form Thêm/Sửa vị trí lấy nguồn từ `fetchKpi5sZones` (KHÔNG
+  phải `personnel_groups`), gọi `Kpi5sAutoAssignModal` với prop `locations`.
+- **File UI mới** `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx`
+  (tái dùng tên file giải phóng) — `Kpi5sZonesTab({factoryId, canManage})`:
+  CRUD khu vực (`ten`/`is_active`/`sort_order`) + nút "Quản lý thành viên" mỗi
+  card mở modal checklist (dùng `loadKpiTaskCandidates`, tick/bỏ tick gọi
+  `addKpi5sZoneMember`/`removeKpi5sZoneMember`).
+- `src/lib/kpi-5s-auto-assign.ts` — `AutoAssignCandidate.zoneIds: string[]`
+  (thay `groupIds` cũ trong ngữ cảnh này — **`primaryGroupId` giữ nguyên
+  không đổi**, vẫn trỏ `personnel_groups`, dùng riêng cho ràng buộc mềm "tránh
+  cùng nhóm CHUYÊN MÔN", không được gộp lại với "khu vực" lần nữa — ghi rõ
+  trong comment đầu file); `AutoAssignLocationInput.zone_id` (thay
+  `eligible_group_id`); `AutoAssignSuggestion.locationId`/`zonePoolRelaxed`
+  (thay `zoneId`/`areaPoolRelaxed`); lọc pool `p.zoneIds.includes(loc.zone_id)`.
+- `src/app/dashboard/settings/_components/kpi-5s-auto-assign-modal.tsx` —
+  tải song song `fetchAllZoneMemberships(factoryId)` + `loadKpiTaskCandidates`,
+  merge thành `AutoAssignCandidate[]` (gộp `zoneIds` từ membership +
+  `primaryGroupId` từ candidate gốc) trước khi gọi thuật toán; prop
+  `zones`→`locations`.
+- `src/app/dashboard/settings/page.tsx` — `kpi5sTab` đổi type từ `"khu-vuc"`
+  thành `"vi-tri" | "khu-vuc"` (mặc định `"vi-tri"`); sub-tab bar 2 phần tử
+  ("Vị trí 5S" icon `SlidersHorizontal`, "Khu vực" icon `Target`); 2 block
+  render — `Kpi5sLocationsTab` (props như cũ, đổi tên import) và `Kpi5sZonesTab`
+  MỚI (chỉ `{factoryId, canManage}`, không cần `userOptions`).
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file đã đổi), và `npm run build` đều
+sạch (build liệt kê đúng route `ƒ /dashboard/kpi/5s/location/[id]`, không còn
+`/zone/[id]` cũ). Trước khi chạy `tsc`, phải xoá `.next/types` (cache route cũ
+từ lần build trước khi rename route folder) — nếu gặp lỗi
+`Cannot find module '.../kpi/5s/zone/[id]/page.js'` khi chạy `tsc --noEmit` mà
+route đã đổi tên đúng trong code, đây chỉ là cache stale, không phải lỗi thật.
+
+### 2 lỗi cú pháp SQL đã phát hiện + fix khi user chạy thật trên Supabase SQL Editor
+
+Cả 2 lỗi này KHÔNG bị `tsc`/`eslint`/`npm run build` bắt được (đúng bản chất —
+những lệnh đó chỉ kiểm tra code TypeScript, không parse file `.sql`). Cả 2 lần
+chạy đều lỗi giữa transaction nên **không để lại thay đổi nào trên DB** (Supabase
+SQL Editor chạy cả file dán vào như 1 transaction duy nhất — 1 câu lỗi cuối cùng
+rollback toàn bộ, kể cả các `ALTER TABLE`/`CREATE TABLE` đã "chạy qua" trước đó
+trong cùng lượt — đúng cơ chế đã ghi ở `.claude/rules/22-documents-module.md`
+mục "Fix 2026-07-24"). Vì vậy KHÔNG cần dọn dẹp gì giữa các lần chạy lại, chỉ
+cần sửa file rồi dán lại chạy lại từ đầu.
+
+1. **`UNIQUE(factory_id, lower(ten))` trong `CREATE TABLE kpi_5s_zones`** —
+   Postgres KHÔNG cho phép biểu thức (`lower(ten)`) trong constraint
+   `UNIQUE(...)` khai báo inline ở `CREATE TABLE`, chỉ nhận tên cột thô →
+   `ERROR 42601: syntax error at or near "("`. Đã sửa: bỏ khỏi
+   `CREATE TABLE`, thay bằng
+   `CREATE UNIQUE INDEX uniq_kpi_5s_zones_factory_ten_lower ON
+   public.kpi_5s_zones(factory_id, lower(ten));` riêng — đúng cách mọi nơi
+   khác trong repo đã làm (`required_notes`, `personnel_groups`, `lots`).
+2. **`CREATE OR REPLACE FUNCTION kpi_5s_evaluation_correct(...)` đổi tên tham
+   số `p_zone_evaluation_id`→`p_location_evaluation_id`** — dù cùng danh sách
+   KIỂU tham số (đủ để không tạo overload mới), Postgres vẫn từ chối
+   `CREATE OR REPLACE` khi tên tham số khác bản cũ:
+   `ERROR 42P13: cannot change name of input parameter
+   "p_zone_evaluation_id", HINT: Use DROP FUNCTION ... first`. Đây là giới
+   hạn RIÊNG của `CREATE OR REPLACE FUNCTION` (khác với đổi return
+   type/body, vốn được phép) — không tự cascade/suy luận được như rename
+   table/column. Đã sửa: thêm
+   `DROP FUNCTION IF EXISTS public.kpi_5s_evaluation_correct(UUID, TEXT,
+   TEXT, TEXT, UUID);` ngay trước, đổi `CREATE OR REPLACE FUNCTION` thành
+   `CREATE FUNCTION` thường (không cần `OR REPLACE` nữa vì đã DROP).
+   **Bài học chung cho migration sau này**: bất cứ khi nào đổi tên tham số
+   của 1 hàm đã tồn tại (không chỉ đổi logic/kiểu trả về), phải luôn
+   `DROP FUNCTION IF EXISTS <đúng chữ ký cũ>` trước, không tin `CREATE OR
+   REPLACE` tự xử lý được.
+
+Sau 2 fix trên, `npx tsc --noEmit`/`npx eslint`/`npm run build` (không liên
+quan tới 2 lỗi SQL này, đã pass từ trước) vẫn giữ nguyên sạch. **File migration
+đã sửa xong, nhưng TÍNH ĐẾN THỜI ĐIỂM GHI CHÚ NÀY VẪN CHƯA CÓ XÁC NHẬN CHẠY
+THÀNH CÔNG TRỌN VẸN TRÊN SUPABASE** — 2 lần chạy trước đó đều lỗi và rollback,
+lần chạy tiếp theo (sau 2 fix) chưa được xác nhận kết quả.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự
+
+1. Chạy `supabase/migrations/20260805_kpi_5s_rename_locations_and_zones.sql`
+   trên Supabase SQL Editor (SAU 4 migration `20260801-04` đã chạy từ trước).
+   **Xác nhận chạy THÀNH CÔNG hoàn toàn** (không còn lỗi nào) trước khi làm
+   các bước sau — nếu vẫn lỗi, đọc kỹ thông báo lỗi, đối chiếu với 2 lỗi đã
+   biết ở trên xem có phải dạng tương tự (biểu thức trong constraint inline,
+   đổi tên tham số qua `OR REPLACE`...) hay là lỗi mới hoàn toàn.
+2. **Test riêng RPC `kpi_5s_evaluation_correct` NGAY sau migration** (rủi ro
+   cao nhất, dễ vỡ nhất vì không lỗi lúc migration chạy, chỉ lỗi lúc gọi) — mở
+   1 vị trí có lịch sử chấm điểm, bấm "Sửa kết quả" (hoặc qua trang Khiếu nại
+   "Đánh dấu đã giải quyết") — xác nhận không lỗi "column does not exist".
+3. Mở `/dashboard/kpi/5s` → xác nhận nhãn "Vị trí 5S", card PGĐ/PH01 vẫn còn
+   nguyên dữ liệu (nguoi_don_id/nguoi_cham_id/lịch sử chấm điểm), link vào đúng
+   `/dashboard/kpi/5s/location/{id}` (route cũ `/zone/{id}` không còn tồn tại —
+   chấp nhận được, chưa in QR thật).
+4. Cài đặt → KPI & 5S → xác nhận 2 sub-tab: "Vị trí 5S" (PGĐ, PH01, nhãn đổi
+   "Mã vị trí"/"Tên vị trí") và "Khu vực" (trống, tạo mới được).
+5. Tạo 2 "Khu vực" (vd "Văn phòng", "Kho 1") ở sub-tab "Khu vực", gán vài
+   người vào mỗi khu vực qua "Quản lý thành viên". Vào sub-tab "Vị trí 5S",
+   sửa PGĐ/PH01 gán vào khu vực "Văn phòng" qua dropdown mới trong form.
+6. Mở "Phân công thông minh" ở sub-tab "Vị trí 5S" — chọn PGĐ/PH01 (đã gán
+   khu vực Văn phòng) — xác nhận random CHỈ chọn trong số thành viên khu vực
+   Văn phòng, không lẫn người khác nhà máy; thử 1 khu vực chỉ có 1 thành viên
+   → xác nhận `zonePoolRelaxed` hoạt động đúng (nới lỏng, không treo).
+7. Xác nhận ràng buộc mềm "tránh cùng nhóm chuyên môn chính" (`personnel_groups`,
+   KHÔNG đụng gì tới Khu vực mới) vẫn hoạt động độc lập, không bị ảnh hưởng
+   bởi thay đổi này (regression check).
+8. Kiểm tra QR trên trang chi tiết vị trí (`buildKpi5sLocationUrl`) trỏ đúng
+   route mới, quét thử ra đúng trang.

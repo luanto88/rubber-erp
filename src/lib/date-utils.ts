@@ -91,3 +91,28 @@ export function isDateInRange(date: string, fromDate?: string | null, toDate?: s
   if (to && iso > to) return false
   return true
 }
+
+export function addDaysISO(dateISO: string, days: number): string {
+  const parts = getDateParts(dateISO)
+  if (!parts) return dateISO
+  const d = new Date(Date.UTC(parts.yearNumber, parts.monthNumber - 1, parts.dayNumber))
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+// Thứ Hai của tuần chứa `dateISO` (mặc định hôm nay) — quy ước tuần bắt đầu Thứ Hai (ISO week),
+// tính bằng thành phần năm/tháng/ngày UTC để tránh lệch múi giờ (đồng bộ getTodayISODate()).
+export function getIsoWeekStart(dateISO?: string): string {
+  const iso = dateISO ? normalizeDateInput(dateISO) : getTodayISODate()
+  const parts = getDateParts(iso)
+  if (!parts) return getTodayISODate()
+  const d = new Date(Date.UTC(parts.yearNumber, parts.monthNumber - 1, parts.dayNumber))
+  const dow = d.getUTCDay() || 7 // Chủ nhật (0) -> 7
+  if (dow !== 1) d.setUTCDate(d.getUTCDate() - (dow - 1))
+  return d.toISOString().slice(0, 10)
+}
+
+export function formatWeekRangeLabel(weekStartISO: string): string {
+  const end = addDaysISO(weekStartISO, 6)
+  return `${formatDateDisplay(weekStartISO)} — ${formatDateDisplay(end)}`
+}

@@ -331,13 +331,20 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
   const nowMs = Date.now()
   const soonCutoffMs = nowMs + 24 * 3600_000
 
-  const [{ data: memberRows }, { data: taskRows }] = await Promise.all([
+  const [{ data: memberRows }, { data: taskRows }, { count: transferCount }] = await Promise.all([
     supabase.from("kpi_task_members").select("task_id").eq("user_id", user.id).eq("is_active", true),
     supabase
       .from("kpi_tasks")
       .select("id, trang_thai, han_hoan_thanh, nguoi_giao_id")
       .eq("factory_id", factoryId)
       .in("trang_thai", ["moi_giao", "dang_thuc_hien", "cho_nghiem_thu", "tra_ve"]),
+    // Phase 1b — Chuyển giao việc: lời mời đang chờ TÔI phản hồi (chưa phải active member nên
+    // không lọt qua vòng lặp tasks bên dưới) — xem migration 20260727_kpi_task_transfers.sql.
+    supabase
+      .from("kpi_task_transfers")
+      .select("id", { count: "exact", head: true })
+      .eq("den_nguoi_id", user.id)
+      .eq("trang_thai", "cho_duyet"),
   ])
 
   const myActiveTaskIds = new Set((memberRows || []).map((r: { task_id: string }) => r.task_id))
@@ -366,11 +373,17 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
     }
   }
 
+  // approvalCount gồm cả task admin không phải nguoi_giao_id (admin thấy toàn bộ hàng chờ
+  // duyệt) — link phải trỏ tab "all" cho admin, nếu không bấm vào tab "mine" sẽ không thấy
+  // đúng việc đó (task đó không thuộc "của họ" theo nghĩa thành viên/người giao).
+  const approvalLink = isAdmin ? "/dashboard/kpi/tasks?tab=all" : "/dashboard/kpi/tasks?tab=mine"
+
   return {
     moduleLabel: "Công việc & KPI",
     items: [
       { label: "Việc cần cập nhật/nộp", count: pendingCount, link: "/dashboard/kpi/tasks?tab=mine" },
-      { label: "Việc chờ nghiệm thu", count: approvalCount, link: "/dashboard/kpi/tasks?tab=mine" },
+      { label: "Việc chờ nghiệm thu", count: approvalCount, link: approvalLink },
+      { label: "Lời mời chuyển giao chờ phản hồi", count: transferCount || 0, link: "/dashboard/kpi/tasks?tab=mine" },
       { label: "Việc sắp đến hạn (24h)", count: dueSoonCount, link: "/dashboard/kpi/tasks?tab=mine" },
       { label: "Việc đã quá hạn", count: overdueCount, link: "/dashboard/kpi/tasks?tab=mine" },
     ],

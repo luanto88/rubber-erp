@@ -336,6 +336,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPublicStorageLookup, user?.id, user?.factory_id, moduleRoutePrefix])
 
+  // KPI — "sinh lười" instance công việc định kỳ hôm nay (kpi_task_templates). Gọi 1 lần/phiên/
+  // ngày, không cần Vercel Cron thật — RPC tự idempotent nên gọi lặp không tạo trùng, cờ
+  // sessionStorage chỉ để đỡ tốn round-trip. Lỗi bỏ qua êm, không được làm chậm/gãy bootstrap
+  // chính. Xem .claude/rules/27-kpi-module.md mục "Việc định kỳ theo nhóm".
+  useEffect(() => {
+    if (isPublicStorageLookup) return
+    if (!user?.id || !user?.factory_id) return
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const flagKey = `kpi_ensured_${user.factory_id}_${todayIso}`
+    if (sessionStorage.getItem(flagKey)) return
+    sessionStorage.setItem(flagKey, "1")
+    void import("@/lib/kpi-templates")
+      .then(({ ensureTodayKpiTaskInstances }) => ensureTodayKpiTaskInstances(user.factory_id as string))
+      .catch(() => {})
+  }, [isPublicStorageLookup, user?.id, user?.factory_id])
+
   // count > 0 ở module hiện tại → chỉ hiện section module, ẩn "Thông báo chung" (quyết định đã chốt)
   const hasModuleTasks = !!moduleTasks && moduleTasks.items.some((i) => i.count > 0)
 

@@ -5,9 +5,10 @@
 // KPI chưa có bảng dữ liệu, sẽ thêm dần theo đúng roadmap tại .claude/rules/27-kpi-module.md.
 
 import { useCallback, useEffect, useState } from "react"
-import { CheckSquare, ClipboardList, QrCode, Target, Trophy } from "lucide-react"
+import { CheckSquare, Target, Trophy } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { useScrollReveal } from "@/lib/useScrollReveal"
 import { KpiShell } from "./_components/kpi-shell"
 
 type PrimaryGroupRow = {
@@ -15,17 +16,9 @@ type PrimaryGroupRow = {
   personnel_groups: Array<{ name: string | null }> | null
 }
 
+// "Công việc" (giao việc) và "Đánh giá 5S" đã có tab riêng trong KpiShell — không còn liệt kê
+// ở đây nữa. Chỉ giữ các phần CHƯA build theo roadmap.
 const ROADMAP_CARDS = [
-  {
-    icon: ClipboardList,
-    title: "Công việc",
-    desc: "Giao việc cá nhân/nhóm, theo dõi tiến độ %, báo cáo kèm ảnh/văn bản/định vị, nghiệm thu.",
-  },
-  {
-    icon: QrCode,
-    title: "Đánh giá 5S",
-    desc: "Mỗi khu vực 1 QR — phân công người dọn đầu tuần, người chấm cuối tuần, chấm Đạt/Không đạt kèm ảnh.",
-  },
   {
     icon: CheckSquare,
     title: "Chấm điểm chuyên môn",
@@ -39,6 +32,7 @@ const ROADMAP_CARDS = [
 ] as const
 
 export default function KpiOverviewPage() {
+  const revealRef = useScrollReveal()
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,14 +91,16 @@ export default function KpiOverviewPage() {
   return (
     <KpiShell>
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
-            <Target size={22} className="text-violet-600" />
-            Quản lý công việc &amp; Đánh giá KPI
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Giao việc, theo dõi tiến độ, đánh giá 5S theo khu vực và chấm điểm KPI hàng tháng.
-          </p>
+        <div ref={revealRef} className="scroll-reveal flex items-center gap-3">
+          <div className="hover-lift shrink-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-200 via-fuchsia-100 to-indigo-100 shadow-sm">
+            <Target size={22} className="text-violet-700" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-800">Quản lý công việc &amp; Đánh giá KPI</h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Giao việc, theo dõi tiến độ, đánh giá 5S theo khu vực và chấm điểm KPI hàng tháng.
+            </p>
+          </div>
         </div>
 
         {primaryGroupChecked && !primaryGroupName && (
@@ -120,12 +116,14 @@ export default function KpiOverviewPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <div ref={revealRef} className="scroll-reveal bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h2 className="text-sm font-extrabold text-slate-700 mb-3">Sắp có</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {ROADMAP_CARDS.map((card) => (
-              <div key={card.title} className="rounded-xl border border-slate-200 p-4">
-                <card.icon size={18} className="text-violet-600 mb-2" />
+              <div key={card.title} className="hover-lift rounded-xl border border-slate-200 bg-gradient-to-br from-white to-violet-50/60 p-4">
+                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100">
+                  <card.icon size={16} className="text-violet-600" />
+                </div>
                 <div className="text-sm font-bold text-slate-700">{card.title}</div>
                 <p className="text-xs text-slate-500 mt-1">{card.desc}</p>
               </div>

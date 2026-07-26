@@ -21,6 +21,8 @@ import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
+import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
+import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -56,6 +58,7 @@ import {
   FileText,
   KeyRound,
   ImagePlus,
+  Target,
   Eye,
   EyeOff,
   Sun,
@@ -148,7 +151,7 @@ type UserEditor = {
   mode: "approve" | "edit"
 }
 
-type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban"
+type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban" | "kpi-5s"
 type SensitiveActionKind = "change_pin" | "change_signature" | "change_password"
 type SensitiveActionModal = {
   actionType: SensitiveActionKind
@@ -729,6 +732,7 @@ export default function SettingsPage() {
   const canViewMasterData = isAdmin || hasPermission(user, "settings.master_data")
   const canViewMaintenanceConfig = isAdmin || hasPermission(user, "settings.maintenance_config")
   const canViewIsoSignature = isAdmin || hasPermission(user, "iso.signature")
+  const canManageKpiConfig = isAdmin || hasPermission(user, "kpi.manage_config")
 
   const [configTab, setConfigTab] = useState<FactoryConfigTab>("warehouses")
   const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
@@ -841,6 +845,7 @@ export default function SettingsPage() {
 
   // ISO & Văn bản tab state
   const [isoVanBanTab, setIsoVanBanTab] = useState<"chu-ky">("chu-ky")
+  const [kpi5sTab, setKpi5sTab] = useState<"vi-tri" | "khu-vuc">("vi-tri")
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
   const [signatureUploading, setSignatureUploading] = useState(false)
   const [pinForm, setPinForm] = useState({ pin: "", pinConfirm: "", showPin: false })
@@ -1669,7 +1674,8 @@ export default function SettingsPage() {
       !hasPermission(sessionUser, "users.approve") &&
       !hasPermission(sessionUser, "settings.master_data") &&
       !hasPermission(sessionUser, "settings.maintenance_config") &&
-      !hasPermission(sessionUser, "iso.signature")
+      !hasPermission(sessionUser, "iso.signature") &&
+      !hasPermission(sessionUser, "kpi.manage_config")
     ) {
       setLoading(false)
       window.location.replace("/dashboard")
@@ -1722,6 +1728,7 @@ export default function SettingsPage() {
     if (!qTab && !qSub && !qAction) return
     deepLinkHandledRef.current = true
     if (qTab === "cau_hinh_nha_may") setTab("factory-config")
+    if (qTab === "kpi_5s") setTab("kpi-5s")
     if (qSub === "lo_vuon") setConfigTab("forest-plots")
     if (qSub === "lo_vuon" && qAction === "add" && (isAdmin || hasPermission(user, "settings.manage_config"))) {
       setConfigError("")
@@ -2606,6 +2613,7 @@ export default function SettingsPage() {
     { key: "master-data" as const, label: "Danh mục", icon: Database, show: canViewMasterData },
     { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: canViewMaintenanceConfig },
     { key: "iso-vanban" as const, label: "ISO & Văn bản", icon: FileText, show: canViewIsoSignature },
+    { key: "kpi-5s" as const, label: "KPI & 5S", icon: Target, show: canManageKpiConfig },
   ].filter((item) => item.show)
 
   const configModalFooter = (
@@ -5838,6 +5846,58 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab KPI & 5S ── */}
+      {tab === "kpi-5s" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-violet-50 to-indigo-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <Target size={16} className="text-violet-600" />
+              <span className="font-extrabold text-slate-700">KPI &amp; 5S</span>
+            </div>
+
+            <div className="px-6 pt-4 flex flex-wrap gap-2 border-b border-slate-100">
+              {([
+                { key: "vi-tri" as const, label: "Vị trí 5S", icon: SlidersHorizontal },
+                { key: "khu-vuc" as const, label: "Khu vực", icon: Target },
+              ]).map((st) => (
+                <button
+                  key={st.key}
+                  onClick={() => setKpi5sTab(st.key)}
+                  className={
+                    "flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-t-xl border-b-2 transition-all " +
+                    (kpi5sTab === st.key
+                      ? "text-violet-700 border-violet-500 bg-violet-50"
+                      : "text-slate-500 border-transparent hover:bg-slate-50")
+                  }
+                >
+                  <st.icon size={14} />
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {kpi5sTab === "vi-tri" && (
+              <div className="p-6">
+                <Kpi5sLocationsTab
+                  factoryId={factoryId}
+                  canManage={canManageKpiConfig}
+                  userOptions={activeProfilesForLink.map((p) => ({
+                    id: p.id,
+                    label: p.full_name ? `${p.full_name} (${p.username})` : p.username,
+                  }))}
+                />
+              </div>
+            )}
+
+            {kpi5sTab === "khu-vuc" && (
+              <div className="p-6">
+                <Kpi5sZonesTab factoryId={factoryId} canManage={canManageKpiConfig} />
               </div>
             )}
           </div>

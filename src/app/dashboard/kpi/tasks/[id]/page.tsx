@@ -10,27 +10,41 @@ import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRightLeft,
   Ban,
+  CalendarClock,
   CheckCircle2,
   ClipboardEdit,
   ExternalLink,
   FileText,
+  Flag,
   Link2,
   MapPin,
   PenSquare,
   RotateCcw,
   Send,
   Sparkles,
+  UserX,
+  X,
 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiEvidencePicker } from "../_components/kpi-evidence-picker"
+import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
+import { createKpiAppealForTask, getKpiAppealErrorMessage } from "@/lib/kpi-appeals"
+import { sendKpiNotify } from "@/lib/kpi-notify"
+import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
+  averageTaskProgress,
   cancelKpiTask,
+  cancelKpiTaskTransfer,
+  computeChinhThreshold,
   evaluateKpiTask,
+  extendKpiTaskDeadline,
   fetchKpiTaskDetail,
   fetchKpiTaskEvidenceLinks,
+  fetchTaskTransfers,
   formatKpiDateTime,
   getKpiErrorMessage,
   isTaskDueSoon,
@@ -41,6 +55,8 @@ import {
   KPI_STATUS_BADGE_CLASS,
   KPI_STATUS_LABEL,
   loadKpiTaskCandidates,
+  requestKpiTaskTransfer,
+  respondKpiTaskTransfer,
   submitKpiTaskProgress,
   type KpiTask,
   type KpiTaskCandidate,
@@ -48,6 +64,7 @@ import {
   type KpiTaskLog,
   type KpiTaskLogAction,
   type KpiTaskMember,
+  type KpiTaskTransfer,
 } from "@/lib/kpi-tasks"
 
 type EvaluateAction = "nghiem_thu" | "dieu_chinh" | "tra_ve" | "yeu_cau_bo_sung"
@@ -60,6 +77,8 @@ const ACTION_ICON: Record<KpiTaskLogAction, typeof ClipboardEdit> = {
   tra_ve: RotateCcw,
   yeu_cau_bo_sung: AlertTriangle,
   gan_ban_ghi: Link2,
+  chuyen_giao: ArrowRightLeft,
+  gia_han: CalendarClock,
 }
 
 function ProgressForm({
@@ -67,12 +86,14 @@ function ProgressForm({
   taskId,
   member,
   task,
+  actorName,
   onDone,
 }: {
   factoryId: string
   taskId: string
   member: KpiTaskMember
   task: KpiTask
+  actorName: string
   onDone: () => void
 }) {
   const [tienDo, setTienDo] = useState(member.tien_do)
@@ -130,6 +151,15 @@ function ProgressForm({
         viDo,
         kinhDo,
         diaDiemText: diaDiemText || null,
+      })
+      sendKpiNotify({
+        factoryId,
+        title: hanhDong === "nop" ? "Công việc đã được nộp" : "Cập nhật tiến độ công việc",
+        lines: [
+          `📋 ${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`,
+          `👤 ${actorName} — tiến độ ${tienDo}%${noiDung.trim() ? `: ${noiDung.trim()}` : ""}`,
+        ],
+        link: `/dashboard/kpi/tasks/${taskId}`,
       })
       onDone()
     } catch (err) {
@@ -233,7 +263,9 @@ function ProgressForm({
 }
 
 function EvaluateModal({
+  factoryId,
   taskId,
+  taskLabel,
   action,
   memberUserId,
   memberName,
@@ -241,7 +273,9 @@ function EvaluateModal({
   onClose,
   onDone,
 }: {
+  factoryId: string
   taskId: string
+  taskLabel: string
   action: EvaluateAction
   memberUserId: string
   memberName: string
@@ -278,6 +312,16 @@ function EvaluateModal({
         hanhDong: action,
         tienDo: needsScore ? tienDo : null,
         noiDung,
+      })
+      sendKpiNotify({
+        factoryId,
+        title: `${titleMap[action]}: ${memberName}`,
+        lines: [
+          `📋 ${taskLabel}`,
+          needsScore ? `📊 Điểm: ${tienDo}%` : null,
+          noiDung.trim() ? `📝 ${noiDung.trim()}` : null,
+        ].filter((l): l is string => !!l),
+        link: `/dashboard/kpi/tasks/${taskId}`,
       })
       onDone()
     } catch (err) {
@@ -333,9 +377,311 @@ function EvaluateModal({
   )
 }
 
+function TransferModal({
+  factoryId,
+  taskId,
+  taskLabel,
+  actorName,
+  candidates,
+  excludeUserIds,
+  onClose,
+  onDone,
+}: {
+  factoryId: string
+  taskId: string
+  taskLabel: string
+  actorName: string
+  candidates: KpiTaskCandidate[]
+  excludeUserIds: string[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const options = useMemo(
+    () => candidates.filter((c) => !excludeUserIds.includes(c.userId)),
+    [candidates, excludeUserIds],
+  )
+  const [denNguoiId, setDenNguoiId] = useState("")
+  const [ghiChu, setGhiChu] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleConfirm = async () => {
+    if (!denNguoiId) {
+      setError("Vui lòng chọn người nhận.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await requestKpiTaskTransfer({ taskId, denNguoiId, ghiChu })
+      const denNguoiName = options.find((o) => o.userId === denNguoiId)?.ten || denNguoiId
+      sendKpiNotify({
+        factoryId,
+        title: "Yêu cầu chuyển giao công việc",
+        lines: [`📋 ${taskLabel}`, `🔁 ${actorName} muốn chuyển giao cho ${denNguoiName}${ghiChu.trim() ? ` — "${ghiChu.trim()}"` : ""}`],
+        link: `/dashboard/kpi/tasks/${taskId}`,
+      })
+      onDone()
+    } catch (err) {
+      setError(getKpiErrorMessage(err, "Không gửi được yêu cầu chuyển giao."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title="Chuyển giao công việc"
+      onClose={onClose}
+      maxWidth="md"
+      footer={
+        <>
+          <button onClick={onClose} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+            Hủy
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+            className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md disabled:opacity-60"
+          >
+            {saving ? "Đang gửi..." : "Gửi yêu cầu"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Người nhận phải chủ động chấp nhận thì việc mới thực sự chuyển — bạn vẫn là người phụ
+          trách cho tới lúc đó. Mỗi việc chỉ chuyển giao được đúng 1 lần.
+        </p>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Chuyển cho *</label>
+          <select
+            value={denNguoiId}
+            onChange={(e) => setDenNguoiId(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Chọn người nhận --</option>
+            {options.map((c) => (
+              <option key={c.userId} value={c.userId}>
+                {c.ten}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú (tuỳ chọn)</label>
+          <textarea
+            value={ghiChu}
+            onChange={(e) => setGhiChu(e.target.value)}
+            rows={2}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            placeholder="VD: Mình đi công tác từ mai, nhờ bạn tiếp tục..."
+          />
+        </div>
+        {error && <div className="text-xs font-semibold text-red-600">{error}</div>}
+      </div>
+    </ModalShell>
+  )
+}
+
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function ExtendDeadlineModal({
+  factoryId,
+  taskId,
+  taskLabel,
+  currentDeadline,
+  onClose,
+  onDone,
+}: {
+  factoryId: string
+  taskId: string
+  taskLabel: string
+  currentDeadline: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [value, setValue] = useState(toDatetimeLocalValue(currentDeadline))
+  const [lyDo, setLyDo] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleConfirm = async () => {
+    if (!value) {
+      setError("Vui lòng chọn hạn hoàn thành mới.")
+      return
+    }
+    if (!lyDo.trim()) {
+      setError("Vui lòng nhập lý do đổi hạn.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const newIso = new Date(value).toISOString()
+      await extendKpiTaskDeadline({ taskId, newHanHoanThanh: newIso, lyDo })
+      sendKpiNotify({
+        factoryId,
+        title: "Gia hạn công việc",
+        lines: [
+          `📋 ${taskLabel}`,
+          `⏰ Hạn cũ: ${formatKpiDateTime(currentDeadline)} → Hạn mới: ${formatKpiDateTime(newIso)}`,
+          `📝 Lý do: ${lyDo.trim()}`,
+        ],
+        link: `/dashboard/kpi/tasks/${taskId}`,
+      })
+      onDone()
+    } catch (err) {
+      setError(getKpiErrorMessage(err, "Không đổi được hạn hoàn thành."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title="Gia hạn công việc"
+      onClose={onClose}
+      maxWidth="md"
+      footer={
+        <>
+          <button onClick={onClose} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+            Hủy
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+            className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md disabled:opacity-60"
+          >
+            {saving ? "Đang lưu..." : "Xác nhận gia hạn"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Hạn hiện tại: <strong>{formatKpiDateTime(currentDeadline)}</strong>. Mọi thành viên đang
+          thực hiện sẽ thấy thay đổi này trong dòng thời gian của họ.
+        </p>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Hạn hoàn thành mới *</label>
+          <input
+            type="datetime-local"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do đổi hạn *</label>
+          <textarea
+            value={lyDo}
+            onChange={(e) => setLyDo(e.target.value)}
+            rows={2}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            placeholder="VD: Chờ nguyên liệu, phát sinh sự cố..."
+          />
+        </div>
+        {error && <div className="text-xs font-semibold text-red-600">{error}</div>}
+      </div>
+    </ModalShell>
+  )
+}
+
+function AppealModal({
+  factoryId,
+  taskId,
+  taskLabel,
+  userId,
+  actorName,
+  onClose,
+  onDone,
+}: {
+  factoryId: string
+  taskId: string
+  taskLabel: string
+  userId: string
+  actorName: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [noiDung, setNoiDung] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleConfirm = async () => {
+    if (!noiDung.trim()) {
+      setError("Vui lòng nhập nội dung khiếu nại.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await createKpiAppealForTask({ factoryId, taskId, nguoiKhieuNaiId: userId, noiDung })
+      sendKpiNotify({
+        factoryId,
+        title: "Khiếu nại mới",
+        lines: [`📋 ${taskLabel}`, `👤 ${actorName}: ${noiDung.trim()}`],
+        link: "/dashboard/kpi/appeals",
+      })
+      onDone()
+    } catch (err) {
+      setError(getKpiAppealErrorMessage(err, "Không gửi được khiếu nại."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title="Khiếu nại về công việc này"
+      onClose={onClose}
+      maxWidth="md"
+      footer={
+        <>
+          <button onClick={onClose} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+            Hủy
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={saving}
+            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md disabled:opacity-60"
+          >
+            {saving ? "Đang gửi..." : "Gửi khiếu nại"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-slate-500">
+          Khiếu nại sẽ được gửi tới người quản trị để xem xét — bạn có thể theo dõi trạng thái ở
+          mục &quot;Khiếu nại&quot; trong menu KPI.
+        </p>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung *</label>
+          <textarea
+            value={noiDung}
+            onChange={(e) => setNoiDung(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-rose-500"
+            placeholder="Mô tả cụ thể vấn đề bạn muốn khiếu nại..."
+          />
+        </div>
+        {error && <div className="text-xs font-semibold text-red-600">{error}</div>}
+      </div>
+    </ModalShell>
+  )
+}
+
 export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = use(params)
   const router = useRouter()
+  const revealRef = useScrollReveal()
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -346,12 +692,18 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   const [logs, setLogs] = useState<KpiTaskLog[]>([])
   const [evidenceLinks, setEvidenceLinks] = useState<KpiTaskEvidenceLink[]>([])
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
+  const [transfers, setTransfers] = useState<KpiTaskTransfer[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
   const [evaluateTarget, setEvaluateTarget] = useState<{ action: EvaluateAction; memberUserId: string; memberName: string } | null>(null)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [showTransferModal, setShowTransferModal] = useState(false)
+  const [transferBusyId, setTransferBusyId] = useState<string | null>(null)
+  const [transferError, setTransferError] = useState<string | null>(null)
+  const [showExtendModal, setShowExtendModal] = useState(false)
+  const [showAppealModal, setShowAppealModal] = useState(false)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -379,16 +731,18 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
     setDataLoading(true)
     setDataError(null)
     try {
-      const [detail, candidateData, evidence] = await Promise.all([
+      const [detail, candidateData, evidence, transferRows] = await Promise.all([
         fetchKpiTaskDetail(taskId),
         loadKpiTaskCandidates(fid),
         fetchKpiTaskEvidenceLinks(taskId),
+        fetchTaskTransfers(taskId),
       ])
       setTask(detail.task)
       setMembers(detail.members)
       setLogs(detail.logs)
       setCandidates(candidateData.people)
       setEvidenceLinks(evidence)
+      setTransfers(transferRows)
     } catch (err) {
       setDataError(getKpiErrorMessage(err, "Không tải được công việc."))
     } finally {
@@ -398,6 +752,22 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
 
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
+  }, [factoryId, loadData])
+
+  // Bằng chứng có thể được gắn từ MODULE KHÁC (Điều xe/Sản lượng/Kiểm nghiệm...), không phải
+  // từ chính trang này — nếu người xem để tab này mở nền rồi quay lại, dữ liệu cũ trong state
+  // sẽ không tự đổi trừ khi refetch. Refetch nhẹ mỗi khi tab quay lại visible/focus.
+  useEffect(() => {
+    if (!factoryId) return
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") void loadData(factoryId)
+    }
+    document.addEventListener("visibilitychange", handleFocus)
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      document.removeEventListener("visibilitychange", handleFocus)
+      window.removeEventListener("focus", handleFocus)
+    }
   }, [factoryId, loadData])
 
   const nameByUserId = useMemo(() => {
@@ -424,6 +794,20 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   const dueSoon = isTaskDueSoon(task)
   const open = isTaskOpen(task.trang_thai)
 
+  // Việc mục tiêu số lượng chung — xem migration 20260725_kpi_task_quantity_target.sql.
+  const evidenceCountByUser: Record<string, number> = {}
+  for (const link of evidenceLinks) {
+    evidenceCountByUser[link.member_user_id] = (evidenceCountByUser[link.member_user_id] || 0) + 1
+  }
+  const chinhThreshold = task.muc_tieu_so_luong ? computeChinhThreshold(task.muc_tieu_so_luong) : null
+
+  // Phase 1b — Chuyển giao việc: mỗi task có thể có nhiều yêu cầu đang chờ song song (mỗi
+  // thành viên tự chuyển phần việc của mình), nhưng RPC chỉ cho tối đa 1 yêu cầu chưa xử lý
+  // /1 thành viên. Map theo tu_nguoi_id để hiện đúng badge trên đúng dòng người đó.
+  const pendingTransfers = transfers.filter((t) => t.trang_thai === "cho_duyet")
+  const outgoingTransferByMember = new Map(pendingTransfers.map((t) => [t.tu_nguoi_id, t]))
+  const myIncomingTransfer = pendingTransfers.find((t) => t.den_nguoi_id === user?.id)
+
   const handleCancel = async () => {
     setCancelling(true)
     try {
@@ -437,6 +821,41 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  const handleRespondTransfer = async (transferId: string, chapNhan: boolean) => {
+    setTransferBusyId(transferId)
+    setTransferError(null)
+    try {
+      await respondKpiTaskTransfer({ transferId, chapNhan })
+      sendKpiNotify({
+        factoryId: factoryId || undefined,
+        title: chapNhan ? "Đã nhận chuyển giao công việc" : "Đã từ chối chuyển giao công việc",
+        lines: [
+          `📋 ${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`,
+          `👤 ${user?.full_name || user?.username || "Người dùng"} ${chapNhan ? "đã chấp nhận" : "đã từ chối"} lời mời chuyển giao.`,
+        ],
+        link: `/dashboard/kpi/tasks/${task.id}`,
+      })
+      if (factoryId) void loadData(factoryId)
+    } catch (err) {
+      setTransferError(getKpiErrorMessage(err, "Không xử lý được yêu cầu chuyển giao."))
+    } finally {
+      setTransferBusyId(null)
+    }
+  }
+
+  const handleCancelTransfer = async (transferId: string) => {
+    setTransferBusyId(transferId)
+    setTransferError(null)
+    try {
+      await cancelKpiTaskTransfer(transferId)
+      if (factoryId) void loadData(factoryId)
+    } catch (err) {
+      setTransferError(getKpiErrorMessage(err, "Không hủy được yêu cầu chuyển giao."))
+    } finally {
+      setTransferBusyId(null)
+    }
+  }
+
   return (
     <KpiShell>
       <div className="space-y-4">
@@ -444,7 +863,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
           <ArrowLeft size={14} /> Quay lại danh sách
         </button>
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <div ref={revealRef} className="scroll-reveal bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
             <div>
               <span className="text-xs font-bold text-slate-400">{task.ma_cong_viec || "—"}</span>
@@ -452,6 +871,14 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
             </div>
             <div className="flex items-center gap-2">
               <span className={`px-3 py-1 rounded-xl text-xs font-bold ${KPI_STATUS_BADGE_CLASS[task.trang_thai]}`}>{KPI_STATUS_LABEL[task.trang_thai]}</span>
+              {!!user && (isOwner || !!myMember) && (
+                <button
+                  onClick={() => setShowAppealModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-xs font-bold text-slate-500"
+                >
+                  <Flag size={12} /> Khiếu nại
+                </button>
+              )}
               {isOwner && open && (
                 <button
                   onClick={() => setShowCancelConfirm(true)}
@@ -480,6 +907,14 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
                 {(overdue || dueSoon) && <AlertTriangle size={12} />}
                 {formatKpiDateTime(task.han_hoan_thanh)}
               </div>
+              {isOwner && open && (
+                <button
+                  onClick={() => setShowExtendModal(true)}
+                  className="mt-1 flex items-center gap-1 text-[11px] font-bold text-violet-600 hover:text-violet-700"
+                >
+                  <CalendarClock size={11} /> Gia hạn
+                </button>
+              )}
             </div>
             <div>
               <div className="text-xs text-slate-400">Yêu cầu báo cáo</div>
@@ -490,42 +925,153 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
+        {myIncomingTransfer && (
+          <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4">
+            <div className="flex items-center gap-1.5 text-sm font-extrabold text-violet-800 mb-1.5">
+              <ArrowRightLeft size={14} /> Lời mời chuyển giao công việc
+            </div>
+            <p className="text-sm text-violet-700">
+              <strong>{resolveName(myIncomingTransfer.tu_nguoi_id)}</strong> muốn chuyển giao công
+              việc này cho bạn, giữ nguyên tiến độ hiện tại{" "}
+              <strong>{myIncomingTransfer.tien_do_luc_chuyen}%</strong>.
+              {myIncomingTransfer.ghi_chu && (
+                <>
+                  {" "}
+                  Ghi chú: <span className="italic">&quot;{myIncomingTransfer.ghi_chu}&quot;</span>
+                </>
+              )}
+            </p>
+            {transferError && <p className="text-xs font-semibold text-red-600 mt-2">{transferError}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => void handleRespondTransfer(myIncomingTransfer.id, true)}
+                disabled={transferBusyId === myIncomingTransfer.id}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-60"
+              >
+                <CheckCircle2 size={14} /> {transferBusyId === myIncomingTransfer.id ? "Đang xử lý..." : "Chấp nhận"}
+              </button>
+              <button
+                onClick={() => void handleRespondTransfer(myIncomingTransfer.id, false)}
+                disabled={transferBusyId === myIncomingTransfer.id}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 text-sm font-bold disabled:opacity-60"
+              >
+                <X size={14} /> Từ chối
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-          <div className="text-sm font-extrabold text-slate-700 mb-3">Người thực hiện</div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-sm font-extrabold text-slate-700">Người thực hiện</div>
+            {task.muc_tieu_so_luong !== null && (
+              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${evidenceLinks.length >= task.muc_tieu_so_luong ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                Việc chung: {evidenceLinks.length}/{task.muc_tieu_so_luong}
+              </span>
+            )}
+          </div>
+          {task.muc_tieu_so_luong !== null && (
+            <>
+              {/* Thanh tiến độ TỔNG, cùng 1 số cho MỌI người xem (giao/chính/choàng) — tính từ
+                  averageTaskProgress() (SUM tien_do các thành viên active), khớp đúng
+                  evidenceLinks.length/muc_tieu_so_luong. Hiển thị độc lập với ProgressForm
+                  (form đó chỉ dành cho thành viên tự cập nhật, đã ẩn ở task mục tiêu số lượng). */}
+              <div className="mb-1">
+                <KpiProgressBar percent={averageTaskProgress(task, members)} size="md" />
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                {averageTaskProgress(task, members)}% hoàn thành chung — Việc chung Hoàn thành
+                khi tổng bằng chứng đạt đủ mục tiêu, không quan tâm ai đóng góp. Riêng người
+                &quot;Chính&quot; có ngưỡng tối thiểu {chinhThreshold} — không đạt sẽ bị trừ điểm
+                cá nhân dù việc chung đã xong.
+              </p>
+            </>
+          )}
           <div className="space-y-2">
             {members.map((m) => {
               const isMe = m.user_id === user?.id
+              const myEvidenceCount = evidenceCountByUser[m.user_id] || 0
+              const outTransfer = outgoingTransferByMember.get(m.user_id)
+              const canTransferOut = isMe && m.is_active && open && !task.da_chuyen_giao && !outTransfer
               return (
-                <div key={m.id} className={`rounded-xl border p-3 ${m.is_active ? "border-slate-100" : "border-slate-100 opacity-50"}`}>
+                <div key={m.id} className={`hover-lift rounded-xl border p-3 ${m.is_active ? "border-slate-100" : "border-slate-100 opacity-50"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-slate-700">{resolveName(m.user_id)}</span>
                       {isMe && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Bạn</span>}
+                      {m.phan_loai === "chinh" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Chính</span>}
+                      {m.phan_loai === "choang" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Choàng</span>}
                       {!m.is_active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">Đã chuyển giao</span>}
                     </div>
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-slate-500">Tự báo cáo: <strong className="text-slate-700">{m.tien_do}%</strong></span>
+                      {task.muc_tieu_so_luong !== null ? (
+                        <span className="text-slate-500">
+                          Đóng góp: <strong className="text-slate-700">{myEvidenceCount}</strong>
+                          {m.phan_loai === "chinh" && chinhThreshold !== null && (
+                            <span className="text-slate-400"> / {chinhThreshold} tối thiểu</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">Tự báo cáo: <strong className="text-slate-700">{m.tien_do}%</strong></span>
+                      )}
                       {m.tien_do_nghiem_thu !== null && (
-                        <span className="text-emerald-600">Nghiệm thu: <strong>{m.tien_do_nghiem_thu}%</strong></span>
+                        <span className={m.phan_loai === "chinh" && m.tien_do_nghiem_thu < 100 ? "text-red-600" : "text-emerald-600"}>
+                          Điểm A: <strong>{m.tien_do_nghiem_thu}%</strong>
+                        </span>
                       )}
                       {m.da_nop_luc && <span className="text-slate-400">Nộp lúc {formatKpiDateTime(m.da_nop_luc)}</span>}
                     </div>
                   </div>
 
+                  {outTransfer && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-violet-600">
+                      <ArrowRightLeft size={11} />
+                      Đang chờ <strong>{resolveName(outTransfer.den_nguoi_id)}</strong> phản hồi lời mời chuyển giao
+                      {isMe && (
+                        <button
+                          onClick={() => void handleCancelTransfer(outTransfer.id)}
+                          disabled={transferBusyId === outTransfer.id}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-violet-200 hover:bg-violet-50 text-violet-600 font-bold disabled:opacity-60"
+                        >
+                          <UserX size={10} /> {transferBusyId === outTransfer.id ? "Đang hủy..." : "Hủy yêu cầu"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {canTransferOut && (
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setShowTransferModal(true)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold"
+                      >
+                        <ArrowRightLeft size={11} /> Chuyển giao
+                      </button>
+                    </div>
+                  )}
+
                   {isOwner && open && m.is_active && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <button
-                        onClick={() => setEvaluateTarget({ action: "nghiem_thu", memberUserId: m.user_id, memberName: resolveName(m.user_id) })}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold"
-                      >
-                        <CheckCircle2 size={11} /> Nghiệm thu
-                      </button>
-                      <button
-                        onClick={() => setEvaluateTarget({ action: "dieu_chinh", memberUserId: m.user_id, memberName: resolveName(m.user_id) })}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] font-bold"
-                      >
-                        <PenSquare size={11} /> Điều chỉnh
-                      </button>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {task.muc_tieu_so_luong === null ? (
+                        <>
+                          <button
+                            onClick={() => setEvaluateTarget({ action: "nghiem_thu", memberUserId: m.user_id, memberName: resolveName(m.user_id) })}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold"
+                          >
+                            <CheckCircle2 size={11} /> Nghiệm thu
+                          </button>
+                          <button
+                            onClick={() => setEvaluateTarget({ action: "dieu_chinh", memberUserId: m.user_id, memberName: resolveName(m.user_id) })}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] font-bold"
+                          >
+                            <PenSquare size={11} /> Điều chỉnh
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-[11px] italic text-slate-400">
+                          Điểm tự tính qua gắn bằng chứng — không nghiệm thu/điều chỉnh tay
+                        </span>
+                      )}
                       <button
                         onClick={() => setEvaluateTarget({ action: "tra_ve", memberUserId: m.user_id, memberName: resolveName(m.user_id) })}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold"
@@ -546,8 +1092,23 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {open && myMember && factoryId && (
-          <ProgressForm factoryId={factoryId} taskId={task.id} member={myMember} task={task} onDone={() => factoryId && loadData(factoryId)} />
+        {open && myMember && factoryId && task.muc_tieu_so_luong === null && (
+          <ProgressForm
+            factoryId={factoryId}
+            taskId={task.id}
+            member={myMember}
+            task={task}
+            actorName={user?.full_name || user?.username || "Thành viên"}
+            onDone={() => factoryId && loadData(factoryId)}
+          />
+        )}
+
+        {open && myMember && task.muc_tieu_so_luong !== null && (
+          <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-800">
+            Việc này tính theo mục tiêu số lượng chung — không cần tự nhập %. Cứ thao tác bình
+            thường ở đúng module nghiệp vụ rồi bấm &quot;Gắn &amp; hoàn thành&quot; ở banner xuất
+            hiện sau khi lưu — tiến độ và điểm ở đây sẽ tự cập nhật theo.
+          </div>
         )}
 
         {evidenceLinks.length > 0 && (
@@ -639,9 +1200,11 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {evaluateTarget && (
+      {evaluateTarget && factoryId && (
         <EvaluateModal
+          factoryId={factoryId}
           taskId={task.id}
+          taskLabel={`${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`}
           action={evaluateTarget.action}
           memberUserId={evaluateTarget.memberUserId}
           memberName={evaluateTarget.memberName}
@@ -649,6 +1212,48 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
           onClose={() => setEvaluateTarget(null)}
           onDone={() => {
             setEvaluateTarget(null)
+            if (factoryId) void loadData(factoryId)
+          }}
+        />
+      )}
+
+      {showTransferModal && factoryId && (
+        <TransferModal
+          factoryId={factoryId}
+          taskId={task.id}
+          taskLabel={`${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`}
+          actorName={user?.full_name || user?.username || "Thành viên"}
+          candidates={candidates}
+          excludeUserIds={members.filter((m) => m.is_active).map((m) => m.user_id)}
+          onClose={() => setShowTransferModal(false)}
+          onDone={() => {
+            setShowTransferModal(false)
+            if (factoryId) void loadData(factoryId)
+          }}
+        />
+      )}
+
+      {showAppealModal && factoryId && user && (
+        <AppealModal
+          factoryId={factoryId}
+          taskId={task.id}
+          taskLabel={`${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`}
+          userId={user.id}
+          actorName={user.full_name || user.username || "Người dùng"}
+          onClose={() => setShowAppealModal(false)}
+          onDone={() => setShowAppealModal(false)}
+        />
+      )}
+
+      {showExtendModal && factoryId && (
+        <ExtendDeadlineModal
+          factoryId={factoryId}
+          taskId={task.id}
+          taskLabel={`${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`}
+          currentDeadline={task.han_hoan_thanh}
+          onClose={() => setShowExtendModal(false)}
+          onDone={() => {
+            setShowExtendModal(false)
             if (factoryId) void loadData(factoryId)
           }}
         />

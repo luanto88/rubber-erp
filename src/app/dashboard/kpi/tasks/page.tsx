@@ -5,16 +5,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, CalendarDays, List, Plus } from "lucide-react"
+import { AlertTriangle, ArrowRightLeft, CalendarDays, List, Plus } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
+import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
+import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
   averageTaskProgress,
   fetchKpiTaskMembersByTaskIds,
   fetchKpiTasks,
   fetchMyActiveTaskIds,
+  fetchPendingIncomingTransfers,
   formatKpiDateTime,
   isTaskDueSoon,
   isTaskOverdue,
@@ -35,6 +38,7 @@ const STATUS_OPTIONS: KpiTaskStatus[] = ["moi_giao", "dang_thuc_hien", "cho_nghi
 export default function KpiTasksPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const revealRef = useScrollReveal()
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -43,6 +47,7 @@ export default function KpiTasksPage() {
   const [tasks, setTasks] = useState<KpiTask[]>([])
   const [members, setMembers] = useState<KpiTaskMember[]>([])
   const [myActiveTaskIds, setMyActiveTaskIds] = useState<Set<string>>(new Set())
+  const [pendingIncomingTaskIds, setPendingIncomingTaskIds] = useState<Set<string>>(new Set())
   const [candidates, setCandidates] = useState<{ people: KpiTaskCandidate[]; groups: KpiTaskCandidateGroup[] }>({
     people: [],
     groups: [],
@@ -87,14 +92,19 @@ export default function KpiTasksPage() {
     async (fid: string, uid: string) => {
       setDataLoading(true)
       try {
-        const [taskRows, myIds, candidateData] = await Promise.all([
+        const [taskRows, myIds, candidateData, pendingTransfers] = await Promise.all([
           fetchKpiTasks(fid, statusFilter.length ? { status: statusFilter } : {}),
           fetchMyActiveTaskIds(uid),
           loadKpiTaskCandidates(fid),
+          fetchPendingIncomingTransfers(uid),
         ])
         setTasks(taskRows)
         setMyActiveTaskIds(myIds)
         setCandidates(candidateData)
+        // Task đang có lời mời chuyển giao chờ tôi phản hồi — tôi CHƯA phải active member nên
+        // không lọt qua myActiveTaskIds; vẫn phải coi là "của tôi" để thấy được lời mời (task
+        // detail page tự cho phép xem qua RLS kpi_is_task_pending_transfer_target).
+        setPendingIncomingTaskIds(new Set(pendingTransfers.map((t) => t.task_id)))
         const memberRows = await fetchKpiTaskMembersByTaskIds(taskRows.map((t) => t.id))
         setMembers(memberRows)
       } catch {
@@ -110,6 +120,21 @@ export default function KpiTasksPage() {
     if (factoryId && user) void loadData(factoryId, user.id)
   }, [factoryId, user, loadData])
 
+  // Bằng chứng/tiến độ có thể đổi từ các module khác trong lúc tab này mở nền — refetch nhẹ khi
+  // quay lại visible/focus, mirror pattern trên trang chi tiết.
+  useEffect(() => {
+    if (!factoryId || !user) return
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") void loadData(factoryId, user.id)
+    }
+    document.addEventListener("visibilitychange", handleFocus)
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      document.removeEventListener("visibilitychange", handleFocus)
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [factoryId, user, loadData])
+
   const nameByUserId = useMemo(() => Object.fromEntries(candidates.people.map((p) => [p.userId, p.ten])), [candidates.people])
   const membersByTask = useMemo(() => {
     const map = new Map<string, KpiTaskMember[]>()
@@ -119,15 +144,17 @@ export default function KpiTasksPage() {
 
   const visibleTasks = useMemo(() => {
     if (tab === "all") return tasks
-    return tasks.filter((t) => t.nguoi_giao_id === user?.id || myActiveTaskIds.has(t.id))
-  }, [tasks, tab, user, myActiveTaskIds])
+    return tasks.filter(
+      (t) => t.nguoi_giao_id === user?.id || myActiveTaskIds.has(t.id) || pendingIncomingTaskIds.has(t.id),
+    )
+  }, [tasks, tab, user, myActiveTaskIds, pendingIncomingTaskIds])
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
   return (
     <KpiShell>
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div ref={revealRef} className="scroll-reveal flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">Công việc</h1>
             <p className="text-sm text-slate-500 mt-0.5">Giao việc, theo dõi tiến độ và nghiệm thu.</p>
@@ -198,14 +225,14 @@ export default function KpiTasksPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {visibleTasks.map((t) => {
               const taskMembers = membersByTask.get(t.id) || []
-              const progress = averageTaskProgress(taskMembers)
+              const progress = averageTaskProgress(t, taskMembers)
               const overdue = isTaskOverdue(t)
               const dueSoon = isTaskDueSoon(t)
               return (
                 <button
                   key={t.id}
                   onClick={() => router.push(`/dashboard/kpi/tasks/${t.id}`)}
-                  className="text-left bg-white rounded-2xl border border-slate-200 shadow-sm p-4 hover:shadow-md hover:border-violet-200 transition-all"
+                  className="hover-lift text-left bg-white rounded-2xl border border-slate-200 shadow-sm p-4 hover:border-violet-200"
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <span className="text-[11px] font-bold text-slate-400">{t.ma_cong_viec || "—"}</span>
@@ -217,8 +244,13 @@ export default function KpiTasksPage() {
                   <div className="text-xs text-slate-500 mb-2 truncate">
                     {taskMembers.map((m) => nameByUserId[m.user_id] || "—").join(", ") || "Chưa gán người"}
                   </div>
-                  <div className="mb-2 h-1.5 w-full rounded-full bg-slate-100">
-                    <div className="h-1.5 rounded-full bg-violet-500" style={{ width: `${progress}%` }} />
+                  {pendingIncomingTaskIds.has(t.id) && (
+                    <div className="mb-2 flex items-center gap-1 text-[11px] font-bold text-violet-600">
+                      <ArrowRightLeft size={11} /> Có lời mời chuyển giao chờ bạn phản hồi
+                    </div>
+                  )}
+                  <div className="mb-2">
+                    <KpiProgressBar percent={progress} size="sm" />
                   </div>
                   <div className={`flex items-center gap-1.5 text-xs font-semibold ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-500"}`}>
                     {(overdue || dueSoon) && <AlertTriangle size={12} />}

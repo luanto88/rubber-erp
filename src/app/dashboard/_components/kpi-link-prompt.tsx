@@ -29,13 +29,16 @@ import {
 type KpiLinkPromptProps = {
   factoryId: string | null
   moduleCode: string
-  recordId: string
+  /** 1 bản ghi (chuẩn) hoặc nhiều bản ghi cùng lúc (vd nhiều dòng mẫu vừa lưu trong 1 phiếu) —
+   *  mảng được gắn tuần tự vào cùng 1 việc KPI đã chọn, mỗi phần tử là 1 evidence riêng. */
+  recordId: string | string[]
   recordLabel: string
   recordUrl?: string | null
   onDone?: () => void
 }
 
 export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, recordUrl, onDone }: KpiLinkPromptProps) {
+  const recordIds = Array.isArray(recordId) ? recordId : [recordId]
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<KpiTask[]>([])
   const [selectedTaskId, setSelectedTaskId] = useState("")
@@ -78,19 +81,31 @@ export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, re
   }, [doneLabel])
 
   const handleConfirm = async () => {
-    if (!selectedTaskId) return
+    if (!selectedTaskId || recordIds.length === 0) return
     setSaving(true)
     setError(null)
+    let linkedCount = 0
     try {
-      await linkKpiTaskEvidenceAndComplete({
-        taskId: selectedTaskId,
-        moduleCode,
-        recordId,
-        recordLabel,
-        recordUrl,
-      })
+      for (const id of recordIds) {
+        try {
+          await linkKpiTaskEvidenceAndComplete({
+            taskId: selectedTaskId,
+            moduleCode,
+            recordId: id,
+            recordLabel,
+            recordUrl,
+          })
+          linkedCount++
+        } catch (err) {
+          // Việc vừa đạt đủ mục tiêu số lượng NGAY GIỮA vòng lặp (từ chính batch này) — dừng
+          // êm, không phải lỗi thật. Các bản ghi còn lại không cần gắn nữa vì việc đã đóng.
+          if (getKpiErrorMessage(err, "").includes("đã kết thúc")) break
+          throw err
+        }
+      }
       const task = tasks.find((t) => t.id === selectedTaskId)
-      setDoneLabel(task?.tieu_de || "công việc đã chọn")
+      const baseLabel = task?.tieu_de || "công việc đã chọn"
+      setDoneLabel(recordIds.length > 1 ? `${baseLabel} (đã gắn ${linkedCount}/${recordIds.length} bản ghi)` : baseLabel)
     } catch (err) {
       setError(getKpiErrorMessage(err, "Không gắn được vào công việc."))
     } finally {
@@ -98,7 +113,7 @@ export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, re
     }
   }
 
-  if (loading || (!doneLabel && tasks.length === 0)) return null
+  if (loading || recordIds.length === 0 || (!doneLabel && tasks.length === 0)) return null
 
   if (doneLabel) {
     return (
