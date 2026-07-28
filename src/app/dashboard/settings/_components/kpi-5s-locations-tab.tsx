@@ -6,13 +6,15 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "UI" (Phase 2 — Đánh giá 5S).
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Edit2, Loader2, MapPin, Plus, Power, Printer, Shuffle, Trash2 } from "lucide-react"
+import { Edit2, MapPin, Plus, Power, Printer, Loader2, Shuffle, Trash2 } from "lucide-react"
 import { ModalShell } from "../../_components/modal-shell"
 import {
   createKpi5sLocation,
   deleteKpi5sLocation,
+  fetchAllLocationCleanerMemberships,
   fetchKpi5sLocations,
   getKpi5sErrorMessage,
+  patchKpi5sLocation,
   updateKpi5sLocation,
   type Kpi5sLocation,
   type Kpi5sLocationInput,
@@ -20,6 +22,7 @@ import {
 import { downloadKpi5sLocationBulkQrPdf } from "@/lib/kpi-5s-pdf"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import { fetchKpi5sZones, type Kpi5sZone } from "@/lib/kpi-5s-zones"
+import { fetchDepartmentOptions, type DepartmentOption } from "@/lib/kpi-department-leaders"
 import { Kpi5sAutoAssignModal } from "./kpi-5s-auto-assign-modal"
 
 type UserOption = { id: string; label: string }
@@ -28,25 +31,37 @@ type FormState = {
   ma_vi_tri: string
   ten_vi_tri: string
   mo_ta: string
-  nguoi_don_id: string
+  cleanerUserIds: string[]
   nguoi_cham_id: string
   zone_id: string
+  phong_ban_id: string
   is_active: boolean
   sort_order: string
 }
 
 function emptyForm(): FormState {
-  return { ma_vi_tri: "", ten_vi_tri: "", mo_ta: "", nguoi_don_id: "", nguoi_cham_id: "", zone_id: "", is_active: true, sort_order: "0" }
+  return {
+    ma_vi_tri: "",
+    ten_vi_tri: "",
+    mo_ta: "",
+    cleanerUserIds: [],
+    nguoi_cham_id: "",
+    zone_id: "",
+    phong_ban_id: "",
+    is_active: true,
+    sort_order: "0",
+  }
 }
 
-function locationToForm(l: Kpi5sLocation): FormState {
+function locationToForm(l: Kpi5sLocation, cleanerUserIds: string[]): FormState {
   return {
     ma_vi_tri: l.ma_vi_tri,
     ten_vi_tri: l.ten_vi_tri,
     mo_ta: l.mo_ta || "",
-    nguoi_don_id: l.nguoi_don_id || "",
+    cleanerUserIds: cleanerUserIds.length > 0 ? cleanerUserIds : l.nguoi_don_id ? [l.nguoi_don_id] : [],
     nguoi_cham_id: l.nguoi_cham_id || "",
     zone_id: l.zone_id || "",
+    phong_ban_id: l.phong_ban_id || "",
     is_active: l.is_active,
     sort_order: String(l.sort_order ?? 0),
   }
@@ -55,14 +70,18 @@ function locationToForm(l: Kpi5sLocation): FormState {
 export function Kpi5sLocationsTab({
   factoryId,
   canManage,
+  currentUserId,
   userOptions,
 }: {
   factoryId: string | null
   canManage: boolean
+  currentUserId: string
   userOptions: UserOption[]
 }) {
   const [locations, setLocations] = useState<Kpi5sLocation[]>([])
   const [zones, setZones] = useState<Kpi5sZone[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
+  const [cleanersByLocation, setCleanersByLocation] = useState<Map<string, string[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
 
@@ -89,12 +108,16 @@ export function Kpi5sLocationsTab({
     setLoading(true)
     setLoadError("")
     try {
-      const [rows, zoneRows] = await Promise.all([
+      const [rows, zoneRows, cleanerMap, deptRows] = await Promise.all([
         fetchKpi5sLocations(fid, { includeInactive: true }),
         fetchKpi5sZones(fid, { includeInactive: true }),
+        fetchAllLocationCleanerMemberships(fid),
+        fetchDepartmentOptions(),
       ])
       setLocations(rows)
       setZones(zoneRows)
+      setCleanersByLocation(cleanerMap)
+      setDepartments(deptRows)
     } catch (err) {
       setLoadError(getKpi5sErrorMessage(err, "Không tải được danh sách vị trí."))
     } finally {
@@ -115,9 +138,21 @@ export function Kpi5sLocationsTab({
 
   const openEdit = (l: Kpi5sLocation) => {
     setEditId(l.id)
-    setForm(locationToForm(l))
+    setForm(locationToForm(l, cleanersByLocation.get(l.id) || []))
     setSaveError("")
     setModalOpen(true)
+  }
+
+  const toggleFormCleaner = (userId: string) => {
+    setForm((f) => ({
+      ...f,
+      cleanerUserIds: f.cleanerUserIds.includes(userId)
+        ? f.cleanerUserIds.filter((id) => id !== userId)
+        : [...f.cleanerUserIds, userId],
+      // Nếu người vừa tick đang là "Người chấm hiện tại", tự gỡ khỏi vai trò chấm — 1 người
+      // không thể vừa dọn vừa chấm cùng lúc (khớp trigger DB).
+      nguoi_cham_id: f.nguoi_cham_id === userId ? "" : f.nguoi_cham_id,
+    }))
   }
 
   const handleSave = async () => {
@@ -126,8 +161,12 @@ export function Kpi5sLocationsTab({
       setSaveError("Vui lòng nhập Mã vị trí và Tên vị trí.")
       return
     }
-    if (form.nguoi_don_id && form.nguoi_cham_id && form.nguoi_don_id === form.nguoi_cham_id) {
-      setSaveError("Người dọn và Người chấm phải là 2 người khác nhau.")
+    if (!form.phong_ban_id) {
+      setSaveError("Vui lòng chọn phòng ban.")
+      return
+    }
+    if (form.nguoi_cham_id && form.cleanerUserIds.includes(form.nguoi_cham_id)) {
+      setSaveError("Người chấm hiện tại không được nằm trong danh sách Người dọn hiện tại.")
       return
     }
     setSaving(true)
@@ -138,16 +177,16 @@ export function Kpi5sLocationsTab({
         ma_vi_tri: form.ma_vi_tri.trim(),
         ten_vi_tri: form.ten_vi_tri.trim(),
         mo_ta: form.mo_ta.trim() || null,
-        nguoi_don_id: form.nguoi_don_id || null,
         nguoi_cham_id: form.nguoi_cham_id || null,
         zone_id: form.zone_id || null,
+        phong_ban_id: form.phong_ban_id || null,
         is_active: form.is_active,
         sort_order: Number(form.sort_order) || 0,
       }
       if (editId) {
-        await updateKpi5sLocation(editId, payload)
+        await updateKpi5sLocation(editId, payload, form.cleanerUserIds, currentUserId)
       } else {
-        await createKpi5sLocation(payload)
+        await createKpi5sLocation(payload, form.cleanerUserIds, currentUserId)
       }
       setModalOpen(false)
       void loadData(factoryId)
@@ -162,7 +201,7 @@ export function Kpi5sLocationsTab({
     if (!factoryId) return
     setBusyId(l.id)
     try {
-      await updateKpi5sLocation(l.id, { is_active: !l.is_active })
+      await patchKpi5sLocation(l.id, { is_active: !l.is_active })
       void loadData(factoryId)
     } catch (err) {
       setLoadError(getKpi5sErrorMessage(err, "Không cập nhật được trạng thái."))
@@ -316,15 +355,26 @@ export function Kpi5sLocationsTab({
               )}
 
               <div className="mt-2.5 space-y-1 text-xs text-slate-600">
-                <div>Người dọn: <strong className="text-slate-800">{resolveName(l.nguoi_don_id)}</strong></div>
+                <div>
+                  Đội ngũ dọn dẹp ({(cleanersByLocation.get(l.id) || []).length}):{" "}
+                  <strong className="text-slate-800">
+                    {(cleanersByLocation.get(l.id) || []).length > 0
+                      ? (cleanersByLocation.get(l.id) || []).map((uid) => resolveName(uid)).join(", ")
+                      : resolveName(l.nguoi_don_id)}
+                  </strong>
+                </div>
                 <div>Người chấm: <strong className="text-slate-800">{resolveName(l.nguoi_cham_id)}</strong></div>
                 {l.zone_id && (
                   <div>Khu vực: <strong className="text-violet-700">{zoneNameById[l.zone_id] || "—"}</strong></div>
                 )}
+                {l.assigned_by && (
+                  <div>Người giao: <strong className="text-slate-800">{resolveName(l.assigned_by)}</strong></div>
+                )}
               </div>
 
-              {canManage && (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5">
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5">
+                {canManage && (
+                  <>
                   <button
                     onClick={() => openEdit(l)}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] font-bold"
@@ -344,8 +394,9 @@ export function Kpi5sLocationsTab({
                   >
                     <Trash2 size={11} /> Xóa
                   </button>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -411,33 +462,57 @@ export function Kpi5sLocationsTab({
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">Người dọn hiện tại</label>
-                <select
-                  value={form.nguoi_don_id}
-                  onChange={(e) => setForm((f) => ({ ...f, nguoi_don_id: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                >
-                  <option value="">— Chưa gán —</option>
-                  {userOptions.map((u) => (
-                    <option key={u.id} value={u.id} disabled={u.id === form.nguoi_cham_id}>{u.label}</option>
-                  ))}
-                </select>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600">Phòng ban *</label>
+              <select
+                value={form.phong_ban_id}
+                onChange={(e) => setForm((f) => ({ ...f, phong_ban_id: e.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              >
+                <option value="">-- Chọn phòng ban --</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600">
+                Người dọn hiện tại ({form.cleanerUserIds.length})
+              </label>
+              <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-xl border border-slate-300 p-2">
+                {userOptions.length === 0 ? (
+                  <div className="px-1 py-1 text-xs text-slate-400">Chưa có tài khoản nào.</div>
+                ) : (
+                  userOptions.map((u) => (
+                    <label key={u.id} className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-sm hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={form.cleanerUserIds.includes(u.id)}
+                        onChange={() => toggleFormCleaner(u.id)}
+                        className="h-4 w-4 rounded accent-emerald-600"
+                      />
+                      {u.label}
+                    </label>
+                  ))
+                )}
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">Người chấm hiện tại</label>
-                <select
-                  value={form.nguoi_cham_id}
-                  onChange={(e) => setForm((f) => ({ ...f, nguoi_cham_id: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                >
-                  <option value="">— Chưa gán —</option>
-                  {userOptions.map((u) => (
-                    <option key={u.id} value={u.id} disabled={u.id === form.nguoi_don_id}>{u.label}</option>
-                  ))}
-                </select>
-              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Vị trí có thể rất rộng và cần nhiều người phụ trách — tick chọn TẤT CẢ những người
+                thực sự đảm nhiệm dọn dẹp vị trí này.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600">Người chấm hiện tại</label>
+              <select
+                value={form.nguoi_cham_id}
+                onChange={(e) => setForm((f) => ({ ...f, nguoi_cham_id: e.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              >
+                <option value="">— Chưa gán —</option>
+                {userOptions.map((u) => (
+                  <option key={u.id} value={u.id} disabled={form.cleanerUserIds.includes(u.id)}>{u.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-600">Khu vực (random nội bộ)</label>

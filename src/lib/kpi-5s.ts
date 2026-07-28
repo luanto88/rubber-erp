@@ -30,11 +30,20 @@ export type Kpi5sLocation = {
   ma_vi_tri: string
   ten_vi_tri: string
   mo_ta: string | null
+  // LEGACY — không còn được form ghi trực tiếp (nguồn thật là kpi_5s_location_cleaners), chỉ
+  // giữ làm fallback hiển thị/cho "Phân công thông minh". Xem getEffectiveCleanerIds().
   nguoi_don_id: string | null
   nguoi_cham_id: string | null
   // Khu vực (kpi_5s_zones.id, tầng LỚN) — giới hạn pool ứng viên khi "Phân công thông
   // minh" random. NULL = không giới hạn (pool toàn nhà máy). Không ảnh hưởng chọn tay.
   zone_id: string | null
+  // Phòng ban chịu trách nhiệm — quyết định lãnh đạo phòng ban nào (ngoài admin/kpi.manage_config)
+  // được quản lý vị trí này + giới hạn phạm vi hiển thị ở danh sách (xem migration
+  // 20260807_kpi_department_scoping.sql).
+  phong_ban_id: string | null
+  // "Người giao" — ai đã cấu hình/gán vị trí này lần gần nhất.
+  assigned_by: string | null
+  assigned_at: string | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -56,7 +65,7 @@ export type Kpi5sEvaluation = {
 }
 
 const LOCATION_COLS =
-  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, is_active, sort_order, created_at, updated_at"
+  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, phong_ban_id, assigned_by, assigned_at, is_active, sort_order, created_at, updated_at"
 const EVAL_COLS =
   "id, factory_id, location_id, tuan_bat_dau, nguoi_don_id, nguoi_cham_id, ket_qua, ly_do, image_urls, danh_gia_luc, created_at"
 
@@ -90,21 +99,70 @@ export type Kpi5sLocationInput = {
   ma_vi_tri: string
   ten_vi_tri: string
   mo_ta: string | null
-  nguoi_don_id: string | null
   nguoi_cham_id: string | null
   zone_id: string | null
+  phong_ban_id: string | null
   is_active: boolean
   sort_order: number
 }
 
-export async function createKpi5sLocation(input: Kpi5sLocationInput): Promise<string> {
-  const { data, error } = await supabase.from("kpi_5s_locations").insert(input).select("id").single()
+// "Người dọn hiện tại" giờ ghi thẳng vào kpi_5s_location_cleaners (multi-select trong CHÍNH form
+// Thêm/Sửa vị trí — không còn nút "Quản lý đội ngũ dọn dẹp" riêng) — createKpi5sLocation/
+// updateKpi5sLocation nhận thêm `cleanerUserIds` để đồng bộ 2 bảng trong cùng 1 lượt lưu.
+// Cột `nguoi_don_id` KHÔNG còn được 2 hàm này ghi (để trống/giữ nguyên) — chỉ "Phân công thông
+// minh" (kpi-5s-auto-assign) còn ghi trực tiếp cột này làm fallback lịch sử.
+export async function createKpi5sLocation(input: Kpi5sLocationInput, cleanerUserIds: string[], assignedBy: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("kpi_5s_locations")
+    .insert({ ...input, assigned_by: assignedBy, assigned_at: new Date().toISOString() })
+    .select("id")
+    .single()
   if (error) throw error
-  return data.id as string
+  const id = data.id as string
+  if (cleanerUserIds.length > 0) {
+    const { error: cleanerErr } = await supabase
+      .from("kpi_5s_location_cleaners")
+      .insert(cleanerUserIds.map((uid) => ({ factory_id: input.factory_id, location_id: id, user_id: uid })))
+    if (cleanerErr) throw cleanerErr
+  }
+  return id
 }
 
-export async function updateKpi5sLocation(id: string, input: Partial<Kpi5sLocationInput>): Promise<void> {
-  const { error } = await supabase.from("kpi_5s_locations").update(input).eq("id", id)
+export async function updateKpi5sLocation(
+  id: string,
+  input: Partial<Kpi5sLocationInput>,
+  cleanerUserIds: string[],
+  assignedBy: string,
+): Promise<void> {
+  // Thứ tự bắt buộc: xoá cleaner CŨ trước khi đổi nguoi_cham_id — trigger
+  // trg_kpi_5s_locations_scorer_not_cleaner kiểm tra nguoi_cham_id mới đối chiếu với cleaner
+  // set HIỆN TẠI trong DB tại thời điểm UPDATE; nếu người sắp thành "chấm" trước đó đang là
+  // 1 trong các "người dọn" cũ, đổi thứ tự (update trước, xoá sau) sẽ bị trigger chặn nhầm.
+  const { error: delErr } = await supabase.from("kpi_5s_location_cleaners").delete().eq("location_id", id)
+  if (delErr) throw delErr
+  const { error } = await supabase
+    .from("kpi_5s_locations")
+    .update({ ...input, assigned_by: assignedBy, assigned_at: new Date().toISOString() })
+    .eq("id", id)
+  if (error) throw error
+  if (cleanerUserIds.length > 0 && input.factory_id) {
+    const { error: insErr } = await supabase
+      .from("kpi_5s_location_cleaners")
+      .insert(cleanerUserIds.map((uid) => ({ factory_id: input.factory_id as string, location_id: id, user_id: uid })))
+    if (insErr) throw insErr
+  }
+}
+
+// Sửa nhanh 1 vài cột đơn giản (vd "Tạm ngưng"/"Kích hoạt lại", hoặc cột LEGACY nguoi_don_id/
+// nguoi_cham_id do "Phân công thông minh" ghi — xem ghi chú TODO trong kpi-5s-auto-assign-modal.tsx
+// về việc chưa đồng bộ công cụ đó với kpi_5s_location_cleaners) KHÔNG động tới đội ngũ dọn dẹp hay
+// "Người giao" — tách riêng khỏi updateKpi5sLocation (dùng cho form Sửa đầy đủ) để không vô tình
+// ghi đè assigned_by/assigned_at hay xoá sạch cleaner set hiện có.
+export async function patchKpi5sLocation(
+  id: string,
+  patch: Partial<Pick<Kpi5sLocationInput, "is_active">> & { nguoi_don_id?: string | null; nguoi_cham_id?: string | null },
+): Promise<void> {
+  const { error } = await supabase.from("kpi_5s_locations").update(patch).eq("id", id)
   if (error) throw error
 }
 
@@ -176,9 +234,59 @@ export function buildKpi5sLocationUrl(locationId: string): string {
 
 export async function uploadKpi5sEvaluationImage(factoryId: string, locationId: string, file: File): Promise<string> {
   const ext = file.name.split(".").pop() || "jpg"
-  const path = `${factoryId}/kpi/5s/${locationId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+  const path = `${factoryId}/kpi/5s/${locationId}/evaluations/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
   const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
   if (error) throw error
   const { data } = supabase.storage.from("order-files").getPublicUrl(path)
   return data.publicUrl
 }
+
+// ── Đội ngũ dọn dẹp nhiều người/1 vị trí (kpi_5s_location_cleaners) ─────────────────────────
+// Thay thế mô hình "chỉ 1 nguoi_don_id" khi vị trí quá rộng cần nhiều người phụ trách — cột
+// `nguoi_don_id` cũ vẫn giữ nguyên (dùng cho "Phân công thông minh" và làm fallback hiển thị cho
+// vị trí chưa được gán multi), nhưng nguồn xác định "ai chịu trách nhiệm dọn vị trí này" giờ là
+// bảng này. Xem migration 20260806_kpi_management_upgrades.sql.
+export type Kpi5sLocationCleaner = { id: string; factory_id: string; location_id: string; user_id: string; created_at: string }
+
+export async function fetchAllLocationCleanerMemberships(factoryId: string): Promise<Map<string, string[]>> {
+  const { data, error } = await supabase
+    .from("kpi_5s_location_cleaners")
+    .select("location_id, user_id")
+    .eq("factory_id", factoryId)
+  if (error) throw error
+  const map = new Map<string, string[]>()
+  for (const row of (data || []) as Pick<Kpi5sLocationCleaner, "location_id" | "user_id">[]) {
+    map.set(row.location_id, [...(map.get(row.location_id) || []), row.user_id])
+  }
+  return map
+}
+
+export async function fetchLocationCleaners(locationId: string): Promise<string[]> {
+  const { data, error } = await supabase.from("kpi_5s_location_cleaners").select("user_id").eq("location_id", locationId)
+  if (error) throw error
+  return (data || []).map((r: { user_id: string }) => r.user_id)
+}
+
+export async function addKpi5sLocationCleaner(factoryId: string, locationId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("kpi_5s_location_cleaners")
+    .insert({ factory_id: factoryId, location_id: locationId, user_id: userId })
+  if (error) throw error
+}
+
+export async function removeKpi5sLocationCleaner(locationId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from("kpi_5s_location_cleaners").delete().eq("location_id", locationId).eq("user_id", userId)
+  if (error) throw error
+}
+
+/** Đội ngũ dọn dẹp thực tế của 1 vị trí — ưu tiên bảng multi-select mới, fallback về
+ *  `nguoi_don_id` đơn (cột cũ) nếu vị trí đó chưa từng được gán qua bảng mới. Dùng để giới hạn
+ *  dropdown "Người chịu trách nhiệm dọn tuần này" khi chấm điểm và để xác định ai được tự báo
+ *  cáo — không bao giờ trả về danh sách rỗng nếu vị trí có ít nhất 1 người được gán bằng cách
+ *  nào đó (cũ hoặc mới). */
+export function getEffectiveCleanerIds(location: Pick<Kpi5sLocation, "id" | "nguoi_don_id">, cleanerMap: Map<string, string[]>): string[] {
+  const ids = cleanerMap.get(location.id) || []
+  if (ids.length > 0) return ids
+  return location.nguoi_don_id ? [location.nguoi_don_id] : []
+}
+

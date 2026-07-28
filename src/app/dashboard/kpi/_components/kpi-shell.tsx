@@ -15,8 +15,11 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ClipboardList, Flag, LayoutDashboard, Repeat, Sparkles, type LucideIcon } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ClipboardList, Flag, Repeat, Sparkles, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
+import type { SessionUser } from "@/lib/auth"
+import { canSeeKpiTemplatesTab } from "@/lib/kpi-department-leaders"
 
 type NavTab = {
   href: string
@@ -25,20 +28,17 @@ type NavTab = {
   matchPrefixes?: string[]
   activeClass: string
   hoverClass: string
+  // true = luôn hiện; false = ẩn hẳn theo quyền — chỉ dùng cho "Việc định kỳ" (xem KpiShell).
+  requiresTemplatesAccess?: boolean
 }
 
+// "Tổng quan" (route /dashboard/kpi) không còn là tab riêng — Fix 6 (2026-08-06): trang này giờ
+// chỉ redirect thẳng sang "Công việc chuyên môn" tab "Việc của tôi" (xem kpi/page.tsx), để mặc
+// định luôn vào đúng danh sách việc cần làm thay vì 1 trang tổng quan trung gian ít việc ở đó.
 const tabs: NavTab[] = [
   {
-    href: "/dashboard/kpi",
-    label: "Tổng quan",
-    icon: LayoutDashboard,
-    matchPrefixes: [],
-    activeClass: "bg-gradient-to-br from-violet-100 to-fuchsia-100 text-violet-700 border-violet-200 shadow-sm",
-    hoverClass: "hover:bg-violet-50 hover:text-violet-600",
-  },
-  {
     href: "/dashboard/kpi/tasks",
-    label: "Công việc",
+    label: "Công việc chuyên môn",
     icon: ClipboardList,
     matchPrefixes: ["/dashboard/kpi/tasks"],
     activeClass: "bg-gradient-to-br from-sky-100 to-blue-100 text-sky-700 border-sky-200 shadow-sm",
@@ -51,6 +51,7 @@ const tabs: NavTab[] = [
     matchPrefixes: ["/dashboard/kpi/templates"],
     activeClass: "bg-gradient-to-br from-teal-100 to-emerald-100 text-teal-700 border-teal-200 shadow-sm",
     hoverClass: "hover:bg-teal-50 hover:text-teal-600",
+    requiresTemplatesAccess: true,
   },
   {
     href: "/dashboard/kpi/5s",
@@ -79,16 +80,31 @@ function isActive(pathname: string, tab: NavTab) {
 
 type KpiShellProps = {
   children?: ReactNode
+  // Chỉ cần truyền khi trang cha đã có sẵn — thiếu 1 trong 2 sẽ ẩn tạm "Việc định kỳ" cho tới
+  // khi có đủ (an toàn hơn hiện nhầm cho người không có quyền, dù chỉ trong vài ms).
+  user?: SessionUser | null
+  factoryId?: string | null
 }
 
-export function KpiShell({ children }: KpiShellProps) {
+export function KpiShell({ children, user, factoryId }: KpiShellProps) {
   const pathname = usePathname()
+  const [showTemplatesTab, setShowTemplatesTab] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void canSeeKpiTemplatesTab(user ?? null, factoryId ?? null).then((ok) => {
+      if (alive) setShowTemplatesTab(ok)
+    })
+    return () => { alive = false }
+  }, [user, factoryId])
+
+  const visibleTabs = tabs.filter((t) => !t.requiresTemplatesAccess || showTemplatesTab)
 
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex gap-1.5 p-2 overflow-x-auto">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = isActive(pathname, tab)
             const Icon = tab.icon
             return (

@@ -7,11 +7,14 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AlertTriangle, ArrowRightLeft, CalendarDays, List, Plus } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { supabase } from "@/lib/supabase"
+import { getTodayISODate } from "@/lib/date-utils"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { fetchDepartmentOptions, resolveMyLeaderDepartmentId, type DepartmentOption } from "@/lib/kpi-department-leaders"
 import {
   averageTaskProgress,
   fetchKpiTaskMembersByTaskIds,
@@ -35,6 +38,11 @@ import { KpiTaskCalendar } from "./_components/kpi-task-calendar"
 
 const STATUS_OPTIONS: KpiTaskStatus[] = ["moi_giao", "dang_thuc_hien", "cho_nghiem_thu", "tra_ve", "hoan_thanh", "huy"]
 
+type PrimaryGroupRow = {
+  group_id: string
+  personnel_groups: Array<{ name: string | null }> | null
+}
+
 export default function KpiTasksPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -52,12 +60,16 @@ export default function KpiTasksPage() {
     people: [],
     groups: [],
   })
+  const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
 
-  const [tab, setTab] = useState<"mine" | "all">(() => (searchParams.get("tab") === "all" ? "all" : "mine"))
+  const [tab, setTab] = useState<"today" | "mine" | "all">(() => (searchParams.get("tab") === "all" ? "all" : searchParams.get("tab") === "mine" ? "mine" : "today"))
   const [view, setView] = useState<"list" | "calendar">("list")
   const [statusFilter, setStatusFilter] = useState<KpiTaskStatus[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [dataLoading, setDataLoading] = useState(true)
+  const [primaryGroupName, setPrimaryGroupName] = useState<string | null>(null)
+  const [primaryGroupChecked, setPrimaryGroupChecked] = useState(false)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -81,8 +93,39 @@ export default function KpiTasksPage() {
     void bootstrap()
   }, [])
 
-  const canViewAll = hasPermission(user, "kpi.view_all")
-  const canAssign = hasPermission(user, "kpi.assign")
+  const isAdmin = user?.role === "admin"
+  // Mặc định role "Quản lý" được cấp sẵn kpi.assign/kpi.view_all rộng rãi (xem ROLE_DEFAULTS,
+  // src/lib/auth.ts) — quá rộng so với yêu cầu "chỉ Admin + lãnh đạo phòng ban". `myLeaderDepartmentId`
+  // tự phát hiện qua đúng chuc_vu/chuc_vu_chinh_quyen trong maintenance_staff (xem
+  // src/lib/kpi-department-leaders.ts) — chỉ admin hoặc đúng lãnh đạo phòng ban mới còn thấy nút
+  // "Giao việc mới"/"Tất cả công việc", khớp đúng RLS `kpi_tasks_insert` ở DB.
+  const isDeptLeader = myLeaderDepartmentId != null
+  // Banner "Nhóm chính" — chuyển từ Tổng quan cũ (/dashboard/kpi) sang đây theo Fix 6 (đổi default
+  // landing sang "Việc của tôi"). Lỗi/thiếu migration bị nuốt êm — chỉ là gợi ý phụ.
+  const loadPrimaryGroup = useCallback(async (fid: string, userId: string) => {
+    try {
+      const { data } = await supabase
+        .from("personnel_group_members")
+        .select("group_id, personnel_groups(name), maintenance_staff!inner(profile_id)")
+        .eq("factory_id", fid)
+        .eq("is_primary", true)
+        .eq("maintenance_staff.profile_id", userId)
+        .maybeSingle()
+      const row = data as PrimaryGroupRow | null
+      setPrimaryGroupName(row?.personnel_groups?.[0]?.name?.trim() || null)
+    } catch {
+      setPrimaryGroupName(null)
+    } finally {
+      setPrimaryGroupChecked(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (factoryId && user) void loadPrimaryGroup(factoryId, user.id)
+  }, [factoryId, user, loadPrimaryGroup])
+
+  const canViewAll = hasPermission(user, "kpi.view_all") && (isAdmin || isDeptLeader)
+  const canAssign = hasPermission(user, "kpi.assign") && (isAdmin || isDeptLeader)
 
   useEffect(() => {
     if (!canViewAll && tab === "all") setTab("mine")
@@ -92,15 +135,19 @@ export default function KpiTasksPage() {
     async (fid: string, uid: string) => {
       setDataLoading(true)
       try {
-        const [taskRows, myIds, candidateData, pendingTransfers] = await Promise.all([
+        const [taskRows, myIds, candidateData, pendingTransfers, leaderDeptId, deptRows] = await Promise.all([
           fetchKpiTasks(fid, statusFilter.length ? { status: statusFilter } : {}),
           fetchMyActiveTaskIds(uid),
           loadKpiTaskCandidates(fid),
           fetchPendingIncomingTransfers(uid),
+          resolveMyLeaderDepartmentId(uid, fid),
+          fetchDepartmentOptions(),
         ])
         setTasks(taskRows)
         setMyActiveTaskIds(myIds)
         setCandidates(candidateData)
+        setMyLeaderDepartmentId(leaderDeptId)
+        setDepartments(deptRows)
         // Task đang có lời mời chuyển giao chờ tôi phản hồi — tôi CHƯA phải active member nên
         // không lọt qua myActiveTaskIds; vẫn phải coi là "của tôi" để thấy được lời mời (task
         // detail page tự cho phép xem qua RLS kpi_is_task_pending_transfer_target).
@@ -142,17 +189,26 @@ export default function KpiTasksPage() {
     return map
   }, [members])
 
-  const visibleTasks = useMemo(() => {
-    if (tab === "all") return tasks
-    return tasks.filter(
-      (t) => t.nguoi_giao_id === user?.id || myActiveTaskIds.has(t.id) || pendingIncomingTaskIds.has(t.id),
-    )
-  }, [tasks, tab, user, myActiveTaskIds, pendingIncomingTaskIds])
+  const myTasks = useMemo(
+    () => tasks.filter((t) => t.nguoi_giao_id === user?.id || myActiveTaskIds.has(t.id) || pendingIncomingTaskIds.has(t.id)),
+    [tasks, user, myActiveTaskIds, pendingIncomingTaskIds],
+  )
+
+  // "Việc hôm nay" — sub-tab mặc định khi vào trang: việc "của tôi" đã quá hạn, sắp đến hạn
+  // (KPI_DUE_SOON_HOURS=24), hoặc giao đúng hôm nay — gộp 3 tiêu chí "cần chú ý ngay" thay vì
+  // phải tự lọc lại toàn bộ "Việc của tôi" mỗi lần vào trang.
+  const today = getTodayISODate()
+  const todayTasks = useMemo(
+    () => myTasks.filter((t) => isTaskOverdue(t) || isTaskDueSoon(t) || t.ngay_giao === today),
+    [myTasks, today],
+  )
+
+  const visibleTasks = tab === "all" ? tasks : tab === "today" ? todayTasks : myTasks
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
   return (
-    <KpiShell>
+    <KpiShell user={user} factoryId={factoryId}>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -185,7 +241,26 @@ export default function KpiTasksPage() {
           </div>
         </div>
 
+        {primaryGroupChecked && !primaryGroupName && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Bạn chưa được gán <strong>&quot;Nhóm chính&quot;</strong> — nhóm chính quyết định hệ số ×10
+            khi tính điểm chuyên môn (các nhóm khác bạn thuộc vẫn tính điểm đầy đủ với hệ số ×5). Liên hệ
+            Admin cấu hình tại <strong>Cài đặt → Hệ thống → Nhân sự</strong>.
+          </div>
+        )}
+        {primaryGroupName && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            Nhóm chính của bạn: <strong>{primaryGroupName}</strong>
+          </div>
+        )}
+
         <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
+          <button
+            onClick={() => setTab("today")}
+            className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "today" ? "bg-violet-600 text-white" : "text-slate-600"}`}
+          >
+            Việc hôm nay{todayTasks.length > 0 ? ` (${todayTasks.length})` : ""}
+          </button>
           <button
             onClick={() => setTab("mine")}
             className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "mine" ? "bg-violet-600 text-white" : "text-slate-600"}`}
@@ -219,7 +294,7 @@ export default function KpiTasksPage() {
           <KpiTaskCalendar tasks={visibleTasks} />
         ) : visibleTasks.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-            Không có công việc nào.
+            {tab === "today" ? "Không có việc nào cần chú ý hôm nay — đã xong hoặc chưa tới hạn." : "Không có công việc nào."}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -228,6 +303,8 @@ export default function KpiTasksPage() {
               const progress = averageTaskProgress(t, taskMembers)
               const overdue = isTaskOverdue(t)
               const dueSoon = isTaskDueSoon(t)
+              const isGiver = t.nguoi_giao_id === user?.id
+              const isMember = myActiveTaskIds.has(t.id)
               return (
                 <button
                   key={t.id}
@@ -241,9 +318,23 @@ export default function KpiTasksPage() {
                     </span>
                   </div>
                   <div className="text-sm font-extrabold text-slate-800 mb-1 line-clamp-2">{t.tieu_de}</div>
-                  <div className="text-xs text-slate-500 mb-2 truncate">
-                    {taskMembers.map((m) => nameByUserId[m.user_id] || "—").join(", ") || "Chưa gán người"}
+                  {(isGiver || isMember) && (
+                    <div className="mb-1.5 flex flex-wrap gap-1">
+                      {isMember && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Việc được giao cho bạn</span>}
+                      {isGiver && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Bạn là người giao</span>}
+                    </div>
+                  )}
+                  <div className="text-xs text-slate-500 mb-1 truncate">
+                    Người giao: <strong className="text-slate-600">{nameByUserId[t.nguoi_giao_id] || "—"}</strong>
                   </div>
+                  <div className="text-xs text-slate-500 mb-2 truncate">
+                    Thực hiện: {taskMembers.map((m) => nameByUserId[m.user_id] || "—").join(", ") || "Chưa gán người"}
+                  </div>
+                  {t.mo_ta && (
+                    <div className="mb-2 line-clamp-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                      📝 {t.mo_ta}
+                    </div>
+                  )}
                   {pendingIncomingTaskIds.has(t.id) && (
                     <div className="mb-2 flex items-center gap-1 text-[11px] font-bold text-violet-600">
                       <ArrowRightLeft size={11} /> Có lời mời chuyển giao chờ bạn phản hồi
@@ -268,6 +359,7 @@ export default function KpiTasksPage() {
           factoryId={factoryId}
           nguoiGiaoId={user.id}
           candidates={candidates}
+          departments={departments}
           onClose={() => setShowCreate(false)}
           onCreated={(task) => {
             setShowCreate(false)

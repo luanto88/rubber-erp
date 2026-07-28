@@ -50,7 +50,7 @@ import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw
+  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2
 } from "lucide-react"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1419,7 +1419,7 @@ export default function StoragePage() {
                           <button onClick={() => setDelConfirm(n.id)}
                             className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors"
                             title="Xóa">
-                            <X size={14} />
+                            <Trash2 size={14} />
                           </button>
                         )}
                       </div>

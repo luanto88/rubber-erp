@@ -33,13 +33,28 @@ export type KpiTaskTemplate = {
   gio_han: string // "HH:MM:SS"
   yeu_cau_bao_cao: KpiReportRequirement[]
   is_active: boolean
+  phong_ban_id: string | null
   created_by: string
   created_at: string
   updated_at: string
 }
 
 const TEMPLATE_COLS =
-  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, gio_han, yeu_cau_bao_cao, is_active, created_by, created_at, updated_at"
+  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, created_by, created_at, updated_at"
+
+export type KpiSubstitutionStatus = "cho_duyet" | "da_duyet" | "tu_choi"
+
+export const KPI_SUBSTITUTION_STATUS_LABEL: Record<KpiSubstitutionStatus, string> = {
+  cho_duyet: "Chờ duyệt",
+  da_duyet: "Đã duyệt",
+  tu_choi: "Từ chối",
+}
+
+export const KPI_SUBSTITUTION_STATUS_BADGE_CLASS: Record<KpiSubstitutionStatus, string> = {
+  cho_duyet: "bg-amber-100 text-amber-700",
+  da_duyet: "bg-emerald-100 text-emerald-700",
+  tu_choi: "bg-rose-100 text-rose-700",
+}
 
 export type KpiUserSubstitution = {
   id: string
@@ -52,10 +67,14 @@ export type KpiUserSubstitution = {
   ly_do: string | null
   created_by: string
   created_at: string
+  trang_thai: KpiSubstitutionStatus
+  nguoi_duyet_id: string | null
+  duyet_luc: string | null
+  ly_do_tu_choi: string | null
 }
 
 const SUBSTITUTION_COLS =
-  "id, factory_id, original_user_id, substitute_user_id, template_id, tu_ngay, den_ngay, ly_do, created_by, created_at"
+  "id, factory_id, original_user_id, substitute_user_id, template_id, tu_ngay, den_ngay, ly_do, created_by, created_at, trang_thai, nguoi_duyet_id, duyet_luc, ly_do_tu_choi"
 
 export type KpiGroupOption = { id: string; name: string }
 
@@ -93,6 +112,7 @@ export type KpiTaskTemplateInput = {
   gioHan: string
   yeuCauBaoCao: KpiReportRequirement[]
   isActive: boolean
+  phongBanId: string | null
 }
 
 export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promise<KpiTaskTemplate> {
@@ -110,6 +130,7 @@ export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promis
       gio_han: input.gioHan,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,
+      phong_ban_id: input.phongBanId,
     })
     .select(TEMPLATE_COLS)
     .single()
@@ -133,6 +154,7 @@ export async function updateKpiTaskTemplate(
       gio_han: input.gioHan,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,
+      phong_ban_id: input.phongBanId,
     })
     .eq("id", id)
   if (error) throw error
@@ -196,6 +218,37 @@ export async function createKpiUserSubstitution(input: {
 export async function deleteKpiUserSubstitution(id: string): Promise<void> {
   const { error } = await supabase.from("kpi_user_substitutions").delete().eq("id", id)
   if (error) throw error
+}
+
+// ── Duyệt/từ chối (Phase C) — ai đăng ký thì phía còn lại duyệt: tự đăng ký → lãnh đạo phòng
+// ban của người đó duyệt; lãnh đạo/kpi.assign đăng ký hộ → chính người đi vắng tự xác nhận. Xem
+// đầy đủ RPC kpi_substitution_approve/kpi_substitution_reject trong
+// 20260807_kpi_substitution_approval.sql — 2 hàm dưới đây chỉ là wrapper mỏng.
+export async function approveKpiUserSubstitution(id: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_substitution_approve", { p_id: id })
+  if (error) throw error
+}
+
+export async function rejectKpiUserSubstitution(id: string, lyDo: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_substitution_reject", { p_id: id, p_ly_do: lyDo.trim() || null })
+  if (error) throw error
+}
+
+// Đăng ký 'cho_duyet' mà CHÍNH user này có khả năng cần xử lý — RLS (kpi_user_substitutions_select)
+// đã tự giới hạn tập nhìn thấy được (chỉ liên quan/admin/kpi.view_all/lãnh đạo phòng ban của
+// original_user_id), ở đây chỉ lọc tiếp bỏ các dòng do chính mình tự đăng ký (đang chờ NGƯỜI
+// KHÁC duyệt cho mình, không phải mình duyệt).
+export async function fetchPendingSubstitutionsForApprover(userId: string, factoryId: string): Promise<KpiUserSubstitution[]> {
+  const { data, error } = await supabase
+    .from("kpi_user_substitutions")
+    .select(SUBSTITUTION_COLS)
+    .eq("factory_id", factoryId)
+    .eq("trang_thai", "cho_duyet")
+  if (error) throw error
+  return ((data || []) as KpiUserSubstitution[]).filter((s) => {
+    if (s.created_by !== s.original_user_id) return s.original_user_id === userId
+    return s.original_user_id !== userId
+  })
 }
 
 // ── Sinh "lười" instance công việc định kỳ hôm nay ───────────────────────────

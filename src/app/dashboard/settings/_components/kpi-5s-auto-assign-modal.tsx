@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, RefreshCw, Shuffle, Users } from "lucide-react"
 import { ModalShell } from "../../_components/modal-shell"
-import { updateKpi5sLocation, getKpi5sErrorMessage, type Kpi5sLocation } from "@/lib/kpi-5s"
+import { patchKpi5sLocation, getKpi5sErrorMessage, type Kpi5sLocation } from "@/lib/kpi-5s"
 import { fetchAllZoneMemberships } from "@/lib/kpi-5s-zones"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
 import { buildAutoAssignSuggestions, type AutoAssignCandidate, type AutoAssignSuggestion } from "@/lib/kpi-5s-auto-assign"
@@ -117,7 +117,7 @@ export function Kpi5sAutoAssignModal({
     try {
       const changed = rows.filter((r) => r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham)
       await Promise.all(
-        changed.map((r) => updateKpi5sLocation(r.locationId, { nguoi_don_id: r.nguoiDonId, nguoi_cham_id: r.nguoiChamId })),
+        changed.map((r) => patchKpi5sLocation(r.locationId, { nguoi_don_id: r.nguoiDonId, nguoi_cham_id: r.nguoiChamId })),
       )
 
       // Tổng hợp theo người để hiện thông báo/thông tin cho bước sau (Telegram) — mỗi người có

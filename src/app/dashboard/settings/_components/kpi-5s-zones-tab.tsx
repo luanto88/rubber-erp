@@ -24,25 +24,28 @@ import {
   type Kpi5sZoneInput,
 } from "@/lib/kpi-5s-zones"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import { fetchDepartmentOptions, type DepartmentOption } from "@/lib/kpi-department-leaders"
 
 type FormState = {
   ten: string
+  phong_ban_id: string
   is_active: boolean
   sort_order: string
 }
 
 function emptyForm(): FormState {
-  return { ten: "", is_active: true, sort_order: "0" }
+  return { ten: "", phong_ban_id: "", is_active: true, sort_order: "0" }
 }
 
 function zoneToForm(z: Kpi5sZone): FormState {
-  return { ten: z.ten, is_active: z.is_active, sort_order: String(z.sort_order ?? 0) }
+  return { ten: z.ten, phong_ban_id: z.phong_ban_id || "", is_active: z.is_active, sort_order: String(z.sort_order ?? 0) }
 }
 
 export function Kpi5sZonesTab({ factoryId, canManage }: { factoryId: string | null; canManage: boolean }) {
   const [zones, setZones] = useState<Kpi5sZone[]>([])
   const [membershipByZone, setMembershipByZone] = useState<Map<string, string[]>>(new Map())
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
 
@@ -64,14 +67,16 @@ export function Kpi5sZonesTab({ factoryId, canManage }: { factoryId: string | nu
     setLoading(true)
     setLoadError("")
     try {
-      const [zoneRows, membershipMap, candidateData] = await Promise.all([
+      const [zoneRows, membershipMap, candidateData, deptRows] = await Promise.all([
         fetchKpi5sZones(fid, { includeInactive: true }),
         fetchAllZoneMemberships(fid),
         loadKpiTaskCandidates(fid),
+        fetchDepartmentOptions(),
       ])
       setZones(zoneRows)
       setMembershipByZone(membershipMap)
       setCandidates(candidateData.people)
+      setDepartments(deptRows)
     } catch (err) {
       setLoadError(getKpi5sErrorMessage(err, "Không tải được danh sách khu vực."))
     } finally {
@@ -109,6 +114,7 @@ export function Kpi5sZonesTab({ factoryId, canManage }: { factoryId: string | nu
       const payload: Kpi5sZoneInput = {
         factory_id: factoryId,
         ten: form.ten.trim(),
+        phong_ban_id: form.phong_ban_id || null,
         is_active: form.is_active,
         sort_order: Number(form.sort_order) || 0,
       }
@@ -302,6 +308,19 @@ export function Kpi5sZonesTab({ factoryId, canManage }: { factoryId: string | nu
                 onChange={(e) => setForm((f) => ({ ...f, sort_order: e.target.value }))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600">Phòng ban</label>
+              <select
+                value={form.phong_ban_id}
+                onChange={(e) => setForm((f) => ({ ...f, phong_ban_id: e.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+              >
+                <option value="">-- Chưa gán --</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
             </div>
             <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
               <input

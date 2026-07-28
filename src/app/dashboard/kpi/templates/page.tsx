@@ -12,6 +12,11 @@ import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import {
+  canSeeKpiTemplatesTab,
+  fetchDepartmentOptions,
+  type DepartmentOption,
+} from "@/lib/kpi-department-leaders"
+import {
   formatKpiDateTime,
   getKpiErrorMessage,
   KPI_REPORT_REQ_LABEL,
@@ -24,6 +29,9 @@ import {
   ensureTodayKpiTaskInstances,
   fetchKpiTaskTemplates,
   fetchKpiUserSubstitutions,
+  fetchPendingSubstitutionsForApprover,
+  KPI_SUBSTITUTION_STATUS_BADGE_CLASS,
+  KPI_SUBSTITUTION_STATUS_LABEL,
   KPI_WEEKDAY_LABEL,
   KPI_WEEKDAY_OPTIONS,
   loadAllPersonnelGroups,
@@ -34,6 +42,7 @@ import {
 } from "@/lib/kpi-templates"
 import { TemplateFormModal } from "./_components/template-form-modal"
 import { SubstitutionFormModal } from "./_components/substitution-form-modal"
+import { PendingSubstitutionsBanner } from "@/app/dashboard/kpi/_components/pending-substitutions-banner"
 
 export default function KpiTemplatesPage() {
   const revealRef = useScrollReveal()
@@ -46,6 +55,8 @@ export default function KpiTemplatesPage() {
   const [substitutions, setSubstitutions] = useState<KpiUserSubstitution[]>([])
   const [groups, setGroups] = useState<KpiGroupOption[]>([])
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
+  const [pendingSubs, setPendingSubs] = useState<KpiUserSubstitution[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -85,16 +96,18 @@ export default function KpiTemplatesPage() {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [templateRows, subRows, groupRows, candidateData] = await Promise.all([
+      const [templateRows, subRows, groupRows, candidateData, deptRows] = await Promise.all([
         fetchKpiTaskTemplates(fid),
         fetchKpiUserSubstitutions(fid),
         loadAllPersonnelGroups(fid),
         loadKpiTaskCandidates(fid),
+        fetchDepartmentOptions(),
       ])
       setTemplates(templateRows)
       setSubstitutions(subRows)
       setGroups(groupRows)
       setCandidates(candidateData.people)
+      setDepartments(deptRows)
     } catch (err) {
       setDataError(getKpiErrorMessage(err, "Không tải được dữ liệu."))
     } finally {
@@ -102,9 +115,35 @@ export default function KpiTemplatesPage() {
     }
   }, [])
 
+  // Đăng ký "cho_duyet" mà CHÍNH người xem cần xử lý — tách riêng vì phụ thuộc user.id (không có
+  // ở loadData chung, và RLS đã tự giới hạn tập nhìn thấy theo đúng người này).
+  const loadPendingSubs = useCallback(async (fid: string, uid: string) => {
+    try {
+      setPendingSubs(await fetchPendingSubstitutionsForApprover(uid, fid))
+    } catch {
+      // im lặng — banner chỉ là tiện ích, không chặn phần còn lại của trang
+    }
+  }, [])
+
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
   }, [factoryId, loadData])
+
+  useEffect(() => {
+    if (factoryId && user) void loadPendingSubs(factoryId, user.id)
+  }, [factoryId, user, loadPendingSubs])
+
+  // Guard bổ sung: tab "Việc định kỳ" chỉ dành cho admin/kpi.manage_config/lãnh đạo phòng ban —
+  // người dùng thường chỉ có kpi.view (đã qua guard cache ở bootstrap) không được vào trang này,
+  // bảo vệ ở cả UI (kpi-shell ẩn tab) lẫn logic (redirect thật ở đây, không chỉ ẩn).
+  useEffect(() => {
+    if (!factoryId || !user) return
+    let alive = true
+    void canSeeKpiTemplatesTab(user, factoryId).then((ok) => {
+      if (alive && !ok) window.location.replace("/dashboard/kpi/tasks")
+    })
+    return () => { alive = false }
+  }, [factoryId, user])
 
   const nameByUserId = useMemo(() => {
     const map: Record<string, string> = Object.fromEntries(candidates.map((c) => [c.userId, c.ten]))
@@ -197,7 +236,7 @@ export default function KpiTemplatesPage() {
   }
 
   return (
-    <KpiShell>
+    <KpiShell user={user} factoryId={factoryId}>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -243,6 +282,14 @@ export default function KpiTemplatesPage() {
         </div>
 
         {actionError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2 text-sm font-semibold text-red-600">{actionError}</div>}
+
+        {pendingSubs.length > 0 && (
+          <PendingSubstitutionsBanner
+            items={pendingSubs}
+            resolveName={resolveName}
+            onChanged={() => { if (factoryId && user) { void loadData(factoryId); void loadPendingSubs(factoryId, user.id) } }}
+          />
+        )}
 
         {dataLoading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
@@ -344,16 +391,22 @@ export default function KpiTemplatesPage() {
                 {substitutions.map((s) => (
                   <div key={s.id} className="row-hover p-4 flex flex-wrap items-center justify-between gap-3">
                     <div className="text-sm">
-                      <div>
+                      <div className="flex items-center gap-2 flex-wrap">
                         <strong className="text-slate-700">{resolveName(s.original_user_id)}</strong>
                         <span className="text-slate-400"> → thay thế bởi </span>
                         <strong className="text-slate-700">{resolveName(s.substitute_user_id)}</strong>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${KPI_SUBSTITUTION_STATUS_BADGE_CLASS[s.trang_thai]}`}>
+                          {KPI_SUBSTITUTION_STATUS_LABEL[s.trang_thai]}
+                        </span>
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
                         {s.tu_ngay} — {s.den_ngay} ·{" "}
                         {s.template_id ? `Chỉ: ${templateTitleById[s.template_id] || "—"}` : "Tất cả việc định kỳ"}
                       </div>
                       {s.ly_do && <div className="text-xs text-slate-400 mt-0.5 italic">&quot;{s.ly_do}&quot;</div>}
+                      {s.trang_thai === "tu_choi" && s.ly_do_tu_choi && (
+                        <div className="text-xs text-rose-600 mt-0.5">Lý do từ chối: {s.ly_do_tu_choi}</div>
+                      )}
                       <div className="text-[11px] text-slate-300 mt-0.5">Đăng ký lúc {formatKpiDateTime(s.created_at)}</div>
                     </div>
                     {canManageSub(s) && (
@@ -378,6 +431,7 @@ export default function KpiTemplatesPage() {
           createdBy={user.id}
           groups={groups}
           candidates={candidates}
+          departments={departments}
           editing={editingTemplate}
           onClose={() => setShowTemplateForm(false)}
           onSaved={() => {

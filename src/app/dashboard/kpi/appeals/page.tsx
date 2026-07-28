@@ -189,10 +189,12 @@ export default function KpiAppealsPage() {
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
   const isAdmin = user?.role === "admin"
+  // Mirror RLS kpi_appeals_update (migration 20260807_kpi_department_scoping.sql) — xử lý khiếu
+  // nại là hành động kiểm duyệt chung, không scope theo phòng ban của bản ghi gốc.
   const canResolve = isAdmin || hasPermission(user, "kpi.manage_config")
 
   return (
-    <KpiShell>
+    <KpiShell user={user} factoryId={factoryId}>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex items-center gap-3">
           <div className="hover-lift shrink-0 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-200 via-pink-100 to-rose-100 shadow-sm">

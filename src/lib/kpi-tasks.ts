@@ -92,6 +92,10 @@ export type KpiTask = {
   // vi gốc). Có giá trị = việc chỉ Hoàn thành khi tổng bằng chứng >= giá trị này, xem
   // kpi_task_members.phan_loai + migration 20260725_kpi_task_quantity_target.sql.
   muc_tieu_so_luong: number | null
+  // Phòng ban chịu trách nhiệm — quyết định ai (lãnh đạo phòng ban đó, ngoài admin/nguoi_giao)
+  // được coi là đủ thẩm quyền tạo/quản lý việc này (xem RLS kpi_tasks_insert, migration
+  // 20260807_kpi_department_scoping.sql). NULL = dữ liệu cũ trước migration này.
+  phong_ban_id: string | null
   created_at: string
   updated_at: string
 }
@@ -134,7 +138,7 @@ export type KpiTaskLog = {
 }
 
 const TASK_COLS =
-  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, created_at, updated_at"
+  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, phong_ban_id, created_at, updated_at"
 const MEMBER_COLS =
   "id, task_id, factory_id, user_id, tien_do, tien_do_nghiem_thu, da_nop_luc, is_active, phan_loai, created_at, updated_at"
 const LOG_COLS =
@@ -157,6 +161,17 @@ export function isTaskDueSoon(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai
   return due >= nowMs && due <= nowMs + KPI_DUE_SOON_HOURS * 3600_000
 }
 
+async function fetchDepartmentUserIds(factoryId: string, departmentId: string): Promise<Set<string>> {
+  try {
+    const res = await fetch(`/api/kpi/dept-users?factoryId=${factoryId}&departmentId=${departmentId}`)
+    if (!res.ok) return new Set()
+    const json = (await res.json()) as { userIds?: string[] }
+    return new Set(json.userIds || [])
+  } catch {
+    return new Set()
+  }
+}
+
 // ── Ứng viên giao việc: người (maintenance_staff có profile liên kết) + nhóm ────────────
 export type KpiTaskCandidate = { userId: string; ten: string; groupIds: string[]; primaryGroupId: string | null }
 export type KpiTaskCandidateGroup = { id: string; name: string; memberUserIds: string[] }
@@ -165,13 +180,21 @@ type StaffRow = { id: string; ten: string; profile_id: string | null; active: bo
 type GroupRow = { id: string; name: string; is_active: boolean | null }
 type MemberRow = { staff_id: string; group_id: string; is_primary: boolean | null }
 
+// `departmentId`: nếu truyền, chỉ giữ lại candidate thuộc đúng phòng ban đó — tra qua
+// /api/kpi/dept-users (service role, bắt buộc vì RLS `profiles` chỉ cho đọc own row hoặc admin,
+// client thường không tự lọc được nhiều profile cùng lúc). Lỗi tra cứu phòng ban bị nuốt êm
+// (trả về danh sách rỗng) — không chặn hẳn form nếu route lỗi tạm thời, chỉ đơn giản không lọc
+// ra candidate nào cho tới khi thử lại. `groups` (personnel_groups) KHÔNG lọc theo phòng ban —
+// đây là 2 trục độc lập, "Thêm nhanh theo nhóm" vẫn hoạt động như cũ bất kể phòng ban đã chọn.
 export async function loadKpiTaskCandidates(
   factoryId: string,
+  opts?: { departmentId?: string },
 ): Promise<{ people: KpiTaskCandidate[]; groups: KpiTaskCandidateGroup[] }> {
-  const [staffRes, groupRes, memberRes] = await Promise.all([
+  const [staffRes, groupRes, memberRes, deptUserIds] = await Promise.all([
     supabase.from("maintenance_staff").select("id, ten, profile_id, active").eq("factory_id", factoryId),
     supabase.from("personnel_groups").select("id, name, is_active").eq("factory_id", factoryId).order("sort_order").order("name"),
     supabase.from("personnel_group_members").select("staff_id, group_id, is_primary").eq("factory_id", factoryId),
+    opts?.departmentId ? fetchDepartmentUserIds(factoryId, opts.departmentId) : Promise.resolve(null),
   ])
   if (staffRes.error) throw staffRes.error
   if (groupRes.error) throw groupRes.error
@@ -192,6 +215,7 @@ export async function loadKpiTaskCandidates(
   }
 
   const people: KpiTaskCandidate[] = staffRows
+    .filter((s) => !deptUserIds || deptUserIds.has(s.profile_id as string))
     .map((s) => ({
       userId: s.profile_id as string,
       ten: s.ten,
@@ -306,6 +330,7 @@ export async function createKpiTask(input: {
   // các thành viên còn lại 'choang'.
   mucTieuSoLuong?: number | null
   nguoiChinhId?: string | null
+  phongBanId: string | null
 }): Promise<KpiTask> {
   if (!input.memberUserIds.length) throw new Error("Vui lòng chọn ít nhất 1 người thực hiện.")
   const mucTieu = input.mucTieuSoLuong ?? null
@@ -329,6 +354,7 @@ export async function createKpiTask(input: {
       han_hoan_thanh: input.hanHoanThanh,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       muc_tieu_so_luong: mucTieu,
+      phong_ban_id: input.phongBanId,
     })
     .select(TASK_COLS)
     .single()

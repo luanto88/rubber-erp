@@ -3,11 +3,13 @@
 // Modal Thêm/Sửa "Việc định kỳ theo nhóm" (kpi_task_templates).
 // Xem đầy đủ .claude/rules/27-kpi-module.md mục "Việc định kỳ theo nhóm".
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import type { DepartmentOption } from "@/lib/kpi-department-leaders"
 import {
   KPI_REPORT_REQ_LABEL,
   getKpiErrorMessage,
+  loadKpiTaskCandidates,
   type KpiReportRequirement,
   type KpiTaskCandidate,
 } from "@/lib/kpi-tasks"
@@ -27,14 +29,19 @@ type TemplateFormModalProps = {
   createdBy: string
   groups: KpiGroupOption[]
   candidates: KpiTaskCandidate[]
+  departments: DepartmentOption[]
   editing: KpiTaskTemplate | null
   onClose: () => void
   onSaved: () => void
 }
 
-export function TemplateFormModal({ factoryId, createdBy, groups, candidates, editing, onClose, onSaved }: TemplateFormModalProps) {
+export function TemplateFormModal({ factoryId, createdBy, groups, candidates, departments, editing, onClose, onSaved }: TemplateFormModalProps) {
   const [groupId, setGroupId] = useState(editing?.group_id || "")
+  const [phongBanId, setPhongBanId] = useState(editing?.phong_ban_id || "")
   const [assignedUserId, setAssignedUserId] = useState(editing?.assigned_user_id || "")
+  // Ứng viên "Người nhận cố định" thu hẹp theo phòng ban đã chọn — mặc định = candidates chung
+  // (toàn nhà máy) khi chưa chọn phòng ban, để không chặn dữ liệu cũ chưa gán phòng ban.
+  const [scopedCandidates, setScopedCandidates] = useState<KpiTaskCandidate[]>(candidates)
   const [tieuDe, setTieuDe] = useState(editing?.tieu_de || "")
   const [moTa, setMoTa] = useState(editing?.mo_ta || "")
   const [weekdays, setWeekdays] = useState<number[]>(editing?.apply_weekdays || [1, 2, 3, 4, 5, 6, 7])
@@ -48,7 +55,26 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, ed
     setWeekdays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)))
   }
 
+  // Đổi phòng ban → tải lại ứng viên đúng phòng ban đó; gỡ người nhận đã chọn nếu không còn
+  // thuộc danh sách mới (tránh <select> hiển thị sai do value không khớp option nào).
+  useEffect(() => {
+    let alive = true
+    if (!phongBanId) {
+      setScopedCandidates(candidates)
+      return
+    }
+    void loadKpiTaskCandidates(factoryId, { departmentId: phongBanId }).then(({ people }) => {
+      if (alive) setScopedCandidates(people)
+    })
+    return () => { alive = false }
+  }, [phongBanId, factoryId, candidates])
+
+  useEffect(() => {
+    setAssignedUserId((prev) => (prev && !scopedCandidates.some((c) => c.userId === prev) ? "" : prev))
+  }, [scopedCandidates])
+
   const handleSave = async () => {
+    if (!phongBanId) { setError("Vui lòng chọn phòng ban."); return }
     if (!groupId) { setError("Vui lòng chọn nhóm."); return }
     if (!assignedUserId) { setError("Vui lòng chọn người nhận cố định."); return }
     if (!tieuDe.trim()) { setError("Vui lòng nhập tiêu đề."); return }
@@ -59,6 +85,7 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, ed
       const payload = {
         groupId,
         assignedUserId,
+        phongBanId,
         tieuDe,
         moTa,
         applyWeekdays: weekdays,
@@ -120,6 +147,24 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, ed
           />
         </div>
 
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban *</label>
+          <select
+            value={phongBanId}
+            onChange={(e) => setPhongBanId(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Chọn phòng ban --</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Quyết định ai được phép quản lý việc định kỳ này (lãnh đạo đúng phòng ban, hoặc
+            admin/kpi.manage_config) và thu hẹp danh sách người nhận bên dưới.
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm (phân loại chính/choàng) *</label>
@@ -145,10 +190,13 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, ed
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
             >
               <option value="">-- Chọn người --</option>
-              {candidates.map((c) => (
+              {scopedCandidates.map((c) => (
                 <option key={c.userId} value={c.userId}>{c.ten}</option>
               ))}
             </select>
+            {phongBanId && scopedCandidates.length === 0 && (
+              <p className="mt-1 text-[11px] text-amber-600">Chưa có nhân sự nào thuộc phòng ban này.</p>
+            )}
           </div>
         </div>
 

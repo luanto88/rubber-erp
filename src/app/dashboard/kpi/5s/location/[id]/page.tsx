@@ -8,7 +8,17 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
-import { AlertTriangle, ArrowLeft, CheckCircle2, Flag, Loader2, MapPin, Pencil, Printer } from "lucide-react"
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  Flag,
+  Loader2,
+  MapPin,
+  Pencil,
+  Printer,
+  Users,
+} from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { formatWeekRangeLabel, getIsoWeekStart } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -19,6 +29,7 @@ import {
   buildKpi5sLocationUrl,
   fetchKpi5sEvaluations,
   fetchKpi5sLocation,
+  fetchLocationCleaners,
   getKpi5sErrorMessage,
   KPI_5S_RESULT_BADGE_CLASS,
   KPI_5S_RESULT_LABEL,
@@ -45,6 +56,7 @@ export default function Kpi5sLocationDetailPage() {
   const [location, setLocation] = useState<Kpi5sLocation | null>(null)
   const [evaluations, setEvaluations] = useState<Kpi5sEvaluation[]>([])
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
+  const [cleanerIds, setCleanerIds] = useState<string[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -98,14 +110,16 @@ export default function Kpi5sLocationDetailPage() {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [locationRow, evalRows, candidateData] = await Promise.all([
+      const [locationRow, evalRows, candidateData, cleanerRows] = await Promise.all([
         fetchKpi5sLocation(locationId),
         fetchKpi5sEvaluations(locationId),
         loadKpiTaskCandidates(fid),
+        fetchLocationCleaners(locationId),
       ])
       setLocation(locationRow)
       setEvaluations(evalRows)
       setCandidates(candidateData.people)
+      setCleanerIds(cleanerRows)
     } catch (err) {
       setDataError(getKpi5sErrorMessage(err, "Không tải được dữ liệu vị trí."))
     } finally {
@@ -130,10 +144,21 @@ export default function Kpi5sLocationDetailPage() {
     [evaluations, currentWeekStart],
   )
   const canEvaluateThisWeek = !!location?.is_active && user?.id === location?.nguoi_cham_id && !currentWeekEvaluation
+  const isAdmin = user?.role === "admin"
+
+  // Đội ngũ dọn dẹp thực tế (Fix 4/5a) — ưu tiên bảng multi-select mới, fallback về
+  // nguoi_don_id đơn nếu vị trí chưa từng được gán qua bảng mới. Khóa dropdown "chấm điểm" và
+  // quyền tự báo cáo vào đúng danh sách này thay vì mở tự do cho toàn bộ nhân sự nhà máy.
+  const effectiveCleanerIds = useMemo(
+    () => (cleanerIds.length > 0 ? cleanerIds : location?.nguoi_don_id ? [location.nguoi_don_id] : []),
+    [cleanerIds, location],
+  )
+  const iAmCleaner = !!user && effectiveCleanerIds.includes(user.id)
+  const iAmScorer = !!user && user.id === location?.nguoi_cham_id
 
   const openForm = () => {
     setKetQua("dat")
-    setNguoiDonId(location?.nguoi_don_id || "")
+    setNguoiDonId(effectiveCleanerIds.length === 1 ? effectiveCleanerIds[0] : "")
     setLyDo("")
     setImages([])
     setSaveError("")
@@ -144,6 +169,10 @@ export default function Kpi5sLocationDetailPage() {
     if (!factoryId || !location || !user) return
     if (!nguoiDonId) {
       setSaveError("Vui lòng chọn người chịu trách nhiệm dọn tuần này.")
+      return
+    }
+    if (images.length === 0) {
+      setSaveError("Vui lòng chụp/tải lên ít nhất 1 ảnh minh chứng.")
       return
     }
     if (ketQua !== "dat" && !lyDo.trim()) {
@@ -270,7 +299,7 @@ export default function Kpi5sLocationDetailPage() {
   const canCorrectResult = user?.role === "admin" || hasPermission(user, "kpi.manage_config")
 
   return (
-    <KpiShell>
+    <KpiShell user={user} factoryId={factoryId}>
       <div className="space-y-4">
         <Link href="/dashboard/kpi/5s" className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-violet-600">
           <ArrowLeft size={14} /> Danh sách vị trí 5S
@@ -288,9 +317,11 @@ export default function Kpi5sLocationDetailPage() {
           <>
             <div ref={revealRef} className="scroll-reveal hover-lift bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-wrap items-start justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700">{location.ma_vi_tri}</span>
                   {!location.is_active && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-200 text-slate-500">Tạm ngưng</span>}
+                  {iAmCleaner && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-sky-100 text-sky-700">Bạn thuộc đội dọn dẹp</span>}
+                  {iAmScorer && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700">Bạn là người chấm</span>}
                 </div>
                 <h1 className="text-xl font-extrabold text-slate-800 mt-1">{location.ten_vi_tri}</h1>
                 {location.mo_ta && (
@@ -299,8 +330,15 @@ export default function Kpi5sLocationDetailPage() {
                   </div>
                 )}
                 <div className="mt-2 space-y-0.5 text-sm text-slate-600">
-                  <div>Người dọn hiện tại: <strong className="text-slate-800">{resolveName(location.nguoi_don_id)}</strong></div>
+                  <div className="flex items-start gap-1">
+                    <Users size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                    Đội ngũ dọn dẹp:{" "}
+                    <strong className="text-slate-800">
+                      {effectiveCleanerIds.length > 0 ? effectiveCleanerIds.map((uid) => resolveName(uid)).join(", ") : "— Chưa gán —"}
+                    </strong>
+                  </div>
                   <div>Người chấm hiện tại: <strong className="text-slate-800">{resolveName(location.nguoi_cham_id)}</strong></div>
+                  <div>Người giao: <strong className="text-slate-800">{resolveName(location.assigned_by)}</strong></div>
                 </div>
               </div>
 
@@ -319,12 +357,18 @@ export default function Kpi5sLocationDetailPage() {
             </div>
 
             {canEvaluateThisWeek && !showForm && (
-              <button
-                onClick={openForm}
-                className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md text-sm"
-              >
-                <CheckCircle2 size={16} /> Chấm điểm tuần này ({formatWeekRangeLabel(currentWeekStart)})
-              </button>
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border-2 border-amber-400 bg-amber-50 p-3 shadow-md">
+                <AlertTriangle size={18} className="shrink-0 animate-pulse text-amber-600" />
+                <span className="text-sm font-extrabold text-amber-800">
+                  Đến lượt bạn chấm điểm vị trí này ({formatWeekRangeLabel(currentWeekStart)})!
+                </span>
+                <button
+                  onClick={openForm}
+                  className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-md text-sm"
+                >
+                  <CheckCircle2 size={16} /> Chấm điểm ngay
+                </button>
+              </div>
             )}
 
             {!location.is_active && (
@@ -350,24 +394,55 @@ export default function Kpi5sLocationDetailPage() {
 
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-600">Người chịu trách nhiệm dọn tuần này *</label>
-                  <select
-                    value={nguoiDonId}
-                    onChange={(e) => setNguoiDonId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-500"
-                  >
-                    <option value="">— Chọn người —</option>
-                    {candidates.map((c) => (
-                      <option key={c.userId} value={c.userId}>{c.ten}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[11px] text-slate-400">Mặc định là người dọn hiện tại của vị trí — đổi lại nếu tuần này có người dọn thay.</p>
+                  {effectiveCleanerIds.length === 1 ? (
+                    <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                      {resolveName(effectiveCleanerIds[0])}
+                    </div>
+                  ) : effectiveCleanerIds.length > 1 ? (
+                    <select
+                      value={nguoiDonId}
+                      onChange={(e) => setNguoiDonId(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-500"
+                    >
+                      <option value="">— Chọn người trong đội ngũ dọn dẹp —</option>
+                      {effectiveCleanerIds.map((uid) => (
+                        <option key={uid} value={uid}>{resolveName(uid)}</option>
+                      ))}
+                    </select>
+                  ) : isAdmin ? (
+                    <>
+                      <select
+                        value={nguoiDonId}
+                        onChange={(e) => setNguoiDonId(e.target.value)}
+                        className="w-full rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm outline-none focus:border-amber-500"
+                      >
+                        <option value="">— Chọn người (chưa gán đội ngũ) —</option>
+                        {candidates.map((c) => (
+                          <option key={c.userId} value={c.userId}>{c.ten}</option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] font-semibold text-amber-600">
+                        Vị trí này chưa gán đội ngũ dọn dẹp — chỉ admin thấy được lựa chọn dự phòng
+                        này. Vào Cài đặt → KPI &amp; 5S → Vị trí 5S để gán đội ngũ chính thức.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      Vị trí này chưa được gán đội ngũ dọn dẹp — liên hệ Admin để gán trước khi chấm điểm.
+                    </div>
+                  )}
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Chỉ chọn được trong số người đã được gán làm đội ngũ dọn dẹp của vị trí này —
+                    nếu người phụ trách đã đổi (đi tua/nghỉ), hãy cập nhật đội ngũ ở Cài đặt trước.
+                  </p>
                 </div>
 
                 <Kpi5sResultPicker ketQua={ketQua} onKetQuaChange={setKetQua} lyDo={lyDo} onLyDoChange={setLyDo} disabled={saving} />
 
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-600">Ảnh (khuyến khích)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-600">Ảnh minh chứng *</label>
                   <Kpi5sImagePicker factoryId={factoryId!} locationId={location.id} images={images} onChange={setImages} />
+                  <p className="mt-1 text-[11px] text-slate-400">Bắt buộc chụp/tải lên ít nhất 1 ảnh trước khi lưu kết quả.</p>
                 </div>
 
                 <div className="flex gap-2 pt-1">

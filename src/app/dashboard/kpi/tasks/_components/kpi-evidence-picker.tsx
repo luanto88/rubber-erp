@@ -6,7 +6,7 @@
 // nhánh file bất kỳ (không giới hạn ảnh) vì kpi_task_logs.file_urls tách riêng image_urls.
 
 import { useRef, useState } from "react"
-import { File as FileIcon, ImagePlus, Loader2, Paperclip, X } from "lucide-react"
+import { Camera, File as FileIcon, ImagePlus, Loader2, Paperclip, X } from "lucide-react"
 import { getKpiErrorMessage, uploadKpiEvidenceFile, uploadKpiEvidenceImage } from "@/lib/kpi-tasks"
 
 const MAX_IMAGES = 6
@@ -29,6 +29,7 @@ export function KpiEvidencePicker({
   fileUrls,
   onFilesChange,
 }: KpiEvidencePickerProps) {
+  const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -94,16 +95,41 @@ export function KpiEvidencePicker({
             </div>
           ))}
           {imageUrls.length < MAX_IMAGES && (
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              disabled={uploadingImage}
-              className="flex h-14 w-14 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {uploadingImage ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={uploadingImage}
+                className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Chụp ảnh"
+              >
+                {uploadingImage ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
+                <span className="text-[8px] font-bold">Chụp</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={uploadingImage}
+                className="flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Chọn từ thư viện"
+              >
+                {uploadingImage ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
+                <span className="text-[8px] font-bold">Thư viện</span>
+              </button>
+            </>
           )}
         </div>
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            void handleImages(e.target.files)
+            e.target.value = ""
+          }}
+        />
         <input
           ref={imageInputRef}
           type="file"

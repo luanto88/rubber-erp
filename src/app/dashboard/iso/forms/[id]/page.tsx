@@ -164,6 +164,8 @@ function SignPlacementModal({
   signatureUrl,
   userName,
   instanceId,
+  userId,
+  acting,
   onConfirm,
   onClose,
 }: {
@@ -174,6 +176,8 @@ function SignPlacementModal({
   signatureUrl: string | null
   userName: string
   instanceId: string
+  userId: string
+  acting: boolean
   onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType) => void
   onClose: () => void
 }) {
@@ -183,8 +187,14 @@ function SignPlacementModal({
   // PDF (vẽ hộp riêng) — DOCX/XLSX không cần (đã xác nhận với người dùng).
   const showSignAsPicker = action === "phe_duyet" && showCanvas
 
+  // Luồng ký chia 2 bước: PIN phải xác thực đúng (chặn, gọi /api/sign/verify)
+  // TRƯỚC khi hiện canvas PDF đặt vị trí chữ ký — mirror iso/documents/[id]/page.tsx
+  // (pinModal/placementModal) và documents/[id]/page.tsx (Cập nhật 2026-07-24).
+  const [step, setStep] = useState<"pin" | "placement">("pin")
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
+  const [showPin, setShowPin] = useState(false)
+  const [pinVerifying, setPinVerifying] = useState(false)
   const [signAs, setSignAs] = useState<SignAsType>("none")
 
   // Canvas + PDF state
@@ -194,8 +204,6 @@ function SignPlacementModal({
   const pdfDocRef = useRef<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [numPages, setNumPages] = useState(1)
-  const [canvasW, setCanvasW] = useState(0)
-  const [canvasH, setCanvasH] = useState(0)
   const [pdfPageH, setPdfPageH] = useState(841.89) // A4 default
   const [pdfScale, setPdfScale] = useState(1.5)
   const [canvasReady, setCanvasReady] = useState(false)
@@ -237,15 +245,14 @@ function SignPlacementModal({
     await page.render({ canvasContext: ctx, viewport } as any).promise
 
     const unscaledViewport = page.getViewport({ scale: 1 })
-    setCanvasW(cW)
-    setCanvasH(cH)
     setPdfScale(scale)
     setPdfPageH(unscaledViewport.height)
   }
 
-  // Load PDF and render to canvas
+  // Load PDF and render to canvas — chỉ chạy khi đã sang bước "placement" (PIN đã
+  // xác thực đúng), tránh tải file lãng phí nếu người dùng hủy ngay ở bước nhập PIN.
   useEffect(() => {
-    if (!showCanvas || !sourceFileUrl) return
+    if (!showCanvas || !sourceFileUrl || step !== "placement") return
     let cancelled = false
 
     const loadPdf = async () => {
@@ -282,7 +289,7 @@ function SignPlacementModal({
       if (!cancelled) setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
     })
     return () => { cancelled = true }
-  }, [showCanvas, sourceFileUrl])
+  }, [showCanvas, sourceFileUrl, step])
 
   const goToPage = (p: number) => {
     if (p < 1 || p > numPages || !pdfDocRef.current) return
@@ -298,8 +305,38 @@ function SignPlacementModal({
     height: h / pdfScale,
   })
 
-  const handleConfirm = () => {
+  // Xác thực PIN thật qua server TRƯỚC khi mở bước đặt vị trí chữ ký — bắt lỗi PIN
+  // sai ngay, không cần đợi tới lúc bấm "Ký xác nhận" ở cuối. onConfirm() bên dưới
+  // vẫn gửi lại pin để handleSignConfirm (trang cha) tự verify lại lấy token thật
+  // cho finalize — không đổi cơ chế đó, gọi ở đây chỉ để early-fail.
+  const handleVerifyPin = async () => {
     if (!pin.trim()) { setPinError("Vui lòng nhập PIN"); return }
+    setPinVerifying(true)
+    setPinError("")
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        setPinError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+        return
+      }
+      const res = await fetch("/api/sign/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ userId, pin, docId: instanceId, docType: "iso_form" }),
+      })
+      const json = await res.json() as { error?: string }
+      if (!res.ok) { setPinError(json.error ?? "PIN không đúng"); return }
+      setStep("placement")
+    } catch {
+      setPinError("Không thể xác thực PIN, vui lòng thử lại")
+    } finally {
+      setPinVerifying(false)
+    }
+  }
+
+  const handleConfirm = () => {
+    if (!pin.trim()) { setStep("pin"); setPinError("Vui lòng nhập lại PIN"); return }
 
     let placement: FullPlacement
     if (showCanvas && canvasReady) {
@@ -351,27 +388,87 @@ function SignPlacementModal({
   const { nameTag, sigTag } = stepTagMap[action] ?? { nameTag: "", sigTag: "" }
   const stepLabel = action === "soan_thao" ? "Ký và gửi hồ sơ" : action === "xem_xet" ? "Ký xem xét" : "Ký phê duyệt"
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-4">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <div>
-            <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {showCanvas
-                ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
-                : autoConvertPdf
-                  ? "Tag chữ ký sẽ được thay tại mỗi bước; file sẽ convert sang PDF khi phê duyệt"
-                  : "Tag trong file Office sẽ được thay tự động khi ký"}
-            </p>
+  // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF. Đúng PIN mới chuyển sang bước 2.
+  if (step === "pin") {
+    return (
+      <ModalShell
+        title={
+          <span className="flex items-center gap-3">
+            <span className="p-2 bg-violet-100 rounded-xl"><Pen size={18} className="text-violet-600" /></span>
+            <span>
+              <span className="font-extrabold text-slate-800 block">{stepLabel}</span>
+              <span className="text-xs text-slate-500 font-normal">Nhập PIN chữ ký để xác nhận</span>
+            </span>
+          </span>
+        }
+        onClose={onClose}
+        maxWidth="sm"
+        footer={
+          <>
+            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+            <button
+              onClick={() => void handleVerifyPin()}
+              disabled={pinVerifying}
+              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+            >
+              {pinVerifying ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
+              {pinVerifying ? "Đang xác thực..." : "Xác nhận"}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN chữ ký</label>
+          <div className="relative">
+            <input
+              type={showPin ? "text" : "password"}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              autoFocus
+              value={pin}
+              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
+              onKeyDown={(e) => e.key === "Enter" && void handleVerifyPin()}
+              placeholder="4–6 chữ số"
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 pr-9 font-mono tracking-widest text-center text-lg"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPin((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+          {pinError && (
+            <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+              <AlertTriangle size={11} /> {pinError}
+            </p>
+          )}
         </div>
+      </ModalShell>
+    )
+  }
 
-        <div className="p-5 space-y-4">
+  // Bước 2: PIN đã xác thực đúng — overlay toàn màn hình để đặt vị trí chữ ký,
+  // chỉ còn cuộn dọc thay vì hộp thoại max-w-3xl/55vh cũ (2 thanh cuộn ngang+dọc).
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-slate-100 shrink-0">
+        <div>
+          <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {showCanvas
+              ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
+              : autoConvertPdf
+                ? "Tag chữ ký sẽ được thay tại mỗi bước; file sẽ convert sang PDF khi phê duyệt"
+                : "Tag trong file Office sẽ được thay tự động khi ký"}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
           {showCanvas && numPages > 1 && (
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage <= 1}
@@ -389,267 +486,246 @@ function SignPlacementModal({
               </button>
             </div>
           )}
-          {/* Canvas or Office message */}
-          {showCanvas ? (
-            <div className="overflow-auto rounded-xl border border-slate-200" style={{ maxHeight: "55vh" }}>
-              <div
-                ref={containerRef}
-                className="relative"
-                style={{ width: canvasW || "100%", height: canvasH || 300, display: "inline-block" }}
-              >
-                <canvas ref={canvasRef} className="block" />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+        </div>
+      </div>
 
-                {!canvasReady && !canvasError && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
-                    <Loader2 size={24} className="animate-spin text-violet-500" />
-                  </div>
-                )}
-                {canvasError && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-amber-50 p-4">
-                    <div className="text-center">
-                      <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
-                      <p className="text-sm font-semibold text-amber-800">Không tải được PDF</p>
-                      <p className="text-xs text-amber-600 mt-1">Chữ ký sẽ đặt ở vị trí mặc định</p>
-                    </div>
-                  </div>
-                )}
+      <div className="flex-1 overflow-auto flex items-start justify-center p-4 bg-slate-100">
+        {showCanvas ? (
+          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none">
+            <canvas ref={canvasRef} className="block" />
 
-                {canvasReady && (
-                  <>
-                    {/* QR — only soan_thao */}
-                    {action === "soan_thao" && (
-                      <Draggable
-                        nodeRef={qrNodeRef as RefObject<HTMLElement>}
-                        position={{ x: qrState.x, y: qrState.y }}
-                        onStop={(_, d) => setQrState((p) => ({ ...p, x: d.x, y: d.y }))}
-                        bounds="parent"
-                      >
-                        <div
-                          ref={qrNodeRef}
-                          className="absolute top-0 left-0 cursor-move"
-                          style={{ zIndex: 12 }}
-                        >
-                          <Resizable
-                            size={{ width: qrState.w, height: qrState.h }}
-                            onResizeStop={(_, __, ___, delta) =>
-                              setQrState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                            enable={{ right: true, bottom: true, bottomRight: true }}
-                            minWidth={32} minHeight={32}
-                          >
-                            <div className="w-full h-full border-2 border-dashed border-blue-400 bg-white/80 rounded flex items-center justify-center select-none overflow-hidden p-0.5">
-                              <QRCodeSVG
-                                value={`${typeof window !== "undefined" ? window.location.origin : "https://qlsxkpt.vercel.app"}/dashboard/iso/forms/${instanceId}`}
-                                size={Math.max(24, qrState.h - 6)}
-                                level="L"
-                              />
-                            </div>
-                          </Resizable>
-                        </div>
-                      </Draggable>
-                    )}
-
-                    {/* Signature */}
-                    <Draggable
-                      nodeRef={sigNodeRef as RefObject<HTMLElement>}
-                      position={{ x: sigState.x, y: sigState.y }}
-                      onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
-                      bounds="parent"
-                    >
-                      <div
-                        ref={sigNodeRef}
-                        className="absolute top-0 left-0 cursor-move"
-                        style={{ zIndex: 11 }}
-                      >
-                        <Resizable
-                          size={{ width: sigState.w, height: sigState.h }}
-                          onResizeStop={(_, __, ___, delta) =>
-                            setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
-                          minWidth={40} minHeight={20}
-                        >
-                          <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none">
-                            {showSig && signatureUrl && (
-                              <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain opacity-90" />
-                            )}
-                            {showSig && !signatureUrl && (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <span className="text-[10px] text-slate-400">Chữ ký</span>
-                              </div>
-                            )}
-                            {!showSig && (
-                              <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
-                                <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
-                              </div>
-                            )}
-                            <button
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setShowSig((v) => !v)}
-                              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
-                              style={{ zIndex: 20 }}
-                              title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
-                            >
-                              {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
-                            </button>
-                          </div>
-                        </Resizable>
-                      </div>
-                    </Draggable>
-
-                    {/* Name */}
-                    <Draggable
-                      nodeRef={nameNodeRef as RefObject<HTMLElement>}
-                      position={{ x: nameState.x, y: nameState.y }}
-                      onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
-                      bounds="parent"
-                    >
-                      <div
-                        ref={nameNodeRef}
-                        className="absolute top-0 left-0 cursor-move"
-                        style={{ zIndex: 11 }}
-                      >
-                        <Resizable
-                          size={{ width: nameState.w, height: nameState.h }}
-                          onResizeStop={(_, __, ___, delta) =>
-                            setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
-                          minWidth={60} minHeight={16}
-                        >
-                          <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
-                            {showName ? (
-                              <span className="text-[10px] font-bold text-violet-700 truncate px-1">{userName || "Người ký"}</span>
-                            ) : (
-                              <span className="text-[10px] text-slate-400">Ẩn tên</span>
-                            )}
-                            <button
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setShowName((v) => !v)}
-                              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
-                              style={{ zIndex: 20 }}
-                              title={showName ? "Ẩn tên" : "Hiện tên"}
-                            >
-                              {showName ? <EyeOff size={10} /> : <Eye size={10} />}
-                            </button>
-                          </div>
-                        </Resizable>
-                      </div>
-                    </Draggable>
-
-                    {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
-                    {showSignAsPicker && signAs !== "none" && (
-                      <Draggable
-                        nodeRef={prefixNodeRef as RefObject<HTMLElement>}
-                        position={{ x: prefixState.x, y: prefixState.y }}
-                        onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
-                        bounds="parent"
-                      >
-                        <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
-                          <Resizable
-                            size={{ width: prefixState.w, height: prefixState.h }}
-                            onResizeStop={(_, __, ___, delta) =>
-                              setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                            enable={{ right: true, bottom: true, bottomRight: true }}
-                            minWidth={36} minHeight={16}
-                          >
-                            <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
-                              <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
-                            </div>
-                          </Resizable>
-                        </div>
-                      </Draggable>
-                    )}
-                  </>
-                )}
+            {!canvasReady && !canvasError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
+                <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
-            </div>
-          ) : autoConvertPdf ? (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-sm font-bold text-amber-800 mb-2">File Office — ký theo tag, convert PDF khi phê duyệt</p>
-              <ul className="text-xs text-amber-700 space-y-1 list-disc list-inside">
-                <li>Mỗi bước ký sẽ thay thế tag chữ ký tương ứng trong file</li>
-                <li>Sau bước phê duyệt cuối, CloudConvert sẽ tạo PDF từ file đã ký</li>
-              </ul>
-            </div>
-          ) : (
-            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl">
-              <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
-              <div className="space-y-1 text-xs text-sky-700">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{sigTag}</span>
-                  <span>→ chữ ký của bạn (PNG)</span>
+            )}
+            {canvasError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-amber-50 p-4">
+                <div className="text-center">
+                  <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-amber-800">Không tải được PDF</p>
+                  <p className="text-xs text-amber-600 mt-1">Chữ ký sẽ đặt ở vị trí mặc định</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{nameTag}</span>
-                  <span>→ tên người ký</span>
-                </div>
+              </div>
+            )}
+
+            {canvasReady && (
+              <>
+                {/* QR — only soan_thao */}
                 {action === "soan_thao" && (
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{"{{QR}}"}</span>
-                    <span>→ mã QR liên kết hồ sơ</span>
-                  </div>
+                  <Draggable
+                    nodeRef={qrNodeRef as RefObject<HTMLElement>}
+                    position={{ x: qrState.x, y: qrState.y }}
+                    onStop={(_, d) => setQrState((p) => ({ ...p, x: d.x, y: d.y }))}
+                    bounds="parent"
+                  >
+                    <div
+                      ref={qrNodeRef}
+                      className="absolute top-0 left-0 cursor-move"
+                      style={{ zIndex: 12 }}
+                    >
+                      <Resizable
+                        size={{ width: qrState.w, height: qrState.h }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setQrState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={32} minHeight={32}
+                      >
+                        <div className="w-full h-full border-2 border-dashed border-blue-400 bg-white/80 rounded flex items-center justify-center select-none overflow-hidden p-0.5">
+                          <QRCodeSVG
+                            value={`${typeof window !== "undefined" ? window.location.origin : "https://qlsxkpt.vercel.app"}/dashboard/iso/forms/${instanceId}`}
+                            size={Math.max(24, qrState.h - 6)}
+                            level="L"
+                          />
+                        </div>
+                      </Resizable>
+                    </div>
+                  </Draggable>
                 )}
-                <p className="text-sky-500 mt-1">Tag không có trong file sẽ được bỏ qua.</p>
-              </div>
-            </div>
-          )}
 
-          {showSignAsPicker && (
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                {/* Signature */}
+                <Draggable
+                  nodeRef={sigNodeRef as RefObject<HTMLElement>}
+                  position={{ x: sigState.x, y: sigState.y }}
+                  onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
+                  bounds="parent"
+                >
+                  <div
+                    ref={sigNodeRef}
+                    className="absolute top-0 left-0 cursor-move"
+                    style={{ zIndex: 11 }}
+                  >
+                    <Resizable
+                      size={{ width: sigState.w, height: sigState.h }}
+                      onResizeStop={(_, __, ___, delta) =>
+                        setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                      enable={{ right: true, bottom: true, bottomRight: true }}
+                      minWidth={40} minHeight={20}
+                    >
+                      <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none">
+                        {showSig && signatureUrl && (
+                          <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain opacity-90" />
+                        )}
+                        {showSig && !signatureUrl && (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <span className="text-[10px] text-slate-400">Chữ ký</span>
+                          </div>
+                        )}
+                        {!showSig && (
+                          <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
+                            <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
+                          </div>
+                        )}
+                        <button
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={() => setShowSig((v) => !v)}
+                          className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
+                          style={{ zIndex: 20 }}
+                          title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
+                        >
+                          {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
+                        </button>
+                      </div>
+                    </Resizable>
+                  </div>
+                </Draggable>
+
+                {/* Name */}
+                <Draggable
+                  nodeRef={nameNodeRef as RefObject<HTMLElement>}
+                  position={{ x: nameState.x, y: nameState.y }}
+                  onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
+                  bounds="parent"
+                >
+                  <div
+                    ref={nameNodeRef}
+                    className="absolute top-0 left-0 cursor-move"
+                    style={{ zIndex: 11 }}
+                  >
+                    <Resizable
+                      size={{ width: nameState.w, height: nameState.h }}
+                      onResizeStop={(_, __, ___, delta) =>
+                        setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                      enable={{ right: true, bottom: true, bottomRight: true }}
+                      minWidth={60} minHeight={16}
+                    >
+                      <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
+                        {showName ? (
+                          <span className="text-[10px] font-bold text-violet-700 truncate px-1">{userName || "Người ký"}</span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">Ẩn tên</span>
+                        )}
+                        <button
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={() => setShowName((v) => !v)}
+                          className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
+                          style={{ zIndex: 20 }}
+                          title={showName ? "Ẩn tên" : "Hiện tên"}
+                        >
+                          {showName ? <EyeOff size={10} /> : <Eye size={10} />}
+                        </button>
+                      </div>
+                    </Resizable>
+                  </div>
+                </Draggable>
+
+                {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
+                {showSignAsPicker && signAs !== "none" && (
+                  <Draggable
+                    nodeRef={prefixNodeRef as RefObject<HTMLElement>}
+                    position={{ x: prefixState.x, y: prefixState.y }}
+                    onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
+                    bounds="parent"
+                  >
+                    <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
+                      <Resizable
+                        size={{ width: prefixState.w, height: prefixState.h }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={36} minHeight={16}
+                      >
+                        <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
+                          <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
+                        </div>
+                      </Resizable>
+                    </div>
+                  </Draggable>
+                )}
+              </>
+            )}
+          </div>
+        ) : autoConvertPdf ? (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl max-w-md">
+            <p className="text-sm font-bold text-amber-800 mb-2">File Office — ký theo tag, convert PDF khi phê duyệt</p>
+            <ul className="text-xs text-amber-700 space-y-1 list-disc list-inside">
+              <li>Mỗi bước ký sẽ thay thế tag chữ ký tương ứng trong file</li>
+              <li>Sau bước phê duyệt cuối, CloudConvert sẽ tạo PDF từ file đã ký</li>
+            </ul>
+          </div>
+        ) : (
+          <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl max-w-md">
+            <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
+            <div className="space-y-1 text-xs text-sky-700">
+              <div className="flex items-center gap-2">
+                <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{sigTag}</span>
+                <span>→ chữ ký của bạn (PNG)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{nameTag}</span>
+                <span>→ tên người ký</span>
+              </div>
+              {action === "soan_thao" && (
+                <div className="flex items-center gap-2">
+                  <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{"{{QR}}"}</span>
+                  <span>→ mã QR liên kết hồ sơ</span>
+                </div>
+              )}
+              <p className="text-sky-500 mt-1">Tag không có trong file sẽ được bỏ qua.</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-slate-100 bg-white px-5 py-4 space-y-3 shrink-0">
+        {showSignAsPicker && (
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
+            <div className="flex flex-wrap gap-3">
+              <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                <input
+                  type="radio"
+                  name="iso-form-sign-as"
+                  checked={signAs === "none"}
+                  onChange={() => setSignAs("none")}
+                />
+                Ký trực tiếp
+              </label>
+              {SIGN_AS_OPTIONS.map((opt) => (
+                <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
                   <input
                     type="radio"
                     name="iso-form-sign-as"
-                    checked={signAs === "none"}
-                    onChange={() => setSignAs("none")}
+                    checked={signAs === opt}
+                    onChange={() => setSignAs(opt)}
                   />
-                  Ký trực tiếp
+                  {SIGN_AS_LABEL[opt]}
                 </label>
-                {SIGN_AS_OPTIONS.map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="iso-form-sign-as"
-                      checked={signAs === opt}
-                      onChange={() => setSignAs(opt)}
-                    />
-                    {SIGN_AS_LABEL[opt]}
-                  </label>
-                ))}
-              </div>
+              ))}
             </div>
-          )}
-
-          {/* PIN input */}
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN chữ ký</label>
-            <input
-              type="password"
-              inputMode="numeric"
-              maxLength={6}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              value={pin}
-              onChange={(e) => { setPin(e.target.value); setPinError("") }}
-              onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
-              placeholder="4–6 chữ số"
-              autoFocus={!showCanvas}
-            />
-            {pinError && (
-              <div className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
-                <AlertTriangle size={11} />{pinError}
-              </div>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* Footer */}
-        <div className="flex gap-2 justify-end px-5 pb-5">
+        <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
           <button
             onClick={handleConfirm}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl"
+            disabled={acting}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
           >
-            <Pen size={13} /> Ký xác nhận
+            {acting ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
+            {acting ? "Đang xử lý..." : "Ký xác nhận"}
           </button>
         </div>
       </div>
@@ -1541,7 +1617,7 @@ export default function IsoFormInstancePage() {
       </div>
 
       {/* Sign Placement Modal */}
-      {signModal && (
+      {signModal && userId && (
         <SignPlacementModal
           action={signModal.action}
           sourceFileUrl={signModal.sourceFileUrl}
@@ -1550,6 +1626,8 @@ export default function IsoFormInstancePage() {
           signatureUrl={signatureUrl}
           userName={userName}
           instanceId={instanceId}
+          userId={userId}
+          acting={signLoading}
           onConfirm={handleSignConfirm}
           onClose={() => setSignModal(null)}
         />

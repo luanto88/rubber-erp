@@ -781,7 +781,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   if (loading || dataLoading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
   if (dataError || !task) {
     return (
-      <KpiShell>
+      <KpiShell user={user} factoryId={factoryId}>
         <div className="bg-white rounded-2xl border border-red-200 p-8 text-center text-red-600">{dataError || "Không tìm thấy công việc."}</div>
       </KpiShell>
     )
@@ -857,7 +857,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <KpiShell>
+    <KpiShell user={user} factoryId={factoryId}>
       <div className="space-y-4">
         <button onClick={() => router.push("/dashboard/kpi/tasks")} className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700">
           <ArrowLeft size={14} /> Quay lại danh sách
@@ -869,8 +869,12 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
               <span className="text-xs font-bold text-slate-400">{task.ma_cong_viec || "—"}</span>
               <h1 className="text-xl font-extrabold text-slate-800">{task.tieu_de}</h1>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className={`px-3 py-1 rounded-xl text-xs font-bold ${KPI_STATUS_BADGE_CLASS[task.trang_thai]}`}>{KPI_STATUS_LABEL[task.trang_thai]}</span>
+              {!!myMember && <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-sky-100 text-sky-700">Việc được giao cho bạn</span>}
+              {isOwner && task.nguoi_giao_id === user?.id && (
+                <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-violet-100 text-violet-700">Bạn là người giao</span>
+              )}
               {!!user && (isOwner || !!myMember) && (
                 <button
                   onClick={() => setShowAppealModal(true)}
@@ -890,7 +894,12 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
 
-          {task.mo_ta && <p className="text-sm text-slate-600 mb-3 whitespace-pre-wrap">{task.mo_ta}</p>}
+          {task.mo_ta && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+              <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-amber-700">Ghi chú / Hướng dẫn thực hiện</div>
+              <p className="text-sm text-amber-900 whitespace-pre-wrap">{task.mo_ta}</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             <div>

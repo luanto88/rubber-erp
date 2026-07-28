@@ -13,13 +13,16 @@ export type Kpi5sZone = {
   id: string
   factory_id: string
   ten: string
+  // Phòng ban gắn với khu vực này — quyết định lãnh đạo phòng ban nào (ngoài admin/
+  // kpi.manage_config) được quản lý khu vực + giới hạn ứng viên "Quản lý thành viên".
+  phong_ban_id: string | null
   is_active: boolean
   sort_order: number
   created_at: string
   updated_at: string
 }
 
-const ZONE_COLS = "id, factory_id, ten, is_active, sort_order, created_at, updated_at"
+const ZONE_COLS = "id, factory_id, ten, phong_ban_id, is_active, sort_order, created_at, updated_at"
 
 export async function fetchKpi5sZones(factoryId: string, opts?: { includeInactive?: boolean }): Promise<Kpi5sZone[]> {
   let q = supabase.from("kpi_5s_zones").select(ZONE_COLS).eq("factory_id", factoryId)
@@ -32,6 +35,7 @@ export async function fetchKpi5sZones(factoryId: string, opts?: { includeInactiv
 export type Kpi5sZoneInput = {
   factory_id: string
   ten: string
+  phong_ban_id: string | null
   is_active: boolean
   sort_order: number
 }

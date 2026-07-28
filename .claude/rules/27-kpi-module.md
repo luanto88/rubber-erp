@@ -2673,3 +2673,448 @@ lần chạy tiếp theo (sau 2 fix) chưa được xác nhận kết quả.
    bởi thay đổi này (regression check).
 8. Kiểm tra QR trên trang chi tiết vị trí (`buildKpi5sLocationUrl`) trỏ đúng
    route mới, quét thử ra đúng trang.
+
+## Cập nhật 2026-08-06 — 7 fix sau test tay đầu tiên (đã code xong, chưa test tay)
+
+Người dùng test bản đổi tên "Vị trí"/"Khu vực" (mục "Cập nhật 2026-08-05") và báo lại 7 vấn đề.
+Đã code đầy đủ cả 7, `npx tsc --noEmit` + `npx eslint` (chỉ còn warning pre-existing không liên
+quan) + `npm run build` đều sạch. **Chưa test tay bất kỳ mục nào** — xem checklist cuối mục.
+
+### Migration mới `supabase/migrations/20260806_kpi_management_upgrades.sql` (CẦN CHẠY THỦ CÔNG,
+CHƯA CHẠY — phải chạy SAU `20260805_kpi_5s_rename_locations_and_zones.sql`)
+
+- `kpi_5s_location_cleaners` (id, factory_id, location_id, user_id) — đội ngũ dọn dẹp NHIỀU
+  người/1 vị trí (Fix 5a). Backfill 1 lần từ `nguoi_don_id` cũ (`ON CONFLICT DO NOTHING`). RLS:
+  SELECT rộng trong factory; ghi (INSERT/UPDATE/DELETE, `FOR ALL`) chỉ admin/`kpi.manage_config`.
+  Cột `kpi_5s_locations.nguoi_don_id` GIỮ NGUYÊN (không xóa) — vẫn dùng cho "Phân công thông
+  minh" (chưa cập nhật để ghi vào bảng multi mới, xem mục "Chưa làm" cuối phần này) và làm
+  fallback hiển thị cho vị trí chưa từng gán qua bảng mới.
+- `kpi_5s_self_reports` (id, factory_id, location_id, user_id, noi_dung, image_urls, vi_do,
+  kinh_do, dia_diem_text, created_at) — tự báo cáo (Fix 5b), CHECK bắt buộc có ít nhất 1 trong
+  {nội dung, ảnh}. RLS: SELECT rộng trong factory (mirror lịch sử chấm điểm 5S — minh bạch);
+  INSERT chỉ chính `user_id = auth.uid()` VÀ (có mặt trong `kpi_5s_location_cleaners` của đúng
+  vị trí đó HOẶC là `nguoi_don_id` cũ của vị trí đó — hỗ trợ vị trí chưa được gán multi). Không
+  UPDATE/DELETE — log bất biến như `kpi_task_logs`.
+- `kpi_department_managers` (id, factory_id, department_id → `departments`, user_id, created_at,
+  UNIQUE(factory_id, department_id, user_id)) — cấu hình "Quản lý theo phòng ban" (Fix 7). RLS:
+  SELECT rộng trong factory; ghi chỉ admin/`kpi.manage_config`.
+- **Thắt chặt có điều kiện** 3 policy hiện có (Fix 7, xem chi tiết thiết kế ở mục "D" dưới):
+  `kpi_tasks_insert` (DROP+CREATE lại — thêm điều kiện AND thứ 3), `kpi_appeals_update`
+  (DROP+CREATE lại), `kpi_user_substitutions_insert` (DROP+CREATE lại, chỉ nhánh "đăng ký hộ
+  người khác qua `kpi.assign`", nhánh tự đăng ký `original_user_id = auth.uid()` không đổi).
+- CHECK ảnh bắt buộc trên `kpi_5s_evaluations` (Fix 2): `DROP CONSTRAINT IF EXISTS` rồi
+  `ADD CONSTRAINT ... CHECK (coalesce(array_length(image_urls,1),0) > 0) NOT VALID` — `NOT VALID`
+  để không phá dữ liệu chấm điểm cũ (một số lần chấm test trước đây chưa có ảnh).
+
+### A. Bảng minh bạch — "Được giao"/"Cần làm"/"Liên quan" + hiện người giao (Fix 1)
+
+- **Danh sách công việc** (`kpi/tasks/page.tsx`): mỗi card giờ hiện dòng "Người giao: {tên}" +
+  badge màu phân biệt vai trò — `Việc được giao cho bạn` (sky, khi bạn là active member) và
+  `Bạn là người giao` (violet, khi `nguoi_giao_id === user.id`). Card task cũng hiện preview
+  `mo_ta` (nếu có) trong khung amber nhỏ `📝 {nội dung}` (line-clamp 2 dòng) — trả lời trực tiếp
+  Fix 3 (xem mục C) ngay tại danh sách, không cần mở chi tiết mới thấy ghi chú.
+- **Chi tiết công việc** (`kpi/tasks/[id]/page.tsx`): thêm 2 badge tương tự ngay cạnh badge trạng
+  thái ở header (`Việc được giao cho bạn`/`Bạn là người giao`).
+- **Danh sách vị trí 5S** (`kpi/5s/page.tsx`): banner "Cần bạn chấm điểm tuần này" đổi từ dòng chữ
+  nhạt `bg-amber-50 text-amber-700` ở cuối card sang khối nổi bật `bg-amber-500 text-white` ở ĐẦU
+  card + icon `animate-pulse`, đồng thời card đó đổi viền `border-2 border-amber-400` (khác hẳn
+  card thường). Thêm badge vai trò `Bạn thuộc đội dọn dẹp` (sky)/`Bạn là người chấm` (emerald)
+  cho MỌI card liên quan tới người xem (không chỉ khi cần hành động) — đây chính là phần "phân
+  biệt việc được giao vs liên quan tới tôi" cho tầng 5S.
+- **Chi tiết vị trí 5S** (`kpi/5s/location/[id]/page.tsx`): cùng 2 badge vai trò ở header; khối
+  "Đến lượt bạn chấm điểm..." đổi thành banner viền `border-2 border-amber-400` + icon pulse +
+  nút "Chấm điểm ngay" nằm bên trong banner (thay vì 1 nút rời rạc mờ nhạt như trước).
+- **Giới hạn xem "tất cả"**: xem mục D — `canViewAll`/tab "Tất cả công việc" giờ phụ thuộc thêm
+  điều kiện quản lý KPI theo phòng ban (không chỉ permission `kpi.view_all` phẳng). **Lưu ý**:
+  quyết định KHÔNG áp dụng giới hạn tương tự cho danh sách "Vị trí 5S" — trang đó cố ý giữ
+  nguyên thiết kế "công khai trong factory" đã có từ Phase 2 (lịch sử chấm điểm minh bạch cho
+  mọi người xem). Nếu người dùng thực sự muốn ẩn danh sách 5S theo cùng logách department-manager,
+  đây là việc CHƯA làm — cần xác nhận lại trước khi đổi (xem mục "Chưa làm" cuối phần này).
+
+### B. Ảnh bắt buộc khi chấm điểm + chụp ảnh trực tiếp/thư viện (Fix 2)
+
+- `Kpi5sImagePicker` (`kpi/5s/_components/kpi-5s-image-picker.tsx`): tách 1 nút "Thêm ảnh" cũ
+  thành 2 nút riêng — "Chụp ảnh" (`<input type="file" capture="environment">`, chỉ mở camera
+  trên thiết bị di động) và "Thư viện" (`<input type="file" multiple>` không có `capture`, mở
+  trình chọn ảnh/camera tùy trình duyệt). Thêm prop `folder?: "evaluations" | "self-reports"`
+  (mặc định `"evaluations"`) truyền xuống `uploadKpi5sEvaluationImage()` để tách đường dẫn lưu
+  trữ giữa ảnh chấm điểm chính thức và ảnh tự báo cáo, cùng bucket `order-files`.
+- `KpiEvidencePicker` (`kpi/tasks/_components/kpi-evidence-picker.tsx`, dùng cho tiến độ công
+  việc): áp dụng cùng pattern tách "Chụp"/"Thư viện" cho phần ảnh (phần "File đính kèm" giữ
+  nguyên 1 nút, vì file bất kỳ không có khái niệm camera). **Không đổi thành bắt buộc** ở đây —
+  yêu cầu ảnh của công việc vẫn là tùy theo `yeu_cau_bao_cao` đã chọn lúc giao việc (soft-warn
+  như cũ, xem `missingReq` trong `ProgressForm`) — quyết định phạm vi "ảnh bắt buộc" của Fix 2
+  CHỈ áp dụng cho chấm điểm 5S hàng tuần (theo đúng ngữ cảnh câu hỏi gốc "khi chấm"), không mở
+  rộng sang tiến độ công việc.
+- `location/[id]/page.tsx`, `handleSubmit()`: thêm chặn cứng `images.length === 0 →
+  "Vui lòng chụp/tải lên ít nhất 1 ảnh minh chứng."` — TRƯỚC bước validate lý do (để hiện đúng
+  thông báo ưu tiên). Label đổi "Ảnh (khuyến khích)" → "Ảnh minh chứng *" kèm ghi chú bắt buộc.
+  Form "Tự báo cáo" (mục D) KHÔNG bắt buộc ảnh — chỉ cần 1 trong {nội dung, ảnh} (khớp CHECK
+  constraint DB), vì tự báo cáo có thể chỉ là 1 dòng ghi chú nhanh.
+
+### C. Ghi chú/hướng dẫn khi giao việc (Fix 3)
+
+- **Quyết định thiết kế quan trọng**: KHÔNG thêm cột DB mới — cột `kpi_tasks.mo_ta` đã tồn tại
+  sẵn từ Phase 1a đúng cho mục đích này (textarea "Mô tả" khi giao việc, đã hiển thị ở trang chi
+  tiết công việc từ trước). Vấn đề thật chỉ là UX: label "Mô tả" mơ hồ, không gợi ý đây là nơi
+  ghi hướng dẫn cụ thể, và không hiển thị ở đâu khác ngoài trang chi tiết (dễ bị bỏ qua).
+- `kpi-task-form-modal.tsx`: label đổi thành "Ghi chú / Hướng dẫn thực hiện", thêm placeholder
+  đúng ví dụ người dùng đưa ra ("Không để chai lọ trên bờ tường; kiểm tra pallet trước khi cho
+  mủ vào kiện..."), thêm dòng giải thích nhỏ bên dưới.
+- `kpi/tasks/page.tsx` (card danh sách): preview `mo_ta` (xem mục A).
+- `kpi/tasks/[id]/page.tsx`: đổi từ `<p>` thường sang khối callout viền `border-amber-200
+  bg-amber-50` có tiêu đề nhỏ "GHI CHÚ / HƯỚNG DẪN THỰC HIỆN" — nổi bật rõ ràng hơn hẳn text
+  thường trước đó.
+
+### D. Khóa logic "người chịu trách nhiệm dọn tuần này" + multi-cleaner (Fix 4 + 5a)
+
+**Fix 4 (khóa dropdown)**: trước đây form chấm điểm 5S cho chọn TỰ DO trong số TẤT CẢ
+`candidates` (mọi nhân sự đã liên kết tài khoản trong nhà máy) — sai logic vì người chấm có thể
+lỡ tay chọn nhầm bất kỳ ai, không liên quan gì tới vị trí đang chấm. Đã sửa:
+- `getEffectiveCleanerIds(location, cleanerMap)` (`src/lib/kpi-5s.ts`) — ưu tiên đọc
+  `kpi_5s_location_cleaners` (bảng mới, multi), fallback về `[nguoi_don_id]` (cột cũ, đơn) nếu
+  vị trí chưa từng được gán qua bảng mới — không bao giờ trả rỗng nếu vị trí có gán bằng cách
+  nào đó (cũ hoặc mới).
+- `location/[id]/page.tsx`: dropdown giờ chỉ hiển thị các lựa chọn trong
+  `effectiveCleanerIds` — đúng 1 người → khóa cứng (hiển thị tĩnh, không phải `<select>`); nhiều
+  người → `<select>` chỉ trong số đó; 0 người (chưa gán) → non-admin bị chặn hẳn với thông báo đỏ
+  "liên hệ Admin để gán trước khi chấm điểm"; **admin có lối thoát dự phòng** (dropdown mở toàn
+  bộ `candidates`, viền amber, kèm cảnh báo "chỉ admin thấy được lựa chọn dự phòng này").
+- **Chưa làm** (ghi rõ, không tự ý mở rộng): KHÔNG xây dựng cơ chế "người thay thế tạm thời"
+  riêng cho 5S song song với `kpi_user_substitutions` (cơ chế đó hiện chỉ áp dụng cho việc định
+  kỳ `kpi_task_templates`, xem Phase "Việc định kỳ"). Nếu về tua/nghỉ, admin phải tự vào Cài đặt
+  sửa lại đội ngũ dọn dẹp — chưa có tự động hoá theo ngày như task templates. Đây là điểm rõ
+  ràng nhất cần làm tiếp ở phase sau nếu người dùng muốn đồng bộ 2 cơ chế.
+
+**Fix 5a (multi-select)**: `kpi_5s_location_cleaners` + các hàm CRUD trong `kpi-5s.ts`
+(`fetchAllLocationCleanerMemberships`, `fetchLocationCleaners`, `addKpi5sLocationCleaner`,
+`removeKpi5sLocationCleaner`). Settings (`kpi-5s-locations-tab.tsx`): thêm nút "Quản lý đội ngũ
+dọn dẹp" trên mỗi card vị trí (LUÔN hiện, không gate `canManage` — xem/tick giống hệt pattern
+"Quản lý thành viên" của `kpi-5s-zones-tab.tsx`), mở modal checklist multi-select từ
+`userOptions` (profiles-based, đã có sẵn ở Settings). Card hiển thị "Đội ngũ dọn dẹp (N): ...".
+**Trường "Người dọn hiện tại" (single-select) trong form Thêm/Sửa vị trí VẪN GIỮ NGUYÊN không
+đổi** — cố ý giữ song song 2 cơ chế (đơn cho form nhanh + "Phân công thông minh"; multi cho quản
+lý team thực tế) thay vì gộp làm một, để không phải viết lại toàn bộ luồng auto-assign trong
+phiên này.
+
+**Chưa làm (quan trọng, cần quyết định ở phiên sau)**: "Phân công thông minh"
+(`kpi-5s-auto-assign.ts`/`kpi-5s-auto-assign-modal.tsx`) HOÀN TOÀN CHƯA ĐƯỢC CẬP NHẬT để nhận
+biết bảng multi mới — nó vẫn chỉ ghi vào cột đơn `nguoi_don_id`/`nguoi_cham_id`. Nếu admin dùng
+"Phân công thông minh" sau khi đã có nhân sự multi-select riêng ở 1 vị trí, kết quả auto-assign
+sẽ GHI ĐÈ cột `nguoi_don_id` đơn (không xóa/đổi bảng multi) — 2 nguồn dữ liệu (`nguoi_don_id` và
+`kpi_5s_location_cleaners`) có thể lệch nhau tạm thời cho tới khi admin đồng bộ lại tay. Không
+nguy hiểm (dropdown ưu tiên bảng multi nếu có), nhưng gây khó hiểu — cần làm rõ ở phase sau: có
+nên để "Phân công thông minh" tự thêm người được chọn vào bảng multi luôn hay không.
+
+### E. Tự báo cáo — ảnh/văn bản/vị trí (Fix 5b, tính năng mới)
+
+- `kpi_5s_self_reports` + `fetchKpi5sSelfReports`/`submitKpi5sSelfReport` (`kpi-5s.ts`).
+- `location/[id]/page.tsx`: nút "Tự báo cáo (ảnh/ghi chú/vị trí)" (sky, chỉ hiện cho
+  `iAmCleaner` — tức có mặt trong `effectiveCleanerIds`) mở form riêng (textarea nội dung +
+  `Kpi5sImagePicker` folder `self-reports` + nút "Lấy vị trí hiện tại" dùng
+  `navigator.geolocation`, mirror `ProgressForm` của module Công việc). Gửi xong hiện trong card
+  "Tự báo cáo của đội ngũ dọn dẹp" (danh sách công khai, mới nhất trước) — độc lập hoàn toàn với
+  "Lịch sử chấm điểm" chính thức, KHÔNG ảnh hưởng `ket_qua`/điểm số nào — thuần túy là kênh
+  thông tin thêm giữa các tuần.
+
+### F. Tab mặc định "Việc của tôi" (Fix 6)
+
+- `kpi/page.tsx` (route `/dashboard/kpi`, trước là "Tổng quan") viết lại thành **redirect stub**
+  — `router.replace("/dashboard/kpi/tasks?tab=mine")` ngay khi mount. Không xóa hẳn route (để
+  link/sidebar cũ trỏ `/dashboard/kpi` không bị 404) — không đổi `dashboard/layout.tsx`'s NAV
+  (`key: "/dashboard/kpi"`) để tránh rủi ro đụng logic highlight/permission-check khác đang dựa
+  vào key này.
+  chú ý: quyết định KHÔNG đổi `key` trong NAV — chỉ đổi hành vi trang đích.
+- `kpi-shell.tsx`: xóa hẳn tab "Tổng quan" khỏi thanh điều hướng (`tabs` array) — vì giờ nó chỉ
+  bounce sang "Công việc", giữ lại sẽ gây UX kỳ lạ (bấm tab lại nhảy sang tab khác).
+  Import `LayoutDashboard` không còn dùng đã bị xóa khỏi import list.
+- Banner "Nhóm chính" (trước đây ở trang Tổng quan) **chuyển nguyên vẹn logic** sang đầu
+  `kpi/tasks/page.tsx` (dưới header, trên thanh tab "Việc của tôi"/"Tất cả công việc") — không
+  mất thông tin, chỉ đổi vị trí hiển thị.
+
+### G. Phân quyền theo phòng ban — "Quản lý KPI theo phòng ban" (Fix 7)
+
+**Quyết định kiến trúc quan trọng — thắt chặt CÓ ĐIỀU KIỆN, không phá vỡ tương thích ngược**:
+mặc định `role="manager"` được cấp sẵn `kpi.assign`/`kpi.view_all` rất rộng (xem `ROLE_DEFAULTS`,
+`src/lib/auth.ts`) — không khớp yêu cầu "chỉ Admin + Giám đốc/Phó giám đốc đơn vị". Thay vì xóa
+thẳng quyền mặc định đó (sẽ phá vỡ mọi factory đang chạy ngay khi migration chạy, rất rủi ro),
+đã thiết kế **feature flag tự nhiên qua dữ liệu**: bảng `kpi_department_managers` CÒN RỖNG →
+hành vi y hệt trước đây (chỉ cần permission cũ); ngay khi admin thêm dòng ĐẦU TIÊN qua Cài đặt
+→ KPI & 5S → "Quản lý theo phòng ban", cả DB (RLS) lẫn UI đồng loạt thắt chặt: chỉ admin hoặc
+đúng những `user_id` được liệt kê trong bảng đó (bất kể phòng ban nào, xem hạn chế bên dưới) mới
+còn:
+- Tạo công việc mới (`kpi_tasks_insert` RLS + `canAssign` trong `kpi/tasks/page.tsx`).
+- Xem tab "Tất cả công việc" (`kpi.view_all` + `canViewAll`, cùng file).
+- Giải quyết khiếu nại (`kpi_appeals_update` RLS + `canResolve` trong `kpi/appeals/page.tsx`).
+- Đăng ký "Người thay thế tạm thời" HỘ người khác (`kpi_user_substitutions_insert` RLS) — tự
+  đăng ký cho chính mình (`original_user_id = auth.uid()`) KHÔNG bị ảnh hưởng, vẫn luôn được
+  phép với bất kỳ ai.
+- **`src/lib/kpi-department-managers.ts`** (file mới): `fetchDepartmentOptions()` (đọc bảng
+  `departments` dùng chung toàn hệ thống, không có `factory_id`, đọc được bởi mọi authenticated
+  user), `fetchKpiDepartmentManagers`, `addKpiDepartmentManager`, `removeKpiDepartmentManager`,
+  `kpiManagersConfigured(managers)` (bảng rỗng hay không), `isFactoryKpiManager(managers,
+  userId)`.
+- **UI mới** `src/app/dashboard/settings/_components/kpi-5s-department-managers-tab.tsx` — sub-
+  tab thứ 3 "Quản lý theo phòng ban" trong Cài đặt → KPI & 5S (cạnh "Vị trí 5S"/"Khu vực"), chọn
+  Phòng ban (từ `departments`) + Người dùng (từ `activeProfilesForLink` có sẵn ở Settings) → nút
+  "Thêm". Banner đầu trang hiện rõ trạng thái hiện tại (chưa cấu hình = amber "chưa thắt chặt gì"
+  / đã cấu hình = emerald "đang áp dụng thắt chặt").
+
+**Hạn chế đã biết, cần xác nhận lại nếu chưa đúng ý người dùng**:
+1. **Không có khái niệm "đúng phòng ban của việc/khiếu nại đó"** — `kpi_department_managers` chỉ
+   trả lời "user X có được coi là 1 người quản lý KPI (ở BẤT KỲ phòng ban nào đã cấu hình) hay
+   không", KHÔNG kiểm tra "việc/khiếu nại này có thuộc đúng phòng ban mà X quản lý hay không" —
+   vì `kpi_tasks`/`kpi_appeals` không có cột `department_id` nào để đối chiếu. Nếu nhà máy có
+   nhiều phòng ban và muốn tách biệt hoàn toàn (GĐ phòng A không quản được việc của phòng B),
+   đây là việc CHƯA làm — cần thêm cột `phong_ban`/`department_id` vào `kpi_tasks` và logic gán
+   phòng ban cho từng task, RỘNG hơn nhiều so với phạm vi phiên này.
+2. **"Chuyển việc" (task transfer, `kpi_task_transfers`) KHÔNG bị đụng tới** — đã cân nhắc và
+   quyết định đây là hành động NGANG HÀNG (nhân viên A tự xin chuyển việc cho nhân viên B, B tự
+   nguyện chấp nhận), không phải hành động "quản lý/phê duyệt" cần giới hạn GĐ/PGĐ — khác với
+   "phê duyệt người thay thế" (`kpi_user_substitutions`, vốn thường do CẤP TRÊN đăng ký hộ nhân
+   viên đi vắng). Nếu ý người dùng thực chất là muốn CẤP TRÊN có quyền ÉP buộc chuyển việc mà
+   không cần người nhận đồng ý, đây là 1 tính năng hoàn toàn mới, chưa tồn tại — cần hỏi lại rõ.
+3. **Danh sách "Vị trí 5S" và "Tự báo cáo" KHÔNG bị giới hạn theo department-manager** — cố ý
+   giữ nguyên "công khai trong factory" như thiết kế Phase 2 ban đầu (xem mục A).
+
+### Việc CHƯA làm — cần quyết định/triển khai ở phiên sau
+
+1. Đồng bộ "Phân công thông minh" 5S với bảng `kpi_5s_location_cleaners` mới (mục D).
+2. Cân nhắc xây "Người thay thế tạm thời" riêng cho 5S (song song `kpi_user_substitutions` cho
+   task templates) — hiện Fix 4 chỉ khóa dropdown vào đúng đội ngũ đã gán, chưa có cơ chế tạm
+   thời đổi người khi đi tua/nghỉ mà không cần admin sửa tay Cài đặt.
+3. Xác nhận lại phạm vi chính xác của "chuyển việc" trong yêu cầu Fix 7 (mục G, hạn chế #2).
+4. Cân nhắc thêm `department_id` thật vào `kpi_tasks` nếu người dùng muốn tách biệt quản lý
+   theo ĐÚNG phòng ban (mục G, hạn chế #1) thay vì "quản lý KPI nói chung".
+5. Cân nhắc có nên giới hạn "Vị trí 5S"/"Tự báo cáo" theo department-manager tương tự Công
+   việc/Khiếu nại hay không (mục G, hạn chế #3) — hiện đang cố ý giữ công khai.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự
+
+1. Chạy `supabase/migrations/20260806_kpi_management_upgrades.sql` trên Supabase SQL Editor
+   (SAU `20260805_kpi_5s_rename_locations_and_zones.sql` đã chạy từ trước).
+2. Chấm điểm 1 vị trí KHÔNG đính kèm ảnh → xác nhận bị chặn đúng thông báo; đính kèm ảnh qua cả
+   2 nút "Chụp ảnh" (trên điện thoại thật, xác nhận mở đúng camera) và "Thư viện" (chọn từ ảnh
+   có sẵn) → xác nhận cả 2 đều upload đúng, lưu thành công.
+3. Vị trí có ĐÚNG 1 người dọn (`nguoi_don_id` cũ, chưa gán multi) → mở form chấm điểm, xác nhận
+   trường "Người chịu trách nhiệm" hiển thị TĨNH (không phải dropdown) đúng tên người đó.
+4. Vào Cài đặt → KPI & 5S → Vị trí 5S → "Quản lý đội ngũ dọn dẹp" cho 1 vị trí, tick 2-3 người →
+   quay lại chấm điểm vị trí đó → xác nhận dropdown giờ CHỈ liệt kê đúng 2-3 người đã tick, không
+   còn thấy toàn bộ nhân sự nhà máy như trước.
+5. Test vị trí CHƯA gán ai (cả cũ lẫn mới) — tài khoản thường bị chặn với thông báo đỏ; tài
+   khoản admin thấy dropdown dự phòng viền amber vẫn chọn được.
+6. Test "Tự báo cáo": đăng nhập 1 người có trong đội ngũ dọn dẹp của 1 vị trí → gửi 1 báo cáo chỉ
+   có ảnh, 1 báo cáo chỉ có nội dung, 1 báo cáo có cả vị trí GPS → xác nhận cả 3 lưu đúng, hiện
+   trong danh sách "Tự báo cáo của đội ngũ dọn dẹp"; đăng nhập người KHÔNG thuộc đội ngũ đó → xác
+   nhận không thấy nút "Tự báo cáo".
+7. Test hiển thị: card công việc/vị trí 5S hiện đúng badge vai trò + tên người giao/đội ngũ;
+   banner "Cần bạn chấm điểm" đủ nổi bật (không còn "mờ nhạt" như phản ánh ban đầu).
+8. Test Fix 6: bấm vào mục "Công việc & KPI" ở sidebar → xác nhận vào thẳng
+   `/dashboard/kpi/tasks` với tab "Việc của tôi" đang active, KHÔNG còn dừng ở trang Tổng quan
+   trung gian; xác nhận banner "Nhóm chính" vẫn hiện đúng ở đây.
+9. Test Fix 7 (theo đúng thứ tự, vì bước 2 làm thay đổi hành vi ngay lập tức cho TOÀN NHÀ MÁY):
+   - Trước khi cấu hình: xác nhận 1 tài khoản `role=manager` bình thường (không phải GĐ/PGĐ) vẫn
+     thấy nút "Giao việc mới"/tab "Tất cả công việc" như cũ (chưa breaking).
+   - Vào Cài đặt → KPI & 5S → "Quản lý theo phòng ban" → thêm ĐÚNG 1 người (vd tài khoản admin
+     test hoặc 1 tài khoản GĐ) cho 1 phòng ban bất kỳ.
+   - Đăng nhập lại tài khoản `manager` bình thường ở bước đầu → xác nhận nút "Giao việc mới"/tab
+     "Tất cả công việc" đã BIẾN MẤT; thử gọi thẳng `createKpiTask` qua devtools (nếu tiện) → xác
+     nhận bị RLS chặn.
+   - Đăng nhập đúng người vừa được cấu hình → xác nhận vẫn thấy đầy đủ các nút/tab như cũ.
+   - Test tương tự cho "Giải quyết khiếu nại" (`/dashboard/kpi/appeals`) và đăng ký "Người thay
+     thế tạm thời" hộ người khác (`/dashboard/kpi/templates`).
+   - Gỡ hết cấu hình (xóa dòng vừa thêm) → xác nhận mọi thứ QUAY LẠI đúng hành vi cũ (không kẹt
+     ở trạng thái thắt chặt vĩnh viễn).
+
+## Cập nhật 2026-07-28 — Phòng ban thay "Quản lý theo phòng ban", duyệt Người thay thế, Việc
+hôm nay, bỏ hẳn Tự báo cáo, multi-select Người dọn ngay trong form — đã code xong cả 6 phase
+
+Người dùng test bản "2026-08-06" (7 fix ở mục ngay trên) và phát hiện thêm 1 loạt vấn đề/nhầm
+lẫn thiết kế mới, tổng hợp thành 1 kế hoạch 6 phase (A→F), viết ở
+`C:\Users\Software\.claude\plans\shimmering-wiggling-hummingbird.md`, đã hỏi 2 vòng
+`AskUserQuestion` để chốt hướng trước khi code (xem "Context" trong file plan để biết đầy đủ
+lịch sử quyết định). Tóm tắt các thay đổi lớn nhất:
+
+1. **"Quản lý theo phòng ban" (`kpi_department_managers`, cấu hình tay GĐ/PGĐ) đã bị loại bỏ
+   hoàn toàn khỏi RLS/UI** — thay bằng cơ chế **tự phát hiện "lãnh đạo"** qua đúng
+   `chuc_vu`/`chuc_vu_chinh_quyen` trong `maintenance_staff` (EXACT MATCH, không phải substring
+   như `dept-leader` của module Văn bản — tách đúng "Giám đốc/Phó giám đốc" nhà máy khỏi "Tổng
+   giám đốc/Phó tổng giám đốc" công ty). Bảng `kpi_department_managers` **KHÔNG bị DROP** (còn
+   dữ liệu cấu hình cũ, không tự ý xoá) — chỉ ngừng được tham chiếu trong RLS/UI mới.
+2. Mọi đối tượng lớn của module giờ **bắt buộc mang theo "Phòng ban"**: `kpi_5s_locations`,
+   `kpi_5s_zones`, `kpi_task_templates`, `kpi_tasks` đều có cột `phong_ban_id` mới — quyết định
+   ai (lãnh đạo đúng phòng ban đó, ngoài admin/`kpi.manage_config`) được quản lý/thu hẹp danh
+   sách ứng viên người nhận/người dọn/người chấm.
+3. **"Người thay thế tạm thời" giờ cần duyệt** — `kpi_user_substitutions` thêm
+   `trang_thai` (`cho_duyet`/`da_duyet`/`tu_choi`), chỉ `da_duyet` mới có hiệu lực sinh việc định
+   kỳ. Ai đăng ký thì phía CÒN LẠI duyệt (tự đăng ký → lãnh đạo phòng ban của người đi vắng
+   duyệt; lãnh đạo/`kpi.assign` đăng ký hộ → chính người đi vắng tự xác nhận).
+4. **"Việc hôm nay"** — sub-tab mới, mặc định khi vào trang, ở cả `/dashboard/kpi/tasks`
+   (việc "của tôi" quá hạn/sắp đến hạn (24h)/giao đúng hôm nay) và `/dashboard/kpi/5s` (vị trí
+   đến lượt tôi chấm điểm tuần này).
+5. **"Tự báo cáo" (Fix 5b ở mục "2026-08-06") đã bị bỏ hẳn, không thay thế bằng gì khác** —
+   quyết định đã chốt lại qua trao đổi thêm với người dùng ("logic tự chấm không khác gì chọn
+   người chấm... bỏ hẵn"). Bảng `kpi_5s_self_reports` **giữ nguyên trong DB** (không xoá dữ
+   liệu), chỉ ngừng đọc/ghi từ app.
+6. **"Người dọn hiện tại" ở form Thêm/Sửa Vị trí 5S đổi thành multi-select TRỰC TIẾP trong
+   CHÍNH form đó** (không còn nút "Quản lý đội ngũ dọn dẹp" tách riêng như "2026-08-06") — ghi
+   thẳng vào `kpi_5s_location_cleaners` cùng lúc lưu vị trí. "Người chấm hiện tại" **giữ nguyên
+   logic cũ** (dropdown đơn) — chỉ đổi phép so sánh từ "khác 1 `nguoi_don_id`" sang "không nằm
+   trong tập nhiều người dọn vừa chọn".
+
+### 3 migration mới (**CẦN CHẠY THỦ CÔNG, THEO ĐÚNG THỨ TỰ NÀY**, sau
+`20260806_kpi_management_upgrades.sql` đã liệt kê ở mục "2026-08-06" phía trên)
+
+1. `supabase/migrations/20260807_kpi_department_scoping.sql` — thêm `phong_ban_id` cho 4 bảng
+   (`kpi_5s_locations`, `kpi_5s_zones`, `kpi_task_templates`, `kpi_tasks`); thêm
+   `assigned_by`/`assigned_at` cho `kpi_5s_locations`; gỡ CHECK cũ
+   `nguoi_don_id <> nguoi_cham_id` (dò tên constraint qua `pg_constraint`, không đoán cứng tên)
+   thay bằng 2 trigger `trg_kpi_5s_location_cleaners_not_scorer`/
+   `trg_kpi_5s_locations_scorer_not_cleaner` thực thi đúng ràng buộc "người chấm khác MỌI người
+   dọn" so với tập nhiều người (Postgres không viết được CHECK constraint tham chiếu bảng
+   khác); hàm `kpi_is_department_leader(user, department)` (EXACT MATCH 6 chức danh); viết lại
+   RLS `kpi_tasks_insert`/`kpi_appeals_update`/`kpi_user_substitutions_insert` (bỏ phụ thuộc
+   `kpi_department_managers`) + mở rộng CRUD `kpi_task_templates`/`kpi_5s_locations`/
+   `kpi_5s_zones` cho lãnh đạo phòng ban tự quản lý đúng phạm vi của mình.
+2. `supabase/migrations/20260807_kpi_substitution_approval.sql` — thêm
+   `trang_thai`/`nguoi_duyet_id`/`duyet_luc`/`ly_do_tu_choi` vào `kpi_user_substitutions`
+   (mặc định `cho_duyet`, **KHÔNG backfill** dữ liệu cũ về `da_duyet` — mọi đăng ký cũ trước
+   migration này sẽ hiện là "Chờ duyệt" cho tới khi có ai duyệt lại); mở rộng RLS SELECT cho
+   lãnh đạo phòng ban thấy được đăng ký cần họ xử lý; RPC `kpi_substitution_approve(p_id)`/
+   `kpi_substitution_reject(p_id, p_ly_do)`; viết lại `kpi_ensure_today_task_instances` chỉ
+   tôn trọng substitution `trang_thai = 'da_duyet'`.
+
+### File chính đã sửa/thêm
+
+- **Lib mới** `src/lib/kpi-department-leaders.ts` (thay thế hoàn toàn
+  `src/lib/kpi-department-managers.ts` đã xoá, cùng
+  `src/app/dashboard/settings/_components/kpi-5s-department-managers-tab.tsx` đã xoá) —
+  `fetchDepartmentOptions()`, `resolveMyLeaderDepartmentId(userId, factoryId)`,
+  `canSeeKpiTemplatesTab(user, factoryId)`.
+- `src/app/api/kpi/dept-users/route.ts` (mới) — service-role, mirror
+  `/api/documents/dept-users`, nhận thẳng `departmentId` (UUID) thay vì tên phòng ban.
+- `src/lib/kpi-tasks.ts` — `loadKpiTaskCandidates(factoryId, opts?: {departmentId})` mở rộng
+  lọc theo phòng ban qua route trên; `KpiTask`/`createKpiTask()` thêm `phong_ban_id`/
+  `phongBanId` (bắt buộc).
+- `src/lib/kpi-templates.ts` — `KpiTaskTemplate`/`KpiTaskTemplateInput` thêm `phong_ban_id`/
+  `phongBanId`; `KpiUserSubstitution` thêm `trang_thai`/`nguoi_duyet_id`/`duyet_luc`/
+  `ly_do_tu_choi`; `approveKpiUserSubstitution()`/`rejectKpiUserSubstitution()`/
+  `fetchPendingSubstitutionsForApprover()` (wrapper RPC).
+- `src/app/dashboard/kpi/_components/pending-substitutions-banner.tsx` (mới) — banner dùng
+  chung "Đăng ký người thay thế đang chờ bạn duyệt", đặt ở cả `/dashboard/kpi/tasks` (banner
+  "Nhóm chính" ngay trên) lẫn `/dashboard/kpi/templates`.
+- `src/app/dashboard/kpi/_components/kpi-shell.tsx` — nhận thêm prop optional
+  `user`/`factoryId`, tự gọi `canSeeKpiTemplatesTab` để ẩn hẳn tab "Việc định kỳ" với người
+  không đủ quyền (mặc định ẩn cho tới khi xác nhận được — tránh hiện nhầm dù chỉ vài ms); tab
+  "Công việc" đổi nhãn thành **"Công việc chuyên môn"**. Toàn bộ 7 nơi render `<KpiShell>` đã
+  cập nhật truyền `user={user} factoryId={factoryId}`.
+- `src/app/dashboard/kpi/templates/page.tsx` — thêm guard bootstrap thật (redirect
+  `/dashboard/kpi/tasks` nếu `!canSeeKpiTemplatesTab`, không chỉ ẩn tab); load thêm
+  `departments`/`pendingSubs`; render `<PendingSubstitutionsBanner>`; badge trạng thái
+  Chờ duyệt/Đã duyệt/Từ chối trên danh sách "Người thay thế tạm thời".
+- `src/app/dashboard/kpi/templates/_components/template-form-modal.tsx` — thêm "Phòng ban *",
+  thu hẹp "Người nhận cố định" theo phòng ban đã chọn (gọi lại `loadKpiTaskCandidates` khi đổi
+  phòng ban, tự gỡ lựa chọn không còn hợp lệ).
+- `src/app/dashboard/kpi/tasks/page.tsx` — thêm sub-tab **"Việc hôm nay"** (mặc định); load
+  `departments`, truyền vào `<KpiTaskFormModal>`.
+- `src/app/dashboard/kpi/tasks/_components/kpi-task-form-modal.tsx` — thêm "Phòng ban chịu
+  trách nhiệm *" (bắt buộc), thu hẹp "Người thực hiện" theo phòng ban đã chọn.
+- `src/app/dashboard/kpi/5s/page.tsx` — thêm sub-tab **"Việc hôm nay"**; **thu hẹp phạm vi hiển
+  thị danh sách** (khác thiết kế "công khai toàn nhà máy" của Phase 2 gốc): admin/
+  `kpi.manage_config` thấy tất cả, lãnh đạo phòng ban thấy đúng vị trí thuộc phòng ban của họ,
+  người dùng thường chỉ thấy vị trí họ thực sự liên quan (thuộc đội ngũ dọn dẹp hoặc là người
+  chấm).
+- `src/app/dashboard/kpi/5s/location/[id]/page.tsx` — **xoá toàn bộ phần "Tự báo cáo"** (state,
+  form, nút, danh sách, `handleSrLocate`/`handleSubmitSelfReport`); thêm hiển thị "Người giao:
+  {tên}" ở header.
+- `src/app/dashboard/kpi/5s/_components/kpi-5s-image-picker.tsx` — bỏ tham số `folder` (chỉ
+  còn duy nhất mục đích "evaluations", không còn "self-reports").
+- `src/lib/kpi-5s.ts` — `Kpi5sLocation`/`Kpi5sLocationInput` thêm `phong_ban_id`/`assigned_by`/
+  `assigned_at`; **xoá hẳn** `fetchKpi5sSelfReports`/`submitKpi5sSelfReport`/`Kpi5sSelfReport`;
+  `createKpi5sLocation(input, cleanerUserIds, assignedBy)`/
+  `updateKpi5sLocation(id, input, cleanerUserIds, assignedBy)` đổi chữ ký — đồng bộ
+  `kpi_5s_location_cleaners` trong CÙNG 1 lượt lưu (thứ tự bắt buộc: xoá cleaner cũ → update
+  location → insert cleaner mới, để không bị 2 trigger DB chặn nhầm khi người sắp thành "chấm"
+  từng là "dọn"). Hàm mới `patchKpi5sLocation(id, patch)` — sửa nhanh 1 vài cột đơn giản
+  (`is_active`, hoặc `nguoi_don_id`/`nguoi_cham_id` LEGACY do "Phân công thông minh" ghi) mà
+  KHÔNG động tới cleaner set/`assigned_by` — tách riêng để 1 lượt bấm "Tạm ngưng" không vô tình
+  ghi đè "Người giao".
+- `src/app/dashboard/settings/_components/kpi-5s-locations-tab.tsx` — viết lại đáng kể: bỏ hẳn
+  nút + modal "Quản lý đội ngũ dọn dẹp" riêng, gộp thẳng thành multi-select checklist trong
+  CHÍNH form Thêm/Sửa; thêm "Phòng ban *"; thêm prop `currentUserId` (để ghi `assigned_by`);
+  card hiện thêm "Người giao".
+- `src/lib/kpi-5s-zones.ts` + `src/app/dashboard/settings/_components/kpi-5s-zones-tab.tsx` —
+  thêm `phong_ban_id`/field "Phòng ban" (giữ nguyên nút "Quản lý thành viên" riêng — plan không
+  yêu cầu gộp cho tầng Khu vực, chỉ tầng Vị trí).
+- `src/app/dashboard/settings/_components/kpi-5s-auto-assign-modal.tsx` — đổi
+  `updateKpi5sLocation(...)` → `patchKpi5sLocation(...)` (chữ ký cũ 2 tham số) — "Phân công
+  thông minh" **vẫn CHƯA đồng bộ với `kpi_5s_location_cleaners`** (xem mục "Chưa làm" ở
+  "2026-08-06"), chỉ ghi cột đơn `nguoi_don_id`/`nguoi_cham_id` LEGACY như trước.
+- `src/app/dashboard/settings/page.tsx` — bỏ import + render block tab "Quản lý theo phòng
+  ban"; bỏ giá trị `"phong-ban"` khỏi `kpi5sTab`; truyền `currentUserId={user?.id || ""}` vào
+  `<Kpi5sLocationsTab>`.
+
+### Quyết định/đơn giản hoá có chủ đích (đọc trước khi mở rộng thêm)
+
+- **Không dựng `department_id` scoping cho "Người thay thế" (candidate list "Người thay thế"
+  trong `substitution-form-modal.tsx`)** — chỉ RPC duyệt (`kpi_substitution_approve/reject`)
+  mới enforce đúng thẩm quyền theo phòng ban; dropdown chọn người vẫn hiện toàn bộ
+  `candidates` truyền vào (không lọc theo phòng ban của "người đi vắng"). Lý do: cần 1 API
+  reverse-lookup "phòng ban của 1 user cụ thể" mới làm được (route hiện có chỉ đi 1 chiều:
+  phòng ban → danh sách user), không tương xứng công sức so với lợi ích UX nhỏ này — an toàn
+  vẫn được đảm bảo đầy đủ ở tầng RLS/RPC, chỉ UI chưa lọc trước.
+- **`handleToggleActive` (Tạm ngưng/Kích hoạt lại vị trí 5S) dùng `patchKpi5sLocation`, KHÔNG
+  dùng `updateKpi5sLocation`** — tránh mỗi lần bấm toggle vô tình ghi đè `assigned_by`/
+  `assigned_at` (đáng lẽ chỉ nên đổi khi thực sự sửa nội dung phân công qua form đầy đủ).
+- **"Phân công thông minh" (5S) vẫn dùng cột `nguoi_don_id`/`nguoi_cham_id` LEGACY, chưa đồng
+  bộ với `kpi_5s_location_cleaners`** — kế thừa nguyên trạng "Chưa làm" đã ghi ở mục
+  "2026-08-06"; sau khi random-gán qua công cụ này, admin cần tự vào form Sửa vị trí để đồng
+  bộ lại multi-select "Người dọn hiện tại" nếu muốn 2 nguồn khớp nhau.
+- **`kpi_department_managers` không bị xoá khỏi DB** — chỉ ngừng dùng ở RLS/UI mới. Nếu về sau
+  người dùng xác nhận muốn dọn hẳn, cần 1 migration `DROP TABLE` riêng (chưa làm trong đợt
+  này).
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file mới/đã sửa liệt kê ở trên), và `npm run build`
+đều sạch (build liệt kê đủ `/dashboard/kpi/tasks`, `/dashboard/kpi/tasks/[id]`,
+`/dashboard/kpi/templates`, `/dashboard/kpi/5s`, `/dashboard/kpi/5s/location/[id]`,
+`/dashboard/kpi/appeals`, không có route KPI nào lỗi build).
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự
+
+1. Chạy 2 migration mới theo đúng thứ tự: `20260807_kpi_department_scoping.sql` →
+   `20260807_kpi_substitution_approval.sql` (sau khi đã chắc chắn `20260806_...` từ mục
+   "2026-08-06" đã chạy xong).
+2. **Test lãnh đạo phòng ban tự phát hiện**: sửa Chức vụ/Chức vụ chính quyền của 1 nhân sự
+   trong `maintenance_staff` thành đúng `"Trưởng phòng"` (hoặc 1 trong 6 chức danh), gán đúng
+   phòng ban của họ → đăng nhập tài khoản đó → xác nhận thấy tab "Việc định kỳ" dù KHÔNG có
+   `kpi.manage_config`; xác nhận `/dashboard/settings?tab=kpi_5s` (Vị trí/Khu vực có
+   `phong_ban_id` khớp) cho phép họ Sửa dù không phải admin.
+3. **Test duyệt Người thay thế**: user A tự đăng ký thay thế cho chính mình → xác nhận lãnh
+   đạo ĐÚNG phòng ban của A thấy banner "Chờ bạn duyệt" (ở cả `/tasks` lẫn `/templates`), người
+   khác (phòng ban khác) KHÔNG thấy → duyệt/từ chối → xác nhận `trang_thai` đổi đúng, chỉ
+   `da_duyet` mới được `kpi_ensure_today_task_instances` tôn trọng khi sinh việc hôm nay. Lặp
+   lại nhánh ngược: lãnh đạo/`kpi.assign` đăng ký hộ người khác → xác nhận CHÍNH người đi vắng
+   (không phải lãnh đạo) mới thấy banner cần duyệt.
+4. **Test "Việc hôm nay"**: tạo 1 việc hạn hôm nay/quá hạn/sắp đến hạn (24h) cho chính mình →
+   vào `/dashboard/kpi/tasks` → xác nhận sub-tab "Việc hôm nay" là mặc định và liệt kê đúng;
+   tương tự cho `/dashboard/kpi/5s` với 1 vị trí mình là người chấm chưa chấm tuần này.
+5. **Test bỏ Tự báo cáo**: xác nhận trang chi tiết vị trí 5S không còn nút/khối "Tự báo cáo"
+   nào; dữ liệu `kpi_5s_self_reports` cũ (nếu có từ lúc test "2026-08-06") vẫn còn nguyên trong
+   DB, chỉ không hiển thị trên UI nữa.
+6. **Test multi-select "Người dọn" trong form**: mở Cài đặt → KPI & 5S → Vị trí 5S → Sửa 1 vị
+   trí đã có sẵn `nguoi_don_id` cũ (dữ liệu trước "2026-08-06") → xác nhận form tự tick đúng
+   người đó (fallback từ cột legacy); tick thêm 2-3 người, đổi "Người chấm hiện tại" trùng 1
+   người vừa tick → xác nhận bị chặn lưu với thông báo rõ; bỏ trùng → lưu thành công → xác nhận
+   card hiện đúng "Đội ngũ dọn dẹp (N)" và "Người giao" đúng tài khoản admin vừa lưu.
+7. **Test "Phòng ban chịu trách nhiệm" bắt buộc** ở cả 3 form (giao việc tay, việc định kỳ, vị
+   trí 5S) — thử lưu khi chưa chọn phòng ban → bị chặn đúng thông báo; chọn xong → danh sách
+   người nhận/thực hiện tự thu hẹp đúng theo phòng ban.
+8. **Test phạm vi hiển thị 5S mới**: đăng nhập 1 tài khoản KHÔNG phải admin/lãnh đạo/không
+   thuộc đội dọn dẹp hay người chấm của bất kỳ vị trí nào → vào `/dashboard/kpi/5s` → xác nhận
+   danh sách trống hoặc chỉ hiện đúng vị trí họ liên quan (không còn thấy "công khai toàn nhà
+   máy" như trước).
+9. Test regression: tài khoản admin vẫn thấy/làm được mọi thứ như trước (tab Việc định kỳ,
+   toàn bộ vị trí 5S, duyệt bất kỳ đăng ký thay thế nào) — không bị ảnh hưởng bởi các giới hạn
+   phòng ban mới.

@@ -10,11 +10,13 @@ import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { getTodayISODate } from "@/lib/date-utils"
 import { sendKpiNotify } from "@/lib/kpi-notify"
+import type { DepartmentOption } from "@/lib/kpi-department-leaders"
 import {
   computeChinhThreshold,
   createKpiTask,
   formatKpiDateTime,
   getKpiErrorMessage,
+  loadKpiTaskCandidates,
   KPI_REPORT_REQ_LABEL,
   type KpiReportRequirement,
   type KpiTask,
@@ -36,13 +38,15 @@ type KpiTaskFormModalProps = {
   factoryId: string
   nguoiGiaoId: string
   candidates: { people: KpiTaskCandidate[]; groups: KpiTaskCandidateGroup[] }
+  departments: DepartmentOption[]
   onClose: () => void
   onCreated: (task: KpiTask) => void
 }
 
-export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, onCreated }: KpiTaskFormModalProps) {
+export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departments, onClose, onCreated }: KpiTaskFormModalProps) {
   const [tieuDe, setTieuDe] = useState("")
   const [moTa, setMoTa] = useState("")
+  const [phongBanId, setPhongBanId] = useState("")
   const [ngayGiao, setNgayGiao] = useState(getTodayISODate())
   const [hanHoanThanh, setHanHoanThanh] = useState(defaultDeadline())
   const [memberIds, setMemberIds] = useState<string[]>([])
@@ -52,16 +56,38 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Ứng viên "Người thực hiện" thu hẹp theo phòng ban đã chọn — mặc định = candidates chung khi
+  // chưa chọn phòng ban (không chặn tạo việc trước khi có phòng ban).
+  const [scopedPeople, setScopedPeople] = useState<KpiTaskCandidate[]>(candidates.people)
+  useEffect(() => {
+    let alive = true
+    if (!phongBanId) {
+      setScopedPeople(candidates.people)
+      return
+    }
+    void loadKpiTaskCandidates(factoryId, { departmentId: phongBanId }).then(({ people }) => {
+      if (alive) setScopedPeople(people)
+    })
+    return () => { alive = false }
+  }, [phongBanId, factoryId, candidates.people])
+
+  // Đổi phòng ban → gỡ khỏi lựa chọn những người không còn thuộc danh sách mới.
+  useEffect(() => {
+    const scopedIds = new Set(scopedPeople.map((p) => p.userId))
+    setMemberIds((prev) => prev.filter((uid) => scopedIds.has(uid)))
+  }, [scopedPeople])
+
   const peopleLabels = useMemo(
     () => Object.fromEntries(candidates.people.map((p) => [p.userId, p.ten])),
     [candidates.people],
   )
-  const peopleOptions = useMemo(() => candidates.people.map((p) => p.userId), [candidates.people])
+  const peopleOptions = useMemo(() => scopedPeople.map((p) => p.userId), [scopedPeople])
   const mucTieuNumber = mucTieuSoLuong.trim() ? Number(mucTieuSoLuong) : null
   const isQuantityMode = !!mucTieuNumber && mucTieuNumber > 0
 
   const addGroupMembers = (group: KpiTaskCandidateGroup) => {
-    setMemberIds((prev) => [...new Set([...prev, ...group.memberUserIds])])
+    const scopedIds = new Set(scopedPeople.map((p) => p.userId))
+    setMemberIds((prev) => [...new Set([...prev, ...group.memberUserIds.filter((uid) => scopedIds.has(uid))])])
   }
 
   // Người chính phải nằm trong danh sách đã chọn — tự bỏ chọn nếu bị gỡ khỏi danh sách; tự
@@ -75,6 +101,10 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
   }, [memberIds, nguoiChinhId])
 
   const handleSave = async () => {
+    if (!phongBanId) {
+      setError("Vui lòng chọn phòng ban chịu trách nhiệm.")
+      return
+    }
     if (!tieuDe.trim()) {
       setError("Vui lòng nhập tiêu đề công việc.")
       return
@@ -105,6 +135,7 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
         memberUserIds: memberIds,
         mucTieuSoLuong: isQuantityMode ? mucTieuNumber : null,
         nguoiChinhId: isQuantityMode ? nguoiChinhId : null,
+        phongBanId,
       })
       sendKpiNotify({
         factoryId,
@@ -156,13 +187,35 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, onClose, 
         </div>
 
         <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả</label>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú / Hướng dẫn thực hiện</label>
           <textarea
             value={moTa}
             onChange={(e) => setMoTa(e.target.value)}
             rows={3}
             className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            placeholder="VD: Không để chai lọ trên bờ tường; kiểm tra pallet trước khi cho mủ vào kiện..."
           />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Nội dung này hiển thị đầy đủ cho người thực hiện — dùng để ghi rõ yêu cầu/lưu ý cụ thể
+            khi giao việc, không chỉ mô tả chung chung.
+          </p>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban chịu trách nhiệm *</label>
+          <select
+            value={phongBanId}
+            onChange={(e) => setPhongBanId(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Chọn phòng ban --</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Thu hẹp danh sách người thực hiện bên dưới theo đúng phòng ban này.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

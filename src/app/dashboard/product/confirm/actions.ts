@@ -997,7 +997,7 @@ export async function deleteShiftHistoryEntry(transactionId: string): Promise<De
     const supabase = getSupabaseAdmin();
     const { data: tx, error: txError } = await supabase
       .from("lot_transactions")
-      .select("lot_id, lots!inner(trang_thai)")
+      .select("lot_id, ngan_id, lots!inner(trang_thai)")
       .eq("id", transactionId)
       .maybeSingle();
     if (txError || !tx) return { success: false, error: "Không tìm thấy giao dịch cần xóa." };
@@ -1009,6 +1009,16 @@ export async function deleteShiftHistoryEntry(transactionId: string): Promise<De
 
     const result = await deleteLotTransaction({ transactionId });
     if (!result.success) return { success: false, error: result.error };
+
+    // Đồng bộ lại trạng thái ngăn (best-effort — không chặn kết quả xóa nếu lỗi, ngăn có thể
+    // đã trống hoàn toàn sau khi xóa dòng cuối cùng, cần trả về "Chờ sản xuất").
+    if (tx.ngan_id) {
+      const { error: syncError } = await supabase.rpc("sync_ngan_production_status", {
+        p_ngan_id: tx.ngan_id,
+      });
+      if (syncError) console.error("sync_ngan_production_status:", syncError);
+    }
+
     return { success: true };
   } catch (error) {
     return {
@@ -1161,6 +1171,16 @@ export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promi
 
     const { error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotInfo.id });
     if (rpcError) return { success: false, error: `Không đồng bộ được lô sau khi sửa: ${rpcError.message}` };
+
+    // Đồng bộ lại trạng thái của cả ngăn cũ (tx.ngan_id) lẫn ngăn mới (input.nganId) nếu người
+    // dùng đổi ngăn nguồn — best-effort, không chặn kết quả sửa nếu lỗi.
+    const nganIdsToSync = new Set([tx.ngan_id, input.nganId].filter(Boolean) as string[]);
+    await Promise.all(
+      [...nganIdsToSync].map(async (id) => {
+        const { error: syncError } = await supabase.rpc("sync_ngan_production_status", { p_ngan_id: id });
+        if (syncError) console.error("sync_ngan_production_status:", syncError);
+      }),
+    );
 
     return { success: true };
   } catch (error) {

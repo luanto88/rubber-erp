@@ -546,6 +546,7 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   export: "Xuất hàng",
   inventory: "Kho vật tư",
   iso: "ISO",
+  kpi: "KPI & 5S",
   maintenance: "Bảo trì",
   notes: "Ghi chú nhanh",
   output: "Sản lượng",
@@ -562,23 +563,29 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
 const PERMISSION_ACTION_LABELS: Record<string, string> = {
   analytics: "thống kê",
   approve: "duyệt tài khoản",
+  assign: "giao việc",
   cancel: "hủy phiếu",
+  confirm_scan: "quét QR xác nhận",
   create: "tạo",
   delete: "xóa",
   delete_order: "xóa đơn",
   distribute: "phân phối",
   edit: "sửa",
   edit_permission: "sửa quyền",
+  evaluate: "đánh giá",
   export_file: "xuất file",
   forms: "thực hiện hồ sơ",
   import: "nhập",
   ky_phong_ban: "ký phòng ban",
+  manage: "quản lý",
   manage_config: "quản trị cấu hình",
   mark_completed: "đánh dấu hoàn thành",
   master_data: "danh mục",
   maintenance_config: "cấu hình bảo trì",
   phe_duyet: "phê duyệt",
   post: "ghi sổ",
+  predict_manage: "quản lý dự đoán số lô",
+  predict_view: "xem dự đoán số lô",
   print: "in",
   quick_add: "thêm nhanh",
   quick_add_customer: "thêm nhanh khách hàng",
@@ -587,6 +594,7 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   soat_xet: "soát xét",
   upload_signed: "tải lên bản đã ký",
   view: "xem",
+  view_all: "xem toàn bộ",
   view_own: "xem đơn được cấp",
   xem_xet: "xem xét",
 }
@@ -5887,6 +5895,7 @@ export default function SettingsPage() {
                 <Kpi5sLocationsTab
                   factoryId={factoryId}
                   canManage={canManageKpiConfig}
+                  currentUserId={user?.id || ""}
                   userOptions={activeProfilesForLink.map((p) => ({
                     id: p.id,
                     label: p.full_name ? `${p.full_name} (${p.username})` : p.username,
