@@ -15,6 +15,19 @@
 // theo khu vực — 2 tầng ràng buộc lồng nhau, mỗi tầng có cờ nới lỏng riêng
 // (zonePoolRelaxed/groupConstraintRelaxed). Trọng số random (loadByUser) vẫn tính trên tải
 // TOÀN NHÀ MÁY — chỉ phạm vi ứng viên bị thu hẹp.
+//
+// Cập nhật 2026-07-29 (fix bug thật — "chọn rất nhiều nhân sự không liên quan"): trước đây pool
+// hoàn toàn KHÔNG lọc theo Phòng ban (`kpi_5s_locations.phong_ban_id`) dù vị trí đã có trường
+// này — chỉ lọc theo "Khu vực" (tùy chọn, thường bỏ trống). Đã thêm 2 tầng lọc MỚI, áp dụng
+// TRƯỚC tầng "Khu vực" hiện có, mỗi tầng có cờ nới lỏng riêng (khớp quyết định đã chốt với người
+// dùng: "Phòng ban + chỉ người đã từng dọn/chấm"):
+//   1. `deptPoolRelaxed` — lọc theo Phòng ban của vị trí (deptUserIdsByDept, không nới lỏng: nếu
+//      vị trí có phong_ban_id và có mapping, BẮT BUỘC chỉ chọn trong số nhân sự phòng ban đó —
+//      đây chính là fix chính cho bug).
+//   2. `establishedRelaxed` — trong số đã lọc theo phòng ban, ưu tiên CHỈ những người ĐANG là
+//      người dọn/chấm ở BẤT KỲ vị trí nào khác (established5sUserIds) — tự động nới lỏng về pool
+//      phòng ban thuần túy nếu phòng ban đó chưa từng có ai được gán 5S (tránh pool rỗng vĩnh
+//      viễn khi mới thiết lập phòng ban).
 
 export type AutoAssignCandidate = { userId: string; ten: string; primaryGroupId: string | null; zoneIds: string[] }
 export type AutoAssignLocationInput = {
@@ -24,6 +37,7 @@ export type AutoAssignLocationInput = {
   nguoi_don_id: string | null
   nguoi_cham_id: string | null
   zone_id: string | null
+  phong_ban_id: string | null
 }
 export type AutoAssignSuggestion = {
   locationId: string
@@ -31,6 +45,28 @@ export type AutoAssignSuggestion = {
   nguoiChamId: string | null
   groupConstraintRelaxed: boolean
   zonePoolRelaxed: boolean
+  deptPoolRelaxed: boolean
+  establishedRelaxed: boolean
+  // Danh sách ứng viên cuối cùng đã dùng để random cho vị trí này (sau mọi tầng lọc/nới lỏng) —
+  // dùng để giới hạn luôn dropdown sửa tay trong modal, tránh chọn tay ra người "không liên quan"
+  // mà thuật toán vừa cố loại bỏ.
+  eligibleUserIds: string[]
+}
+
+/** Union userId đang là người dọn (kpi_5s_location_cleaners, fallback nguoi_don_id khi vị trí
+ *  chưa có dòng multi-cleaner nào) HOẶC người chấm (nguoi_cham_id) của BẤT KỲ vị trí nào trong
+ *  `locations` — dùng làm ràng buộc mềm "chỉ random nhân sự dọn dẹp/chấm hiện tại". */
+export function computeEstablished5sUserIds(
+  locations: Pick<AutoAssignLocationInput, "id" | "nguoi_don_id" | "nguoi_cham_id">[],
+  cleanerMembership: Map<string, string[]>,
+): Set<string> {
+  const established = new Set<string>()
+  for (const loc of locations) {
+    const cleaners = cleanerMembership.get(loc.id) ?? (loc.nguoi_don_id ? [loc.nguoi_don_id] : [])
+    for (const uid of cleaners) established.add(uid)
+    if (loc.nguoi_cham_id) established.add(loc.nguoi_cham_id)
+  }
+  return established
 }
 
 function weightedPick(
@@ -53,7 +89,17 @@ function weightedPick(
 export function buildAutoAssignSuggestions(
   locations: AutoAssignLocationInput[],
   people: AutoAssignCandidate[],
-  opts: { onlyUnassigned: boolean; avoidSameGroup: boolean },
+  opts: {
+    onlyUnassigned: boolean
+    avoidSameGroup: boolean
+    // Phòng ban → tập userId thuộc đúng phòng ban đó (từ /api/kpi/dept-users). Bỏ trống hoặc
+    // thiếu mapping cho 1 phòng ban cụ thể = không lọc theo phòng ban cho vị trí đó (an toàn hơn
+    // là loại sạch, phòng trường hợp route tra cứu lỗi tạm thời).
+    deptUserIdsByDept?: Map<string, Set<string>>
+    // Union userId đang là người dọn/chấm ở BẤT KỲ vị trí nào — ràng buộc mềm "chỉ random nhân
+    // sự dọn dẹp/chấm hiện tại", tự nới lỏng nếu phòng ban chưa từng gán ai.
+    establishedUserIds?: Set<string>
+  },
 ): AutoAssignSuggestion[] {
   if (people.length < 2) return []
 
@@ -76,12 +122,32 @@ export function buildAutoAssignSuggestions(
     const keepDon = opts.onlyUnassigned && !!loc.nguoi_don_id
     const keepCham = opts.onlyUnassigned && !!loc.nguoi_cham_id
 
-    // Thu hẹp pool theo khu vực (nếu có) — cần ít nhất 2 người trong khu vực mới đủ để phân
-    // biệt người dọn/người chấm; không đủ thì nới lỏng về pool toàn nhà máy cho cả 2 vai trò.
-    let zonePool = people
+    // Tầng 1 — Phòng ban (bắt buộc, không nới lỏng): chỉ giữ nhân sự thuộc đúng phong_ban_id của
+    // vị trí. Đây là fix chính cho bug "chọn rất nhiều nhân sự không liên quan".
+    let deptPool = people
+    let deptPoolRelaxed = false
+    if (loc.phong_ban_id && opts.deptUserIdsByDept?.has(loc.phong_ban_id)) {
+      const deptIds = opts.deptUserIdsByDept.get(loc.phong_ban_id)!
+      deptPool = people.filter((p) => deptIds.has(p.userId))
+    } else if (loc.phong_ban_id) {
+      deptPoolRelaxed = true // có phòng ban nhưng chưa tra được mapping — không lọc được, ghi nhận để cảnh báo
+    }
+
+    // Tầng 2 — "Đã từng dọn/chấm" (mềm, tự nới lỏng về deptPool nếu phòng ban chưa từng gán ai).
+    let establishedPool = deptPool
+    let establishedRelaxed = false
+    if (opts.establishedUserIds) {
+      const filtered = deptPool.filter((p) => opts.establishedUserIds!.has(p.userId))
+      if (filtered.length >= 2) establishedPool = filtered
+      else establishedRelaxed = true
+    }
+
+    // Tầng 3 — Khu vực (hiện có từ trước) — cần ít nhất 2 người mới đủ để phân biệt người dọn/
+    // người chấm; không đủ thì nới lỏng về pool đã lọc ở 2 tầng trên.
+    let zonePool = establishedPool
     let zonePoolRelaxed = false
     if (loc.zone_id) {
-      const filtered = people.filter((p) => p.zoneIds.includes(loc.zone_id!))
+      const filtered = establishedPool.filter((p) => p.zoneIds.includes(loc.zone_id!))
       if (filtered.length >= 2) zonePool = filtered
       else zonePoolRelaxed = true
     }
@@ -109,7 +175,18 @@ export function buildAutoAssignSuggestions(
       if (chamId) loadByUser.set(chamId, (loadByUser.get(chamId) || 0) + 1)
     }
 
-    results.push({ locationId: loc.id, nguoiDonId: donId, nguoiChamId: chamId, groupConstraintRelaxed, zonePoolRelaxed })
+    const eligibleUserIds = [...new Set(zonePool.map((p) => p.userId))]
+
+    results.push({
+      locationId: loc.id,
+      nguoiDonId: donId,
+      nguoiChamId: chamId,
+      groupConstraintRelaxed,
+      zonePoolRelaxed,
+      deptPoolRelaxed,
+      establishedRelaxed,
+      eligibleUserIds,
+    })
   }
 
   return results

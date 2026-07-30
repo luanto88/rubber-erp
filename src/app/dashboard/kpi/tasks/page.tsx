@@ -208,7 +208,7 @@ export default function KpiTasksPage() {
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

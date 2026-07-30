@@ -14,7 +14,6 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Phase B".
 
 import { supabase } from "@/lib/supabase"
-import { hasPermission, type SessionUser } from "@/lib/auth"
 
 export type DepartmentOption = { id: string; code: string; name: string }
 
@@ -69,13 +68,4 @@ export async function resolveMyLeaderDepartmentId(userId: string, factoryId: str
     .or(`name.eq.${profile.department},code.ilike.${profile.department}`)
     .maybeSingle()
   return (deptRow as { id: string } | null)?.id || null
-}
-
-/** Tab "Việc định kỳ" chỉ dành cho admin / kpi.manage_config / lãnh đạo phòng ban (bất kỳ phòng
- *  ban nào) — người dùng thường (chỉ kpi.view) không cần thấy tab quản trị này. */
-export async function canSeeKpiTemplatesTab(user: SessionUser | null, factoryId: string | null): Promise<boolean> {
-  if (!user || !factoryId) return false
-  if (user.role === "admin" || hasPermission(user, "kpi.manage_config")) return true
-  const leaderDeptId = await resolveMyLeaderDepartmentId(user.id, factoryId)
-  return leaderDeptId != null
 }

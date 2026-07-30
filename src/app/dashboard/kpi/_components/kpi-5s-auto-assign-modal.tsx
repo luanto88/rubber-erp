@@ -3,14 +3,30 @@
 // Modal "Phân công thông minh" cho vị trí 5S — thay thế thao tác gán tay từng vị trí khi số
 // lượng vị trí quá nhiều. Random CÓ TRỌNG SỐ theo tải hiện tại (không phải random thuần túy),
 // luôn cho xem trước + sửa tay trước khi ghi thật. Xem thuật toán trong kpi-5s-auto-assign.ts.
+//
+// Chuyển từ settings/_components/ sang đây (2026-07-29) để dùng chung được ở cả Cài đặt → KPI &
+// 5S lẫn /dashboard/kpi/5s (nút đặt cạnh "Quản lý vị trí") — component thuần túy, không phụ
+// thuộc gì vào layout Settings.
+//
+// Cập nhật cùng đợt — fix bug "chọn rất nhiều nhân sự không liên quan": pool giờ lọc theo Phòng
+// ban của vị trí (deptUserIdsByDept, tra qua /api/kpi/dept-users) + chỉ ưu tiên người ĐANG là
+// người dọn/chấm ở vị trí khác (establishedUserIds, tự nới lỏng nếu phòng ban chưa từng gán ai)
+// — xem đầy đủ trong kpi-5s-auto-assign.ts. Dropdown sửa tay trong preview cũng chỉ còn hiện
+// đúng `eligibleUserIds` đã được thuật toán dùng để random (loại người không liên quan), fallback
+// về danh sách đầy đủ nếu pool đó rỗng (tránh dropdown trống hoàn toàn).
 
 import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, RefreshCw, Shuffle, Users } from "lucide-react"
 import { ModalShell } from "../../_components/modal-shell"
-import { patchKpi5sLocation, getKpi5sErrorMessage, type Kpi5sLocation } from "@/lib/kpi-5s"
+import { patchKpi5sLocation, fetchAllLocationCleanerMemberships, getKpi5sErrorMessage, type Kpi5sLocation } from "@/lib/kpi-5s"
 import { fetchAllZoneMemberships } from "@/lib/kpi-5s-zones"
-import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
-import { buildAutoAssignSuggestions, type AutoAssignCandidate, type AutoAssignSuggestion } from "@/lib/kpi-5s-auto-assign"
+import { loadKpiTaskCandidates, fetchDepartmentUserIds, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import {
+  buildAutoAssignSuggestions,
+  computeEstablished5sUserIds,
+  type AutoAssignCandidate,
+  type AutoAssignSuggestion,
+} from "@/lib/kpi-5s-auto-assign"
 
 type RowState = AutoAssignSuggestion & { originalDon: string | null; originalCham: string | null }
 
@@ -27,6 +43,8 @@ export function Kpi5sAutoAssignModal({
 }) {
   const [candidatesRaw, setCandidatesRaw] = useState<KpiTaskCandidate[]>([])
   const [zoneMembership, setZoneMembership] = useState<Map<string, string[]>>(new Map())
+  const [deptUserIdsByDept, setDeptUserIdsByDept] = useState<Map<string, Set<string>>>(new Map())
+  const [establishedUserIds, setEstablishedUserIds] = useState<Set<string>>(new Set())
   const [loadingCandidates, setLoadingCandidates] = useState(true)
   const [loadError, setLoadError] = useState("")
 
@@ -43,14 +61,18 @@ export function Kpi5sAutoAssignModal({
       setLoadingCandidates(true)
       setLoadError("")
       try {
-        const [taskData, membership] = await Promise.all([
+        const distinctDeptIds = [...new Set(locations.map((l) => l.phong_ban_id).filter((v): v is string => !!v))]
+        const [taskData, membership, cleanerMembership, deptEntries] = await Promise.all([
           loadKpiTaskCandidates(factoryId),
           fetchAllZoneMemberships(factoryId),
+          fetchAllLocationCleanerMemberships(factoryId),
+          Promise.all(distinctDeptIds.map(async (id) => [id, await fetchDepartmentUserIds(factoryId, id)] as const)),
         ])
-        if (alive) {
-          setCandidatesRaw(taskData.people)
-          setZoneMembership(membership)
-        }
+        if (!alive) return
+        setCandidatesRaw(taskData.people)
+        setZoneMembership(membership)
+        setDeptUserIdsByDept(new Map(deptEntries))
+        setEstablishedUserIds(computeEstablished5sUserIds(locations, cleanerMembership))
       } catch (err) {
         if (alive) setLoadError(getKpi5sErrorMessage(err, "Không tải được danh sách nhân sự."))
       } finally {
@@ -58,6 +80,7 @@ export function Kpi5sAutoAssignModal({
       }
     })()
     return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ tải lại khi factoryId đổi, không phải mỗi lần `locations` đổi identity
   }, [factoryId])
 
   // Gộp thành viên khu vực (kpi_5s_zone_members) vào từng candidate — dùng cho ràng buộc
@@ -93,9 +116,10 @@ export function Kpi5sAutoAssignModal({
         nguoi_don_id: l.nguoi_don_id,
         nguoi_cham_id: l.nguoi_cham_id,
         zone_id: l.zone_id,
+        phong_ban_id: l.phong_ban_id,
       })),
       candidates,
-      { onlyUnassigned, avoidSameGroup },
+      { onlyUnassigned, avoidSameGroup, deptUserIdsByDept, establishedUserIds },
     )
     setRows(
       suggestions.map((s) => {
@@ -178,7 +202,9 @@ export function Kpi5sAutoAssignModal({
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-sm text-slate-600">
             <Users size={15} className="text-violet-600" />
-            Random <strong>có trọng số theo tải hiện tại</strong> — người đang phụ trách ít vị trí hơn có xác suất được chọn cao hơn, không phải random đều 100%.
+            Random <strong>có trọng số theo tải hiện tại</strong>, chỉ trong số nhân sự thuộc đúng
+            Phòng ban của vị trí và ưu tiên người ĐANG là người dọn/chấm ở vị trí khác — không lấy
+            người hoàn toàn không liên quan.
           </div>
           <div className="space-y-2.5">
             <label className="flex items-start gap-2 text-sm">
@@ -221,17 +247,33 @@ export function Kpi5sAutoAssignModal({
               {rows.map((r) => {
                 const l = locationById[r.locationId]
                 if (!l) return null
+                const eligibleSet = new Set(r.eligibleUserIds)
+                const options = eligibleSet.size > 0 ? candidates.filter((c) => eligibleSet.has(c.userId)) : candidates
                 return (
                   <div key={r.locationId} className="p-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr] gap-2 items-center">
                     <div>
                       <div className="text-[11px] font-bold text-violet-700">{l.ma_vi_tri}</div>
                       <div className="text-sm font-semibold text-slate-700">{l.ten_vi_tri}</div>
+                      {(r.deptPoolRelaxed || r.establishedRelaxed) && (
+                        <div className="mt-0.5 flex flex-col gap-0.5">
+                          {r.deptPoolRelaxed && (
+                            <span className="text-[10px] text-amber-600 flex items-center gap-1">
+                              <AlertTriangle size={9} /> Chưa tra được phòng ban — không lọc được
+                            </span>
+                          )}
+                          {r.establishedRelaxed && (
+                            <span className="text-[10px] text-amber-600 flex items-center gap-1">
+                              <AlertTriangle size={9} /> Phòng ban chưa từng gán ai — đã nới lỏng
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5 flex items-center gap-1">
                         Người dọn
                         {r.zonePoolRelaxed && (
-                          <span title="Khu vực không đủ 2 người — đã tự nới lỏng về pool toàn nhà máy">
+                          <span title="Khu vực không đủ 2 người — đã tự nới lỏng">
                             <AlertTriangle size={10} className="text-amber-500" />
                           </span>
                         )}
@@ -242,7 +284,7 @@ export function Kpi5sAutoAssignModal({
                         className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500"
                       >
                         <option value="">— Chưa gán —</option>
-                        {candidates.map((c) => (
+                        {options.map((c) => (
                           <option key={c.userId} value={c.userId} disabled={c.userId === r.nguoiChamId}>{c.ten}</option>
                         ))}
                       </select>
@@ -251,7 +293,7 @@ export function Kpi5sAutoAssignModal({
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5 flex items-center gap-1">
                         Người chấm
                         {r.zonePoolRelaxed && (
-                          <span title="Khu vực không đủ 2 người — đã tự nới lỏng về pool toàn nhà máy">
+                          <span title="Khu vực không đủ 2 người — đã tự nới lỏng">
                             <AlertTriangle size={10} className="text-amber-500" />
                           </span>
                         )}
@@ -267,7 +309,7 @@ export function Kpi5sAutoAssignModal({
                         className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500"
                       >
                         <option value="">— Chưa gán —</option>
-                        {candidates.map((c) => (
+                        {options.map((c) => (
                           <option key={c.userId} value={c.userId} disabled={c.userId === r.nguoiDonId}>{c.ten}</option>
                         ))}
                       </select>

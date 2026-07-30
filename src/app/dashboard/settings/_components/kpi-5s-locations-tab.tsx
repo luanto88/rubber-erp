@@ -23,7 +23,8 @@ import { downloadKpi5sLocationBulkQrPdf } from "@/lib/kpi-5s-pdf"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import { fetchKpi5sZones, type Kpi5sZone } from "@/lib/kpi-5s-zones"
 import { fetchDepartmentOptions, type DepartmentOption } from "@/lib/kpi-department-leaders"
-import { Kpi5sAutoAssignModal } from "./kpi-5s-auto-assign-modal"
+import { fetchDepartmentUserIds } from "@/lib/kpi-tasks"
+import { Kpi5sAutoAssignModal } from "@/app/dashboard/kpi/_components/kpi-5s-auto-assign-modal"
 
 type UserOption = { id: string; label: string }
 
@@ -100,6 +101,12 @@ export function Kpi5sLocationsTab({
   const [showAutoAssign, setShowAutoAssign] = useState(false)
   const [assignSummary, setAssignSummary] = useState<{ userId: string; ten: string; donZones: string[]; chamZones: string[] }[] | null>(null)
 
+  // Fix bug thật: "Người dọn hiện tại"/"Người chấm hiện tại" trước đây liệt kê TOÀN BỘ nhân sự
+  // nhà máy (userOptions, không lọc gì cả) — dẫn tới cả 2 field lẫn "Phân công thông minh" (đọc
+  // cùng nguồn) đều dễ chọn nhầm người không liên quan tới phòng ban của vị trí. Tra qua
+  // /api/kpi/dept-users mỗi khi form.phong_ban_id đổi (chỉ khi modal đang mở).
+  const [deptUserIds, setDeptUserIds] = useState<Set<string> | null>(null)
+
   const nameByUserId = useMemo(() => Object.fromEntries(userOptions.map((u) => [u.id, u.label])), [userOptions])
   const resolveName = useCallback((uid: string | null) => (uid ? nameByUserId[uid] || "Người dùng không xác định" : "— Chưa gán —"), [nameByUserId])
   const zoneNameById = useMemo(() => Object.fromEntries(zones.map((z) => [z.id, z.ten])), [zones])
@@ -143,6 +150,27 @@ export function Kpi5sLocationsTab({
     setModalOpen(true)
   }
 
+  useEffect(() => {
+    if (!modalOpen || !factoryId || !form.phong_ban_id) {
+      setDeptUserIds(null)
+      return
+    }
+    let alive = true
+    void fetchDepartmentUserIds(factoryId, form.phong_ban_id).then((ids) => {
+      if (alive) setDeptUserIds(ids)
+    })
+    return () => { alive = false }
+  }, [modalOpen, factoryId, form.phong_ban_id])
+
+  // Luôn giữ hiển thị người ĐÃ chọn (dọn hoặc chấm) kể cả khi họ rơi ra ngoài phòng ban vừa lọc —
+  // tránh bug "select hiển thị sai giá trị" khi value hiện tại không khớp option nào còn lại.
+  const filteredUserOptions = useMemo(() => {
+    if (!deptUserIds) return userOptions
+    return userOptions.filter(
+      (u) => deptUserIds.has(u.id) || form.cleanerUserIds.includes(u.id) || form.nguoi_cham_id === u.id,
+    )
+  }, [userOptions, deptUserIds, form.cleanerUserIds, form.nguoi_cham_id])
+
   const toggleFormCleaner = (userId: string) => {
     setForm((f) => ({
       ...f,
@@ -165,7 +193,11 @@ export function Kpi5sLocationsTab({
       setSaveError("Vui lòng chọn phòng ban.")
       return
     }
-    if (form.nguoi_cham_id && form.cleanerUserIds.includes(form.nguoi_cham_id)) {
+    if (!form.nguoi_cham_id) {
+      setSaveError("Vui lòng chọn Người chấm hiện tại.")
+      return
+    }
+    if (form.cleanerUserIds.includes(form.nguoi_cham_id)) {
       setSaveError("Người chấm hiện tại không được nằm trong danh sách Người dọn hiện tại.")
       return
     }
@@ -480,10 +512,12 @@ export function Kpi5sLocationsTab({
                 Người dọn hiện tại ({form.cleanerUserIds.length})
               </label>
               <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-xl border border-slate-300 p-2">
-                {userOptions.length === 0 ? (
-                  <div className="px-1 py-1 text-xs text-slate-400">Chưa có tài khoản nào.</div>
+                {filteredUserOptions.length === 0 ? (
+                  <div className="px-1 py-1 text-xs text-slate-400">
+                    {form.phong_ban_id ? "Phòng ban này chưa có tài khoản nào." : "Chưa có tài khoản nào."}
+                  </div>
                 ) : (
-                  userOptions.map((u) => (
+                  filteredUserOptions.map((u) => (
                     <label key={u.id} className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-sm hover:bg-slate-50">
                       <input
                         type="checkbox"
@@ -498,18 +532,19 @@ export function Kpi5sLocationsTab({
               </div>
               <p className="mt-1 text-[11px] text-slate-400">
                 Vị trí có thể rất rộng và cần nhiều người phụ trách — tick chọn TẤT CẢ những người
-                thực sự đảm nhiệm dọn dẹp vị trí này.
+                thực sự đảm nhiệm dọn dẹp vị trí này.{" "}
+                {!form.phong_ban_id && "Chọn Phòng ban trước để danh sách chỉ hiện đúng nhân sự liên quan."}
               </p>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-600">Người chấm hiện tại</label>
+              <label className="mb-1 block text-xs font-bold text-slate-600">Người chấm hiện tại *</label>
               <select
                 value={form.nguoi_cham_id}
                 onChange={(e) => setForm((f) => ({ ...f, nguoi_cham_id: e.target.value }))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
               >
-                <option value="">— Chưa gán —</option>
-                {userOptions.map((u) => (
+                <option value="">-- Chọn người chấm --</option>
+                {filteredUserOptions.map((u) => (
                   <option key={u.id} value={u.id} disabled={form.cleanerUserIds.includes(u.id)}>{u.label}</option>
                 ))}
               </select>

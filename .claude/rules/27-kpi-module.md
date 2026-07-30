@@ -3118,3 +3118,180 @@ lịch sử quyết định). Tóm tắt các thay đổi lớn nhất:
 9. Test regression: tài khoản admin vẫn thấy/làm được mọi thứ như trước (tab Việc định kỳ,
    toàn bộ vị trí 5S, duyệt bất kỳ đăng ký thay thế nào) — không bị ảnh hưởng bởi các giới hạn
    phòng ban mới.
+
+## Cập nhật 2026-07-29 — 3 bug thật đã fix sau khi người dùng test tay bản "2026-07-28" (đã code
+xong, `tsc`/`eslint`/`npm run build` sạch, CHƯA test tay)
+
+Người dùng test bản "Cập nhật 2026-07-28" (phòng ban thay "Quản lý theo phòng ban", duyệt Người
+thay thế, Việc hôm nay...) và báo lại đúng 3 vấn đề — cả 3 đã xác nhận nguyên nhân bằng cách đọc
+code thật (không đoán) trước khi sửa:
+
+### Bug 1 — Tab "Việc định kỳ" bị ẩn hoàn toàn với nhân viên thường, chặn cả việc tự đăng ký
+"Người thay thế"
+
+**Nguyên nhân xác nhận qua code**: `kpi-shell.tsx` ẩn hẳn tab "Việc định kỳ" khỏi thanh điều
+hướng (`requiresTemplatesAccess: true` + gọi `canSeeKpiTemplatesTab`) với bất kỳ ai không phải
+admin/`kpi.manage_config`/lãnh đạo phòng ban. Đồng thời `templates/page.tsx` có thêm 1 `useEffect`
+**redirect thẳng** `window.location.replace("/dashboard/kpi/tasks")` nếu `!canSeeKpiTemplatesTab`.
+Vì sub-tab **"Người thay thế tạm thời"** bên trong chính trang đó dành cho **MỌI** nhân viên tự
+đăng ký cho chính mình (RLS `kpi_user_substitutions_insert` từ trước đã cho phép
+`original_user_id = auth.uid()` không cần bất kỳ quyền đặc biệt nào), việc ẩn+redirect cả trang
+khiến nhân viên thường **không có cách nào vào trang để đăng ký** — đúng bug người dùng báo.
+
+**Fix**:
+- `kpi-shell.tsx`: bỏ hẳn cơ chế ẩn tab theo quyền (`requiresTemplatesAccess`, state
+  `showTemplatesTab`, effect gọi `canSeeKpiTemplatesTab`) — "Việc định kỳ" giờ hiện cho mọi người
+  như 3 tab còn lại (Công việc/Đánh giá 5S/Khiếu nại). Đã bỏ luôn prop `user`/`factoryId` của
+  `KpiShellProps` (không còn cần thiết) — dọn theo ở cả 7 nơi gọi `<KpiShell>`.
+- `templates/page.tsx`: bỏ hẳn `useEffect` redirect. Thêm `myLeaderDepartmentId` (qua
+  `resolveMyLeaderDepartmentId`, cùng pattern `tasks/page.tsx`/`5s/page.tsx`) — `canManageTemplates
+  = isAdmin || kpi.manage_config || isDeptLeader` (khớp đúng RLS
+  `kpi_task_templates_insert/update/delete` sau migration `20260807_kpi_department_scoping.sql`).
+  Sub-tab "Việc định kỳ" giờ hiển thị ĐỌC ĐƯỢC (read-only) cho người không quản lý — chỉ ẩn nút
+  Thêm/Sửa/Tạm ngưng/Xóa, không ẩn cả danh sách (RLS SELECT vốn đã rộng trong factory từ trước).
+  Thêm 1 effect chạy đúng 1 lần: người KHÔNG quản lý được mặc định vào thẳng sub-tab "Người thay
+  thế tạm thời" (không cần tự bấm chuyển tab).
+- Đã xóa hẳn hàm `canSeeKpiTemplatesTab` (dead code sau khi cả 2 nơi gọi nó bị gỡ) khỏi
+  `src/lib/kpi-department-leaders.ts` — giữ nguyên `resolveMyLeaderDepartmentId`/
+  `fetchDepartmentOptions`.
+
+### Bug 2 — "Phân công thông minh" 5S chọn rất nhiều nhân sự không liên quan (form + thuật toán
+không lọc theo Phòng ban)
+
+**Nguyên nhân xác nhận qua code**: `kpi-5s-locations-tab.tsx` (form Thêm/Sửa Vị trí 5S) và
+`kpi-5s-auto-assign-modal.tsx`/`kpi-5s-auto-assign.ts` (thuật toán) đều lấy **`userOptions`**
+(toàn bộ profile active trong nhà máy, không lọc gì) hoặc **`loadKpiTaskCandidates(factoryId)`**
+(toàn bộ `maintenance_staff` liên kết tài khoản trong nhà máy) làm nguồn ứng viên — dù
+`kpi_5s_locations.phong_ban_id` đã tồn tại từ migration `20260807_kpi_department_scoping.sql`,
+KHÔNG nơi nào dùng nó để thu hẹp danh sách. Đây là nguyên nhân thật của "chọn rất nhiều nhân sự
+không liên quan".
+
+**Quyết định thiết kế đã hỏi và được xác nhận qua `AskUserQuestion`**: ngoài lọc theo Phòng ban,
+"Phân công thông minh" CHỈ random trong số người **ĐANG** là người dọn/chấm ở **bất kỳ vị trí
+nào khác** (loại hẳn người chưa từng giữ vai trò 5S nào) — tự động nới lỏng về "chỉ theo phòng
+ban" nếu phòng ban đó chưa từng gán ai (tránh pool rỗng vĩnh viễn lúc mới thiết lập).
+
+**Fix**:
+- `kpi-tasks.ts`: export `fetchDepartmentUserIds(factoryId, departmentId)` (trước đó private,
+  chỉ dùng nội bộ cho `loadKpiTaskCandidates`) — dùng chung cho cả candidate list kiểu
+  `maintenance_staff` lẫn danh sách profile thô.
+- `kpi-5s-locations-tab.tsx` (form Thêm/Sửa Vị trí): thêm state `deptUserIds` (tra qua
+  `fetchDepartmentUserIds` mỗi khi `form.phong_ban_id` đổi, chỉ khi modal mở);
+  `filteredUserOptions` = `userOptions` đã lọc theo `deptUserIds`, **luôn giữ hiển thị người ĐÃ
+  chọn** (cleaner/scorer) dù họ rơi ra ngoài phòng ban vừa lọc (tránh bug "select hiển thị sai
+  giá trị"). Cả 2 picker "Người dọn hiện tại"/"Người chấm hiện tại" đổi sang dùng
+  `filteredUserOptions` thay `userOptions`.
+- `kpi-5s-auto-assign.ts`: `AutoAssignLocationInput` thêm `phong_ban_id`; `AutoAssignSuggestion`
+  thêm `deptPoolRelaxed`/`establishedRelaxed`/`eligibleUserIds`. Hàm mới
+  `computeEstablished5sUserIds(locations, cleanerMembership)` — union userId đang là người dọn
+  (kể cả fallback `nguoi_don_id` legacy) hoặc người chấm của BẤT KỲ vị trí nào. Thuật toán
+  `buildAutoAssignSuggestions` giờ có 3 tầng lọc lồng nhau theo đúng thứ tự: (1) Phòng ban — bắt
+  buộc, không nới lỏng; (2) "đã từng dọn/chấm" — mềm, tự nới lỏng về pool phòng ban nếu rỗng; (3)
+  Khu vực (`zone_id`, đã có từ trước) — mềm, tự nới lỏng như cũ. Tầng "tránh cùng nhóm chính"
+  (existing) áp dụng sau cùng, không đổi.
+- `kpi-5s-auto-assign-modal.tsx` (đã MOVE, xem mục dưới): tải thêm
+  `fetchAllLocationCleanerMemberships` + tra `fetchDepartmentUserIds` cho từng `phong_ban_id`
+  distinct trong `locations` được truyền vào, build `deptUserIdsByDept`/`establishedUserIds`
+  truyền vào thuật toán. Dropdown sửa tay trong preview (`<select>` Người dọn/Người chấm) giờ
+  CHỈ hiện đúng `eligibleUserIds` (pool cuối cùng sau mọi tầng lọc/nới lỏng) thay vì toàn bộ
+  `candidates` — fallback về danh sách đầy đủ nếu pool đó rỗng (tránh dropdown trống hoàn toàn).
+  Thêm 2 cảnh báo mới (icon `AlertTriangle`, mirror `zonePoolRelaxed`/`groupConstraintRelaxed` đã
+  có): "Chưa tra được phòng ban — không lọc được" (`deptPoolRelaxed`) và "Phòng ban chưa từng gán
+  ai — đã nới lỏng" (`establishedRelaxed`).
+
+### Bug 3 (yêu cầu, không phải bug) — "Người chấm hiện tại" chưa bắt buộc khi thêm Vị trí 5S
+
+`kpi-5s-locations-tab.tsx`'s `handleSave()` thêm chặn cứng
+`if (!form.nguoi_cham_id) { setSaveError("Vui lòng chọn Người chấm hiện tại."); return }` — đặt
+TRƯỚC check "chấm không được nằm trong người dọn" (để hiện đúng thông báo ưu tiên). Label đổi
+"Người chấm hiện tại" → "Người chấm hiện tại \*", option placeholder đổi "— Chưa gán —" → "--
+Chọn người chấm --" (nhất quán với "-- Chọn phòng ban --" đã có).
+
+### Việc phụ phát sinh giữa phiên (theo yêu cầu mid-turn của người dùng) — nút "Phân công thông
+minh" chuyển ra `/dashboard/kpi/5s`
+
+Người dùng nhận xét nút "Sinh việc hôm nay" ở tab "Việc định kỳ" (đặt ngay ở trang chính, không
+phải chôn trong Cài đặt) rất tiện — yêu cầu áp dụng tương tự cho "Phân công thông minh" (trước
+đó chỉ có trong Cài đặt → KPI & 5S → Vị trí 5S).
+
+- **Di chuyển file**: `kpi-5s-auto-assign-modal.tsx` chuyển từ
+  `src/app/dashboard/settings/_components/` sang `src/app/dashboard/kpi/_components/` (component
+  thuần túy, không phụ thuộc layout Settings) — cập nhật import tại
+  `kpi-5s-locations-tab.tsx` sang đường dẫn mới.
+- `/dashboard/kpi/5s/page.tsx`: thêm nút **"Phân công thông minh"** (tím, icon `Shuffle`) đặt
+  cùng hàng với "Quản lý vị trí" — gọi thẳng `Kpi5sAutoAssignModal` với `locations=visibleLocations`
+  (đã scope đúng theo người xem — admin/kpi.manage_config thấy tất cả, lãnh đạo phòng ban chỉ
+  thấy đúng phòng ban mình). Sau khi giao xong: hiện banner tóm tắt (mirror Settings tab), gọi
+  `sendKpiNotify` (Telegram), rồi `loadData()` lại.
+- **Fix đi kèm phát hiện trong lúc làm việc này** (không phải yêu cầu gốc nhưng là hệ quả tất
+  yếu): biến `canManageLocations` trong `5s/page.tsx` (dùng để quyết định `visibleLocations` có
+  bypass scoping theo phòng ban hay không) **KHÔNG được đổi** — vẫn giữ nguyên
+  `isAdmin || kpi.manage_config` (đổi biến này sẽ vô tình cho lãnh đạo phòng ban thấy TẤT CẢ vị
+  trí thay vì chỉ đúng phòng ban mình, phá vỡ toàn bộ logic scoping "Phase E" đã có). Thay vào đó
+  thêm biến RIÊNG `canManageAnyLocation = canManageLocations || isDeptLeader` — chỉ dùng để hiện/
+  ẩn 2 nút "Quản lý vị trí"/"Phân công thông minh", không ảnh hưởng `visibleLocations`.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file mới/đã sửa: `kpi-tasks.ts`,
+`kpi-department-leaders.ts`, `kpi-5s-auto-assign.ts`, `kpi-shell.tsx`,
+`kpi-5s-auto-assign-modal.tsx` (mới), `templates/page.tsx`, `5s/page.tsx`, `tasks/page.tsx`,
+`tasks/[id]/page.tsx`, `appeals/page.tsx`, `5s/location/[id]/page.tsx`,
+`kpi-5s-locations-tab.tsx`, `settings/page.tsx`), và `npm run build` đều sạch (4 warning còn lại
+trong `settings/page.tsx` là pre-existing, không liên quan thay đổi này — đã đối chiếu).
+
+### Mở Cài đặt → KPI & 5S cho lãnh đạo phòng ban (quyết định đã hỏi và được xác nhận)
+
+Vì migration `20260807_kpi_department_scoping.sql` đã cấp RLS cho lãnh đạo phòng ban tự quản lý
+`kpi_5s_locations`/`kpi_5s_zones`/`kpi_task_templates` đúng phòng ban mình mà KHÔNG cần
+`kpi.manage_config`, nhưng tab "Cài đặt → KPI & 5S" trước đó ẩn hoàn toàn với họ (kể cả bootstrap
+guard tổng của trang Cài đặt cũng chặn thẳng), đã mở thêm lối vào:
+
+- `settings/page.tsx`: thêm state `kpiLeaderDepartmentId` (tính trong `bootstrap()` qua
+  `resolveMyLeaderDepartmentId(sessionUser.id, fid)`, **TRƯỚC** guard tổng) — guard tổng
+  (`if (!hasPermission(...) && ... && !hasPermission(sessionUser, "kpi.manage_config"))`) thêm
+  điều kiện `&& leaderDeptId == null` vào cuối chuỗi AND, để lãnh đạo phòng ban không bị đá về
+  `/dashboard` chỉ vì thiếu MỌI quyền Cài đặt khác.
+- Thêm biến `isKpiDeptLeader`/`canManageKpi5s = canManageKpiConfig || isKpiDeptLeader` — dùng
+  riêng cho sidebar (`show: canManageKpi5s` thay `canManageKpiConfig`) và 2 nơi truyền
+  `canManage` prop xuống `Kpi5sLocationsTab`/`Kpi5sZonesTab`. **`canManageKpiConfig` gốc giữ
+  nguyên không đổi** (không dùng cho tab "KPI & 5S" nữa, nhưng không có nơi nào khác tham chiếu
+  nên an toàn).
+- **Giới hạn đã biết, chưa xử lý**: dropdown "Phòng ban" trong form Thêm/Sửa Vị trí 5S (và
+  tương tự ở form Việc định kỳ/Giao việc tay) liệt kê TẤT CẢ phòng ban trong hệ thống, không tự
+  giới hạn lãnh đạo chỉ chọn được đúng phòng ban của họ ở tầng UI — nếu họ cố tình chọn phòng ban
+  khác, RLS sẽ chặn ở bước lưu với lỗi Supabase chung chung (không thân thiện, nhưng không sai
+  logic). Chưa xử lý vì không nằm trong yêu cầu gốc của phiên này — cần cân nhắc thêm UX rõ ràng
+  hơn nếu người dùng phản ánh nhầm lẫn.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự (không cần migration mới, đã
+dùng lại đúng 2 migration `20260807_...` đã liệt kê ở mục "2026-07-28" phía trên)
+
+1. Đăng nhập 1 tài khoản THƯỜNG (không phải admin/kpi.manage_config/lãnh đạo phòng ban nào) →
+   xác nhận thấy tab "Việc định kỳ" trong thanh điều hướng module KPI → bấm vào → tự động vào
+   thẳng sub-tab "Người thay thế tạm thời" (không phải "Việc định kỳ") → bấm "Đăng ký người thay
+   thế" → tự đăng ký cho chính mình → xác nhận lưu thành công (trước đây không thể vào trang).
+2. Cùng tài khoản đó, thử bấm sub-tab "Việc định kỳ" → xác nhận vẫn XEM được danh sách (đọc),
+   nhưng KHÔNG thấy nút "Thêm việc định kỳ"/"Sửa"/"Tạm ngưng"/"Xóa"/"Sinh việc hôm nay ngay".
+3. Tạo 2 Vị trí 5S ở 2 phòng ban khác nhau (vd "Phòng Kế toán" và "Đội xe"), mỗi phòng ban có
+   ít nhất 2-3 nhân sự liên kết tài khoản khác nhau → mở form Sửa 1 trong 2 vị trí đó → xác nhận
+   "Người dọn hiện tại"/"Người chấm hiện tại" CHỈ liệt kê đúng nhân sự thuộc phòng ban đã chọn,
+   không còn thấy toàn bộ nhân sự nhà máy.
+4. Thử lưu vị trí 5S KHÔNG chọn "Người chấm hiện tại" → xác nhận bị chặn đúng thông báo; chọn
+   xong lưu thành công.
+5. Test "Phân công thông minh" (cả từ Cài đặt lẫn nút mới ở `/dashboard/kpi/5s`): với 2 phòng
+   ban ở bước 3, bấm "Tạo đề xuất" → xác nhận đề xuất người dọn/chấm CHỈ đến từ đúng phòng ban
+   của từng vị trí, không lẫn người phòng ban khác. Nếu phòng ban đó CHƯA từng gán ai làm 5S
+   trước đây → xác nhận cảnh báo "Phòng ban chưa từng gán ai — đã nới lỏng" hiện đúng, và đề
+   xuất khi đó mở rộng ra toàn bộ phòng ban (không còn giới hạn "đã từng dọn/chấm"). Nếu phòng
+   ban ĐÃ có người từng làm 5S ở vị trí khác → xác nhận đề xuất ưu tiên đúng những người đó.
+6. Đăng nhập 1 tài khoản là lãnh đạo phòng ban (Chức vụ đúng 1 trong 6 chức danh, xem mục "Phase
+   B") → xác nhận vào được `Cài đặt → KPI & 5S` (trước đây bị ẩn/chặn hoàn toàn) → tạo/sửa được
+   Vị trí 5S có `phong_ban_id` = đúng phòng ban của họ; thử chọn phòng ban KHÁC phòng ban mình →
+   xác nhận bị chặn lưu (lỗi RLS) — ghi nhận đây là hành vi chấp nhận được (chưa có UX thân
+   thiện hơn), không phải bug.
+7. Test nút "Phân công thông minh" mới ở `/dashboard/kpi/5s` cho tài khoản lãnh đạo phòng ban →
+   xác nhận CHỈ thấy/random được vị trí thuộc đúng phòng ban mình (không phải toàn bộ nhà máy
+   như admin).
+8. Test regression: tài khoản admin vẫn thấy/thao tác được mọi thứ như trước ở cả 2 nơi (Cài đặt
+   và `/dashboard/kpi/5s`), không bị thu hẹp bởi các thay đổi trên.

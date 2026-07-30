@@ -194,7 +194,7 @@ export default function KpiAppealsPage() {
   const canResolve = isAdmin || hasPermission(user, "kpi.manage_config")
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex items-center gap-3">
           <div className="hover-lift shrink-0 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-200 via-pink-100 to-rose-100 shadow-sm">

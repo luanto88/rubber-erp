@@ -4,12 +4,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, MapPin, Settings, Sparkles, Users } from "lucide-react"
+import { AlertCircle, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { getIsoWeekStart } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { KpiShell } from "../_components/kpi-shell"
+import { Kpi5sAutoAssignModal } from "../_components/kpi-5s-auto-assign-modal"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
+import { sendKpiNotify } from "@/lib/kpi-notify"
 import {
   fetchAllLocationCleanerMemberships,
   fetchKpi5sLocations,
@@ -37,6 +39,8 @@ export default function Kpi5sLocationListPage() {
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
   const [subTab, setSubTab] = useState<"today" | "all">("today")
+  const [showAutoAssign, setShowAutoAssign] = useState(false)
+  const [assignSummary, setAssignSummary] = useState<{ userId: string; ten: string; donZones: string[]; chamZones: string[] }[] | null>(null)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -99,6 +103,12 @@ export default function Kpi5sLocationListPage() {
   const isAdmin = user?.role === "admin"
   const canManageLocations = isAdmin || hasPermission(user, "kpi.manage_config")
   const isDeptLeader = myLeaderDepartmentId != null
+  // Riêng cho các nút hành động (KHÔNG dùng để tính visibleLocations bên dưới — biến đó phải
+  // giữ đúng nghĩa "bypass hoàn toàn scoping theo phòng ban", chỉ admin/kpi.manage_config).
+  // Lãnh đạo phòng ban giờ cũng quản lý được vị trí của đúng phòng ban mình (RLS đã cho phép từ
+  // migration 20260807_kpi_department_scoping.sql) nên cũng cần thấy "Quản lý vị trí"/"Phân công
+  // thông minh".
+  const canManageAnyLocation = canManageLocations || isDeptLeader
 
   // Phạm vi hiển thị (Phase E): admin/kpi.manage_config thấy tất cả; lãnh đạo phòng ban thấy mọi
   // vị trí thuộc ĐÚNG phòng ban của họ; người dùng thường chỉ thấy vị trí họ thực sự liên quan
@@ -125,7 +135,7 @@ export default function Kpi5sLocationListPage() {
   const shownLocations = subTab === "today" ? todayLocations : visibleLocations
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -139,15 +149,40 @@ export default function Kpi5sLocationListPage() {
               </p>
             </div>
           </div>
-          {canManageLocations && (
-            <Link
-              href="/dashboard/settings?tab=kpi_5s"
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm text-sm"
-            >
-              <Settings size={15} /> Quản lý vị trí
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageAnyLocation && visibleLocations.length > 0 && (
+              <button
+                onClick={() => { setAssignSummary(null); setShowAutoAssign(true) }}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-sm text-sm"
+              >
+                <Shuffle size={15} /> Phân công thông minh
+              </button>
+            )}
+            {canManageLocations && (
+              <Link
+                href="/dashboard/settings?tab=kpi_5s"
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm text-sm"
+              >
+                <Settings size={15} /> Quản lý vị trí
+              </Link>
+            )}
+          </div>
         </div>
+
+        {assignSummary && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="font-bold mb-1">Đã giao xong:</div>
+            <ul className="space-y-0.5 text-xs">
+              {assignSummary.map((s) => (
+                <li key={s.userId}>
+                  <strong>{s.ten}</strong>
+                  {s.donZones.length > 0 && ` — dọn: ${s.donZones.join(", ")}`}
+                  {s.chamZones.length > 0 && `${s.donZones.length > 0 ? " ·" : " —"} chấm: ${s.chamZones.join(", ")}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
           <button
@@ -233,6 +268,30 @@ export default function Kpi5sLocationListPage() {
           </div>
         )}
       </div>
+
+      {showAutoAssign && factoryId && (
+        <Kpi5sAutoAssignModal
+          factoryId={factoryId}
+          locations={visibleLocations}
+          onClose={() => setShowAutoAssign(false)}
+          onAssigned={(summary) => {
+            setShowAutoAssign(false)
+            setAssignSummary(summary)
+            sendKpiNotify({
+              factoryId,
+              title: "Phân công vị trí 5S",
+              lines: summary.map((s) => {
+                const parts: string[] = []
+                if (s.donZones.length > 0) parts.push(`dọn: ${s.donZones.join(", ")}`)
+                if (s.chamZones.length > 0) parts.push(`chấm: ${s.chamZones.join(", ")}`)
+                return `👤 ${s.ten} — ${parts.join(" · ")}`
+              }),
+              link: "/dashboard/kpi/5s",
+            })
+            if (user) void loadData(factoryId, user.id)
+          }}
+        />
+      )}
     </KpiShell>
   )
 }

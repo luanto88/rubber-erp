@@ -23,6 +23,7 @@ import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
+import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -711,6 +712,11 @@ export default function SettingsPage() {
   const [masterDataTab, setMasterDataTab] = useState<MasterDataTab>("suffixes")
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
+  // Phòng ban mà chính user đang đăng nhập là lãnh đạo (Trưởng/Phó phòng, Giám đốc/Phó GĐ...) —
+  // migration 20260807_kpi_department_scoping.sql đã cấp RLS cho họ tự quản lý Vị trí 5S/Khu
+  // vực/Việc định kỳ đúng phòng ban mình mà KHÔNG cần quyền kpi.manage_config, nhưng UI Cài đặt
+  // trước đó vẫn ẩn hoàn toàn tab "KPI & 5S" với họ — null = không phải lãnh đạo phòng ban nào.
+  const [kpiLeaderDepartmentId, setKpiLeaderDepartmentId] = useState<string | null>(null)
   const [suffixes, setSuffixes] = useState<Suffix[]>([])
   const [loading, setLoading] = useState(true)
   const [profiles, setProfiles] = useState<ProfileRow[]>([])
@@ -741,6 +747,10 @@ export default function SettingsPage() {
   const canViewMaintenanceConfig = isAdmin || hasPermission(user, "settings.maintenance_config")
   const canViewIsoSignature = isAdmin || hasPermission(user, "iso.signature")
   const canManageKpiConfig = isAdmin || hasPermission(user, "kpi.manage_config")
+  const isKpiDeptLeader = kpiLeaderDepartmentId != null
+  // Dùng cho tab "KPI & 5S" (sidebar + CRUD Vị trí/Khu vực) — mở rộng thêm lãnh đạo phòng ban,
+  // KHÔNG đổi ý nghĩa `canManageKpiConfig` gốc (vẫn dùng riêng cho guard tổng phía trên).
+  const canManageKpi5s = canManageKpiConfig || isKpiDeptLeader
 
   const [configTab, setConfigTab] = useState<FactoryConfigTab>("warehouses")
   const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
@@ -1676,6 +1686,12 @@ export default function SettingsPage() {
 
     setFactoryId(fid)
     setUser(sessionUser)
+    // Lãnh đạo phòng ban (Trưởng/Phó phòng, Giám đốc/Phó GĐ...) được RLS cho phép tự quản lý
+    // Vị trí 5S/Khu vực/Việc định kỳ đúng phòng ban mình (migration
+    // 20260807_kpi_department_scoping.sql) — phải tính TRƯỚC guard tổng bên dưới để không bị
+    // chặn vào Cài đặt chỉ vì thiếu mọi quyền Cài đặt khác.
+    const leaderDeptId = await resolveMyLeaderDepartmentId(sessionUser.id, fid)
+    setKpiLeaderDepartmentId(leaderDeptId)
     if (
       !hasPermission(sessionUser, "settings.manage_config") &&
       !hasPermission(sessionUser, "users.view") &&
@@ -1683,7 +1699,8 @@ export default function SettingsPage() {
       !hasPermission(sessionUser, "settings.master_data") &&
       !hasPermission(sessionUser, "settings.maintenance_config") &&
       !hasPermission(sessionUser, "iso.signature") &&
-      !hasPermission(sessionUser, "kpi.manage_config")
+      !hasPermission(sessionUser, "kpi.manage_config") &&
+      leaderDeptId == null
     ) {
       setLoading(false)
       window.location.replace("/dashboard")
@@ -2621,7 +2638,7 @@ export default function SettingsPage() {
     { key: "master-data" as const, label: "Danh mục", icon: Database, show: canViewMasterData },
     { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: canViewMaintenanceConfig },
     { key: "iso-vanban" as const, label: "ISO & Văn bản", icon: FileText, show: canViewIsoSignature },
-    { key: "kpi-5s" as const, label: "KPI & 5S", icon: Target, show: canManageKpiConfig },
+    { key: "kpi-5s" as const, label: "KPI & 5S", icon: Target, show: canManageKpi5s },
   ].filter((item) => item.show)
 
   const configModalFooter = (
@@ -5894,7 +5911,7 @@ export default function SettingsPage() {
               <div className="p-6">
                 <Kpi5sLocationsTab
                   factoryId={factoryId}
-                  canManage={canManageKpiConfig}
+                  canManage={canManageKpi5s}
                   currentUserId={user?.id || ""}
                   userOptions={activeProfilesForLink.map((p) => ({
                     id: p.id,
@@ -5906,7 +5923,7 @@ export default function SettingsPage() {
 
             {kpi5sTab === "khu-vuc" && (
               <div className="p-6">
-                <Kpi5sZonesTab factoryId={factoryId} canManage={canManageKpiConfig} />
+                <Kpi5sZonesTab factoryId={factoryId} canManage={canManageKpi5s} />
               </div>
             )}
           </div>

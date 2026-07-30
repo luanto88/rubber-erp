@@ -5,15 +5,15 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md mục "Việc định kỳ theo nhóm" + "Người thay thế
 // tạm thời".
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CalendarClock, Pencil, Plus, Power, RefreshCw, Repeat, Trash2, UserCog } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import {
-  canSeeKpiTemplatesTab,
   fetchDepartmentOptions,
+  resolveMyLeaderDepartmentId,
   type DepartmentOption,
 } from "@/lib/kpi-department-leaders"
 import {
@@ -57,6 +57,7 @@ export default function KpiTemplatesPage() {
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [pendingSubs, setPendingSubs] = useState<KpiUserSubstitution[]>([])
+  const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -92,22 +93,24 @@ export default function KpiTemplatesPage() {
     void bootstrap()
   }, [])
 
-  const loadData = useCallback(async (fid: string) => {
+  const loadData = useCallback(async (fid: string, uid: string) => {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [templateRows, subRows, groupRows, candidateData, deptRows] = await Promise.all([
+      const [templateRows, subRows, groupRows, candidateData, deptRows, leaderDeptId] = await Promise.all([
         fetchKpiTaskTemplates(fid),
         fetchKpiUserSubstitutions(fid),
         loadAllPersonnelGroups(fid),
         loadKpiTaskCandidates(fid),
         fetchDepartmentOptions(),
+        resolveMyLeaderDepartmentId(uid, fid),
       ])
       setTemplates(templateRows)
       setSubstitutions(subRows)
       setGroups(groupRows)
       setCandidates(candidateData.people)
       setDepartments(deptRows)
+      setMyLeaderDepartmentId(leaderDeptId)
     } catch (err) {
       setDataError(getKpiErrorMessage(err, "Không tải được dữ liệu."))
     } finally {
@@ -126,24 +129,25 @@ export default function KpiTemplatesPage() {
   }, [])
 
   useEffect(() => {
-    if (factoryId) void loadData(factoryId)
-  }, [factoryId, loadData])
+    if (factoryId && user) void loadData(factoryId, user.id)
+  }, [factoryId, user, loadData])
 
   useEffect(() => {
     if (factoryId && user) void loadPendingSubs(factoryId, user.id)
   }, [factoryId, user, loadPendingSubs])
 
-  // Guard bổ sung: tab "Việc định kỳ" chỉ dành cho admin/kpi.manage_config/lãnh đạo phòng ban —
-  // người dùng thường chỉ có kpi.view (đã qua guard cache ở bootstrap) không được vào trang này,
-  // bảo vệ ở cả UI (kpi-shell ẩn tab) lẫn logic (redirect thật ở đây, không chỉ ẩn).
+  // Mặc định sub-tab: người không quản lý được "Việc định kỳ" (không phải admin/kpi.manage_config/
+  // lãnh đạo phòng ban) chỉ cần vào đây để tự đăng ký "Người thay thế tạm thời" — mở thẳng đúng
+  // sub-tab đó thay vì "Việc định kỳ" (đọc được nhưng không thao tác gì được). Chỉ áp dụng MỘT
+  // LẦN ngay sau khi biết đủ quyền, không ép lại nếu người dùng đã tự chuyển tab.
+  const defaultSubTabAppliedRef = useRef(false)
   useEffect(() => {
-    if (!factoryId || !user) return
-    let alive = true
-    void canSeeKpiTemplatesTab(user, factoryId).then((ok) => {
-      if (alive && !ok) window.location.replace("/dashboard/kpi/tasks")
-    })
-    return () => { alive = false }
-  }, [factoryId, user])
+    if (defaultSubTabAppliedRef.current) return
+    if (!factoryId || !user || dataLoading) return
+    defaultSubTabAppliedRef.current = true
+    const manage = user.role === "admin" || hasPermission(user, "kpi.manage_config") || myLeaderDepartmentId != null
+    if (!manage) setSubTab("substitutions")
+  }, [factoryId, user, dataLoading, myLeaderDepartmentId])
 
   const nameByUserId = useMemo(() => {
     const map: Record<string, string> = Object.fromEntries(candidates.map((c) => [c.userId, c.ten]))
@@ -157,7 +161,11 @@ export default function KpiTemplatesPage() {
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
   const isAdmin = user?.role === "admin"
-  const canManageTemplates = isAdmin || hasPermission(user, "kpi.manage_config")
+  const isDeptLeader = myLeaderDepartmentId != null
+  // Khớp đúng RLS kpi_task_templates_insert/update/delete (migration
+  // 20260807_kpi_department_scoping.sql) — admin HOẶC kpi.manage_config HOẶC lãnh đạo phòng ban
+  // (bất kỳ phòng ban nào, vì template tự khai báo phong_ban_id riêng khi tạo).
+  const canManageTemplates = isAdmin || hasPermission(user, "kpi.manage_config") || isDeptLeader
   const canChooseOriginal = isAdmin || hasPermission(user, "kpi.assign")
 
   const handleToggleActive = async (t: KpiTaskTemplate) => {
@@ -165,7 +173,7 @@ export default function KpiTemplatesPage() {
     setActionError(null)
     try {
       await setKpiTaskTemplateActive(t.id, !t.is_active)
-      if (factoryId) await loadData(factoryId)
+      if (factoryId && user) await loadData(factoryId, user.id)
     } catch (err) {
       setActionError(getKpiErrorMessage(err, "Không cập nhật được trạng thái."))
     } finally {
@@ -180,7 +188,7 @@ export default function KpiTemplatesPage() {
     try {
       await deleteKpiTaskTemplate(deleteTemplateTarget.id)
       setDeleteTemplateTarget(null)
-      if (factoryId) await loadData(factoryId)
+      if (factoryId && user) await loadData(factoryId, user.id)
     } catch (err) {
       setActionError(getKpiErrorMessage(err, "Không xóa được việc định kỳ."))
     } finally {
@@ -195,7 +203,7 @@ export default function KpiTemplatesPage() {
     try {
       await deleteKpiUserSubstitution(deleteSubTarget.id)
       setDeleteSubTarget(null)
-      if (factoryId) await loadData(factoryId)
+      if (factoryId && user) await loadData(factoryId, user.id)
     } catch (err) {
       setActionError(getKpiErrorMessage(err, "Không hủy được đăng ký."))
     } finally {
@@ -206,7 +214,7 @@ export default function KpiTemplatesPage() {
   const canManageSub = (s: KpiUserSubstitution) => isAdmin || s.original_user_id === user?.id || s.created_by === user?.id
 
   const handleSyncToday = async () => {
-    if (!factoryId) return
+    if (!factoryId || !user) return
     setSyncingToday(true)
     setSyncTodayMessage(null)
     setActionError(null)
@@ -215,7 +223,7 @@ export default function KpiTemplatesPage() {
       setSyncTodayMessage(
         created > 0 ? `Đã sinh ${created} việc định kỳ mới cho hôm nay.` : "Không có việc mới nào cần sinh — mọi việc định kỳ hôm nay đã được tạo.",
       )
-      await loadData(factoryId)
+      await loadData(factoryId, user.id)
     } catch (err) {
       setActionError(getKpiErrorMessage(err, "Không sinh được việc hôm nay."))
     } finally {
@@ -236,7 +244,7 @@ export default function KpiTemplatesPage() {
   }
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <div ref={revealRef} className="scroll-reveal flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -287,7 +295,7 @@ export default function KpiTemplatesPage() {
           <PendingSubstitutionsBanner
             items={pendingSubs}
             resolveName={resolveName}
-            onChanged={() => { if (factoryId && user) { void loadData(factoryId); void loadPendingSubs(factoryId, user.id) } }}
+            onChanged={() => { if (factoryId && user) { void loadData(factoryId, user.id); void loadPendingSubs(factoryId, user.id) } }}
           />
         )}
 
@@ -436,7 +444,7 @@ export default function KpiTemplatesPage() {
           onClose={() => setShowTemplateForm(false)}
           onSaved={() => {
             setShowTemplateForm(false)
-            if (factoryId) void syncTodaySilently(factoryId).then(() => loadData(factoryId))
+            if (factoryId && user) void syncTodaySilently(factoryId).then(() => loadData(factoryId, user.id))
           }}
         />
       )}
@@ -452,7 +460,7 @@ export default function KpiTemplatesPage() {
           onClose={() => setShowSubForm(false)}
           onSaved={() => {
             setShowSubForm(false)
-            if (factoryId) void syncTodaySilently(factoryId).then(() => loadData(factoryId))
+            if (factoryId && user) void syncTodaySilently(factoryId).then(() => loadData(factoryId, user.id))
           }}
         />
       )}

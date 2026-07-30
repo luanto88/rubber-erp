@@ -781,7 +781,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   if (loading || dataLoading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
   if (dataError || !task) {
     return (
-      <KpiShell user={user} factoryId={factoryId}>
+      <KpiShell>
         <div className="bg-white rounded-2xl border border-red-200 p-8 text-center text-red-600">{dataError || "Không tìm thấy công việc."}</div>
       </KpiShell>
     )
@@ -857,7 +857,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <button onClick={() => router.push("/dashboard/kpi/tasks")} className="flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700">
           <ArrowLeft size={14} /> Quay lại danh sách

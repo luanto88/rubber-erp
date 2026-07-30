@@ -161,7 +161,9 @@ export function isTaskDueSoon(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai
   return due >= nowMs && due <= nowMs + KPI_DUE_SOON_HOURS * 3600_000
 }
 
-async function fetchDepartmentUserIds(factoryId: string, departmentId: string): Promise<Set<string>> {
+// Export dùng chung — filter theo Phòng ban cho cả candidate list kiểu maintenance_staff
+// (loadKpiTaskCandidates) lẫn danh sách profile thô (vd form Vị trí 5S, kpi-5s-locations-tab.tsx).
+export async function fetchDepartmentUserIds(factoryId: string, departmentId: string): Promise<Set<string>> {
   try {
     const res = await fetch(`/api/kpi/dept-users?factoryId=${factoryId}&departmentId=${departmentId}`)
     if (!res.ok) return new Set()

@@ -299,7 +299,7 @@ export default function Kpi5sLocationDetailPage() {
   const canCorrectResult = user?.role === "admin" || hasPermission(user, "kpi.manage_config")
 
   return (
-    <KpiShell user={user} factoryId={factoryId}>
+    <KpiShell>
       <div className="space-y-4">
         <Link href="/dashboard/kpi/5s" className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-violet-600">
           <ArrowLeft size={14} /> Danh sách vị trí 5S
