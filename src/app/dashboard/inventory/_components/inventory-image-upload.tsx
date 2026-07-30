@@ -108,6 +108,131 @@ export async function uploadInventoryImage(params: {
   return { publicUrl: data.publicUrl }
 }
 
+type InventoryMultiImageUploadProps = {
+  factoryId: string | null
+  documentType: string
+  label: string
+  images: string[]
+  onChange: (urls: string[]) => void
+  bucket?: string
+  maxImages?: number
+  helperText?: string
+}
+
+const DEFAULT_MAX_IMAGES = 6
+
+export function InventoryMultiImageUpload({
+  factoryId,
+  documentType,
+  label,
+  images,
+  onChange,
+  bucket = "inventory-files",
+  maxImages = DEFAULT_MAX_IMAGES,
+  helperText,
+}: InventoryMultiImageUploadProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+
+  const handlePick = () => {
+    inputRef.current?.click()
+  }
+
+  const handleRemove = (index: number) => {
+    onChange(images.filter((_, i) => i !== index))
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ""
+    if (files.length === 0) return
+
+    if (!factoryId) {
+      setError("Chưa xác định được nhà máy để tải ảnh.")
+      return
+    }
+
+    const remaining = maxImages - images.length
+    if (remaining <= 0) {
+      setError(`Đã đủ ${maxImages} ảnh. Vui lòng xóa bớt ảnh cũ để tải ảnh mới.`)
+      return
+    }
+
+    const picked = files.slice(0, remaining)
+    setUploading(true)
+    setError(null)
+
+    try {
+      const uploads = await Promise.all(
+        picked.map((file) => uploadInventoryImage({ bucket, documentType, factoryId, file }).then((r) => r.publicUrl)),
+      )
+      onChange([...images, ...uploads])
+      if (files.length > picked.length) {
+        setError(`Chỉ tải được thêm ${picked.length} ảnh (tối đa ${maxImages} ảnh/dòng).`)
+      }
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-bold text-slate-600">{label}</label>
+      <div className="flex flex-wrap items-start gap-2">
+        {images.map((url, index) => (
+          <div
+            key={`${index}-${url}`}
+            className="group relative h-14 w-14 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm"
+          >
+            <img
+              src={url}
+              alt={`${label} ${index + 1}`}
+              className="h-full w-full cursor-zoom-in object-cover"
+              onClick={() => setLightboxUrl(url)}
+              title="Nhấn để xem ảnh lớn"
+            />
+            <button
+              type="button"
+              onClick={() => handleRemove(index)}
+              className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm transition hover:bg-white"
+              aria-label={`Xóa ảnh ${index + 1}`}
+            >
+              <X size={10} />
+            </button>
+          </div>
+        ))}
+
+        {images.length < maxImages ? (
+          <button
+            type="button"
+            onClick={handlePick}
+            disabled={uploading}
+            className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white text-slate-400 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+            title={uploading ? "Đang tải ảnh..." : `Chọn ảnh (tối đa ${maxImages} ảnh, chọn nhiều cùng lúc)`}
+          >
+            {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+          </button>
+        ) : null}
+      </div>
+      {error ? <div className="mt-1 text-xs text-red-600">{error}</div> : null}
+      {helperText ? <div className="mt-1 text-[11px] text-slate-400">{helperText}</div> : null}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
+      {lightboxUrl && <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+    </div>
+  )
+}
+
 function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
   return (
     <div

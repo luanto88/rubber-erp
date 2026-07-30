@@ -50,6 +50,11 @@ export function authEmailsForUsername(username: string) {
 export function clearLegacySession() {
   localStorage.removeItem("erp_user")
   localStorage.removeItem("erp_factory")
+  // Draft phiếu kho lưu theo thiết bị, không theo user — dọn khi đăng xuất để tránh tên người
+  // dùng cũ (Người lập phiếu) rò rỉ sang tài khoản khác đăng nhập sau trên cùng máy.
+  localStorage.removeItem("inventory-issue-draft-v4")
+  localStorage.removeItem("inventory-receipt-draft-v5")
+  localStorage.removeItem("inventory-transfer-draft-v3")
 }
 
 export function clearSupabaseBrowserSession() {

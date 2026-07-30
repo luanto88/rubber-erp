@@ -7,12 +7,17 @@ import { AlertTriangle, ArrowRightLeft, Ban, Check, CopyPlus, Printer, Save, Tra
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
-import { InventoryImageUpload } from "../_components/inventory-image-upload"
+import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
-import { buildEffectiveStockBalances, getStockContextLabel } from "../_components/inventory-stock"
+import { buildEffectiveStockBalances, getStockContextLabel, resolveStockThreshold } from "../_components/inventory-stock"
 import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import {
+  sendInventoryLowStockAlert,
+  sendInventoryNxtChangeNotify,
+  type NxtDocumentNotifyLine,
+} from "@/lib/inventory-notify"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
@@ -30,8 +35,7 @@ type TransferLineDraft = {
   lotNo: string
   expiryDate: string
   note: string
-  image1Url: string
-  image2Url: string
+  imageUrls: string[]
 }
 
 type TransferDraftState = {
@@ -39,7 +43,6 @@ type TransferDraftState = {
   documentCode: string
   sourceWarehouseId: string
   targetWarehouseId: string
-  actorName: string
   documentDate: string
   note: string
   selectedItemIds: string[]
@@ -116,8 +119,7 @@ function makeLine(itemId = ""): TransferLineDraft {
     lotNo: "",
     expiryDate: "",
     note: "",
-    image1Url: "",
-    image2Url: "",
+    imageUrls: [],
   }
 }
 
@@ -127,7 +129,6 @@ function defaultDraft(): TransferDraftState {
     documentCode: "",
     sourceWarehouseId: "",
     targetWarehouseId: "",
-    actorName: "",
     documentDate: todayIso(),
     note: "",
     selectedItemIds: [],
@@ -144,7 +145,8 @@ function normalizeDraftState(value: unknown): TransferDraftState {
     ? raw.lines
         .map((line) => {
           if (!line || typeof line !== "object") return null
-          const entry = line as Partial<TransferLineDraft>
+          const entry = line as Partial<TransferLineDraft> & { image1Url?: string; image2Url?: string }
+          const legacyImages = [entry.image1Url, entry.image2Url].filter((v): v is string => Boolean(v))
           return {
             id: entry.id || makeLine().id,
             itemId: entry.itemId || "",
@@ -152,8 +154,9 @@ function normalizeDraftState(value: unknown): TransferDraftState {
             lotNo: entry.lotNo || "",
             expiryDate: entry.expiryDate || "",
             note: entry.note || "",
-            image1Url: entry.image1Url || "",
-            image2Url: entry.image2Url || "",
+            imageUrls: Array.isArray(entry.imageUrls)
+              ? entry.imageUrls.filter((u): u is string => typeof u === "string")
+              : legacyImages,
           }
         })
         .filter((line): line is TransferLineDraft => Boolean(line))
@@ -164,7 +167,6 @@ function normalizeDraftState(value: unknown): TransferDraftState {
     documentCode: typeof raw.documentCode === "string" ? raw.documentCode : "",
     sourceWarehouseId: typeof raw.sourceWarehouseId === "string" ? raw.sourceWarehouseId : "",
     targetWarehouseId: typeof raw.targetWarehouseId === "string" ? raw.targetWarehouseId : "",
-    actorName: typeof raw.actorName === "string" ? raw.actorName : "",
     documentDate: typeof raw.documentDate === "string" && raw.documentDate ? raw.documentDate : base.documentDate,
     note: typeof raw.note === "string" ? raw.note : "",
     selectedItemIds: Array.isArray(raw.selectedItemIds)
@@ -231,7 +233,7 @@ function buildPersistableLines(lines: TransferLineDraft[], items: InventoryItemO
       lotNo,
       expiryDate,
       note: line.note.trim() || null,
-      imageUrls: [line.image1Url, line.image2Url].filter(Boolean),
+      imageUrls: line.imageUrls,
     })
   }
 
@@ -304,7 +306,6 @@ export default function InventoryTransfersPage() {
         const activeSession = await hydrateActiveSession().catch(() => ({ user: null }))
         if (activeSession.user) setCurrentUser(activeSession.user)
         const resolvedFactoryId = inventoryData.factoryId ?? (await getActiveFactoryId())
-        const actorName = activeSession.user?.full_name || activeSession.user?.username || ""
 
         setFactoryId(resolvedFactoryId)
         setWarning(inventoryData.warning)
@@ -379,7 +380,6 @@ export default function InventoryTransfersPage() {
             documentCode: loaded.document.document_code,
             sourceWarehouseId,
             targetWarehouseId,
-            actorName,
             documentDate: loaded.document.document_date,
             note: loaded.document.notes || "",
             selectedItemIds,
@@ -390,8 +390,7 @@ export default function InventoryTransfersPage() {
               lotNo: line.lot_no || "",
               expiryDate: line.expiry_date || "",
               note: line.line_notes || "",
-              image1Url: line.image_urls?.[0] || "",
-              image2Url: line.image_urls?.[1] || "",
+              imageUrls: line.image_urls || [],
             })),
           })
           setDocumentStatus(
@@ -411,23 +410,33 @@ export default function InventoryTransfersPage() {
         if (stored) {
           try {
             const parsed = normalizeDraftState(JSON.parse(stored))
-            setDraft({
-              ...parsed,
-              actorName: parsed.actorName || actorName,
-              sourceWarehouseId:
-                inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.sourceWarehouseId)
-                  ? parsed.sourceWarehouseId
-                  : fallbackSource,
-              targetWarehouseId:
-                inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.targetWarehouseId)
-                  ? parsed.targetWarehouseId
-                  : fallbackTarget,
-            })
-            setDocumentStatus(parsed.documentId ? "draft" : null)
+            if (parsed.documentId) {
+              // Phiếu này đã có mã (đã Lưu nháp/Ghi sổ trước đó) — không tự nạp lại qua đường vào
+              // trang trần (không có ?documentId=), tránh hiện "phiếu ma" với trạng thái sai. Muốn
+              // tiếp tục phiếu cũ phải mở đúng qua ?documentId=.
+              setDraft({
+                ...defaultDraft(),
+                sourceWarehouseId: fallbackSource,
+                targetWarehouseId: fallbackTarget,
+              })
+              setDocumentStatus(null)
+            } else {
+              setDraft({
+                ...parsed,
+                sourceWarehouseId:
+                  inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.sourceWarehouseId)
+                    ? parsed.sourceWarehouseId
+                    : fallbackSource,
+                targetWarehouseId:
+                  inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.targetWarehouseId)
+                    ? parsed.targetWarehouseId
+                    : fallbackTarget,
+              })
+              setDocumentStatus(null)
+            }
           } catch {
             setDraft({
               ...defaultDraft(),
-              actorName,
               sourceWarehouseId: fallbackSource,
               targetWarehouseId: fallbackTarget,
             })
@@ -435,7 +444,6 @@ export default function InventoryTransfersPage() {
         } else {
           setDraft({
             ...defaultDraft(),
-            actorName,
             sourceWarehouseId: fallbackSource,
             targetWarehouseId: fallbackTarget,
           })
@@ -655,7 +663,6 @@ export default function InventoryTransfersPage() {
   const resetDraft = () => {
     const nextDraft = {
       ...defaultDraft(),
-      actorName: draft.actorName,
       sourceWarehouseId: warehouses[0]?.id || "",
       targetWarehouseId: warehouses[1]?.id || warehouses[0]?.id || "",
     }
@@ -666,7 +673,7 @@ export default function InventoryTransfersPage() {
     window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
   }
 
-  const refreshBalances = async (fid: string) => {
+  const refreshBalances = async (fid: string): Promise<BalanceRow[]> => {
     const [balanceResult, lotBalanceResult, oilPoolResult] = await Promise.all([
       supabase
         .from("inventory_stock_balances")
@@ -682,16 +689,17 @@ export default function InventoryTransfersPage() {
         .eq("factory_id", fid),
     ])
 
+    let effective: BalanceRow[] = []
     if (!balanceResult.error && !oilPoolResult.error) {
-      setBalances(
-        buildEffectiveStockBalances({
-          items,
-          stockBalances: (balanceResult.data || []) as BalanceRow[],
-          oilPoolBalances: (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[],
-        }) as BalanceRow[],
-      )
+      effective = buildEffectiveStockBalances({
+        items,
+        stockBalances: (balanceResult.data || []) as BalanceRow[],
+        oilPoolBalances: (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[],
+      }) as BalanceRow[]
+      setBalances(effective)
     }
     if (!lotBalanceResult.error) setLotBalances((lotBalanceResult.data || []) as LotBalanceRow[])
+    return effective
   }
 
   const saveTransferDraft = async () => {
@@ -760,7 +768,7 @@ export default function InventoryTransfersPage() {
         target_warehouse_id: draft.targetWarehouseId,
         source_name: sourceWarehouseRow.name,
         recipient_name: null,
-        requester_name: draft.actorName || null,
+        requester_name: currentUser?.full_name || currentUser?.username || session.user.email || null,
         created_by: session.user.id,
         status: "draft",
         qr_value: `/dashboard/inventory/transfers?code=${encodeURIComponent(nextDocumentCode)}`,
@@ -902,7 +910,53 @@ export default function InventoryTransfersPage() {
         documentCode: targetDocumentCode,
       }))
       setSaveSuccess(`Đã ghi sổ phiếu chuyển ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
-      await refreshBalances(factoryId)
+      const freshBalances = await refreshBalances(factoryId)
+      const freshBalanceMap = new Map(
+        freshBalances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0]),
+      )
+      const nguoiNx = currentUser?.full_name || currentUser?.username || session.user.email || ""
+      const sourceWh = warehouses.find((w) => w.id === draft.sourceWarehouseId) || null
+      const targetWh = warehouses.find((w) => w.id === draft.targetWarehouseId) || null
+      const notifyLines: NxtDocumentNotifyLine[] = []
+      for (const detail of lineDetails) {
+        if (!detail.item) continue
+        const newSourceStock = freshBalanceMap.get(`${draft.sourceWarehouseId}:${detail.item.id}`) ?? 0
+        notifyLines.push({
+          itemName: detail.item.name,
+          quantity: detail.quantity,
+          unit: detail.item.unit,
+          currentStock: newSourceStock,
+        })
+        const { minStock: sourceMinStock } = resolveStockThreshold(
+          detail.item.id,
+          draft.sourceWarehouseId,
+          detail.item,
+          warehouseRules,
+        )
+        if (sourceMinStock > 0 && newSourceStock < sourceMinStock) {
+          sendInventoryLowStockAlert({ itemName: detail.item.name, currentStock: newSourceStock, unit: detail.item.unit })
+        }
+        const newTargetStock = freshBalanceMap.get(`${draft.targetWarehouseId}:${detail.item.id}`) ?? 0
+        const { minStock: targetMinStock } = resolveStockThreshold(
+          detail.item.id,
+          draft.targetWarehouseId,
+          detail.item,
+          warehouseRules,
+        )
+        if (targetMinStock > 0 && newTargetStock < targetMinStock) {
+          sendInventoryLowStockAlert({ itemName: detail.item.name, currentStock: newTargetStock, unit: detail.item.unit })
+        }
+      }
+      if (notifyLines.length > 0) {
+        sendInventoryNxtChangeNotify({
+          loaiNxt: "Chuyển",
+          documentCode: targetDocumentCode,
+          warehouseLabel: `${sourceWh?.code || "?"} → ${targetWh?.code || "?"}`,
+          nguoiNx,
+          ghiChu: draft.note.trim() || null,
+          lines: notifyLines,
+        })
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Không ghi sổ được phiếu chuyển kho.")
     } finally {
@@ -1338,23 +1392,13 @@ export default function InventoryTransfersPage() {
                       </select>
                     </div>
 
-                    <div>
-                      <InventoryImageUpload
+                    <div className="md:col-span-2">
+                      <InventoryMultiImageUpload
                         factoryId={factoryId}
                         documentType="transfer"
-                        label="Hình ảnh 1"
-                        value={detail.line.image1Url}
-                        onChange={(url) => updateLine(detail.line.id, { image1Url: url })}
-                      />
-                    </div>
-
-                    <div>
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        documentType="transfer"
-                        label="Hình ảnh 2"
-                        value={detail.line.image2Url}
-                        onChange={(url) => updateLine(detail.line.id, { image2Url: url })}
+                        label="Hình ảnh (tối đa 6, chọn nhiều cùng lúc)"
+                        images={detail.line.imageUrls}
+                        onChange={(urls) => updateLine(detail.line.id, { imageUrls: urls })}
                       />
                     </div>
 

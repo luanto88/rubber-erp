@@ -83,6 +83,11 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function firstDayOfCurrentMonthIso() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+}
+
 function getReportQuantity(quantity: number) {
   return Math.abs(quantity)
 }
@@ -99,6 +104,9 @@ export default function InventoryCardsPage() {
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [movements, setMovements] = useState<InventoryStockMovementRow[]>([])
   const [lineNotesById, setLineNotesById] = useState<Record<string, string>>({})
+  const [documentInfoById, setDocumentInfoById] = useState<
+    Record<string, { requesterName: string; approved: boolean }>
+  >({})
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<string[]>([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
@@ -107,7 +115,8 @@ export default function InventoryCardsPage() {
     "export",
     "transfer",
   ])
-  const [fromDate, setFromDate] = useState("")
+  const [selectedApprovalStates, setSelectedApprovalStates] = useState<string[]>([])
+  const [fromDate, setFromDate] = useState(firstDayOfCurrentMonthIso())
   const [toDate, setToDate] = useState(todayIso())
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const revealRef = useScrollReveal()
@@ -140,6 +149,29 @@ export default function InventoryCardsPage() {
             )
             setLineNotesById(nextNotes)
           }
+
+          // Mỗi dòng phát sinh chỉ có trong bảng này khi phiếu đã Ghi sổ (đã xác nhận:
+          // inventory_cancel_document XÓA HẲN dòng phát sinh khi hủy phiếu) — nên "Trạng thái" ở
+          // đây chỉ có 2 giá trị thật sự xảy ra: Chờ phê duyệt / Đã phê duyệt.
+          const documentIds = Array.from(new Set(inventoryData.movements.map((movement) => movement.document_id)))
+          const { data: docData } = await supabase
+            .from("inventory_documents")
+            .select("id, requester_name, approved_by_name")
+            .eq("factory_id", inventoryData.factoryId)
+            .in("id", documentIds)
+
+          if (docData) {
+            const nextDocInfo = Object.fromEntries(
+              docData.map((row) => [
+                row.id as string,
+                {
+                  requesterName: (row.requester_name as string | null) || "",
+                  approved: !!row.approved_by_name,
+                },
+              ]),
+            )
+            setDocumentInfoById(nextDocInfo)
+          }
         }
       } finally {
         setLoading(false)
@@ -158,6 +190,7 @@ export default function InventoryCardsPage() {
   const categoryFilterSet = useMemo(() => new Set(selectedCategoryIds), [selectedCategoryIds])
   const itemFilterSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds])
   const typeFilterSet = useMemo(() => new Set(selectedDocumentTypes), [selectedDocumentTypes])
+  const approvalFilterSet = useMemo(() => new Set(selectedApprovalStates), [selectedApprovalStates])
 
   const availableCategories = useMemo(() => {
     const ids = new Set(
@@ -204,6 +237,11 @@ export default function InventoryCardsPage() {
         if (selectedItemIds.length > 0 && !itemFilterSet.has(item.id)) return false
         if (fromDate && movement.movement_date < fromDate) return false
         if (toDate && movement.movement_date > toDate) return false
+        if (selectedApprovalStates.length > 0) {
+          const approved = documentInfoById[movement.document_id]?.approved ?? false
+          const state = approved ? "da_duyet" : "cho_duyet"
+          if (!approvalFilterSet.has(state)) return false
+        }
         return warehouseMap.has(movement.warehouse_id)
       })
       .map((movement) => {
@@ -231,11 +269,14 @@ export default function InventoryCardsPage() {
         return b.movement_date.localeCompare(a.movement_date, "vi")
       })
   }, [
+    approvalFilterSet,
     categoryFilterSet,
+    documentInfoById,
     fromDate,
     itemFilterSet,
     itemMap,
     movements,
+    selectedApprovalStates.length,
     selectedCategoryIds.length,
     selectedItemIds.length,
     selectedWarehouseIds.length,
@@ -515,6 +556,19 @@ export default function InventoryCardsPage() {
         </div>
 
         <div className="w-full">
+          <MultiSelectField
+            label="Trạng thái"
+            options={[
+              { value: "cho_duyet", label: "Chờ phê duyệt" },
+              { value: "da_duyet", label: "Đã phê duyệt" },
+            ]}
+            selectedValues={selectedApprovalStates}
+            onChange={setSelectedApprovalStates}
+            placeholder="Tất cả trạng thái"
+          />
+        </div>
+
+        <div className="w-full">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Từ ngày</label>
           <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={INPUT_CLASS} />
         </div>
@@ -551,7 +605,7 @@ export default function InventoryCardsPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  {["Ngày", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "Loại giao dịch", "Số lô", "Hạn sử dụng", "Số lượng", "Tồn sau", "Chứng từ"].map(
+                  {["Ngày", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "Loại giao dịch", "Trạng thái", "Người tạo", "Số lượng", "Tồn sau", "Chứng từ"].map(
                     (head) => (
                       <th key={head} className="px-4 py-3 text-left font-bold">
                         {head}
@@ -583,9 +637,19 @@ export default function InventoryCardsPage() {
                         {getMovementLabel(movement.movement_type)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{movement.lot_no || "Không áp dụng"}</td>
-                    <td className="px-4 py-3 text-slate-500">
-                      {movement.expiry_date ? formatDate(movement.expiry_date) : "Không áp dụng"}
+                    <td className="px-4 py-3">
+                      {documentInfoById[movement.document_id]?.approved ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
+                          Đã phê duyệt
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700">
+                          Chờ phê duyệt
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {documentInfoById[movement.document_id]?.requesterName || "—"}
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{movement.quantity.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-600">

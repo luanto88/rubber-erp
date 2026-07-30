@@ -1,6 +1,11 @@
 "use client"
 
-import type { InventoryItemOption, InventoryOilPoolBalanceRow, InventoryStockBalanceRow } from "./inventory-data"
+import type {
+  InventoryItemOption,
+  InventoryOilPoolBalanceRow,
+  InventoryStockBalanceRow,
+  InventoryWarehouseRule,
+} from "./inventory-data"
 
 export function isSharedOilItem(item: Pick<InventoryItemOption, "uses_shared_oil_stock"> | null | undefined): boolean {
   return Boolean(item?.uses_shared_oil_stock)
@@ -40,6 +45,19 @@ export function buildEffectiveStockBalances(params: {
     .filter((balance) => Boolean(balance.warehouse_id))
 
   return [...normalBalances, ...sharedOilBalances]
+}
+
+export function resolveStockThreshold(
+  itemId: string,
+  warehouseId: string,
+  item: Pick<InventoryItemOption, "min_stock" | "max_stock"> | null | undefined,
+  warehouseRules: InventoryWarehouseRule[],
+): { minStock: number; maxStock: number } {
+  const rule = warehouseRules.find((r) => r.item_id === itemId && r.warehouse_id === warehouseId)
+  return {
+    minStock: Number(rule?.min_stock ?? item?.min_stock ?? 0),
+    maxStock: Number(rule?.max_stock ?? item?.max_stock ?? 0),
+  }
 }
 
 export function getStockContextLabel(

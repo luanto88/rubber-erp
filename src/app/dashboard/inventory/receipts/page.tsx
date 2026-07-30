@@ -3,16 +3,22 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { AlertTriangle, Ban, Check, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
+import { AlertTriangle, Ban, Check, CheckCircle2, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
-import { InventoryImageUpload } from "../_components/inventory-image-upload"
+import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
-import { buildEffectiveStockBalances, getStockContextLabel } from "../_components/inventory-stock"
+import { buildEffectiveStockBalances, getStockContextLabel, resolveStockThreshold } from "../_components/inventory-stock"
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
+import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import {
+  sendInventoryLowStockAlert,
+  sendInventoryNxtChangeNotify,
+  type NxtDocumentNotifyLine,
+} from "@/lib/inventory-notify"
 import {
   getLineTypeLabel,
   loadInventoryAdminData,
@@ -30,8 +36,7 @@ type ReceiptLineDraft = {
   lotNo: string
   expiryDate: string
   note: string
-  image1Url: string
-  image2Url: string
+  imageUrls: string[]
 }
 
 type DraftState = {
@@ -39,7 +44,6 @@ type DraftState = {
   documentCode: string
   warehouseId: string
   sourceName: string
-  actorName: string
   documentDate: string
   note: string
   selectedItemIds: string[]
@@ -107,8 +111,7 @@ function makeLine(itemId = ""): ReceiptLineDraft {
     lotNo: "",
     expiryDate: "",
     note: "",
-    image1Url: "",
-    image2Url: "",
+    imageUrls: [],
   }
 }
 
@@ -118,7 +121,6 @@ function defaultDraft(): DraftState {
     documentCode: "",
     warehouseId: "",
     sourceName: "",
-    actorName: "",
     documentDate: todayIso(),
     note: "",
     selectedItemIds: [],
@@ -159,7 +161,8 @@ function normalizeDraftState(value: unknown): DraftState {
     ? raw.lines
         .map((line) => {
           if (!line || typeof line !== "object") return null
-          const entry = line as Partial<ReceiptLineDraft>
+          const entry = line as Partial<ReceiptLineDraft> & { image1Url?: string; image2Url?: string }
+          const legacyImages = [entry.image1Url, entry.image2Url].filter((v): v is string => Boolean(v))
           return {
             id: entry.id || makeLine().id,
             itemId: entry.itemId || "",
@@ -167,8 +170,9 @@ function normalizeDraftState(value: unknown): DraftState {
             lotNo: entry.lotNo || "",
             expiryDate: entry.expiryDate || "",
             note: entry.note || "",
-            image1Url: entry.image1Url || "",
-            image2Url: entry.image2Url || "",
+            imageUrls: Array.isArray(entry.imageUrls)
+              ? entry.imageUrls.filter((u): u is string => typeof u === "string")
+              : legacyImages,
           }
         })
         .filter((line): line is ReceiptLineDraft => Boolean(line))
@@ -179,7 +183,6 @@ function normalizeDraftState(value: unknown): DraftState {
     documentCode: typeof raw.documentCode === "string" ? raw.documentCode : "",
     warehouseId: typeof raw.warehouseId === "string" ? raw.warehouseId : "",
     sourceName: typeof raw.sourceName === "string" ? raw.sourceName : "",
-    actorName: typeof raw.actorName === "string" ? raw.actorName : "",
     documentDate: typeof raw.documentDate === "string" && raw.documentDate ? raw.documentDate : base.documentDate,
     note: typeof raw.note === "string" ? raw.note : "",
     selectedItemIds: Array.isArray(raw.selectedItemIds)
@@ -223,7 +226,7 @@ function buildPersistableLines(lines: ReceiptLineDraft[], items: InventoryItemOp
       lotNo: line.lotNo.trim() || null,
       expiryDate: line.expiryDate || null,
       note: line.note.trim() || null,
-      imageUrls: [line.image1Url, line.image2Url].filter(Boolean),
+      imageUrls: line.imageUrls,
     })
   }
 
@@ -280,6 +283,10 @@ export default function InventoryReceiptsPage() {
   const [cancelModal, setCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState("")
   const [cancelling, setCancelling] = useState(false)
+  const [canApprove, setCanApprove] = useState(false)
+  const [approvedInfo, setApprovedInfo] = useState<{ at: string; byName: string } | null>(null)
+  const [approveModal, setApproveModal] = useState(false)
+  const [approving, setApproving] = useState(false)
   const [warehouses, setWarehouses] = useState<InventoryWarehouseOption[]>([])
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [warehouseRules, setWarehouseRules] = useState<InventoryWarehouseRule[]>([])
@@ -302,7 +309,6 @@ export default function InventoryReceiptsPage() {
       try {
         const inventoryData = await loadInventoryAdminData()
         const activeSession = await hydrateActiveSession().catch(() => ({ user: null }))
-        const actorName = activeSession.user?.full_name || activeSession.user?.username || ""
         if (activeSession.user) setCurrentUser(activeSession.user)
         const fallbackWarehouseId = inventoryData.warehouses[0]?.id || ""
 
@@ -312,6 +318,10 @@ export default function InventoryReceiptsPage() {
         setItems(inventoryData.items)
         setWarehouseRules(inventoryData.warehouseRules)
         setCategories(inventoryData.categories)
+
+        if (inventoryData.factoryId && activeSession.user) {
+          void resolveCanApproveInventory(inventoryData.factoryId, activeSession.user).then(setCanApprove)
+        }
 
         if (inventoryData.factoryId) {
           const [balanceResult, oilPoolResult] = await Promise.all([
@@ -361,7 +371,6 @@ export default function InventoryReceiptsPage() {
             documentCode: loaded.document.document_code,
             warehouseId: nextWarehouseId,
             sourceName: loaded.document.source_name || "",
-            actorName,
             documentDate: loaded.document.document_date,
             note: loaded.document.notes || "",
             selectedItemIds,
@@ -372,8 +381,7 @@ export default function InventoryReceiptsPage() {
               lotNo: line.lot_no || "",
               expiryDate: line.expiry_date || "",
               note: line.line_notes || "",
-              image1Url: line.image_urls?.[0] || "",
-              image2Url: line.image_urls?.[1] || "",
+              imageUrls: line.image_urls || [],
             })),
           })
           setDocumentStatus(
@@ -381,6 +389,11 @@ export default function InventoryReceiptsPage() {
             : loaded.document.status === "cancelled" ? "cancelled"
             : "draft"
           )
+          if (loaded.document.approved_by_name && loaded.document.approved_at) {
+            setApprovedInfo({ at: loaded.document.approved_at, byName: loaded.document.approved_by_name })
+          } else {
+            setApprovedInfo(null)
+          }
           return true
         }
 
@@ -392,20 +405,29 @@ export default function InventoryReceiptsPage() {
         if (stored) {
           try {
             const parsed = normalizeDraftState(JSON.parse(stored))
-            const nextWarehouseId = inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.warehouseId)
-              ? parsed.warehouseId
-              : fallbackWarehouseId
-            setDraft({
-              ...parsed,
-              warehouseId: nextWarehouseId,
-              actorName: parsed.actorName || actorName,
-            })
-            setDocumentStatus(parsed.documentId ? "draft" : null)
+            if (parsed.documentId) {
+              // Phiếu này đã có mã (đã Lưu nháp/Ghi sổ trước đó) — không tự nạp lại qua đường vào
+              // trang trần (không có ?documentId=), tránh hiện "phiếu ma" với trạng thái sai. Muốn
+              // tiếp tục phiếu cũ phải mở đúng qua ?documentId=.
+              setDraft({
+                ...defaultDraft(),
+                warehouseId: fallbackWarehouseId,
+              })
+              setDocumentStatus(null)
+            } else {
+              const nextWarehouseId = inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.warehouseId)
+                ? parsed.warehouseId
+                : fallbackWarehouseId
+              setDraft({
+                ...parsed,
+                warehouseId: nextWarehouseId,
+              })
+              setDocumentStatus(null)
+            }
           } catch {
             setDraft({
               ...defaultDraft(),
               warehouseId: fallbackWarehouseId,
-              actorName,
             })
             setDocumentStatus(null)
           }
@@ -413,7 +435,6 @@ export default function InventoryReceiptsPage() {
           setDraft({
             ...defaultDraft(),
             warehouseId: fallbackWarehouseId,
-            actorName,
           })
           setDocumentStatus(null)
         }
@@ -912,10 +933,10 @@ export default function InventoryReceiptsPage() {
     const nextDraft = {
       ...defaultDraft(),
       warehouseId: warehouses[0]?.id || "",
-      actorName: draft.actorName,
     }
     setDraft(nextDraft)
     setDocumentStatus(null)
+    setApprovedInfo(null)
     setSaveError(null)
     setSaveSuccess(null)
     window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
@@ -982,8 +1003,8 @@ export default function InventoryReceiptsPage() {
         source_warehouse_id: null,
         target_warehouse_id: draft.warehouseId,
         source_name: draft.sourceName.trim() || null,
-        recipient_name: draft.actorName || null,
-        requester_name: draft.actorName || null,
+        recipient_name: null,
+        requester_name: currentUser?.full_name || currentUser?.username || session.user.email || null,
         created_by: session.user.id,
         status: "draft",
         qr_value: `/dashboard/inventory/print?type=import&code=${encodeURIComponent(nextDocumentCode)}`,
@@ -1059,6 +1080,27 @@ export default function InventoryReceiptsPage() {
     }
   }
 
+  const refreshBalances = async (fid: string): Promise<{ warehouse_id: string; item_id: string; on_hand: number }[]> => {
+    const [balanceResult, oilPoolResult] = await Promise.all([
+      supabase
+        .from("inventory_stock_balances")
+        .select("warehouse_id, item_id, on_hand")
+        .eq("factory_id", fid),
+      supabase
+        .from("inventory_oil_stock_pools")
+        .select("warehouse_id, on_hand")
+        .eq("factory_id", fid),
+    ])
+    if (balanceResult.error || oilPoolResult.error) return []
+    const effective = buildEffectiveStockBalances({
+      items,
+      stockBalances: (balanceResult.data || []) as { warehouse_id: string; item_id: string; on_hand: number }[],
+      oilPoolBalances: (oilPoolResult.data || []) as InventoryOilPoolBalanceRow[],
+    })
+    setBalances(effective)
+    return effective
+  }
+
   const postReceiptDraft = async () => {
     setSaveError(null)
     setSaveSuccess(null)
@@ -1115,6 +1157,40 @@ export default function InventoryReceiptsPage() {
         documentCode: targetDocumentCode,
       }))
       setSaveSuccess(`Đã ghi sổ phiếu nhập ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
+      const freshBalances = await refreshBalances(factoryId)
+      const freshBalanceMap = new Map(
+        freshBalances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0]),
+      )
+      const nguoiNx = currentUser?.full_name || currentUser?.username || session.user.email || ""
+      const warehouse = warehouses.find((w) => w.id === draft.warehouseId)
+      const notifyLines: NxtDocumentNotifyLine[] = []
+      for (const detail of lineDetails) {
+        if (!detail.item) continue
+        const newStock = freshBalanceMap.get(`${draft.warehouseId}:${detail.item.id}`) ?? 0
+        notifyLines.push({
+          itemName: detail.item.name,
+          quantity: detail.quantity,
+          unit: detail.item.unit,
+          currentStock: newStock,
+        })
+        const { minStock } = resolveStockThreshold(detail.item.id, draft.warehouseId, detail.item, warehouseRules)
+        if (minStock > 0 && newStock < minStock) {
+          sendInventoryLowStockAlert({ itemName: detail.item.name, currentStock: newStock, unit: detail.item.unit })
+        }
+      }
+      if (notifyLines.length > 0) {
+        sendInventoryNxtChangeNotify({
+          loaiNxt: "Nhập",
+          documentCode: targetDocumentCode,
+          warehouseLabel: warehouse ? `${warehouse.code} - ${warehouse.name}` : "",
+          nguoiNx,
+          ghiChu: draft.note.trim() || null,
+          lines: notifyLines,
+          linkPath: targetDocumentId
+            ? `/dashboard/inventory/receipts?documentId=${encodeURIComponent(targetDocumentId)}`
+            : undefined,
+        })
+      }
     } catch (error) {
       const msg =
         error instanceof Error
@@ -1148,6 +1224,30 @@ export default function InventoryReceiptsPage() {
       setSaveError(error instanceof Error ? error.message : "Không thể hủy phiếu.")
     } finally {
       setCancelling(false)
+    }
+  }
+
+  const approveDocument = async () => {
+    if (!factoryId || !draft.documentId) return
+    const session = await getFreshAuthSession()
+    if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn."); return }
+    setApproving(true)
+    try {
+      const byName = currentUser?.full_name || currentUser?.username || session.user.email || ""
+      const nowIso = new Date().toISOString()
+      const { error } = await supabase
+        .from("inventory_documents")
+        .update({ approved_by: session.user.id, approved_by_name: byName, approved_at: nowIso })
+        .eq("id", draft.documentId)
+        .eq("factory_id", factoryId)
+      if (error) throw error
+      setApprovedInfo({ at: nowIso, byName })
+      setApproveModal(false)
+      setSaveSuccess(`Phiếu nhập ${draft.documentCode} đã được phê duyệt.`)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
+    } finally {
+      setApproving(false)
     }
   }
 
@@ -1246,6 +1346,15 @@ export default function InventoryReceiptsPage() {
                   Hủy phiếu
                 </button>
               ) : null}
+              {documentStatus === "posted" && canApprove && !approvedInfo ? (
+                <button
+                  onClick={() => setApproveModal(true)}
+                  className="col-span-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 sm:col-span-1 sm:px-5 sm:py-2"
+                >
+                  <CheckCircle2 size={14} className="mr-1.5 inline" />
+                  Phê duyệt
+                </button>
+              ) : null}
             </div>
             {postedInfo ? (
               <div className="flex items-center gap-1.5 text-xs text-emerald-700">
@@ -1256,6 +1365,18 @@ export default function InventoryReceiptsPage() {
                   {postedInfo.byName ? ` bởi ${postedInfo.byName}` : ""}
                 </span>
               </div>
+            ) : null}
+            {approvedInfo ? (
+              <div className="flex items-center gap-1.5 text-xs text-indigo-700">
+                <CheckCircle2 size={13} className="shrink-0" />
+                <span>
+                  Đã phê duyệt lúc {new Date(approvedInfo.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                  {" "}ngày {new Date(approvedInfo.at).toLocaleDateString("vi-VN")}
+                  {approvedInfo.byName ? ` bởi ${approvedInfo.byName}` : ""}
+                </span>
+              </div>
+            ) : documentStatus === "posted" ? (
+              <div className="text-xs font-semibold text-amber-600">Chưa phê duyệt</div>
             ) : null}
             <InventoryQrCard
               title="QR phiếu nhập"
@@ -1505,25 +1626,15 @@ export default function InventoryReceiptsPage() {
                     />
                   </div>
 
-                  <div>
-                    <InventoryImageUpload
+                  <div className="md:col-span-2">
+                    <InventoryMultiImageUpload
                       factoryId={factoryId}
                       documentType="import"
-                      label="Hình ảnh 1"
-                      value={detail.line.image1Url}
-                      onChange={(url) => updateLine(detail.line.id, { image1Url: url })}
+                      label="Hình ảnh (tối đa 6, chọn nhiều cùng lúc)"
+                      images={detail.line.imageUrls}
+                      onChange={(urls) => updateLine(detail.line.id, { imageUrls: urls })}
                     />
                   </div>
-
-                    <div>
-                      <InventoryImageUpload
-                        factoryId={factoryId}
-                        documentType="import"
-                        label="Hình ảnh 2"
-                        value={detail.line.image2Url}
-                        onChange={(url) => updateLine(detail.line.id, { image2Url: url })}
-                      />
-                    </div>
 
                   <div className="md:col-span-2">
                     <label className="mb-1.5 block text-xs font-bold text-slate-600">Ghi chú</label>
@@ -1800,6 +1911,35 @@ export default function InventoryReceiptsPage() {
             rows={3}
             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-red-400"
           />
+      </ModalShell>
+    ) : null}
+
+    {approveModal ? (
+      <ModalShell
+        title={<span className="flex items-center gap-2 text-indigo-700"><CheckCircle2 size={18} /> Phê duyệt phiếu nhập</span>}
+        onClose={() => setApproveModal(false)}
+        maxWidth="md"
+        footer={
+          <>
+            <button
+              onClick={() => setApproveModal(false)}
+              className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            >
+              Đóng
+            </button>
+            <button
+              onClick={() => void approveDocument()}
+              disabled={approving}
+              className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {approving ? "Đang phê duyệt..." : "Xác nhận phê duyệt"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Xác nhận phê duyệt phiếu nhập <strong>{draft.documentCode}</strong> với tư cách Ban giám đốc. Tên và thời điểm phê duyệt sẽ được in trên phiếu.
+        </p>
       </ModalShell>
     ) : null}
     </>

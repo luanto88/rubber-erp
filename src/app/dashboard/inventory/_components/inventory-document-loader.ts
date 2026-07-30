@@ -21,6 +21,10 @@ type InventoryDocumentHeader = {
   cancelled_by: string | null
   cancelled_at: string | null
   cancel_reason: string | null
+  approved_by: string | null
+  approved_by_name: string | null
+  approved_at: string | null
+  batch_id: string | null
 }
 
 type InventoryDocumentLine = {
@@ -50,7 +54,7 @@ export async function fetchInventoryDocumentByReference(
   }
 
   const buildDocQuery = (fields: string) => {
-    let q = supabase
+    const q = supabase
       .from("inventory_documents")
       .select(fields)
       .eq("factory_id", factoryId)
@@ -59,6 +63,8 @@ export async function fetchInventoryDocumentByReference(
   }
 
   const FULL_FIELDS =
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason, approved_by, approved_by_name, approved_at, batch_id"
+  const AUDIT_FIELDS =
     "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason"
   const BASIC_FIELDS =
     "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes"
@@ -70,16 +76,32 @@ export async function fetchInventoryDocumentByReference(
   if (!fullResult.error) {
     rawDoc = fullResult.data as unknown as Record<string, unknown> | null
   } else {
-    // Fallback: audit columns may not exist yet (pending migration) — retry without them
-    const basicResult = await buildDocQuery(BASIC_FIELDS).maybeSingle()
-    if (basicResult.error || !basicResult.data) return null
-    rawDoc = {
-      ...(basicResult.data as unknown as Record<string, unknown>),
-      posted_by: null,
-      posted_at: null,
-      cancelled_by: null,
-      cancelled_at: null,
-      cancel_reason: null,
+    // Fallback: cột approved_by/batch_id có thể chưa chạy migration — thử lại thiếu 2 nhóm cột mới nhất
+    const auditResult = await buildDocQuery(AUDIT_FIELDS).maybeSingle()
+    if (!auditResult.error) {
+      rawDoc = {
+        ...(auditResult.data as unknown as Record<string, unknown>),
+        approved_by: null,
+        approved_by_name: null,
+        approved_at: null,
+        batch_id: null,
+      }
+    } else {
+      // Fallback tiếp: audit columns cũ cũng chưa có (pending migration) — retry không có gì thêm
+      const basicResult = await buildDocQuery(BASIC_FIELDS).maybeSingle()
+      if (basicResult.error || !basicResult.data) return null
+      rawDoc = {
+        ...(basicResult.data as unknown as Record<string, unknown>),
+        posted_by: null,
+        posted_at: null,
+        cancelled_by: null,
+        cancelled_at: null,
+        cancel_reason: null,
+        approved_by: null,
+        approved_by_name: null,
+        approved_at: null,
+        batch_id: null,
+      }
     }
   }
 
