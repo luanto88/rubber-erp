@@ -890,6 +890,7 @@ export default function InventoryReceiptsPage() {
           reorder_point: Number(quickItemForm.min_stock) || 0,
           safety_stock: Number(quickItemForm.min_stock) || 0,
           is_primary: true,
+          location_code: null,
         },
       ])
       setDraft((prev) => ({

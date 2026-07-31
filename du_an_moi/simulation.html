@@ -1,314 +1,198 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="vi">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Quản lý công việc - Pastel Cam Điểm Nhấn</title>
-    <!-- Sử dụng Tailwind CSS qua CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thẻ Kho Điện Tử - Digital Stock Card</title>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
+    body { background-color: #f8fafc; color: #334155; padding: 16px; display: flex; justify-content: center; }
+    
+    .card-container { 
+      background: #ffffff; 
+      width: 100%; 
+      max-width: 480px; 
+      border-radius: 12px; 
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03); 
+      overflow: hidden; 
+    }
+    
+    /* Header Tone Pastel sáng - Tối ưu in ấn & hiển thị */
+    .header { 
+      background: #f1f5f9; 
+      color: #1e293b; 
+      padding: 16px; 
+      text-align: center; 
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .header h2 { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; color: #0f172a; }
+    .header .badge { 
+      display: inline-block; 
+      background: #e6f4ea; 
+      color: #137333; 
+      border: 1px solid #ceead6;
+      font-size: 11px; 
+      font-weight: 600;
+      padding: 3px 10px; 
+      border-radius: 12px; 
+      margin-top: 6px; 
+    }
+    
+    /* Thông tin vật tư */
+    .info-section { padding: 16px; border-bottom: 1px solid #f1f5f9; background: #ffffff; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; }
+    .info-item span { color: #64748b; display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; margin-bottom: 2px; }
+    .info-item strong { color: #0f172a; font-size: 13px; font-weight: 600; }
+    
+    /* Banner Tồn kho */
+    .stock-banner { 
+      background: #f0f7ff; 
+      border-left: 4px solid #3b82f6; 
+      padding: 12px 16px; 
+      margin: 16px; 
+      border-radius: 6px; 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+    }
+    .stock-title { font-size: 11px; color: #1d4ed8; font-weight: 700; text-transform: uppercase; }
+    .stock-qty { font-size: 22px; font-weight: 700; color: #1e40af; }
 
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ["Inter", "sans-serif"] },
-            colors: {
-              pastel: {
-                bg: "#FBF8F1" /* Trắng kem ấm áp */,
-                purple: "#8764A0" /* Tím pastel đậm đà */,
-                purpleLight: "#E8E4EE",
-                orange: "#FF9F68" /* Cam pastel làm điểm nhấn */,
-                orangeLight: "#FFECD2",
-                green: "#6BCB77" /* Xanh lục pastel đậm hơn */,
-                greenLight: "#E6F7E8",
-              },
-            },
-          },
-        },
-      };
-    </script>
+    /* Lịch sử giao dịch */
+    .history-section { padding: 0 16px 16px 16px; }
+    .history-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; color: #334155; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; padding: 8px 6px; background: #f8fafc; color: #475569; font-weight: 600; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
+    td { padding: 10px 6px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    .type-in { color: #15803d; font-weight: 700; }
+    .type-out { color: #b91c1c; font-weight: 700; }
+    .balance { font-weight: 700; color: #0f172a; }
+    
+    /* Footer 4 Action với Tông màu Pastel Sáng */
+    .footer-actions { 
+      padding: 12px; 
+      background: #f8fafc; 
+      border-top: 1px solid #e2e8f0; 
+    }
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .btn { 
+      padding: 10px 6px; 
+      border-radius: 6px; 
+      font-size: 12px; 
+      font-weight: 600; 
+      cursor: pointer; 
+      text-align: center; 
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+    .btn:active { transform: scale(0.98); }
 
-    <style>
-      body {
-        background-color: #fbf8f1;
-        color: #333;
-      }
+    /* Mẫu màu Pastel nhẹ dịu */
+    .btn-export { background-color: #fef2f2; color: #991b1b; border-color: #fecaca; } /* Tạo phiếu xuất */
+    .btn-import { background-color: #f0fdf4; color: #166534; border-color: #bbf7d0; } /* Tạo phiếu nhập */
+    .btn-transfer { background-color: #eff6ff; color: #1e40af; border-color: #bfdbfe; } /* Chuyển kho */
+    .btn-scan { background-color: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; } /* Tiếp tục quét QR */
+  </style>
+</head>
+<body>
 
-      /* --- Hiệu ứng Hover cho thẻ (Card) --- */
-      .task-card {
-        background: #ffffff;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        border: 1px solid rgba(135, 100, 160, 0.15);
-      }
-      .task-card:hover {
-        transform: translateY(-6px);
-        box-shadow: 0 15px 30px rgba(255, 159, 104, 0.15); /* Bóng đổ ám cam nhẹ */
-        border-color: rgba(255, 159, 104, 0.4);
-      }
+<div class="card-container">
+  <!-- Header Pastel sáng -->
+  <div class="header">
+    <h2>THẺ KHO ĐIỆN TỬ</h2>
+    <span class="badge">● Trạng thái: Trực tuyến (Real-time)</span>
+  </div>
 
-      /* --- Thanh tiến độ nổi khối (3D) và chuyển màu (Gradient) --- */
-      .progress-track {
-        background-color: #eae3de;
-        border-radius: 999px;
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-        height: 14px;
-        width: 100%;
-        overflow: hidden;
-        position: relative;
-      }
-
-      .progress-fill {
-        height: 100%;
-        border-radius: 999px;
-        /* Gradient từ Tím đậm đà sang Cam pastel */
-        background: linear-gradient(90deg, #8764a0 0%, #ff9f68 100%);
-        box-shadow:
-          inset 0 3px 3px rgba(255, 255, 255, 0.4),
-          inset 0 -3px 3px rgba(0, 0, 0, 0.15);
-        transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-      }
-
-      .progress-fill.completed {
-        /* Gradient Xanh lục đậm đà khi hoàn thành */
-        background: linear-gradient(90deg, #5db869 0%, #6bcb77 100%);
-      }
-
-      /* --- Animation khi cuộn chuột (Scroll Animation) --- */
-      .fade-in-up {
-        opacity: 0;
-        transform: translateY(30px);
-        transition:
-          opacity 0.8s ease-out,
-          transform 0.8s ease-out;
-      }
-      .fade-in-up.is-visible {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      /* Nút Tab đang active */
-      .tab-active {
-        background-color: #ffecd2;
-        color: #d36b32; /* Cam đậm để dễ đọc chữ */
-        font-weight: 600;
-      }
-    </style>
-  </head>
-  <body class="p-4 md:p-8">
-    <div class="max-w-7xl mx-auto">
-      <!-- Tabs điều hướng -->
-      <div class="flex gap-4 mb-8 overflow-x-auto pb-2 fade-in-up">
-        <button
-          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
-        >
-          <span class="mr-2">⊞</span> Tổng quan
-        </button>
-        <button
-          class="tab-active px-5 py-2.5 rounded-xl transition flex items-center shadow-sm"
-        >
-          <span class="mr-2">📋</span> Công việc
-        </button>
-        <button
-          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
-        >
-          <span class="mr-2">🔁</span> Việc định kỳ
-        </button>
-        <button
-          class="px-5 py-2.5 rounded-xl text-gray-500 font-medium hover:bg-pastel-orangeLight hover:text-orange-700 transition"
-        >
-          <span class="mr-2">🎯</span> Đánh giá 5S
-        </button>
+  <!-- Thông tin định danh -->
+  <div class="info-section">
+    <div class="info-grid">
+      <div class="info-item">
+        <span>Mã vật tư (SKU)</span>
+        <strong>VT-2026-889</strong>
       </div>
-
-      <!-- Tiêu đề & Nút thao tác -->
-      <div
-        class="flex flex-col md:flex-row md:items-center justify-between mb-8 fade-in-up"
-        style="transition-delay: 0.1s"
-      >
-        <div>
-          <h1 class="text-3xl font-bold text-gray-800 mb-1">Công việc</h1>
-          <p class="text-gray-500 text-sm">
-            Giao việc, theo dõi tiến độ và nghiệm thu.
-          </p>
-        </div>
-        <div class="flex gap-3 mt-4 md:mt-0">
-          <button
-            class="bg-white border border-gray-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition shadow-sm"
-          >
-            ≡ Danh sách
-          </button>
-          <!-- Nút bấm chính sử dụng Cam Pastel -->
-          <button
-            class="bg-pastel-orange text-white px-5 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-lg shadow-orange-200/50"
-          >
-            + Giao việc mới
-          </button>
-        </div>
+      <div class="info-item">
+        <span>Tên vật tư</span>
+        <strong>Axit Formic 85% (Thùng)</strong>
       </div>
-
-      <!-- Sub-tabs & Filter -->
-      <div class="flex gap-3 mb-6 fade-in-up" style="transition-delay: 0.2s">
-        <button
-          class="bg-white border border-gray-200 px-5 py-2 rounded-full text-sm font-medium shadow-sm hover:bg-pastel-orangeLight hover:text-orange-700 transition"
-        >
-          Việc của tôi
-        </button>
-        <button
-          class="bg-pastel-purple text-white px-5 py-2 rounded-full text-sm font-medium shadow-md shadow-purple-200"
-        >
-          Tất cả công việc
-        </button>
+      <div class="info-item">
+        <span>Vị trí kho</span>
+        <strong>Khu A - Kệ A2 - Lô 04</strong>
       </div>
-
-      <div class="mb-8 fade-in-up" style="transition-delay: 0.3s">
-        <select
-          class="bg-white border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-pastel-orange focus:border-pastel-orange block w-48 p-2.5 shadow-sm outline-none"
-        >
-          <option>Tất cả trạng thái</option>
-          <option>Mới giao</option>
-          <option>Đang thực hiện</option>
-          <option>Hoàn thành</option>
-        </select>
-      </div>
-
-      <!-- Lưới Công việc (Grid) -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <!-- Card 1 -->
-        <div class="task-card rounded-2xl p-5 fade-in-up shadow-sm">
-          <div class="flex justify-between items-start mb-3">
-            <span class="text-xs font-semibold text-gray-400"
-              >CV-260726/001</span
-            >
-            <span
-              class="px-2.5 py-1 text-xs font-medium bg-pastel-orangeLight text-orange-600 rounded-md"
-              >Mới giao</span
-            >
-          </div>
-          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
-            Tạo phiếu điều xe trước 17h hằng ngày
-          </h3>
-          <p class="text-sm text-gray-500 mb-5">Chau Nho</p>
-
-          <!-- Tiến độ nổi khối -->
-          <div class="mb-4">
-            <div
-              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
-            >
-              <span>Tiến độ</span>
-              <span class="text-pastel-orange font-bold">25%</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill" style="width: 25%"></div>
-            </div>
-          </div>
-
-          <div
-            class="flex items-center text-xs text-orange-500 font-medium bg-white border border-orange-100 w-max px-2 py-1 rounded"
-          >
-            <span class="mr-1">⚠</span> Hạn: 27/07/2026 00:00
-          </div>
-        </div>
-
-        <!-- Card 2 -->
-        <div
-          class="task-card rounded-2xl p-5 fade-in-up shadow-sm"
-          style="transition-delay: 0.1s"
-        >
-          <div class="flex justify-between items-start mb-3">
-            <span class="text-xs font-semibold text-gray-400"
-              >CV-260726/002</span
-            >
-            <span
-              class="px-2.5 py-1 text-xs font-medium bg-pastel-purpleLight text-purple-700 rounded-md"
-              >Đang thực hiện</span
-            >
-          </div>
-          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
-            Đo mẫu tối thiểu 4 mẫu trên 1 ngày bthường 6-8 mẫu...
-          </h3>
-          <p class="text-sm text-gray-500 mb-5">Nguyễn Hữu Thọ</p>
-
-          <div class="mb-4">
-            <div
-              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
-            >
-              <span>Tiến độ</span>
-              <span class="text-pastel-orange font-bold">50%</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill" style="width: 50%"></div>
-            </div>
-          </div>
-
-          <div
-            class="flex items-center text-xs text-orange-500 font-medium bg-white border border-orange-100 w-max px-2 py-1 rounded"
-          >
-            <span class="mr-1">⚠</span> Hạn: 27/07/2026 05:00
-          </div>
-        </div>
-
-        <!-- Card 3 (Hoàn thành) -->
-        <div
-          class="task-card rounded-2xl p-5 fade-in-up shadow-sm"
-          style="transition-delay: 0.2s"
-        >
-          <div class="flex justify-between items-start mb-3">
-            <span class="text-xs font-semibold text-gray-400"
-              >CV-260726/005</span
-            >
-            <span
-              class="px-2.5 py-1 text-xs font-medium bg-pastel-greenLight text-green-700 rounded-md"
-              >Hoàn thành</span
-            >
-          </div>
-          <h3 class="text-base font-bold text-gray-800 mb-1 line-clamp-2">
-            Tạo ngăn lưu
-          </h3>
-          <p class="text-sm text-gray-500 mb-5">Neang Ry Ta</p>
-
-          <div class="mb-4">
-            <div
-              class="flex justify-between text-xs mb-1.5 font-medium text-gray-600"
-            >
-              <span>Tiến độ</span>
-              <span class="text-pastel-green font-bold">100%</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill completed" style="width: 100%"></div>
-            </div>
-          </div>
-
-          <div class="flex items-center text-xs text-gray-400 font-medium">
-            Hạn: 27/07/2026 05:00
-          </div>
-        </div>
+      <div class="info-item">
+        <span>Đơn vị tính</span>
+        <strong>Kg</strong>
       </div>
     </div>
+  </div>
 
-    <!-- Script tạo hiệu ứng Scroll -->
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        const observer = new IntersectionObserver(
-          (entries) => {
-            entries.forEach((entry) => {
-              if (entry.isIntersecting) {
-                entry.target.classList.add("is-visible");
-              }
-            });
-          },
-          {
-            threshold: 0.1,
-          },
-        );
+  <!-- Banner Tồn kho -->
+  <div class="stock-banner">
+    <div>
+      <div class="stock-title">Tồn kho khả dụng</div>
+      <div style="color: #64748b; font-size: 11px; margin-top: 2px;">Cập nhật: Vài giây trước</div>
+    </div>
+    <div class="stock-qty">2,450 <span style="font-size: 13px; font-weight: 500; color: #3b82f6;">Kg</span></div>
+  </div>
 
-        const hiddenElements = document.querySelectorAll(".fade-in-up");
-        hiddenElements.forEach((el) => observer.observe(el));
-      });
-    </script>
-  </body>
+  <!-- Nhật ký biến động -->
+  <div class="history-section">
+    <div class="history-title">Lịch sử giao dịch gần đây</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Thời gian / Mã phiếu</th>
+          <th>Diễn giải</th>
+          <th style="text-align: right;">Nhập/Xuất</th>
+          <th style="text-align: right;">Tồn</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong>30/07 08:30</strong><br>
+            <span style="color: #64748b; font-size: 10px;">PXK-00421</span>
+          </td>
+          <td>Xuất Phân xưởng A</td>
+          <td style="text-align: right;" class="type-out">- 500</td>
+          <td style="text-align: right;" class="balance">2,450</td>
+        </tr>
+        <tr>
+          <td>
+            <strong>28/07 14:15</strong><br>
+            <span style="color: #64748b; font-size: 10px;">PNK-00388</span>
+          </td>
+          <td>Nhập từ NCC X</td>
+          <td style="text-align: right;" class="type-in">+ 1,000</td>
+          <td style="text-align: right;" class="balance">2,950</td>
+        </tr>
+        <tr>
+          <td>
+            <strong>25/07 09:00</strong><br>
+            <span style="color: #64748b; font-size: 10px;">PXK-00390</span>
+          </td>
+          <td>Xuất Phân xưởng B</td>
+          <td style="text-align: right;" class="type-out">- 350</td>
+          <td style="text-align: right;" class="balance">1,950</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Footer 4 Action -->
+  <div class="footer-actions">
+    <div class="action-grid">
+      <button class="btn btn-export">1. Tạo phiếu xuất</button>
+      <button class="btn btn-import">2. Tạo phiếu nhập</button>
+      <button class="btn btn-transfer">3. Chuyển kho</button>
+      <button class="btn btn-scan">4. Tiếp tục quét QR</button>
+    </div>
+  </div>
+</div>
+
+</body>
 </html>

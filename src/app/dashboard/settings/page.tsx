@@ -335,7 +335,8 @@ type InvWarehouseForm = { code: string; name: string; keeper_name: string; wareh
 type InvCategoryForm = { code: string; name: string; sort_order: string; is_active: boolean }
 type InvItemForm = {
   category_id: string; code: string; name: string; unit: string; specification: string
-  selected_warehouse_ids: string[]; manages_lot: boolean; manages_expiry: boolean
+  selected_warehouse_ids: string[]; location_codes: Record<string, string>
+  manages_lot: boolean; manages_expiry: boolean
   min_stock: string; max_stock: string; is_active: boolean
 }
 
@@ -772,7 +773,7 @@ export default function SettingsPage() {
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
-  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
   const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
   const [dispatchDriverForm, setDispatchDriverForm] = useState<DispatchDriverForm>(emptyDispatchDriverForm())
   const [dispatchVehicleForm, setDispatchVehicleForm] = useState<DispatchVehicleForm>(emptyDispatchVehicleForm())
@@ -1316,7 +1317,7 @@ export default function SettingsPage() {
       if (result.error || !result.data?.id) { setConfigError(result.error?.message || "Không lưu được vật tư"); return }
       const itemId = result.data.id as string
       await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemId).eq("factory_id", factoryId)
-      const rulesPayload = invItemForm.selected_warehouse_ids.map((wId, idx) => ({ factory_id: factoryId, item_id: itemId, warehouse_id: wId, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, reorder_point: Number(invItemForm.min_stock) || 0, safety_stock: Number(invItemForm.min_stock) || 0, is_primary: idx === 0 }))
+      const rulesPayload = invItemForm.selected_warehouse_ids.map((wId, idx) => ({ factory_id: factoryId, item_id: itemId, warehouse_id: wId, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, reorder_point: Number(invItemForm.min_stock) || 0, safety_stock: Number(invItemForm.min_stock) || 0, is_primary: idx === 0, location_code: (invItemForm.location_codes[wId] || "").trim() || null }))
       const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
       if (rulesResult.error) { setConfigError(rulesResult.error.message); return }
       setConfigModal(null)
@@ -3212,7 +3213,7 @@ export default function SettingsPage() {
                         setConfigModal("category")
                       } else if (configTab === "items") {
                         setConfigEditId(null)
-                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
                         setConfigModal("item")
                       } else if (configTab === "delivery-points") {
                         setConfigEditId(null)
@@ -3400,7 +3401,7 @@ export default function SettingsPage() {
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active }); setConfigModal("item") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], location_codes: {}, manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active }); setConfigModal("item"); if (factoryId) { void supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", row.id).eq("factory_id", factoryId).then(({ data }) => { if (data) setInvItemForm((prev) => ({ ...prev, location_codes: Object.fromEntries(data.filter((r) => r.location_code).map((r) => [r.warehouse_id as string, (r.location_code as string) || ""])) })) }) } }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setConfigDelConfirm({ type: "item", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -5165,6 +5166,27 @@ export default function SettingsPage() {
                       ))}
                     </div>
                   </div>
+                  {invItemForm.selected_warehouse_ids.length > 0 && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Vị trí kho theo từng kho</label>
+                      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        {invItemForm.selected_warehouse_ids.map((wId) => {
+                          const w = invWarehouses.find((entry) => entry.id === wId)
+                          return (
+                            <div key={wId} className="flex items-center gap-3">
+                              <span className="w-20 shrink-0 text-xs font-bold text-slate-500">{w?.code || wId}</span>
+                              <input
+                                value={invItemForm.location_codes[wId] || ""}
+                                onChange={(e) => setInvItemForm((p) => ({ ...p, location_codes: { ...p.location_codes, [wId]: e.target.value } }))}
+                                placeholder="VD: Khu A - Kệ A2 - Lô 04"
+                                className="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tồn tối thiểu</label>

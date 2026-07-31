@@ -45,6 +45,7 @@ export type InventoryWarehouseRule = {
   reorder_point: number
   safety_stock: number
   is_primary: boolean
+  location_code: string | null
 }
 
 export type InventoryStockBalanceRow = {
@@ -152,9 +153,9 @@ export const fallbackItems: InventoryItemOption[] = [
 ]
 
 export const fallbackWarehouseRules: InventoryWarehouseRule[] = [
-  { item_id: "af", warehouse_id: "kb", min_stock: 1000, max_stock: 25000, reorder_point: 1000, safety_stock: 1000, is_primary: true },
-  { item_id: "aa", warehouse_id: "kb", min_stock: 1500, max_stock: 12000, reorder_point: 1500, safety_stock: 1500, is_primary: true },
-  { item_id: "dox", warehouse_id: "kddx", min_stock: 500, max_stock: 5000, reorder_point: 500, safety_stock: 500, is_primary: true },
+  { item_id: "af", warehouse_id: "kb", min_stock: 1000, max_stock: 25000, reorder_point: 1000, safety_stock: 1000, is_primary: true, location_code: "Khu A - Kệ A2" },
+  { item_id: "aa", warehouse_id: "kb", min_stock: 1500, max_stock: 12000, reorder_point: 1500, safety_stock: 1500, is_primary: true, location_code: "Khu A - Kệ A5" },
+  { item_id: "dox", warehouse_id: "kddx", min_stock: 500, max_stock: 5000, reorder_point: 500, safety_stock: 500, is_primary: true, location_code: null },
 ]
 
 export const fallbackStockBalances: InventoryStockBalanceRow[] = [
@@ -271,7 +272,7 @@ export async function loadInventoryAdminData() {
       .order("code"),
     supabase
       .from("inventory_item_warehouse_rules")
-      .select("item_id, warehouse_id, min_stock, max_stock, reorder_point, safety_stock, is_primary")
+      .select("item_id, warehouse_id, min_stock, max_stock, reorder_point, safety_stock, is_primary, location_code")
       .eq("factory_id", factoryId),
   ])
 

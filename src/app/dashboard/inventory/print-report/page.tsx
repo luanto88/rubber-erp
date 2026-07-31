@@ -32,7 +32,7 @@ function getReportMeta(kind: ReportKind) {
   if (kind === "cards") {
     return {
       title: "Bản in thẻ kho",
-      backHref: "/dashboard/inventory/cards",
+      backHref: "/dashboard/inventory/lookup",
     }
   }
 

@@ -96,6 +96,7 @@ type ItemForm = {
   unit: string
   specification: string
   selected_warehouse_ids: string[]
+  location_codes: Record<string, string>
   manages_lot: boolean
   manages_expiry: boolean
   min_stock: string
@@ -231,6 +232,7 @@ function emptyItemForm(): ItemForm {
     unit: "",
     specification: "",
     selected_warehouse_ids: [],
+    location_codes: {},
     manages_lot: false,
     manages_expiry: false,
     min_stock: "0",
@@ -470,7 +472,7 @@ export default function InventorySettingsPage() {
     )
   }
 
-  const openItemModal = (row?: ItemRow) => {
+  const openItemModal = async (row?: ItemRow) => {
     setFormError("")
     setModalType("item")
     setEditingId(row?.id || null)
@@ -483,6 +485,7 @@ export default function InventorySettingsPage() {
             unit: row.unit,
             specification: row.specification || "",
             selected_warehouse_ids: row.default_warehouse_ids || [],
+            location_codes: {},
             manages_lot: row.manages_lot,
             manages_expiry: row.manages_expiry,
             min_stock: String(row.min_stock ?? 0),
@@ -498,6 +501,25 @@ export default function InventorySettingsPage() {
             category_id: categories[0]?.id || "",
           },
     )
+
+    // Vị trí kho lưu theo từng cặp (vật tư, kho) trong inventory_item_warehouse_rules — không có
+    // sẵn trên ItemRow (chỉ dùng cho danh sách), nên phải fetch riêng khi mở modal Sửa.
+    if (row?.id && factoryId) {
+      const { data } = await supabase
+        .from("inventory_item_warehouse_rules")
+        .select("warehouse_id, location_code")
+        .eq("item_id", row.id)
+        .eq("factory_id", factoryId)
+
+      if (data) {
+        const locationCodes = Object.fromEntries(
+          data
+            .filter((rule) => rule.location_code)
+            .map((rule) => [rule.warehouse_id as string, (rule.location_code as string) || ""]),
+        )
+        setItemForm((prev) => ({ ...prev, location_codes: locationCodes }))
+      }
+    }
   }
 
   const closeModal = () => {
@@ -617,6 +639,7 @@ export default function InventorySettingsPage() {
         reorder_point: Number(itemForm.min_stock) || 0,
         safety_stock: Number(itemForm.min_stock) || 0,
         is_primary: index === 0,
+        location_code: (itemForm.location_codes[warehouseId] || "").trim() || null,
       }))
       const rulesResult = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
       if (rulesResult.error) { setFormError(rulesResult.error.message); return }
@@ -894,7 +917,7 @@ export default function InventorySettingsPage() {
             icon={<Beaker size={14} />}
             action={
               <button
-                onClick={() => openItemModal()}
+                onClick={() => void openItemModal()}
                 className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-emerald-700"
               >
                 <Plus size={15} />
@@ -958,7 +981,7 @@ export default function InventorySettingsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
                           <button
-                            onClick={() => openItemModal(row)}
+                            onClick={() => void openItemModal(row)}
                             className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-blue-50 hover:text-blue-600"
                           >
                             <PencilLine size={14} />
@@ -1223,6 +1246,34 @@ export default function InventorySettingsPage() {
                       ))}
                     </div>
                   </div>
+                  {itemForm.selected_warehouse_ids.length > 0 && (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Vị trí kho theo từng kho</label>
+                      <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        {itemForm.selected_warehouse_ids.map((warehouseId) => {
+                          const warehouse = warehouses.find((w) => w.id === warehouseId)
+                          return (
+                            <div key={warehouseId} className="flex items-center gap-3">
+                              <span className="w-20 shrink-0 text-xs font-bold text-slate-500">
+                                {warehouse?.code || warehouseId}
+                              </span>
+                              <input
+                                value={itemForm.location_codes[warehouseId] || ""}
+                                onChange={(e) =>
+                                  setItemForm((prev) => ({
+                                    ...prev,
+                                    location_codes: { ...prev.location_codes, [warehouseId]: e.target.value },
+                                  }))
+                                }
+                                placeholder="VD: Khu A - Kệ A2 - Lô 04"
+                                className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-sm outline-none transition-colors focus:border-emerald-500"
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid gap-4 md:grid-cols-3">
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-slate-600">Tồn tối thiểu</label>

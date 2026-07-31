@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
@@ -744,7 +745,7 @@ export default function InventoryAnalyticsPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentTx.slice(0, 50).map((row) => {
+                {recentTx.slice(0, 8).map((row) => {
                   const item = itemMap.get(row.itemId)
                   const warehouse = warehouseMap.get(row.warehouseId)
                   const typeConfig =
@@ -786,6 +787,14 @@ export default function InventoryAnalyticsPage() {
             </table>
           </div>
         )}
+        <div className="border-t border-slate-100 px-4 py-3">
+          <Link
+            href="/dashboard/inventory/lookup"
+            className="text-sm font-bold text-emerald-600 transition hover:text-emerald-700 hover:underline"
+          >
+            Xem đầy đủ tại Tra cứu →
+          </Link>
+        </div>
         </ResponsiveTableWrapper>
       </ScrollRevealSection>
 

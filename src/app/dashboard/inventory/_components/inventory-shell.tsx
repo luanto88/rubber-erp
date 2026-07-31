@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowRightLeft, BarChart3, Boxes, Layers, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
+import { ArrowRightLeft, BarChart3, Boxes, Layers, PackageMinus, PackagePlus, QrCode, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 
@@ -39,6 +39,7 @@ const primaryTabs: PrimaryTab[] = [
       "/dashboard/inventory/transfers",
       "/dashboard/inventory/on-hand",
       "/dashboard/inventory/cards",
+      "/dashboard/inventory/lookup",
     ],
   },
   {
@@ -54,7 +55,8 @@ const operationalTabs: SecondaryTab[] = [
   { href: "/dashboard/inventory/issues", label: "Xuất kho", icon: PackageMinus },
   { href: "/dashboard/inventory/transfers", label: "Chuyển kho", icon: ArrowRightLeft },
   { href: "/dashboard/inventory/on-hand", label: "Tồn kho", icon: Boxes },
-  { href: "/dashboard/inventory/cards", label: "Thẻ kho", icon: ScrollText },
+  { href: "/dashboard/inventory/cards", label: "Thẻ kho", icon: QrCode },
+  { href: "/dashboard/inventory/lookup", label: "Tra cứu", icon: ScrollText },
 ]
 
 function isActivePath(pathname: string, href: string) {

@@ -287,3 +287,53 @@ src/app/dashboard/inventory/
   - `Tên vật tư`
   - `Đơn vị tính`
   - `Tổng số lượng`
+
+## Cập nhật 2026-08-10 — Tách "Tra cứu" khỏi "Thẻ kho" thật + Thẻ kho điện tử + Vị trí kho
+
+Đã triển khai đúng kế hoạch (plan `k-ho-ch-m-i-tranquil-tarjan.md`): tab "Thẻ kho" cũ (lọc lịch sử
+phát sinh + xuất Excel + in báo cáo, giữ nguyên 100% logic) đổi tên thành **"Tra cứu"**
+(`cards/page.tsx` → `lookup/page.tsx`, route `/dashboard/inventory/lookup`). Route
+`/dashboard/inventory/cards` được giải phóng cho tab **"Thẻ kho" mới** — in nhãn QR vật lý dán tại
+vị trí lưu vật tư (`cards/page.tsx` mới + `src/lib/inventory-card-pdf.ts`, layout QR trái + khối
+text nhiều dòng bên phải, khác layout QR-trên-text-dưới của `downloadStorageBulkQrPdf`). Vật tư Dầu
+dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải 1 nhãn/mã), QR trỏ
+`?warehouseId=` không kèm `code`.
+
+- **Vị trí kho**: cột mới `inventory_item_warehouse_rules.location_code` (migration
+  `20260810_inventory_item_warehouse_location.sql`, **cần chạy thủ công**). `InventoryWarehouseRule`
+  (`inventory-data.ts`) thêm field này.
+- **Phát hiện quan trọng khi code**: `/dashboard/inventory/settings/page.tsx` (nơi ban đầu định thêm
+  UI Vị trí kho) **không được link từ bất kỳ đâu trong app** — đã grep xác nhận 0 kết quả. Trang admin
+  vật tư/kho **thật sự đang dùng** là tab "Vật tư / Hóa chất" trong `Cấu hình nhà máy` của
+  `src/app/dashboard/settings/page.tsx` (đúng theo rule kiến trúc "Danh mục kho, vật tư... phải nằm
+  trong `/dashboard/settings`" ở đầu file này) — `InvItemForm`/`saveItem`-tương-đương ở đó có
+  `rulesPayload` riêng, tách biệt hoàn toàn khỏi `inventory/settings/page.tsx`. Đã thêm UI "Vị trí kho
+  theo từng kho" (input text theo từng kho đã tick, dưới khối "Kho chứa *") ở **cả 2 nơi** — giữ
+  `inventory/settings/page.tsx` đồng bộ dù hiện chưa reachable, và bổ sung ở `dashboard/settings/page.tsx`
+  vì đó là nơi admin thực sự dùng. Khi sửa tiếp tính năng liên quan `inventory_item_warehouse_rules`
+  trong tương lai, **luôn kiểm tra cả 2 file** (grep `inventory_item_warehouse_rules`) — 2 implementation
+  song song, không dùng chung state/hàm.
+- **Thẻ kho điện tử** (`item/page.tsx`) redesign: đọc thêm `?warehouseId=` (ưu tiên đúng rule khớp
+  kho đó cho Vị trí kho, fallback `is_primary` rồi rule đầu tiên); badge "TRỰC TUYẾN (REAL-TIME)";
+  4 nút thao tác nhanh (Xuất/Nhập/Chuyển kho chỉ điều hướng, không prefill dòng vật tư; "Tiếp tục quét
+  QR" tái dùng `QrScanner` từ `src/app/dashboard/product/confirm/qr-scanner.tsx` qua
+  `next/dynamic({ssr:false})`); **chế độ Bồn dầu chung** khi có `warehouseId` mà không có `code` — tồn
+  lấy qua `stockBalances` đã build sẵn bởi `buildEffectiveStockBalances` (mọi mã dùng chung 1 bồn có
+  cùng `on_hand`, không cần query riêng `inventory_oil_stock_pools`), liệt kê các mã dùng chung, lịch
+  sử giao dịch gộp theo `warehouseId` + tập item id dùng chung.
+- `lookup/page.tsx`: link cột "Mã vật tư" trong bảng lịch sử phát sinh nay kèm thêm
+  `&warehouseId=${movement.warehouse.id}` để Thẻ kho điện tử hiện đúng Vị trí kho ngay, không cần đoán.
+- `analytics/page.tsx` ("Thống kê"): bảng "Giao dịch gần đây" rút gọn còn 8 dòng preview (giữ nguyên
+  toggle 7/30 ngày + cảnh báo bất thường ⚠️ — tính năng riêng của Thống kê, không xóa), thêm link
+  "Xem đầy đủ tại Tra cứu →" trỏ `/dashboard/inventory/lookup`. **Không** hydrate filter qua URL —
+  `lookup/page.tsx` chưa đọc query param cho bộ lọc, nằm ngoài phạm vi đợt này.
+- `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch (đã fix thêm 2 call site khác trong repo
+  từng tạo object literal khớp `InventoryWarehouseRule` mà thiếu `location_code`:
+  `receipts/page.tsx`'s quick-add vật tư, và `dashboard/settings/page.tsx`'s `rulesPayload`).
+- **Chưa test tay** — cần: chạy migration trên Supabase SQL Editor trước; ở `dashboard/settings/page.tsx`
+  sửa 1 vật tư có ≥2 kho, nhập Vị trí kho khác nhau từng kho, lưu, mở lại xác nhận không lẫn; tab
+  "Thẻ kho" mới chọn vài vật tư + xác nhận card bồn dầu gộp đúng theo mapping ở mục "Đầu dùng chung
+  bồn" phía trên, in PDF đối chiếu layout; quét QR vật tư thường và QR bồn dầu bằng điện thoại (chưa
+  đăng nhập → bị đá `/login` → đăng nhập xong vào đúng trang, đúng Vị trí kho theo đúng kho đã in);
+  bấm đủ 4 nút thao tác nhanh, đặc biệt "Tiếp tục quét QR" mở camera đúng; xác nhận tab "Tra cứu"
+  hoạt động y hệt "Thẻ kho" cũ; xác nhận "Thống kê" bảng giao dịch gần đây gọn lại và link hoạt động.
