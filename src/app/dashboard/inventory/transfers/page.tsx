@@ -1287,13 +1287,13 @@ export default function InventoryTransfersPage() {
 
               return (
                 <div key={detail.line.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-bold text-slate-800">
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="break-words font-bold text-slate-800">
                         {getLineTypeLabel(detail.item, index, lineDetails.map((d) => d.item))}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {detail.item?.manages_lot && detail.availableLots.length >= 2 ? (
                         <button
                           type="button"
