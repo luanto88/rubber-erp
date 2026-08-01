@@ -517,6 +517,62 @@ tay** — cần: soát xét cả tài liệu cha (TH3) lẫn hồ sơ con (TH4) 
 field nguồn soát xét giữ nguyên giá trị sau khi Lưu và khi người phê duyệt khác mở lại;
 xác nhận "Người soạn thảo" hiện đúng tên cho người xem xét/phê duyệt không phải admin.
 
+## Cập nhật 2026-08-01 — Điều tra bug "trả về không thay được file" ở module Văn bản +
+tài liệu ISO không có mã (tùy chọn)
+
+Điều tra chéo phát sinh từ bug "Trả về không thay được file" ở module Văn bản nội bộ (xem
+`.claude/rules/22-documents-module.md` mục "Cập nhật 2026-08-01") — đã xác nhận **module
+này KHÔNG bị lỗi tương tự**: `iso/documents/[id]/page.tsx`'s `isEditable` (dòng ~798 tại
+thời điểm điều tra: `isNew || ((draft || tra_ve) && isSoanThao) || (bi_tu_choi_phe_duyet &&
+canXemXet)`) đã đúng, bao trùm cả sửa metadata lẫn thay file — nút "Thay file"/ô upload đã
+gate theo đúng cờ này từ trước, không cần sửa gì. `iso/forms/[id]/page.tsx` tương tự
+(`isEditable = draft || tra_ve`, cả "Thay file" lẫn dropzone upload đều gate đúng theo cờ
+này). Ghi lại đây để tránh điều tra lặp lại nếu có báo cáo tương tự trong tương lai.
+
+### Tài liệu ISO (tài liệu cha, soạn thảo mới) không có mã
+
+Người dùng xác nhận: tài liệu/hồ sơ ISO không có mã (VD: "Danh sách được cấp giấy chứng
+nhận đào tạo ISO 9001, 14001") **vẫn đi qua đúng luồng xem xét/phê duyệt hiện tại, chỉ bỏ
+qua yêu cầu bắt buộc phải có mã**. Đã xác nhận `iso_documents.ma_tai_lieu` đã nullable sẵn
+ở DB, và unique index `uniq_iso_documents_factory_ma_tai_lieu_active`
+(`20260531_fix_iso_unique_constraint.sql`) đã **cố ý loại trừ mã rỗng** từ trước (thiết kế
+sẵn cho đúng trường hợp này) — không cần migration.
+
+**Phạm vi cố ý thu hẹp — chỉ TH1 (Tài liệu Cha, Soạn thảo mới)**: không đụng "Hồ sơ (Con)"
+(mã con luôn phụ thuộc mã cha — không có khái niệm hồ sơ con đứng độc lập không mã, và
+`handleFileUpload` cho hồ sơ con đã có sẵn guard `if (!form.ma_tai_lieu) { ... }` chặn đúng
+tự nhiên nếu tài liệu cha chưa có mã) và không đụng "Soát xét" (bản chất soát xét là sửa
+lại mã đã có sẵn, không áp dụng cho tài liệu chưa từng có mã).
+
+- `iso-types.ts`'s `IsoDocumentForm` thêm `khong_co_ma: boolean` (không phải cột DB — chỉ
+  là cờ UI, mặc định `false` trong `emptyIsoForm()`). Khi load lại 1 tài liệu cha đã có sẵn
+  không mã để sửa, cờ này được suy ra tự động (`!isCon && !d.ma_tai_lieu`) để checkbox hiển
+  thị đúng trạng thái.
+- `iso/documents/[id]/page.tsx`: checkbox "Tài liệu này không có mã" đặt ngay trên field
+  "Số hiệu" (chỉ hiện ở nhánh `!isReviewForm && !isCon`) — khi tick, `patchDraftForm({
+  khong_co_ma: true, so_hieu: "" })` (ẩn hẳn input Số hiệu); khối "Mã tự sinh" đổi
+  placeholder thành "Không áp dụng mã cho tài liệu này". **Không cần sửa
+  `rebuildDraftCode()`/`buildMaTaiLieu()`** — hàm gốc đã tự trả về `""` khi `so_hieu` rỗng,
+  nên `ma_tai_lieu` tự động rỗng qua đúng cơ chế có sẵn.
+- `validateForm()`'s `draftErrors` (nhánh không phải `con`): bỏ qua `requireValue(so_hieu)`/
+  `requireValue(ma_tai_lieu)` khi `form.khong_co_ma`. `validateUniqueDocumentCodes()` không
+  cần sửa — đã có sẵn điều kiện `if (form.phan_loai_tl !== "con" && mainCode)`, tự bỏ qua
+  khi `mainCode` rỗng.
+- Reset `khong_co_ma: false` khi chuyển sang "Soát xét" hoặc "Hồ sơ (Con)" — cờ này chỉ có
+  ý nghĩa ở đúng nhánh Soạn thảo mới + Tài liệu Cha.
+- Giữ nguyên bắt buộc `loai_tai_lieu`/`phong_ban`/`ten_tai_lieu`/`lan_ban_hanh` — chỉ số
+  hiệu + mã trở thành tùy chọn, đúng "chỉ bỏ qua mã".
+- **Không đụng module "Thực hiện hồ sơ ISO"** (`iso/forms/`) — `iso_form_instances.
+  template_doc_id` bắt buộc NOT NULL trỏ vào 1 `iso_documents` đã có, và tính năng này là
+  "form lặp lại nhiều lần", không khớp ngữ cảnh "1 tài liệu tham chiếu tĩnh không mã".
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch. **Chưa test tay** — cần: tạo 1
+tài liệu ISO cha, tick "Không có mã", để trống Số hiệu → lưu thành công → đi qua đúng luồng
+Xem xét/Phê duyệt bình thường như tài liệu có mã; mở lại tài liệu đó để sửa → xác nhận
+checkbox tự động tick đúng; xác nhận danh sách/chi tiết/kho ISO hiện đúng "(chưa có mã)"/
+"—" thay vì lỗi (các nơi hiển thị `ma_tai_lieu` đã có sẵn fallback từ trước, không sửa gì
+thêm).
+
 ## Nguồn ưu tiên khi có mâu thuẫn
 
 Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:

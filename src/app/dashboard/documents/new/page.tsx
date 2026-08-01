@@ -104,6 +104,9 @@ export default function NewDocumentPage() {
   const [maVanBanChecking, setMaVanBanChecking] = useState(false)
   const [maVanBanExists, setMaVanBanExists] = useState(false)
   const maCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Văn bản không có mã (VD: danh sách, chứng nhận không theo khuôn số) — vẫn đi qua
+  // đúng luồng ký duyệt hiện tại, chỉ bỏ qua yêu cầu bắt buộc phải có mã.
+  const [khongCoMa, setKhongCoMa] = useState(false)
 
   const [steps, setSteps] = useState<StepForm[]>([])
   const [file, setFile] = useState<File | null>(null)
@@ -391,7 +394,7 @@ export default function NewDocumentPage() {
         }
       }
     }
-    if (maVanBanExists) {
+    if (!khongCoMa && maVanBanExists) {
       setSaveError("Mã văn bản này đã tồn tại trong hệ thống. Vui lòng kiểm tra lại.")
       return
     }
@@ -399,23 +402,28 @@ export default function NewDocumentPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      let finalMa = maVanBan.trim()
-      let finalSo: number
+      let finalMa = ""
+      let finalSoStr: string | null = null
 
-      if (maVanBanEdited && finalMa) {
-        // User tự nhập mã — parse số từ mã
-        const match = finalMa.match(/^(\d+)\//)
-        finalSo = match ? parseInt(match[1]) : 1
-      } else {
-        // Tính lại số tiếp theo NGAY TRƯỚC khi lưu (không tái dùng nextSoPreview đã
-        // tính trước đó) để giảm khoảng hở race nếu có văn bản khác vừa được tạo.
-        const nam = new Date().getFullYear()
-        const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
-        finalSo = so
-        const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
-        const kyHieu =
-          selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
-        finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
+      if (!khongCoMa) {
+        let finalSo: number
+        finalMa = maVanBan.trim()
+        if (maVanBanEdited && finalMa) {
+          // User tự nhập mã — parse số từ mã
+          const match = finalMa.match(/^(\d+)\//)
+          finalSo = match ? parseInt(match[1]) : 1
+        } else {
+          // Tính lại số tiếp theo NGAY TRƯỚC khi lưu (không tái dùng nextSoPreview đã
+          // tính trước đó) để giảm khoảng hở race nếu có văn bản khác vừa được tạo.
+          const nam = new Date().getFullYear()
+          const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
+          finalSo = so
+          const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
+          const kyHieu =
+            selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
+          finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
+        }
+        finalSoStr = String(finalSo).padStart(2, "0")
       }
 
       let thuTuKyJson: ThuTuKyStep[]
@@ -462,11 +470,11 @@ export default function NewDocumentPage() {
 
       const payload = {
         factory_id: factoryId,
-        ma_van_ban: finalMa,
+        ma_van_ban: khongCoMa ? null : finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
         loai_van_ban: form.loai_van_ban,
         phong_ban: form.phong_ban,
-        so_van_ban: String(finalSo).padStart(2, "0"),
+        so_van_ban: finalSoStr,
         nam: new Date().getFullYear(),
         cap_tl: form.pham_vi === "Don_vi" ? "Cấp 1" : form.cap_tl,
         phan_loai: form.pham_vi === "Don_vi" ? "Thuong" : form.phan_loai,
@@ -716,57 +724,79 @@ export default function NewDocumentPage() {
                 </div>
               </div>
 
-              {/* Bug 2: Editable mã văn bản với cảnh báo */}
-              {(form.loai_van_ban && form.phong_ban) && (
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Mã văn bản
-                    <span className="ml-1.5 text-xs font-normal text-slate-400">(tự sinh — có thể sửa)</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none transition-colors ${
-                        maVanBanExists
-                          ? "border-red-400 bg-red-50 focus:border-red-500"
-                          : hasGapWarning
-                          ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                          : "border-slate-300 focus:border-blue-500"
-                      }`}
-                      value={maVanBan}
-                      onChange={(e) => {
-                        setMaVanBan(e.target.value)
-                        setMaVanBanEdited(true)
-                      }}
-                      placeholder={
-                        form.loai_van_ban && form.phong_ban
-                          ? `VD: ${buildMaVanBan(nextSoPreview || 1, kyHieu, form.phong_ban)}`
-                          : "Chọn Loại VB và Phòng ban trước"
+              {/* Bug 2: Editable mã văn bản với cảnh báo — checkbox "không có mã" luôn hiện,
+                  không chờ chọn xong Loại VB + Phòng ban mới hiện (2 trường đó chỉ cần thiết
+                  để auto-sinh/preview mã, không cần thiết để quyết định có-mã-hay-không). */}
+              <div>
+                <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={khongCoMa}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setKhongCoMa(checked)
+                      if (checked) {
+                        setMaVanBan("")
+                        setMaVanBanEdited(false)
                       }
-                    />
-                    {maVanBanChecking && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                    }}
+                    className="rounded"
+                  />
+                  <span className="text-xs font-bold text-slate-600">
+                    Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
+                  </span>
+                </label>
+                {!khongCoMa && form.loai_van_ban && form.phong_ban && (
+                  <>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                      Mã văn bản
+                      <span className="ml-1.5 text-xs font-normal text-slate-400">(tự sinh — có thể sửa)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none transition-colors ${
+                          maVanBanExists
+                            ? "border-red-400 bg-red-50 focus:border-red-500"
+                            : hasGapWarning
+                            ? "border-amber-400 bg-amber-50 focus:border-amber-500"
+                            : "border-slate-300 focus:border-blue-500"
+                        }`}
+                        value={maVanBan}
+                        onChange={(e) => {
+                          setMaVanBan(e.target.value)
+                          setMaVanBanEdited(true)
+                        }}
+                        placeholder={
+                          form.loai_van_ban && form.phong_ban
+                            ? `VD: ${buildMaVanBan(nextSoPreview || 1, kyHieu, form.phong_ban)}`
+                            : "Chọn Loại VB và Phòng ban trước"
+                        }
+                      />
+                      {maVanBanChecking && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                    {maVanBanExists && (
+                      <div className="flex items-center gap-1.5 mt-1.5 text-xs text-red-600 font-bold">
+                        <AlertTriangle size={12} />
+                        Mã văn bản này đã tồn tại trong hệ thống.
                       </div>
                     )}
-                  </div>
-                  {maVanBanExists && (
-                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-red-600 font-bold">
-                      <AlertTriangle size={12} />
-                      Mã văn bản này đã tồn tại trong hệ thống.
-                    </div>
-                  )}
-                  {!maVanBanExists && hasGapWarning && nextSoPreview !== null && (
-                    <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-700 font-medium">
-                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-                      <span>
-                        Cảnh báo: Số tiếp theo được đề xuất là{" "}
-                        <strong className="font-mono">{buildMaVanBan(nextSoPreview, kyHieu, form.phong_ban)}</strong>.
-                        {" "}Kiểm tra kiểm soát nhảy số trước khi lưu.
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
+                    {!maVanBanExists && hasGapWarning && nextSoPreview !== null && (
+                      <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-700 font-medium">
+                        <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                        <span>
+                          Cảnh báo: Số tiếp theo được đề xuất là{" "}
+                          <strong className="font-mono">{buildMaVanBan(nextSoPreview, kyHieu, form.phong_ban)}</strong>.
+                          {" "}Kiểm tra kiểm soát nhảy số trước khi lưu.
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">

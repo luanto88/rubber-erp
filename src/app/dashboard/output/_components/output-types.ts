@@ -29,6 +29,7 @@ export interface ProductionRecord {
   import_batch_id: string | null
   ghi_chu: string | null
   created_by: string | null
+  nguoi_upload: string | null
   created_at: string
   updated_at: string
 }

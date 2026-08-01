@@ -127,6 +127,9 @@ export type IsoDocumentForm = {
   noi_dung_soat_xet: string
   ma_tai_lieu_moi: string
   phan_loai_tl: string         // "cha" | "con"
+  // Tài liệu cha, soạn thảo mới, không có mã (VD: danh sách chứng nhận đào tạo) — vẫn đi
+  // qua đúng luồng xem xét/phê duyệt hiện tại, chỉ bỏ qua yêu cầu bắt buộc phải có mã.
+  khong_co_ma: boolean
 }
 
 export const ISO_STANDARD_FALLBACK: IsoStandard[] = [
@@ -279,6 +282,7 @@ export function emptyIsoForm(): IsoDocumentForm {
     noi_dung_soat_xet: "",
     ma_tai_lieu_moi: "",
     phan_loai_tl: "cha",
+    khong_co_ma: false,
   }
 }
 

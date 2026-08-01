@@ -846,3 +846,32 @@ Phát hiện khi trả lời câu hỏi người dùng "user không phải admin
 - 2 nơi gọi API ở `documents/[id]/page.tsx` (`openDistModal`, `handleDistSend`) đã thêm header `Authorization: Bearer <token>` (dùng `getAuthToken()` sẵn có trong file) — bắt buộc phải có vì `requireAuthUser()` đọc token từ header này.
 
 `npm run build`/`eslint` sạch. **Chưa test tay** — cần: (1) tài khoản role `user` được cấp `documents.distribute` qua Cài đặt → Phân quyền → phân phối thành công; (2) tài khoản KHÔNG có quyền này → nút ẩn ở UI, và nếu gọi thẳng API (devtools) → nhận đúng lỗi 403 "Bạn không có quyền phân phối văn bản"; (3) `distributed_by` lưu đúng người thực sự đăng nhập, không phụ thuộc giá trị client gửi.
+
+## Cập nhật 2026-08-01 — Fix bug thật: bị trả về không thay được file + reset trạng thái ký cũ + văn bản không có mã (tùy chọn)
+
+Người dùng phản ánh: khi 1 văn bản bị **Trả về**, người soạn thảo mở "Sửa văn bản" (`EditDocModal`) hoặc trang chi tiết đều **không có cách nào thay file đính kèm**. Điều tra xác nhận đây là bug thật, nghiêm trọng hơn nhìn bề ngoài:
+
+- `EditDocModal` (`documents/page.tsx`) chỉ sửa Tên/Ghi chú/Mô tả AI/bước ký theo đúng chủ đích thiết kế (có comment giải thích) — không phải bug.
+- **Bug thật**: `documents/[id]/page.tsx` (trang chi tiết) trước đây **không có bất kỳ `<input type="file">` nào** — không có đường nào thay file đính kèm sau khi tạo văn bản, kể cả khi đang `draft` (chưa gửi ký), không riêng `tra_ve`.
+- Đối chiếu 2 module ISO (`iso/documents/[id]/page.tsx`, `iso/forms/[id]/page.tsx`) — **KHÔNG bị lỗi tương tự**, cả 2 đều có `isEditable` gate đúng bao trùm cả metadata lẫn file khi `tra_ve`/`bi_tu_choi_phe_duyet`. ISO Tài liệu đã có sẵn đúng pattern: khi upload file mới khác `file_goc_url` cũ, tự động null hóa `file_signed_pdf_url`/`file_signed_office_url`/`file_signed_office_type` (`iso/documents/[id]/page.tsx:1172-1176` tại thời điểm điều tra) — đây là pattern đã mirror sang văn bản.
+
+### Fix 1 — Nút "Thay file" ở trang chi tiết
+
+- `documents/[id]/page.tsx`: thêm nút "Thay file" (icon `Upload`) cạnh nút "Xem file" trong header, cùng điều kiện `canGuiKy` đã có sẵn (`isSoanThao && (draft || tra_ve)`) — đúng chính xác "ai được sửa lúc nào". Hàm `handleReplaceFile(file)` upload lên bucket `iso-documents` (path `${factoryId}/vanban/drafts/...`, cùng bucket `new/page.tsx` dùng), rồi `.update({ file_goc_url: newUrl, file_signed_pdf_url: null, file_signed_office_url: null, file_signed_office_type: null })` — **bắt buộc** null hóa 3 cột file đã ký, nếu không thì `fileUrl = file_signed_pdf_url || file_signed_office_url || file_goc_url` vẫn ưu tiên file đã ký CŨ, file mới vừa upload sẽ vô hình.
+- `EditDocModal`'s comment đầu file cập nhật thêm 1 dòng ghi rõ "file được thay ở trang chi tiết văn bản" — không đổi hành vi modal.
+
+### Fix 2 — Bug phụ cùng loại: `gui_ky` không dọn sạch trạng thái ký cũ
+
+Điều tra sâu hơn phát hiện: khi Trả về rồi Gửi ký lại (`api/documents/sign/route.ts`, action `gui_ky`), route chỉ reset `trang_thai`/`buoc_hien_tai`/`tra_ve_*`, **không xóa `nguoi_ky`/`placement_ky`** của vòng ký trước — timeline hiển thị nhầm các bước đã ký trước khi trả về là "đã ký" (tên + ngày cũ) dù thực tế cần ký lại từ đầu.
+
+Đã fix: `gui_ky`'s `.update({...})` thêm `nguoi_ky: {}`, `placement_ky: {}`, `file_signed_pdf_url: null`, `file_signed_office_url: null`, `file_signed_office_type: null` — áp dụng vô điều kiện (an toàn cho cả `draft → gui_ky` lần đầu, các field vốn đã rỗng). Đặt ở `gui_ky` (thời điểm resend) chứ không phải `tra_ve` (thời điểm bị trả về) để người soạn thảo còn xem lại file/chữ ký đã ký một phần trong lúc đang sửa; chỉ dọn sạch đúng lúc quy trình ký thực sự bắt đầu lại từ bước 0.
+
+### Fix 3 — Văn bản không có mã (tùy chọn)
+
+Người dùng xác nhận: văn bản không có mã (VD: danh sách, chứng nhận không theo khuôn số) **vẫn đi qua đúng luồng ký duyệt/xem xét/phê duyệt hiện tại, chỉ bỏ qua yêu cầu bắt buộc phải có mã**. Đã xác nhận `van_ban_documents.ma_van_ban`/`so_van_ban` đã nullable sẵn ở DB, không unique constraint — giới hạn chỉ nằm ở validate tầng app.
+
+- `new/page.tsx` và `new/upload/page.tsx`: thêm state `khongCoMa` + checkbox "Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)" ngay trên/cạnh field "Mã văn bản". Khi tick: ẩn hẳn input mã + các cảnh báo trùng mã/nhảy số, bỏ qua khối tính `finalMa`/số thứ tự trong `handleSave`, payload gửi `ma_van_ban: null, so_van_ban: null`. `new/upload/page.tsx` còn bỏ chặn cứng cũ `if (!maVanBan.trim()) { setSaveError(...) }` khi `khongCoMa`.
+- Không đổi yêu cầu bắt buộc `loai_van_ban`/`phong_ban`/`ten_van_ban` — chỉ mã trở thành tùy chọn.
+- Mọi nơi hiển thị `ma_van_ban` (danh sách, chi tiết, in, my-tasks) đã có sẵn fallback `|| "—"`/`|| "Chưa có số văn bản"` từ trước — không cần sửa gì thêm.
+
+`npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch (0 lỗi; các warning còn lại là pre-existing, không liên quan). **Chưa test tay** — cần: gửi ký 1 văn bản, để 1 người trả về → mở trang chi tiết → xác nhận thấy nút "Thay file" → thay file mới → "Xem file" phản ánh đúng file mới ngay lập tức (không còn thấy file cũ đã ký 1 phần) → gửi ký lại → xác nhận timeline không còn hiển thị bước cũ là "đã ký"; tạo văn bản tick "Không có mã" ở cả 2 form → lưu thành công, đi qua đúng luồng ký duyệt bình thường, danh sách/chi tiết/in hiện đúng "—" thay vì lỗi.

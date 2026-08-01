@@ -81,6 +81,9 @@ export default function UploadVanBanPage() {
   const [maVanBanEdited, setMaVanBanEdited] = useState(false)
   const [maVanBanExists, setMaVanBanExists] = useState(false)
   const [nextSoPreview, setNextSoPreview] = useState<number | null>(null)
+  // Văn bản không có mã (VD: danh sách, chứng nhận không theo khuôn số) — vẫn đi qua
+  // đúng luồng ký duyệt hiện tại, chỉ bỏ qua yêu cầu bắt buộc phải có mã.
+  const [khongCoMa, setKhongCoMa] = useState(false)
 
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -330,11 +333,11 @@ export default function UploadVanBanPage() {
       setSaveError("Vui lòng điền đầy đủ thông tin bắt buộc: Loại văn bản, Phòng ban, Tên văn bản.")
       return
     }
-    if (!maVanBan.trim()) {
+    if (!khongCoMa && !maVanBan.trim()) {
       setSaveError("Mã văn bản không được để trống.")
       return
     }
-    if (maVanBanExists) {
+    if (!khongCoMa && maVanBanExists) {
       setSaveError("Mã văn bản đã tồn tại trong hệ thống. Vui lòng chọn mã khác.")
       return
     }
@@ -379,22 +382,25 @@ export default function UploadVanBanPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      let finalMa = maVanBan.trim()
-      let soStr = "01"
+      let finalMa = ""
+      let soStr: string | null = null
 
-      if (maVanBanEdited) {
-        // Dùng mã user đã nhập — parse số từ phần đầu
-        const parsed = parseInt(finalMa.split("/")[0])
-        soStr = isNaN(parsed) ? "01" : String(parsed).padStart(2, "0")
-      } else {
-        // Tính lại số tiếp theo NGAY TRƯỚC khi lưu, dựa trên dữ liệu thật trong
-        // van_ban_documents — giảm khoảng hở race so với dùng nextSoPreview đã tính trước đó.
-        const nam = new Date().getFullYear()
-        const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
-        const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
-        const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
-        finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
-        soStr = String(so).padStart(2, "0")
+      if (!khongCoMa) {
+        finalMa = maVanBan.trim()
+        if (maVanBanEdited) {
+          // Dùng mã user đã nhập — parse số từ phần đầu
+          const parsed = parseInt(finalMa.split("/")[0])
+          soStr = isNaN(parsed) ? "01" : String(parsed).padStart(2, "0")
+        } else {
+          // Tính lại số tiếp theo NGAY TRƯỚC khi lưu, dựa trên dữ liệu thật trong
+          // van_ban_documents — giảm khoảng hở race so với dùng nextSoPreview đã tính trước đó.
+          const nam = new Date().getFullYear()
+          const so = await computeNextVanBanSo(factoryId, form.loai_van_ban, form.phong_ban, nam)
+          const selectedType = docTypes.find((t) => t.code === form.loai_van_ban)
+          const kyHieu = selectedType?.ky_hieu || LOAI_VAN_BAN_KY_HIEU[form.loai_van_ban] || form.loai_van_ban
+          finalMa = buildMaVanBan(so, kyHieu, form.phong_ban)
+          soStr = String(so).padStart(2, "0")
+        }
       }
 
       // Upload file lên Storage
@@ -420,7 +426,7 @@ export default function UploadVanBanPage() {
 
       const payload = {
         factory_id: factoryId,
-        ma_van_ban: finalMa,
+        ma_van_ban: khongCoMa ? null : finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
         loai_van_ban: form.loai_van_ban,
         phong_ban: form.phong_ban,
@@ -724,29 +730,51 @@ export default function UploadVanBanPage() {
 
               {/* Mã văn bản — editable */}
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Mã văn bản <span className="text-red-500">*</span>
+                <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={khongCoMa}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setKhongCoMa(checked)
+                      if (checked) {
+                        setMaVanBan("")
+                        setMaVanBanEdited(false)
+                      }
+                    }}
+                    className="rounded"
+                  />
+                  <span className="text-xs font-bold text-slate-600">
+                    Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
+                  </span>
                 </label>
-                <input
-                  className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-blue-500 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
-                  placeholder="Ví dụ: 01/BC-NMCB"
-                  value={maVanBan}
-                  onChange={(e) => {
-                    setMaVanBan(e.target.value.toUpperCase())
-                    setMaVanBanEdited(true)
-                  }}
-                />
-                {hasSoJump && (
-                  <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-700">
-                    <AlertTriangle size={12} />
-                    Số này khác số tiếp theo ({nextSoPreview}). Hệ thống vẫn lưu đúng số bạn nhập.
-                  </div>
-                )}
-                {maVanBanExists && (
-                  <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-700">
-                    <AlertTriangle size={12} />
-                    Mã văn bản này đã tồn tại trong hệ thống.
-                  </div>
+                {!khongCoMa && (
+                  <>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                      Mã văn bản <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-blue-500 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
+                      placeholder="Ví dụ: 01/BC-NMCB"
+                      value={maVanBan}
+                      onChange={(e) => {
+                        setMaVanBan(e.target.value.toUpperCase())
+                        setMaVanBanEdited(true)
+                      }}
+                    />
+                    {hasSoJump && (
+                      <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-700">
+                        <AlertTriangle size={12} />
+                        Số này khác số tiếp theo ({nextSoPreview}). Hệ thống vẫn lưu đúng số bạn nhập.
+                      </div>
+                    )}
+                    {maVanBanExists && (
+                      <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-300 rounded-lg text-xs text-red-700">
+                        <AlertTriangle size={12} />
+                        Mã văn bản này đã tồn tại trong hệ thống.
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 

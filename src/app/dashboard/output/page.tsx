@@ -465,6 +465,8 @@ export default function OutputPage() {
       dt_drc: parseFloat(form.dt_drc) || 0,
       dt_kho: parseFloat(form.dt_kho) || 0,
       ghi_chu: form.ghi_chu || null,
+      nguoi_upload: currentUser?.full_name || currentUser?.username || null,
+      created_by: currentUser?.id ?? null,
     }
 
     let error
@@ -739,7 +741,7 @@ export default function OutputPage() {
               </div>
 
               <ResponsiveTableWrapper className="rounded-2xl">
-                  <table className="w-full min-w-[960px] text-sm">
+                  <table className="w-full min-w-[1080px] text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50">
                       <tr>
                         {isAdmin && (
@@ -752,7 +754,7 @@ export default function OutputPage() {
                             />
                           </th>
                         )}
-                        {["Xe", "Chuyến", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ghi chú"].map((header) => (
+                        {["Xe", "Chuyến", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ghi chú", "Người Upload"].map((header) => (
                           <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
                         ))}
                         {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Thao tác</th>}
@@ -798,6 +800,7 @@ export default function OutputPage() {
                               ) : <span className="text-slate-400">Không có</span>}
                             </td>
                             <td className="px-4 py-3 text-slate-500">{record.ghi_chu || "—"}</td>
+                            <td className="px-4 py-3 text-slate-500">{record.nguoi_upload || "—"}</td>
                             {isAdmin && (
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1">
@@ -962,6 +965,7 @@ export default function OutputPage() {
           dispatches={dispatches}
           deliveryPoints={deliveryPoints}
           supabase={supabase}
+          currentUser={currentUser}
           onImported={() => { void loadRecords(factoryId) }}
           onClose={() => setShowImport(false)}
         />

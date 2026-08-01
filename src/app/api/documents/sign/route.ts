@@ -681,11 +681,21 @@ export async function POST(req: NextRequest) {
       const isCap1 = d.cap_tl === "Cấp 1"
       const nextStatus = isCap1 && hasSteps ? "cho_ky_phong_ban" : "cho_phe_duyet"
 
+      // Dọn sạch toàn bộ dữ liệu ký của vòng trước (nếu có) — bắt buộc kể cả khi văn bản
+      // chưa từng được ký lần nào (draft → gui_ky lần đầu, các field này vốn đã rỗng nên
+      // ghi đè không đổi gì). Nếu không dọn, timeline sẽ hiển thị nhầm các bước cũ (trước
+      // khi bị trả về) là "đã ký" với tên/ngày cũ dù buoc_hien_tai đã reset về 0, và
+      // file_signed_* có thể vẫn trỏ tới bản đã ký một phần của vòng trước.
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
         .update({
           trang_thai: nextStatus,
           buoc_hien_tai: 0,
+          nguoi_ky: {},
+          placement_ky: {},
+          file_signed_pdf_url: null,
+          file_signed_office_url: null,
+          file_signed_office_type: null,
           tra_ve_step: null,
           tra_ve_ly_do: null,
           tra_ve_nguoi: null,

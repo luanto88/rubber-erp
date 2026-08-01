@@ -647,6 +647,9 @@ export default function IsoDocumentDetailPage() {
       noi_dung_soat_xet: d.noi_dung_soat_xet || "",
       ma_tai_lieu_moi: d.ma_tai_lieu_moi || "",
       phan_loai_tl: d.phan_loai_tl || "cha",
+      // Không phải cột DB — suy ra từ việc tài liệu cha đã có sẵn không có mã, để checkbox
+      // hiển thị đúng trạng thái khi mở lại tài liệu đã lưu trước đó.
+      khong_co_ma: !isCon && !d.ma_tai_lieu,
     })
     setUploadedFileUrl(d.file_goc_url || null)
     if (d.file_goc_url) {
@@ -1124,10 +1127,12 @@ export default function IsoDocumentDetailPage() {
           requireValue(form.so_hieu_cha, "số hiệu tài liệu"),
           childDraftRows.length === 0 ? "Vui lòng thêm ít nhất một hồ sơ" : null,
         ]
-      : [
-          requireValue(form.so_hieu, "số hiệu"),
-          requireValue(form.ma_tai_lieu, "mã tài liệu"),
-        ]
+      : form.khong_co_ma
+        ? []
+        : [
+            requireValue(form.so_hieu, "số hiệu"),
+            requireValue(form.ma_tai_lieu, "mã tài liệu"),
+          ]
     return draftErrors.filter(Boolean)[0] as string | undefined
   }
 
@@ -2771,6 +2776,9 @@ export default function IsoDocumentDetailPage() {
                 ma_tai_lieu_moi: "",
                 ly_do_soat_xet: "",
                 noi_dung_soat_xet: "",
+                // "Không có mã" chỉ áp dụng cho Soạn thảo mới — Soát xét luôn thao tác trên
+                // mã đã có sẵn, không có ý nghĩa "bỏ qua mã".
+                ...(chonQuyTrinh === "Soát xét" ? { khong_co_ma: false } : {}),
               })
             }}
             disabled={!isEditable}
@@ -2804,7 +2812,9 @@ export default function IsoDocumentDetailPage() {
                 const newLoai = childTypeOptions.includes(form.loai_tai_lieu) ? form.loai_tai_lieu : "PL"
                 setReviewDocId("")
                 setReviewParentDocId("")
-                patchDraftForm({ phan_loai_tl: "con", loai_tai_lieu: newLoai, ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" })
+                // "Không có mã" chỉ áp dụng cho tài liệu Cha — hồ sơ Con luôn có mã phụ
+                // thuộc mã cha, không có khái niệm hồ sơ con đứng độc lập không mã.
+                patchDraftForm({ phan_loai_tl: "con", loai_tai_lieu: newLoai, ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "", khong_co_ma: false })
               }}
               className={`flex-1 py-2 text-sm font-bold transition-all ${isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
             >
@@ -2817,12 +2827,14 @@ export default function IsoDocumentDetailPage() {
 
         {!isReviewForm && !isCon && (
           <div className="sm:col-span-2">
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel}: Tự sinh <span className="text-red-500">*</span></label>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              {codeLabel}: Tự sinh {!form.khong_co_ma && <span className="text-red-500">*</span>}
+            </label>
             <input
               type="text"
-              value={form.ma_tai_lieu}
+              value={form.khong_co_ma ? "" : form.ma_tai_lieu}
               readOnly
-              placeholder="Tự sinh sau khi chọn đủ thông tin"
+              placeholder={form.khong_co_ma ? "Không áp dụng mã cho tài liệu này" : "Tự sinh sau khi chọn đủ thông tin"}
               className="w-full px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl font-mono text-lg font-bold text-violet-700 outline-none"
             />
           </div>
@@ -2883,8 +2895,25 @@ export default function IsoDocumentDetailPage() {
 
         {!isReviewForm && !isCon && (
           <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu <span className="text-red-500">*</span></label>
-            <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+            <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={form.khong_co_ma}
+                disabled={!isEditable}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  patchDraftForm(checked ? { khong_co_ma: true, so_hieu: "" } : { khong_co_ma: false })
+                }}
+                className="rounded"
+              />
+              <span className="text-xs font-bold text-slate-600">Tài liệu này không có mã</span>
+            </label>
+            {!form.khong_co_ma && (
+              <>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu <span className="text-red-500">*</span></label>
+                <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+              </>
+            )}
           </div>
         )}
 

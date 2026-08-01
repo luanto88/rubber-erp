@@ -18,6 +18,7 @@ import {
   SIGN_AS_OPTIONS,
   SIGN_AS_LABEL,
   fmtDate,
+  sanitizeStorageFileName,
   type VanBanDocument,
   type ThuTuKyStep,
   type SignAsType,
@@ -41,9 +42,12 @@ import {
   Printer,
   Share2,
   Loader2,
+  Upload,
 } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+
+const STORAGE_BUCKET = "iso-documents"
 
 type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }
 type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
@@ -658,6 +662,10 @@ export default function DocumentDetailPage() {
   const [distGhiChu, setDistGhiChu] = useState("")
   const [distSending, setDistSending] = useState(false)
 
+  // Thay file đính kèm — chỉ khả dụng khi văn bản còn đang draft/tra_ve (canGuiKy)
+  const fileReplaceInputRef = useRef<HTMLInputElement>(null)
+  const [replacingFile, setReplacingFile] = useState(false)
+
   // Fetch department code via admin API — PHẢI gắn Authorization, nếu không
   // requireAuthUser() ở route sẽ throw và route trả về { code: null } với status 200,
   // khiến userDeptCode luôn là null và canKyBuoc luôn sai cho mọi người dùng.
@@ -684,6 +692,43 @@ export default function DocumentDetailPage() {
       .single()
     setDoc(data as VanBanDocument | null)
   }, [docId])
+
+  // Thay file đính kèm — chỉ gọi được khi canGuiKy (isSoanThao && draft/tra_ve). Bắt buộc
+  // null hóa file_signed_pdf_url/file_signed_office_url/file_signed_office_type vì
+  // fileUrl/docSourceUrl luôn ưu tiên các cột đã ký này trước file_goc_url — nếu không null
+  // hóa, file mới vừa upload sẽ vô hình (mirror đúng pattern đã có sẵn ở ISO Tài liệu).
+  const handleReplaceFile = async (file: File) => {
+    if (!factoryId || !doc) return
+    setReplacingFile(true)
+    setActionError(null)
+    try {
+      const filePath = `${factoryId}/vanban/drafts/${Date.now()}_${sanitizeStorageFileName(file.name)}`
+      const { error: uploadErr } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(filePath, file, { upsert: false })
+      if (uploadErr) throw new Error(`Upload file thất bại: ${uploadErr.message}`)
+      const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath)
+
+      const { error: updateErr } = await supabase
+        .from("van_ban_documents")
+        .update({
+          file_goc_url: urlData.publicUrl,
+          file_signed_pdf_url: null,
+          file_signed_office_url: null,
+          file_signed_office_type: null,
+        })
+        .eq("id", doc.id)
+      if (updateErr) throw new Error(updateErr.message)
+
+      setActionOk("Đã thay file thành công!")
+      setTimeout(() => setActionOk(null), 3000)
+      await loadDoc(factoryId)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setReplacingFile(false)
+    }
+  }
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -971,6 +1016,28 @@ export default function DocumentDetailPage() {
               <Eye size={15} />
               Xem file
             </a>
+          )}
+          {canGuiKy && (
+            <>
+              <input
+                ref={fileReplaceInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ""
+                  if (f) void handleReplaceFile(f)
+                }}
+              />
+              <button
+                onClick={() => fileReplaceInputRef.current?.click()}
+                disabled={replacingFile}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all disabled:opacity-50"
+              >
+                {replacingFile ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                {replacingFile ? "Đang tải lên..." : "Thay file"}
+              </button>
+            </>
           )}
           <a
             href={`/dashboard/documents/print/?docId=${doc.id}`}

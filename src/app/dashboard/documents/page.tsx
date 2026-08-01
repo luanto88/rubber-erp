@@ -547,7 +547,9 @@ export default function DocumentsPage() {
 // ─── EditDocModal ────────────────────────────────────────────────────────────
 // Sửa nhanh: chỉ Tên/Ghi chú/Mô tả AI + danh sách bước ký (nếu đang draft/tra_ve,
 // tức chưa ai ký) — KHÔNG sửa loại VB, phòng ban soạn thảo, mã VB, cấp VB,
-// phạm vi, người phê duyệt hay file, để tránh phức tạp hóa lại số VB/luồng ký.
+// phạm vi hay người phê duyệt, để tránh phức tạp hóa lại số VB/luồng ký.
+// File đính kèm được thay ở trang chi tiết văn bản (nút "Thay file", cùng điều
+// kiện draft/tra_ve) — không lặp lại ở modal sửa nhanh này.
 
 type EditStepForm = {
   id: string

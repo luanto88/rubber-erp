@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useMemo, useRef, useState } from "react"
 import { AlertTriangle, CheckCircle, ChevronRight, FileSpreadsheet, Plus, Upload } from "lucide-react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -15,6 +15,16 @@ import {
 } from "./output-types"
 import { normalizeDateInput } from "@/lib/date-utils"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import type { SessionUser } from "@/lib/auth"
+
+// Danh sách loại mủ cho bảng xem trước (Step 2) — chỉ cột của loại có dữ liệu trong file mới hiện.
+const PREVIEW_MATERIALS = [
+  { label: "Mủ nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
+  { label: "Mủ chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
+  { label: "Mủ đông chén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
+  { label: "Mủ đông khối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
+  { label: "Mủ dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
+] as const satisfies ReadonlyArray<{ label: string; tuoiKey: keyof MatchedSlRow; khoKey: keyof MatchedSlRow }>
 
 // ────────────────────────────────────────────────────────────────
 // Excel helpers
@@ -281,10 +291,11 @@ interface OutputImportProps {
   onClose: () => void
   // Supabase client passed from parent (avoid re-import)
   supabase: import("@supabase/supabase-js").SupabaseClient
+  currentUser: SessionUser | null
 }
 
 export function OutputImport({
-  factoryId, dispatches, deliveryPoints, onImported, onClose, supabase,
+  factoryId, dispatches, deliveryPoints, onImported, onClose, supabase, currentUser,
 }: OutputImportProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [fileName, setFileName] = useState("")
@@ -384,6 +395,12 @@ export function OutputImport({
     return [...map.entries()].map(([content, count]) => ({ content, count }))
   }, [matched])
 
+  const activeMaterials = useMemo(() => {
+    return PREVIEW_MATERIALS.filter((def) =>
+      matched.some((r) => Number(r[def.tuoiKey] ?? 0) > 0 || Number(r[def.khoKey] ?? 0) > 0)
+    )
+  }, [matched])
+
   const handleConfirm = async (options?: { skipInvalidNotes?: boolean }) => {
     setImporting(true)
     setImportError(null)
@@ -420,6 +437,8 @@ export function OutputImport({
         warn_codes: r.warn_codes,
         import_batch_id: batchId,
         ghi_chu: r.ghi_chu || null,
+        nguoi_upload: currentUser?.full_name || currentUser?.username || null,
+        created_by: currentUser?.id ?? null,
       }))
       const existingRows = await loadExistingRecords(supabase, factoryId, rowsToImport)
       const existingByKey = new Map<string, ExistingProductionRecord[]>()
@@ -647,8 +666,12 @@ export function OutputImport({
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Số xe</th>
                       <th className="px-3 py-2 text-center font-bold text-slate-600">Chuyến</th>
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Tài xế</th>
-                      <th className="px-3 py-2 text-right font-bold text-slate-600">Tươi (kg)</th>
-                      <th className="px-3 py-2 text-right font-bold text-slate-600">Khô (kg)</th>
+                      {activeMaterials.map((def) => (
+                        <Fragment key={def.label}>
+                          <th className="px-3 py-2 text-right font-bold text-slate-600 whitespace-nowrap">{def.label} — Tươi (kg)</th>
+                          <th className="px-3 py-2 text-right font-bold text-slate-600 whitespace-nowrap">{def.label} — Khô (kg)</th>
+                        </Fragment>
+                      ))}
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Ghi chú</th>
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Cảnh báo</th>
                     </tr>
@@ -658,8 +681,6 @@ export function OutputImport({
                       const hasRed = r.warn_codes.some(c => WARN_SEVERITY[c] === "red")
                       const hasAmber = !hasRed && r.warn_codes.some(c => WARN_SEVERITY[c] === "amber")
                       const rowCls = hasRed ? "bg-red-50" : hasAmber ? "bg-amber-50/50" : i % 2 === 0 ? "bg-white" : "bg-slate-50/50"
-                      const totalTuoi = r.mn_tuoi + r.ct_tuoi + r.dct_tuoi + r.dkt_tuoi + r.dt_tuoi
-                      const totalKho = r.mn_kho + r.ct_kho + r.dct_kho + r.dkt_kho + r.dt_kho
                       return (
                         <tr key={i} className={rowCls}>
                           <td className="px-3 py-1.5 text-slate-700">{r.ngay}</td>
@@ -667,8 +688,16 @@ export function OutputImport({
                           <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{r.base_xe}</td>
                           <td className="px-3 py-1.5 text-center text-slate-600">{r.chuyen}</td>
                           <td className="px-3 py-1.5 text-slate-600">{r.tai_xe || <span className="text-slate-300">—</span>}</td>
-                          <td className="px-3 py-1.5 text-right text-slate-700">{totalTuoi > 0 ? totalTuoi.toLocaleString("vi-VN") : "—"}</td>
-                          <td className="px-3 py-1.5 text-right font-bold text-emerald-700">{totalKho > 0 ? totalKho.toLocaleString("vi-VN") : "—"}</td>
+                          {activeMaterials.map((def) => {
+                            const tuoi = Number(r[def.tuoiKey] ?? 0)
+                            const kho = Number(r[def.khoKey] ?? 0)
+                            return (
+                              <Fragment key={def.label}>
+                                <td className="px-3 py-1.5 text-right text-slate-700">{tuoi > 0 ? tuoi.toLocaleString("vi-VN") : "—"}</td>
+                                <td className="px-3 py-1.5 text-right font-bold text-emerald-700">{kho > 0 ? kho.toLocaleString("vi-VN") : "—"}</td>
+                              </Fragment>
+                            )
+                          })}
                           <td className="px-3 py-1.5 text-slate-500 min-w-[140px]">
                             {r.warn_codes.includes("UNKNOWN_NOTE") ? (
                               <RequiredNoteSelect
