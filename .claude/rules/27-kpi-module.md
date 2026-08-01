@@ -406,13 +406,24 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, location_evaluation_id NU
   tại là `kpi_5s_locations`+`kpi_5s_zones` (bảng mới)+`kpi_5s_zone_members`,
   route `/dashboard/kpi/5s/location/{id}`. `tsc`/`eslint`/`npm run build` đều
   sạch, **chưa test tay** (cả bản gốc lẫn bản đổi tên).
-- **Phase 3 — Khung tiêu chí KPI + Chấm điểm chuyên môn theo ngày**:
-  `kpi_criteria_templates`+`kpi_daily_evaluations`+`kpi_daily_evaluation_items`;
-  Settings Khung tiêu chí; tab "Chấm điểm chuyên môn".
-- **Phase 4 — Trọng số + Hệ số chuyên cần + Engine tính điểm (bản nháp)**:
-  `kpi_score_weights`+`kpi_monthly_scores`; engine 1 RPC/transaction `GROUP BY`
-  (không loop-per-user), `UPSERT ... WHERE trang_thai <> 'da_khoa'`; tab "Bảng
-  điểm KPI"; điểm luôn `nhap` (chưa khóa) — chạy nháp 1-2 tháng quan sát thực tế.
+- **Phase 3 — Khung tiêu chí KPI + Chấm điểm chuyên môn theo ngày** ✅ Đã code xong
+  (2026-08-11 (system), 2026-07-29 (repo timeline nội bộ) — xem mục "Cập nhật Phase
+  3" bên dưới): `kpi_criteria_templates`+`kpi_daily_evaluations`+
+  `kpi_daily_evaluation_items` (migration
+  `20260811_kpi_criteria_daily_evaluations.sql`, **CHƯA CHẠY**); RPC atomic
+  `kpi_submit_daily_evaluation`/`kpi_delete_daily_evaluation`; sub-tab "Khung
+  tiêu chí KPI" (Cài đặt → KPI & 5S) + tab "Chấm điểm chuyên môn"
+  (`/dashboard/kpi/evaluate`). `tsc`/`eslint`/`npm run build` đều sạch, **chưa
+  chạy migration, chưa test tay**.
+- **Phase 4 — Trọng số + Hệ số chuyên cần + Engine tính điểm (bản nháp)** ✅ Đã
+  code xong (xem mục "Cập nhật Phase 4" bên dưới): `kpi_score_weights`+
+  `kpi_monthly_scores` (migration
+  `20260813_kpi_score_weights_monthly_scores.sql`, **CHƯA CHẠY**); engine 1
+  RPC/transaction `GROUP BY` (không loop-per-user), `UPSERT ... WHERE
+  trang_thai <> 'da_khoa'`; sub-tab "Trọng số công thức" (Cài đặt → KPI & 5S) +
+  tab "Bảng điểm KPI" (`/dashboard/kpi/scores`); điểm luôn `nhap` (chưa khóa) —
+  chạy nháp 1-2 tháng quan sát thực tế. `tsc`/`eslint`/`npm run build` đều
+  sạch, **chưa chạy migration, chưa test tay**.
 - **Phase 5 — Khóa sổ, khiếu nại & minh bạch**: `kpi_score_adjustments`+
   `kpi_appeals`; khóa sổ, điều chỉnh (audit), khiếu nại; điểm tạm tính real-time,
   bảng xếp hạng ẩn danh theo nhóm/phòng ban.
@@ -3295,3 +3306,350 @@ dùng lại đúng 2 migration `20260807_...` đã liệt kê ở mục "2026-07
    như admin).
 8. Test regression: tài khoản admin vẫn thấy/thao tác được mọi thứ như trước ở cả 2 nơi (Cài đặt
    và `/dashboard/kpi/5s`), không bị thu hẹp bởi các thay đổi trên.
+
+## Cập nhật Phase 3 (2026-07-29, tiếp) — Khung tiêu chí KPI + Chấm điểm chuyên môn theo ngày, ĐÃ
+CODE XONG, CHƯA CHẠY MIGRATION, CHƯA TEST TAY
+
+Đã hỏi và được xác nhận qua `AskUserQuestion` trước khi code (đi tiếp Phase 3 thay vì ưu tiên
+việc khác). Xây đúng theo schema đã phác thảo sẵn ở mục "Database Schema" → "Nhóm & Chuyên môn
+(D)" đầu file, không lệch thiết kế nào đáng kể.
+
+### Migration `supabase/migrations/20260811_kpi_criteria_daily_evaluations.sql` (**CẦN CHẠY THỦ
+CÔNG, CHƯA CHẠY**)
+
+- `kpi_criteria_templates` (`factory_id, group_id → personnel_groups, ten_tieu_chi, mo_ta,
+  sort_order, is_active`) — mỗi tiêu chí thuộc đúng 1 nhóm chuyên môn. RLS: SELECT rộng trong
+  factory; INSERT/UPDATE/DELETE chỉ `kpi.manage_config`/admin — **KHÔNG mở rộng cho lãnh đạo
+  phòng ban** như `kpi_5s_locations`/`kpi_task_templates`, vì `personnel_groups` không mang khái
+  niệm phòng ban (`phong_ban_id`), không có ranh giới rõ ràng để gán quyền tương tự.
+- `kpi_daily_evaluations` (`factory_id, user_id, ngay, group_id, loai ('chinh'|'choang'),
+  nguoi_cham_id, ghi_chu`), `UNIQUE(factory_id,user_id,ngay,group_id)` — RLS chỉ có SELECT rộng
+  trong factory; **không cấp INSERT/UPDATE/DELETE trực tiếp cho client** — mọi ghi bắt buộc qua 2
+  RPC bên dưới.
+- `kpi_daily_evaluation_items` (`factory_id, evaluation_id → kpi_daily_evaluations ON DELETE
+  CASCADE, criteria_id, ket_qua ('dat'|'tuong_doi'|'chua_dat')`), `UNIQUE(evaluation_id,
+  criteria_id)` — có `factory_id` riêng (mirror `kpi_task_logs`, tránh JOIN qua bảng cha mỗi lần
+  lọc, đúng invariant "mọi bảng đều có factory_id"). Cũng không cấp ghi trực tiếp.
+- **Quyết định thiết kế quan trọng**: `kpi.evaluate` (đã seed sẵn từ Phase 0, cấp mặc định cho
+  `admin`+`manager`) trước đây **chưa từng được dùng để gate bất kỳ đâu** (đã ghi rõ ở mục "Fix
+  nhỏ 2026-07-25" — Nghiệm thu/Điều chỉnh/Trả về của công việc chỉ dùng `nguoi_giao_id`/admin,
+  cố ý không dùng permission này). Đây là nơi ĐẦU TIÊN `kpi.evaluate` thực sự có tác dụng: gate
+  ai được gọi RPC `kpi_submit_daily_evaluation`/`kpi_delete_daily_evaluation`.
+- **RPC atomic `kpi_submit_daily_evaluation(p_user_id, p_ngay, p_group_id, p_ghi_chu, p_items
+  JSONB)`** — validate quyền (`current_profile_has_permission('kpi.evaluate')`) + cùng nhà máy
+  (cả người chấm, người được chấm, nhóm) → tự tính `loai` server-side (snapshot
+  `personnel_group_members.is_primary` của đúng `group_id` cho đúng `user_id`, KHÔNG tin client
+  tự khai) → `INSERT ... ON CONFLICT (factory_id,user_id,ngay,group_id) DO UPDATE` (upsert, cho
+  phép "gộp nhiều lần chấm/lần" đúng theo roadmap — khác hẳn `kpi_5s_evaluations`, vốn là log bất
+  biến không cho sửa) → xóa hết items cũ → insert items mới (validate từng `criteria_id` đúng
+  thuộc `group_id`+`factory_id` đang chấm). Toàn bộ trong 1 transaction, đúng convention "RPC
+  atomic cho multi-step write" xuyên suốt cả module.
+- **RPC `kpi_delete_daily_evaluation(p_evaluation_id)`** — xóa hẳn 1 lượt chấm (dùng khi chọn
+  nhầm người/nhóm hoàn toàn, không phải sửa kết quả).
+- Không có ràng buộc "chỉ người chấm gốc mới sửa lại được" — bất kỳ ai có `kpi.evaluate`/admin
+  đều re-score được (ghi đè `nguoi_cham_id` thành người vừa sửa) — quyết định có chủ đích vì
+  roadmap ưu tiên "gộp/merge" hơn tính bất biến kiểu 5S; nếu sau này phát sinh lo ngại thao túng
+  điểm số, có thể bổ sung theo hướng audit log riêng (chưa làm ở đợt này).
+
+### `src/lib/kpi-criteria.ts` (mới) — CRUD khung tiêu chí
+
+`fetchKpiCriteriaTemplates(factoryId, opts?)`, `fetchKpiCriteriaTemplatesByGroup(factoryId,
+groupId)` (chỉ tiêu chí `is_active`, dùng cho form chấm điểm), `createKpiCriteriaTemplate`,
+`updateKpiCriteriaTemplate`, `setKpiCriteriaTemplateActive`, `deleteKpiCriteriaTemplate`. Theo
+đúng convention `kpi-templates.ts` (throw raw Supabase error, không tự bọc message — trang gọi
+dùng `getKpiErrorMessage` từ `kpi-tasks.ts` để format), KHÔNG duplicate helper error như
+`kpi-5s.ts` từng làm.
+
+### `src/lib/kpi-daily-evaluations.ts` (mới) — nộp/xem chấm điểm
+
+- `computeDailyPercent(items)` — đúng công thức `%đạt = Σ(Đạt×1.0+Tương_đối×0.5+Chưa_đạt×0) ÷ số
+  tiêu chí đã chấm`, làm tròn 1 chữ số thập phân.
+- `fetchKpiDailyEvaluationOne(factoryId, userId, ngay, groupId)` — 1 lượt chấm cụ thể kèm items
+  (nested select `kpi_daily_evaluation_items(...)`), dùng pre-fill form khi mở lại/sửa.
+- `fetchKpiDailyEvaluationsForDay(factoryId, ngay)` — toàn bộ lượt chấm trong 1 ngày (mọi
+  người/nhóm), dùng cho bảng lịch sử.
+- `submitKpiDailyEvaluation`/`deleteKpiDailyEvaluation` — wrapper gọi 2 RPC trên.
+
+### Settings — sub-tab "Khung tiêu chí KPI" (`kpi-criteria-tab.tsx`, mới)
+
+Thêm sub-tab thứ 3 trong Cài đặt → KPI & 5S (cạnh "Vị trí 5S"/"Khu vực"). Danh sách nhóm chuyên
+môn (`loadAllPersonnelGroups`) mỗi nhóm 1 card, liệt kê tiêu chí bên trong (Sửa/Tạm ngưng/Xóa),
+nút "Thêm tiêu chí" chung + "Thêm vào nhóm này" per-card. **`canManage` truyền vào là
+`canManageKpiConfig` THUẦN** (admin/kpi.manage_config) — KHÔNG dùng `canManageKpi5s` (đã mở rộng
+cho lãnh đạo phòng ban ở 2 tab kia) — đúng quyết định thiết kế ở trên.
+
+### Tab "Chấm điểm chuyên môn" (`/dashboard/kpi/evaluate/page.tsx`, mới)
+
+- Thêm vào `KpiShell` (tông màu indigo, icon `ClipboardCheck`) — hiện cho mọi `kpi.view` user
+  như 4 tab còn lại; phần "Lưu"/"Sửa"/"Xóa" tự ẩn nếu `!canEvaluate` (chỉ còn xem lịch sử).
+- Form: Ngày (mặc định hôm nay) → Người được chấm (`loadKpiTaskCandidates`) → Nhóm chuyên môn
+  (chỉ hiện các nhóm mà NGƯỜI ĐÓ thực sự thuộc, qua `candidate.groupIds`) → tự tải tiêu chí
+  (`fetchKpiCriteriaTemplatesByGroup`) + lượt chấm đã có (nếu có, để sửa/gộp) → mỗi tiêu chí 3 nút
+  Đạt/Tương đối/Chưa đạt (không ép chọn hết — khớp đúng "số tiêu chí ĐÃ CHẤM" trong công thức, cho
+  phép chấm một phần) → ghi chú → Lưu (gọi RPC, upsert).
+- Hiển thị preview `%đạt hiện tại` + nhãn "Chính (×10)"/"Choàng (×5)" tính client-side (chỉ để
+  tham khảo trước khi lưu — giá trị `loai` CHÍNH THỨC luôn do RPC tự tính lại server-side, không
+  tin giá trị preview này).
+- Bảng "Lịch sử chấm điểm ngày {ngày}" — liệt kê mọi lượt chấm trong ngày đã chọn (mọi người/mọi
+  nhóm), hiện %đạt/loại/người chấm/ghi chú, nút Sửa (nạp lại vào form phía trên) + Xóa (RPC
+  `kpi_delete_daily_evaluation`, có xác nhận qua `ModalShell`).
+
+### Ngoài phạm vi (chưa làm ở Phase 3 này, để Phase 4)
+
+- **KHÔNG tính điểm tháng** (D — Điểm chuyên môn tổng hợp theo công thức "Điểm ngày =
+  %chính×10 + Σ(%choàng_i×5), Max ngày = 10 + 5×số nhóm choàng có chấm ngày đó") — Phase 3 chỉ
+  xây hạ tầng lưu trữ + form chấm điểm hàng ngày, việc tổng hợp thành điểm KPI tháng
+  (`kpi_monthly_scores`) thuộc Phase 4, cần dữ liệu Phase 3 này làm input.
+- Không có cơ chế nhắc nhở/báo thiếu nếu 1 người bị bỏ sót chấm điểm ngày nào đó — thuần túy nộp
+  chủ động, không có "Việc hôm nay" kiểu Công việc/5S cho việc chấm điểm.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự
+
+1. Chạy `supabase/migrations/20260811_kpi_criteria_daily_evaluations.sql` trên Supabase SQL
+   Editor.
+2. Vào Cài đặt → KPI & 5S → "Khung tiêu chí KPI" — thêm 2-3 tiêu chí cho 1 nhóm chuyên môn có
+   sẵn (vd "Bảo trì") — xác nhận lưu đúng, Sửa/Tạm ngưng/Xóa hoạt động; test tài khoản KHÔNG có
+   `kpi.manage_config` (kể cả lãnh đạo phòng ban) → xác nhận vẫn xem được danh sách nhưng không
+   thấy nút Thêm/Sửa/Xóa.
+3. Vào `/dashboard/kpi/evaluate` với tài khoản có `kpi.evaluate` (mặc định admin/manager) — chọn
+   Ngày (hôm nay) + 1 Người thuộc nhóm vừa thêm tiêu chí + đúng Nhóm đó → xác nhận tiêu chí hiện
+   ra đúng, chấm 1 vài tiêu chí (không cần hết) → Lưu → xác nhận thành công, %đạt hiển thị đúng
+   theo công thức, xuất hiện trong "Lịch sử chấm điểm ngày" bên dưới với đúng nhãn Chính/Choàng
+   (test cả 2 trường hợp: nhóm đó LÀ nhóm chính của người này, và KHÔNG PHẢI nhóm chính).
+4. Mở lại đúng (Ngày, Người, Nhóm) đã chấm ở bước 3 → xác nhận form tự nạp lại đúng kết quả cũ
+   (pre-fill) → đổi 1-2 tiêu chí, thêm tiêu chí mới chưa chấm trước đó → Lưu lại → xác nhận
+   UPSERT đúng (không tạo dòng trùng trong lịch sử, chỉ 1 dòng duy nhất cho đúng tổ hợp
+   Ngày+Người+Nhóm, %đạt cập nhật đúng theo bộ items mới).
+5. Bấm "Sửa" trực tiếp từ bảng "Lịch sử chấm điểm" → xác nhận nạp đúng vào form phía trên; bấm
+   "Xóa" 1 lượt chấm → xác nhận biến mất khỏi lịch sử, gọi lại đúng RPC xóa.
+6. Test tài khoản KHÔNG có `kpi.evaluate` (role `user` mặc định) → vào `/dashboard/kpi/evaluate`
+   → xác nhận chỉ thấy bảng lịch sử (đọc), không thấy form chấm điểm/nút Lưu/Sửa/Xóa.
+7. Test 1 người CHƯA thuộc nhóm chuyên môn nào (`personnel_group_members` rỗng cho họ) → chọn
+   người đó trong form → xác nhận dropdown "Nhóm chuyên môn" hiện đúng cảnh báo "chưa thuộc nhóm
+   chuyên môn nào" và bị khóa (không chọn được nhóm nào), không crash.
+8. Test 1 nhóm CHƯA có tiêu chí nào (`is_active`) → chọn nhóm đó → xác nhận hiện đúng thông báo
+   hướng dẫn vào Cài đặt thêm tiêu chí, không hiện nút Lưu.
+9. Thử gọi thẳng RPC `kpi_submit_daily_evaluation` (qua devtools) với `p_user_id` thuộc nhà máy
+   KHÁC, hoặc `p_group_id` không tồn tại — xác nhận bị chặn đúng với thông báo lỗi rõ ràng, không
+   ghi được dữ liệu sai nhà máy.
+
+## Cập nhật (kế hoạch phiên sau) — Fix bug "việc định kỳ mắc kẹt" + tài liệu Q1/Q4, ĐÃ CODE XONG,
+CHƯA CHẠY MIGRATION, CHƯA TEST TAY
+
+Người dùng đặt 3 câu hỏi thiết kế trước khi đi tiếp Phase 4, xác nhận qua `AskUserQuestion` — câu
+hỏi 2 chỉ ra 1 bug thật, đã fix. Câu hỏi 1/4 chỉ cần tài liệu hóa (không code logic). Câu hỏi 3
+(validate ngày dữ liệu nghiệp vụ khi "Gắn bản ghi tại chỗ") **cố ý hoãn**, chưa làm.
+
+### Bug đã fix — RPC `kpi_ensure_today_task_instances` sinh task trùng mỗi ngày khi task cũ chưa xong
+
+**Nguyên nhân xác nhận qua đọc code** (không đoán): hàm chỉ kiểm tra `EXISTS (... AND ngay_giao =
+v_today)` — "đã có task cho ĐÚNG HÔM NAY chưa" — không hề kiểm tra instance của NGÀY TRƯỚC (cùng
+`template_id`) đã đóng (`hoan_thanh`/`huy`) hay chưa. Ví dụ thật: 1 việc định kỳ "up sản lượng
+trước 22h" giao ngày 27/7, chưa hoàn thành; sang ngày 28/7 mở app, hệ thống vẫn sinh thêm 1 task
+MỚI cho ngày 28/7 — task ngày 27/7 vẫn còn mở, chồng chất dần mỗi ngày không xong.
+
+**Fix** — migration `supabase/migrations/20260812_kpi_task_templates_skip_stuck.sql` (**CẦN CHẠY
+THỦ CÔNG, CHƯA CHẠY** — phải chạy SAU `20260807_kpi_substitution_approval.sql`): `CREATE OR
+REPLACE FUNCTION kpi_ensure_today_task_instances` (giữ nguyên chữ ký, không cần `DROP FUNCTION`)
+— thêm 1 khối `IF EXISTS (SELECT 1 FROM kpi_tasks WHERE template_id = v_tpl.id AND trang_thai NOT
+IN ('hoan_thanh','huy')) THEN CONTINUE; END IF;` ngay sau khối kiểm tra "đã có task hôm nay chưa".
+Nếu template đang có BẤT KỲ task nào còn mở (bất kể ngày sinh, bất kể ai đang giữ), không sinh
+thêm — task cũ giữ nguyên `han_hoan_thanh` gốc, độ trễ hiển thị rõ qua badge "Quá hạn N ngày" mới
+thêm (xem dưới) thay vì bị nhân bản.
+
+**Known limitation đã ghi nhận, cố ý chưa xử lý ở đợt này**: nếu "Người thay thế tạm thời" bắt
+đầu hiệu lực trong lúc task cũ (của người gốc) còn mắc kẹt, người thay thế sẽ KHÔNG có task mới
+cho tới khi task cũ đóng (không tự động reassign task cũ sang người thay thế). Cần quyết định
+thêm nếu người dùng phản ánh case này trong thực tế.
+
+**UX đi kèm** — hàm mới `daysOverdue(task, nowMs?)` trong `src/lib/kpi-tasks.ts` (bên cạnh
+`isTaskOverdue`/`isTaskDueSoon` đã có), trả về số ngày quá hạn (làm tròn xuống) hoặc `null` nếu
+task không quá hạn. Hiển thị badge đỏ nhỏ "Quá hạn N ngày" ở: card danh sách công việc
+(`kpi/tasks/page.tsx`, cạnh dòng "Hạn: ...") và header trang chi tiết công việc
+(`kpi/tasks/[id]/page.tsx`, cạnh "Hạn hoàn thành"). Cần thiết vì sau fix, 1 task có thể tồn tại
+quá hạn NHIỀU ngày liên tục thay vì bị "che" bởi các bản sao mới mỗi ngày như trước — nếu không
+hiển thị rõ mức độ trễ, module sẽ mất đi tính minh bạch.
+
+### Tài liệu hóa câu hỏi 1 — "Vì sao cần Khung tiêu chí (D) khi đã giao task (A/B) rồi?"
+
+Đã xác nhận với người dùng: D và A/B đo hai thứ khác nhau, không trùng lặp nếu tiêu chí được cấu
+hình đúng tinh thần — **không cần sửa code**, chỉ ghi lại hướng dẫn cho admin khi cấu hình
+`kpi_criteria_templates` (Cài đặt → KPI & 5S → Khung tiêu chí KPI):
+
+- **A (Hoàn thành) + B (Đúng hạn)** — đo việc GIAO CỤ THỂ (`kpi_tasks`): đã làm task này chưa,
+  đúng hạn không. Ví dụ: task "Đo mẫu hàng ngày" (nhóm Kỹ thuật - Chất lượng, giao Nguyễn Hữu Thọ
+  chính/Chau Nho choàng) → A = đã nộp/nghiệm thu chưa; B = có đúng hạn không.
+- **D (Chuyên môn)** — đo CHẤT LƯỢNG/KỸ NĂNG HÀNH NGHỀ CHUNG của nhóm, độc lập với có task cụ thể
+  nào hôm đó hay không. Tiêu chí ĐÚNG tinh thần cho nhóm "Kỹ thuật - Chất lượng": *"Tuân thủ đúng
+  quy trình lấy mẫu"*, *"Ghi chép đầy đủ vào biểu mẫu"*, *"Vệ sinh/bảo quản dụng cụ đo đúng
+  cách"*, *"An toàn lao động khi thao tác mẫu"*. Tiêu chí SAI tinh thần (tránh khi cấu hình) —
+  *"Đã đo mẫu đúng hạn hôm nay"* (trùng lặp trực tiếp với B, không nên đưa vào Khung tiêu chí).
+
+### Tài liệu hóa câu hỏi 4 — "Việc định kỳ nhịp độ khác ngày (vd chấm điểm hàng tuần)"
+
+Đã xác nhận: dùng cơ chế có sẵn, **không cần code**. `kpi_task_templates.apply_weekdays` đã hỗ
+trợ chọn ĐÚNG 1 thứ (vd chỉ Chủ nhật) — kết hợp `gio_han` (vd 17:00) → `kpi_ensure_today_task_instances`
+tự sinh đúng 1 task/tuần vào đúng thứ đó, không cần thay đổi schema. Đã thêm 1 dòng hint trong
+`template-form-modal.tsx` ngay dưới phần chọn "Thứ áp dụng": *"Chọn nhiều thứ = việc lặp lại hàng
+ngày... Chỉ chọn 1 thứ (vd chỉ Chủ nhật) = việc lặp lại theo tuần vào đúng thứ đó."*
+
+### Câu hỏi 3 — cố ý CHƯA làm (known limitation)
+
+"Validate đúng ngày dữ liệu nghiệp vụ khi đóng task qua Gắn bản ghi tại chỗ" (vd bắt buộc bản ghi
+sản lượng gắn vào đúng phải là của ngày mục tiêu, không được là ngày cũ hơn) — **chưa cần**, theo
+xác nhận của người dùng. Cơ chế "Gắn bản ghi tại chỗ" (`kpi_task_link_and_complete`,
+`KpiLinkPrompt`) tiếp tục tin tưởng người dùng tự chọn đúng bản ghi, domain-agnostic, không kiểm
+tra ngày. Ghi lại làm known limitation, không phải việc quên làm.
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Chạy migration `20260812_kpi_task_templates_skip_stuck.sql` trên Supabase SQL Editor (SAU
+   `20260807_kpi_substitution_approval.sql`).
+2. Test đúng kịch bản gốc: 1 template giao cho 1 người, để task ngày N không hoàn thành → mở app
+   ở ngày N+1, N+2 → xác nhận CHỈ có 1 task tồn tại (không nhân bản), `han_hoan_thanh` giữ nguyên
+   mốc gốc (ngày N), badge "Quá hạn N ngày" tăng đúng theo số ngày trôi qua ở cả card danh sách
+   lẫn trang chi tiết.
+3. Hoàn thành task đó (nghiệm thu hoặc Gắn bản ghi tại chỗ) → mở app ngày kế tiếp → xác nhận sinh
+   đúng 1 task MỚI cho ngày đó (không còn bị chặn nữa vì task cũ đã đóng).
+4. Tạo 1 template chỉ chọn Chủ nhật, giờ hạn 17:00 → xác nhận chỉ sinh đúng 1 task/tuần vào đúng
+   Chủ nhật (không sinh vào các ngày khác trong tuần) — xác nhận hành vi có sẵn hoạt động đúng như
+   kỳ vọng, không cần sửa gì thêm.
+5. Xác nhận dòng hint mới trong form Thêm/Sửa "Việc định kỳ" hiển thị đúng, không vỡ layout.
+
+## Cập nhật Phase 4 (kế hoạch phiên sau, tiếp) — Trọng số công thức + Hệ số chuyên cần + Engine
+tính điểm tháng, ĐÃ CODE XONG, CHƯA CHẠY MIGRATION, CHƯA TEST TAY
+
+Implement đúng theo công thức đã chốt sẵn ở đầu file ("Công thức tính điểm") — không đổi công
+thức, chỉ hiện thực hóa thành schema + RPC + UI.
+
+### Migration `supabase/migrations/20260813_kpi_score_weights_monthly_scores.sql` (**CẦN CHẠY THỦ
+CÔNG, CHƯA CHẠY** — chạy sau mọi migration KPI trước đó, không phụ thuộc thứ tự đặc biệt nào khác)
+
+- `kpi_score_weights` (`factory_id, group_id NULL`, `trong_so_hoan_thanh/dung_han/5s/chuyen_mon`
+  mặc định 30/25/20/25, `ngay_chuan_chuyen_can` mặc định 24, `he_so_chuyen_can_min/max` mặc định
+  0.75/1.10) — `UNIQUE(factory_id, group_id)` (đúng cho các dòng theo nhóm cụ thể) + 1 partial
+  unique index riêng `WHERE group_id IS NULL` (Postgres không tự chặn nhiều dòng NULL trong
+  UNIQUE thường — bắt buộc phải có index riêng cho dòng "mặc định toàn nhà máy"). RLS: SELECT
+  rộng trong factory; INSERT/UPDATE/DELETE chỉ `current_profile_has_permission('kpi.manage_config')`
+  (hàm này tự trả `true` cho admin, không cần OR thêm điều kiện role) — **KHÔNG mở rộng cho lãnh
+  đạo phòng ban**, cùng lý do với `kpi_criteria_templates`: không có ranh giới phòng ban rõ ràng
+  cho cấu hình công thức toàn nhà máy/theo nhóm.
+- `kpi_monthly_scores` (`factory_id, user_id, nam, thang`, `diem_hoan_thanh/dung_han/5s/chuyen_mon`,
+  `he_so_chuyen_can`, `so_ngay_co_cham`, `diem_tong`, `chi_tiet JSONB`, `trang_thai
+  ('nhap'|'da_khoa')` mặc định `nhap`, `khoa_boi`/`khoa_luc` — dự phòng sẵn cho Phase 5, Phase 4
+  chưa dùng tới) — `UNIQUE(factory_id, user_id, nam, thang)`. RLS chỉ có SELECT (`user_id =
+  auth.uid() OR admin OR kpi.view_all`) — **không có INSERT/UPDATE/DELETE cho client**, mọi ghi
+  đều qua RPC `SECURITY DEFINER` bên dưới.
+- **RPC atomic `kpi_compute_monthly_scores(p_factory_id, p_nam, p_thang) RETURNS INTEGER`** — 1
+  transaction duy nhất, dùng chuỗi CTE + `GROUP BY` cho TOÀN BỘ user active của nhà máy (không
+  loop-per-user, đúng ràng buộc bắt buộc ở "Rủi ro/quy tắc bắt buộc" đầu file):
+  - `a_data`: A = `AVG(COALESCE(tien_do_nghiem_thu, tien_do))` theo `kpi_task_members.is_active=
+    true` join `kpi_tasks.ngay_giao` rơi trong tháng.
+  - `b_data`: B = tỷ lệ `da_nop_luc <= han_hoan_thanh` trong số task ĐÃ ĐẾN HẠN
+    (`han_hoan_thanh <= cutoff`, `cutoff = LEAST(now(), ngày cuối tháng + 1)` — nếu đang tính
+    tháng hiện tại thì chỉ tính task đã thực sự đến hạn tính tới thời điểm gọi RPC, tránh tính
+    nhầm các task cuối tháng chưa tới hạn thành "trễ").
+  - `c_data`: C = `AVG(dat=100/tuong_doi=50/khong_dat=0)` theo `kpi_5s_evaluations.nguoi_don_id`
+    (snapshot đúng tuần đó), `tuan_bat_dau` rơi trong tháng — tự nhiên "chia cho số lần thực sự
+    có snapshot" vì `AVG` chỉ tính trên các dòng tồn tại, không phải tổng số tuần trong tháng.
+  - `d_data`: dùng `eval_pct` (tính %đạt mỗi `kpi_daily_evaluations`, đúng công thức
+    `computeDailyPercent` viết lại bằng SQL) → tách `chinh_days`/`choang_days` → `day_scores`
+    (chỉ tính NGÀY có `loai='chinh'` — đúng "ngày có mặt/có chấm" theo rules file; nếu ngày đó
+    chỉ có choàng mà không có chính thì KHÔNG được tính vào D tháng) → `d_data` = trung bình
+    `(diem_ngay/max_ngay)*100` qua các ngày đó, `so_ngay_co_cham` = đếm số ngày đó.
+  - `weight_row`: resolve trọng số ưu tiên theo `personnel_group_members.is_primary` của user →
+    `kpi_score_weights` theo đúng `group_id` đó, fallback dòng `group_id IS NULL`, fallback cuối
+    cùng hằng số hard-code (khớp `defaultKpiScoreWeights()` phía TS).
+  - **Quyết định thiết kế quan trọng (bản nháp)**: thiếu dữ liệu 1 thành phần (không có task nào/
+    không có task đã đến hạn/không có lần chấm 5S nào/không có ngày chấm D nào) → thành phần đó
+    mặc định **100**, KHÔNG renormalize lại trọng số 3 thành phần còn lại. Đơn giản hóa có chủ
+    đích cho giai đoạn nháp — nếu sau vài tháng quan sát thấy bất hợp lý (vd 1 người mới vào chưa
+    có task nào nhưng vẫn được A=100), cần quay lại thiết kế ở Phase 5.
+  - `UPSERT ... ON CONFLICT (factory_id,user_id,nam,thang) DO UPDATE ... WHERE
+    kpi_monthly_scores.trang_thai <> 'da_khoa'` — không ghi đè điểm đã khóa (dù chưa có UI khóa ở
+    Phase 4, chuẩn bị sẵn cho Phase 5 cắm vào không phải sửa RPC).
+  - Chỉ admin/`kpi.manage_config` gọi được (validate qua `current_profile_has_permission`, không
+    tin phía client).
+
+### `src/lib/kpi-scores.ts` (mới)
+
+- `KpiScoreWeights`/`defaultKpiScoreWeights()` (hằng số 30/25/20/25/24/0.75/1.10, dùng làm giá trị
+  mặc định form Thêm mới VÀ làm fallback hiển thị khi 1 nhóm/nhà máy chưa cấu hình gì) +
+  `fetchKpiScoreWeights`/`createKpiScoreWeights`/`updateKpiScoreWeights`/`deleteKpiScoreWeights`
+  (`validateWeightsSum` chặn lưu nếu tổng 4 trọng số ≠ 100 — validate TẦNG APP, không phải DB
+  CHECK, vì admin có thể tạm thời lưu dở khi đang chỉnh nhiều dòng).
+- `KpiMonthlyScore`/`KpiMonthlyScoreDetail` (khớp `chi_tiet` JSONB) +
+  `fetchKpiMonthlyScores(factoryId, nam, thang)` (toàn nhà máy, 1 tháng) +
+  `fetchMyKpiMonthlyScores(userId, factoryId)` (lịch sử nhiều tháng của 1 người) +
+  `computeKpiMonthlyScores(factoryId, nam, thang)` (wrapper RPC).
+
+### Settings — sub-tab "Trọng số công thức" (`kpi-score-weights-tab.tsx`, mới)
+
+Sub-tab thứ 4 trong Cài đặt → KPI & 5S (cạnh "Vị trí 5S"/"Khu vực"/"Khung tiêu chí KPI"). Hiện 1
+card "Mặc định toàn nhà máy" luôn có (dù chưa từng lưu — hiển thị hằng số mặc định + nút "Cấu
+hình riêng" để tạo dòng thật) + danh sách card theo từng nhóm đã có cấu hình riêng + hàng nút
+nhanh "Thêm cấu hình riêng cho nhóm: ..." cho các nhóm CHƯA cấu hình. Modal Thêm/Sửa hiện live
+"Tổng: X%" đổi màu đỏ/xanh theo có = 100 hay không. **`canManage` truyền vào là
+`canManageKpiConfig` THUẦN** (admin/kpi.manage_config), giống "Khung tiêu chí KPI" — không mở
+rộng cho lãnh đạo phòng ban.
+
+### Tab "Bảng điểm KPI" (`/dashboard/kpi/scores/page.tsx`, mới)
+
+- Thêm vào `KpiShell` (tông màu fuchsia, icon `Award`) — hiện cho mọi `kpi.view` user.
+- Bộ chọn Tháng/Năm (mặc định tháng/năm hiện tại). Card "Điểm của bạn — Tháng X/Y" (breakdown
+  A/B/C/D bằng `KpiProgressBar` + số, hệ số chuyên cần, số ngày có chấm) luôn hiện cho chính người
+  xem. Card "Lịch sử điểm của bạn" liệt kê tất cả tháng đã có điểm (không giới hạn theo tháng đang
+  chọn ở trên). Bảng "Toàn nhà máy — Tháng X/Y" (đúng đúng tháng đang chọn, sort theo `diem_tong`
+  giảm dần) chỉ hiện khi `canViewAll = hasPermission(user,"kpi.view_all") && (isAdmin ||
+  isDeptLeader)` — mirror chính xác pattern đã dùng ở `kpi/tasks/page.tsx`.
+- Nút "Tính điểm tháng" chỉ hiện khi `canCompute = isAdmin || hasPermission(user,
+  "kpi.manage_config")` — gọi RPC cho đúng (nam, thang) đang chọn, hiện banner tóm tắt số người
+  vừa được tính, rồi tự tải lại dữ liệu.
+- Tên hiển thị người dùng trong bảng toàn nhà máy dùng lại `loadKpiTaskCandidates(factoryId)`
+  (nguồn `maintenance_staff`, đã dùng xuyên suốt module này để resolve tên) — chỉ tải khi
+  `canViewAll` để tránh round-trip thừa cho user thường.
+
+### Ngoài phạm vi (chưa làm ở Phase 4 này, để Phase 5)
+
+- Không có khóa sổ thật (`trang_thai` luôn `'nhap'`, không có nút "Khóa" nào trong UI) — Phase 5
+  mới thêm.
+- Không có `kpi_score_adjustments` (điều chỉnh điểm có audit) hay `kpi_appeals` gắn với
+  `monthly_score_id` (khiếu nại điểm tháng — bảng `kpi_appeals` hiện tại chỉ gắn `task_id`/
+  `location_evaluation_id`, cột `monthly_score_id` đã có sẵn trong schema từ trước nhưng chưa
+  được dùng).
+- Không renormalize trọng số khi 1 thành phần thiếu dữ liệu (xem "Quyết định thiết kế quan
+  trọng" ở trên) — chấp nhận được cho giai đoạn nháp.
+- Không có bảng xếp hạng ẩn danh theo nhóm/phòng ban (roadmap Phase 5).
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC theo đúng thứ tự
+
+1. Chạy `supabase/migrations/20260813_kpi_score_weights_monthly_scores.sql` trên Supabase SQL
+   Editor.
+2. Vào Cài đặt → KPI & 5S → "Trọng số công thức" — xác nhận card "Mặc định toàn nhà máy" hiện
+   đúng hằng số 30/25/20/25/24/0.75-1.10; bấm "Cấu hình riêng" → sửa vài số, thử tổng ≠ 100 → xác
+   nhận bị chặn lưu (cả banner đỏ live lẫn khi bấm Lưu thật); sửa lại tổng = 100 → lưu thành công.
+3. Tạo 1 cấu hình riêng cho 1 Nhóm chuyên môn cụ thể (khác trọng số mặc định) — xác nhận card
+   hiện đúng trong nhóm "Cấu hình riêng theo nhóm", xóa được, sau khi xóa nhóm đó quay lại dùng
+   dòng mặc định.
+4. Chuẩn bị dữ liệu thật cho 1 tháng: vài task (`kpi_tasks`/`kpi_task_members`, có cả nộp đúng
+   hạn/trễ hạn), vài lượt chấm 5S (`kpi_5s_evaluations`), vài lượt chấm chuyên môn theo ngày
+   (`kpi_daily_evaluations`, cả ngày có chính+choàng và ngày chỉ có choàng không có chính) cho ít
+   nhất 1-2 nhân sự trong tháng đó.
+5. Đăng nhập admin/`kpi.manage_config`, vào `/dashboard/kpi/scores`, chọn đúng tháng ở bước 4 →
+   bấm "Tính điểm tháng" → xác nhận banner báo đúng số người được tính, bảng "Toàn nhà máy" hiện
+   đúng breakdown A/B/C/D + hệ số chuyên cần + tổng.
+6. Đối chiếu TAY 1 nhân sự cụ thể theo đúng công thức (dùng ví dụ mẫu ở đầu rules file làm khuôn
+   mẫu tính) — đặc biệt xác nhận: (a) ngày chỉ có choàng không có chính KHÔNG được tính vào D
+   tháng; (b) B chỉ tính trên task đã đến hạn, không tính task chưa tới hạn; (c) hệ số chuyên cần
+   đúng công thức CLAMP.
+7. Bấm "Tính điểm tháng" LẦN 2 cho cùng tháng (không đổi dữ liệu nguồn) → xác nhận điểm giữ
+   nguyên y hệt (idempotent), không nhân đôi/tạo dòng trùng.
+8. Đăng nhập 1 tài khoản THƯỜNG (không `kpi.view_all`, không phải lãnh đạo phòng ban) → vào
+   `/dashboard/kpi/scores` → xác nhận CHỈ thấy "Điểm của bạn"/"Lịch sử điểm của bạn" (điểm đúng
+   của chính họ nếu đã được tính), KHÔNG thấy bảng "Toàn nhà máy", KHÔNG thấy nút "Tính điểm
+   tháng".
+9. Đăng nhập 1 lãnh đạo phòng ban (không phải admin, có `kpi.view_all` qua role default) → xác
+   nhận thấy bảng "Toàn nhà máy" (đúng `canViewAll` mirror `kpi/tasks/page.tsx`) nhưng KHÔNG thấy
+   nút "Tính điểm tháng" nếu họ không có `kpi.manage_config`.
+10. Thử gọi thẳng RPC `kpi_compute_monthly_scores` (qua devtools) bằng tài khoản không có
+    `kpi.manage_config` — xác nhận bị chặn đúng lỗi "Bạn không có quyền tính điểm KPI tháng."

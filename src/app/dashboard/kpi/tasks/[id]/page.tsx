@@ -47,6 +47,7 @@ import {
   fetchTaskTransfers,
   formatKpiDateTime,
   getKpiErrorMessage,
+  daysOverdue,
   isTaskDueSoon,
   isTaskOpen,
   isTaskOverdue,
@@ -792,6 +793,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   const myMember = members.find((m) => m.user_id === user?.id && m.is_active)
   const overdue = isTaskOverdue(task)
   const dueSoon = isTaskDueSoon(task)
+  const overdueDays = daysOverdue(task)
   const open = isTaskOpen(task.trang_thai)
 
   // Việc mục tiêu số lượng chung — xem migration 20260725_kpi_task_quantity_target.sql.
@@ -912,9 +914,14 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
             </div>
             <div>
               <div className="text-xs text-slate-400">Hạn hoàn thành</div>
-              <div className={`font-semibold flex items-center gap-1 ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-700"}`}>
+              <div className={`font-semibold flex items-center gap-1 flex-wrap ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-700"}`}>
                 {(overdue || dueSoon) && <AlertTriangle size={12} />}
                 {formatKpiDateTime(task.han_hoan_thanh)}
+                {overdueDays !== null && overdueDays > 0 && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                    Quá hạn {overdueDays} ngày
+                  </span>
+                )}
               </div>
               {isOwner && open && (
                 <button

@@ -22,6 +22,7 @@ import {
   fetchMyActiveTaskIds,
   fetchPendingIncomingTransfers,
   formatKpiDateTime,
+  daysOverdue,
   isTaskDueSoon,
   isTaskOverdue,
   KPI_STATUS_BADGE_CLASS,
@@ -303,6 +304,7 @@ export default function KpiTasksPage() {
               const progress = averageTaskProgress(t, taskMembers)
               const overdue = isTaskOverdue(t)
               const dueSoon = isTaskDueSoon(t)
+              const overdueDays = daysOverdue(t)
               const isGiver = t.nguoi_giao_id === user?.id
               const isMember = myActiveTaskIds.has(t.id)
               return (
@@ -346,6 +348,11 @@ export default function KpiTasksPage() {
                   <div className={`flex items-center gap-1.5 text-xs font-semibold ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-500"}`}>
                     {(overdue || dueSoon) && <AlertTriangle size={12} />}
                     Hạn: {formatKpiDateTime(t.han_hoan_thanh)}
+                    {overdueDays !== null && overdueDays > 0 && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                        Quá hạn {overdueDays} ngày
+                      </span>
+                    )}
                   </div>
                 </button>
               )

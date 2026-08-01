@@ -220,6 +220,11 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
               )
             })}
           </div>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Chọn nhiều thứ = việc lặp lại hàng ngày (theo đúng các thứ đã chọn). Chỉ chọn 1 thứ
+            (vd chỉ Chủ nhật) = việc lặp lại theo tuần vào đúng thứ đó — không cần cấu hình gì
+            thêm để có nhịp độ &quot;hàng tuần&quot;.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3 items-end">

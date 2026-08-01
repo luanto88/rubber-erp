@@ -161,6 +161,16 @@ export function isTaskDueSoon(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai
   return due >= nowMs && due <= nowMs + KPI_DUE_SOON_HOURS * 3600_000
 }
 
+// Số ngày đã quá hạn — dùng cho badge "Quá hạn N ngày" trên card công việc. Sau fix bug "việc
+// định kỳ mắc kẹt" (kpi_ensure_today_task_instances không còn sinh task trùng mỗi ngày khi task
+// cũ chưa đóng), 1 task có thể tồn tại quá hạn nhiều ngày liên tục — cần hiển thị rõ mức độ trễ
+// để không mất tính minh bạch. Trả về null nếu task không (còn) quá hạn.
+export function daysOverdue(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai">, nowMs = Date.now()): number | null {
+  if (!isTaskOverdue(task, nowMs)) return null
+  const due = new Date(task.han_hoan_thanh).getTime()
+  return Math.floor((nowMs - due) / 86_400_000)
+}
+
 // Export dùng chung — filter theo Phòng ban cho cả candidate list kiểu maintenance_staff
 // (loadKpiTaskCandidates) lẫn danh sách profile thô (vd form Vị trí 5S, kpi-5s-locations-tab.tsx).
 export async function fetchDepartmentUserIds(factoryId: string, departmentId: string): Promise<Set<string>> {

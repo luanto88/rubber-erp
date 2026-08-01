@@ -19,10 +19,19 @@
 // vốn đã cho phép ai cũng tự đăng ký cho chính mình). Ẩn cả tab khiến nhân viên thường không có
 // cách nào vào trang để đăng ký. Tab giờ hiện cho mọi người như 3 tab còn lại — phần quản trị
 // (CRUD kpi_task_templates) vẫn tự gate theo quyền NGAY TRONG trang (canManageTemplates).
+//
+// Phase 3 (2026-08-11): thêm tab "Chấm điểm chuyên môn" (kpi_daily_evaluations) — nộp chấm điểm
+// theo ngày cho từng nhóm chuyên môn, dùng chung khung tiêu chí quản trị ở Cài đặt → KPI & 5S →
+// Khung tiêu chí KPI. Trang tự gate nút "Lưu" theo quyền kpi.evaluate; ai có kpi.view cũng xem
+// được lịch sử chấm điểm (RLS SELECT rộng trong factory).
+//
+// Phase 4: thêm tab "Bảng điểm KPI" (kpi_monthly_scores) — xem điểm tháng A/B/C/D + hệ số chuyên
+// cần + tổng (bản nháp, chưa khóa sổ). Mọi kpi.view user xem điểm của chính mình; xem toàn nhà
+// máy chỉ dành cho admin/kpi.view_all + lãnh đạo phòng ban.
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ClipboardList, Flag, Repeat, Sparkles, type LucideIcon } from "lucide-react"
+import { Award, ClipboardCheck, ClipboardList, Flag, Repeat, Sparkles, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 type NavTab = {
@@ -63,12 +72,28 @@ const tabs: NavTab[] = [
     hoverClass: "hover:bg-amber-50 hover:text-amber-600",
   },
   {
+    href: "/dashboard/kpi/evaluate",
+    label: "Chấm điểm chuyên môn",
+    icon: ClipboardCheck,
+    matchPrefixes: ["/dashboard/kpi/evaluate"],
+    activeClass: "bg-gradient-to-br from-indigo-100 to-violet-100 text-indigo-700 border-indigo-200 shadow-sm",
+    hoverClass: "hover:bg-indigo-50 hover:text-indigo-600",
+  },
+  {
     href: "/dashboard/kpi/appeals",
     label: "Khiếu nại",
     icon: Flag,
     matchPrefixes: ["/dashboard/kpi/appeals"],
     activeClass: "bg-gradient-to-br from-rose-100 to-pink-100 text-rose-700 border-rose-200 shadow-sm",
     hoverClass: "hover:bg-rose-50 hover:text-rose-600",
+  },
+  {
+    href: "/dashboard/kpi/scores",
+    label: "Bảng điểm KPI",
+    icon: Award,
+    matchPrefixes: ["/dashboard/kpi/scores"],
+    activeClass: "bg-gradient-to-br from-fuchsia-100 to-purple-100 text-fuchsia-700 border-fuchsia-200 shadow-sm",
+    hoverClass: "hover:bg-fuchsia-50 hover:text-fuchsia-600",
   },
 ]
 

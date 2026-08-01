@@ -23,11 +23,14 @@ import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
+import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
+import { KpiScoreWeightsTab } from "./_components/kpi-score-weights-tab"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
   getActiveFactoryId,
+  getFreshAuthSession,
   hasPermission,
   hydrateActiveSession,
   type AppRole,
@@ -45,6 +48,7 @@ import {
   Users,
   ShieldCheck,
   Lock,
+  Unlock,
   CheckCircle2,
   UserCheck,
   SlidersHorizontal,
@@ -63,6 +67,8 @@ import {
   Eye,
   EyeOff,
   Sun,
+  ListChecks,
+  Scale,
 } from "lucide-react"
 
 type Suffix = {
@@ -864,7 +870,7 @@ export default function SettingsPage() {
 
   // ISO & Văn bản tab state
   const [isoVanBanTab, setIsoVanBanTab] = useState<"chu-ky">("chu-ky")
-  const [kpi5sTab, setKpi5sTab] = useState<"vi-tri" | "khu-vuc">("vi-tri")
+  const [kpi5sTab, setKpi5sTab] = useState<"vi-tri" | "khu-vuc" | "tieu-chi" | "trong-so">("vi-tri")
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
   const [signatureUploading, setSignatureUploading] = useState(false)
   const [pinForm, setPinForm] = useState({ pin: "", pinConfirm: "", showPin: false })
@@ -2353,12 +2359,14 @@ export default function SettingsPage() {
   }
 
   const getAccessToken = async () => {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    if (!token) {
+    try {
+      const session = await getFreshAuthSession()
+      const token = session?.access_token
+      if (!token) throw new Error("no token")
+      return token
+    } catch {
       throw new Error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
     }
-    return token
   }
 
   const closeSensitiveActionModal = () => {
@@ -2851,6 +2859,57 @@ export default function SettingsPage() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </ResponsiveTableWrapper>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Lock size={15} className="text-red-600" />
+                <h2 className="font-bold text-slate-800">Tài khoản đã khóa</h2>
+              </div>
+              <ResponsiveTableWrapper>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Username", "Họ tên", "Role", "Khóa lúc", ""].map((head) => (
+                        <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          {head}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {disabledUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                          Không có tài khoản bị khóa
+                        </td>
+                      </tr>
+                    ) : (
+                      disabledUsers.map((profile) => (
+                        <tr key={profile.id} className="row-hover">
+                          <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
+                          <td className="px-4 py-3 text-slate-500">{profile.role}</td>
+                          <td className="px-4 py-3 text-slate-500">
+                            {profile.disabled_at ? new Date(profile.disabled_at).toLocaleString("vi-VN") : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {canApproveUsers && (
+                              <button
+                                onClick={() => openApproveModal(profile)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
+                              >
+                                <Unlock size={13} />
+                                Mở khóa
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </ResponsiveTableWrapper>
@@ -5912,6 +5971,8 @@ export default function SettingsPage() {
               {([
                 { key: "vi-tri" as const, label: "Vị trí 5S", icon: SlidersHorizontal },
                 { key: "khu-vuc" as const, label: "Khu vực", icon: Target },
+                { key: "tieu-chi" as const, label: "Khung tiêu chí KPI", icon: ListChecks },
+                { key: "trong-so" as const, label: "Trọng số công thức", icon: Scale },
               ]).map((st) => (
                 <button
                   key={st.key}
@@ -5946,6 +6007,18 @@ export default function SettingsPage() {
             {kpi5sTab === "khu-vuc" && (
               <div className="p-6">
                 <Kpi5sZonesTab factoryId={factoryId} canManage={canManageKpi5s} />
+              </div>
+            )}
+
+            {kpi5sTab === "tieu-chi" && (
+              <div className="p-6">
+                <KpiCriteriaTab factoryId={factoryId} canManage={canManageKpiConfig} />
+              </div>
+            )}
+
+            {kpi5sTab === "trong-so" && (
+              <div className="p-6">
+                <KpiScoreWeightsTab factoryId={factoryId} canManage={canManageKpiConfig} />
               </div>
             )}
           </div>
