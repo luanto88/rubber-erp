@@ -246,7 +246,7 @@ export default function KpiTemplatesPage() {
   return (
     <KpiShell>
       <div className="space-y-4">
-        <div ref={revealRef} className="scroll-reveal flex flex-wrap items-start justify-between gap-3">
+        <div ref={revealRef} className="scroll-reveal flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="hover-lift shrink-0 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-200 via-emerald-100 to-teal-100 shadow-sm">
               <Repeat size={20} className="text-teal-700" />
@@ -260,11 +260,11 @@ export default function KpiTemplatesPage() {
             </div>
           </div>
           {canManageTemplates && (
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-col items-stretch gap-1 sm:items-end">
               <button
                 onClick={() => void handleSyncToday()}
                 disabled={syncingToday || !factoryId}
-                className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-md text-sm disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-teal-700 disabled:opacity-60 sm:w-auto"
               >
                 <RefreshCw size={15} className={syncingToday ? "animate-spin" : undefined} />
                 {syncingToday ? "Đang sinh việc..." : "Sinh việc hôm nay ngay"}
@@ -274,7 +274,7 @@ export default function KpiTemplatesPage() {
           )}
         </div>
 
-        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
+        <div className="flex flex-wrap gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
           <button
             onClick={() => setSubTab("templates")}
             className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "templates" ? "bg-violet-600 text-white" : "text-slate-600"}`}

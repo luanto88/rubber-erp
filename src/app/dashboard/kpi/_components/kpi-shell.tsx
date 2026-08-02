@@ -32,11 +32,12 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Award, ClipboardCheck, ClipboardList, Flag, Repeat, Sparkles, type LucideIcon } from "lucide-react"
-import type { ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
 type NavTab = {
   href: string
   label: string
+  shortLabel: string
   icon: LucideIcon
   matchPrefixes?: string[]
   activeClass: string
@@ -50,6 +51,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/tasks",
     label: "Công việc chuyên môn",
+    shortLabel: "Công việc",
     icon: ClipboardList,
     matchPrefixes: ["/dashboard/kpi/tasks"],
     activeClass: "bg-gradient-to-br from-sky-100 to-blue-100 text-sky-700 border-sky-200 shadow-sm",
@@ -58,6 +60,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/templates",
     label: "Việc định kỳ",
+    shortLabel: "Định kỳ",
     icon: Repeat,
     matchPrefixes: ["/dashboard/kpi/templates"],
     activeClass: "bg-gradient-to-br from-teal-100 to-emerald-100 text-teal-700 border-teal-200 shadow-sm",
@@ -66,6 +69,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/5s",
     label: "Đánh giá 5S",
+    shortLabel: "5S",
     icon: Sparkles,
     matchPrefixes: ["/dashboard/kpi/5s"],
     activeClass: "bg-gradient-to-br from-amber-100 to-orange-100 text-amber-700 border-amber-200 shadow-sm",
@@ -74,6 +78,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/evaluate",
     label: "Chấm điểm chuyên môn",
+    shortLabel: "Chấm điểm",
     icon: ClipboardCheck,
     matchPrefixes: ["/dashboard/kpi/evaluate"],
     activeClass: "bg-gradient-to-br from-indigo-100 to-violet-100 text-indigo-700 border-indigo-200 shadow-sm",
@@ -82,6 +87,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/appeals",
     label: "Khiếu nại",
+    shortLabel: "Khiếu nại",
     icon: Flag,
     matchPrefixes: ["/dashboard/kpi/appeals"],
     activeClass: "bg-gradient-to-br from-rose-100 to-pink-100 text-rose-700 border-rose-200 shadow-sm",
@@ -90,6 +96,7 @@ const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/scores",
     label: "Bảng điểm KPI",
+    shortLabel: "Bảng điểm",
     icon: Award,
     matchPrefixes: ["/dashboard/kpi/scores"],
     activeClass: "bg-gradient-to-br from-fuchsia-100 to-purple-100 text-fuchsia-700 border-fuchsia-200 shadow-sm",
@@ -111,10 +118,39 @@ type KpiShellProps = {
 export function KpiShell({ children }: KpiShellProps) {
   const pathname = usePathname()
 
+  // Gradient báo hiệu còn nội dung cuộn — logic duy nhất, nhân bản có chủ đích từ
+  // ResponsiveTableWrapper (không refactor thành hook dùng chung để không mở rộng blast radius
+  // ra toàn app, xem plan phiên này).
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const update = () => {
+      setCanScrollLeft(el.scrollLeft > 4)
+      setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+    }
+
+    update()
+    el.addEventListener("scroll", update, { passive: true })
+    window.addEventListener("resize", update)
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(el)
+
+    return () => {
+      el.removeEventListener("scroll", update)
+      window.removeEventListener("resize", update)
+      resizeObserver.disconnect()
+    }
+  }, [])
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex gap-1.5 p-2 overflow-x-auto">
+      <div className="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div ref={scrollRef} className="flex gap-1.5 p-2 overflow-x-auto">
           {tabs.map((tab) => {
             const active = isActive(pathname, tab)
             const Icon = tab.icon
@@ -123,16 +159,23 @@ export function KpiShell({ children }: KpiShellProps) {
                 key={tab.href}
                 href={tab.href}
                 className={
-                  "hover-lift flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap border transition-colors " +
+                  "hover-lift flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap border transition-colors " +
                   (active ? tab.activeClass : `bg-white text-slate-600 border-transparent ${tab.hoverClass}`)
                 }
               >
                 <Icon size={14} />
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.shortLabel}</span>
               </Link>
             )
           })}
         </div>
+        {canScrollLeft && (
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
+        )}
+        {canScrollRight && (
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
+        )}
       </div>
 
       {children}

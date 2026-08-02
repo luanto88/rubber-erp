@@ -27,10 +27,13 @@ import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { Kpi5sResultPicker } from "@/app/dashboard/kpi/_components/kpi-5s-result-picker"
 import {
   buildKpi5sLocationUrl,
+  computeKpi5sDeadline,
   fetchKpi5sEvaluations,
   fetchKpi5sLocation,
   fetchLocationCleaners,
   getKpi5sErrorMessage,
+  isKpi5sDeadlineDueSoon,
+  isKpi5sDeadlineOverdue,
   KPI_5S_RESULT_BADGE_CLASS,
   KPI_5S_RESULT_LABEL,
   submitKpi5sEvaluation,
@@ -40,6 +43,7 @@ import {
 } from "@/lib/kpi-5s"
 import { downloadKpi5sLocationBulkQrPdf } from "@/lib/kpi-5s-pdf"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
 import { correctKpi5sEvaluationDirect, createKpiAppealForLocationEvaluation, getKpiAppealErrorMessage } from "@/lib/kpi-appeals"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import { Kpi5sImagePicker } from "../../_components/kpi-5s-image-picker"
@@ -145,6 +149,14 @@ export default function Kpi5sLocationDetailPage() {
   )
   const canEvaluateThisWeek = !!location?.is_active && user?.id === location?.nguoi_cham_id && !currentWeekEvaluation
   const isAdmin = user?.role === "admin"
+
+  const deadline = useMemo(
+    () => (location ? computeKpi5sDeadline(location, currentWeekStart) : null),
+    [location, currentWeekStart],
+  )
+  const hasEvaluatedThisWeek = !!currentWeekEvaluation
+  const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
+  const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
 
   // Đội ngũ dọn dẹp thực tế (Fix 4/5a) — ưu tiên bảng multi-select mới, fallback về
   // nguoi_don_id đơn nếu vị trí chưa từng được gán qua bảng mới. Khóa dropdown "chấm điểm" và
@@ -322,6 +334,16 @@ export default function Kpi5sLocationDetailPage() {
                   {!location.is_active && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-200 text-slate-500">Tạm ngưng</span>}
                   {iAmCleaner && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-sky-100 text-sky-700">Bạn thuộc đội dọn dẹp</span>}
                   {iAmScorer && <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700">Bạn là người chấm</span>}
+                  {deadline && !hasEvaluatedThisWeek && (
+                    <span
+                      className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-lg ${
+                        overdue ? "bg-red-100 text-red-700" : dueSoon ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {(overdue || dueSoon) && <AlertTriangle size={11} />}
+                      {overdue ? "Quá hạn — " : ""}Hạn: {KPI_WEEKDAY_LABEL[location!.deadline_weekdays![0]]}, {location!.deadline_time!.slice(0, 5)}
+                    </span>
+                  )}
                 </div>
                 <h1 className="text-xl font-extrabold text-slate-800 mt-1">{location.ten_vi_tri}</h1>
                 {location.mo_ta && (
@@ -357,14 +379,20 @@ export default function Kpi5sLocationDetailPage() {
             </div>
 
             {canEvaluateThisWeek && !showForm && (
-              <div className="flex flex-wrap items-center gap-2 rounded-2xl border-2 border-amber-400 bg-amber-50 p-3 shadow-md">
-                <AlertTriangle size={18} className="shrink-0 animate-pulse text-amber-600" />
-                <span className="text-sm font-extrabold text-amber-800">
-                  Đến lượt bạn chấm điểm vị trí này ({formatWeekRangeLabel(currentWeekStart)})!
+              <div
+                className={`flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 shadow-md ${
+                  overdue ? "border-red-400 bg-red-50" : "border-amber-400 bg-amber-50"
+                }`}
+              >
+                <AlertTriangle size={18} className={`shrink-0 animate-pulse ${overdue ? "text-red-600" : "text-amber-600"}`} />
+                <span className={`text-sm font-extrabold ${overdue ? "text-red-800" : "text-amber-800"}`}>
+                  {overdue ? "Đã quá hạn — " : "Đến lượt bạn "}chấm điểm vị trí này ({formatWeekRangeLabel(currentWeekStart)})!
                 </span>
                 <button
                   onClick={openForm}
-                  className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-md text-sm"
+                  className={`ml-auto flex items-center gap-2 px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-sm ${
+                    overdue ? "bg-red-500 hover:bg-red-600" : "bg-amber-500 hover:bg-amber-600"
+                  }`}
                 >
                   <CheckCircle2 size={16} /> Chấm điểm ngay
                 </button>

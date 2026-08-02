@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
+import { AlertCircle, AlertTriangle, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { getIsoWeekStart } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -13,17 +13,21 @@ import { Kpi5sAutoAssignModal } from "../_components/kpi-5s-auto-assign-modal"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import {
+  computeKpi5sDeadline,
   fetchAllLocationCleanerMemberships,
   fetchKpi5sLocations,
   fetchLatestKpi5sEvaluationsByLocationIds,
   getEffectiveCleanerIds,
   getKpi5sErrorMessage,
+  isKpi5sDeadlineDueSoon,
+  isKpi5sDeadlineOverdue,
   KPI_5S_RESULT_BADGE_CLASS,
   KPI_5S_RESULT_LABEL,
   type Kpi5sEvaluation,
   type Kpi5sLocation,
 } from "@/lib/kpi-5s"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
 
 export default function Kpi5sLocationListPage() {
   const revealRef = useScrollReveal()
@@ -137,7 +141,7 @@ export default function Kpi5sLocationListPage() {
   return (
     <KpiShell>
       <div className="space-y-4">
-        <div ref={revealRef} className="scroll-reveal flex flex-wrap items-start justify-between gap-3">
+        <div ref={revealRef} className="scroll-reveal flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="hover-lift shrink-0 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-200 via-orange-100 to-amber-100 shadow-sm">
               <Sparkles size={20} className="text-amber-700" />
@@ -149,11 +153,11 @@ export default function Kpi5sLocationListPage() {
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {canManageAnyLocation && visibleLocations.length > 0 && (
               <button
                 onClick={() => { setAssignSummary(null); setShowAutoAssign(true) }}
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-sm text-sm"
+                className="flex w-full items-center justify-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-sm text-sm sm:w-auto"
               >
                 <Shuffle size={15} /> Phân công thông minh
               </button>
@@ -161,7 +165,7 @@ export default function Kpi5sLocationListPage() {
             {canManageLocations && (
               <Link
                 href="/dashboard/settings?tab=kpi_5s"
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm text-sm"
+                className="flex w-full items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm text-sm sm:w-auto"
               >
                 <Settings size={15} /> Quản lý vị trí
               </Link>
@@ -213,10 +217,14 @@ export default function Kpi5sLocationListPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {shownLocations.map((loc) => {
               const latest = latestByLocation.get(loc.id)
-              const needsMyEvaluation = user?.id === loc.nguoi_cham_id && latest?.tuan_bat_dau !== currentWeekStart
+              const hasEvaluatedThisWeek = latest?.tuan_bat_dau === currentWeekStart
+              const needsMyEvaluation = user?.id === loc.nguoi_cham_id && !hasEvaluatedThisWeek
               const cleanerIds = getEffectiveCleanerIds(loc, cleanersByLocation)
               const iAmCleaner = !!user && cleanerIds.includes(user.id)
               const iAmScorer = !!user && user.id === loc.nguoi_cham_id
+              const deadline = computeKpi5sDeadline(loc, currentWeekStart)
+              const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
+              const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
               return (
                 <Link
                   key={loc.id}
@@ -243,6 +251,12 @@ export default function Kpi5sLocationListPage() {
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500">Chưa chấm</span>
                     )}
                   </div>
+                  {deadline && !hasEvaluatedThisWeek && (
+                    <div className={`mb-1.5 flex items-center gap-1 text-xs font-semibold ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-500"}`}>
+                      {(overdue || dueSoon) && <AlertTriangle size={12} />}
+                      {overdue ? "Quá hạn — " : ""}Hạn: {KPI_WEEKDAY_LABEL[loc.deadline_weekdays![0]]}, {loc.deadline_time!.slice(0, 5)}
+                    </div>
+                  )}
                   <div className="text-sm font-extrabold text-slate-800">{loc.ten_vi_tri}</div>
                   {loc.mo_ta && (
                     <div className="mt-1 flex items-start gap-1 text-xs text-slate-500">

@@ -55,6 +55,17 @@ export function Kpi5sAutoAssignModal({
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState("")
 
+  // Bỏ qua đợt này (Mục 2b) — tách khỏi RowState để giữ nguyên trạng thái tắt xuyên suốt các
+  // lần bấm "Random lại" (generate() tạo lại rows mới nhưng locationId không đổi).
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set())
+  const toggleSkip = (locationId: string) =>
+    setSkippedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(locationId)) next.delete(locationId)
+      else next.add(locationId)
+      return next
+    })
+
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -139,7 +150,9 @@ export function Kpi5sAutoAssignModal({
     setSaving(true)
     setSaveError("")
     try {
-      const changed = rows.filter((r) => r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham)
+      const changed = rows.filter(
+        (r) => !skippedIds.has(r.locationId) && (r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham),
+      )
       await Promise.all(
         changed.map((r) => patchKpi5sLocation(r.locationId, { nguoi_don_id: r.nguoiDonId, nguoi_cham_id: r.nguoiChamId })),
       )
@@ -165,7 +178,9 @@ export function Kpi5sAutoAssignModal({
     }
   }
 
-  const changedCount = rows ? rows.filter((r) => r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham).length : 0
+  const changedCount = rows
+    ? rows.filter((r) => !skippedIds.has(r.locationId) && (r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham)).length
+    : 0
 
   return (
     <ModalShell
@@ -249,9 +264,22 @@ export function Kpi5sAutoAssignModal({
                 if (!l) return null
                 const eligibleSet = new Set(r.eligibleUserIds)
                 const options = eligibleSet.size > 0 ? candidates.filter((c) => eligibleSet.has(c.userId)) : candidates
+                const skipped = skippedIds.has(r.locationId)
                 return (
-                  <div key={r.locationId} className="p-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr] gap-2 items-center">
+                  <div
+                    key={r.locationId}
+                    className={`p-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr] gap-2 items-center${skipped ? " opacity-40" : ""}`}
+                  >
                     <div>
+                      <label className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-slate-400">
+                        <input
+                          type="checkbox"
+                          checked={skipped}
+                          onChange={() => toggleSkip(r.locationId)}
+                          className="accent-slate-400"
+                        />
+                        Bỏ qua đợt này
+                      </label>
                       <div className="text-[11px] font-bold text-violet-700">{l.ma_vi_tri}</div>
                       <div className="text-sm font-semibold text-slate-700">{l.ten_vi_tri}</div>
                       {(r.deptPoolRelaxed || r.establishedRelaxed) && (
@@ -281,7 +309,8 @@ export function Kpi5sAutoAssignModal({
                       <select
                         value={r.nguoiDonId || ""}
                         onChange={(e) => updateRow(r.locationId, { nguoiDonId: e.target.value || null })}
-                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500"
+                        disabled={skipped}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500 disabled:bg-slate-100"
                       >
                         <option value="">— Chưa gán —</option>
                         {options.map((c) => (
@@ -306,7 +335,8 @@ export function Kpi5sAutoAssignModal({
                       <select
                         value={r.nguoiChamId || ""}
                         onChange={(e) => updateRow(r.locationId, { nguoiChamId: e.target.value || null })}
-                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500"
+                        disabled={skipped}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500 disabled:bg-slate-100"
                       >
                         <option value="">— Chưa gán —</option>
                         {options.map((c) => (

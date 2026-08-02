@@ -432,6 +432,14 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, location_evaluation_id NU
   (bảng xếp hạng ẩn danh, chỉ trả rank+điểm+is_me, không lộ tên). Điểm tạm tính real-time đã
   hiện thực hóa sớm hơn qua sub-tab "Chi tiết cách tính điểm" (mục "Cập nhật (phiên sau Phase 4,
   tiếp)"). Migration `20260814_kpi_score_lock_adjust_rank.sql`, **CHƯA CHẠY, chưa test tay**.
+- **Hạn chấm điểm 5S + Random riêng từng vị trí + Bỏ qua đợt phân công + Redesign mobile toàn
+  module** ✅ Đã code xong (xem mục "Cập nhật (phiên sau Phase 5)" bên dưới): `kpi_5s_locations`
+  thêm `deadline_weekdays`/`deadline_time` (Thứ + Giờ, tuỳ chọn theo vị trí) + badge quá hạn/sắp
+  hạn ở cả danh sách lẫn chi tiết; nút "Random vị trí này" trên mỗi thẻ Vị trí 5S (Cài đặt); toggle
+  "Bỏ qua đợt này" từng dòng trong modal "Phân công thông minh"; redesign responsive mobile cho cả
+  6 trang KPI + thanh tab `KpiShell` (nhãn rút gọn, gradient cuộn, dời dropdown "Theo phòng ban"
+  lên header chính của Bảng điểm KPI, bọc 5 bảng bằng `ResponsiveTableWrapper`). Migration
+  `20260815_kpi_5s_deadline.sql`, **CHƯA CHẠY, chưa test tay**.
 
 ## Rủi ro/quy tắc bắt buộc
 
@@ -3877,3 +3885,162 @@ gì thêm):
 8. Test quyền: tài khoản `role=user` không có `kpi.manage_config` → không thấy nút "Khóa" ở bảng
    "Toàn nhà máy"; thử gọi thẳng RPC `kpi_monthly_score_lock` → phải bị chặn đúng lỗi "Bạn không
    có quyền khóa sổ điểm KPI."
+
+## Cập nhật (phiên sau Phase 5) — Hạn chấm điểm 5S, Random riêng từng vị trí, Bỏ qua đợt phân
+công, Redesign mobile toàn module — ĐÃ CODE XONG, CHƯA CHẠY MIGRATION, CHƯA TEST TAY
+
+Kế hoạch chi tiết đã lập ở `C:\Users\Software\.claude\plans\misty-discovering-sky.md` (Plan Mode,
+3 Explore agent + 4 câu hỏi xác nhận trực tiếp với người dùng trước khi code). 4 hạng mục:
+
+### 1. Hạn chấm điểm hàng tuần cho Vị trí 5S (chọn Thứ + Giờ)
+
+Đã hỏi lại đầu phiên và người dùng xác nhận **chỉ cần hạn trong tuần** (không có nhu cầu cadence
+hàng ngày riêng) — thiết kế mảng `INTEGER[]` (tương thích ngược nếu sau này cần) là đủ dùng ngay,
+không cần mở rộng gì thêm.
+
+- Migration `supabase/migrations/20260815_kpi_5s_deadline.sql` (**CẦN CHẠY THỦ CÔNG, CHƯA
+  CHẠY**) — thêm `kpi_5s_locations.deadline_weekdays INTEGER[]` (1=Thứ 2..7=CN, khớp
+  `EXTRACT(ISODOW...)`) + `deadline_time TIME`, cả 2 nullable, CHECK constraint validate mảng
+  1-7 phần tử trong `[1..7]`. Không backfill — dữ liệu cũ mặc định `NULL` = giữ nguyên hành vi
+  "chấm bất kỳ ngày nào trong tuần". Không cần đổi RLS.
+- `src/lib/kpi-5s.ts`: `Kpi5sLocation`/`LOCATION_COLS`/`Kpi5sLocationInput` thêm 2 field trên
+  (tự động flow qua `createKpi5sLocation`/`updateKpi5sLocation` vì cả 2 spread `...input`, không
+  cần sửa). Thêm 3 hàm: `computeKpi5sDeadline(location, weekStartISO)` (dùng
+  `location.deadline_weekdays[0]` — UI chỉ cho chọn đúng 1 phần tử dù kiểu là mảng — cộng
+  `addDaysISO` rồi ghép `deadline_time` thành `Date`), `isKpi5sDeadlineOverdue`/
+  `isKpi5sDeadlineDueSoon` (mirror `isTaskOverdue`/`isTaskDueSoon` của `kpi-tasks.ts`, ngưỡng
+  "sắp hạn" cố định 24h).
+- `kpi-5s-locations-tab.tsx` (Cài đặt → KPI & 5S → Vị trí 5S, form Thêm/Sửa): thêm field "Hạn
+  chấm điểm hàng tuần (tuỳ chọn)" — dãy pill-toggle 7 thứ (mirror style `template-form-modal.tsx`)
+  nhưng **hành vi radio-deselectable** (bấm 1 thứ = chọn đúng thứ đó thay lựa chọn cũ; bấm lại
+  thứ đang chọn = bỏ chọn hoàn toàn) — khác hẳn multi-select gốc của `apply_weekdays`, cố ý ghi
+  rõ trong code để không nhầm là copy y nguyên. `<input type="time">` chỉ hiện khi đã chọn 1 thứ.
+  Payload: `deadline_weekday === "" ? null : [deadline_weekday]`.
+- `kpi/5s/page.tsx` (danh sách): mỗi card tính `deadline`/`overdue`/`dueSoon` (dựa vào tuần đã
+  chấm hay chưa), hiện badge ngay trên tên vị trí — đỏ "Quá hạn — Hạn: Thứ X, HH:MM", cam "Hạn:
+  Thứ X, HH:MM" (sắp tới), ẩn hẳn khi đã chấm tuần này hoặc chưa cấu hình hạn.
+- `kpi/5s/location/[id]/page.tsx` (chi tiết): cùng badge trong header card (cạnh
+  `is_active`/`iAmCleaner`/`iAmScorer`); banner "Đến lượt bạn chấm điểm" đổi màu đỏ + text "Đã
+  quá hạn — " khi `overdue`.
+- Badge là tính toán **client-side thuần túy tại thời điểm render** (`new Date()` phụ thuộc giờ
+  local máy client) — không enforce nghiệp vụ cứng, không chặn chấm muộn, không lưu thêm gì vào
+  `kpi_5s_evaluations`.
+
+### 2a. Nút "Random vị trí này" trên mỗi thẻ Vị trí 5S
+
+Chỉ ở `kpi-5s-locations-tab.tsx` (Cài đặt → KPI & 5S → Vị trí 5S — nơi DUY NHẤT có sẵn 3 nút Sửa/
+Tạm ngưng/Xóa trên card; **cố ý KHÔNG thêm** nút tương tự ở `/dashboard/kpi/5s/page.tsx` — card ở
+đó là `<Link>` nguyên khối mở trang chi tiết, không có hàng action nào để chèn thêm, ngoài phạm
+vi đã xác nhận với người dùng).
+
+- State mới `autoAssignLocation: Kpi5sLocation | null` (tách biệt `showAutoAssign` — state cho
+  đợt bulk cũ, không overload ý nghĩa).
+- Nút "Random vị trí này" (tím, icon `Shuffle`) chèn giữa "Sửa" và "Tạm ngưng".
+- Render `<Kpi5sAutoAssignModal locations={[autoAssignLocation]} .../>` song song modal bulk hiện
+  có, dùng chung state `assignSummary`/luồng `sendKpiNotify`.
+- Đã xác nhận qua đọc code: `Kpi5sAutoAssignModal`/`buildAutoAssignSuggestions` không có chỗ nào
+  giả định `locations.length >= 2` — hoạt động đúng với mảng 1 phần tử, không cần sửa gì trong
+  modal cho case này (radio "toàn bộ N vị trí" chỉ hiện "N=1", chấp nhận được).
+
+### 2b. Toggle "Bỏ qua đợt này" từng dòng trong modal Phân công thông minh
+
+Chỉ ở `kpi-5s-auto-assign-modal.tsx` — **không đụng** `kpi-5s-auto-assign.ts` (thuật toán random
+giữ nguyên, "bỏ qua" là quyết định UI thuần túy tách biệt khỏi đề xuất của thuật toán).
+
+- State `skippedIds: Set<string>` **tách khỏi `RowState`** (không nhét vào field của từng dòng)
+  để giữ nguyên trạng thái "đã bỏ qua" xuyên suốt các lần bấm "Random lại" (`generate()` tạo lại
+  `rows` mới nhưng `locationId` không đổi, vì luôn xuất phát từ `locations` prop cố định).
+- Mỗi dòng preview thêm checkbox "Bỏ qua đợt này" ở đầu cột đầu tiên (cạnh mã vị trí), làm mờ cả
+  dòng (`opacity-40`) và **disable cả 2 `<select>`** Người dọn/Người chấm khi bị tắt — vẫn hiển
+  thị giá trị đã random để tham khảo, chỉ khóa tương tác.
+- `handleConfirm`'s `changed` filter và `changedCount` đều thêm điều kiện
+  `!skippedIds.has(r.locationId)` — dòng bị tắt không bao giờ được ghi dù có thay đổi so với giá
+  trị gốc.
+- Modal mở từ nút 2a (1 phần tử) vẫn hiện toggle này bình thường, không ẩn theo điều kiện số
+  dòng.
+
+### 3+4. Redesign responsive mobile toàn module KPI
+
+- **`kpi-shell.tsx`** (ảnh hưởng cả 6 trang cùng lúc): `NavTab` thêm `shortLabel` (6 nhãn rút
+  gọn: Công việc/Định kỳ/5S/Chấm điểm/Khiếu nại/Bảng điểm), render `hidden sm:inline`/`sm:hidden`
+  song song 2 nhãn; tap target `py-2.5 → py-3`; thêm gradient báo hiệu còn nội dung cuộn 2 bên
+  thanh tab — **logic scroll-shadow (ResizeObserver + scroll listener) được NHÂN BẢN trực tiếp
+  từ `ResponsiveTableWrapper`, KHÔNG refactor thành hook dùng chung** (quyết định có chủ đích thu
+  hẹp rủi ro — refactor sẽ ảnh hưởng mọi module khác đang phụ thuộc component đó, ngoài phạm vi
+  phiên này).
+- **`kpi/templates/page.tsx`**: header đổi `flex flex-wrap items-start justify-between` →
+  `flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between` (mirror mẫu chuẩn
+  `kpi/tasks/page.tsx`); nút "Sinh việc hôm nay ngay" full-width trên mobile
+  (`w-full sm:w-auto`); thêm `flex-wrap` cho hàng 2 sub-tab pill ("Việc định kỳ"/"Người thay thế
+  tạm thời") để tránh tràn ngang khi nhãn dài.
+- **`kpi/5s/page.tsx`**: cùng pattern header; 2 nút "Phân công thông minh"/"Quản lý vị trí"
+  full-width trên mobile.
+- **`kpi/evaluate/page.tsx`**, **`kpi/appeals/page.tsx`**: xác nhận qua plan — **không đổi**, cả
+  2 header đơn giản/rủi ro thấp, phần chọn Ngày/Người/Nhóm ở `evaluate` đã dùng
+  `grid grid-cols-1 sm:grid-cols-3` sẵn đủ responsive.
+- **`kpi/scores/page.tsx`** (thay đổi lớn nhất, làm sau cùng):
+  - Header đổi cùng pattern `flex-col sm:flex-row` như các trang khác; nút "Tính điểm tháng"
+    full-width trên mobile.
+  - **Dời dropdown "Theo phòng ban"** từ vị trí cũ (lồng trong card "Toàn nhà máy — Tháng X/Y",
+    chỉ hiện ở nhánh `scoreView === "tong-quan"`) lên **header chính**, đặt sau `<select nam>` và
+    trước nút "Tính điểm tháng" — **luôn hiển thị bất kể `scoreView`** (miễn
+    `isAdmin && departments.length > 0`), đồng nhất với Tháng/Năm luôn cố định. Không đổi state
+    `deptFilter`/logic `visibleFactoryScores` — chỉ đổi vị trí JSX. Chấp nhận dropdown "không có
+    tác dụng gì" khi đang xem tab "Chi tiết"/"Bảng xếp hạng" — đổi lại UX nhất quán hơn (không
+    "nhấp nháy" biến mất khi chuyển tab).
+  - Rút gọn nhãn toggle "Chi tiết cách tính điểm của tôi" → "Chi tiết" trên mobile (2 nhãn còn
+    lại "Tổng quan"/"Bảng xếp hạng" đã đủ ngắn, không đổi).
+  - **Bọc cả 5 `<table>` bằng `ResponsiveTableWrapper`** (bảng "Toàn nhà máy" + 4 bảng A/B/C/D
+    trong "Chi tiết cách tính điểm") — dùng `className="rounded-none border-0 shadow-none"` cho
+    cả 5 (đúng convention `05-ui-components.md` khi bảng đã nằm sẵn trong 1 card có
+    border/shadow riêng, tránh double-border). Bảng D có 1 dòng text phụ ("Số ngày có chấm
+    chuyên môn: N") nằm ngoài phạm vi cuộn ngang — đã tách ra khỏi `ResponsiveTableWrapper`
+    (trước đó nằm chung trong cùng `overflow-x-auto`), chỉ table mới cuộn, dòng text giữ nguyên
+    vị trí dưới bảng.
+  - **Cố ý KHÔNG bọc `FilterBar`** cho cụm Tháng/Năm/Phòng ban/nút "Tính điểm tháng" — đây là
+    tham số truy vấn CHÍNH quyết định toàn bộ nội dung trang (khác "bộ lọc phụ trợ" của
+    `tasks/page.tsx`), bọc `FilterBar` sẽ ẩn Tháng/Năm sau nút "Bộ lọc" trên mobile, đi ngược kỳ
+    vọng luôn thấy ngay đang xem tháng nào.
+- **Cố ý KHÔNG đổi** tap target các nút hành động nhỏ `text-[11px] px-2.5 py-1` (nút Sửa/Tạm
+  ngưng/Xóa trong `kpi-5s-locations-tab.tsx`, nút Đã giải quyết/Từ chối trong `appeals/page.tsx`
+  ...) — style đồng bộ dùng xuyên suốt toàn module, đổi riêng lẻ 1 chỗ sẽ gây lệch; đổi đồng loạt
+  là quyết định ngoài phạm vi phiên này.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (8 file: `kpi-5s.ts`, `kpi-5s-locations-tab.tsx`,
+`kpi/5s/page.tsx`, `kpi/5s/location/[id]/page.tsx`, `kpi-5s-auto-assign-modal.tsx`,
+`kpi-shell.tsx`, `kpi/templates/page.tsx`, `kpi/scores/page.tsx`), và `npm run build` đều sạch —
+build liệt kê đủ mọi route KPI (`/dashboard/kpi/5s/location/[id]`, `/dashboard/kpi/scores`...),
+không route nào lỗi.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration trước
+
+1. Chạy `supabase/migrations/20260815_kpi_5s_deadline.sql` trên Supabase SQL Editor.
+2. **Mục 1**: cấu hình 1 vị trí với Thứ=CN, Giờ=17:00 (đúng ví dụ gốc: trạm bơm suối, RyTa là
+   người chấm) → xác nhận badge "Hạn: CN, 17:00" hiện đúng ở cả `/dashboard/kpi/5s` lẫn trang chi
+   tiết; qua khỏi mốc đó mà chưa chấm → badge chuyển đỏ "Quá hạn — Hạn: CN, 17:00", banner "Đến
+   lượt bạn chấm điểm" cũng chuyển đỏ "Đã quá hạn — ..."; chấm xong → badge biến mất cho tới tuần
+   sau. Vị trí chưa cấu hình hạn (dữ liệu cũ, `deadline_weekdays = NULL`) → không có badge nào,
+   vẫn chấm được bất kỳ ngày nào như trước (regression check).
+3. **Mục 2a**: bấm "Random vị trí này" trên 1 thẻ ở Cài đặt → KPI & 5S → Vị trí 5S → modal mở
+   đúng chỉ 1 vị trí, "Tạo đề xuất" ra đúng 1 dòng, "Xác nhận & Giao" thành công không ảnh hưởng
+   vị trí khác.
+4. **Mục 2b**: mở "Phân công thông minh" bulk (từ Cài đặt hoặc nút ở `/dashboard/kpi/5s`) → tick
+   "Bỏ qua đợt này" ở 1-2 dòng → xác nhận 2 dropdown của dòng đó bị khóa (mờ, không bấm được) →
+   bấm "Random lại" → xác nhận các dòng đã tick VẪN giữ trạng thái tắt sau khi random lại →
+   "Xác nhận & Giao" → xác nhận đúng những vị trí bị tắt KHÔNG bị đổi `nguoi_don_id`/
+   `nguoi_cham_id`, kể cả khi thuật toán đề xuất giá trị khác giá trị gốc cho dòng đó.
+5. **Mục 3+4**: test trên viewport 375px (iPhone SE) cho cả 6 trang:
+   - Thanh tab (`KpiShell`): nhãn rút gọn đúng (Công việc/Định kỳ/5S/Chấm điểm/Khiếu nại/Bảng
+     điểm), không tràn cứng, gradient mờ 2 bên xuất hiện đúng khi còn tab bị che (cuộn ngang thử
+     xem gradient trái/phải bật/tắt đúng theo vị trí cuộn).
+   - `kpi/templates/page.tsx`, `kpi/5s/page.tsx`: header không vỡ dòng, nút hành động full-width
+     dễ bấm khi xuống hàng riêng.
+   - `kpi/scores/page.tsx`: dropdown "Theo phòng ban" xuất hiện đúng vị trí mới (header chính,
+     cạnh Tháng/Năm), hoạt động đúng ở tab "Tổng quan" (lọc đúng bảng "Toàn nhà máy"), không gây
+     lỗi khi đang ở 2 tab còn lại (chỉ đơn giản không có tác dụng); 5 bảng cuộn ngang mượt có
+     gradient báo hiệu, không double-border với card bọc ngoài; nhãn toggle "Chi tiết" hiện đúng
+     trên mobile, "Chi tiết cách tính điểm của tôi" đầy đủ trên desktop.
+   - `kpi/evaluate/page.tsx`, `kpi/appeals/page.tsx`: xác nhận KHÔNG có regression (không đổi gì
+     nhưng cần xác nhận layout vẫn ổn định sau khi `KpiShell` đổi).

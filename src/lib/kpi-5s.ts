@@ -7,6 +7,7 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Database Schema" (5S) + "UI".
 
 import { supabase } from "@/lib/supabase"
+import { addDaysISO } from "@/lib/date-utils"
 
 export type Kpi5sResult = "dat" | "tuong_doi" | "khong_dat"
 
@@ -44,6 +45,11 @@ export type Kpi5sLocation = {
   // "Người giao" — ai đã cấu hình/gán vị trí này lần gần nhất.
   assigned_by: string | null
   assigned_at: string | null
+  // Hạn chấm điểm hàng tuần, tuỳ chọn (opt-in) — 1=Thứ 2..7=CN. UI form chỉ cho chọn ĐÚNG 1 phần
+  // tử (radio-behavior), nhưng cột là mảng để tương thích với cadence khác nếu cần mở rộng sau
+  // này. NULL = không giới hạn, chấm bất kỳ ngày nào trong tuần (hành vi mặc định/cũ).
+  deadline_weekdays: number[] | null
+  deadline_time: string | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -65,7 +71,7 @@ export type Kpi5sEvaluation = {
 }
 
 const LOCATION_COLS =
-  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, phong_ban_id, assigned_by, assigned_at, is_active, sort_order, created_at, updated_at"
+  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, phong_ban_id, assigned_by, assigned_at, deadline_weekdays, deadline_time, is_active, sort_order, created_at, updated_at"
 const EVAL_COLS =
   "id, factory_id, location_id, tuan_bat_dau, nguoi_don_id, nguoi_cham_id, ket_qua, ly_do, image_urls, danh_gia_luc, created_at"
 
@@ -102,6 +108,8 @@ export type Kpi5sLocationInput = {
   nguoi_cham_id: string | null
   zone_id: string | null
   phong_ban_id: string | null
+  deadline_weekdays: number[] | null
+  deadline_time: string | null
   is_active: boolean
   sort_order: number
 }
@@ -179,6 +187,33 @@ export async function fetchKpi5sEvaluations(locationId: string): Promise<Kpi5sEv
     .order("tuan_bat_dau", { ascending: false })
   if (error) throw error
   return (data || []) as Kpi5sEvaluation[]
+}
+
+// Hạn chấm điểm của TUẦN ĐANG XÉT, suy từ deadline_weekdays[0] + deadline_time — null nếu vị trí
+// chưa cấu hình hạn. weekStartISO PHẢI là kết quả của getIsoWeekStart() (luôn = Thứ Hai).
+export function computeKpi5sDeadline(
+  location: Pick<Kpi5sLocation, "deadline_weekdays" | "deadline_time">,
+  weekStartISO: string,
+): Date | null {
+  if (!location.deadline_weekdays?.length || !location.deadline_time) return null
+  const weekday = location.deadline_weekdays[0] // UI form hiện chỉ cho chọn đúng 1 phần tử
+  const dateISO = addDaysISO(weekStartISO, weekday - 1) // 1=Thứ 2 (weekStartISO chính nó) .. 7=CN
+  const d = new Date(`${dateISO}T${location.deadline_time}`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+// Chỉ quá hạn khi tuần này CHƯA có bản chấm — đã chấm xong thì không còn "quá hạn" nữa dù qua
+// mốc giờ. Tính client-side thuần túy tại thời điểm render, không lưu TIMESTAMPTZ nào vào DB.
+export function isKpi5sDeadlineOverdue(deadline: Date | null, hasEvaluatedThisWeek: boolean, nowMs = Date.now()): boolean {
+  if (!deadline || hasEvaluatedThisWeek) return false
+  return deadline.getTime() < nowMs
+}
+
+// Mirror KPI_DUE_SOON_HOURS = 24 (kpi-tasks.ts) — sắp đến hạn trong vòng 24 giờ tới.
+export function isKpi5sDeadlineDueSoon(deadline: Date | null, hasEvaluatedThisWeek: boolean, nowMs = Date.now()): boolean {
+  if (!deadline || hasEvaluatedThisWeek) return false
+  const t = deadline.getTime()
+  return t >= nowMs && t <= nowMs + 24 * 3600_000
 }
 
 // Tuần hiện tại (Thứ Hai) đã có bản chấm chưa — quyết định có hiện nút "Chấm điểm tuần này".

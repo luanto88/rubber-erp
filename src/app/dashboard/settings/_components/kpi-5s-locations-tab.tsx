@@ -24,6 +24,7 @@ import { sendKpiNotify } from "@/lib/kpi-notify"
 import { fetchKpi5sZones, type Kpi5sZone } from "@/lib/kpi-5s-zones"
 import { fetchDepartmentOptions, type DepartmentOption } from "@/lib/kpi-department-leaders"
 import { fetchDepartmentUserIds } from "@/lib/kpi-tasks"
+import { KPI_WEEKDAY_LABEL, KPI_WEEKDAY_OPTIONS } from "@/lib/kpi-templates"
 import { Kpi5sAutoAssignModal } from "@/app/dashboard/kpi/_components/kpi-5s-auto-assign-modal"
 
 type UserOption = { id: string; label: string }
@@ -36,6 +37,10 @@ type FormState = {
   nguoi_cham_id: string
   zone_id: string
   phong_ban_id: string
+  // Hạn chấm điểm hàng tuần, tuỳ chọn — UI chỉ cho chọn ĐÚNG 1 thứ (radio-behavior), không phải
+  // multi-select như apply_weekdays của Việc định kỳ. "" = không giới hạn.
+  deadline_weekday: number | ""
+  deadline_time: string
   is_active: boolean
   sort_order: string
 }
@@ -49,6 +54,8 @@ function emptyForm(): FormState {
     nguoi_cham_id: "",
     zone_id: "",
     phong_ban_id: "",
+    deadline_weekday: "",
+    deadline_time: "17:00",
     is_active: true,
     sort_order: "0",
   }
@@ -63,6 +70,8 @@ function locationToForm(l: Kpi5sLocation, cleanerUserIds: string[]): FormState {
     nguoi_cham_id: l.nguoi_cham_id || "",
     zone_id: l.zone_id || "",
     phong_ban_id: l.phong_ban_id || "",
+    deadline_weekday: l.deadline_weekdays?.[0] ?? "",
+    deadline_time: l.deadline_time?.slice(0, 5) || "17:00",
     is_active: l.is_active,
     sort_order: String(l.sort_order ?? 0),
   }
@@ -99,6 +108,9 @@ export function Kpi5sLocationsTab({
   const [printError, setPrintError] = useState("")
 
   const [showAutoAssign, setShowAutoAssign] = useState(false)
+  // Random riêng cho đúng 1 vị trí (mở từ nút trên thẻ) — tách khỏi showAutoAssign (đợt bulk) để
+  // không overload ý nghĩa của state cũ.
+  const [autoAssignLocation, setAutoAssignLocation] = useState<Kpi5sLocation | null>(null)
   const [assignSummary, setAssignSummary] = useState<{ userId: string; ten: string; donZones: string[]; chamZones: string[] }[] | null>(null)
 
   // Fix bug thật: "Người dọn hiện tại"/"Người chấm hiện tại" trước đây liệt kê TOÀN BỘ nhân sự
@@ -201,6 +213,10 @@ export function Kpi5sLocationsTab({
       setSaveError("Người chấm hiện tại không được nằm trong danh sách Người dọn hiện tại.")
       return
     }
+    if (form.deadline_weekday !== "" && !form.deadline_time) {
+      setSaveError("Vui lòng chọn Giờ hạn, hoặc bỏ chọn Thứ để không giới hạn hạn chấm điểm.")
+      return
+    }
     setSaving(true)
     setSaveError("")
     try {
@@ -212,6 +228,8 @@ export function Kpi5sLocationsTab({
         nguoi_cham_id: form.nguoi_cham_id || null,
         zone_id: form.zone_id || null,
         phong_ban_id: form.phong_ban_id || null,
+        deadline_weekdays: form.deadline_weekday === "" ? null : [form.deadline_weekday],
+        deadline_time: form.deadline_weekday === "" ? null : `${form.deadline_time}:00`,
         is_active: form.is_active,
         sort_order: Number(form.sort_order) || 0,
       }
@@ -414,6 +432,12 @@ export function Kpi5sLocationsTab({
                     <Edit2 size={11} /> Sửa
                   </button>
                   <button
+                    onClick={() => setAutoAssignLocation(l)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold"
+                  >
+                    <Shuffle size={11} /> Random vị trí này
+                  </button>
+                  <button
                     onClick={() => void handleToggleActive(l)}
                     disabled={busyId === l.id}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-bold disabled:opacity-60"
@@ -567,6 +591,43 @@ export function Kpi5sLocationsTab({
                 (vd &quot;Văn phòng&quot;, &quot;Kho 1&quot;, &quot;Kho 2&quot;, &quot;Ca SX mủ tạp&quot;...).
               </p>
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600">Hạn chấm điểm hàng tuần (tuỳ chọn)</label>
+              <div className="flex flex-wrap gap-1.5">
+                {KPI_WEEKDAY_OPTIONS.map((d) => {
+                  const checked = form.deadline_weekday === d
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      // Hành vi RADIO có thể bỏ chọn — khác multi-select apply_weekdays của Việc
+                      // định kỳ: bấm 1 thứ = chọn đúng thứ đó (thay thế lựa chọn cũ), bấm lại thứ
+                      // đang chọn = bỏ chọn hoàn toàn.
+                      onClick={() => setForm((f) => ({ ...f, deadline_weekday: f.deadline_weekday === d ? "" : d }))}
+                      className={
+                        "px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors " +
+                        (checked ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      {KPI_WEEKDAY_LABEL[d]}
+                    </button>
+                  )
+                })}
+              </div>
+              {form.deadline_weekday !== "" && (
+                <input
+                  type="time"
+                  value={form.deadline_time}
+                  onChange={(e) => setForm((f) => ({ ...f, deadline_time: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-500 sm:w-40"
+                />
+              )}
+              <p className="mt-1 text-[11px] text-slate-400">
+                Để trống = không giới hạn, chấm bất kỳ ngày nào trong tuần (như hiện tại). Chọn 1
+                thứ + giờ = hiện badge cảnh báo &quot;Quá hạn&quot; nếu chưa chấm điểm tuần đó khi
+                qua mốc này.
+              </p>
+            </div>
             <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
               <input
                 type="checkbox"
@@ -615,6 +676,30 @@ export function Kpi5sLocationsTab({
           onClose={() => setShowAutoAssign(false)}
           onAssigned={(summary) => {
             setShowAutoAssign(false)
+            setAssignSummary(summary)
+            sendKpiNotify({
+              factoryId,
+              title: "Phân công vị trí 5S",
+              lines: summary.map((s) => {
+                const parts: string[] = []
+                if (s.donZones.length > 0) parts.push(`dọn: ${s.donZones.join(", ")}`)
+                if (s.chamZones.length > 0) parts.push(`chấm: ${s.chamZones.join(", ")}`)
+                return `👤 ${s.ten} — ${parts.join(" · ")}`
+              }),
+              link: "/dashboard/kpi/5s",
+            })
+            void loadData(factoryId)
+          }}
+        />
+      )}
+
+      {autoAssignLocation && factoryId && (
+        <Kpi5sAutoAssignModal
+          factoryId={factoryId}
+          locations={[autoAssignLocation]}
+          onClose={() => setAutoAssignLocation(null)}
+          onAssigned={(summary) => {
+            setAutoAssignLocation(null)
             setAssignSummary(summary)
             sendKpiNotify({
               factoryId,

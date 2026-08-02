@@ -35,6 +35,7 @@ import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUs
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { fetchDepartmentOptions, resolveMyLeaderDepartmentId, type DepartmentOption } from "@/lib/kpi-department-leaders"
 import { loadAllPersonnelGroups, type KpiGroupOption } from "@/lib/kpi-templates"
@@ -272,7 +273,7 @@ export default function KpiScoresPage() {
   return (
     <KpiShell>
       <div ref={revealRef} className="scroll-reveal space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-100 to-violet-100 text-indigo-600">
               <Award size={18} />
@@ -303,11 +304,23 @@ export default function KpiScoresPage() {
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
+            {isAdmin && departments.length > 0 && (
+              <select
+                value={deptFilter}
+                onChange={(e) => setDeptFilter(e.target.value)}
+                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-violet-500"
+              >
+                <option value="">Tất cả phòng ban</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            )}
             {canCompute && (
               <button
                 onClick={() => void handleCompute()}
                 disabled={computing}
-                className="hover-lift flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60"
+                className="hover-lift flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-indigo-700 disabled:opacity-60 sm:w-auto"
               >
                 <Calculator size={15} /> {computing ? "Đang tính..." : "Tính điểm tháng"}
               </button>
@@ -327,7 +340,9 @@ export default function KpiScoresPage() {
             onClick={() => setScoreView("chi-tiet")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${scoreView === "chi-tiet" ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}
           >
-            <ListTree size={14} /> Chi tiết cách tính điểm của tôi
+            <ListTree size={14} />
+            <span className="hidden sm:inline">Chi tiết cách tính điểm của tôi</span>
+            <span className="sm:hidden">Chi tiết</span>
           </button>
           <button
             onClick={() => setScoreView("xep-hang")}
@@ -410,25 +425,13 @@ export default function KpiScoresPage() {
               <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-extrabold text-slate-700">Toàn nhà máy — Tháng {thang}/{nam}</div>
-                  {isAdmin && departments.length > 0 && (
-                    <select
-                      value={deptFilter}
-                      onChange={(e) => setDeptFilter(e.target.value)}
-                      className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold outline-none focus:border-violet-500"
-                    >
-                      <option value="">Tất cả phòng ban</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
-                  )}
                 </div>
                 {dataLoading ? (
                   <div className="py-6 text-center text-sm text-slate-400">Đang tải...</div>
                 ) : visibleFactoryScores.length === 0 ? (
                   <div className="py-6 text-center text-sm text-slate-400">Chưa có điểm nào được tính cho tháng này.</div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase text-slate-400">
@@ -474,7 +477,7 @@ export default function KpiScoresPage() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </ResponsiveTableWrapper>
                 )}
               </div>
             )}
@@ -673,7 +676,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
         {tasks.length === 0 ? (
           <div className="py-3 text-center text-xs text-slate-400">Không có việc nào trong tháng → mặc định 100%.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left font-bold uppercase text-slate-400">
@@ -694,7 +697,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
                 ))}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTableWrapper>
         )}
       </div>
 
@@ -706,7 +709,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
         {dueTasks.length === 0 ? (
           <div className="py-3 text-center text-xs text-slate-400">Không có việc nào đã đến hạn trong tháng → mặc định 100%.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left font-bold uppercase text-slate-400">
@@ -730,7 +733,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
                 })}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTableWrapper>
         )}
       </div>
 
@@ -742,7 +745,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
         {evals5s.length === 0 ? (
           <div className="py-3 text-center text-xs text-slate-400">Không có lượt chấm 5S nào trong tháng → mặc định 100%.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left font-bold uppercase text-slate-400">
@@ -763,7 +766,7 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
                 ))}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTableWrapper>
         )}
       </div>
 
@@ -775,33 +778,35 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
         {dayScores.length === 0 ? (
           <div className="py-3 text-center text-xs text-slate-400">Không có ngày nào có chấm chuyên môn (nhóm chính) trong tháng → mặc định 100%.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 text-left font-bold uppercase text-slate-400">
-                  <th className="py-1.5 pr-2">Ngày</th>
-                  <th className="px-2 py-1.5">%Chính</th>
-                  <th className="px-2 py-1.5">Choàng</th>
-                  <th className="px-2 py-1.5">Điểm ngày / Max</th>
-                  <th className="py-1.5 pl-2 text-right">%Ngày</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dayScores.map((dsc) => (
-                  <tr key={dsc.ngay} className="border-b border-slate-100 last:border-0">
-                    <td className="py-1.5 pr-2 font-semibold text-slate-700">{dsc.ngay}</td>
-                    <td className="px-2 py-1.5 text-slate-500">{dsc.chinhPct}%</td>
-                    <td className="px-2 py-1.5 text-slate-500">
-                      {dsc.choangEntries.length === 0 ? "—" : dsc.choangEntries.map((c) => `${c.group_ten} (${c.pct}%)`).join(", ")}
-                    </td>
-                    <td className="px-2 py-1.5 text-slate-500">{round1(dsc.diemNgay)} / {dsc.maxNgay}</td>
-                    <td className="py-1.5 pl-2 text-right font-bold text-slate-700">{round1(dsc.pctNgay)}%</td>
+          <>
+            <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left font-bold uppercase text-slate-400">
+                    <th className="py-1.5 pr-2">Ngày</th>
+                    <th className="px-2 py-1.5">%Chính</th>
+                    <th className="px-2 py-1.5">Choàng</th>
+                    <th className="px-2 py-1.5">Điểm ngày / Max</th>
+                    <th className="py-1.5 pl-2 text-right">%Ngày</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {dayScores.map((dsc) => (
+                    <tr key={dsc.ngay} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2 font-semibold text-slate-700">{dsc.ngay}</td>
+                      <td className="px-2 py-1.5 text-slate-500">{dsc.chinhPct}%</td>
+                      <td className="px-2 py-1.5 text-slate-500">
+                        {dsc.choangEntries.length === 0 ? "—" : dsc.choangEntries.map((c) => `${c.group_ten} (${c.pct}%)`).join(", ")}
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-500">{round1(dsc.diemNgay)} / {dsc.maxNgay}</td>
+                      <td className="py-1.5 pl-2 text-right font-bold text-slate-700">{round1(dsc.pctNgay)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
             <div className="mt-2 text-[11px] text-slate-400">Số ngày có chấm chuyên môn: {dayScores.length}</div>
-          </div>
+          </>
         )}
       </div>
 
