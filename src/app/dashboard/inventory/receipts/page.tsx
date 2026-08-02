@@ -1282,7 +1282,7 @@ export default function InventoryReceiptsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         <SummaryBox label="Tổng số dòng" value={String(draft.lines.length)} />
         <SummaryBox label="Tổng số lượng nhập" value={summary.totalQty.toLocaleString("vi-VN")} tone="text-emerald-700" />
         <SummaryBox label="Cảnh báo" value={String(summary.warningCount)} tone="text-amber-600" />
@@ -1389,7 +1389,7 @@ export default function InventoryReceiptsPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho nhập *</label>
             <select
@@ -1450,7 +1450,7 @@ export default function InventoryReceiptsPage() {
           </div>
 
           <div className="relative z-30 xl:col-span-2">
-            <div className="mb-2 grid gap-3 xl:grid-cols-2">
+            <div className="mb-2 grid grid-cols-1 gap-3 xl:grid-cols-2">
               <div className="flex items-end gap-3">
                 <div className="min-w-0 flex-1">
                 <MultiSelectField
@@ -1494,7 +1494,7 @@ export default function InventoryReceiptsPage() {
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = draft.warehouseId
@@ -1579,7 +1579,7 @@ export default function InventoryReceiptsPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên vật tư</label>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
@@ -1708,7 +1708,7 @@ export default function InventoryReceiptsPage() {
           ) : null}
 
           {quickModal === "category" ? (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-600">Mã phân loại *</label>
                 <input
@@ -1753,7 +1753,7 @@ export default function InventoryReceiptsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-slate-600">Phân loại vật tư *</label>
                   <select
@@ -1778,7 +1778,7 @@ export default function InventoryReceiptsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-slate-600">Mã vật tư *</label>
                   <input
@@ -1800,7 +1800,7 @@ export default function InventoryReceiptsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên vật tư *</label>
                   <input
@@ -1822,7 +1822,7 @@ export default function InventoryReceiptsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-slate-600">Tồn tối thiểu</label>
                   <input
@@ -1842,7 +1842,7 @@ export default function InventoryReceiptsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"

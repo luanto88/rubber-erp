@@ -989,6 +989,9 @@ export default function StoragePage() {
   // Đồng bộ nhanh KL tươi/khô của 1 ngăn từ dữ liệu Điều xe/Sản lượng hiện tại,
   // không cần tải lại toàn bộ trang. Dùng lại đúng công thức resolveStorageNgansActualTotals
   // (chỉ tính lại theo các trip đã có trong ngan.trips[], không tự thêm chuyến mới).
+  // Đồng thời gọi RPC sync_ngan_production_status để đồng bộ lại trang_thai theo sản lượng
+  // thành phẩm — bù đắp cho các ngăn có lot_transactions ghi TRƯỚC khi RPC này ra đời (xem
+  // rule 06-module-production.md mục "Đồng bộ trạng thái ngăn theo sản lượng thật").
   const handleQuickSyncNgan = async (ngan: Ngan) => {
     if (!factoryId) return
     if (!canEditStorage) {
@@ -998,30 +1001,64 @@ export default function StoragePage() {
     setNganSyncingId(ngan.id)
     try {
       const [resolved] = await resolveStorageNgansActualTotals(factoryId, [ngan], { persist: true })
+
+      let nextTrangThai = ngan.trang_thai
+      const { error: statusSyncError } = await supabase.rpc("sync_ngan_production_status", {
+        p_ngan_id: ngan.id,
+      })
+      if (statusSyncError) {
+        console.error("sync_ngan_production_status:", statusSyncError)
+      } else {
+        const { data: freshNgan } = await supabase
+          .from("ngans")
+          .select("trang_thai")
+          .eq("id", ngan.id)
+          .maybeSingle()
+        if (freshNgan?.trang_thai) nextTrangThai = freshNgan.trang_thai
+      }
+      const statusChanged = nextTrangThai !== ngan.trang_thai
+
       if (resolved) {
         setNgans((prev) =>
           prev.map((item) =>
             item.id === ngan.id
-              ? { ...item, tong_tuoi: resolved.tong_tuoi, tong_kho: resolved.tong_kho, trips: resolved.trips }
+              ? {
+                  ...item,
+                  tong_tuoi: resolved.tong_tuoi,
+                  tong_kho: resolved.tong_kho,
+                  trips: resolved.trips,
+                  trang_thai: nextTrangThai,
+                }
               : item,
           ),
         )
         const tuoiDiff = resolved.tong_tuoi - (ngan.tong_tuoi || 0)
         const khoDiff = resolved.tong_kho - (ngan.tong_kho || 0)
-        const message =
+        const klMessage =
           Math.abs(tuoiDiff) < 0.01 && Math.abs(khoDiff) < 0.01
-            ? "Đã đồng bộ — không có thay đổi"
-            : `Đã đồng bộ — KL khô ${(ngan.tong_kho || 0).toLocaleString()} → ${resolved.tong_kho.toLocaleString()} kg`
+            ? "không có thay đổi KL"
+            : `KL khô ${(ngan.tong_kho || 0).toLocaleString()} → ${resolved.tong_kho.toLocaleString()} kg`
+        const message = statusChanged
+          ? `Đã đồng bộ — ${klMessage}, trạng thái ${ngan.trang_thai} → ${nextTrangThai}`
+          : `Đã đồng bộ — ${klMessage}`
         setNganSyncMessage((prev) => ({ ...prev, [ngan.id]: message }))
-        setTimeout(() => {
-          setNganSyncMessage((prev) => {
-            if (!(ngan.id in prev)) return prev
-            const next = { ...prev }
-            delete next[ngan.id]
-            return next
-          })
-        }, 5000)
+      } else if (statusChanged) {
+        setNgans((prev) =>
+          prev.map((item) => (item.id === ngan.id ? { ...item, trang_thai: nextTrangThai } : item)),
+        )
+        setNganSyncMessage((prev) => ({
+          ...prev,
+          [ngan.id]: `Đã đồng bộ trạng thái: ${ngan.trang_thai} → ${nextTrangThai}`,
+        }))
       }
+      setTimeout(() => {
+        setNganSyncMessage((prev) => {
+          if (!(ngan.id in prev)) return prev
+          const next = { ...prev }
+          delete next[ngan.id]
+          return next
+        })
+      }, 5000)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Không đồng bộ được sản lượng ngăn")
     } finally {

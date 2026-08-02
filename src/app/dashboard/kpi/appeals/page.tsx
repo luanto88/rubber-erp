@@ -3,7 +3,11 @@
 // Danh sách + xử lý Khiếu nại (kpi_appeals). Người dùng thường chỉ thấy khiếu nại của chính
 // mình (RLS); admin/kpi.manage_config thấy tất cả và có nút xử lý.
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Cập nhật — Phân công thông minh + Gia hạn +
-// Khiếu nại".
+// Khiếu nại" và "Liệt kê Phase 5".
+//
+// Phase 5: khiếu nại điểm KPI tháng (monthly_score_id) — chỉ tạo được khi điểm đã khóa sổ (RLS
+// tự chặn ở trang Bảng điểm KPI). Đóng "Đã giải quyết" cho loại này bắt buộc nhập điểm mới + lý
+// do điều chỉnh (mirror đúng cơ chế Bug 2 đã có cho khiếu nại 5S) — ghi vào kpi_score_adjustments.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
@@ -21,6 +25,7 @@ import {
   KPI_APPEAL_STATUS_LABEL,
   resolveKpiAppeal,
   resolveKpiLocationEvaluationAppeal,
+  resolveKpiMonthlyScoreAppeal,
   type KpiAppeal,
 } from "@/lib/kpi-appeals"
 import { KPI_5S_RESULT_LABEL, type Kpi5sResult } from "@/lib/kpi-5s"
@@ -30,6 +35,7 @@ import { formatKpiDateTime, loadKpiTaskCandidates, type KpiTaskCandidate } from 
 type TaskRef = { id: string; ma_cong_viec: string | null; tieu_de: string }
 type LocationEvalRef = { id: string; location_id: string; tuan_bat_dau: string; ket_qua: Kpi5sResult; ly_do: string | null }
 type LocationRef = { id: string; ma_vi_tri: string; ten_vi_tri: string }
+type MonthlyScoreRef = { id: string; nam: number; thang: number; diem_tong: number | null; trang_thai: "nhap" | "da_khoa" }
 
 export default function KpiAppealsPage() {
   const revealRef = useScrollReveal()
@@ -41,6 +47,7 @@ export default function KpiAppealsPage() {
   const [candidates, setCandidates] = useState<KpiTaskCandidate[]>([])
   const [taskRefs, setTaskRefs] = useState<Record<string, TaskRef>>({})
   const [locationRefs, setLocationRefs] = useState<Record<string, { eval: LocationEvalRef; location: LocationRef | null }>>({})
+  const [monthlyScoreRefs, setMonthlyScoreRefs] = useState<Record<string, MonthlyScoreRef>>({})
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -53,6 +60,11 @@ export default function KpiAppealsPage() {
   // chấp trong cùng thao tác — chỉ hiện khi appeal gắn location_evaluation_id.
   const [resolveKetQua, setResolveKetQua] = useState<Kpi5sResult>("dat")
   const [resolveLyDo, setResolveLyDo] = useState("")
+
+  // Phase 5: khi đóng khiếu nại điểm KPI tháng "Đã giải quyết", cho phép điều chỉnh luôn điểm
+  // tổng (ghi kpi_score_adjustments) — chỉ hiện khi appeal gắn monthly_score_id.
+  const [resolveNewDiemTong, setResolveNewDiemTong] = useState(0)
+  const [resolveAdjustLyDo, setResolveAdjustLyDo] = useState("")
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -112,6 +124,14 @@ export default function KpiAppealsPage() {
       } else {
         setLocationRefs({})
       }
+
+      const scoreIds = Array.from(new Set(appealRows.map((a) => a.monthly_score_id).filter((v): v is string => !!v)))
+      if (scoreIds.length > 0) {
+        const { data: scoreData } = await supabase.from("kpi_monthly_scores").select("id, nam, thang, diem_tong, trang_thai").in("id", scoreIds)
+        setMonthlyScoreRefs(Object.fromEntries(((scoreData || []) as MonthlyScoreRef[]).map((s) => [s.id, s])))
+      } else {
+        setMonthlyScoreRefs({})
+      }
     } catch (err) {
       setDataError(getKpiAppealErrorMessage(err, "Không tải được danh sách khiếu nại."))
     } finally {
@@ -137,15 +157,25 @@ export default function KpiAppealsPage() {
     const locationEval = appeal.location_evaluation_id ? locationRefs[appeal.location_evaluation_id]?.eval : null
     setResolveKetQua(locationEval?.ket_qua || "dat")
     setResolveLyDo(locationEval?.ly_do || "")
+    const scoreRef = appeal.monthly_score_id ? monthlyScoreRefs[appeal.monthly_score_id] : null
+    setResolveNewDiemTong(scoreRef?.diem_tong ?? 0)
+    setResolveAdjustLyDo("")
   }
 
   // Đóng "Đã giải quyết" cho khiếu nại gắn 1 lần chấm 5S — sửa luôn kết quả gốc (Bug 2).
   const isLocationResultCorrection = resolveTarget?.trangThai === "da_giai_quyet" && !!resolveTarget.appeal.location_evaluation_id
+  // Phase 5: đóng "Đã giải quyết" cho khiếu nại điểm KPI tháng — điều chỉnh luôn điểm tổng
+  // (kpi_score_adjustments), bắt buộc nhập lý do (CHECK NOT NULL ở tầng DB).
+  const isMonthlyScoreAdjustment = resolveTarget?.trangThai === "da_giai_quyet" && !!resolveTarget.appeal.monthly_score_id
 
   const handleResolve = async () => {
     if (!resolveTarget || !user) return
     if (isLocationResultCorrection && resolveKetQua !== "dat" && !resolveLyDo.trim()) {
       setResolveError(`Vui lòng nhập lý do khi kết quả là ${KPI_5S_RESULT_LABEL[resolveKetQua]}.`)
+      return
+    }
+    if (isMonthlyScoreAdjustment && !resolveAdjustLyDo.trim()) {
+      setResolveError("Vui lòng nhập lý do điều chỉnh.")
       return
     }
     setResolving(true)
@@ -157,6 +187,14 @@ export default function KpiAppealsPage() {
           locationEvaluationId: resolveTarget.appeal.location_evaluation_id!,
           newKetQua: resolveKetQua,
           newLyDo: resolveLyDo,
+          ghiChu: phanHoi,
+        })
+      } else if (isMonthlyScoreAdjustment) {
+        await resolveKpiMonthlyScoreAppeal({
+          appealId: resolveTarget.appeal.id,
+          monthlyScoreId: resolveTarget.appeal.monthly_score_id!,
+          newDiemTong: resolveNewDiemTong,
+          lyDo: resolveAdjustLyDo,
           ghiChu: phanHoi,
         })
       } else {
@@ -219,6 +257,7 @@ export default function KpiAppealsPage() {
             {appeals.map((a) => {
               const taskRef = a.task_id ? taskRefs[a.task_id] : null
               const locationRef = a.location_evaluation_id ? locationRefs[a.location_evaluation_id] : null
+              const scoreRef = a.monthly_score_id ? monthlyScoreRefs[a.monthly_score_id] : null
               return (
                 <div key={a.id} className="hover-lift bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -248,7 +287,7 @@ export default function KpiAppealsPage() {
                     )}
                   </div>
 
-                  {(taskRef || locationRef) && (
+                  {(taskRef || locationRef || scoreRef) && (
                     <div className="mt-2 text-xs">
                       {taskRef && (
                         <Link href={`/dashboard/kpi/tasks/${taskRef.id}`} className="text-violet-600 hover:underline font-semibold">
@@ -258,6 +297,11 @@ export default function KpiAppealsPage() {
                       {locationRef?.location && (
                         <Link href={`/dashboard/kpi/5s/location/${locationRef.location.id}`} className="text-violet-600 hover:underline font-semibold">
                           Vị trí 5S: {locationRef.location.ma_vi_tri} — tuần {locationRef.eval.tuan_bat_dau}
+                        </Link>
+                      )}
+                      {scoreRef && (
+                        <Link href="/dashboard/kpi/scores" className="text-violet-600 hover:underline font-semibold">
+                          Điểm KPI tháng {scoreRef.thang}/{scoreRef.nam} (hiện {scoreRef.diem_tong ?? "—"} điểm)
                         </Link>
                       )}
                     </div>
@@ -312,6 +356,36 @@ export default function KpiAppealsPage() {
                   onLyDoChange={setResolveLyDo}
                   disabled={resolving}
                 />
+              </>
+            )}
+            {isMonthlyScoreAdjustment && (
+              <>
+                <p className="text-xs text-slate-500">
+                  Xác nhận lại điểm tổng chính thức của điểm tháng này — mặc định là điểm hiện
+                  tại, đổi lại nếu khiếu nại đúng. Mọi thay đổi đều được ghi lại vào lịch sử điều
+                  chỉnh.
+                </p>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Điểm mới</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={resolveNewDiemTong}
+                    onChange={(e) => setResolveNewDiemTong(Number(e.target.value))}
+                    disabled={resolving}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do điều chỉnh</label>
+                  <textarea
+                    value={resolveAdjustLyDo}
+                    onChange={(e) => setResolveAdjustLyDo(e.target.value)}
+                    rows={2}
+                    disabled={resolving}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
               </>
             )}
             <div>

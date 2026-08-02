@@ -220,3 +220,18 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION submit_confirm_draft_batch(UUID[], UUID, JSONB) TO authenticated, service_role;
+
+-- Backfill 1 lần: RPC sync_ngan_production_status() ở trên chỉ kích hoạt khi có GHI MỚI vào
+-- lot_transactions đi qua submit_confirm_draft_batch/editShiftHistoryEntry/deleteShiftHistoryEntry
+-- — không hồi tố cho dữ liệu đã tồn tại TRƯỚC migration này. Vòng lặp dưới đây đồng bộ lại 1 lần
+-- cho MỌI ngăn hiện đang "Chờ sản xuất"/"Đang sản xuất" trong toàn hệ thống — an toàn chạy lại
+-- nhiều lần (idempotent), không đụng ngăn "Đang nhận"/"Đóng"/"Đã sản xuất".
+DO $$
+DECLARE
+  v_ngan_id UUID;
+BEGIN
+  FOR v_ngan_id IN SELECT id FROM ngans WHERE trang_thai IN ('Chờ sản xuất', 'Đang sản xuất') LOOP
+    PERFORM sync_ngan_production_status(v_ngan_id);
+  END LOOP;
+END;
+$$;

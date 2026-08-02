@@ -1018,7 +1018,7 @@ export default function InventoryTransfersPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         <SummaryBox label="Số dòng" value={String(draft.lines.length)} />
         <SummaryBox label="Tổng số lượng chuyển" value={summary.totalQty.toLocaleString("vi-VN")} tone="text-blue-700" />
         <SummaryBox label="Cảnh báo" value={String(summary.warningCount)} tone="text-amber-600" />
@@ -1104,7 +1104,7 @@ export default function InventoryTransfersPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho nguồn *</label>
             <select
@@ -1144,7 +1144,7 @@ export default function InventoryTransfersPage() {
                     documentCode: "",
                   }))
                 }
-                className={INPUT_CLASS}
+                className={`min-w-0 flex-1 ${INPUT_CLASS}`}
               >
                 <option value="">Chọn kho đích</option>
                 {warehouses.map((warehouse) => (
@@ -1155,7 +1155,7 @@ export default function InventoryTransfersPage() {
               </select>
               <button
                 onClick={swapWarehouses}
-                className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-600 transition-colors hover:bg-slate-100"
+                className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-600 transition-colors hover:bg-slate-100"
               >
                 <ArrowRightLeft size={18} />
               </button>
@@ -1180,7 +1180,7 @@ export default function InventoryTransfersPage() {
           </div>
 
           <div className="relative z-30 xl:col-span-3">
-            <div className="mb-2 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div className="mb-2 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <div>
                 <MultiSelectField
                   label="Phân loại vật tư"
@@ -1220,7 +1220,7 @@ export default function InventoryTransfersPage() {
                 Vui lòng chọn kho nguồn trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = draft.sourceWarehouseId
@@ -1313,7 +1313,7 @@ export default function InventoryTransfersPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên vật tư</label>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">

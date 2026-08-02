@@ -424,9 +424,14 @@ kpi_appeals ( id, monthly_score_id NULL, task_id NULL, location_evaluation_id NU
   tab "Bảng điểm KPI" (`/dashboard/kpi/scores`); điểm luôn `nhap` (chưa khóa) —
   chạy nháp 1-2 tháng quan sát thực tế. `tsc`/`eslint`/`npm run build` đều
   sạch, **chưa chạy migration, chưa test tay**.
-- **Phase 5 — Khóa sổ, khiếu nại & minh bạch**: `kpi_score_adjustments`+
-  `kpi_appeals`; khóa sổ, điều chỉnh (audit), khiếu nại; điểm tạm tính real-time,
-  bảng xếp hạng ẩn danh theo nhóm/phòng ban.
+- **Phase 5 — Khóa sổ, khiếu nại & minh bạch** ✅ Đã code xong (xem mục "Cập nhật Phase 5" bên
+  dưới): RPC `kpi_monthly_score_lock` (khóa sổ, không có "mở khóa"); bảng `kpi_score_adjustments`
+  + RPC `kpi_monthly_score_adjust` (audit điều chỉnh điểm đã khóa, chỉ hoạt động qua khiếu nại
+  hoặc admin điều chỉnh trực tiếp); nối `kpi_appeals.monthly_score_id` (khiếu nại điểm tháng, chỉ
+  tạo được khi đã khóa sổ); 2 RPC `kpi_score_ranking_by_group`/`kpi_score_ranking_by_department`
+  (bảng xếp hạng ẩn danh, chỉ trả rank+điểm+is_me, không lộ tên). Điểm tạm tính real-time đã
+  hiện thực hóa sớm hơn qua sub-tab "Chi tiết cách tính điểm" (mục "Cập nhật (phiên sau Phase 4,
+  tiếp)"). Migration `20260814_kpi_score_lock_adjust_rank.sql`, **CHƯA CHẠY, chưa test tay**.
 
 ## Rủi ro/quy tắc bắt buộc
 
@@ -3653,3 +3658,222 @@ rộng cho lãnh đạo phòng ban.
    nút "Tính điểm tháng" nếu họ không có `kpi.manage_config`.
 10. Thử gọi thẳng RPC `kpi_compute_monthly_scores` (qua devtools) bằng tài khoản không có
     `kpi.manage_config` — xác nhận bị chặn đúng lỗi "Bạn không có quyền tính điểm KPI tháng."
+
+## Sự cố thật đã xử lý (2026-08-02) — migration 20260812 chưa từng chạy, dọn 27 task trùng
+
+Người dùng báo "chấm 5S + hoàn thành task cho cnho/ryta nhưng Bảng điểm KPI tháng 7/2026 vẫn
+'Chưa có điểm cho tháng này'". Điều tra bằng script read-only
+(`scripts/investigate-kpi-no-score.mjs`, giữ lại để tái dùng) xác nhận **2 nguyên nhân độc lập**:
+
+1. **Không phải bug** — `kpi_monthly_scores` có 0 dòng cho tháng 7/2026 vì chưa từng có ai bấm
+   "Tính điểm tháng" (đúng thiết kế Phase 4: điểm không tự tính khi hoàn thành task/chấm 5S).
+   Nút này chỉ hiện cho admin/`kpi.manage_config` — tài khoản người dùng đang xem không có quyền
+   đó nên không thấy nút.
+2. **Bug thật** — dữ liệu cho thấy migration `20260812_kpi_task_templates_skip_stuck.sql` (fix
+   "việc định kỳ mắc kẹt", viết ở mục ngay trên) **chưa từng được chạy** trên Supabase, dù
+   `20260811`/`20260813` đã chạy — mỗi ngày mở app vẫn sinh thêm 1 task mới cho template dù task
+   ngày trước chưa đóng. Quét toàn bộ `kpi_tasks` (không giới hạn 2 template người dùng nêu) phát
+   hiện **6/6 template đang active đều bị ảnh hưởng, tổng 27 task trùng** (28/7 → 1/8): "Upload
+   file kiểm nghiệm...", "Đo mẫu tối thiểu...", "Upload file sản lượng...", "Tạo ngăn lưu", "Tạo
+   phiếu điều xe...", "Dọn dẹp phòng điều hành xử lý nước thải".
+
+**Đã dọn dữ liệu** bằng `scripts/cleanup-kpi-duplicate-template-tasks.mjs` (dry-run mặc định, cần
+`--apply` để ghi thật — giữ lại để tái dùng nếu tái diễn): với mỗi template có >1 task đang mở,
+**hủy** (`trang_thai='huy'` — dùng đúng cơ chế "Hủy công việc" có sẵn, KHÔNG xóa cứng, giữ nguyên
+`kpi_task_logs`/evidence links) tất cả trừ task có `ngay_giao` mới nhất (1/8/2026). Đã verify lại
+bằng dry-run lần 2: 0 template còn trùng.
+
+**Việc bắt buộc phải làm ngay**: chạy `supabase/migrations/20260812_kpi_task_templates_skip_stuck.sql`
+trên Supabase SQL Editor — nếu chưa chạy, bug sẽ tái diễn ở lần mở app tiếp theo (mỗi template lại
+có nguy cơ sinh thêm task mới dù task 1/8 hiện tại vẫn `moi_giao`).
+
+**Chưa test tay lại việc tính điểm tháng 7** sau khi dọn xong — cần: admin/`kpi.manage_config`
+vào `/dashboard/kpi/scores`, chọn Tháng 7/2026, bấm "Tính điểm tháng" → xác nhận cnho/ryta ra
+điểm đúng theo dữ liệu 5S + task đã hoàn thành.
+
+## Cập nhật (phiên sau Phase 4, tiếp) — Lọc Phòng ban ở Bảng điểm KPI + Sub-tab "Chi tiết cách
+tính điểm", ĐÃ CODE XONG, KHÔNG CẦN MIGRATION, CHƯA TEST TAY
+
+Người dùng yêu cầu 3 việc: (1) liệt kê Phase 5 (xem mục ngay dưới), (2) thêm trường "Phòng ban" để
+lọc nhân sự khi xem điểm KPI, (3) thêm 1 sub-tab giải thích minh bạch cách tính điểm của chính
+người xem. Cả (2) và (3) đã code xong, **không cần migration nào** — thuần sửa/thêm ở tầng client.
+
+### 1. Lọc Phòng ban ở bảng "Toàn nhà máy" (`src/app/dashboard/kpi/scores/page.tsx`)
+
+**Root cause đã xác nhận (không đoán)**: đây là nơi DUY NHẤT trong module KPI chưa có khái niệm
+phòng ban — Công việc/Việc định kỳ/Vị trí 5S/Khu vực 5S đều đã có `phong_ban_id` để lãnh đạo phòng
+ban tự động chỉ thấy đúng phạm vi mình, riêng Bảng điểm KPI cho lãnh đạo phòng ban thấy điểm TOÀN
+NHÀ MÁY.
+
+- `loadData()` khi `viewAll=true` giờ tải thêm `fetchDepartmentOptions()` (`src/lib/kpi-department-leaders.ts`)
+  rồi với MỖI phòng ban gọi song song `fetchDepartmentUserIds(fid, dept.id)` (`src/lib/kpi-tasks.ts`,
+  đã export sẵn từ trước) — đảo ngược thành `userDeptMap: Map<userId, DepartmentOption>` (mirror
+  đúng pattern `deptUserIdsByDept` đã dùng ở `kpi-5s-auto-assign-modal.tsx`).
+- `visibleFactoryScores` (useMemo): lãnh đạo phòng ban (không phải admin) tự động lọc cứng chỉ còn
+  dòng có `userDeptMap.get(user_id)?.id === myLeaderDepartmentId` — không có lựa chọn xem thêm
+  phòng ban khác (nhất quán các module kia). Admin có dropdown "Phòng ban" (mặc định "Tất cả")
+  lọc client-side qua `deptFilter` state.
+- Bảng thêm cột "Phòng ban" luôn hiển thị (dùng `userDeptMap.get(s.user_id)?.name || "—"`).
+- Cố ý KHÔNG đụng `kpi_score_weights`/"Trọng số công thức" — đã xác nhận với người dùng chỉ áp
+  dụng phạm vi lọc ở trang xem điểm, không mở rộng cấu hình trọng số theo phòng ban.
+
+### 2. Sub-tab "Chi tiết cách tính điểm" (cùng file, component `MyScoreExplain`)
+
+Thêm state `scoreView: "tong-quan" | "chi-tiet"` (toggle 2 nút, không route riêng). Chỉ hiện dữ
+liệu của **CHÍNH người đang đăng nhập** (không có cách nào chọn xem người khác, kể cả admin/lãnh
+đạo phòng ban — đã chốt với người dùng). Tính lại **real-time, client-side** — không đọc
+`kpi_monthly_scores.chi_tiet` (chỉ lưu số tổng hợp, không đủ chi tiết từng bản ghi).
+
+**File mới `src/lib/kpi-score-breakdown.ts`** — thuần query READ-ONLY, không RPC, mọi bảng user
+luôn tự đọc được cho chính mình qua RLS hiện có (không cần đổi RLS nào):
+
+- `fetchMyPrimaryGroup(factoryId, userId)` — mirror y hệt query `loadPrimaryGroup` trong
+  `kpi/tasks/page.tsx` (personnel_group_members + maintenance_staff.profile_id = chính mình).
+- `fetchScoreBreakdownTasks`/`fetchScoreBreakdown5s`/`fetchScoreBreakdownDaily` — join tương ứng
+  `kpi_task_members`+`kpi_tasks`, `kpi_5s_evaluations`+`kpi_5s_locations(ten_vi_tri)`,
+  `kpi_daily_evaluations`+`items`+`personnel_groups(name)`, lọc đúng `(userId, tháng)`.
+- `computeCutoffMs(nam, thang)` — mirror đúng cutoff của RPC (`LEAST(now, cuối tháng+1)`), dùng
+  `Date.UTC` (không phải local time) vì `han_hoan_thanh` so sánh trong Postgres mặc định UTC —
+  chấp nhận sai lệch nhỏ ở biên múi giờ Campuchia, cùng hạn chế đã ghi nhận ở nơi khác trong repo.
+- `groupDailyByDay(rows)` — nhóm theo ngày, CHỈ giữ ngày có `loai='chinh'` (đúng "ngày có mặt/có
+  chấm"), tính `Điểm ngày = %chính×10 + Σ%choàng×5`, `Max ngày = 10 + 5×số choàng`, `%ngày`.
+
+**UI** (`MyScoreExplain` trong `scores/page.tsx`): card "Trọng số áp dụng cho bạn" (resolve theo
+nhóm chính, fallback mặc định — đúng thứ tự RPC) → bảng A (từng task + %) → bảng B (chỉ task đã
+đến hạn, Đúng hạn/Trễ hạn) → bảng C (từng lượt chấm 5S + điểm quy đổi) → bảng D (từng ngày có
+chính, kèm các lượt choàng cùng ngày, Điểm ngày/Max/%ngày) → khối "Kết quả cuối cùng" ráp công
+thức đầy đủ có số thật, kèm ghi chú có thể lệch với điểm đã lưu ở tab Tổng quan nếu dữ liệu thay
+đổi sau lần "Tính điểm tháng" gần nhất.
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Đăng nhập admin → Bảng điểm KPI → xác nhận bảng "Toàn nhà máy" có cột "Phòng ban" + dropdown
+   lọc hoạt động đúng (chọn 1 phòng ban → chỉ còn đúng nhân sự phòng ban đó).
+2. Đăng nhập 1 lãnh đạo phòng ban (không phải admin) → xác nhận bảng "Toàn nhà máy" CHỈ còn đúng
+   nhân sự phòng ban của họ (không còn thấy toàn nhà máy như trước).
+3. Đăng nhập 1 user thường → bấm toggle "Chi tiết cách tính điểm của tôi" → xác nhận thấy đầy đủ
+   breakdown A/B/C/D + công thức cuối cùng; đối chiếu tay 1-2 dòng để xác nhận đúng công thức
+   (đặc biệt: ngày chỉ có choàng không có chính phải KHÔNG xuất hiện trong bảng D; task chưa đến
+   hạn phải KHÔNG xuất hiện trong bảng B).
+4. Xác nhận không có nơi nào (kể cả admin) chọn xem chi tiết của người khác.
+5. Test 1 user chưa thuộc nhóm chuyên môn nào → xác nhận card "Trọng số áp dụng cho bạn" hiện đúng
+   thông báo "chưa thuộc nhóm nào — dùng mặc định toàn nhà máy", không crash.
+6. Test 1 tháng hoàn toàn chưa có dữ liệu nào (task/5S/daily) → xác nhận cả 4 thành phần hiện đúng
+   "mặc định 100%" và công thức cuối cùng vẫn tính ra số hợp lý (không NaN/lỗi chia 0).
+
+## Cập nhật Phase 5 — Khóa sổ, khiếu nại & minh bạch (đã code xong, theo đúng thứ tự đã liệt kê)
+
+Migration `supabase/migrations/20260814_kpi_score_lock_adjust_rank.sql` (**CẦN CHẠY THỦ CÔNG,
+CHƯA CHẠY** — chạy sau mọi migration KPI trước đó, đặc biệt sau `20260813_...` vì cần bảng
+`kpi_monthly_scores` đã tồn tại). Thực hiện đúng 4 hạng mục còn lại của Phase 5 (hạng mục 5 —
+"điểm tạm tính real-time" — đã xong sớm hơn qua sub-tab "Chi tiết cách tính điểm", không có việc
+gì thêm):
+
+### 1. Khóa sổ điểm tháng — CHỈ khóa, KHÔNG có "mở khóa"
+
+- RPC `kpi_monthly_score_lock(p_monthly_score_id)` — chỉ admin/`kpi.manage_config`
+  (`current_profile_has_permission('kpi.manage_config')`, hàm này đã tự trả `true` cho admin —
+  không cần check role riêng, khác `kpi_5s_evaluation_correct` kiểm tra cả 2 kiểu dư thừa).
+  Chuyển `trang_thai: 'nhap' → 'da_khoa'`, set `khoa_boi`/`khoa_luc` (2 cột có sẵn từ migration
+  `20260813`, chưa từng dùng). Chặn cứng nếu điểm không tồn tại hoặc đã khóa từ trước.
+- **Quyết định thiết kế quan trọng — cố ý KHÔNG có RPC "mở khóa"**: nếu cho phép mở khóa tự do
+  rồi `kpi_compute_monthly_scores` tính lại (RPC đó chỉ bỏ qua đúng điều kiện
+  `WHERE trang_thai <> 'da_khoa'`), admin có thể lách hoàn toàn cơ chế audit của mục 2 — mở khóa,
+  tính lại, khóa lại, không để lại dấu vết nào trong `kpi_score_adjustments`. Nếu cần sửa điểm đã
+  khóa, bắt buộc đi qua `kpi_monthly_score_adjust` (có audit) — không có đường tắt nào khác.
+- UI: cột "Trạng thái" mới trong bảng "Toàn nhà máy" (`/dashboard/kpi/scores`, sub-tab "Tổng
+  quan") — badge Nháp/Đã khóa + nút "Khóa" (chỉ `canCompute`, chỉ khi `trang_thai='nhap'`).
+
+### 2. `kpi_score_adjustments` — audit log bất biến + RPC điều chỉnh
+
+- Bảng `kpi_score_adjustments` — **có thêm cột `factory_id`** so với bản phác thảo gốc ở đầu file
+  này (CLAUDE.md invariant "mọi bảng đều có factory_id", cùng lý do `kpi_appeals` cũng có cột
+  này dù là bảng audit-log-like). Không có RLS INSERT/UPDATE/DELETE cho client — chỉ RPC
+  `kpi_monthly_score_adjust` (SECURITY DEFINER) mới ghi được, đảm bảo MỌI thay đổi điểm đã khóa
+  đều để lại đúng 1 dòng audit.
+- RPC `kpi_monthly_score_adjust(p_monthly_score_id, p_new_diem_tong, p_ly_do, p_ghi_chu DEFAULT
+  NULL, p_appeal_id DEFAULT NULL)` — mirror chính xác kiến trúc `kpi_5s_evaluation_correct`
+  (Phase 2): `p_appeal_id` có giá trị → đóng khiếu nại đó `'da_giai_quyet'` trong cùng
+  transaction; `NULL` → admin tự điều chỉnh trực tiếp, tự tạo 1 dòng `kpi_appeals` mới đã
+  `'da_giai_quyet'` làm audit trail duy nhất. Chặn cứng nếu điểm chưa `'da_khoa'` (bắt buộc khóa
+  sổ trước khi điều chỉnh) hoặc thiếu lý do.
+- `src/lib/kpi-appeals.ts` thêm 2 wrapper theo đúng tiền lệ 2 hàm 5S đã có (`resolveKpiLocation
+  EvaluationAppeal`/`correctKpi5sEvaluationDirect`): `resolveKpiMonthlyScoreAppeal` (qua khiếu
+  nại) và `adjustKpiMonthlyScoreDirect` (trực tiếp, chưa nối UI — dự phòng cho phase sau nếu cần
+  1 nút "Điều chỉnh điểm" độc lập không qua khiếu nại, hiện chỉ dùng nội bộ qua đường khiếu nại).
+- `src/lib/kpi-scores.ts` thêm `fetchKpiScoreAdjustments(monthlyScoreId)` — hiển thị lịch sử điều
+  chỉnh ngay dưới card "Điểm của bạn" (chỉ khi có ít nhất 1 dòng), không cần mở trang riêng.
+
+### 3. Nối `kpi_appeals.monthly_score_id` — khiếu nại điểm tháng
+
+- RLS `kpi_appeals_insert` thêm nhánh thứ 3: chủ điểm tự khiếu nại được, **CHỈ khi điểm đã
+  `'da_khoa'`** (`ms.user_id = auth.uid() AND ms.trang_thai = 'da_khoa'`) — defense-in-depth,
+  khớp đúng điều kiện hiện nút "Khiếu nại điểm này" ở UI (chỉ hiện khi `myScoreThisMonth.trang_
+  thai === "da_khoa"`).
+- `/dashboard/kpi/scores`: nút "Khiếu nại điểm này" trên card "Điểm của bạn" → modal nhập nội
+  dung → `createKpiAppealForMonthlyScore` → `sendKpiNotify` (Telegram, link `/dashboard/kpi/
+  appeals`) → banner xanh xác nhận đã gửi.
+- `/dashboard/kpi/appeals`: nạp thêm `monthlyScoreRefs` (song song `taskRefs`/`locationRefs`,
+  cùng kiểu best-effort không chặn nếu lỗi), hiện link "Điểm KPI tháng X/Y (hiện Z điểm)". Đóng
+  "Đã giải quyết" cho loại khiếu nại này (`isMonthlyScoreAdjustment`) mở thêm 2 trường bắt buộc
+  trong modal — "Điểm mới" (number, mặc định = điểm hiện tại) và "Lý do điều chỉnh" (bắt buộc,
+  khớp `ly_do NOT NULL` của `kpi_score_adjustments`) — gọi `resolveKpiMonthlyScoreAppeal`. "Từ
+  chối" dùng chung `resolveKpiAppeal` (không điều chỉnh gì) như 2 loại khiếu nại kia.
+
+### 4. Bảng xếp hạng ẩn danh theo Nhóm chuyên môn / Phòng ban
+
+- 2 RPC SECURITY DEFINER `kpi_score_ranking_by_group`/`kpi_score_ranking_by_department` — chỉ
+  yêu cầu `kpi.view` (KHÔNG cần `kpi.view_all`, vì mục đích chính là so sánh ẩn danh không lộ
+  danh tính — khác hẳn bảng "Toàn nhà máy" ở sub-tab Tổng quan). Trả về **đúng** `{rank,
+  diem_tong, is_me}` — không bao giờ trả `user_id`/tên, dùng `RANK() OVER (ORDER BY diem_tong
+  DESC)`. Đây là cách DUY NHẤT một user thường (không có `kpi.view_all`) xem được điểm của người
+  khác trong hệ thống — vì RLS `kpi_monthly_scores_select` chỉ cho đọc điểm của chính mình, client
+  không thể tự query chéo; RPC bypass RLS ở tầng SQL (SECURITY DEFINER) nhưng chỉ lộ đúng
+  rank+điểm, giữ đúng tinh thần "ẩn danh".
+  - Ranking theo nhóm: chỉ tính thành viên có `is_primary=true` của đúng `group_id` đó (mirror
+    logic "nhóm chính quyết định trọng số áp dụng" đã dùng xuyên suốt Phase 3/4) — KHÔNG gồm
+    người chỉ "choàng" nhóm đó.
+  - Ranking theo phòng ban: mirror đúng 3-way match của `/api/kpi/dept-users` (`department_id`
+    FK, tên đầy đủ, code) viết lại bằng SQL thuần trong RPC.
+- `/dashboard/kpi/scores`: sub-tab thứ 3 "Bảng xếp hạng" (`scoreView: "tong-quan" | "chi-tiet" |
+  "xep-hang"`) — component `ScoreRankingView` (cuối file `page.tsx`), toggle Nhóm/Phòng ban +
+  dropdown chọn cụ thể (mặc định = nhóm chính/lựa chọn đầu tiên), danh sách dòng dạng
+  `"Hạng {rank}{" (bạn)" nếu is_me}: {điểm} điểm"` — đúng format ví dụ trong roadmap gốc, dòng
+  của chính người xem tô nổi bật màu tím.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (4 file: `kpi-scores.ts`, `kpi-appeals.ts`,
+`kpi/scores/page.tsx`, `kpi/appeals/page.tsx`), và `npm run build` đều sạch — build liệt kê đủ
+`/dashboard/kpi/scores` và `/dashboard/kpi/appeals` (static), không có route KPI nào lỗi.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration trước
+
+1. Chạy `supabase/migrations/20260814_kpi_score_lock_adjust_rank.sql` trên Supabase SQL Editor
+   (sau khi đã chắc chắn `20260813_kpi_score_weights_monthly_scores.sql` đã chạy xong — bảng
+   `kpi_monthly_scores` phải tồn tại trước).
+2. **Khóa sổ**: tính điểm 1 tháng có dữ liệu → vào bảng "Toàn nhà máy" → bấm "Khóa" 1 dòng → xác
+   nhận badge chuyển "Đã khóa", nút "Khóa" biến mất; bấm lại "Tính điểm tháng" cho cùng tháng →
+   xác nhận điểm ĐÃ khóa giữ nguyên (không bị ghi đè), các điểm còn `'nhap'` vẫn cập nhật bình
+   thường.
+3. **Khiếu nại + điều chỉnh**: đăng nhập đúng người có điểm vừa khóa → xác nhận nút "Khiếu nại
+   điểm này" xuất hiện (không có ở điểm chưa khóa) → gửi khiếu nại → xác nhận Telegram nhận
+   được, xuất hiện ở `/dashboard/kpi/appeals` (cả người khiếu nại lẫn admin đều thấy, người khác
+   không thấy). Admin bấm "Đã giải quyết" → nhập điểm mới khác điểm cũ + lý do → xác nhận
+   `diem_tong` cập nhật đúng ở cả 2 trang (Bảng điểm KPI, chi tiết khiếu nại), lịch sử điều chỉnh
+   hiện đúng dưới card "Điểm của bạn" (điểm trước → điểm sau, lý do, thời gian).
+4. Thử để trống "Lý do điều chỉnh" khi "Đã giải quyết" 1 khiếu nại điểm tháng → phải bị chặn ở cả
+   UI lẫn (nếu bỏ qua UI) RPC (`ly_do NOT NULL`).
+5. Thử gọi thẳng RPC `kpi_monthly_score_adjust` cho 1 điểm CHƯA khóa (qua devtools) → phải bị
+   chặn đúng lỗi "Chỉ được điều chỉnh điểm đã khóa sổ...".
+6. **Bảng xếp hạng**: vào sub-tab "Bảng xếp hạng" bằng 1 tài khoản THƯỜNG (không có
+   `kpi.view_all`) → xác nhận vẫn xem được (khác hẳn sub-tab "Tổng quan" — bảng "Toàn nhà máy"
+   không hiện với tài khoản này) → đổi qua lại "Theo nhóm chuyên môn"/"Theo phòng ban", đổi
+   dropdown → xác nhận danh sách hiện đúng "Hạng N: X điểm", dòng của chính mình có "(bạn)" và tô
+   nổi bật, KHÔNG có tên ai khác xuất hiện ở bất kỳ đâu trong response (kiểm tra qua Network tab
+   devtools để chắc chắn RPC không trả `user_id`).
+7. Test 1 nhóm/phòng ban chưa có ai được tính điểm tháng đó → xác nhận thông báo rỗng phù hợp,
+   không lỗi.
+8. Test quyền: tài khoản `role=user` không có `kpi.manage_config` → không thấy nút "Khóa" ở bảng
+   "Toàn nhà máy"; thử gọi thẳng RPC `kpi_monthly_score_lock` → phải bị chặn đúng lỗi "Bạn không
+   có quyền khóa sổ điểm KPI."

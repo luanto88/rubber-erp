@@ -7,6 +7,10 @@
 // kpi_score_weights: 1 dòng/nhóm chuyên môn (group_id) hoặc 1 dòng mặc định toàn nhà máy
 // (group_id = null). kpi_monthly_scores: snapshot bất biến (trừ khi trang_thai='nhap') do RPC
 // kpi_compute_monthly_scores ghi — client KHÔNG được insert/update trực tiếp bảng này.
+//
+// Phase 5 (migration 20260814_kpi_score_lock_adjust_rank.sql): khóa sổ (lockKpiMonthlyScore),
+// audit điều chỉnh điểm đã khóa (kpi_score_adjustments — chỉ ghi qua RPC, xem kpi-appeals.ts cho
+// 2 hàm gọi kpi_monthly_score_adjust), và bảng xếp hạng ẩn danh theo nhóm/phòng ban.
 
 import { supabase } from "@/lib/supabase"
 
@@ -181,4 +185,74 @@ export async function computeKpiMonthlyScores(factoryId: string, nam: number, th
   })
   if (error) throw error
   return (data as number) || 0
+}
+
+// ── Phase 5: Khóa sổ + audit điều chỉnh ─────────────────────────────────────────
+// Chỉ admin/kpi.manage_config gọi được. Sau khi khóa, kpi_compute_monthly_scores tự động BỎ QUA
+// (không ghi đè) điểm này ở các lần tính lại sau — không có RPC "mở khóa": mọi thay đổi điểm đã
+// khóa phải đi qua kpi_monthly_score_adjust (có audit log kpi_score_adjustments), xem
+// migration 20260814_kpi_score_lock_adjust_rank.sql.
+export async function lockKpiMonthlyScore(monthlyScoreId: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_monthly_score_lock", { p_monthly_score_id: monthlyScoreId })
+  if (error) throw error
+}
+
+export type KpiScoreAdjustment = {
+  id: string
+  factory_id: string
+  monthly_score_id: string
+  ly_do: string
+  diem_truoc: number | null
+  diem_sau: number | null
+  nguoi_dieu_chinh_id: string | null
+  created_at: string
+}
+
+const ADJUSTMENT_COLS = "id, factory_id, monthly_score_id, ly_do, diem_truoc, diem_sau, nguoi_dieu_chinh_id, created_at"
+
+export async function fetchKpiScoreAdjustments(monthlyScoreId: string): Promise<KpiScoreAdjustment[]> {
+  const { data, error } = await supabase
+    .from("kpi_score_adjustments")
+    .select(ADJUSTMENT_COLS)
+    .eq("monthly_score_id", monthlyScoreId)
+    .order("created_at", { ascending: false })
+  if (error) throw error
+  return (data || []) as KpiScoreAdjustment[]
+}
+
+// ── Phase 5: Bảng xếp hạng ẩn danh ────────────────────────────────────────────────
+// 2 RPC SECURITY DEFINER trả về ĐÚNG {rank, diem_tong, is_me} — không bao giờ trả user_id/tên,
+// nên mọi user có kpi.view gọi được (không cần kpi.view_all) mà vẫn giữ tính ẩn danh.
+export type KpiScoreRankingRow = { rank: number; diem_tong: number; is_me: boolean }
+
+export async function fetchKpiScoreRankingByGroup(
+  factoryId: string,
+  nam: number,
+  thang: number,
+  groupId: string,
+): Promise<KpiScoreRankingRow[]> {
+  const { data, error } = await supabase.rpc("kpi_score_ranking_by_group", {
+    p_factory_id: factoryId,
+    p_nam: nam,
+    p_thang: thang,
+    p_group_id: groupId,
+  })
+  if (error) throw error
+  return (data || []) as KpiScoreRankingRow[]
+}
+
+export async function fetchKpiScoreRankingByDepartment(
+  factoryId: string,
+  nam: number,
+  thang: number,
+  departmentId: string,
+): Promise<KpiScoreRankingRow[]> {
+  const { data, error } = await supabase.rpc("kpi_score_ranking_by_department", {
+    p_factory_id: factoryId,
+    p_nam: nam,
+    p_thang: thang,
+    p_department_id: departmentId,
+  })
+  if (error) throw error
+  return (data || []) as KpiScoreRankingRow[]
 }

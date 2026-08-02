@@ -1,8 +1,8 @@
 "use client"
 
-// Module KPI — Khiếu nại (kpi_appeals). Tối giản: gắn với 1 công việc HOẶC 1 lần chấm điểm 5S.
-// Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Cập nhật — Phân công thông minh + Gia hạn +
-// Khiếu nại".
+// Module KPI — Khiếu nại (kpi_appeals). Gắn với 1 công việc, 1 lần chấm điểm 5S, HOẶC (Phase 5)
+// 1 điểm KPI tháng đã khóa sổ. Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Cập nhật — Phân
+// công thông minh + Gia hạn + Khiếu nại" và "Liệt kê Phase 5".
 
 import { supabase } from "@/lib/supabase"
 import type { Kpi5sResult } from "@/lib/kpi-5s"
@@ -26,6 +26,7 @@ export type KpiAppeal = {
   factory_id: string
   task_id: string | null
   location_evaluation_id: string | null
+  monthly_score_id: string | null
   nguoi_khieu_nai_id: string
   noi_dung: string
   trang_thai: KpiAppealStatus
@@ -36,7 +37,7 @@ export type KpiAppeal = {
 }
 
 const APPEAL_COLS =
-  "id, factory_id, task_id, location_evaluation_id, nguoi_khieu_nai_id, noi_dung, trang_thai, phan_hoi, nguoi_xu_ly_id, created_at, updated_at"
+  "id, factory_id, task_id, location_evaluation_id, monthly_score_id, nguoi_khieu_nai_id, noi_dung, trang_thai, phan_hoi, nguoi_xu_ly_id, created_at, updated_at"
 
 export function getKpiAppealErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error) return err.message
@@ -129,6 +130,60 @@ export async function correctKpi5sEvaluationDirect(input: {
     p_location_evaluation_id: input.locationEvaluationId,
     p_new_ket_qua: input.newKetQua,
     p_new_ly_do: input.newLyDo.trim() || null,
+    p_ghi_chu: input.ghiChu.trim() || null,
+    p_appeal_id: null,
+  })
+  if (error) throw error
+}
+
+// ── Phase 5: Khiếu nại điểm KPI tháng (chỉ khi điểm đã khóa sổ — RLS tự chặn) ────────────────
+export async function createKpiAppealForMonthlyScore(input: {
+  factoryId: string
+  monthlyScoreId: string
+  nguoiKhieuNaiId: string
+  noiDung: string
+}): Promise<void> {
+  const { error } = await supabase.from("kpi_appeals").insert({
+    factory_id: input.factoryId,
+    monthly_score_id: input.monthlyScoreId,
+    nguoi_khieu_nai_id: input.nguoiKhieuNaiId,
+    noi_dung: input.noiDung.trim(),
+  })
+  if (error) throw error
+}
+
+// Đóng 1 khiếu nại điểm tháng "Đã giải quyết" ĐỒNG THỜI ghi audit điều chỉnh vào
+// kpi_score_adjustments — mirror đúng resolveKpiLocationEvaluationAppeal. RPC tự chặn nếu điểm
+// chưa 'da_khoa' hoặc khiếu nại không còn 'cho_xu_ly'.
+export async function resolveKpiMonthlyScoreAppeal(input: {
+  appealId: string
+  monthlyScoreId: string
+  newDiemTong: number
+  lyDo: string
+  ghiChu: string
+}): Promise<void> {
+  const { error } = await supabase.rpc("kpi_monthly_score_adjust", {
+    p_monthly_score_id: input.monthlyScoreId,
+    p_new_diem_tong: input.newDiemTong,
+    p_ly_do: input.lyDo.trim(),
+    p_ghi_chu: input.ghiChu.trim() || null,
+    p_appeal_id: input.appealId,
+  })
+  if (error) throw error
+}
+
+// Admin tự điều chỉnh điểm tháng ĐÃ KHÓA trực tiếp, KHÔNG qua 1 khiếu nại có sẵn — mirror
+// correctKpi5sEvaluationDirect. RPC tự tạo 1 khiếu nại "Đã giải quyết" làm audit trail.
+export async function adjustKpiMonthlyScoreDirect(input: {
+  monthlyScoreId: string
+  newDiemTong: number
+  lyDo: string
+  ghiChu: string
+}): Promise<void> {
+  const { error } = await supabase.rpc("kpi_monthly_score_adjust", {
+    p_monthly_score_id: input.monthlyScoreId,
+    p_new_diem_tong: input.newDiemTong,
+    p_ly_do: input.lyDo.trim(),
     p_ghi_chu: input.ghiChu.trim() || null,
     p_appeal_id: null,
   })

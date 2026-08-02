@@ -1340,7 +1340,7 @@ export default function InventoryIssuesPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         <SummaryBox label="Tổng số dòng" value={String(draft.lines.length)} />
         <SummaryBox label="Tổng số lượng xuất" value={summary.totalQty.toLocaleString("vi-VN")} tone="text-rose-700" />
         <SummaryBox label="Cảnh báo" value={String(summary.warningCount)} tone="text-amber-600" />
@@ -1471,7 +1471,7 @@ export default function InventoryIssuesPage() {
           )}
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div className="xl:col-span-2">
             {isEditingExistingDoc ? (
               <div>
@@ -1531,7 +1531,7 @@ export default function InventoryIssuesPage() {
           </div>
 
           <div className="relative z-30 xl:col-span-2">
-            <div className="mb-2 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div className="mb-2 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <div>
                 <MultiSelectField
                   label="Phân loại vật tư"
@@ -1571,7 +1571,7 @@ export default function InventoryIssuesPage() {
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const relevantWarehouses = warehouses.filter((w) => draft.warehouseIds.includes(w.id))
@@ -1702,7 +1702,7 @@ export default function InventoryIssuesPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-slate-600">Tên vật tư</label>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
