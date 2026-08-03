@@ -4044,3 +4044,125 @@ không route nào lỗi.
      trên mobile, "Chi tiết cách tính điểm của tôi" đầy đủ trên desktop.
    - `kpi/evaluate/page.tsx`, `kpi/appeals/page.tsx`: xác nhận KHÔNG có regression (không đổi gì
      nhưng cần xác nhận layout vẫn ổn định sau khi `KpiShell` đổi).
+
+## Cập nhật (phiên sau) — Lọc "Gắn bản ghi tại chỗ" theo đúng module + banner nổi bật hơn — ĐÃ
+CODE XONG, CHƯA CHẠY MIGRATION, CHƯA TEST TAY
+
+Người dùng test "Gắn bản ghi tại chỗ" (`KpiLinkPrompt`, Phase 1a.1) và phát hiện bug thiết kế
+thật: `fetchOpenKpiTasksForUser(factoryId, userId)` trả về **TẤT CẢ** việc KPI đang mở của người
+dùng, không lọc theo module nào — Châu Nho được giao việc "Điều xe" thì khi vào Kho nguyên liệu
+tạo ngăn/lưu vẫn bị gợi ý gắn nhầm việc "Điều xe" vào bản ghi Kho nguyên liệu. Đồng thời banner
+hiện tại render **inline** trong luồng trang (dễ bị bỏ qua vì mắt người dùng đã rời khỏi khu vực
+đó ngay sau khi bấm Lưu — xem ảnh chụp người dùng gửi kèm).
+
+### Migration `supabase/migrations/20260816_kpi_task_module_code.sql` (CẦN CHẠY THỦ CÔNG, CHƯA
+CHẠY)
+
+- Thêm `module_code TEXT` (nullable) vào cả `kpi_tasks` và `kpi_task_templates`, CHECK constraint
+  giới hạn đúng 6 giá trị khớp 6 nơi có `<KpiLinkPrompt>` (`dispatch`, `output`, `quality`,
+  `storage`, `product`, `process`) — **lưu "họ module"**, KHÔNG phải chuỗi đầy đủ như
+  `"process:measurement"`. Index `WHERE module_code IS NOT NULL`. Không backfill — mọi việc đã
+  tạo trước migration này có `module_code = NULL`, đúng chủ đích (xem "Quyết định phạm vi" dưới).
+- `CREATE OR REPLACE FUNCTION kpi_ensure_today_task_instances(...)` — copy `v_tpl.module_code`
+  vào `INSERT INTO kpi_tasks (...)` để instance sinh ra mỗi ngày tự thừa hưởng đúng module của
+  template gốc. Thân hàm lấy nguyên trạng từ bản mới nhất
+  (`20260812_kpi_task_templates_skip_stuck.sql` — đã có check "còn task mở thì không sinh thêm" +
+  lọc `trang_thai='da_duyet'` cho người thay thế + cột `phong_ban_id`), chỉ thêm `module_code` —
+  **đã đối chiếu trực tiếp với file migration mới nhất trước khi viết**, không tái tạo từ trí
+  nhớ/bản cũ để tránh vô tình revert 2 fix đó.
+
+### Quyết định phạm vi đã chốt (không hỏi lại người dùng, cả 2 ví dụ họ đưa ra đều thỏa mãn)
+
+- **"Việc định kỳ" (`kpi_task_templates`) đã có sẵn nút Sửa** — gắn/sửa Module cho 1 template có
+  sẵn (vd "Đo mẫu") là thao tác free ngay được; instance sinh SAU đó tự mang đúng `module_code`.
+- **"Công việc chuyên môn" giao tay 1 lần (`kpi_tasks`) KHÔNG có nút Sửa nào cả** (kể cả trước
+  tính năng này) — phiên này chỉ thêm field "Module liên quan" lúc **TẠO MỚI**, không thêm khả
+  năng sửa việc đã tạo. Ví dụ "Chau Nho được giao Điều xe" trong yêu cầu người dùng là ví dụ PHỦ
+  ĐỊNH (không được hiện banner ở module khác) — thỏa mãn ngay cả khi việc đó chưa từng được gắn
+  `module_code` (NULL không khớp bất kỳ module nào, nên không bao giờ hiện banner ở đâu cả).
+- Việc/việc định kỳ KHÔNG gắn module (`module_code = NULL`, vd "Dọn dẹp phòng điều hành xử lý
+  nước thải") sẽ KHÔNG BAO GIỜ hiện banner ở bất kỳ module nào — người thực hiện vẫn hoàn thành
+  bình thường qua trang chi tiết việc (Nộp/Nghiệm thu, đã có từ Phase 1a).
+
+### `src/lib/kpi-tasks.ts`
+
+- `KPI_MODULE_OPTIONS` (6 phần tử `{code, label}`), `KpiModuleCode`, `KPI_MODULE_LABEL` — đặt
+  cạnh `KPI_DUE_SOON_HOURS`.
+- `KpiTask.module_code: string | null` + `TASK_COLS` thêm cột.
+- `createKpiTask(input)` thêm `moduleCode?: string | null`, ghi vào payload insert.
+- `fetchOpenKpiTasksForUser(factoryId, userId, moduleCode?: string)` — tham số thứ 3 mới, có giá
+  trị thì `.eq("module_code", moduleCode)`; không truyền giữ nguyên hành vi cũ (không còn call
+  site nào dùng nhánh này sau khi sửa `KpiLinkPrompt`, giữ lại chỉ để không breaking chữ ký hàm).
+
+### `src/lib/kpi-templates.ts`
+
+`KpiTaskTemplate`/`KpiTaskTemplateInput` thêm `module_code`/`moduleCode`; `createKpiTaskTemplate`/
+`updateKpiTaskTemplate` ghi cột này vào payload.
+
+### 2 form modal — thêm field "Module liên quan (tuỳ chọn)"
+
+- `kpi-task-form-modal.tsx` (Giao việc mới) và `template-form-modal.tsx` (Việc định kỳ): cùng
+  1 `<select>` dùng `KPI_MODULE_OPTIONS`, option đầu "-- Không liên kết module cụ thể --", mặc
+  định rỗng (→ `null`). Đặt ngay sau field "Phòng ban". Hint: "Chọn đúng module để người thực
+  hiện được gợi ý 'Gắn bằng chứng' ngay sau khi họ lưu 1 bản ghi ở module đó — để trống nếu việc
+  không liên quan module nào."
+- `kpi/templates/page.tsx`: mỗi card thêm badge module (nhãn từ `KPI_MODULE_LABEL`, màu sky) nếu
+  có, hoặc badge xám "Chưa gắn module" nếu chưa — giúp admin rà soát nhanh các template cũ (Đo
+  mẫu/Tạo ngăn lưu/Tạo phiếu điều xe...) cần được sửa lại để gắn đúng module.
+
+### `src/app/dashboard/_components/kpi-link-prompt.tsx` — redesign
+
+- `const moduleFamily = moduleCode.split(":")[0]` (component KHÔNG cần đổi prop `moduleCode` ở
+  7 nơi gọi — vẫn nhận chuỗi đầy đủ như trước, tự tách ở đây), gọi
+  `fetchOpenKpiTasksForUser(factoryId, userId, moduleFamily)`.
+- Nếu lọc xong chỉ còn ĐÚNG 1 việc → tự `setSelectedTaskId` ngay khi tải xong (đỡ 1 bước mở
+  dropdown).
+- Đổi bố cục từ inline (`<div className="rounded-xl border ...">` nằm trong luồng trang) sang
+  `position: fixed` **góc trên-phải** (`fixed top-4 right-4 z-[70] w-[calc(100vw-2rem)] sm:w-96`)
+  — chọn góc này có chủ đích sau khi khảo sát: nhiều trang dùng toast top-center
+  (`fixed top-4 left-1/2 -translate-x-1/2 z-50`), và **đúng 3/6 module mục tiêu** (Kiểm nghiệm,
+  Điều xe, Kiểm soát quá trình) có toast riêng ở **bottom-right** (`fixed bottom-6 right-6 z-50`)
+  — góc trên-phải là góc DUY NHẤT không đụng độ với bất kỳ toast đã khảo sát. `z-[70]` cao hơn
+  toast/modal thường (`z-50`).
+  - Thêm hiệu ứng xuất hiện `animate-[fadeInUp_0.3s_ease-out]` (keyframe có sẵn `globals.css`),
+    `shadow-2xl`, viền `border-2` đậm hơn, và 1 "notification dot" pulse (`animate-ping`) cạnh
+    icon `Link2` để thu hút mắt.
+  - Áp dụng đồng nhất cho cả 2 trạng thái (chọn việc / đã hoàn thành `doneLabel`) — giữ nguyên
+    auto-dismiss 3s của `doneLabel`, KHÔNG auto-dismiss trạng thái đang chờ chọn việc.
+- Dọn 6/7 wrapper `<div className="mb-4">` thừa quanh `<KpiLinkPrompt>` ở `dispatch/page.tsx`,
+  `output/page.tsx`, `quality/page.tsx`, `storage/page.tsx`, `product/page.tsx`,
+  `process/measurements/page.tsx` (component giờ tự định vị bằng `fixed`, div bọc ngoài không
+  còn tác dụng) — `product/confirm/page.tsx` vốn đã không có wrapper này, không cần sửa.
+
+### Đã xác nhận
+
+`npx tsc --noEmit` sạch. `npx eslint` trên toàn bộ 12 file đã sửa — 18 vấn đề còn lại trong
+`quality/page.tsx`/`dispatch/page.tsx` đã đối chiếu qua `git diff` xác nhận là pre-existing, nằm
+ngoài hoàn toàn phạm vi diff của lần sửa này (chỉ đụng đúng khối JSX gọi `<KpiLinkPrompt>`).
+`npm run build` sạch — build liệt kê đủ mọi route KPI, không route nào lỗi.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration trước
+
+1. Chạy `supabase/migrations/20260816_kpi_task_module_code.sql` trên Supabase SQL Editor.
+2. Sửa lại 1 template "Đo mẫu" có sẵn (hoặc tạo mới), gắn Module = "Kiểm soát quá trình (Đo
+   nhanh)" → bấm "Sinh việc hôm nay ngay" → xác nhận `kpi_tasks` mới sinh có đúng
+   `module_code='process'`.
+3. Đăng nhập đúng người được giao việc "Đo mẫu" đó → vào Kiểm soát quá trình → Đo nhanh chỉ tiêu
+   → nhập kết quả → Lưu → xác nhận banner nổi **góc trên-phải** (không còn dễ bỏ qua như ảnh chụp
+   cũ), dropdown CHỈ liệt kê đúng việc "Đo mẫu" (không lẫn việc khác của người đó ở module khác)
+   → gắn thành công.
+4. Cùng người đó, vào 1 module KHÁC (vd Kho nguyên liệu) mà họ KHÔNG có việc nào gắn
+   `module_code='storage'` → tạo 1 ngăn lưu mới → Lưu → xác nhận KHÔNG có banner nào hiện ra (kể
+   cả khi họ vẫn còn việc "Đo mẫu" đang mở ở module khác).
+5. Test đúng ví dụ gốc: Châu Nho có việc "Điều xe" → vào Kho nguyên liệu tạo ngăn, Lưu → không
+   hiện banner.
+6. Test 1 người có ĐÚNG 1 việc khớp module → xác nhận dropdown tự chọn sẵn việc đó, chỉ cần bấm
+   "Gắn & hoàn thành".
+7. Test tạo 1 "Công việc chuyên môn" (Giao việc mới) có gắn Module → lặp lại bước 3-4 cho đúng
+   module đã chọn.
+8. Test regression: 1 template/task KHÔNG gắn module nào → xác nhận không bao giờ hiện banner ở
+   bất kỳ module nào, người thực hiện vẫn hoàn thành việc bình thường qua trang chi tiết việc
+   (Nộp/Nghiệm thu).
+9. Test hiển thị: banner không bị modal khác che khuất (`z-[70]` cao hơn `ModalShell` mặc định
+   `z-50`); trên mobile (viewport hẹp) banner không tràn màn hình
+   (`w-[calc(100vw-2rem)] sm:w-96`).

@@ -2,10 +2,10 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Clock3, Download, FileText, History, Printer } from "lucide-react"
+import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Check, Clock3, Download, FileText, History, Printer, X } from "lucide-react"
 import { saveAs } from "file-saver"
 import * as XLSX from "xlsx"
-import { hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { InventoryPageShell, InventoryPlaceholderSection } from "../_components/inventory-shell"
 import {
   loadInventoryMovementData,
@@ -14,6 +14,7 @@ import {
   type InventoryWarehouseOption,
 } from "../_components/inventory-data"
 import { MultiSelectField } from "../_components/inventory-ui"
+import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { supabase } from "@/lib/supabase"
@@ -119,6 +120,10 @@ export default function InventoryLookupPage() {
   const [fromDate, setFromDate] = useState(firstDayOfCurrentMonthIso())
   const [toDate, setToDate] = useState(todayIso())
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [canApprove, setCanApprove] = useState(false)
+  const [approvingDocumentId, setApprovingDocumentId] = useState<string | null>(null)
+  const [approveError, setApproveError] = useState<string | null>(null)
   const revealRef = useScrollReveal()
 
   useEffect(() => {
@@ -131,7 +136,12 @@ export default function InventoryLookupPage() {
         setWarehouses(inventoryData.warehouses)
         setItems(inventoryData.items)
         setMovements(inventoryData.movements)
+        setFactoryId(inventoryData.factoryId || null)
         if (activeSession.user) setCurrentUser(activeSession.user)
+
+        if (inventoryData.factoryId && activeSession.user) {
+          void resolveCanApproveInventory(inventoryData.factoryId, activeSession.user).then(setCanApprove)
+        }
 
         if (inventoryData.factoryId && !inventoryData.warning && inventoryData.movements.length > 0) {
           const lineIds = Array.from(
@@ -427,6 +437,35 @@ export default function InventoryLookupPage() {
     )
   }
 
+  const handleApproveDocument = async (documentId: string) => {
+    if (!factoryId || approvingDocumentId) return
+    setApproveError(null)
+    setApprovingDocumentId(documentId)
+    try {
+      const session = await getFreshAuthSession()
+      if (!session?.user) {
+        setApproveError("Phiên đăng nhập đã hết hạn.")
+        return
+      }
+      const byName = currentUser?.full_name || currentUser?.username || session.user.email || ""
+      const nowIso = new Date().toISOString()
+      const { error } = await supabase
+        .from("inventory_documents")
+        .update({ approved_by: session.user.id, approved_by_name: byName, approved_at: nowIso })
+        .eq("id", documentId)
+        .eq("factory_id", factoryId)
+      if (error) throw error
+      setDocumentInfoById((prev) => ({
+        ...prev,
+        [documentId]: { requesterName: prev[documentId]?.requesterName || "", approved: true },
+      }))
+    } catch (error) {
+      setApproveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
+    } finally {
+      setApprovingDocumentId(null)
+    }
+  }
+
   return (
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
@@ -656,12 +695,28 @@ export default function InventoryLookupPage() {
                       {movement.balance_after === null ? "Chưa có" : movement.balance_after.toLocaleString("vi-VN")}
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={getDocumentHref(movement.movement_type, movement.document_id)}
-                        className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
-                      >
-                        Mở phiếu
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canApprove &&
+                          movement.documentType !== "transfer" &&
+                          !documentInfoById[movement.document_id]?.approved && (
+                            <button
+                              type="button"
+                              onClick={() => void handleApproveDocument(movement.document_id)}
+                              disabled={approvingDocumentId === movement.document_id}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60"
+                              title="Phê duyệt phiếu"
+                            >
+                              <Check size={13} />
+                              {approvingDocumentId === movement.document_id ? "Đang duyệt..." : "Duyệt"}
+                            </button>
+                          )}
+                        <Link
+                          href={getDocumentHref(movement.movement_type, movement.document_id)}
+                          className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+                        >
+                          Mở phiếu
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -695,6 +750,16 @@ export default function InventoryLookupPage() {
           ]}
         />
       </div>
+
+      {approveError && (
+        <div className="fixed left-1/2 top-4 z-50 flex max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-red-600 px-5 py-3 text-white shadow-2xl">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span className="text-sm font-bold">{approveError}</span>
+          <button onClick={() => setApproveError(null)} className="ml-2 hover:opacity-70">
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </InventoryPageShell>
   )
 }

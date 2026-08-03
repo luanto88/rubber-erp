@@ -19,6 +19,7 @@ import {
 import {
   formatKpiDateTime,
   getKpiErrorMessage,
+  KPI_MODULE_LABEL,
   KPI_REPORT_REQ_LABEL,
   loadKpiTaskCandidates,
   type KpiTaskCandidate,
@@ -321,10 +322,21 @@ export default function KpiTemplatesPage() {
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {templates.map((t) => (
                   <div key={t.id} className={`hover-lift bg-white rounded-2xl border shadow-sm p-4 ${t.is_active ? "border-slate-200" : "border-slate-100 opacity-60"}`}>
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700">
-                        {groupNameById[t.group_id] || "—"}
-                      </span>
+                    <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700">
+                          {groupNameById[t.group_id] || "—"}
+                        </span>
+                        {t.module_code ? (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-sky-50 text-sky-700">
+                            {KPI_MODULE_LABEL[t.module_code] || t.module_code}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-400">
+                            Chưa gắn module
+                          </span>
+                        )}
+                      </div>
                       <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg ${t.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
                         {t.is_active ? "Đang áp dụng" : "Tạm ngưng"}
                       </span>

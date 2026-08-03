@@ -4738,16 +4738,14 @@ export default function ProductPage() {
       )}
 
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="product:create"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/product"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="product:create"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/product"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">

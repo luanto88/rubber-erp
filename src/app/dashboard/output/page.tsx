@@ -544,16 +544,14 @@ export default function OutputPage() {
   return (
     <div className="p-4 sm:p-6">
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="output:save"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/output"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="output:save"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/output"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
@@ -818,10 +816,10 @@ export default function OutputPage() {
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-2xl">
-                <table className="w-full min-w-[900px] text-sm">
+                <table className="w-full min-w-[1040px] text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50">
                     <tr>
-                      {["Ngày", "Số xe", "Ghi chú", "Cảnh báo", "Tổng KL tươi", "Tổng KL khô", "Thao tác"].map((header) => (
+                      {["Ngày", "Số xe", "Ghi chú", "Người Upload", "Cảnh báo", "Tổng KL tươi", "Tổng KL khô", "Thao tác"].map((header) => (
                         <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
                       ))}
                     </tr>
@@ -830,12 +828,18 @@ export default function OutputPage() {
                     {groupedDates.map(({ ngay, records: dayRecords, totalTuoi, totalKho }) => {
                       const vehicleCount = [...new Set(dayRecords.map((record) => record.so_xe))].length
                       const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter((note) => !isBlankNoteContent(note)))]
+                      const uploaders = [...new Set(
+                        dayRecords
+                          .map((record) => record.nguoi_upload?.trim())
+                          .filter((name): name is string => Boolean(name)),
+                      )]
                       const dayWarnCount = dayRecords.reduce((sum, record) => sum + record.warn_codes.length, 0)
                       return (
                         <tr key={ngay} className="cursor-pointer transition-colors hover:bg-slate-50">
                           <td className="px-4 py-3 font-bold text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtDate(ngay)}</td>
                           <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{vehicleCount} xe / {dayRecords.length} dòng</td>
                           <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{notes.length > 0 ? notes.join(", ") : "—"}</td>
+                          <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{uploaders.length > 0 ? uploaders.join(", ") : "—"}</td>
                           <td className="px-4 py-3" onClick={() => openDayDetail(ngay)}>
                             {dayWarnCount > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{dayWarnCount} cảnh báo</span> : <span className="text-slate-400">Không có</span>}
                           </td>

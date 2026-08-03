@@ -1032,16 +1032,14 @@ export default function MeasurementsPage() {
         </div>
       )}
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="process:measurement"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/process/measurements"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="process:measurement"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/process/measurements"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
       {/* Header */}
       <div className="flex items-center justify-between mb-2">

@@ -17,6 +17,7 @@ import {
   formatKpiDateTime,
   getKpiErrorMessage,
   loadKpiTaskCandidates,
+  KPI_MODULE_OPTIONS,
   KPI_REPORT_REQ_LABEL,
   type KpiReportRequirement,
   type KpiTask,
@@ -47,6 +48,7 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
   const [tieuDe, setTieuDe] = useState("")
   const [moTa, setMoTa] = useState("")
   const [phongBanId, setPhongBanId] = useState("")
+  const [moduleCode, setModuleCode] = useState("")
   const [ngayGiao, setNgayGiao] = useState(getTodayISODate())
   const [hanHoanThanh, setHanHoanThanh] = useState(defaultDeadline())
   const [memberIds, setMemberIds] = useState<string[]>([])
@@ -136,6 +138,7 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
         mucTieuSoLuong: isQuantityMode ? mucTieuNumber : null,
         nguoiChinhId: isQuantityMode ? nguoiChinhId : null,
         phongBanId,
+        moduleCode: moduleCode || null,
       })
       sendKpiNotify({
         factoryId,
@@ -215,6 +218,24 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
           </select>
           <p className="mt-1 text-[11px] text-slate-400">
             Thu hẹp danh sách người thực hiện bên dưới theo đúng phòng ban này.
+          </p>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Module liên quan (tuỳ chọn)</label>
+          <select
+            value={moduleCode}
+            onChange={(e) => setModuleCode(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Không liên kết module cụ thể --</option>
+            {KPI_MODULE_OPTIONS.map((m) => (
+              <option key={m.code} value={m.code}>{m.label}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Chọn đúng module để người thực hiện được gợi ý &quot;Gắn bằng chứng&quot; ngay sau khi
+            họ lưu 1 bản ghi ở module đó — để trống nếu việc không liên quan module nào.
           </p>
         </div>
 

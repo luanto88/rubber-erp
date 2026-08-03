@@ -1106,16 +1106,14 @@ export default function StoragePage() {
   return (
     <div>
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="storage:create"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/storage"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="storage:create"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/storage"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
       {/* Dây chuyến selector */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">

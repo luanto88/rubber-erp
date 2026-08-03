@@ -7,6 +7,7 @@ import { useEffect, useState } from "react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import type { DepartmentOption } from "@/lib/kpi-department-leaders"
 import {
+  KPI_MODULE_OPTIONS,
   KPI_REPORT_REQ_LABEL,
   getKpiErrorMessage,
   loadKpiTaskCandidates,
@@ -38,6 +39,7 @@ type TemplateFormModalProps = {
 export function TemplateFormModal({ factoryId, createdBy, groups, candidates, departments, editing, onClose, onSaved }: TemplateFormModalProps) {
   const [groupId, setGroupId] = useState(editing?.group_id || "")
   const [phongBanId, setPhongBanId] = useState(editing?.phong_ban_id || "")
+  const [moduleCode, setModuleCode] = useState(editing?.module_code || "")
   const [assignedUserId, setAssignedUserId] = useState(editing?.assigned_user_id || "")
   // Ứng viên "Người nhận cố định" thu hẹp theo phòng ban đã chọn — mặc định = candidates chung
   // (toàn nhà máy) khi chưa chọn phòng ban, để không chặn dữ liệu cũ chưa gán phòng ban.
@@ -86,6 +88,7 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
         groupId,
         assignedUserId,
         phongBanId,
+        moduleCode: moduleCode || null,
         tieuDe,
         moTa,
         applyWeekdays: weekdays,
@@ -162,6 +165,25 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
           <p className="mt-1 text-[11px] text-slate-400">
             Quyết định ai được phép quản lý việc định kỳ này (lãnh đạo đúng phòng ban, hoặc
             admin/kpi.manage_config) và thu hẹp danh sách người nhận bên dưới.
+          </p>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Module liên quan (tuỳ chọn)</label>
+          <select
+            value={moduleCode}
+            onChange={(e) => setModuleCode(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Không liên kết module cụ thể --</option>
+            {KPI_MODULE_OPTIONS.map((m) => (
+              <option key={m.code} value={m.code}>{m.label}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Chọn đúng module để người thực hiện được gợi ý &quot;Gắn bằng chứng&quot; ngay sau khi
+            họ lưu 1 bản ghi ở module đó — để trống nếu việc không liên quan module nào (vd dọn
+            dẹp, kiểm tra thiết bị...).
           </p>
         </div>
 

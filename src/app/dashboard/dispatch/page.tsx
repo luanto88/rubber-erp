@@ -1545,16 +1545,14 @@ export default function DispatchPage() {
     <div>
       <ToastNotification/>
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="dispatch:create"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/dispatch"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="dispatch:create"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/dispatch"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
       <div className="flex items-center justify-between mb-6">
         <div>

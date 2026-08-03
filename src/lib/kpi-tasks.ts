@@ -14,6 +14,23 @@ import type { SessionUser } from "@/lib/auth"
 
 export const KPI_DUE_SOON_HOURS = 24
 
+// Module ERP liên quan 1 công việc/1 việc định kỳ — quyết định KpiLinkPrompt ("Gắn bản ghi tại
+// chỗ") có gợi ý việc này hay không khi người dùng lưu 1 bản ghi ở đúng module đó. Đúng 6 giá
+// trị khớp 6 nơi đang có <KpiLinkPrompt moduleCode="...:..."> — KHÔNG lưu chuỗi đầy đủ
+// "process:measurement", chỉ lưu phần "họ module" trước dấu ":" (xem kpi-link-prompt.tsx).
+export const KPI_MODULE_OPTIONS = [
+  { code: "dispatch", label: "Điều xe" },
+  { code: "output", label: "Sản lượng" },
+  { code: "quality", label: "Kiểm nghiệm" },
+  { code: "storage", label: "Kho nguyên liệu" },
+  { code: "product", label: "Thành phẩm" },
+  { code: "process", label: "Kiểm soát quá trình (Đo nhanh)" },
+] as const
+export type KpiModuleCode = (typeof KPI_MODULE_OPTIONS)[number]["code"]
+export const KPI_MODULE_LABEL: Record<string, string> = Object.fromEntries(
+  KPI_MODULE_OPTIONS.map((m) => [m.code, m.label]),
+)
+
 export type KpiTaskStatus = "moi_giao" | "dang_thuc_hien" | "cho_nghiem_thu" | "hoan_thanh" | "tra_ve" | "huy"
 export type KpiReportRequirement = "anh" | "file" | "dinh_vi" | "van_ban"
 export type KpiTaskLogAction =
@@ -96,6 +113,9 @@ export type KpiTask = {
   // được coi là đủ thẩm quyền tạo/quản lý việc này (xem RLS kpi_tasks_insert, migration
   // 20260807_kpi_department_scoping.sql). NULL = dữ liệu cũ trước migration này.
   phong_ban_id: string | null
+  // Module ERP liên quan (xem KPI_MODULE_OPTIONS) — quyết định KpiLinkPrompt có gợi ý việc này
+  // hay không. NULL = việc không liên quan module nào, không bao giờ được gợi ý gắn bằng chứng.
+  module_code: string | null
   created_at: string
   updated_at: string
 }
@@ -138,7 +158,7 @@ export type KpiTaskLog = {
 }
 
 const TASK_COLS =
-  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, phong_ban_id, created_at, updated_at"
+  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, phong_ban_id, module_code, created_at, updated_at"
 const MEMBER_COLS =
   "id, task_id, factory_id, user_id, tien_do, tien_do_nghiem_thu, da_nop_luc, is_active, phan_loai, created_at, updated_at"
 const LOG_COLS =
@@ -343,6 +363,9 @@ export async function createKpiTask(input: {
   mucTieuSoLuong?: number | null
   nguoiChinhId?: string | null
   phongBanId: string | null
+  // Module ERP liên quan (xem KPI_MODULE_OPTIONS) — tuỳ chọn, NULL nếu việc không liên quan
+  // module cụ thể nào.
+  moduleCode?: string | null
 }): Promise<KpiTask> {
   if (!input.memberUserIds.length) throw new Error("Vui lòng chọn ít nhất 1 người thực hiện.")
   const mucTieu = input.mucTieuSoLuong ?? null
@@ -367,6 +390,7 @@ export async function createKpiTask(input: {
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       muc_tieu_so_luong: mucTieu,
       phong_ban_id: input.phongBanId,
+      module_code: input.moduleCode || null,
     })
     .select(TASK_COLS)
     .single()
@@ -566,9 +590,13 @@ export function getKpiCachedUserId(): string | null {
  *  tồn đọng từ hôm trước). Lọc theo `ngay_giao` từng gây bug thật: task giao hôm qua nhưng hạn
  *  hôm nay bị loại khỏi dropdown dù đang mở, trong khi 1 task khác giao đúng hôm nay nhưng hạn
  *  tận vài ngày sau lại xuất hiện — ngược hoàn toàn với kỳ vọng "việc tôi cần làm bây giờ".
- *  Chưa JOIN `kpi_task_templates` (bảng "Việc định kỳ" chưa tồn tại) — khi bảng đó ra đời, nối
- *  thêm để gợi ý sẵn việc khớp `auto_action_type`. */
-export async function fetchOpenKpiTasksForUser(factoryId: string, userId: string): Promise<KpiTask[]> {
+ *
+ *  `moduleCode` (tuỳ chọn — nên là "họ module", vd "process", không phải "process:measurement")
+ *  lọc chỉ còn đúng việc đã gắn `module_code` khớp module đang thao tác — dùng bởi
+ *  `KpiLinkPrompt` để không gợi ý nhầm việc thuộc module khác (vd việc "Điều xe" bị gợi ý gắn
+ *  vào bản ghi Kho nguyên liệu). Không truyền = không lọc theo module (backward-compat, hiện
+ *  không còn call site nào dùng nhánh này sau khi KpiLinkPrompt luôn truyền module). */
+export async function fetchOpenKpiTasksForUser(factoryId: string, userId: string, moduleCode?: string): Promise<KpiTask[]> {
   const { data: memberRows, error: memberErr } = await supabase
     .from("kpi_task_members")
     .select("task_id")
@@ -578,13 +606,14 @@ export async function fetchOpenKpiTasksForUser(factoryId: string, userId: string
   const taskIds = [...new Set((memberRows || []).map((r: { task_id: string }) => r.task_id))]
   if (!taskIds.length) return []
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("kpi_tasks")
     .select(TASK_COLS)
     .eq("factory_id", factoryId)
     .in("id", taskIds)
     .not("trang_thai", "in", "(hoan_thanh,huy)")
-    .order("han_hoan_thanh", { ascending: true })
+  if (moduleCode) query = query.eq("module_code", moduleCode)
+  const { data, error } = await query.order("han_hoan_thanh", { ascending: true })
   if (error) throw error
   return (data || []) as KpiTask[]
 }

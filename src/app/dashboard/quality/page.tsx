@@ -1318,6 +1318,22 @@ export default function QualityPage() {
       const cl = rawLoai.replace(/^(CSR|SVR)/i, "")
       const tieuChuan = meta["TIEU_CHUAN"] || "TCCS 112:2022"
 
+      // Chặn cứng nếu cột TIEU_CHUAN trong file không khớp đúng 1 giá trị hợp lệ —
+      // tránh lặp lại bug đã xảy ra thật: file ghi "TCCS" (viết tắt) thay vì
+      // "TCCS 112:2022" khiến hàng loạt phiếu bị lưu lệch chuẩn, loại khỏi mọi báo cáo
+      // mục tiêu theo tiêu chuẩn đó dù nghiệp vụ vẫn đúng là TCCS 112:2022.
+      const validTieuChuanValues = new Set([
+        "TCCS 112:2022", "TCVN 3769:2016", ...customStds.map((s) => s.id),
+      ])
+      if (!validTieuChuanValues.has(tieuChuan)) {
+        showToast(
+          `Cột TIEU_CHUAN trong file ghi "${tieuChuan}" — không khớp đúng "TCCS 112:2022" hoặc "TCVN 3769:2016". Sửa lại giá trị này trong file rồi tải lại.`,
+          false,
+        )
+        setImporting(false)
+        return
+      }
+
       const colH = rows[2].map(h => String(h || "").trim().toUpperCase())
       const colIdx: Record<string, number> = {}
       colH.forEach((h, i) => { if (h) colIdx[h] = i })
@@ -1652,16 +1668,14 @@ export default function QualityPage() {
       )}
 
       {kpiPrompt && (
-        <div className="mb-4">
-          <KpiLinkPrompt
-            factoryId={factoryId}
-            moduleCode="quality:create"
-            recordId={kpiPrompt.recordId}
-            recordLabel={kpiPrompt.recordLabel}
-            recordUrl="/dashboard/quality"
-            onDone={() => setKpiPrompt(null)}
-          />
-        </div>
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="quality:create"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl="/dashboard/quality"
+          onDone={() => setKpiPrompt(null)}
+        />
       )}
 
       {/* ── CREATE VIEW ─────────────────────────────────────────────────────── */}

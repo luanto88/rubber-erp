@@ -34,13 +34,17 @@ export type KpiTaskTemplate = {
   yeu_cau_bao_cao: KpiReportRequirement[]
   is_active: boolean
   phong_ban_id: string | null
+  // Module ERP liên quan (xem KPI_MODULE_OPTIONS trong kpi-tasks.ts) — copy sang mọi instance
+  // kpi_tasks sinh ra từ template này (kpi_ensure_today_task_instances). NULL = không liên quan
+  // module cụ thể, các instance sinh ra sẽ không bao giờ được KpiLinkPrompt gợi ý.
+  module_code: string | null
   created_by: string
   created_at: string
   updated_at: string
 }
 
 const TEMPLATE_COLS =
-  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, created_by, created_at, updated_at"
+  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, module_code, created_by, created_at, updated_at"
 
 export type KpiSubstitutionStatus = "cho_duyet" | "da_duyet" | "tu_choi"
 
@@ -113,6 +117,7 @@ export type KpiTaskTemplateInput = {
   yeuCauBaoCao: KpiReportRequirement[]
   isActive: boolean
   phongBanId: string | null
+  moduleCode: string | null
 }
 
 export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promise<KpiTaskTemplate> {
@@ -131,6 +136,7 @@ export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promis
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,
       phong_ban_id: input.phongBanId,
+      module_code: input.moduleCode,
     })
     .select(TEMPLATE_COLS)
     .single()
@@ -155,6 +161,7 @@ export async function updateKpiTaskTemplate(
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,
       phong_ban_id: input.phongBanId,
+      module_code: input.moduleCode,
     })
     .eq("id", id)
   if (error) throw error
