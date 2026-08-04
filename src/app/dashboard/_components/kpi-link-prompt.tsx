@@ -17,14 +17,16 @@
 // null hoặc thông báo lỗi cục bộ — không bao giờ được ném lỗi làm gãy luồng nghiệp vụ của
 // trang cha.
 //
-// Bố cục: `position: fixed` góc trên-phải (không phải inline trong luồng trang như trước) — dễ
-// bị bỏ qua vì mắt người dùng đã rời khỏi khu vực đó ngay sau khi bấm Lưu. Góc trên-phải được
-// chọn có chủ đích vì không đụng độ với toast/banner riêng của bất kỳ trang nào đã khảo sát
-// (nhiều trang dùng top-center `fixed top-4 left-1/2 -translate-x-1/2`, một số trang — đúng 3/6
-// module mục tiêu: Kiểm nghiệm/Điều xe/Kiểm soát quá trình — dùng bottom-right cho toast riêng
-// của chúng).
+// Bố cục: `position: fixed`, căn GIỮA màn hình kèm backdrop mờ (không phải góc nhỏ như bản đầu,
+// càng không phải inline trong luồng trang — 2 bản trước đó đều bị người dùng phản ánh "dễ bỏ
+// qua"/"quá nhỏ"). Có backdrop (`bg-black/30`) để tách hẳn khỏi nội dung trang phía sau.
+//
+// Click vào backdrop KHÔNG đóng banner nữa (đổi theo phản hồi người dùng — trước đó click ra
+// ngoài coi như "Bỏ qua", nhưng dễ vô tình tắt khi chỉ định bấm hụt) — thay vào đó thẻ "nhấp
+// nháy" (rung nhẹ, keyframe `attentionShake` trong globals.css) để nhắc người dùng vẫn còn ở đây,
+// cần tự bấm đúng nút "Bỏ qua" hoặc chọn việc rồi "Gắn & hoàn thành" mới đóng được.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CheckCircle2, Link2, X } from "lucide-react"
 import {
   fetchOpenKpiTasksForUser,
@@ -46,9 +48,6 @@ type KpiLinkPromptProps = {
   onDone?: () => void
 }
 
-const FLOATING_WRAPPER_CLASS =
-  "fixed top-4 right-4 z-[70] w-[calc(100vw-2rem)] sm:w-96 animate-[fadeInUp_0.3s_ease-out]"
-
 export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, recordUrl, onDone }: KpiLinkPromptProps) {
   const recordIds = Array.isArray(recordId) ? recordId : [recordId]
   const moduleFamily = moduleCode.split(":")[0]
@@ -58,6 +57,23 @@ export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, re
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneLabel, setDoneLabel] = useState<string | null>(null)
+  const [shake, setShake] = useState(false)
+  const shakeTimerRef = useRef<number | null>(null)
+
+  // Backdrop bấm ra ngoài KHÔNG đóng banner — chỉ rung nhẹ để nhắc còn ở đây.
+  const nudge = () => {
+    setShake(false)
+    window.requestAnimationFrame(() => {
+      setShake(true)
+      if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current)
+      shakeTimerRef.current = window.setTimeout(() => setShake(false), 420)
+    })
+  }
+  useEffect(() => {
+    return () => {
+      if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -134,61 +150,86 @@ export function KpiLinkPrompt({ factoryId, moduleCode, recordId, recordLabel, re
 
   if (doneLabel) {
     return (
-      <div className={FLOATING_WRAPPER_CLASS}>
-        <div className="flex items-center gap-2 rounded-2xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3 shadow-2xl">
-          <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
-          <span className="text-sm text-emerald-800">
-            Đã hoàn thành công việc: <strong>{doneLabel}</strong>
-          </span>
-          <button onClick={() => onDone?.()} className="ml-auto shrink-0 text-emerald-500 hover:text-emerald-700">
-            <X size={14} />
-          </button>
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/30" onClick={nudge} />
+        <div
+          className={`relative w-full max-w-md rounded-3xl border-2 border-emerald-300 bg-white p-6 shadow-2xl ${
+            shake ? "animate-[attentionShake_0.4s_ease-in-out]" : "animate-[fadeInUp_0.3s_ease-out]"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+              <CheckCircle2 size={22} className="text-emerald-600" />
+            </div>
+            <div className="min-w-0 flex-1 pt-1">
+              <p className="text-base text-slate-700">
+                Đã hoàn thành công việc: <strong className="text-emerald-700">{doneLabel}</strong>
+              </p>
+            </div>
+            <button onClick={() => onDone?.()} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+              <X size={18} />
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className={FLOATING_WRAPPER_CLASS}>
-      <div className="rounded-2xl border-2 border-violet-300 bg-violet-50 px-4 py-3 shadow-2xl">
-        <div className="flex items-start gap-2.5">
-          <span className="relative mt-0.5 shrink-0">
-            <Link2 size={17} className="text-violet-600" />
-            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-violet-500 animate-ping" />
-            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-violet-600" />
-          </span>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={nudge} />
+      <div
+        className={`relative w-full max-w-lg rounded-3xl border-2 border-violet-300 bg-white p-6 shadow-2xl sm:p-7 ${
+          shake ? "animate-[attentionShake_0.4s_ease-in-out]" : "animate-[fadeInUp_0.3s_ease-out]"
+        }`}
+      >
+        <div className="flex items-start gap-3.5">
+          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-violet-100">
+            <Link2 size={22} className="text-violet-600" />
+            <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-violet-500 animate-ping" />
+            <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-violet-600" />
+          </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-violet-800">
-              Đã lưu <strong>{recordLabel}</strong> — gắn vào công việc KPI nào đang mở?
+            <p className="text-base font-semibold text-slate-800">
+              Đã lưu <strong className="text-violet-700">{recordLabel}</strong>
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                value={selectedTaskId}
-                onChange={(e) => setSelectedTaskId(e.target.value)}
-                className="min-w-0 flex-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-violet-500"
-              >
-                <option value="">-- Chọn việc --</option>
-                {tasks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.tieu_de} (hạn {formatKpiDateTime(t.han_hoan_thanh)})
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => void handleConfirm()}
-                disabled={!selectedTaskId || saving}
-                className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"
-              >
-                {saving ? "Đang gắn..." : "Gắn & hoàn thành"}
-              </button>
-              <button
-                onClick={() => onDone?.()}
-                className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100"
-              >
-                Bỏ qua
-              </button>
-            </div>
-            {error && <div className="mt-1.5 text-xs font-semibold text-red-600">{error}</div>}
+            <p className="mt-0.5 text-sm text-slate-500">Gắn vào công việc KPI nào đang mở?</p>
+          </div>
+          <button onClick={() => onDone?.()} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          <select
+            value={selectedTaskId}
+            onChange={(e) => setSelectedTaskId(e.target.value)}
+            className="w-full rounded-xl border border-violet-300 bg-white px-3.5 py-3 text-sm outline-none focus:border-violet-500"
+          >
+            <option value="">-- Chọn việc --</option>
+            {tasks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.tieu_de} (hạn {formatKpiDateTime(t.han_hoan_thanh)})
+              </option>
+            ))}
+          </select>
+
+          {error && <div className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm font-semibold text-red-600">{error}</div>}
+
+          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+            <button
+              onClick={() => onDone?.()}
+              className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100"
+            >
+              Bỏ qua
+            </button>
+            <button
+              onClick={() => void handleConfirm()}
+              disabled={!selectedTaskId || saving}
+              className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-violet-700 disabled:opacity-50"
+            >
+              {saving ? "Đang gắn..." : "Gắn & hoàn thành"}
+            </button>
           </div>
         </div>
       </div>

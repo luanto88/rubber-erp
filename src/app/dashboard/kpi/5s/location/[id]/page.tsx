@@ -31,6 +31,7 @@ import {
   fetchKpi5sEvaluations,
   fetchKpi5sLocation,
   fetchLocationCleaners,
+  formatKpi5sDeadlineLabel,
   getKpi5sErrorMessage,
   isKpi5sDeadlineDueSoon,
   isKpi5sDeadlineOverdue,
@@ -157,6 +158,9 @@ export default function Kpi5sLocationDetailPage() {
   const hasEvaluatedThisWeek = !!currentWeekEvaluation
   const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
   const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
+  // Nhãn "Thứ X, HH:MM" hiển thị ngay cạnh QR (kể cả khi tuần này đã chấm xong) — khác badge
+  // cảnh báo quá hạn/sắp hạn phía trên vốn chỉ hiện khi CHƯA chấm tuần này.
+  const deadlineLabel = location ? formatKpi5sDeadlineLabel(location) : null
 
   // Đội ngũ dọn dẹp thực tế (Fix 4/5a) — ưu tiên bảng multi-select mới, fallback về
   // nguoi_don_id đơn nếu vị trí chưa từng được gán qua bảng mới. Khóa dropdown "chấm điểm" và
@@ -368,6 +372,13 @@ export default function Kpi5sLocationDetailPage() {
                 <div className="hover-lift rounded-xl border border-amber-100 bg-gradient-to-br from-white to-amber-50/60 p-2">
                   <QRCodeSVG value={buildKpi5sLocationUrl(location.id)} size={96} />
                 </div>
+                {deadlineLabel ? (
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-amber-700">
+                    <AlertTriangle size={11} /> Hạn chấm: {deadlineLabel}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-slate-400">Chưa cấu hình hạn chấm</div>
+                )}
                 <button
                   onClick={() => void handlePrintQr()}
                   disabled={printing}

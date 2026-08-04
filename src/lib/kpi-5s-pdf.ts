@@ -1,17 +1,23 @@
 import jsPDF from "jspdf"
 import { PDF_FONT_NAME, addQrImage, ensurePdfFont, safeName } from "@/lib/pdf-qr-shared"
-import { buildKpi5sLocationUrl, type Kpi5sLocation } from "@/lib/kpi-5s"
+import { buildKpi5sLocationUrl, formatKpi5sDeadlineLabel, type Kpi5sLocation } from "@/lib/kpi-5s"
 
 // In QR hàng loạt cho vị trí 5S — dán tại hiện trường, mirror đúng layout
 // downloadStorageBulkQrPdf (src/lib/storage-pdf.ts) nhưng tách file riêng vì QR trỏ tới URL
-// vị trí 5S khác hẳn ngăn lưu, và nhãn hiển thị "Mã vị trí + Tên vị trí" (2 dòng) thay vì chỉ
-// mã ngăn. Không refactor gộp với storage-pdf.ts để tránh đụng code đang chạy ổn định.
+// vị trí 5S khác hẳn ngăn lưu, và nhãn hiển thị "Mã vị trí + Tên vị trí" (2-3 dòng, tối đa 4 nếu
+// có thêm dòng "Hạn chấm") thay vì chỉ mã ngăn. Không refactor gộp với storage-pdf.ts để tránh
+// đụng code đang chạy ổn định.
 const QR_LABEL_SIZE_MM = 32
 const QR_LABEL_CELL_PADDING_MM = 2.5
 const QR_LABEL_TEXT_GAP_MM = 1.2
 const QR_LABEL_LINE_HEIGHT_MM = 3.4
+// Ngân sách dòng text: 3 dòng cho mã/tên + 1 dòng riêng cho "Hạn chấm" (chỉ vị trí có cấu hình
+// deadline_weekdays/deadline_time mới in dòng này — cell không cấu hình để trống, không co lại,
+// vì toàn bộ ô trong lưới phải cùng chiều cao để thẳng hàng).
 const QR_LABEL_MAX_TEXT_LINES = 3
+const QR_LABEL_DEADLINE_LINE = 1
 const QR_LABEL_FONT_SIZE_PT = 7.5
+const QR_LABEL_DEADLINE_FONT_SIZE_PT = 6.5
 const QR_LABEL_GAP_X_MM = 6
 const QR_LABEL_GAP_Y_MM = 5
 const QR_LABEL_PAGE_MARGIN_MM = 10
@@ -22,7 +28,9 @@ function computeGridLayout(doc: jsPDF) {
   const pageHeight = doc.internal.pageSize.getHeight()
 
   const cellBoxWidth = QR_LABEL_SIZE_MM + QR_LABEL_CELL_PADDING_MM * 2
-  const textBlockHeight = QR_LABEL_LINE_HEIGHT_MM * QR_LABEL_MAX_TEXT_LINES
+  // Chiều cao ô luôn tính đủ chỗ cho dòng "Hạn chấm" (dù không phải vị trí nào cũng in dòng đó)
+  // — để mọi ô trong lưới cùng chiều cao, thẳng hàng nhau.
+  const textBlockHeight = QR_LABEL_LINE_HEIGHT_MM * (QR_LABEL_MAX_TEXT_LINES + QR_LABEL_DEADLINE_LINE)
   const cellBoxHeight = QR_LABEL_SIZE_MM + QR_LABEL_TEXT_GAP_MM + textBlockHeight + QR_LABEL_CELL_PADDING_MM * 2
 
   const usableWidth = pageWidth - QR_LABEL_PAGE_MARGIN_MM * 2
@@ -50,7 +58,9 @@ function renderPageHeader(doc: jsPDF, pageNo: number, totalPages: number) {
   doc.text(`Trang ${pageNo}/${totalPages}`, pageWidth - QR_LABEL_PAGE_MARGIN_MM, 8, { align: "right" })
 }
 
-export async function downloadKpi5sLocationBulkQrPdf(locations: Pick<Kpi5sLocation, "id" | "ma_vi_tri" | "ten_vi_tri">[]) {
+export async function downloadKpi5sLocationBulkQrPdf(
+  locations: Pick<Kpi5sLocation, "id" | "ma_vi_tri" | "ten_vi_tri" | "deadline_weekdays" | "deadline_time">[],
+) {
   if (locations.length === 0) throw new Error("Chưa chọn vị trí nào để in QR.")
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
@@ -113,6 +123,18 @@ export async function downloadKpi5sLocationBulkQrPdf(locations: Pick<Kpi5sLocati
         cursorY += QR_LABEL_LINE_HEIGHT_MM
         linesUsed += 1
       }
+    }
+
+    // Dòng riêng "Hạn chấm: Thứ X, HH:MM" — chỉ in khi vị trí có cấu hình hạn; cỡ chữ nhỏ hơn +
+    // màu hổ phách để phân biệt rõ với mã/tên vị trí phía trên.
+    const deadlineLabel = formatKpi5sDeadlineLabel(location)
+    if (deadlineLabel) {
+      const deadlineY = qrY + QR_LABEL_SIZE_MM + QR_LABEL_TEXT_GAP_MM + QR_LABEL_LINE_HEIGHT_MM * (QR_LABEL_MAX_TEXT_LINES + 0.8)
+      doc.setFont(PDF_FONT_NAME, "bold")
+      doc.setFontSize(QR_LABEL_DEADLINE_FONT_SIZE_PT)
+      doc.setTextColor(180, 83, 9)
+      doc.text(`Hạn chấm: ${deadlineLabel}`, textX, deadlineY, { align: "center" })
+      doc.setTextColor(15, 23, 42)
     }
   }
 

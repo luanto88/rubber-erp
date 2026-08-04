@@ -8,6 +8,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { addDaysISO } from "@/lib/date-utils"
+import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
 
 export type Kpi5sResult = "dat" | "tuong_doi" | "khong_dat"
 
@@ -214,6 +215,13 @@ export function isKpi5sDeadlineDueSoon(deadline: Date | null, hasEvaluatedThisWe
   if (!deadline || hasEvaluatedThisWeek) return false
   const t = deadline.getTime()
   return t >= nowMs && t <= nowMs + 24 * 3600_000
+}
+
+// Nhãn "Thứ X, HH:MM" cho hạn chấm điểm hàng tuần — dùng chung cho QR hiển thị trên màn hình
+// lẫn nhãn QR in PDF (downloadKpi5sLocationBulkQrPdf); null nếu vị trí chưa cấu hình hạn.
+export function formatKpi5sDeadlineLabel(location: Pick<Kpi5sLocation, "deadline_weekdays" | "deadline_time">): string | null {
+  if (!location.deadline_weekdays?.length || !location.deadline_time) return null
+  return `${KPI_WEEKDAY_LABEL[location.deadline_weekdays[0]]}, ${location.deadline_time.slice(0, 5)}`
 }
 
 // Tuần hiện tại (Thứ Hai) đã có bản chấm chưa — quyết định có hiện nút "Chấm điểm tuần này".

@@ -109,3 +109,13 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
     transform: translateY(0);
   }
 }
+
+/* Dùng để "nhắc" người dùng khi bấm ra ngoài 1 hộp thoại bắt buộc phải tự đóng bằng nút (vd
+   KpiLinkPrompt) — thẻ rung nhẹ thay vì tự đóng, báo hiệu "vẫn còn ở đây, hãy chọn hoặc Bỏ qua". */
+@keyframes attentionShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}

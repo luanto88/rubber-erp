@@ -4166,3 +4166,150 @@ ngoài hoàn toàn phạm vi diff của lần sửa này (chỉ đụng đúng k
 9. Test hiển thị: banner không bị modal khác che khuất (`z-[70]` cao hơn `ModalShell` mặc định
    `z-50`); trên mobile (viewport hẹp) banner không tràn màn hình
    (`w-[calc(100vw-2rem)] sm:w-96`).
+
+### Cập nhật (cùng phiên, tiếp) — Bug thật đã xác nhận qua DB: "Hữu Thọ có việc Đo mẫu nhưng
+không thấy banner" — ĐÃ FIX + ĐÃ BACKFILL DỮ LIỆU THẬT
+
+Sau khi deploy migration `20260816_...`, người dùng test ngay và báo Hữu Thọ có việc "Đo mẫu tối
+thiểu 4 mẫu..." (`CV-010826/002`, xem ảnh chụp "Việc hôm nay") nhưng lưu phiếu Đo nhanh chỉ tiêu
+xong không có banner nào nổi lên. Đã điều tra bằng script đọc trực tiếp DB (không đoán) — xác
+nhận **2 nguyên nhân**, không phải bug logic lọc module vừa code:
+
+1. **Nguyên nhân chính (dữ liệu, không phải code)**: migration đã chạy đúng (cột `module_code`
+   tồn tại), nhưng **5/6 template "Việc định kỳ"** (Tạo phiếu điều xe, Đo mẫu, Upload sản lượng,
+   Upload kiểm nghiệm, Tạo ngăn lưu — đúng 5/6 template hiện có trong hệ thống, khớp chính xác 5
+   module hook điểm) đều có `module_code = NULL` — chưa ai vào sửa lại để gắn Module (tính năng
+   mới deploy, admin chưa kịp cấu hình). Vì `module_code = NULL` không khớp bất kỳ filter module
+   nào, banner đúng là không hiện — **đây là hành vi ĐÚNG thiết kế**, không phải bug.
+2. **Bug thật đã fix**: kể cả khi admin sửa lại 1 template để gắn Module, việc ĐANG MỞ đã sinh ra
+   từ template đó trước khi sửa (như `CV-010826/002`) sẽ **KHÔNG tự động cập nhật** —
+   `updateKpiTaskTemplate()` (`src/lib/kpi-templates.ts`) trước đây chỉ `UPDATE
+   kpi_task_templates`, không đụng tới `kpi_tasks` đã sinh sẵn. Và `kpi_ensure_today_task_
+   instances` chỉ sinh instance MỚI khi instance cũ đã đóng (`hoan_thanh`/`huy` — cơ chế chặn
+   "mắc kẹt" từ `20260812_kpi_task_templates_skip_stuck.sql`), nên admin sửa Module xong vẫn phải
+   đợi việc cũ đóng mới thấy tác dụng — quá chậm, gây đúng hiện tượng người dùng báo.
+
+**Fix**: `updateKpiTaskTemplate()` giờ, ngay sau khi `UPDATE kpi_task_templates` thành công, chạy
+thêm 1 câu `UPDATE kpi_tasks SET module_code = ... WHERE template_id = id AND trang_thai NOT IN
+('hoan_thanh','huy')` — đồng bộ Module xuống MỌI instance đang mở của đúng template đó ngay lập
+tức, không cần đợi việc cũ đóng. Chỉ đồng bộ `module_code` (không đồng bộ `tieu_de`/`mo_ta`/field
+khác khi sửa template — ngoài phạm vi bug này, không mở rộng thêm).
+
+**Đã backfill dữ liệu thật** (2 script tạm `scripts/investigate-kpi-module-code-banner.mjs` +
+`scripts/backfill-kpi-template-module-code.mjs`, đã xác nhận với người dùng trước khi ghi, chạy
+xong và **đã xóa** — không phải script tái sử dụng lâu dài): gắn đúng Module cho 5 template dựa
+trực tiếp vào tiêu đề đã ghi rõ module (không đoán mò) — "Tạo phiếu điều xe..." → `dispatch`,
+"Đo mẫu..." → `process`, "Upload... modun Sản lượng" → `output`, "Upload... modun Chất lượng" →
+`quality`, "Tạo ngăn lưu" → `storage`; template "Dọn dẹp phòng điều hành xử lý nước thải" **giữ
+nguyên `module_code = NULL`** (không liên quan module ERP nào, đúng thiết kế). Đồng thời đồng bộ
+xuống cả 5 việc đang mở tương ứng (`CV-010826/001` đến `/005`) — đã verify qua log script: cả 5
+đều chuyển từ `module_code=NULL` sang đúng module, `CV-010826/006` (Dọn dẹp) giữ nguyên `NULL`.
+
+`npx tsc --noEmit`/`npx eslint src/lib/kpi-templates.ts` sạch sau fix. **Chưa test tay UI thật**
+— cần: đăng nhập Hữu Thọ → vào Kiểm soát quá trình → Đo nhanh chỉ tiêu → nhập kết quả → Lưu →
+xác nhận banner nổi góc trên-phải xuất hiện, dropdown có đúng việc "Đo mẫu tối thiểu 4 mẫu..." →
+gắn thành công, task chuyển "Hoàn thành". Test tương tự cho 4 người còn lại với 4 module còn lại
+(Điều xe/Sản lượng/Kiểm nghiệm/Kho nguyên liệu) nếu có tài khoản tương ứng. Test sửa 1 template
+BẤT KỲ đổi Module khác → xác nhận việc đang mở (nếu có) của template đó cập nhật `module_code`
+ngay, không cần đợi qua ngày.
+
+### Cập nhật (cùng phiên, tiếp 2) — Redesign banner lần 2: căn giữa màn hình + kèm backdrop
+
+Người dùng test tay ngay sau backfill — banner đã hiện đúng (xác nhận cơ chế lọc module hoạt
+động), nhưng phản ánh bản góc trên-phải (`fixed top-4 right-4 w-96`) "quá nhỏ", muốn to hơn và
+hiển thị **giữa màn hình**. Đã redesign `kpi-link-prompt.tsx` lần 2:
+
+- Đổi từ `fixed top-4 right-4 w-96` sang `fixed inset-0 flex items-center justify-center` — thẻ
+  nổi giữa màn hình, kèm backdrop `bg-black/30` (click backdrop = "Bỏ qua", tương đương nút có
+  sẵn). Card rộng hơn hẳn (`max-w-lg`, padding `p-6 sm:p-7`, bo góc `rounded-3xl`).
+  - Icon chuyển thành huy hiệu tròn lớn (`h-12 w-12 rounded-full bg-violet-100`) thay vì icon
+    trần nhỏ, giữ nguyên chấm pulse `animate-ping` ở góc.
+  - Tiêu đề tách 2 dòng rõ ràng (`text-base font-semibold` + dòng phụ `text-sm text-slate-500`
+    "Gắn vào công việc KPI nào đang mở?") thay vì 1 câu dài gộp chung.
+  - Dropdown/nút phóng to (`py-3`/`py-2.5`, `text-sm` thay `text-xs`), nút Bỏ qua/Gắn xếp hàng
+    ngang bên phải trên desktop, xếp dọc full-width trên mobile
+    (`flex-col-reverse sm:flex-row sm:justify-end`).
+  - Trạng thái "đã hoàn thành" (`doneLabel`) áp dụng cùng bố cục căn giữa + backdrop, không còn
+    lệch phong cách so với trạng thái chọn việc.
+  - Giữ nguyên `z-[70]`, giữ nguyên toàn bộ logic lọc module/auto-dismiss 3s/fail-silent — chỉ
+    đổi phần trình bày.
+
+`npx tsc --noEmit`/`npx eslint`/`npm run build` đều sạch. **Chưa test tay lại bản này** — cần xác
+nhận: card hiển thị đúng giữa màn hình trên cả desktop lẫn mobile, backdrop dim đúng toàn trang,
+click backdrop đóng đúng như nút "Bỏ qua", không bị modal khác của trang che khuất.
+
+### Cập nhật (cùng phiên, tiếp 3) — Backdrop không còn tự đóng, chỉ "nhấp nháy" + Hạn chấm điểm
+hiện trên QR vị trí 5S — ĐÃ CODE XONG, KHÔNG CẦN MIGRATION, CHƯA TEST TAY
+
+Người dùng test bản căn-giữa-màn-hình ở mục ngay trên, phản hồi 2 việc riêng biệt (không liên
+quan nhau — 1 việc thuộc `KpiLinkPrompt`, 1 việc thuộc Vị trí 5S):
+
+**1. Backdrop click không còn đóng banner — chỉ rung nhẹ để nhắc**
+
+Trước đó backdrop `onClick={() => onDone?.()}` coi click ra ngoài = "Bỏ qua" (đúng ghi chú ở mục
+"tiếp 2" phía trên). Người dùng muốn đổi: chỉ đúng nút "Bỏ qua" mới đóng được banner; click ra
+ngoài chỉ làm thẻ "nhấp nháy" (rung nhẹ) để nhắc còn đang chờ xử lý, KHÔNG đóng.
+
+- `src/app/globals.css` — thêm keyframe mới `attentionShake` (dịch ngang qua lại nhanh, tổng thời
+  lượng phù hợp `0.4s`), đặt ngay sau `slideUp` — dùng chung được cho bất kỳ hộp thoại "bắt buộc
+  tự đóng bằng nút" nào khác sau này, không riêng cho component này.
+- `kpi-link-prompt.tsx`: thêm state `shake` + `shakeTimerRef`; hàm `nudge()` — reset `shake` về
+  `false` rồi `requestAnimationFrame` bật lại `true` (đảm bảo class animation re-trigger được kể
+  cả khi click liên tiếp nhanh, vì React sẽ không re-render lại className giống hệt nếu giá trị
+  không đổi giữa 2 lần set liên tục) + `setTimeout` 420ms tắt lại. Backdrop của CẢ 2 trạng thái
+  (chọn việc / `doneLabel` đã hoàn thành) đổi `onClick={() => onDone?.()}` → `onClick={nudge}`.
+  Card áp dụng class động: `shake ? "animate-[attentionShake_0.4s_ease-in-out]" :
+  "animate-[fadeInUp_0.3s_ease-out]"` — giữ hiệu ứng xuất hiện ban đầu khi chưa rung, chuyển sang
+  rung khi người dùng bấm ra ngoài. Nút "Bỏ qua" và nút X góc trên đều giữ nguyên
+  `onClick={() => onDone?.()}` — vẫn là 2 cách DUY NHẤT đóng được banner (cùng với "Gắn & hoàn
+  thành" thành công).
+
+**2. Hạn chấm điểm 5S hiển thị trên/cạnh QR**
+
+Trước đó "hạn chấm" (Thứ + Giờ, `deadline_weekdays`/`deadline_time`, xem mục "Cập nhật (phiên sau
+Phase 5)") chỉ hiện dưới dạng badge cảnh báo quá hạn/sắp hạn ở đầu trang chi tiết vị trí — KHÔNG
+xuất hiện ở bất kỳ đâu gắn liền với chính mã QR (cả trên màn hình lẫn khi in ra dán hiện trường).
+Người dùng muốn hạn chấm đi kèm QR.
+
+- `src/lib/kpi-5s.ts` — thêm hàm dùng chung `formatKpi5sDeadlineLabel(location)` → trả về chuỗi
+  `"Thứ X, HH:MM"` hoặc `null` nếu chưa cấu hình (dùng `KPI_WEEKDAY_LABEL` từ `kpi-templates.ts`,
+  không có rủi ro circular import — `kpi-templates.ts` chỉ import `kpi-tasks.ts`, không import
+  ngược lại `kpi-5s.ts`).
+- `src/lib/kpi-5s-pdf.ts` (`downloadKpi5sLocationBulkQrPdf`) — `Pick<Kpi5sLocation, ...>` param
+  mở rộng thêm `deadline_weekdays`/`deadline_time`. Ngân sách chiều cao ô nhãn
+  (`computeGridLayout`) tăng thêm đúng 1 dòng cố định (`QR_LABEL_DEADLINE_LINE = 1`) — **áp dụng
+  đồng nhất cho MỌI ô trong lưới, kể cả vị trí chưa cấu hình hạn** (để giữ chiều cao ô thống nhất
+  toàn trang, các ô không có hạn chỉ đơn giản để trống dòng đó, không co lại — nếu co theo từng ô
+  sẽ làm lưới lệch hàng). Sau khối in mã/tên vị trí (tối đa 3 dòng như cũ), nếu
+  `formatKpi5sDeadlineLabel(location)` có giá trị thì in thêm 1 dòng riêng `"Hạn chấm: Thứ X,
+  HH:MM"` — cỡ chữ nhỏ hơn (`QR_LABEL_DEADLINE_FONT_SIZE_PT = 6.5pt` so với `7.5pt` của mã/tên),
+  in đậm, màu hổ phách (`rgb(180,83,9)`) để phân biệt rõ với 2 dòng thông tin định danh phía
+  trên. Vị trí chưa cấu hình hạn không in dòng này (chỉ để trống khoảng đã dành sẵn).
+- `src/app/dashboard/kpi/5s/location/[id]/page.tsx` — thêm `deadlineLabel` (tính qua
+  `formatKpi5sDeadlineLabel(location)`, hiển thị **bất kể tuần này đã chấm hay chưa** — khác hẳn
+  badge cảnh báo quá hạn/sắp hạn đã có sẵn ở đầu trang, vốn CHỈ hiện khi chưa chấm tuần này; đây
+  là thông tin tham khảo cố định, không phải cảnh báo hành động). Chèn ngay dưới khối QR
+  (`<QRCodeSVG>`) và trên nút "Tải QR": có cấu hình → dòng chữ hổ phách nhỏ kèm icon
+  `AlertTriangle`, "Hạn chấm: Thứ X, HH:MM"; chưa cấu hình → dòng chữ xám nhạt "Chưa cấu hình hạn
+  chấm" (giúp người xem biết ngay đây là trạng thái chưa thiết lập, không phải lỗi hiển thị).
+
+`npx tsc --noEmit`, `npx eslint` (4 file: `kpi-link-prompt.tsx`, `kpi-5s.ts`, `kpi-5s-pdf.ts`,
+`5s/location/[id]/page.tsx`), và `npm run build` đều sạch — build liệt kê đủ mọi route KPI, kể cả
+`/dashboard/kpi/5s/location/[id]` (dynamic), không route nào lỗi. Không có migration nào cần chạy
+cho cả 2 việc trong mục này (cột `deadline_weekdays`/`deadline_time` đã tồn tại sẵn từ trước).
+
+**Chưa test tay** — cần:
+
+1. Mở banner "Gắn bản ghi tại chỗ" (lưu 1 bản ghi ở module đã gắn Module cho task) → bấm ra
+   NGOÀI card (vùng backdrop tối) nhiều lần liên tiếp nhanh → xác nhận thẻ rung nhẹ mỗi lần bấm
+   (kể cả bấm dồn dập), KHÔNG bao giờ tự đóng; chỉ bấm đúng nút "Bỏ qua" hoặc nút X góc trên hoặc
+   "Gắn & hoàn thành" thành công mới đóng được.
+2. Mở 1 Vị trí 5S ĐÃ cấu hình hạn chấm (Thứ + Giờ) → xác nhận dòng "Hạn chấm: Thứ X, HH:MM" hiện
+   đúng ngay dưới QR trên màn hình (màu hổ phách), hiển thị dù tuần này đã chấm xong hay chưa.
+3. Mở 1 Vị trí 5S CHƯA cấu hình hạn → xác nhận dòng "Chưa cấu hình hạn chấm" (xám) hiện đúng chỗ,
+   không vỡ layout.
+4. Bấm "Tải QR" (in 1 vị trí đã có hạn chấm) hoặc vào Cài đặt → KPI & 5S → Vị trí 5S → chọn nhiều
+   vị trí (trộn cả có/chưa cấu hình hạn) → "In QR hàng loạt" → xác nhận PDF có dòng "Hạn chấm:
+   Thứ X, HH:MM" (chữ hổ phách, cỡ nhỏ hơn mã/tên) đúng dưới mỗi nhãn có cấu hình, các nhãn chưa
+   cấu hình để trống đúng khoảng đó — toàn bộ lưới các ô vẫn thẳng hàng nhau (không lệch chiều
+   cao giữa ô có/không có dòng hạn chấm).

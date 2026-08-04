@@ -165,6 +165,19 @@ export async function updateKpiTaskTemplate(
     })
     .eq("id", id)
   if (error) throw error
+
+  // Đồng bộ module_code xuống ĐÚNG instance đang mở của template này (nếu có) — RPC
+  // kpi_ensure_today_task_instances chỉ sinh instance MỚI khi instance cũ đã đóng (chặn "mắc
+  // kẹt", xem 20260812_kpi_task_templates_skip_stuck.sql), nên nếu không đồng bộ ở đây, sửa
+  // Module cho 1 template có sẵn sẽ không có tác dụng gì trên việc đang mở của người dùng — họ
+  // phải chờ tới khi việc đó đóng rồi mới thấy instance kế tiếp mang đúng module (bug thật đã
+  // gặp: template "Đo mẫu" sửa xong nhưng CV-010826/002 vẫn module_code=NULL, không hiện banner).
+  const { error: syncErr } = await supabase
+    .from("kpi_tasks")
+    .update({ module_code: input.moduleCode })
+    .eq("template_id", id)
+    .not("trang_thai", "in", "(hoan_thanh,huy)")
+  if (syncErr) throw syncErr
 }
 
 export async function setKpiTaskTemplateActive(id: string, isActive: boolean): Promise<void> {
