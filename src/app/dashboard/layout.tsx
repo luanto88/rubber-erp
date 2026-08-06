@@ -39,6 +39,15 @@ import {
   type SessionUser,
 } from "@/lib/auth"
 import { getModuleTasks, type ModuleTaskSummary } from "./_components/module-tasks"
+import {
+  broadcastCustomerPortalLangChange,
+  getStoredCustomerPortalLang,
+  onCustomerPortalLangChange,
+  tCustomerPortal,
+  translateNavLabel,
+  type CustomerPortalLang,
+} from "@/lib/customer-portal-i18n"
+import { CustomerPortalLangToggle } from "./customer-portal/_components/lang-toggle"
 
 interface AppNotification {
   id: string
@@ -156,6 +165,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // độc lập với bảng notifications, không cần migration.
   const [moduleTasks, setModuleTasks] = useState<ModuleTaskSummary | null>(null)
   const moduleRoutePrefix = pathname.split("/").slice(0, 3).join("/") // "/dashboard/xxx"
+
+  // Song ngữ khung dashboard (sidebar/header/thông báo) — CHỈ áp dụng cho role="customer"
+  // (dùng chung key lưu trữ với Customer Portal để đồng bộ lựa chọn ngôn ngữ giữa 2 nơi).
+  // Nhân viên nội bộ luôn thấy tiếng Việt như trước, không bị ảnh hưởng gì.
+  const isCustomer = user?.role === "customer"
+  const [customerLang, setCustomerLang] = useState<CustomerPortalLang>("en")
+  const chromeLang: CustomerPortalLang = isCustomer ? customerLang : "vi"
+  const tc = (key: Parameters<typeof tCustomerPortal>[1]) => tCustomerPortal(chromeLang, key)
+  const navLabel = (label: string) => translateNavLabel(label, chromeLang)
+
+  useEffect(() => {
+    setCustomerLang(getStoredCustomerPortalLang())
+    return onCustomerPortalLangChange(setCustomerLang)
+  }, [])
 
   useEffect(() => {
     if (isPublicStorageLookup) {
@@ -477,8 +500,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-extrabold">Nhà máy chế biến Phước Hòa KPT</div>
-                <div className="truncate text-[10px] text-emerald-400">Hệ thống quản lý sản xuất</div>
+                <div className="truncate text-sm font-extrabold">{tc("factoryNameShort")}</div>
+                <div className="truncate text-[10px] text-emerald-400">{tc("factorySystemShort")}</div>
               </div>
             </>
           ) : (
@@ -520,7 +543,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <item.icon size={18} />
                     {!collapsed && (
                       <>
-                        <span className="flex-1 text-left">{item.label}</span>
+                        <span className="flex-1 text-left">{navLabel(item.label)}</span>
                         <ChevronRight
                           size={14}
                           className={"transition-transform " + (isOpen ? "rotate-90" : "")}
@@ -548,7 +571,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           }
                         >
                           <child.icon size={15} />
-                          <span>{child.label}</span>
+                          <span>{navLabel(child.label)}</span>
                         </button>
                       )
                     })}
@@ -573,7 +596,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 }
               >
                 <item.icon size={18} />
-                {!collapsed && <span>{item.label}</span>}
+                {!collapsed && <span>{navLabel(item.label)}</span>}
               </button>
             )
           })}
@@ -585,17 +608,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <button
             onClick={() => setMobileNavOpen(true)}
             className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors md:hidden"
-            aria-label="Mở menu điều hướng"
+            aria-label={tc("openNav")}
           >
             <Menu size={18} />
           </button>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          {isCustomer && (
+            <CustomerPortalLangToggle lang={customerLang} onChange={broadcastCustomerPortalLangChange} />
+          )}
           {/* Bell notifications */}
           <div ref={notifRef} className="relative">
             <button
               onClick={() => setNotifOpen(!notifOpen)}
               className="relative flex h-10 w-10 items-center justify-center rounded-xl hover:bg-slate-100 transition-colors"
-              title="Thông báo"
+              title={tc("notifications")}
             >
               <Bell size={17} className="text-slate-500" />
               {unreadCount > 0 && (
@@ -621,7 +647,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
                     <span className="text-sm font-bold text-slate-700">
-                      {hasModuleTasks ? `Việc cần làm — ${moduleTasks!.moduleLabel}` : "Thông báo"}
+                      {hasModuleTasks ? `${tc("tasksToDoPrefix")} — ${moduleTasks!.moduleLabel}` : tc("notifications")}
                     </span>
                     <div className="flex items-center gap-3">
                       {!hasModuleTasks && unreadCount > 0 && (
@@ -634,13 +660,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           }}
                           className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800"
                         >
-                          Đánh dấu tất cả đã đọc
+                          {tc("markAllRead")}
                         </button>
                       )}
                       <button
                         onClick={() => setNotifOpen(false)}
                         className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 md:hidden"
-                        aria-label="Đóng"
+                        aria-label={tc("closeLabel")}
                       >
                         <X size={16} />
                       </button>
@@ -667,7 +693,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         </button>
                       ))
                     ) : notifications.length === 0 ? (
-                      <div className="py-8 text-center text-sm text-slate-400">Không có thông báo</div>
+                      <div className="py-8 text-center text-sm text-slate-400">{tc("noNotifications")}</div>
                     ) : (
                       notifications.map((n) => (
                         <button
@@ -690,7 +716,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                               <p className="text-xs font-bold text-slate-800 line-clamp-1">{n.title}</p>
                               {n.body && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>}
                               <p className="text-[10px] text-slate-400 mt-1">
-                                {new Date(n.created_at).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                {new Date(n.created_at).toLocaleDateString(chromeLang === "en" ? "en-US" : "vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                               </p>
                             </div>
                           </div>
@@ -741,7 +767,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
                 >
                   <LogOut size={15} />
-                  Đăng xuất
+                  {tc("logout")}
                 </button>
               </div>
             )}

@@ -13,6 +13,7 @@ import { InventoryQrCard } from "../_components/inventory-qr-card"
 import { buildEffectiveStockBalances, getStockContextLabel, resolveStockThreshold } from "../_components/inventory-stock"
 import { CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import {
   sendInventoryLowStockAlert,
   sendInventoryNxtChangeNotify,
@@ -283,6 +284,8 @@ export default function InventoryTransfersPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu chuyển vừa ghi sổ vào công việc KPI đang mở.
+  const [kpiPrompt, setKpiPrompt] = useState<{ recordId: string; recordLabel: string } | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"draft" | "posted" | "cancelled" | null>(null)
   const [postedInfo, setPostedInfo] = useState<{ at: string; byName: string } | null>(null)
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
@@ -910,6 +913,7 @@ export default function InventoryTransfersPage() {
         documentCode: targetDocumentCode,
       }))
       setSaveSuccess(`Đã ghi sổ phiếu chuyển ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
+      setKpiPrompt({ recordId: targetDocumentId, recordLabel: targetDocumentCode })
       const freshBalances = await refreshBalances(factoryId)
       const freshBalanceMap = new Map(
         freshBalances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0]),
@@ -997,6 +1001,16 @@ export default function InventoryTransfersPage() {
       title="Phiếu chuyển kho"
       description="Chọn kho nguồn, kho đích và nhiều vật tư cùng lúc. Mỗi dòng được hoàn thiện theo số lô và hạn dùng còn tồn ở kho nguồn."
     >
+      {kpiPrompt && (
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="inventory:transfer"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl={`/dashboard/inventory/transfers?documentId=${encodeURIComponent(kpiPrompt.recordId)}`}
+          onDone={() => setKpiPrompt(null)}
+        />
+      )}
       {warning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <div className="font-bold">Đang dùng dữ liệu mẫu</div>

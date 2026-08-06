@@ -15,6 +15,15 @@ import {
   signOutEverywhere,
   signUpWithUsername,
 } from "@/lib/auth"
+import {
+  broadcastCustomerPortalLangChange,
+  getStoredCustomerPortalLang,
+  hasStoredCustomerPortalLang,
+  onCustomerPortalLangChange,
+  tCustomerPortal,
+  type CustomerPortalLang,
+} from "@/lib/customer-portal-i18n"
+import { CustomerPortalLangToggle } from "@/app/dashboard/customer-portal/_components/lang-toggle"
 
 type FactoryOption = {
   id: string
@@ -31,12 +40,6 @@ type DepartmentOption = {
 }
 
 const LOGIN_BOOT_TIMEOUT_MS = 8000
-
-const REASON_MESSAGES: Record<string, string> = {
-  pending: "Tài khoản đã đăng nhập nhưng đang chờ admin phê duyệt.",
-  disabled: "Tài khoản đã bị khóa. Vui lòng liên hệ admin.",
-  no_factory: "Tài khoản chưa được gán nhà máy.",
-}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
   return Promise.race<T>([
@@ -65,9 +68,33 @@ function LoginPageContent() {
   const [deptOpen, setDeptOpen] = useState(false)
   const deptRef = useRef<HTMLDivElement>(null)
   const [booting, setBooting] = useState(true)
-  const [notice, setNotice] = useState("")
+  // Lưu dưới dạng key/reason thay vì chuỗi đã dịch sẵn — thông báo này được set bên trong
+  // 1 effect chỉ chạy 1 lần lúc mount (closure có thể "cũ" nếu người dùng đổi ngôn ngữ
+  // ngay sau đó); dịch tại thời điểm render (dùng `lang` hiện tại) để luôn đúng ngôn ngữ.
+  const [notice, setNotice] = useState<{ kind: "reason"; reason: string } | { kind: "key"; key: Parameters<typeof tCustomerPortal>[1] } | null>(null)
+  const [lang, setLang] = useState<CustomerPortalLang>("vi")
+  const t = (key: Parameters<typeof tCustomerPortal>[1]) => tCustomerPortal(lang, key)
 
   const reason = searchParams.get("reason") || ""
+
+  // Mặc định tiếng Việt (đa số người dùng là nhân viên nhà máy) — chỉ theo lựa chọn đã
+  // lưu trước đó nếu người dùng (hoặc Customer Portal) đã từng đổi ngôn ngữ tường minh.
+  useEffect(() => {
+    setLang(hasStoredCustomerPortalLang() ? getStoredCustomerPortalLang() : "vi")
+    return onCustomerPortalLangChange(setLang)
+  }, [])
+
+  const changeLang = (next: CustomerPortalLang) => {
+    setLang(next)
+    broadcastCustomerPortalLangChange(next)
+  }
+
+  const reasonMessage = (r: string): string => {
+    if (r === "pending") return t("reasonPending")
+    if (r === "disabled") return t("reasonDisabled")
+    if (r === "no_factory") return t("reasonNoFactory")
+    return ""
+  }
 
   const factoryOptions = useMemo(
     () =>
@@ -135,7 +162,7 @@ function LoginPageContent() {
 
           if (blockReason && blockReason !== "missing") {
             await signOutEverywhere()
-            if (alive) setNotice(REASON_MESSAGES[blockReason] || "")
+            if (alive) setNotice({ kind: "reason", reason: blockReason })
           }
         } else {
           clearLegacySession()
@@ -145,7 +172,7 @@ function LoginPageContent() {
           setFactories([])
           setDepartments([])
           clearLegacySession()
-          setNotice("Không thể tải phiên đăng nhập tự động. Bạn vẫn có thể đăng nhập thủ công.")
+          setNotice({ kind: "key", key: "errorCannotLoadSession" })
         }
       } finally {
         if (alive) setBooting(false)
@@ -161,8 +188,10 @@ function LoginPageContent() {
   }, [])
 
   useEffect(() => {
-    if (reason) setNotice(REASON_MESSAGES[reason] || "")
+    if (reason) setNotice({ kind: "reason", reason })
   }, [reason])
+
+  const noticeText = notice ? (notice.kind === "reason" ? reasonMessage(notice.reason) : t(notice.key)) : ""
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -176,10 +205,10 @@ function LoginPageContent() {
 
   const handleLogin = async () => {
     setError("")
-    setNotice("")
+    setNotice(null)
 
     if (!username.trim() || !password) {
-      setError("Vui lòng nhập tên đăng nhập và mật khẩu")
+      setError(t("errorFillCreds"))
       return
     }
 
@@ -188,7 +217,7 @@ function LoginPageContent() {
     try {
       const { data, error: authError } = await signInWithUsername(username, password)
       if (authError || !data.user) {
-        setError(authError ? describeAuthError(authError) : "Sai tên đăng nhập hoặc mật khẩu")
+        setError(authError ? describeAuthError(authError) : t("errorWrongCreds"))
         setLoading(false)
         return
       }
@@ -198,7 +227,7 @@ function LoginPageContent() {
 
       if (blockReason) {
         await signOutEverywhere()
-        setError(REASON_MESSAGES[blockReason] || "Tài khoản không thể truy cập hệ thống")
+        setError(reasonMessage(blockReason) || t("reasonGeneric"))
         setLoading(false)
         return
       }
@@ -213,18 +242,18 @@ function LoginPageContent() {
 
   const handleRegister = async () => {
     setError("")
-    setNotice("")
+    setNotice(null)
 
     const normalizedUsername = normalizeUsername(username)
     const normalizedEmail = email.trim().toLowerCase()
 
     if (!normalizedUsername || !password || !fullName.trim() || !normalizedEmail || !factoryId) {
-      setError("Vui lòng nhập đầy đủ thông tin bắt buộc")
+      setError(t("errorFillAllRequired"))
       return
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setError("Vui lòng nhập email hợp lệ")
+      setError(t("errorInvalidEmail"))
       return
     }
 
@@ -244,7 +273,7 @@ function LoginPageContent() {
       }
 
       if (existingProfile.data) {
-        setError("Tên đăng nhập đã tồn tại")
+        setError(t("errorUsernameTaken"))
         setLoading(false)
         return
       }
@@ -260,7 +289,7 @@ function LoginPageContent() {
 
       if (signupError) {
         setError(
-          signupError.message.includes("already") ? "Tên đăng nhập đã tồn tại" : signupError.message,
+          signupError.message.includes("already") ? t("errorUsernameTaken") : signupError.message,
         )
         setLoading(false)
         return
@@ -268,12 +297,12 @@ function LoginPageContent() {
 
       await supabase.auth.signOut()
       clearLegacySession()
-      setNotice("Đăng ký thành công. Tài khoản đang ở trạng thái chờ phê duyệt.")
+      setNotice({ kind: "key", key: "registerSuccessNotice" })
       setTab("login")
       setPassword("")
       setEmail("")
     } catch {
-      setError("Không thể đăng ký. Vui lòng thử lại.")
+      setError(t("errorCannotRegister"))
     }
 
     setLoading(false)
@@ -282,6 +311,9 @@ function LoginPageContent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
       <div className="w-full max-w-md">
+        <div className="mb-3 flex justify-end">
+          <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
+        </div>
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex justify-center">
             <Image
@@ -297,10 +329,10 @@ function LoginPageContent() {
             CTY TNHH PTCS PHƯỚC HÒA KAMPONG THOM
           </h1>
           <p className="mt-2 text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
-            NHÀ MÁY CHẾ BIẾN
+            {t("factorySubtitle")}
           </p>
           <p className="mt-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
-            HỆ THỐNG QUẢN LÝ SẢN XUẤT
+            {t("systemSubtitle")}
           </p>
         </div>
 
@@ -308,7 +340,7 @@ function LoginPageContent() {
           {booting && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-              <span>Đang kiểm tra phiên đăng nhập và tải dữ liệu ban đầu...</span>
+              <span>{t("bootingMessage")}</span>
             </div>
           )}
 
@@ -319,14 +351,14 @@ function LoginPageContent() {
                 onClick={() => {
                   setTab(item)
                   setError("")
-                  setNotice("")
+                  setNotice(null)
                 }}
                 className={
                   "flex-1 rounded-full py-2.5 text-sm font-bold transition-all " +
                   (tab === item ? "bg-emerald-600 text-white shadow-md" : "text-slate-500 hover:bg-emerald-50")
                 }
               >
-                {item === "login" ? "Đăng nhập" : "Đăng ký"}
+                {item === "login" ? t("loginTab") : t("registerTab")}
               </button>
             ))}
           </div>
@@ -337,7 +369,7 @@ function LoginPageContent() {
               onChange={(e) => setFactoryId(e.target.value)}
               className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
             >
-              {factoryOptions.length === 0 && <option value="">Chọn nhà máy</option>}
+              {factoryOptions.length === 0 && <option value="">{t("selectFactoryPlaceholder")}</option>}
               {factoryOptions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label}
@@ -350,14 +382,14 @@ function LoginPageContent() {
                 <input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Họ tên *"
+                  placeholder={t("fullNamePlaceholder")}
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email cá nhân *"
+                  placeholder={t("emailPlaceholder")}
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
                 />
                 <div ref={deptRef} className="relative">
@@ -374,7 +406,7 @@ function LoginPageContent() {
                         ? departments.find((d) => d.name === dept)
                           ? `${dept} (${departments.find((d) => d.name === dept)?.code || ""})`
                           : dept
-                        : "Phòng ban"}
+                        : t("departmentPlaceholder")}
                     </span>
                     <ChevronDown size={16} className={"transition-transform " + (deptOpen ? "rotate-180" : "")} />
                   </button>
@@ -391,7 +423,7 @@ function LoginPageContent() {
                           (!dept ? "bg-emerald-50 font-semibold text-emerald-700" : "text-slate-400")
                         }
                       >
-                        Phòng ban
+                        {t("departmentPlaceholder")}
                       </button>
                       {departments.map((department) => (
                         <button
@@ -420,7 +452,7 @@ function LoginPageContent() {
             <input
               value={username}
               onChange={(e) => setUsername(normalizeUsername(e.target.value))}
-              placeholder="Tên đăng nhập *"
+              placeholder={t("usernamePlaceholder")}
               className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
             />
 
@@ -428,7 +460,7 @@ function LoginPageContent() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mật khẩu *"
+              placeholder={t("passwordPlaceholder")}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   void (tab === "login" ? handleLogin() : handleRegister())
@@ -437,9 +469,9 @@ function LoginPageContent() {
               className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
             />
 
-            {notice && (
+            {noticeText && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
-                {notice}
+                {noticeText}
               </div>
             )}
 
@@ -454,7 +486,7 @@ function LoginPageContent() {
               disabled={loading || (tab === "register" && !factoryId)}
               className="w-full rounded-xl bg-emerald-600 py-3 font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
             >
-              {loading ? "Đang xử lý..." : tab === "login" ? "Đăng nhập" : "Đăng ký"}
+              {loading ? t("processingButton") : tab === "login" ? t("loginTab") : t("registerTab")}
             </button>
           </div>
         </div>

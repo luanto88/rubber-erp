@@ -4,19 +4,21 @@
 // nhân sự (personnel_groups). Chọn nhóm chỉ là tiện ích UI mở rộng thành viên tại thời điểm
 // tạo (snapshot), không lưu liên kết nhóm nào trên chính kpi_tasks.
 
-import { useEffect, useMemo, useState } from "react"
-import { Users } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { ImagePlus, Loader2, Users, X } from "lucide-react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { getTodayISODate } from "@/lib/date-utils"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import type { DepartmentOption } from "@/lib/kpi-department-leaders"
+import type { Kpi5sLocation } from "@/lib/kpi-5s"
 import {
   computeChinhThreshold,
   createKpiTask,
   formatKpiDateTime,
   getKpiErrorMessage,
   loadKpiTaskCandidates,
+  uploadKpiEvidenceImage,
   KPI_MODULE_OPTIONS,
   KPI_REPORT_REQ_LABEL,
   type KpiReportRequirement,
@@ -24,6 +26,10 @@ import {
   type KpiTaskCandidate,
   type KpiTaskCandidateGroup,
 } from "@/lib/kpi-tasks"
+
+// Ảnh hiện trạng "before" (việc đột xuất 5S) — tối đa 4 ảnh, nhỏ gọn hơn hẳn ảnh bằng chứng
+// đầy đủ (kpi-evidence-picker.tsx, tối đa 6) vì đây chỉ là ảnh tham khảo lúc giao việc.
+const MAX_BEFORE_IMAGES = 4
 
 const REPORT_REQ_OPTIONS: KpiReportRequirement[] = ["anh", "file", "dinh_vi", "van_ban"]
 
@@ -40,11 +46,13 @@ type KpiTaskFormModalProps = {
   nguoiGiaoId: string
   candidates: { people: KpiTaskCandidate[]; groups: KpiTaskCandidateGroup[] }
   departments: DepartmentOption[]
+  // Việc đột xuất 5S (tuỳ chọn) — danh sách vị trí để chọn "Vị trí 5S liên quan".
+  kpi5sLocations: Kpi5sLocation[]
   onClose: () => void
   onCreated: (task: KpiTask) => void
 }
 
-export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departments, onClose, onCreated }: KpiTaskFormModalProps) {
+export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departments, kpi5sLocations, onClose, onCreated }: KpiTaskFormModalProps) {
   const [tieuDe, setTieuDe] = useState("")
   const [moTa, setMoTa] = useState("")
   const [phongBanId, setPhongBanId] = useState("")
@@ -57,6 +65,36 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
   const [nguoiChinhId, setNguoiChinhId] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Việc đột xuất 5S (tuỳ chọn) — liên kết vị trí + ảnh "before". `taskId` sinh sẵn phía client
+  // (crypto.randomUUID()) để upload ảnh lên đúng path Storage TRƯỚC khi tạo dòng kpi_tasks (xem
+  // migration 20260817_kpi_tasks_5s_adhoc.sql) — chỉ thực sự dùng làm id khi có ít nhất 1 ảnh.
+  const [taskId] = useState(() => crypto.randomUUID())
+  const [locationId, setLocationId] = useState("")
+  const [beforeImages, setBeforeImages] = useState<string[]>([])
+  const [uploadingBefore, setUploadingBefore] = useState(false)
+  const [beforeError, setBeforeError] = useState<string | null>(null)
+  const beforeInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleBeforeFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length) return
+    const remaining = MAX_BEFORE_IMAGES - beforeImages.length
+    if (remaining <= 0) {
+      setBeforeError(`Tối đa ${MAX_BEFORE_IMAGES} ảnh.`)
+      return
+    }
+    const files = Array.from(fileList).slice(0, remaining)
+    setUploadingBefore(true)
+    setBeforeError(null)
+    try {
+      const urls = await Promise.all(files.map((file) => uploadKpiEvidenceImage(factoryId, taskId, file)))
+      setBeforeImages((prev) => [...prev, ...urls])
+    } catch (err) {
+      setBeforeError(getKpiErrorMessage(err, "Không tải được ảnh."))
+    } finally {
+      setUploadingBefore(false)
+    }
+  }
 
   // Ứng viên "Người thực hiện" thu hẹp theo phòng ban đã chọn — mặc định = candidates chung khi
   // chưa chọn phòng ban (không chặn tạo việc trước khi có phòng ban).
@@ -139,6 +177,9 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
         nguoiChinhId: isQuantityMode ? nguoiChinhId : null,
         phongBanId,
         moduleCode: moduleCode || null,
+        kpi5sLocationId: locationId || null,
+        beforeImageUrls: beforeImages.length ? beforeImages : null,
+        id: beforeImages.length ? taskId : undefined,
       })
       sendKpiNotify({
         factoryId,
@@ -237,6 +278,71 @@ export function KpiTaskFormModal({ factoryId, nguoiGiaoId, candidates, departmen
             Chọn đúng module để người thực hiện được gợi ý &quot;Gắn bằng chứng&quot; ngay sau khi
             họ lưu 1 bản ghi ở module đó — để trống nếu việc không liên quan module nào.
           </p>
+        </div>
+
+        {kpi5sLocations.length > 0 && (
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Vị trí 5S liên quan (tuỳ chọn)</label>
+            <select
+              value={locationId}
+              onChange={(e) => setLocationId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            >
+              <option value="">-- Không liên quan vị trí 5S nào --</option>
+              {kpi5sLocations.map((loc) => (
+                <option key={loc.id} value={loc.id}>{loc.ma_vi_tri} — {loc.ten_vi_tri}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Dùng cho việc đột xuất tại 1 vị trí 5S cụ thể — hoàn toàn tách biệt với chấm điểm 5S
+              định kỳ, chỉ hiện link tham khảo ở trang chi tiết việc.
+            </p>
+          </div>
+        )}
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">
+            Ảnh hiện trạng trước khi xử lý — before (tuỳ chọn, tối đa {MAX_BEFORE_IMAGES} ảnh)
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {beforeImages.map((url, i) => (
+              <div key={`${url}-${i}`} className="group relative h-16 w-16 overflow-hidden rounded-xl bg-slate-100 shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`Ảnh ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setBeforeImages((prev) => prev.filter((_, idx) => idx !== i))}
+                  className="absolute right-0.5 top-0.5 rounded-full bg-white/90 p-0.5 text-slate-500 shadow-sm transition hover:bg-white"
+                  aria-label={`Xóa ảnh ${i + 1}`}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+            {beforeImages.length < MAX_BEFORE_IMAGES && (
+              <button
+                type="button"
+                onClick={() => beforeInputRef.current?.click()}
+                disabled={uploadingBefore}
+                className="flex h-16 w-16 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Thêm ảnh"
+              >
+                {uploadingBefore ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+              </button>
+            )}
+          </div>
+          {beforeError && <div className="mt-1 text-[11px] font-semibold text-red-600">{beforeError}</div>}
+          <input
+            ref={beforeInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void handleBeforeFiles(e.target.files)
+              e.target.value = ""
+            }}
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-3">

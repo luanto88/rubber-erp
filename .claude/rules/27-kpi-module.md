@@ -4313,3 +4313,189 @@ cho cả 2 việc trong mục này (cột `deadline_weekdays`/`deadline_time` đ
    Thứ X, HH:MM" (chữ hổ phách, cỡ nhỏ hơn mã/tên) đúng dưới mỗi nhãn có cấu hình, các nhãn chưa
    cấu hình để trống đúng khoảng đó — toàn bộ lưới các ô vẫn thẳng hàng nhau (không lệch chiều
    cao giữa ô có/không có dòng hạn chấm).
+
+## Cập nhật 2026-08-17 — Mở rộng liên kết module (Bảo trì/Xuất hàng/Kho vật tư), Việc đột xuất
+5S kèm ảnh "before", nút Nhắc nhở thủ công (ĐÃ CODE XONG, CHƯA CHẠY MIGRATION, CHƯA TEST TAY)
+
+Cùng đợt: điều tra và fix riêng biệt nguyên nhân "Ghi chú nhanh bị lag" (xem mục cuối cùng của
+mục này) — không liên quan tới KPI, chỉ tình cờ làm cùng phiên vì cùng 1 yêu cầu của người dùng.
+
+### A. Migration mới (2 file, **CẦN CHẠY THỦ CÔNG trên Supabase SQL Editor**, CHƯA CHẠY)
+
+- `supabase/migrations/20260817_kpi_task_module_code_extend.sql` — mở rộng CHECK constraint
+  `module_code` trên cả `kpi_tasks` và `kpi_task_templates` từ 6 lên **9 giá trị** (thêm
+  `maintenance`, `export`, `inventory`). `DROP CONSTRAINT IF EXISTS` rồi `ADD CONSTRAINT` lại,
+  đúng phong cách `20260816_kpi_task_module_code.sql`. Không backfill.
+- `supabase/migrations/20260817_kpi_tasks_5s_adhoc.sql` — thêm 2 cột tuỳ chọn vào `kpi_tasks`:
+  `kpi_5s_location_id UUID REFERENCES kpi_5s_locations(id) ON DELETE SET NULL` và
+  `before_image_urls TEXT[] NULL DEFAULT NULL`, kèm index `WHERE kpi_5s_location_id IS NOT NULL`.
+  Dùng cho "Việc đột xuất 5S" (mục C).
+
+### B. Mở rộng `KpiLinkPrompt` sang Bảo trì/Xuất hàng/Kho vật tư
+
+`src/lib/kpi-tasks.ts`'s `KPI_MODULE_OPTIONS` thêm 3 phần tử: `maintenance` (Bảo trì), `export`
+(Xuất hàng), `inventory` (Kho vật tư) — `KpiModuleCode`/`KPI_MODULE_LABEL` tự suy theo. Kiểm nghiệm
+đã có sẵn từ trước, không cần thêm. Tổng cộng **7 call site cũ + 5 call site mới = 12**:
+
+- **Bảo trì** (`maintenance:save`) — `src/app/dashboard/maintenance/records/[id]/page.tsx`,
+  `handleSave`. **Điểm rủi ro cao nhất trong cả đợt này**: nhánh `isNew` trước đây gọi
+  `router.push(...)` NGAY sau khi tạo biên bản — nếu vẫn giữ nguyên, đổi `params.id` ngay lập tức
+  sẽ remount route con và làm mất state `kpiPrompt` giữa chừng (banner chớp tắt/mất). Đã sửa: nhánh
+  `isNew` giờ chỉ `setKpiPrompt({..., navigateTo: "/dashboard/maintenance/records/${recordId}"})`,
+  `router.push` bị **delay tới `onDone`** của `KpiLinkPrompt` (đóng banner mới điều hướng). Nhánh
+  sửa (không phải `isNew`) không có vấn đề này (không đổi route), set `kpiPrompt` không kèm
+  `navigateTo`.
+- **Xuất hàng** (`export:create`) — `src/app/dashboard/export/page.tsx`, `handleSave`. **Việc tiên
+  quyết đã fix**: nhánh tạo đơn mới trước đây insert `export_orders` **không có
+  `.select("id").single()`** — không có cách nào lấy `id` đơn vừa tạo để truyền vào
+  `KpiLinkPrompt`. Đã thêm `.select("id").single()`, capture `insertedOrder.id`. `recordUrl` chỉ
+  trỏ `/dashboard/export` (không có deep-link theo đơn cụ thể — trang này không hỗ trợ query param
+  đó).
+- **Kho vật tư** — 3 luồng **dùng chung 1 `module_code = "inventory"`** (mirror cách
+  `process:measurement` gộp về family `process`): Nhập kho (`inventory:receipt`,
+  `receipts/page.tsx`'s `postReceiptDraft`), Xuất kho (`inventory:issue`, `issues/page.tsx`'s
+  `postIssueDraft`), Chuyển kho (`inventory:transfer`, `transfers/page.tsx`'s `postTransferDraft`)
+  — cả 3 set `kpiPrompt` ngay sau khi RPC ghi sổ (`inventory_post_import_document`/
+  `inventory_post_export_document`/`inventory_post_transfer_document`) thành công, `recordUrl` dùng
+  đúng pattern `?documentId=` mà cả 3 trang đã đọc sẵn để deep-link. **Hệ quả cố ý chấp nhận**: 1
+  việc "Kho vật tư" đang mở sẽ được gợi ý sau BẤT KỲ thao tác nào trong 3 luồng, không phân biệt
+  đúng là Nhập/Xuất/Chuyển.
+
+### C. Việc đột xuất 5S kèm ảnh "before" — model hoá bằng `kpi_tasks`, KHÔNG đụng
+`kpi_5s_evaluations`
+
+Đã chốt với người dùng qua `AskUserQuestion`: dùng lại nguyên hệ thống "Công việc" hiện có, thêm 2
+field tuỳ chọn — **hoàn toàn tách biệt** với chấm điểm 5S định kỳ hàng tuần, không ảnh hưởng công
+thức tính điểm C (5S) hàng tháng.
+
+- `src/lib/kpi-tasks.ts`: `KpiTask` type + `TASK_COLS` thêm `kpi_5s_location_id`/
+  `before_image_urls`. `createKpiTask()` thêm 3 tham số tuỳ chọn: `kpi5sLocationId`,
+  `beforeImageUrls`, và **`id?: string`** (client-generated).
+- **Vấn đề thiết kế đã giải quyết**: `kpi_tasks` hiện **không có màn Sửa** sau khi tạo — nếu insert
+  task trước rồi mới upload ảnh, 1 lần upload/update lỗi sẽ để lại task vĩnh viễn không có ảnh
+  before và không có cách bổ sung. Giải pháp: client tự sinh `id` (`crypto.randomUUID()`) TRƯỚC
+  khi insert, upload ảnh lên đúng path Storage `{factory_id}/kpi/tasks/{id}/...` (dùng lại
+  `uploadKpiEvidenceImage` có sẵn) rồi mới `createKpiTask({..., id})` với `id` tường minh — chỉ
+  dùng nhánh này khi thực sự có ít nhất 1 ảnh (task thường vẫn để DB tự sinh `id` như cũ). Đã xác
+  nhận an toàn qua đọc trực tiếp schema: `kpi_tasks.id` chỉ là `UUID DEFAULT gen_random_uuid()`
+  (không phải `GENERATED ALWAYS`), RLS `kpi_tasks_insert` không tham chiếu `id`, không có
+  `BEFORE INSERT` trigger nào can thiệp.
+- `KpiTaskFormModal` (`kpi-task-form-modal.tsx`) — modal "Giao công việc mới" DÙNG CHUNG (không
+  tách flow riêng cho 5S), thêm 2 field tuỳ chọn ngay sau "Module liên quan": dropdown "Vị trí 5S
+  liên quan" (nguồn `kpi5sLocations` — tải 1 lần ở `kpi/tasks/page.tsx` qua `fetchKpi5sLocations`,
+  truyền xuống modal qua prop mới, tránh fetch lại mỗi lần mở modal) và widget ảnh nhỏ gọn "Ảnh
+  hiện trạng trước khi xử lý — before" (tối đa 4 ảnh, `taskId` sinh 1 lần qua
+  `useState(() => crypto.randomUUID())`).
+- Hiển thị (`kpi/tasks/[id]/page.tsx`): khối mới "Ảnh hiện trạng lúc giao việc (before)" (thumbnail
+  grid, click mở ảnh gốc tab mới) render ngay dưới callout "Ghi chú / Hướng dẫn thực hiện", chỉ
+  hiện khi `task.before_image_urls?.length`. Badge/link "Vị trí 5S liên quan: {mã} — {tên}" (icon
+  `MapPin`, trỏ `/dashboard/kpi/5s/location/{id}`) khi `task.kpi_5s_location_id` có giá trị — tên
+  vị trí resolve qua `fetchKpi5sLocation(id)` (1 lần, `useEffect` phụ thuộc
+  `task?.kpi_5s_location_id`). Ảnh "after" do người thực hiện nộp qua đúng luồng nộp tiến độ đã có
+  sẵn (không sửa gì thêm) — 2 bộ ảnh (before đầu trang, after trong nhật ký xử lý) tạo cặp đối
+  chiếu.
+
+### D. Nút "Nhắc nhở" thủ công — CHỈ Telegram, KHÔNG có cơ chế tự động
+
+Đã chốt với người dùng: vì repo hoàn toàn không có hạ tầng cron nào (không Vercel Cron, không
+route `/api/cron*`), nút "Nhắc nhở" chỉ là **hành động thủ công** — người giao/Admin tự bấm để gửi
+Telegram ngay qua `sendKpiNotify()` có sẵn (không sửa `/api/kpi/notify`, không thêm bảng "đã nhắc"
+nào). Mỗi nút tự khoá tạm 45 giây sau khi bấm (state cục bộ `remindCooldown`/`remindCooldownIds`,
+KHÔNG ghi DB) chỉ để tránh gửi trùng do double-click — không phải cơ chế chống spam thật sự.
+
+Áp dụng ở **4 nơi**, đều cùng công thức `{ factoryId, title, lines: [...], link }`:
+
+1. `kpi/tasks/[id]/page.tsx` — nút cạnh "Hủy công việc" (header), gate `isOwner && open` (dùng
+   đúng biến quyền có sẵn).
+2. `kpi/5s/location/[id]/page.tsx` — nút cạnh "Tải QR" (khối actions bên QR), gate mới
+   `isAssigner = user?.id === location?.assigned_by`, điều kiện hiện `(isAdmin || isAssigner) &&
+   deadline && !hasEvaluatedThisWeek` (tái dùng `deadline`/`hasEvaluatedThisWeek` đã tính sẵn).
+3. `kpi/tasks/page.tsx` (danh sách) — nút inline mỗi thẻ, gate `isGiver && (overdue || dueSoon)`.
+   **Đã fix bug HTML lồng phần tử tương tác**: card gốc là `<button>` bao ngoài toàn bộ nội dung —
+   thêm `<button>` "Nhắc nhở" lồng bên trong sẽ là button-trong-button (không hợp lệ, trình duyệt
+   có thể tự đóng sớm phần tử ngoài, phá vỡ click-để-mở-chi-tiết). Đã đổi phần tử bao ngoài từ
+   `<button>` sang `<div role="button" tabIndex={0} onClick=... onKeyDown=...>`, nút "Nhắc nhở" là
+   `<button>` con độc lập với `onClick={(e) => { e.stopPropagation(); ... }}`.
+4. `kpi/5s/page.tsx` (danh sách) — nút inline mỗi thẻ, gate
+   `(isAdmin || user?.id === loc.assigned_by) && deadline && !hasEvaluatedThisWeek`. Card gốc là
+   `<Link>` (render `<a>`) bao toàn bộ nội dung — cùng vấn đề lồng phần tử tương tác. Đã tách khác
+   với cách xử lý ở mục 3: giữ `<Link>` chỉ bọc phần nội dung chính (title/body, `className="block"`),
+   bọc ngoài đổi thành `<div>` KHÔNG tương tác, nút "Nhắc nhở" là `<button>` SIBLING độc lập nằm
+   ngoài `<Link>` — không cần `stopPropagation` vì không còn lồng nhau.
+
+### E. Bug thật đã fix trong lúc code — `useState` gọi sau early-return (React Hooks rule)
+
+Khi thêm state `remindCooldown` ở `kpi/tasks/[id]/page.tsx`, lần đầu đặt nhầm vị trí (ngay trước
+`handleCancelTransfer`, tức SAU dòng `if (loading || dataLoading) return ...`) — `eslint` (rule
+`react-hooks/rules-of-hooks`) bắt được ngay: gọi Hook có điều kiện. Đã sửa: chuyển khai báo
+`useState` lên đầu component cùng các state khác (trước early-return), chỉ giữ hàm `handleRemind`
+ở vị trí cũ.
+
+### F. Fix riêng biệt — "Ghi chú nhanh" bị lag/giật (không hard-code, thuần kiến trúc)
+
+Điều tra bằng Explore agent xác nhận: **không có `setTimeout`/`sleep` giả nào** — nguyên nhân hoàn
+toàn ở tầng kiến trúc. Đã sửa dứt điểm cả 6 nguyên nhân, toàn bộ ở tầng client, không đổi RLS:
+
+1. **Debounce ô tìm kiếm 300ms** (`notes/page.tsx`) — tách `searchInput` (gõ tay) khỏi `search`
+   (debounced, thật sự đẩy vào `loadData`) — trước đây mỗi ký tự gõ bắn ngay 1 query Supabase.
+2. **Phân trang đúng cách** — `fetchOperationNotes` (`operation-notes.ts`) thêm `offset`, dùng
+   `.range()` thay vì chỉ `.limit()`. "Tải thêm" (`notes/page.tsx`) giờ gọi với
+   `offset = notes.length` và NỐI THÊM (`[...prev, ...more]`) thay vì tăng `limit` rồi truy vấn lại
+   từ đầu (bug cũ: càng tải càng chậm, gần như O(n²)).
+3. **Cập nhật cục bộ thay vì tải lại toàn bộ sau mỗi thao tác** — `createOperationNote`/
+   `updateOperationNote` đổi từ trả `void` sang trả về **row đã lưu**
+   (`.select(SELECT_COLS).single()`). `handleSave`/`handleDelete` (`notes/page.tsx`) và
+   `handleSubmit` (`quick-notes-widget.tsx`) thay `void loadData(...)` bằng thao tác trực tiếp trên
+   mảng `notes` cục bộ (prepend/patch/filter), có hàm `compareOperationNotes` (mới, export từ
+   `operation-notes.ts`) để sắp xếp lại đúng vị trí sau khi thêm/sửa.
+4. **Memo hoá `NoteCard`** — bọc `React.memo` (`NoteCardBase` → `export const NoteCard =
+   memo(NoteCardBase)`). Đổi prop callback từ dạng "đã bind sẵn note" (tạo closure mới mỗi render,
+   vô hiệu hoá memo) sang dạng nhận tham số (`onEdit?: (note) => void`, `onDelete?: (noteId) =>
+   void`, `onShare?: (note) => void`) — `notes/page.tsx` giờ chỉ cần 1 `useCallback([])` ổn định
+   cho cả danh sách (`openEdit`/`requestDelete`/`openShare`, mỗi hàm chỉ dùng setState setter nên
+   an toàn giữ closure cũ).
+5. **`loading="lazy"`** cho `<img>` trong `note-card.tsx` và `note-image-picker.tsx` (thumbnail
+   grid — không thêm cho overlay phóng to toàn màn hình, vì người dùng đang chủ động chờ xem ngay).
+6. **Tăng giới hạn ảnh 6 → 10**: `OPERATION_NOTE_MAX_IMAGES` (`operation-notes.ts`) — đúng 1 hằng
+   số, không có chuỗi "6 ảnh" hard-code nào khác cần sửa (UI đọc động từ hằng số này).
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file đã sửa/thêm trong đợt này), và `npm run build` đều
+sạch — build liệt kê đủ mọi route liên quan (`/dashboard/kpi/tasks`, `/dashboard/kpi/tasks/[id]`,
+`/dashboard/kpi/5s`, `/dashboard/kpi/5s/location/[id]`, `/dashboard/maintenance/records/[id]`,
+`/dashboard/export`, `/dashboard/inventory/receipts|issues|transfers`, `/dashboard/notes`), không
+route nào lỗi.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy 2 migration trước
+
+1. Chạy `20260817_kpi_task_module_code_extend.sql` rồi `20260817_kpi_tasks_5s_adhoc.sql` trên
+   Supabase SQL Editor.
+2. Gắn `module_code="maintenance"` cho 1 Việc/Việc định kỳ → tạo 1 biên bản bảo trì mới → xác nhận
+   banner "Gắn bản ghi" hiện ra TRƯỚC khi điều hướng, đóng banner (gắn hoặc "Bỏ qua") mới chuyển
+   sang `/records/{id}`, không mất banner giữa chừng, không lỗi console. Lặp lại cho biên bản SỬA
+   (không phải tạo mới) — xác nhận vẫn có banner nhưng không có hành vi delay điều hướng nào.
+3. Tương tự cho `module_code="export"` (tạo đơn xuất mới) — xác nhận `insertedOrder.id` lấy đúng,
+   banner hiện đúng mã đơn.
+4. Tương tự cho `module_code="inventory"` — ghi sổ lần lượt 1 phiếu Nhập/Xuất/Chuyển, xác nhận cả 3
+   đều gợi ý đúng 1 việc "Kho vật tư" đang mở (dù việc đó ban đầu tạo không phân biệt Nhập/Xuất/
+   Chuyển).
+5. Tạo 1 Công việc mới, chọn 1 Vị trí 5S + đính 2-3 ảnh "before" → xác nhận task tạo thành công, mở
+   trang chi tiết thấy đúng ảnh before + link vị trí 5S hoạt động; xác nhận việc này KHÔNG xuất
+   hiện/ảnh hưởng gì trong lịch sử chấm điểm 5S định kỳ của vị trí đó (không có dòng mới trong
+   `kpi_5s_evaluations`).
+6. Thử bỏ trống ảnh before khi tạo việc (không đính ảnh nào) → xác nhận `id` vẫn để DB tự sinh
+   (không set tường minh), task tạo bình thường như trước.
+7. Nút Nhắc nhở: với 1 việc/1 vị trí 5S sắp/đã trễ hạn — đăng nhập người giao và Admin xác nhận
+   thấy nút (cả ở trang chi tiết lẫn trang danh sách), bấm xác nhận Telegram nhận được tin đúng nội
+   dung, nút tự khoá 45s sau khi bấm rồi mở lại. Đăng nhập người KHÔNG phải người giao/admin — xác
+   nhận không thấy nút ở bất kỳ đâu.
+8. Test riêng 2 trang danh sách sau khi đổi cấu trúc thẻ: `kpi/tasks/page.tsx` (thẻ giờ là `<div
+   role="button">`) — xác nhận bấm vào thân thẻ vẫn mở đúng trang chi tiết (cả bằng chuột lẫn
+   Tab+Enter/Space bàn phím), bấm nút "Nhắc nhở" KHÔNG vô tình điều hướng theo thẻ.
+   `kpi/5s/page.tsx` (Link giờ chỉ bọc phần nội dung chính) — xác nhận tương tự, bấm nút "Nhắc nhở"
+   không kích hoạt Link.
+9. Ghi chú nhanh: gõ liên tục vào ô tìm kiếm — xác nhận không có query dồn dập (Network tab), chỉ 1
+   query sau khi ngừng gõ ~300ms; lưu/xoá 1 ghi chú — xác nhận danh sách cập nhật ngay không "nhấp
+   nháy" tải lại toàn bộ; "Tải thêm" nhiều lần — xác nhận mỗi lần chỉ fetch đúng 1 trang mới, không
+   phình to dần; đính kèm tới 10 ảnh cho 1 ghi chú — xác nhận lưu và hiển thị đủ.

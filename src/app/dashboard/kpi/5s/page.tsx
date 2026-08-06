@@ -4,9 +4,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, AlertTriangle, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
+import { AlertCircle, AlertTriangle, Bell, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
-import { getIsoWeekStart } from "@/lib/date-utils"
+import { formatWeekRangeLabel, getIsoWeekStart } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { KpiShell } from "../_components/kpi-shell"
 import { Kpi5sAutoAssignModal } from "../_components/kpi-5s-auto-assign-modal"
@@ -45,6 +45,9 @@ export default function Kpi5sLocationListPage() {
   const [subTab, setSubTab] = useState<"today" | "all">("today")
   const [showAutoAssign, setShowAutoAssign] = useState(false)
   const [assignSummary, setAssignSummary] = useState<{ userId: string; ten: string; donZones: string[]; chamZones: string[] }[] | null>(null)
+  // Nút "Nhắc nhở" thủ công inline trên từng thẻ — chỉ Telegram, khoá tạm 45s/vị trí sau khi
+  // bấm (state cục bộ, không ghi DB) để tránh gửi trùng do double-click.
+  const [remindCooldownIds, setRemindCooldownIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -133,6 +136,28 @@ export default function Kpi5sLocationListPage() {
     () => visibleLocations.filter((l) => user?.id === l.nguoi_cham_id && latestByLocation.get(l.id)?.tuan_bat_dau !== currentWeekStart),
     [visibleLocations, user, latestByLocation, currentWeekStart],
   )
+
+  const handleRemindLocation = (loc: Kpi5sLocation) => {
+    if (!factoryId) return
+    sendKpiNotify({
+      factoryId,
+      title: "Nhắc nhở chấm điểm 5S",
+      lines: [
+        `🧹 Vị trí: ${loc.ma_vi_tri} — ${loc.ten_vi_tri}`,
+        `👤 Người chấm: ${resolveName(loc.nguoi_cham_id)}`,
+        `📅 Tuần này (${formatWeekRangeLabel(currentWeekStart)}) chưa có bản chấm.`,
+      ],
+      link: `/dashboard/kpi/5s/location/${loc.id}`,
+    })
+    setRemindCooldownIds((prev) => new Set(prev).add(loc.id))
+    setTimeout(() => {
+      setRemindCooldownIds((prev) => {
+        const next = new Set(prev)
+        next.delete(loc.id)
+        return next
+      })
+    }, 45_000)
+  }
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
@@ -225,17 +250,22 @@ export default function Kpi5sLocationListPage() {
               const deadline = computeKpi5sDeadline(loc, currentWeekStart)
               const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
               const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
+              const canRemindLocation = (isAdmin || user?.id === loc.assigned_by) && !!deadline && !hasEvaluatedThisWeek
+              const remindSent = remindCooldownIds.has(loc.id)
               return (
-                <Link
+                // Bọc ngoài KHÔNG còn là <Link> (tránh lồng <button> "Nhắc nhở" bên trong <a>) —
+                // Link chỉ bọc phần nội dung chính có thể bấm để mở chi tiết, nút Nhắc nhở là
+                // phần tử độc lập nằm ngoài Link, không cần stopPropagation vì không lồng nhau.
+                <div
                   key={loc.id}
-                  href={`/dashboard/kpi/5s/location/${loc.id}`}
                   className={
-                    "hover-lift block rounded-2xl p-4 shadow-sm " +
+                    "hover-lift rounded-2xl p-4 shadow-sm " +
                     (needsMyEvaluation
                       ? "border-2 border-amber-400 bg-amber-50"
                       : "border border-slate-200 bg-white hover:border-amber-200")
                   }
                 >
+                <Link href={`/dashboard/kpi/5s/location/${loc.id}`} className="block">
                   {needsMyEvaluation && (
                     <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-extrabold text-white shadow-sm">
                       <AlertCircle size={13} className="animate-pulse" /> Cần bạn chấm điểm tuần này
@@ -277,6 +307,17 @@ export default function Kpi5sLocationListPage() {
                     <div>Người chấm: <strong className="text-slate-800">{resolveName(loc.nguoi_cham_id)}</strong></div>
                   </div>
                 </Link>
+                {canRemindLocation && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemindLocation(loc)}
+                    disabled={remindSent}
+                    className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-200 disabled:opacity-50"
+                  >
+                    <Bell size={11} /> {remindSent ? "Đã gửi nhắc nhở" : "Nhắc nhở ngay"}
+                  </button>
+                )}
+                </div>
               )
             })}
           </div>

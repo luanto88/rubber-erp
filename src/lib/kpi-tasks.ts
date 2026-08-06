@@ -15,9 +15,10 @@ import type { SessionUser } from "@/lib/auth"
 export const KPI_DUE_SOON_HOURS = 24
 
 // Module ERP liên quan 1 công việc/1 việc định kỳ — quyết định KpiLinkPrompt ("Gắn bản ghi tại
-// chỗ") có gợi ý việc này hay không khi người dùng lưu 1 bản ghi ở đúng module đó. Đúng 6 giá
-// trị khớp 6 nơi đang có <KpiLinkPrompt moduleCode="...:..."> — KHÔNG lưu chuỗi đầy đủ
-// "process:measurement", chỉ lưu phần "họ module" trước dấu ":" (xem kpi-link-prompt.tsx).
+// chỗ") có gợi ý việc này hay không khi người dùng lưu 1 bản ghi ở đúng module đó. 9 giá trị
+// khớp 9+ nơi đang có <KpiLinkPrompt moduleCode="...:..."> (2026-08-17: mở rộng thêm maintenance/
+// export/inventory, xem migration 20260817_kpi_task_module_code_extend.sql) — KHÔNG lưu chuỗi
+// đầy đủ "process:measurement", chỉ lưu phần "họ module" trước dấu ":" (xem kpi-link-prompt.tsx).
 export const KPI_MODULE_OPTIONS = [
   { code: "dispatch", label: "Điều xe" },
   { code: "output", label: "Sản lượng" },
@@ -25,6 +26,9 @@ export const KPI_MODULE_OPTIONS = [
   { code: "storage", label: "Kho nguyên liệu" },
   { code: "product", label: "Thành phẩm" },
   { code: "process", label: "Kiểm soát quá trình (Đo nhanh)" },
+  { code: "maintenance", label: "Bảo trì" },
+  { code: "export", label: "Xuất hàng" },
+  { code: "inventory", label: "Kho vật tư" },
 ] as const
 export type KpiModuleCode = (typeof KPI_MODULE_OPTIONS)[number]["code"]
 export const KPI_MODULE_LABEL: Record<string, string> = Object.fromEntries(
@@ -116,6 +120,13 @@ export type KpiTask = {
   // Module ERP liên quan (xem KPI_MODULE_OPTIONS) — quyết định KpiLinkPrompt có gợi ý việc này
   // hay không. NULL = việc không liên quan module nào, không bao giờ được gợi ý gắn bằng chứng.
   module_code: string | null
+  // Việc đột xuất 5S (tuỳ chọn) — liên kết tới 1 kpi_5s_locations cụ thể. HOÀN TOÀN TÁCH BIỆT
+  // với chấm điểm 5S định kỳ (kpi_5s_evaluations) — chỉ để hiển thị link/badge "Vị trí 5S liên
+  // quan" ở trang chi tiết việc, không ảnh hưởng công thức tính điểm C (5S) hàng tháng.
+  kpi_5s_location_id: string | null
+  // Ảnh hiện trạng ("before") do người GIAO việc đính kèm lúc tạo — khác kpi_task_logs.image_urls
+  // (ảnh bằng chứng "after" do người THỰC HIỆN nộp sau khi xử lý xong).
+  before_image_urls: string[] | null
   created_at: string
   updated_at: string
 }
@@ -158,7 +169,7 @@ export type KpiTaskLog = {
 }
 
 const TASK_COLS =
-  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, phong_ban_id, module_code, created_at, updated_at"
+  "id, factory_id, ma_cong_viec, tieu_de, mo_ta, nguoi_giao_id, ngay_giao, han_hoan_thanh, yeu_cau_bao_cao, da_chuyen_giao, trang_thai, muc_tieu_so_luong, phong_ban_id, module_code, kpi_5s_location_id, before_image_urls, created_at, updated_at"
 const MEMBER_COLS =
   "id, task_id, factory_id, user_id, tien_do, tien_do_nghiem_thu, da_nop_luc, is_active, phan_loai, created_at, updated_at"
 const LOG_COLS =
@@ -366,6 +377,14 @@ export async function createKpiTask(input: {
   // Module ERP liên quan (xem KPI_MODULE_OPTIONS) — tuỳ chọn, NULL nếu việc không liên quan
   // module cụ thể nào.
   moduleCode?: string | null
+  // Việc đột xuất 5S (tuỳ chọn) — xem KpiTask.kpi_5s_location_id/before_image_urls.
+  kpi5sLocationId?: string | null
+  beforeImageUrls?: string[] | null
+  // `id` client-generated (crypto.randomUUID()) — CHỈ truyền khi đã upload ảnh before TRƯỚC
+  // insert (path Storage {factory_id}/kpi/tasks/{id}/... cần id có sẵn). Việc thường không
+  // truyền, để DB tự sinh id theo default gen_random_uuid() như trước — tránh đổi hành vi mặc
+  // định của mọi task khác. Xem migration 20260817_kpi_tasks_5s_adhoc.sql.
+  id?: string
 }): Promise<KpiTask> {
   if (!input.memberUserIds.length) throw new Error("Vui lòng chọn ít nhất 1 người thực hiện.")
   const mucTieu = input.mucTieuSoLuong ?? null
@@ -380,6 +399,7 @@ export async function createKpiTask(input: {
   const { data: taskRow, error: taskErr } = await supabase
     .from("kpi_tasks")
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       factory_id: input.factoryId,
       ma_cong_viec: maCongViec,
       tieu_de: input.tieuDe.trim(),
@@ -391,6 +411,8 @@ export async function createKpiTask(input: {
       muc_tieu_so_luong: mucTieu,
       phong_ban_id: input.phongBanId,
       module_code: input.moduleCode || null,
+      kpi_5s_location_id: input.kpi5sLocationId || null,
+      before_image_urls: input.beforeImageUrls?.length ? input.beforeImageUrls : null,
     })
     .select(TASK_COLS)
     .single()

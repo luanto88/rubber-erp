@@ -3,7 +3,7 @@
 import { supabase } from "@/lib/supabase"
 import { getTodayISODate } from "@/lib/date-utils"
 
-export const OPERATION_NOTE_MAX_IMAGES = 6
+export const OPERATION_NOTE_MAX_IMAGES = 10
 
 // Supabase JS (PostgREST/Storage) ném lỗi dạng plain object { message, code, details, hint... },
 // KHÔNG phải instance của `Error` — nên `err instanceof Error ? err.message : fallback` luôn
@@ -36,6 +36,17 @@ export type OperationNoteFilters = {
   from?: string
   to?: string
   limit?: number
+  // Phân trang thật (.range()) — dùng cùng với limit để "Tải thêm" chỉ lấy đúng trang kế tiếp
+  // thay vì truy vấn lại từ đầu với limit lớn hơn (bug lag cũ). Không truyền = lấy limit đầu tiên.
+  offset?: number
+}
+
+// So sánh khớp đúng thứ tự sort của query (ngay_xay_ra desc, created_at desc) — dùng để chèn
+// 1 ghi chú mới/vừa sửa vào đúng vị trí trong mảng đã tải cục bộ, không phải tải lại toàn bộ.
+export function compareOperationNotes(a: OperationNote, b: OperationNote): number {
+  if (a.ngay_xay_ra !== b.ngay_xay_ra) return a.ngay_xay_ra < b.ngay_xay_ra ? 1 : -1
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1
+  return 0
 }
 
 const SELECT_COLS =
@@ -55,7 +66,11 @@ export async function fetchOperationNotes(
   if (filters.from) q = q.gte("ngay_xay_ra", filters.from)
   if (filters.to) q = q.lte("ngay_xay_ra", filters.to)
   if (filters.search?.trim()) q = q.ilike("noi_dung", `%${filters.search.trim()}%`)
-  if (filters.limit) q = q.limit(filters.limit)
+  if (filters.limit && filters.offset !== undefined) {
+    q = q.range(filters.offset, filters.offset + filters.limit - 1)
+  } else if (filters.limit) {
+    q = q.limit(filters.limit)
+  }
 
   const { data, error } = await q
   if (error) throw error
@@ -71,6 +86,8 @@ export async function uploadOperationNoteImage(factoryId: string, file: File): P
   return data.publicUrl
 }
 
+// Trả về row vừa tạo (không chỉ throw-on-error) — để caller cập nhật danh sách cục bộ
+// (prepend) thay vì phải tải lại toàn bộ trang sau mỗi lần lưu.
 export async function createOperationNote(input: {
   factoryId: string
   noiDung: string
@@ -78,28 +95,40 @@ export async function createOperationNote(input: {
   imageUrls: string[]
   createdBy: string | null
   nguoiTao: string | null
-}) {
-  const { error } = await supabase.from("operation_notes").insert({
-    factory_id: input.factoryId,
-    noi_dung: input.noiDung.trim(),
-    ngay_xay_ra: input.ngayXayRa || getTodayISODate(),
-    image_urls: input.imageUrls,
-    created_by: input.createdBy,
-    nguoi_tao: input.nguoiTao,
-  })
+}): Promise<OperationNote> {
+  const { data, error } = await supabase
+    .from("operation_notes")
+    .insert({
+      factory_id: input.factoryId,
+      noi_dung: input.noiDung.trim(),
+      ngay_xay_ra: input.ngayXayRa || getTodayISODate(),
+      image_urls: input.imageUrls,
+      created_by: input.createdBy,
+      nguoi_tao: input.nguoiTao,
+    })
+    .select(SELECT_COLS)
+    .single()
   if (error) throw error
+  return data as OperationNote
 }
 
+// Trả về row đã cập nhật — dùng để patch đúng vị trí trong mảng cục bộ thay vì tải lại toàn bộ.
 export async function updateOperationNote(
   id: string,
   patch: { noiDung?: string; ngayXayRa?: string; imageUrls?: string[] },
-) {
+): Promise<OperationNote> {
   const payload: Record<string, unknown> = {}
   if (patch.noiDung !== undefined) payload.noi_dung = patch.noiDung.trim()
   if (patch.ngayXayRa !== undefined) payload.ngay_xay_ra = patch.ngayXayRa
   if (patch.imageUrls !== undefined) payload.image_urls = patch.imageUrls
-  const { error } = await supabase.from("operation_notes").update(payload).eq("id", id)
+  const { data, error } = await supabase
+    .from("operation_notes")
+    .update(payload)
+    .eq("id", id)
+    .select(SELECT_COLS)
+    .single()
   if (error) throw error
+  return data as OperationNote
 }
 
 export async function deleteOperationNote(id: string) {

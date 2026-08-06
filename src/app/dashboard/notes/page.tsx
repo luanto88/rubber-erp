@@ -12,6 +12,7 @@ import { NoteFormFields, type NoteFormValue } from "@/app/dashboard/_components/
 import { NoteShareModal } from "@/app/dashboard/_components/note-share-modal"
 import {
   canManageOperationNote,
+  compareOperationNotes,
   createOperationNote,
   deleteOperationNote,
   fetchOperationNotes,
@@ -32,12 +33,20 @@ export default function NotesPage() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const [notes, setNotes] = useState<OperationNote[]>([])
   const [loading, setLoading] = useState(true)
-  const [limit, setLimit] = useState(PAGE_SIZE)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
 
-  // Filters
+  // Filters — searchInput là state gõ tay, search (debounced 300ms) mới thật sự đẩy vào
+  // loadData. Trước đây mỗi ký tự gõ bắn ngay 1 query Supabase, gây giật lag rõ rệt.
+  const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo] = useState("")
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   // Modal thêm/sửa
   const [modal, setModal] = useState<"add" | "edit" | null>(null)
@@ -59,13 +68,35 @@ export default function NotesPage() {
         search: search || undefined,
         from: filterFrom || undefined,
         to: filterTo || undefined,
-        limit,
+        limit: PAGE_SIZE,
+        offset: 0,
       })
       setNotes(data)
+      setHasMore(data.length >= PAGE_SIZE)
     } finally {
       setLoading(false)
     }
-  }, [search, filterFrom, filterTo, limit])
+  }, [search, filterFrom, filterTo])
+
+  // "Tải thêm" — chỉ lấy đúng trang kế tiếp (offset = số ghi chú đã có) rồi NỐI THÊM, thay vì
+  // tăng dần 1 giới hạn rồi truy vấn lại toàn bộ từ đầu (bug lag cũ, càng tải càng chậm).
+  const loadMore = async () => {
+    if (!factoryId || loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const more = await fetchOperationNotes(factoryId, {
+        search: search || undefined,
+        from: filterFrom || undefined,
+        to: filterTo || undefined,
+        limit: PAGE_SIZE,
+        offset: notes.length,
+      })
+      setNotes((prev) => [...prev, ...more])
+      setHasMore(more.length >= PAGE_SIZE)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Bootstrap — chỉ chạy 1 lần, không gọi loadData trực tiếp (xem 04-code-patterns.md)
   useEffect(() => {
@@ -103,11 +134,6 @@ export default function NotesPage() {
       .catch(() => {})
   }, [notes])
 
-  // Đổi bộ lọc thì quay lại trang đầu (tránh giữ limit lớn cũ khi lọc còn ít dữ liệu)
-  useEffect(() => {
-    setLimit(PAGE_SIZE)
-  }, [search, filterFrom, filterTo])
-
   const openAdd = () => {
     setForm(emptyForm())
     setSaveError(null)
@@ -115,12 +141,18 @@ export default function NotesPage() {
     setModal("add")
   }
 
-  const openEdit = (note: OperationNote) => {
+  // useCallback([]) — chỉ dùng các setState setter (ổn định giữa các render) nên an toàn để giữ
+  // 1 tham chiếu duy nhất cho toàn bộ danh sách, thay vì tạo closure mới mỗi lần render (điều
+  // kiện bắt buộc để React.memo trên NoteCard thực sự có tác dụng).
+  const openEdit = useCallback((note: OperationNote) => {
     setForm({ noiDung: note.noi_dung, ngayXayRa: note.ngay_xay_ra, images: note.image_urls || [] })
     setSaveError(null)
     setEditId(note.id)
     setModal("edit")
-  }
+  }, [])
+
+  const requestDelete = useCallback((noteId: string) => setDelConfirm(noteId), [])
+  const openShare = useCallback((note: OperationNote) => setShareNote(note), [])
 
   const closeModal = () => setModal(null)
 
@@ -130,13 +162,14 @@ export default function NotesPage() {
     setSaveError(null)
     try {
       if (editId) {
-        await updateOperationNote(editId, {
+        const updated = await updateOperationNote(editId, {
           noiDung: form.noiDung,
           ngayXayRa: form.ngayXayRa,
           imageUrls: form.images,
         })
+        setNotes((prev) => prev.map((n) => (n.id === editId ? updated : n)).sort(compareOperationNotes))
       } else {
-        await createOperationNote({
+        const created = await createOperationNote({
           factoryId,
           noiDung: form.noiDung,
           ngayXayRa: form.ngayXayRa,
@@ -144,9 +177,9 @@ export default function NotesPage() {
           createdBy: currentUser?.id ?? null,
           nguoiTao: currentUser?.full_name || currentUser?.username || null,
         })
+        setNotes((prev) => [...prev, created].sort(compareOperationNotes))
       }
       closeModal()
-      void loadData(factoryId)
     } catch (err) {
       setSaveError(getErrorMessage(err, "Không lưu được ghi chú."))
     } finally {
@@ -158,10 +191,11 @@ export default function NotesPage() {
     if (!factoryId) return
     await deleteOperationNote(id)
     setDelConfirm(null)
-    void loadData(factoryId)
+    setNotes((prev) => prev.filter((n) => n.id !== id))
   }
 
   const clearFilters = () => {
+    setSearchInput("")
     setSearch("")
     setFilterFrom("")
     setFilterTo("")
@@ -192,8 +226,8 @@ export default function NotesPage() {
         <div className="relative min-w-[220px] flex-1">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Tìm nội dung ghi chú..."
             className="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
           />
@@ -240,21 +274,22 @@ export default function NotesPage() {
                   index={i}
                   canManage={canManageOperationNote(note, currentUser)}
                   sharedCount={shareCounts[note.id] || 0}
-                  onEdit={() => openEdit(note)}
-                  onDelete={() => setDelConfirm(note.id)}
-                  onShare={() => setShareNote(note)}
+                  onEdit={openEdit}
+                  onDelete={requestDelete}
+                  onShare={openShare}
                   onImageClick={setZoomUrl}
                 />
               </div>
             ))}
           </div>
-          {notes.length >= limit && (
+          {hasMore && (
             <div className="text-center">
               <button
-                onClick={() => setLimit((l) => l + PAGE_SIZE)}
-                className="rounded-xl px-5 py-2 text-sm font-bold text-emerald-600 hover:bg-emerald-50"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="rounded-xl px-5 py-2 text-sm font-bold text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
               >
-                Tải thêm
+                {loadingMore ? "Đang tải..." : "Tải thêm"}
               </button>
             </div>
           )}

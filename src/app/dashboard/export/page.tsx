@@ -34,6 +34,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import { CustomerGrantModal } from "@/app/dashboard/export/_components/customer-grant-modal";
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
 
 // --- Types -------------------------------------------------------------------
 type Vehicle = {
@@ -391,6 +392,9 @@ export default function ExportPage() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn đơn xuất hàng MỚI TẠO vào công việc KPI đang mở.
+  const [kpiPrompt, setKpiPrompt] = useState<{ recordId: string; recordLabel: string } | null>(null);
 
   const persistExportDraft = useCallback(
     (pendingRetest: ExportDraftSnapshot["pendingRetest"]) => {
@@ -1320,9 +1324,11 @@ export default function ExportPage() {
           approved_by: null,
           approved_at: null,
         };
-        const { error } = await supabase
+        const { data: insertedOrder, error } = await supabase
           .from("export_orders")
-          .insert(insertPayload);
+          .insert(insertPayload)
+          .select("id")
+          .single();
         if (error) {
           showToast(error.message, "error");
           return;
@@ -1340,6 +1346,7 @@ export default function ExportPage() {
           (latestOrders || []) as Array<{ id?: string; assignments?: Assignment[] }>,
         );
         showToast("Đã tạo đơn xuất hàng mới");
+        setKpiPrompt({ recordId: insertedOrder.id, recordLabel: form.ma_don });
       }
       setView("list");
       setEditId(null);
@@ -1525,6 +1532,16 @@ export default function ExportPage() {
     return (
       <div>
         <Toast />
+        {kpiPrompt && (
+          <KpiLinkPrompt
+            factoryId={factoryId}
+            moduleCode="export:create"
+            recordId={kpiPrompt.recordId}
+            recordLabel={kpiPrompt.recordLabel}
+            recordUrl="/dashboard/export"
+            onDone={() => setKpiPrompt(null)}
+          />
+        )}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">

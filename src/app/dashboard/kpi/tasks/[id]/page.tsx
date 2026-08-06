@@ -7,11 +7,13 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRightLeft,
   Ban,
+  Bell,
   CalendarClock,
   CheckCircle2,
   ClipboardEdit,
@@ -33,6 +35,7 @@ import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiEvidencePicker } from "../_components/kpi-evidence-picker"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
 import { createKpiAppealForTask, getKpiAppealErrorMessage } from "@/lib/kpi-appeals"
+import { fetchKpi5sLocation, type Kpi5sLocation } from "@/lib/kpi-5s"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import {
@@ -705,6 +708,12 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   const [transferError, setTransferError] = useState<string | null>(null)
   const [showExtendModal, setShowExtendModal] = useState(false)
   const [showAppealModal, setShowAppealModal] = useState(false)
+  // Việc đột xuất 5S — resolve tên vị trí liên quan (nếu có) để hiện badge/link ở trang chi tiết.
+  const [linkedLocation, setLinkedLocation] = useState<Kpi5sLocation | null>(null)
+  // Nút "Nhắc nhở" thủ công — chỉ Telegram, không có cơ chế tự động (repo không có hạ tầng
+  // cron). Khoá tạm 45s sau khi bấm (chỉ state cục bộ, không ghi DB) để tránh gửi trùng do
+  // double-click, không phải chống spam thật sự.
+  const [remindCooldown, setRemindCooldown] = useState(false)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -754,6 +763,18 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
   }, [factoryId, loadData])
+
+  useEffect(() => {
+    let alive = true
+    if (!task?.kpi_5s_location_id) {
+      setLinkedLocation(null)
+      return
+    }
+    fetchKpi5sLocation(task.kpi_5s_location_id)
+      .then((loc) => { if (alive) setLinkedLocation(loc) })
+      .catch(() => { if (alive) setLinkedLocation(null) })
+    return () => { alive = false }
+  }, [task?.kpi_5s_location_id])
 
   // Bằng chứng có thể được gắn từ MODULE KHÁC (Điều xe/Sản lượng/Kiểm nghiệm...), không phải
   // từ chính trang này — nếu người xem để tab này mở nền rồi quay lại, dữ liệu cũ trong state
@@ -845,6 +866,21 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  const handleRemind = () => {
+    sendKpiNotify({
+      factoryId: factoryId || undefined,
+      title: "Nhắc nhở công việc",
+      lines: [
+        `📋 ${task.tieu_de}${task.ma_cong_viec ? ` (${task.ma_cong_viec})` : ""}`,
+        `👥 Người thực hiện: ${members.filter((m) => m.is_active).map((m) => resolveName(m.user_id)).join(", ") || "—"}`,
+        `⏰ Hạn: ${formatKpiDateTime(task.han_hoan_thanh)}${overdue ? " — ĐÃ QUÁ HẠN" : ""}`,
+      ],
+      link: `/dashboard/kpi/tasks/${task.id}`,
+    })
+    setRemindCooldown(true)
+    setTimeout(() => setRemindCooldown(false), 45_000)
+  }
+
   const handleCancelTransfer = async (transferId: string) => {
     setTransferBusyId(transferId)
     setTransferError(null)
@@ -887,6 +923,15 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
               )}
               {isOwner && open && (
                 <button
+                  onClick={handleRemind}
+                  disabled={remindCooldown}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-amber-50 hover:text-amber-600 text-xs font-bold text-slate-500 disabled:opacity-50"
+                >
+                  <Bell size={12} /> {remindCooldown ? "Đã gửi nhắc nhở" : "Nhắc nhở ngay"}
+                </button>
+              )}
+              {isOwner && open && (
+                <button
                   onClick={() => setShowCancelConfirm(true)}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-red-50 hover:text-red-600 text-xs font-bold text-slate-500"
                 >
@@ -900,6 +945,30 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
             <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
               <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-amber-700">Ghi chú / Hướng dẫn thực hiện</div>
               <p className="text-sm text-amber-900 whitespace-pre-wrap">{task.mo_ta}</p>
+            </div>
+          )}
+
+          {linkedLocation && (
+            <Link
+              href={`/dashboard/kpi/5s/location/${linkedLocation.id}`}
+              className="mb-3 inline-flex items-center gap-1.5 rounded-xl bg-sky-100 px-3 py-1.5 text-xs font-bold text-sky-700 hover:bg-sky-200"
+            >
+              <MapPin size={12} /> Vị trí 5S liên quan: {linkedLocation.ma_vi_tri} — {linkedLocation.ten_vi_tri}
+            </Link>
+          )}
+
+          {!!task.before_image_urls?.length && (
+            <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Ảnh hiện trạng lúc giao việc (before)
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {task.before_image_urls.map((url, i) => (
+                  <a key={`${url}-${i}`} href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt={`Ảnh before ${i + 1}`} loading="lazy" className="h-16 w-16 rounded-lg object-cover shadow-sm" />
+                  </a>
+                ))}
+              </div>
             </div>
           )}
 

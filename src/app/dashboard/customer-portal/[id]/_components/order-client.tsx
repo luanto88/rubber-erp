@@ -13,8 +13,9 @@ import JSZip from "jszip"
 import { ArrowLeft, Download, Loader2, MapPin, Package } from "lucide-react"
 import { generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
 import {
+  broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
-  setStoredCustomerPortalLang,
+  onCustomerPortalLangChange,
   tCustomerPortal,
   type CustomerPortalLang,
 } from "@/lib/customer-portal-i18n"
@@ -101,11 +102,12 @@ export default function CustomerPortalOrderClient() {
 
   useEffect(() => {
     setLang(getStoredCustomerPortalLang())
+    return onCustomerPortalLangChange(setLang)
   }, [])
 
   const changeLang = (next: CustomerPortalLang) => {
     setLang(next)
-    setStoredCustomerPortalLang(next)
+    broadcastCustomerPortalLangChange(next)
   }
 
   const showToast = (msg: string, ok = true) => {

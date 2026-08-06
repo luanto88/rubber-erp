@@ -153,8 +153,13 @@ function computeOrderCert(
   return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]
 }
 
+// Trỏ tới trang trung gian /dashboard/eudr/lookup — trang này tự xác định vai trò người
+// quét QR: nhân viên nội bộ (export.view) vào thẳng /dashboard/eudr như cũ; khách hàng
+// (role="customer") được chuyển hướng đúng vào Customer Portal (song ngữ Anh/Việt) của
+// đúng đơn hàng đó. QR trỏ thẳng /dashboard/eudr trước đây khiến khách hàng bị chặn vì
+// thiếu quyền nhân viên.
 function buildOrderLookupUrl(orderCode: string) {
-  return `${APP_URL}/dashboard/eudr?order=${encodeURIComponent(orderCode)}`
+  return `${APP_URL}/dashboard/eudr/lookup?order=${encodeURIComponent(orderCode)}`
 }
 
 async function addOrderQr(doc: jsPDF, orderCode: string) {

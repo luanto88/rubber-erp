@@ -11,6 +11,7 @@ import { QRCodeSVG } from "qrcode.react"
 import {
   AlertTriangle,
   ArrowLeft,
+  Bell,
   CheckCircle2,
   Flag,
   Loader2,
@@ -171,6 +172,7 @@ export default function Kpi5sLocationDetailPage() {
   )
   const iAmCleaner = !!user && effectiveCleanerIds.includes(user.id)
   const iAmScorer = !!user && user.id === location?.nguoi_cham_id
+  const isAssigner = !!user && user.id === location?.assigned_by
 
   const openForm = () => {
     setKetQua("dat")
@@ -298,6 +300,25 @@ export default function Kpi5sLocationDetailPage() {
     }
   }
 
+  // Nút "Nhắc nhở" thủ công — chỉ Telegram, không có cơ chế tự động (repo không có hạ tầng
+  // cron). Khoá tạm 45s sau khi bấm (chỉ state cục bộ, không ghi DB) để tránh gửi trùng.
+  const [remindCooldown, setRemindCooldown] = useState(false)
+  const handleRemindLocation = () => {
+    if (!factoryId || !location) return
+    sendKpiNotify({
+      factoryId,
+      title: "Nhắc nhở chấm điểm 5S",
+      lines: [
+        `🧹 Vị trí: ${location.ma_vi_tri} — ${location.ten_vi_tri}`,
+        `👤 Người chấm: ${resolveName(location.nguoi_cham_id)}`,
+        `📅 Tuần này (${formatWeekRangeLabel(currentWeekStart)}) chưa có bản chấm${overdue ? " — ĐÃ QUÁ HẠN" : ""}.`,
+      ],
+      link: `/dashboard/kpi/5s/location/${location.id}`,
+    })
+    setRemindCooldown(true)
+    setTimeout(() => setRemindCooldown(false), 45_000)
+  }
+
   const handlePrintQr = async () => {
     if (!location) return
     setPrinting(true)
@@ -386,6 +407,15 @@ export default function Kpi5sLocationDetailPage() {
                 >
                   {printing ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />} Tải QR
                 </button>
+                {(isAdmin || isAssigner) && deadline && !hasEvaluatedThisWeek && (
+                  <button
+                    onClick={handleRemindLocation}
+                    disabled={remindCooldown}
+                    className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-amber-600 disabled:opacity-50"
+                  >
+                    <Bell size={12} /> {remindCooldown ? "Đã gửi nhắc nhở" : "Nhắc nhở ngay"}
+                  </button>
+                )}
               </div>
             </div>
 

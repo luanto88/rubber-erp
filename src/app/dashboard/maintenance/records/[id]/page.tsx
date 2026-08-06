@@ -27,6 +27,7 @@ import {
   type MaintenanceStaff,
 } from "../../_components/maintenance-data"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 
 type InventoryItemOption = {
   id: string
@@ -177,6 +178,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState("")
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
+
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn biên bản vừa lưu vào công việc KPI đang mở. `navigateTo`
+  // chỉ có ở nhánh tạo mới — điều hướng bị DELAY tới khi banner đóng (onDone), vì đổi params.id
+  // ngay lập tức sẽ remount route con và làm mất state kpiPrompt giữa chừng.
+  const [kpiPrompt, setKpiPrompt] = useState<{ recordId: string; recordLabel: string; navigateTo?: string } | null>(null)
 
   // Image slot upload
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null)
@@ -1146,11 +1152,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         void loadMaintenanceExtMaterials(factoryId!).then(setExtMaterials)
       }
 
+      const kpiLabel = maBB || record?.ma_bb || "Biên bản bảo trì"
       if (isNew) {
-        router.push(`/dashboard/maintenance/records/${recordId}`)
+        // KHÔNG router.push ngay — điều hướng bị delay tới khi KpiLinkPrompt đóng (onDone).
+        setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel, navigateTo: `/dashboard/maintenance/records/${recordId}` })
       } else {
         setSaveSuccess(`Đã lưu biên bản ${record?.ma_bb || ""}. Trạng thái: ${trangThaiLabel(record?.trang_thai)}.`)
         void loadRecord(factoryId, id)
+        setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel })
       }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Lỗi không xác định")
@@ -1451,6 +1460,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   return (
     <MaintenanceShell>
+      {kpiPrompt && (
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="maintenance:save"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl={`/dashboard/maintenance/records/${kpiPrompt.recordId}`}
+          onDone={() => {
+            setKpiPrompt(null)
+            if (kpiPrompt.navigateTo) router.push(kpiPrompt.navigateTo)
+          }}
+        />
+      )}
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-2">
         <div className="flex flex-wrap items-start gap-4">

@@ -14,6 +14,7 @@ import { buildEffectiveStockBalances, getStockContextLabel, resolveStockThreshol
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import {
   sendInventoryLowStockAlert,
   sendInventoryNxtChangeNotify,
@@ -276,6 +277,8 @@ export default function InventoryReceiptsPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveErrorTitle, setSaveErrorTitle] = useState("Có lỗi xảy ra")
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu nhập vừa ghi sổ vào công việc KPI đang mở.
+  const [kpiPrompt, setKpiPrompt] = useState<{ recordId: string; recordLabel: string } | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"draft" | "posted" | "cancelled" | null>(null)
   const [postedInfo, setPostedInfo] = useState<{ at: string; byName: string } | null>(null)
@@ -1158,6 +1161,7 @@ export default function InventoryReceiptsPage() {
         documentCode: targetDocumentCode,
       }))
       setSaveSuccess(`Đã ghi sổ phiếu nhập ${targetDocumentCode} với ${postedLines} dòng vật tư.`)
+      setKpiPrompt({ recordId: targetDocumentId, recordLabel: targetDocumentCode })
       const freshBalances = await refreshBalances(factoryId)
       const freshBalanceMap = new Map(
         freshBalances.map((row) => [`${row.warehouse_id}:${row.item_id}`, Number(row.on_hand) || 0]),
@@ -1261,6 +1265,16 @@ export default function InventoryReceiptsPage() {
       title="Phiếu nhập kho"
       description="Chọn kho, chọn nhiều vật tư theo kho và hoàn thiện số lượng, lô, hạn dùng ngay trên từng dòng nhập."
     >
+      {kpiPrompt && (
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="inventory:receipt"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl={`/dashboard/inventory/receipts?documentId=${encodeURIComponent(kpiPrompt.recordId)}`}
+          onDone={() => setKpiPrompt(null)}
+        />
+      )}
       {warning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <div className="font-bold">Đang dùng dữ liệu mẫu</div>

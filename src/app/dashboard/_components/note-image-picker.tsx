@@ -56,6 +56,7 @@ export function NoteImagePicker({ factoryId, images, onChange, compact = false }
             <img
               src={url}
               alt={`Ảnh ${i + 1}`}
+              loading="lazy"
               className="h-full w-full cursor-zoom-in object-cover"
               onClick={() => setZoomUrl(url)}
             />

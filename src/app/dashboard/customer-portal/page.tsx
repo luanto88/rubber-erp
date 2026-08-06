@@ -4,8 +4,9 @@ import Link from "next/link";
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth";
 import { FileOutput, Package } from "lucide-react";
 import {
+  broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
-  setStoredCustomerPortalLang,
+  onCustomerPortalLangChange,
   tCustomerPortal,
   type CustomerPortalLang,
 } from "@/lib/customer-portal-i18n";
@@ -37,11 +38,12 @@ export default function CustomerPortalPage() {
 
   useEffect(() => {
     setLang(getStoredCustomerPortalLang());
+    return onCustomerPortalLangChange(setLang);
   }, []);
 
   const changeLang = (next: CustomerPortalLang) => {
     setLang(next);
-    setStoredCustomerPortalLang(next);
+    broadcastCustomerPortalLangChange(next);
   };
 
   // Nhận thẳng token đã lấy được từ bootstrap (qua hydrateActiveSession()) — không đọc

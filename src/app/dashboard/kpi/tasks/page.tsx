@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, ArrowRightLeft, CalendarDays, List, Plus } from "lucide-react"
+import { AlertTriangle, ArrowRightLeft, Bell, CalendarDays, List, Plus } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { getTodayISODate } from "@/lib/date-utils"
@@ -15,6 +15,7 @@ import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { fetchDepartmentOptions, resolveMyLeaderDepartmentId, type DepartmentOption } from "@/lib/kpi-department-leaders"
+import { fetchKpi5sLocations, type Kpi5sLocation } from "@/lib/kpi-5s"
 import {
   averageTaskProgress,
   fetchKpiTaskMembersByTaskIds,
@@ -34,6 +35,7 @@ import {
   type KpiTaskMember,
   type KpiTaskStatus,
 } from "@/lib/kpi-tasks"
+import { sendKpiNotify } from "@/lib/kpi-notify"
 import { KpiTaskFormModal } from "./_components/kpi-task-form-modal"
 import { KpiTaskCalendar } from "./_components/kpi-task-calendar"
 
@@ -63,6 +65,9 @@ export default function KpiTasksPage() {
   })
   const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
+  // Tải 1 lần ở trang cha, truyền xuống KpiTaskFormModal — tránh fetch lại mỗi lần mở modal
+  // "Giao việc mới" (field "Vị trí 5S liên quan" cho việc đột xuất 5S).
+  const [kpi5sLocations, setKpi5sLocations] = useState<Kpi5sLocation[]>([])
 
   const [tab, setTab] = useState<"today" | "mine" | "all">(() => (searchParams.get("tab") === "all" ? "all" : searchParams.get("tab") === "mine" ? "mine" : "today"))
   const [view, setView] = useState<"list" | "calendar">("list")
@@ -71,6 +76,9 @@ export default function KpiTasksPage() {
   const [dataLoading, setDataLoading] = useState(true)
   const [primaryGroupName, setPrimaryGroupName] = useState<string | null>(null)
   const [primaryGroupChecked, setPrimaryGroupChecked] = useState(false)
+  // Nút "Nhắc nhở" thủ công inline trên từng thẻ — chỉ Telegram, khoá tạm 45s/việc sau khi bấm
+  // (state cục bộ, không ghi DB) để tránh gửi trùng do double-click.
+  const [remindCooldownIds, setRemindCooldownIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -136,19 +144,21 @@ export default function KpiTasksPage() {
     async (fid: string, uid: string) => {
       setDataLoading(true)
       try {
-        const [taskRows, myIds, candidateData, pendingTransfers, leaderDeptId, deptRows] = await Promise.all([
+        const [taskRows, myIds, candidateData, pendingTransfers, leaderDeptId, deptRows, locationRows] = await Promise.all([
           fetchKpiTasks(fid, statusFilter.length ? { status: statusFilter } : {}),
           fetchMyActiveTaskIds(uid),
           loadKpiTaskCandidates(fid),
           fetchPendingIncomingTransfers(uid),
           resolveMyLeaderDepartmentId(uid, fid),
           fetchDepartmentOptions(),
+          fetchKpi5sLocations(fid),
         ])
         setTasks(taskRows)
         setMyActiveTaskIds(myIds)
         setCandidates(candidateData)
         setMyLeaderDepartmentId(leaderDeptId)
         setDepartments(deptRows)
+        setKpi5sLocations(locationRows)
         // Task đang có lời mời chuyển giao chờ tôi phản hồi — tôi CHƯA phải active member nên
         // không lọt qua myActiveTaskIds; vẫn phải coi là "của tôi" để thấy được lời mời (task
         // detail page tự cho phép xem qua RLS kpi_is_task_pending_transfer_target).
@@ -205,6 +215,27 @@ export default function KpiTasksPage() {
   )
 
   const visibleTasks = tab === "all" ? tasks : tab === "today" ? todayTasks : myTasks
+
+  const handleRemindTask = (t: KpiTask, taskMembers: KpiTaskMember[]) => {
+    sendKpiNotify({
+      factoryId: factoryId || undefined,
+      title: "Nhắc nhở công việc",
+      lines: [
+        `📋 ${t.tieu_de}${t.ma_cong_viec ? ` (${t.ma_cong_viec})` : ""}`,
+        `👥 Người thực hiện: ${taskMembers.filter((m) => m.is_active).map((m) => nameByUserId[m.user_id] || "—").join(", ") || "—"}`,
+        `⏰ Hạn: ${formatKpiDateTime(t.han_hoan_thanh)}`,
+      ],
+      link: `/dashboard/kpi/tasks/${t.id}`,
+    })
+    setRemindCooldownIds((prev) => new Set(prev).add(t.id))
+    setTimeout(() => {
+      setRemindCooldownIds((prev) => {
+        const next = new Set(prev)
+        next.delete(t.id)
+        return next
+      })
+    }, 45_000)
+  }
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
@@ -307,11 +338,24 @@ export default function KpiTasksPage() {
               const overdueDays = daysOverdue(t)
               const isGiver = t.nguoi_giao_id === user?.id
               const isMember = myActiveTaskIds.has(t.id)
+              const canRemind = isGiver && (overdue || dueSoon)
+              const remindSent = remindCooldownIds.has(t.id)
               return (
-                <button
+                // Dùng div role="button" thay <button> — cần lồng 1 nút "Nhắc nhở" độc lập bên
+                // trong (button-trong-button là HTML lồng phần tử tương tác không hợp lệ, dễ bị
+                // trình duyệt tự đóng sớm phần tử ngoài và phá vỡ hành vi click-để-mở-chi-tiết).
+                <div
                   key={t.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => router.push(`/dashboard/kpi/tasks/${t.id}`)}
-                  className="hover-lift text-left bg-white rounded-2xl border border-slate-200 shadow-sm p-4 hover:border-violet-200"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      router.push(`/dashboard/kpi/tasks/${t.id}`)
+                    }
+                  }}
+                  className="hover-lift cursor-pointer text-left bg-white rounded-2xl border border-slate-200 shadow-sm p-4 hover:border-violet-200"
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <span className="text-[11px] font-bold text-slate-400">{t.ma_cong_viec || "—"}</span>
@@ -354,7 +398,20 @@ export default function KpiTasksPage() {
                       </span>
                     )}
                   </div>
-                </button>
+                  {canRemind && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemindTask(t, taskMembers)
+                      }}
+                      disabled={remindSent}
+                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      <Bell size={11} /> {remindSent ? "Đã gửi nhắc nhở" : "Nhắc nhở ngay"}
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>
@@ -367,6 +424,7 @@ export default function KpiTasksPage() {
           nguoiGiaoId={user.id}
           candidates={candidates}
           departments={departments}
+          kpi5sLocations={kpi5sLocations}
           onClose={() => setShowCreate(false)}
           onCreated={(task) => {
             setShowCreate(false)

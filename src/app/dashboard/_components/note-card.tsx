@@ -1,6 +1,7 @@
 "use client"
 /* eslint-disable @next/next/no-img-element */
 
+import { memo } from "react"
 import { Pencil, Share2, Trash2, Users } from "lucide-react"
 import { formatDateDisplay } from "@/lib/date-utils"
 import { notePastelBg, type OperationNote } from "@/lib/operation-notes"
@@ -11,9 +12,12 @@ type NoteCardProps = {
   compact?: boolean
   canManage?: boolean
   sharedCount?: number
-  onEdit?: () => void
-  onDelete?: () => void
-  onShare?: () => void
+  // Nhận tham số (note/noteId) thay vì đã bind sẵn — để component cha chỉ cần 1 useCallback([])
+  // ổn định dùng chung cho cả danh sách, thay vì tạo N closure mới mỗi lần render (bắt buộc để
+  // React.memo bên dưới thực sự chặn được re-render thừa).
+  onEdit?: (note: OperationNote) => void
+  onDelete?: (noteId: string) => void
+  onShare?: (note: OperationNote) => void
   onImageClick?: (url: string) => void
 }
 
@@ -21,7 +25,7 @@ type NoteCardProps = {
  * Thẻ ghi chú kiểu "giấy nhớ" — pastel, bo góc mềm, chỉ đổ bóng nhẹ, không viền cứng.
  * Dùng chung cho widget Dashboard (compact) và grid đầy đủ ở /dashboard/notes.
  */
-export function NoteCard({
+function NoteCardBase({
   note,
   index,
   compact = false,
@@ -50,7 +54,7 @@ export function NoteCard({
             {onShare && (
               <button
                 type="button"
-                onClick={onShare}
+                onClick={() => onShare(note)}
                 className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/70"
                 aria-label="Chia sẻ ghi chú"
               >
@@ -60,7 +64,7 @@ export function NoteCard({
             {onEdit && (
               <button
                 type="button"
-                onClick={onEdit}
+                onClick={() => onEdit(note)}
                 className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/70"
                 aria-label="Sửa ghi chú"
               >
@@ -70,7 +74,7 @@ export function NoteCard({
             {onDelete && (
               <button
                 type="button"
-                onClick={onDelete}
+                onClick={() => onDelete(note.id)}
                 className="rounded-lg p-1.5 text-red-500 transition hover:bg-white/70"
                 aria-label="Xóa ghi chú"
               >
@@ -92,6 +96,7 @@ export function NoteCard({
               key={`${url}-${i}`}
               src={url}
               alt=""
+              loading="lazy"
               className="h-12 w-12 cursor-zoom-in rounded-lg object-cover shadow-sm"
               onClick={() => onImageClick?.(url)}
             />
@@ -103,3 +108,5 @@ export function NoteCard({
     </div>
   )
 }
+
+export const NoteCard = memo(NoteCardBase)

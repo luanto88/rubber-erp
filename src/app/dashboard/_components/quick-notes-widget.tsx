@@ -59,7 +59,7 @@ export function QuickNotesWidget({ factoryId, user }: QuickNotesWidgetProps) {
     setSaving(true)
     setError(null)
     try {
-      await createOperationNote({
+      const created = await createOperationNote({
         factoryId,
         noiDung: form.noiDung,
         ngayXayRa: form.ngayXayRa,
@@ -68,7 +68,9 @@ export function QuickNotesWidget({ factoryId, user }: QuickNotesWidgetProps) {
         nguoiTao: user?.full_name || user?.username || null,
       })
       setForm(emptyForm())
-      void load(factoryId)
+      // Cập nhật cục bộ (không tải lại toàn bộ widget) — ghi chú vừa tạo hầu như luôn thuộc
+      // ngày mới nhất nên chèn đầu danh sách là đúng, cắt lại đúng WIDGET_LIMIT.
+      setNotes((prev) => [created, ...prev].slice(0, WIDGET_LIMIT))
     } catch (err) {
       setError(getErrorMessage(err, "Không lưu được ghi chú."))
     } finally {
