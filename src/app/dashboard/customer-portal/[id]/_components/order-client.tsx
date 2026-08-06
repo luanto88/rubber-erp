@@ -1,17 +1,37 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
-import type { FeatureCollection } from "geojson"
+import type { Feature, FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import JSZip from "jszip"
-import { ArrowLeft, Download, Loader2, MapPin, Package } from "lucide-react"
+import {
+  ArrowLeft,
+  Building2,
+  CalendarDays,
+  Download,
+  FileDown,
+  FileText,
+  Layers3,
+  Loader2,
+  Map,
+  MapPin,
+  Mountain,
+  Package,
+  Route,
+  Ruler,
+  Sprout,
+  Trees,
+  Users,
+  X,
+} from "lucide-react"
 import { generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import { toDisplayNumber, toDisplayText, type EudrPlotProperties } from "@/lib/eudr-plot-merge"
 import {
   broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
@@ -34,6 +54,7 @@ type PortalOrderDetail = {
   so_hoa_don: string
   so_hop_dong: string
   assignments: { lot_id: string; ma_lo: string; kien_a: number; kien_b: number; kien_c: number; kien_d: number }[]
+  files?: { name: string; url: string; path?: string; size?: number }[] | null
   customers?: { ma_kh: string; ten_kh_en: string; quoc_gia: string; dia_chi: string; email: string; nguoi_lien_he: string } | null
 }
 
@@ -97,6 +118,7 @@ export default function CustomerPortalOrderClient() {
   const [data, setData] = useState<PortalData | null>(null)
   const [downloading, setDownloading] = useState<DownloadKind | null>(null)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [selectedPlot, setSelectedPlot] = useState<EudrPlotProperties | null>(null)
   const [lang, setLang] = useState<CustomerPortalLang>("en")
   const t = (key: Parameters<typeof tCustomerPortal>[1]) => tCustomerPortal(lang, key)
 
@@ -156,6 +178,42 @@ export default function CustomerPortalOrderClient() {
     const color = TEAM_COLORS[doi] || "#6b7280"
     return { color, weight: 2, fillColor: color, fillOpacity: 0.35 }
   }
+
+  // Tooltip khi hover + popup Leaflet nhỏ khi click + mở khung chi tiết đầy đủ
+  // (selectedPlot) — mirror đúng onEachFeature của EudrClient.tsx (trang nội bộ),
+  // chỉ khác là nhãn được dịch song ngữ theo `lang` hiện tại. Phụ thuộc `lang` vì
+  // nội dung HTML tooltip/popup được build 1 lần lúc bind — đổi ngôn ngữ phải rebind
+  // lại (xem `key` truyền vào <GeoJSON> bên dưới để buộc remount).
+  const onEachFeature = useCallback(
+    (feature: Feature, layer: L.Layer) => {
+      const p = (feature.properties || {}) as EudrPlotProperties
+      const plotName = toDisplayText(p.Ten || p.Ma_lo_2026 || p.Ma_lo, "?")
+      const areaText = toDisplayNumber(p.Dtich2026_ha, 2)
+      const teamText = toDisplayText(p.Doi_2026)
+      const varietyText = toDisplayText(p.Giong)
+      const plantationText = toDisplayText(p.Nong_truong)
+      layer.bindTooltip(
+        `<div style="font-size:12px;font-weight:600">${plotName}</div>
+         <div style="font-size:11px;color:#666">${t("plotFieldTeam")} ${teamText} · ${varietyText} · ${areaText} ha</div>`,
+        { sticky: true, className: "lot-tooltip" },
+      )
+      layer.bindPopup(
+        `<div class="text-xs leading-5">
+          <div class="font-bold text-slate-800 mb-1">${plotName}</div>
+          <div>${t("plotFieldPlantation")}: <strong>${plantationText}</strong></div>
+          <div>${t("plotFieldTeam")}: <strong>${teamText}</strong></div>
+          <div>${t("plotFieldArea")}: <strong>${areaText} ha</strong></div>
+          <div>${t("plotFieldVariety")}: <strong>${varietyText}</strong></div>
+          <div>${t("plotFieldPlantingYear")}: <strong>${toDisplayText(p.Nam_trong)}</strong></div>
+          <div>${t("plotFieldTappingOpenYear")}: <strong>${toDisplayText(p.Nam_mo_cao)}</strong></div>
+        </div>`,
+        { maxWidth: 240 },
+      )
+      layer.on("click", () => setSelectedPlot(p))
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lang],
+  )
 
   const handleDownloadDDS1 = async () => {
     if (!data?.factory) {
@@ -226,6 +284,21 @@ export default function CustomerPortalOrderClient() {
       zip.file(`${data.order.ma_don}_Plantation.pdf`, dds1Blob)
       zip.file(`${data.order.ma_don}_Shipment.pdf`, dds2Blob)
       zip.file(`${data.order.ma_don}_supply_chain.geojson`, JSON.stringify(data.geoData, null, 2))
+
+      // Gộp thêm các tệp đính kèm ngoài 2 DDS (nhân viên đính vào qua trang EUDR nội bộ) —
+      // bucket "eudr-files" đã public nên fetch thẳng URL là đủ, không cần service role.
+      // 1 file lỗi không được làm hỏng cả lượt tải — bỏ qua file đó, vẫn zip các file còn lại.
+      for (const f of data.order.files || []) {
+        try {
+          const res = await fetch(f.url)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const blob = await res.blob()
+          zip.file(f.name, blob)
+        } catch {
+          // bỏ qua file đính kèm lỗi, tiếp tục với các file khác
+        }
+      }
+
       const zipBlob = await zip.generateAsync({ type: "blob" })
       saveAs(zipBlob, `${data.order.ma_don}_EUDR.zip`)
     } catch {
@@ -319,6 +392,33 @@ export default function CustomerPortalOrderClient() {
           </div>
         </div>
 
+        {order.files && order.files.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="text-xs font-bold text-slate-500 mb-2">{t("attachmentsTitle")}</div>
+            <div className="space-y-1.5">
+              {order.files.map((f) => (
+                <div
+                  key={f.url}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200"
+                >
+                  <FileText size={13} className="text-slate-400 shrink-0" />
+                  <span className="flex-1 text-xs text-slate-700 truncate" title={f.name}>
+                    {f.name}
+                  </span>
+                  <a
+                    href={f.url}
+                    download
+                    className="p-1 hover:bg-slate-200 rounded text-slate-500"
+                    title={t("downloadOne")}
+                  >
+                    <FileDown size={13} />
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           {[
             { label: t("kpiLots"), value: data.traceInfo.lots },
@@ -338,20 +438,94 @@ export default function CustomerPortalOrderClient() {
         <div className="flex items-center gap-2 mb-3 text-slate-700 font-bold text-sm">
           <MapPin size={16} /> {t("plantationMap")}
         </div>
-        <div className="h-[420px] rounded-xl overflow-hidden border border-slate-200">
+        {/* relative isolate: chỗ neo cho khung chi tiết lô (absolute) + chặn z-index nội bộ
+            của Leaflet tràn ra ngoài khung bản đồ — mirror EudrClient.tsx */}
+        <div className="h-[420px] rounded-xl overflow-hidden border border-slate-200 relative isolate">
           {data.geoData.features.length > 0 ? (
             <MapContainer center={[12.58187, 105.497249]} zoom={12} style={{ height: "100%", width: "100%" }}>
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; OpenStreetMap contributors'
               />
-              <GeoJSON data={data.geoData} style={geoStyle} />
+              <GeoJSON
+                key={`${lang}-${data.geoData.features.map((f) => f.properties?.Ma_lo).join(",")}`}
+                data={data.geoData}
+                style={geoStyle}
+                onEachFeature={onEachFeature}
+              />
               <FitBounds data={data.geoData} />
               <MapResizeFix />
             </MapContainer>
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-slate-400">
               {t("noPolygonData")}
+            </div>
+          )}
+          {selectedPlot && (
+            <div className="absolute top-4 right-4 z-[400] w-80 max-w-[calc(100%-2rem)] bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-black text-slate-800">
+                    {toDisplayText(selectedPlot.Ten || selectedPlot.Ma_lo_2026 || selectedPlot.Ma_lo)}
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono">
+                    {toDisplayText(selectedPlot.ma_lo_full || selectedPlot.Ma_lo_2026 || selectedPlot.Ma_lo)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedPlot(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-400"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-3 space-y-2 text-sm max-h-[70vh] overflow-y-auto">
+                {[
+                  { label: t("plotFieldTeam"), value: `${t("plotFieldTeam")} ${toDisplayText(selectedPlot.Doi_2026)}`, icon: Users },
+                  { label: t("plotFieldSubTeam"), value: toDisplayText(selectedPlot.Doi_nho), icon: Layers3 },
+                  { label: t("plotFieldPlantation"), value: toDisplayText(selectedPlot.Nong_truong), icon: Building2 },
+                  { label: t("plotFieldVariety"), value: toDisplayText(selectedPlot.Giong), icon: Sprout },
+                  { label: t("plotFieldArea"), value: `${toDisplayNumber(selectedPlot.Dtich2026_ha, 2)} ha`, icon: Ruler },
+                  { label: t("plotFieldPlantingYear"), value: toDisplayText(selectedPlot.Nam_trong), icon: CalendarDays },
+                  { label: t("plotFieldTappingOpenYear"), value: toDisplayText(selectedPlot.Nam_mo_cao), icon: CalendarDays },
+                  {
+                    label: t("plotFieldTappingAge"),
+                    value: selectedPlot.Tuoi_cao ? `${toDisplayText(selectedPlot.Tuoi_cao)} ${t("unitYears")}` : "—",
+                    icon: Route,
+                  },
+                  { label: t("plotFieldTreeCount"), value: toDisplayNumber(selectedPlot.Tong_so_cay_KK), icon: Trees },
+                  { label: t("plotFieldTappingPanel"), value: toDisplayText(selectedPlot.Mat_cao_2026), icon: FileText },
+                  { label: t("plotFieldTappingRegime"), value: toDisplayText(selectedPlot.CD_cao_2026), icon: Package },
+                  { label: t("plotFieldSoilGrade"), value: toDisplayText(selectedPlot.Hang_dat), icon: Map },
+                  { label: t("plotFieldSpacing"), value: toDisplayText(selectedPlot.Khoang_cach_m), icon: Ruler },
+                  {
+                    label: t("plotFieldElevation"),
+                    value:
+                      selectedPlot.Cao_trinh_min_m || selectedPlot.Cao_trinh_max_m
+                        ? `${toDisplayText(selectedPlot.Cao_trinh_min_m)}-${toDisplayText(selectedPlot.Cao_trinh_max_m)} m`
+                        : "—",
+                    icon: Mountain,
+                  },
+                  {
+                    label: t("plotFieldCoordinates"),
+                    value:
+                      selectedPlot.ToadoY || selectedPlot.ToadoX
+                        ? `${toDisplayText(selectedPlot.ToadoY)}, ${toDisplayText(selectedPlot.ToadoX)}`
+                        : "—",
+                    icon: MapPin,
+                  },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl bg-slate-50 px-3 py-2 flex items-start gap-3">
+                    <div className="mt-0.5 rounded-lg bg-white p-2 text-slate-500 shadow-sm">
+                      <item.icon size={15} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.label}</div>
+                      <div className="font-semibold text-slate-700">{item.value}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

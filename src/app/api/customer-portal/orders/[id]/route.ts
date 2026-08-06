@@ -26,6 +26,7 @@ type ExportOrderRow = {
   so_hop_dong: string
   assignments: TraceOrderAssignment[]
   vehicles: unknown
+  files: { name: string; url: string; path?: string; size?: number }[] | null
   customers: { ma_kh: string; ten_kh_en: string; quoc_gia: string; dia_chi: string; email: string; nguoi_lien_he: string } | null
 }
 
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { data: orderData, error: orderError } = await supabaseAdmin
       .from("export_orders")
       .select(
-        "id, factory_id, ma_don, ngay, chung_loai, tong_banh, loai_banh, loai_pallet, loai_boc, so_thong_bao, so_hoa_don, so_hop_dong, assignments, vehicles, customers(ma_kh, ten_kh_en, quoc_gia, dia_chi, email, nguoi_lien_he)",
+        "id, factory_id, ma_don, ngay, chung_loai, tong_banh, loai_banh, loai_pallet, loai_boc, so_thong_bao, so_hoa_don, so_hop_dong, assignments, vehicles, files, customers(ma_kh, ten_kh_en, quoc_gia, dia_chi, email, nguoi_lien_he)",
       )
       .eq("id", orderId)
       .single()
