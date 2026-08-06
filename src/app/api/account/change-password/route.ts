@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
+  accountErrorResponse,
   requireAuthUser,
   supabaseAdmin,
   verifySensitiveActionToken,
@@ -34,9 +35,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi máy chủ" },
-      { status: 400 },
-    )
+    return accountErrorResponse(err, "Lỗi máy chủ")
   }
 }

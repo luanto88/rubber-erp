@@ -490,9 +490,9 @@ function SignPlacementModal({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto flex items-start justify-center p-4 bg-slate-100">
+      <div className="flex-1 overflow-auto flex items-start p-4 bg-slate-100">
         {showCanvas ? (
-          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none">
+          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none mx-auto">
             <canvas ref={canvasRef} className="block" />
 
             {!canvasReady && !canvasError && (

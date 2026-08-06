@@ -151,6 +151,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ production: true })
   const [loading, setLoading] = useState(true)
+  // Tách rõ "đang tải" (loading) khỏi kết luận xác thực THẬT — chỉ redirect về /login khi có
+  // kết quả xác nhận rõ ràng ("unauthenticated"), không redirect chỉ vì bootstrap hết giờ chờ
+  // trong lúc mạng mobile chậm (xem effect fallback bên dưới + hàm syncSession).
+  const [authResolved, setAuthResolved] = useState<"pending" | "authenticated" | "unauthenticated">("pending")
+  // Chỉ dùng để hiện gợi ý "Tải lại trang" khi mạng thực sự quá chậm/đứng — không kích hoạt
+  // bất kỳ redirect/đăng xuất nào, thuần là lối thoát thủ công cho người dùng.
+  const [slowNetwork, setSlowNetwork] = useState(false)
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
   const isLoggingOutRef = useRef(false)
   const userDropdownRef = useRef<HTMLDivElement>(null)
@@ -197,18 +204,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
      *
      * Interval/focus dùng lightweight để tránh 4-5 DB query mỗi 60s.
      * Lỗi DB trong DB query có thể match isAuthSessionError và xóa user nhầm.
+     *
+     * runSyncOnce tách khỏi syncSession để hỗ trợ thử lại 1 lần khi gặp lỗi auth — trên mobile,
+     * tab hay bị hệ điều hành tạm dừng rồi resume đúng lúc access token cần refresh, và nhiều
+     * nguồn refresh (interval, focus-listener, autoRefreshToken nền của SDK) có thể đụng độ
+     * thoáng qua. Thử lại trước khi kết luận "unauthenticated" giúp tránh đăng xuất oan.
      */
-    const syncSession = async (redirectBase = "/login", fullHydration = true) => {
-      if (syncing) return
-      syncing = true
+    const runSyncOnce = async (redirectBase: string, fullHydration: boolean, isRetry = false): Promise<void> => {
       try {
         if (!fullHydration) {
           // Lightweight: chỉ verify token còn sống, không gọi DB
           const session = await getFreshAuthSession()
-          if (!session?.user && alive) {
-            setUser(null)
-            window.location.replace(redirectBase)
+          if (!session?.user) {
+            if (alive) {
+              setAuthResolved("unauthenticated")
+              setUser(null)
+              window.location.replace(redirectBase)
+            }
+            return
           }
+          if (alive) setAuthResolved("authenticated")
           return
         }
 
@@ -216,6 +231,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const { session, user: sessionUser } = await hydrateActiveSession()
         if (!session?.user) {
           if (alive) {
+            setAuthResolved("unauthenticated")
             setUser(null)
             window.location.replace(redirectBase)
           }
@@ -225,18 +241,44 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const blocked = authBlockReason(sessionUser)
         if (!sessionUser || blocked) {
           await signOutEverywhere()
-          if (alive) window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+          if (alive) {
+            setAuthResolved("unauthenticated")
+            window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+          }
           return
         }
 
-        if (alive) setUser(sessionUser)
+        if (alive) {
+          setUser(sessionUser)
+          setAuthResolved("authenticated")
+        }
       } catch (error) {
         console.error("dashboard session sync failed", error)
-        // Chỉ xóa session khi lỗi xác thực thực sự, không phải lỗi mạng tạm thời
-        if (alive && isAuthSessionError(error)) {
+        if (!isAuthSessionError(error)) {
+          // Lỗi mạng tạm thời, không phải lỗi xác thực — giữ nguyên trạng thái "pending",
+          // KHÔNG kết luận gì và KHÔNG đăng xuất. Lần sync kế tiếp (interval/focus) sẽ tự thử lại.
+          return
+        }
+        // Lỗi xác thực thật — nhưng rất có thể chỉ là race thoáng qua giữa nhiều nguồn refresh
+        // token cùng lúc. Thử lại đúng 1 lần trước khi kết luận hẳn "unauthenticated".
+        if (!isRetry) {
+          await new Promise((resolve) => setTimeout(resolve, 800))
+          if (alive) await runSyncOnce(redirectBase, fullHydration, true)
+          return
+        }
+        if (alive) {
+          setAuthResolved("unauthenticated")
           setUser(null)
           window.location.replace("/login")
         }
+      }
+    }
+
+    const syncSession = async (redirectBase = "/login", fullHydration = true) => {
+      if (syncing) return
+      syncing = true
+      try {
+        await runSyncOnce(redirectBase, fullHydration)
       } finally {
         syncing = false
       }
@@ -244,11 +286,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const bootstrap = async () => {
       try {
-        // Timeout 10s: nếu hydrateActiveSession treo do mạng chậm,
-        // vẫn hạ loading để tránh spinner treo vô hạn
+        // Timeout 20s: nếu hydrateActiveSession treo do mạng mobile chậm, vẫn hạ `loading` để
+        // tránh spinner-blocking-DOM, NHƯNG không kết luận gì về xác thực — `authResolved` vẫn
+        // "pending" nên UI tiếp tục hiện spinner (không phải dashboard, không redirect) cho tới
+        // khi syncSession thật sự resolve. Điều này khác bản cũ: bản cũ để timeout tự suy ra
+        // "không có user" rồi redirect về /login dù session có thể vẫn hợp lệ, chỉ là chậm.
         await Promise.race([
           syncSession("/login", true),
-          new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+          new Promise<void>((resolve) => setTimeout(resolve, 20_000)),
         ])
       } finally {
         bootstrapDone = true
@@ -258,6 +303,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     void bootstrap()
 
+    // Gợi ý "Tải lại trang" khi mạng thực sự quá chậm/đứng — thuần UX, không redirect/đăng xuất.
+    const slowNetworkTimer = window.setTimeout(() => {
+      if (alive) setSlowNetwork(true)
+    }, 15_000)
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -265,15 +315,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (event === "SIGNED_OUT" || !session?.user) {
         // Bỏ qua nếu đang logout thủ công — handleLogout sẽ navigate
         if (isLoggingOutRef.current) return
-        // Supabase có thể fire SIGNED_OUT khi network blip xảy ra lúc auto-refresh.
-        // Thử lấy lại session trước khi redirect để tránh false-positive.
-        try {
-          const recovered = await getFreshAuthSession()
-          if (recovered?.user && alive) return
-        } catch {
-          // không recover được, tiếp tục redirect
+        // Supabase có thể fire SIGNED_OUT khi network blip xảy ra lúc auto-refresh, hoặc khi
+        // mobile OS vừa resume tab sau thời gian dài ở nền. Thử lấy lại session, đợi ngắn rồi
+        // thử thêm 1 lần nữa trước khi kết luận thật sự đã đăng xuất.
+        let recovered = false
+        for (let attempt = 0; attempt < 2 && !recovered; attempt++) {
+          try {
+            const result = await getFreshAuthSession()
+            if (result?.user) recovered = true
+          } catch {
+            // chưa recover được ở lượt này
+          }
+          if (!recovered && attempt === 0) await new Promise((resolve) => setTimeout(resolve, 800))
+        }
+        if (recovered) {
+          if (alive) setAuthResolved("authenticated")
+          return
         }
         if (alive) {
+          setAuthResolved("unauthenticated")
           setUser(null)
           window.location.replace("/login")
         }
@@ -307,6 +367,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       alive = false
       subscription.unsubscribe()
       window.clearInterval(intervalId)
+      window.clearTimeout(slowNetworkTimer)
       window.removeEventListener("focus", handleVisibilityOrFocus)
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
     }
@@ -422,14 +483,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isPublicStorageLookup])
 
-  // Khi bootstrap xong nhưng không có user (lỗi mạng tạm thời / session hết hạn không phải auth error)
-  // → redirect về login thay vì để spinner treo vô hạn
+  // Chỉ redirect về /login khi có KẾT QUẢ XÁC NHẬN THẬT là chưa đăng nhập ("unauthenticated") —
+  // không redirect chỉ vì bootstrap hết giờ chờ trong lúc mạng mobile chậm. syncSession() đã tự
+  // gọi window.location.replace() ngay khi nó set "unauthenticated" (xem useEffect ở trên); effect
+  // này chỉ là lớp phòng vệ bổ sung, không phải nguồn suy luận chính.
   useEffect(() => {
     if (isPublicStorageLookup) return
-    if (!loading && !user) {
+    if (authResolved === "unauthenticated") {
       window.location.replace("/login")
     }
-  }, [isPublicStorageLookup, loading, user])
+  }, [isPublicStorageLookup, authResolved])
 
   // Tài khoản role="customer" chỉ được dùng "Đơn hàng của tôi" — đây chỉ là UX điều hướng,
   // KHÔNG phải lớp bảo vệ chính. Bảo mật thật nằm ở RESTRICTIVE RLS + API route tự verify
@@ -458,8 +521,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+        {slowNetwork && authResolved === "pending" && (
+          <div className="max-w-xs text-sm text-slate-500">
+            <p>Kết nối đang chậm hơn bình thường, vui lòng đợi hoặc thử lại.</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200"
+            >
+              Tải lại trang
+            </button>
+          </div>
+        )}
       </div>
     )
   }

@@ -29,10 +29,12 @@ import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
+  forceRefreshAuthSession,
   getActiveFactoryId,
   getFreshAuthSession,
   hasPermission,
   hydrateActiveSession,
+  signOutEverywhere,
   type AppRole,
   type SessionUser,
 } from "@/lib/auth"
@@ -157,6 +159,18 @@ type UserEditor = {
   permissions: string[]
   mode: "approve" | "edit"
 }
+
+// Message này được cả client (getAccessToken, khi refreshSession thất bại) lẫn server
+// (requireAuthUser trong src/app/api/account/_lib/security.ts) dùng chung — dùng để nhận diện
+// và tự thử lại 1 lần khi luồng OTP đổi PIN/chữ ký/mật khẩu bị đụng độ refresh token thoáng qua
+// (ví dụ người dùng chuyển sang app Mail lấy OTP rồi quay lại, kích hoạt refresh song song).
+// Retry ở đây chỉ là lưới an toàn cuối cùng — 2 lớp phòng vệ chính đã nằm ở tầng dưới:
+//   1. src/lib/auth.ts's getFreshAuthSession() dùng 1 promise refresh dùng chung (single-flight)
+//      để mọi lệnh gọi đồng thời trong app (interval, focus-listener, trang này...) không tự
+//      gọi refreshSession() độc lập, gây "đốt" refresh token của nhau.
+//   2. src/lib/supabase.ts cache client qua globalThis để Next.js Fast Refresh (chỉ xảy ra ở
+//      `npm run dev`) không vô tình tạo ra nhiều GoTrueClient cùng đọc/ghi 1 key localStorage.
+const SESSION_EXPIRED_MESSAGE = "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại"
 
 type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban" | "kpi-5s"
 type SensitiveActionKind = "change_pin" | "change_signature" | "change_password"
@@ -2358,14 +2372,39 @@ export default function SettingsPage() {
     void loadVanBanTypes(factoryId)
   }
 
-  const getAccessToken = async () => {
-    try {
-      const session = await getFreshAuthSession()
+  // forceRefresh=true: bỏ qua getFreshAuthSession() (chỉ refresh khi client TỰ THẤY token sắp
+  // hết hạn) — dùng khi ĐÃ BIẾT server vừa từ chối token hiện tại (SESSION_EXPIRED_MESSAGE), lúc
+  // đó gọi lại getFreshAuthSession() bình thường có thể trả về Y NGUYÊN token cũ đã bị từ chối
+  // (bug thật đã xác nhận qua console log: retry không hề có log lỗi refresh nào, vì client vẫn
+  // nghĩ token còn hạn theo expires_at đang giữ) — phải ép refresh thật bằng forceRefreshAuthSession().
+  const getAccessToken = async (forceRefresh = false): Promise<string> => {
+    const tryOnce = async () => {
+      const session = forceRefresh ? await forceRefreshAuthSession() : await getFreshAuthSession()
       const token = session?.access_token
-      if (!token) throw new Error("no token")
+      if (!token) throw new Error("Không lấy được access token từ session hiện tại")
       return token
-    } catch {
-      throw new Error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+    }
+    try {
+      return await tryOnce()
+    } catch (error) {
+      // Không nuốt lỗi thật — log rõ nguyên nhân gốc để còn debug được trên production.
+      // Lỗi phổ biến nhất là race giữa nhiều nguồn refresh token cùng lúc (interval 60s,
+      // focus-listener khi người dùng quay lại tab sau khi mở app Mail lấy OTP, autoRefreshToken
+      // nền của SDK) — thường tự hết sau vài trăm mili-giây nên thử lại 1 lần trước khi kết luận.
+      console.error(
+        "getAccessToken: lần thử đầu thất bại, thử lại sau 600ms —",
+        error instanceof Error ? `${error.name}: ${error.message}` : error,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      try {
+        return await tryOnce()
+      } catch (retryError) {
+        console.error(
+          "getAccessToken: thử lại vẫn thất bại —",
+          retryError instanceof Error ? `${retryError.name}: ${retryError.message}` : retryError,
+        )
+        throw new Error(SESSION_EXPIRED_MESSAGE)
+      }
     }
   }
 
@@ -2373,6 +2412,17 @@ export default function SettingsPage() {
     setSensitiveActionModal(null)
     setSensitiveActionError("")
     setSensitiveActionLoading(false)
+  }
+
+  // Gọi khi ĐÃ XÁC NHẬN phiên đăng nhập thực sự bị Supabase thu hồi ở tầng server (không phải
+  // race thoáng qua nữa — đã thử ép refresh token thật và server vẫn từ chối). Không có cách nào
+  // "sửa" được 1 phiên đã chết bằng cách thử lại thêm — chủ động đăng xuất sạch và đưa về /login
+  // thay vì để người dùng bị kẹt lặp lại lỗi trong modal đổi PIN/chữ ký/mật khẩu.
+  const signOutDueToExpiredSession = async (reason: string) => {
+    console.error(`${reason} — phiên đăng nhập đã bị thu hồi thật sự, đăng xuất và chuyển về /login`)
+    setSensitiveActionError("Phiên đăng nhập đã hết hạn thật sự. Đang đưa bạn về trang đăng nhập...")
+    await signOutEverywhere()
+    window.location.replace("/login")
   }
 
   const beginSensitiveAction = (action: Omit<SensitiveActionModal, "challengeId" | "maskedEmail" | "currentPassword" | "currentPin" | "otp">) => {
@@ -2439,22 +2489,58 @@ export default function SettingsPage() {
     setSensitiveActionLoading(true)
     setSensitiveActionError("")
     try {
-      const accessToken = await getAccessToken()
-      const verifyRes = await fetch("/api/account/verify-otp", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          actionType: sensitiveActionModal.actionType,
-          challengeId: sensitiveActionModal.challengeId,
-          otp: sensitiveActionModal.otp,
-        }),
-      })
-      const verifyJson = await verifyRes.json()
+      let accessToken = await getAccessToken()
+      const doVerifyOtp = (token: string) =>
+        fetch("/api/account/verify-otp", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            actionType: sensitiveActionModal.actionType,
+            challengeId: sensitiveActionModal.challengeId,
+            otp: sensitiveActionModal.otp,
+          }),
+        })
+
+      let verifyRes = await doVerifyOtp(accessToken)
+      let verifyJson = await verifyRes.json()
+
       if (!verifyRes.ok) {
+        console.warn(`verify-otp: lần gọi đầu thất bại (HTTP ${verifyRes.status}) —`, verifyJson)
+      }
+
+      // Server đánh dấu code:"session_expired" (xem accountErrorResponse trong _lib/security.ts)
+      // khi requireAuthUser() từ chối token — có thể do bị vô hiệu hóa bởi 1 lượt refresh token
+      // khác chạy song song (tab khác, interval, focus-listener...) ngay giữa lúc OTP đúng đã
+      // được nhập, hoặc do phía client vẫn tưởng token còn hạn trong khi server đã từ chối nó.
+      // Bắt buộc dùng forceRefresh=true — gọi getAccessToken() thường ở đây sẽ có thể trả về Y
+      // NGUYÊN token vừa bị từ chối (getFreshAuthSession() chỉ refresh khi client TỰ THẤY token
+      // sắp hết hạn, không biết server vừa từ chối nó) khiến lần gọi lại luôn thất bại giống hệt
+      // lần đầu — đây là bug thật đã xác nhận qua console log thực tế, không phải suy đoán. Lấy
+      // token mới THẬT (ép refresh) và gửi lại đúng 1 lần trước khi kết luận phiên đăng nhập thật
+      // sự đã hết hạn.
+      if (!verifyRes.ok && verifyJson.code === "session_expired") {
+        console.warn("verify-otp: server báo phiên hết hạn dù OTP có thể đúng, ép refresh token thật và gửi lại...")
+        accessToken = await getAccessToken(true)
+        verifyRes = await doVerifyOtp(accessToken)
+        verifyJson = await verifyRes.json()
+        if (!verifyRes.ok) {
+          console.error(`verify-otp: lần gọi lại (sau khi ép refresh token) vẫn thất bại (HTTP ${verifyRes.status}) —`, verifyJson)
+        }
+      }
+
+      if (!verifyRes.ok) {
+        if (verifyJson.code === "session_expired") {
+          // Server đã từ chối CẢ token vừa ép refresh thật — không phải race thoáng qua nữa,
+          // phiên đăng nhập này đã thực sự bị Supabase thu hồi ở tầng server (thường do refresh
+          // token bị dùng trùng giữa 2 nguồn refresh chạy song song ở 1 thời điểm trước đó —
+          // error_code "session_not_found" từ Supabase Auth).
+          await signOutDueToExpiredSession("confirmSensitiveAction: verify-otp vẫn bị từ chối sau khi ép refresh")
+          return
+        }
         setSensitiveActionError(verifyJson.error || "OTP không hợp lệ")
         return
       }
@@ -2533,6 +2619,19 @@ export default function SettingsPage() {
 
       closeSensitiveActionModal()
     } catch (error) {
+      // getAccessToken() tự ném đúng SESSION_EXPIRED_MESSAGE khi CẢ 2 lần thử (kể cả forceRefresh)
+      // đều không lấy được token nào — nghĩa là refreshSession() thật sự thất bại, dấu hiệu phiên
+      // đăng nhập đã bị thu hồi ở tầng server, không phải lỗi tạm thời. Xử lý giống hệt nhánh
+      // "verify-otp trả về code: session_expired" ở trên — đăng xuất sạch thay vì để lỗi hiện
+      // lặp lại vô nghĩa trong modal.
+      if (error instanceof Error && error.message === SESSION_EXPIRED_MESSAGE) {
+        await signOutDueToExpiredSession("confirmSensitiveAction: getAccessToken() thất bại hoàn toàn")
+        return
+      }
+      console.error(
+        "confirmSensitiveAction: lỗi không mong đợi —",
+        error instanceof Error ? `${error.name}: ${error.message}` : error,
+      )
       setSensitiveActionError(error instanceof Error ? error.message : "Xác thực thay đổi thất bại")
     } finally {
       setSensitiveActionLoading(false)

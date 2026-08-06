@@ -108,13 +108,48 @@ export function isAuthSessionError(error: unknown) {
   )
 }
 
+// Nhiều nơi trong app gọi getFreshAuthSession() độc lập với nhau (interval 60s, focus/visibility
+// listener trong dashboard/layout.tsx, các lệnh gọi trực tiếp từ settings.tsx khi đổi PIN/chữ
+// ký/mật khẩu...). Nếu 2 lệnh gọi này rơi đúng lúc access token sắp hết hạn, cả 2 có thể cùng
+// gọi refreshSession() gần như đồng thời — supabase-js rotate refresh token sau mỗi lần dùng nên
+// lệnh chạy sau có thể nhận phải refresh token đã bị lệnh chạy trước "đốt", ra lỗi
+// "Invalid Refresh Token: Already Used" dù phiên đăng nhập thực ra vẫn còn hợp lệ. Dùng 1 promise
+// dùng chung để mọi lệnh gọi đồng thời "ăn theo" đúng 1 lượt refresh thật duy nhất.
+let refreshInFlight: Promise<Session | null> | null = null
+
+async function refreshSessionOnce(): Promise<Session | null> {
+  const { data, error } = await supabase.auth.refreshSession()
+  if (error) {
+    console.error(
+      `getFreshAuthSession: refreshSession() thất bại — ${error.name}: ${error.message}` +
+        ("status" in error && error.status ? ` (status=${error.status})` : ""),
+    )
+    throw error
+  }
+  return data.session
+}
+
 export async function getFreshAuthSession() {
   const session = await getAuthSession()
   if (session && !isSessionExpiringSoon(session)) return session
+  return forceRefreshAuthSession()
+}
 
-  const { data, error } = await supabase.auth.refreshSession()
-  if (error) throw error
-  return data.session
+// Dùng khi ĐÃ BIẾT access token hiện tại bị server từ chối (vd verify-otp trả về "Phiên đăng
+// nhập đã hết hạn") dù phía client vẫn tưởng token còn hạn — nghĩa là `session.expires_at` đang
+// giữ chưa rơi vào khoảng SESSION_REFRESH_LEEWAY_SECONDS. getFreshAuthSession() bình thường sẽ
+// KHÔNG refresh trong trường hợp này (vì isSessionExpiringSoon() vẫn false) nên trả về nguyên
+// token cũ đã bị từ chối — bug thật đã xác nhận qua console log (retry gọi lại getAccessToken()
+// mà không hề có log lỗi refresh nào, tức getFreshAuthSession() coi token vẫn hợp lệ và trả về y
+// nguyên). Gọi thẳng hàm này ở các nhánh "server vừa báo hết hạn" để ép refresh thật, bỏ qua bước
+// kiểm tra "còn hạn hay chưa".
+export async function forceRefreshAuthSession() {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshSessionOnce().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
 }
 
 export async function signOutEverywhere() {

@@ -1,9 +1,37 @@
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { createClient, type User as SupabaseUser } from "@supabase/supabase-js"
 import { jwtVerify, SignJWT } from "jose"
 import bcrypt from "bcryptjs"
 import nodemailer from "nodemailer"
 import { authEmailsForUsername } from "@/lib/auth"
+
+// Đánh dấu riêng trường hợp requireAuthUser() từ chối token — client cần phân biệt được đây là
+// lỗi PHIÊN THẬT SỰ ĐÃ CHẾT (Supabase server xác nhận token/session không còn tồn tại, ví dụ
+// error_code "session_not_found" — xảy ra khi session bị thu hồi do refresh token bị dùng trùng
+// giữa 2 nguồn refresh chạy song song) so với các lỗi khác (OTP sai, thiếu tham số...). Dùng
+// `name` để nhận diện thay vì so sánh chuỗi message (dễ vỡ nếu message đổi).
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+    this.name = "SessionExpiredError"
+  }
+}
+
+export function isSessionExpiredError(err: unknown): err is SessionExpiredError {
+  return err instanceof Error && err.name === "SessionExpiredError"
+}
+
+// Helper dùng chung cho catch block của các route dưới _lib/security.ts — tự thêm
+// `code: "session_expired"` khi lỗi đến từ requireAuthUser() bị từ chối, để client
+// (settings/page.tsx) phân biệt được với lỗi thường và biết khi nào nên tự đăng xuất thay vì cứ
+// hiện lỗi rồi để người dùng bấm lại vô ích.
+export function accountErrorResponse(err: unknown, fallbackMessage: string, status = 400) {
+  const message = err instanceof Error ? err.message : fallbackMessage
+  return NextResponse.json(
+    { error: message, ...(isSessionExpiredError(err) ? { code: "session_expired" } : {}) },
+    { status },
+  )
+}
 
 export type SensitiveActionType = "change_pin" | "change_signature" | "change_password"
 
@@ -42,7 +70,15 @@ export async function requireAuthUser(req: NextRequest): Promise<SupabaseUser> {
 
   const { data, error } = await supabaseAuth.auth.getUser(token)
   if (error || !data.user) {
-    throw new Error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+    const detail = error
+      ? `${error.name}: ${error.message}${"status" in error && error.status ? ` (status=${error.status})` : ""}`
+      : "getUser() trả về rỗng dù không có lỗi"
+    // Log rõ nguyên nhân gốc ra console server (terminal chạy npm run dev / log Vercel) — lỗi
+    // hiển thị cho người dùng luôn là 1 câu chung chung, nhưng nguyên nhân thật (token hết hạn
+    // thật sự vs "Invalid Refresh Token: Already Used" do 2 nguồn refresh song song...) chỉ thấy
+    // được ở đây.
+    console.error(`requireAuthUser: xác thực token thất bại — ${detail} — token đầu: ${token.slice(0, 12)}...`)
+    throw new SessionExpiredError()
   }
 
   return data.user

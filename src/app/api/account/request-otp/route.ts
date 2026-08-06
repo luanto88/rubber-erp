@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
+  accountErrorResponse,
   createOtpChallenge,
   generateOtp,
   getProfileAuthRow,
@@ -67,9 +68,6 @@ export async function POST(req: NextRequest) {
       expiresAt: challenge.expires_at,
     })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi máy chủ" },
-      { status: 500 },
-    )
+    return accountErrorResponse(err, "Lỗi máy chủ", 500)
   }
 }

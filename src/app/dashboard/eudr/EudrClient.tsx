@@ -35,6 +35,7 @@ type ExportOrder = {
   chung_loai: string; tong_banh: number
   loai_banh: number; loai_pallet: string; loai_boc: string
   so_thong_bao: string; so_hoa_don: string; so_hop_dong: string
+  public_token?: string | null
   assignments: { lot_id: string; ma_lo: string; vehicleIdx: number; kien_a:number; kien_b:number; kien_c:number; kien_d:number }[]
   vehicles: { id:string; loai_xe:string; bien_truoc:string; bien_sau:string }[]
   files: { name: string; url: string; path?: string; size?: number }[]

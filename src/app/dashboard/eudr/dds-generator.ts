@@ -47,6 +47,7 @@ type OrderForDDS = {
   so_thong_bao: string
   so_hoa_don: string
   so_hop_dong: string
+  public_token?: string | null
   assignments: {
     lot_id: string
     ma_lo: string
@@ -82,6 +83,15 @@ function normalizePdfText(value?: string | null): string {
     "Pallet gá»—": "Pallet gỗ",
   }
   return replacements[text] || text
+}
+
+// Bảng dịch nhanh 1 vài giá trị "loai_pallet" hay gặp sang tiếng Anh cho DDS. Chỉ dịch giá
+// trị đã xác nhận với người dùng ("Rời"); các giá trị khác giữ nguyên tiếng Việt như cũ vì
+// chưa có yêu cầu dịch chính thức, tránh đoán sai thuật ngữ.
+function palletTypeLabelEn(value?: string | null): string {
+  const text = normalizePdfText(value)
+  if (text === "Rời") return "Loose (No Pallet)"
+  return text
 }
 
 function fmtDate(d?: string | null): string {
@@ -153,20 +163,27 @@ function computeOrderCert(
   return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]
 }
 
-// Trỏ tới trang trung gian /dashboard/eudr/lookup — trang này tự xác định vai trò người
-// quét QR: nhân viên nội bộ (export.view) vào thẳng /dashboard/eudr như cũ; khách hàng
-// (role="customer") được chuyển hướng đúng vào Customer Portal (song ngữ Anh/Việt) của
-// đúng đơn hàng đó. QR trỏ thẳng /dashboard/eudr trước đây khiến khách hàng bị chặn vì
-// thiếu quyền nhân viên.
-function buildOrderLookupUrl(orderCode: string) {
+// Khi đơn đã có public_token (mọi đơn mới đều có, xem migration 20260818): QR trỏ THẲNG
+// tới trang công khai /eudr-order — không cần đăng nhập, không đi qua bất kỳ tài khoản
+// nào, chỉ hiển thị đúng dữ liệu/file của MỘT đơn hàng này. Đây là điểm mấu chốt để chặn
+// lỗ hổng "quét 1 QR bất kỳ là xem được toàn bộ đơn hàng của tài khoản" — vì trang này độc
+// lập hoàn toàn với export_order_customer_grants/tài khoản đăng nhập.
+//
+// Khi KHÔNG có token (dữ liệu rất cũ, sinh trước migration) mới fallback về hành vi cũ:
+// trang trung gian /dashboard/eudr/lookup tự xác định vai trò người quét (nhân viên vào
+// thẳng /dashboard/eudr; khách hàng phải đăng nhập rồi vào Customer Portal).
+function buildOrderLookupUrl(orderCode: string, token?: string | null) {
+  if (token) {
+    return `${APP_URL}/eudr-order?token=${encodeURIComponent(token)}`
+  }
   return `${APP_URL}/dashboard/eudr/lookup?order=${encodeURIComponent(orderCode)}`
 }
 
-async function addOrderQr(doc: jsPDF, orderCode: string) {
+async function addOrderQr(doc: jsPDF, orderCode: string, token?: string | null) {
   const pageW = doc.internal.pageSize.getWidth()
   const x = pageW - 14 - DDS_QR_SIZE_MM
   const y = 12
-  const qrDataUrl = await QRCode.toDataURL(buildOrderLookupUrl(orderCode), {
+  const qrDataUrl = await QRCode.toDataURL(buildOrderLookupUrl(orderCode, token), {
     width: 240,
     margin: 1,
   })
@@ -240,7 +257,7 @@ export async function generateDDS1(
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await addOrderQr(doc, order.ma_don)
+  await addOrderQr(doc, order.ma_don, order.public_token)
 
   const startY = buildDDSHeader(doc, "RUBBER PLANTATION LOCATION DECLARATION", order, factory)
   const orderCert = normalizePdfText(computeOrderCert(order.assignments, lotCertMap))
@@ -297,7 +314,7 @@ export async function generateDDS2(
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await addOrderQr(doc, order.ma_don)
+  await addOrderQr(doc, order.ma_don, order.public_token)
 
   const startY = buildDDSHeader(doc, "SHIPMENT LOT DECLARATION", order, factory)
 
@@ -311,7 +328,7 @@ export async function generateDDS2(
       String(index + 1),
       normalizePdfText(assignment.ma_lo),
       weightTon,
-      normalizePdfText(order.loai_pallet),
+      palletTypeLabelEn(order.loai_pallet),
       fmtDate(extractionDates[assignment.lot_id]),
       fmtDate(lot?.ngay_sx),
       normalizePdfText(factory.full_name_en),
@@ -334,14 +351,28 @@ export async function generateDDS2(
   const finalY = (pdf.lastAutoTable?.finalY ?? startY) + 8
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
-  if (finalY < pageH - 30) {
+  const showPalletNote = order.loai_pallet === "Rời"
+  if (finalY < pageH - (showPalletNote ? 36 : 30)) {
+    let noteY = finalY
+    if (showPalletNote) {
+      doc.setFont(PDF_FONT_NAME, "normal")
+      doc.setFontSize(7)
+      doc.setTextColor(100)
+      doc.text(
+        "* Loose (No Pallet): rubber bales (35kg rectangular blocks) loaded onto the truck individually, without being stacked on pallets.",
+        pageW / 2,
+        noteY,
+        { align: "center", maxWidth: pageW - 28 },
+      )
+      noteY += 5
+    }
     doc.setFont(PDF_FONT_NAME, "normal")
     doc.setFontSize(8)
     doc.setTextColor(100)
     doc.text(
       `Total lots: ${rows.length}     Generated: ${fmtDate(new Date().toISOString())}     Order: ${order.ma_don}`,
       pageW / 2,
-      finalY,
+      noteY,
       { align: "center" },
     )
   }

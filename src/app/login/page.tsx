@@ -39,7 +39,11 @@ type DepartmentOption = {
   sort_order: number
 }
 
-const LOGIN_BOOT_TIMEOUT_MS = 8000
+// Tăng từ 8s → 15s: trên mạng mobile chậm (chuyển 4G↔wifi, sóng yếu), 8s hay không đủ để tải
+// xong danh sách nhà máy, khiến dropdown "Chọn nhà máy" chỉ còn placeholder rỗng một cách im
+// lặng. 15s vẫn đủ nhanh cho trải nghiệm bình thường, đồng thời có nút "Thử lại" bên dưới cho
+// trường hợp thực sự thất bại thay vì để người dùng không biết vì sao dropdown trống.
+const LOGIN_BOOT_TIMEOUT_MS = 15000
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
   return Promise.race<T>([
@@ -68,6 +72,10 @@ function LoginPageContent() {
   const [deptOpen, setDeptOpen] = useState(false)
   const deptRef = useRef<HTMLDivElement>(null)
   const [booting, setBooting] = useState(true)
+  // Tăng số này để chủ động chạy lại effect bootstrap bên dưới (nút "Thử lại" khi tải danh
+  // sách nhà máy thất bại do mạng chậm) — không dùng router.refresh()/window.location.reload()
+  // để tránh mất state form (username/password đã gõ dở, tab đang chọn...).
+  const [bootAttempt, setBootAttempt] = useState(0)
   // Lưu dưới dạng key/reason thay vì chuỗi đã dịch sẵn — thông báo này được set bên trong
   // 1 effect chỉ chạy 1 lần lúc mount (closure có thể "cũ" nếu người dùng đổi ngôn ngữ
   // ngay sau đó); dịch tại thời điểm render (dùng `lang` hiện tại) để luôn đúng ngôn ngữ.
@@ -107,6 +115,7 @@ function LoginPageContent() {
 
   useEffect(() => {
     let alive = true
+    setBooting(true)
 
     const bootstrap = async () => {
       try {
@@ -185,7 +194,7 @@ function LoginPageContent() {
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [bootAttempt])
 
   useEffect(() => {
     if (reason) setNotice({ kind: "reason", reason })
@@ -376,6 +385,19 @@ function LoginPageContent() {
                 </option>
               ))}
             </select>
+
+            {!booting && factoryOptions.length === 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
+                <span>{t("factoriesLoadFailedHint")}</span>
+                <button
+                  type="button"
+                  onClick={() => setBootAttempt((n) => n + 1)}
+                  className="shrink-0 rounded-lg bg-amber-100 px-3 py-1.5 font-bold hover:bg-amber-200"
+                >
+                  {t("retryLoadFactories")}
+                </button>
+              </div>
+            )}
 
             {tab === "register" && (
               <>

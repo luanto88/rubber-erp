@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
+  accountErrorResponse,
   getProfileAuthRow,
   requireAuthUser,
   supabaseAdmin,
@@ -48,9 +49,6 @@ export async function POST(req: NextRequest) {
     const { data } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(sigPath)
     return NextResponse.json({ ok: true, publicUrl: data.publicUrl })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi máy chủ" },
-      { status: 400 },
-    )
+    return accountErrorResponse(err, "Lỗi máy chủ")
   }
 }

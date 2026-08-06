@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import {
+  accountErrorResponse,
   requireAuthUser,
   supabaseAdmin,
   verifySensitiveActionToken,
@@ -49,9 +50,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi server" },
-      { status: 400 },
-    )
+    return accountErrorResponse(err, "Lỗi server")
   }
 }

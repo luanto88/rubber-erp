@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuthUser } from "@/app/api/account/_lib/security"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { traceExportOrderGeoChain, type TraceOrderAssignment } from "@/lib/eudr-trace"
 
 export const dynamic = "force-dynamic"
-
-type ProfileRow = {
-  id: string
-  role: string | null
-  status: string | null
-}
 
 type ExportOrderRow = {
   id: string
@@ -41,60 +34,37 @@ type FactoryRow = {
   country_en: string
 }
 
-// GET /api/customer-portal/orders/[id]
-// Trả về toàn bộ chuỗi truy xuất EUDR của 1 đơn xuất hàng CỤ THỂ, chỉ khi tài khoản
-// customer đang gọi đã được admin cấp quyền xem đúng đơn này (bảng
-// export_order_customer_grants). Dùng service role để tự chạy lại chuỗi trace (vốn
-// RESTRICTIVE RLS đã chặn role customer đọc thẳng các bảng liên quan) — không tin bất kỳ
-// dữ liệu nào client gửi lên ngoài id đơn trong URL.
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// GET /api/eudr/public-order?token=<public_token>
+//
+// Route CÔNG KHAI — KHÔNG gọi requireAuthUser(), không quan tâm người gọi có đăng nhập hay
+// không, không dựa vào export_order_customer_grants. Đây chính là điểm mấu chốt khắc phục
+// lỗ hổng "quét 1 QR bất kỳ là xem được toàn bộ đơn hàng của tài khoản": mỗi đơn hàng có 1
+// public_token ngẫu nhiên riêng (UUID, không đoán được), quét đúng token nào chỉ trả về
+// đúng dữ liệu của đơn hàng đó — độc lập hoàn toàn với tài khoản/quyền đăng nhập.
+//
+// Dùng service role vì role="customer" bị RESTRICTIVE RLS chặn đọc thẳng các bảng liên
+// quan, và khách truy cập qua route này hoàn toàn không có phiên đăng nhập nào cả.
+export async function GET(req: NextRequest) {
   try {
-    const { id: orderId } = await params
-    if (!orderId) {
-      return NextResponse.json({ error: "Thiếu mã đơn xuất hàng" }, { status: 400 })
+    const token = req.nextUrl.searchParams.get("token")?.trim()
+    if (!token) {
+      return NextResponse.json({ error: "Thiếu mã tra cứu" }, { status: 400 })
     }
 
-    const authUser = await requireAuthUser(req)
     const supabaseAdmin = getSupabaseAdmin()
-
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, role, status")
-      .eq("id", authUser.id)
-      .single()
-
-    if (profileError || !profile) {
-      return NextResponse.json({ error: "Không tìm thấy hồ sơ người dùng" }, { status: 403 })
-    }
-
-    const caller = profile as ProfileRow
-    if (caller.role !== "customer" || caller.status !== "active") {
-      return NextResponse.json({ error: "Tài khoản không có quyền truy cập" }, { status: 403 })
-    }
-
-    const { data: grant, error: grantError } = await supabaseAdmin
-      .from("export_order_customer_grants")
-      .select("id")
-      .eq("export_order_id", orderId)
-      .eq("granted_to_user_id", authUser.id)
-      .maybeSingle()
-
-    if (grantError) {
-      return NextResponse.json({ error: grantError.message }, { status: 500 })
-    }
-    if (!grant) {
-      return NextResponse.json({ error: "Bạn không có quyền xem đơn này" }, { status: 403 })
-    }
 
     const { data: orderData, error: orderError } = await supabaseAdmin
       .from("export_orders")
       .select(
         "id, factory_id, ma_don, ngay, chung_loai, tong_banh, loai_banh, loai_pallet, loai_boc, so_thong_bao, so_hoa_don, so_hop_dong, public_token, assignments, vehicles, files, customers(ma_kh, ten_kh_en, quoc_gia, dia_chi, email, nguoi_lien_he)",
       )
-      .eq("id", orderId)
-      .single()
+      .eq("public_token", token)
+      .maybeSingle()
 
-    if (orderError || !orderData) {
+    if (orderError) {
+      return NextResponse.json({ error: orderError.message }, { status: 500 })
+    }
+    if (!orderData) {
       return NextResponse.json({ error: "Không tìm thấy đơn xuất hàng" }, { status: 404 })
     }
 
@@ -128,7 +98,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },
-      { status: 401 },
+      { status: 500 },
     )
   }
 }

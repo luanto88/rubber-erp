@@ -4428,8 +4428,8 @@ export default function IsoDocumentDetailPage() {
               </div>
             </div>
             {/* Canvas area */}
-            <div className="flex-1 overflow-auto flex items-start justify-center p-4 bg-slate-100">
-              <div className="relative inline-block shadow-2xl bg-white select-none">
+            <div className="flex-1 overflow-auto flex items-start p-4 bg-slate-100">
+              <div className="relative inline-block shadow-2xl bg-white select-none mx-auto">
                 <canvas ref={pdfCanvasRef} className="block" />
                 {placementModal.previewSignatures
                   .filter((entry) => entry.page === placementModal.currentPage)

@@ -1,13 +1,17 @@
 "use client"
 
+// Client component cho trang công khai /eudr-order — đích quét QR trong DDS. KHÔNG có bất
+// kỳ session/permission gate nào, KHÔNG có "Quay lại danh sách" hay liên kết nào tới đơn
+// hàng khác — chỉ hiển thị đúng dữ liệu/file của MỘT đơn hàng, xác định bởi `token` (mã bí
+// mật ngẫu nhiên riêng của đơn đó). Mirror phần lớn UI của
+// dashboard/customer-portal/[id]/_components/order-client.tsx (Customer Portal, cần đăng
+// nhập) nhưng tách riêng vì khác hẳn về xác thực/điều hướng.
+
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
-import Link from "next/link"
-import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import JSZip from "jszip"
-import { ArrowLeft, Download, FileDown, FileText, Loader2, MapPin, Package } from "lucide-react"
+import { Download, FileDown, FileText, Loader2, MapPin, Package, ShieldCheck } from "lucide-react"
 import { generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
@@ -19,7 +23,7 @@ import {
 } from "@/lib/customer-portal-i18n"
 import { CustomerPortalLangToggle } from "@/app/dashboard/customer-portal/_components/lang-toggle"
 
-type PortalOrderDetail = {
+type PublicOrderDetail = {
   id: string
   ma_don: string
   ngay: string
@@ -37,8 +41,8 @@ type PortalOrderDetail = {
   customers?: { ma_kh: string; ten_kh_en: string; quoc_gia: string; dia_chi: string; email: string; nguoi_lien_he: string } | null
 }
 
-type PortalData = {
-  order: PortalOrderDetail
+type PublicOrderData = {
+  order: PublicOrderDetail
   factory: FactoryProfile | null
   lotDetails: LotDetail[]
   extractionDates: Record<string, string>
@@ -57,12 +61,10 @@ function formatDate(value: string) {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
 }
 
-export default function CustomerPortalOrderClient() {
-  const params = useParams<{ id: string }>()
-  const orderId = params?.id
+export function EudrOrderPublicClient({ token }: { token: string }) {
   const [loading, setLoading] = useState(true)
   const [loadFailed, setLoadFailed] = useState(false)
-  const [data, setData] = useState<PortalData | null>(null)
+  const [data, setData] = useState<PublicOrderData | null>(null)
   const [downloading, setDownloading] = useState<DownloadKind | null>(null)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [lang, setLang] = useState<CustomerPortalLang>("en")
@@ -84,30 +86,15 @@ export default function CustomerPortalOrderClient() {
   }
 
   useEffect(() => {
-    const bootstrap = async () => {
-      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
-      const blocked = authBlockReason(user)
-      if (!session?.user || blocked) {
-        setLoading(false)
-        await signOutEverywhere()
-        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
-        return
-      }
-      if (!hasPermission(user, "export.view_own")) {
-        setLoading(false)
-        window.location.replace("/dashboard")
-        return
-      }
-      if (!orderId) {
+    const load = async () => {
+      if (!token) {
         setLoading(false)
         setLoadFailed(true)
         return
       }
       try {
-        const res = await fetch(`/api/customer-portal/orders/${orderId}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        })
-        const json = (await res.json().catch(() => null)) as (PortalData & { error?: string }) | null
+        const res = await fetch(`/api/eudr/public-order?token=${encodeURIComponent(token)}`)
+        const json = (await res.json().catch(() => null)) as (PublicOrderData & { error?: string }) | null
         if (!res.ok || !json) throw new Error("load_failed")
         setData(json)
       } catch {
@@ -116,8 +103,8 @@ export default function CustomerPortalOrderClient() {
         setLoading(false)
       }
     }
-    void bootstrap()
-  }, [orderId])
+    void load()
+  }, [token])
 
   const handleDownloadDDS1 = async () => {
     if (!data?.factory) {
@@ -189,9 +176,6 @@ export default function CustomerPortalOrderClient() {
       zip.file(`${data.order.ma_don}_Shipment.pdf`, dds2Blob)
       zip.file(`${data.order.ma_don}_supply_chain.geojson`, JSON.stringify(data.geoData, null, 2))
 
-      // Gộp thêm các tệp đính kèm ngoài 2 DDS (nhân viên đính vào qua trang EUDR nội bộ) —
-      // bucket "eudr-files" đã public nên fetch thẳng URL là đủ, không cần service role.
-      // 1 file lỗi không được làm hỏng cả lượt tải — bỏ qua file đó, vẫn zip các file còn lại.
       for (const f of data.order.files || []) {
         try {
           const res = await fetch(f.url)
@@ -237,12 +221,9 @@ export default function CustomerPortalOrderClient() {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <Link
-          href="/dashboard/customer-portal"
-          className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700"
-        >
-          <ArrowLeft size={14} /> {t("backToList")}
-        </Link>
+        <div className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500">
+          <ShieldCheck size={14} className="text-emerald-600" /> EUDR Due Diligence
+        </div>
         <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
       </div>
 
