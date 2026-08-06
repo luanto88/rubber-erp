@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
       otp: String(otp),
     })
 
-    const actionToken = await issueSensitiveActionToken({
-      userId,
-      actionType: actionType as SensitiveActionType,
-    })
+    const actionToken = await issueSensitiveActionToken(
+      { userId, actionType: actionType as SensitiveActionType },
+      challengeId,
+    )
 
     return NextResponse.json({ ok: true, actionToken })
   } catch (err) {

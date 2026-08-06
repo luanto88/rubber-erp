@@ -3,7 +3,12 @@ import { createClient, type User as SupabaseUser } from "@supabase/supabase-js"
 import { jwtVerify, SignJWT } from "jose"
 import bcrypt from "bcryptjs"
 import nodemailer from "nodemailer"
+import { randomUUID } from "crypto"
 import { authEmailsForUsername } from "@/lib/auth"
+
+// Số lần thử OTP tối đa cho mỗi challenge trước khi bị khóa, phải bắt cùng 1 người dùng yêu cầu
+// mã mới — chặn brute-force mã 6 số (900.000 khả năng) qua chính /api/account/verify-otp.
+const MAX_OTP_ATTEMPTS = 5
 
 // Đánh dấu riêng trường hợp requireAuthUser() từ chối token — client cần phân biệt được đây là
 // lỗi PHIÊN THẬT SỰ ĐÃ CHẾT (Supabase server xác nhận token/session không còn tồn tại, ví dụ
@@ -98,15 +103,35 @@ export async function getProfileAuthRow(userId: string): Promise<ProfileAuthRow>
   return data as ProfileAuthRow
 }
 
+// BUG THẬT ĐÃ XÁC NHẬN 2026-08-07 (nguyên nhân gốc của lỗi "Phiên đăng nhập đã hết hạn" tái diễn ở
+// MỌI tài khoản, MỌI lần thử, kể cả vừa đăng nhập lại hoàn toàn mới): bản cũ của hàm này gọi
+// `supabaseAuth.auth.signInWithPassword(...)` rồi `supabaseAuth.auth.signOut()` trên CHÍNH client
+// singleton dùng chung với `requireAuthUser()` (biến `supabaseAuth` module-level phía trên).
+// `signOut()` không truyền `scope` mặc định là `scope: "global"` trong supabase-js v2 — tức thu
+// hồi TẤT CẢ session của user đó trên MỌI thiết bị, không chỉ session tạm vừa tạo bởi
+// signInWithPassword. Vì đây CÙNG LÀ user đang thao tác (verifyCurrentPassword luôn gọi với chính
+// mật khẩu của người dùng hiện tại), lệnh signOut() này VÔ TÌNH THU HỒI LUÔN session thật đang mở
+// trên trình duyệt của chính họ — ngay ở bước "request-otp" (nhập mật khẩu để bắt đầu), TRƯỚC KHI
+// họ kịp nhập OTP. Session bị hủy ở tầng Supabase server (session_id không còn trong bảng
+// `sessions`), nên access token cũ tuy chưa hết hạn theo `exp` vẫn bị từ chối với
+// `AuthSessionMissingError`/`session_not_found` ở mọi request xác thực sau đó — khớp chính xác
+// mọi triệu chứng đã quan sát (xảy ra với bất kỳ tài khoản nào, chỉ 1 tab, không liên quan cấu
+// hình "single session"/"time-box" nào của Supabase).
+// Fix: dùng 1 client HOÀN TOÀN RIÊNG (persistSession/autoRefreshToken tắt), không đụng gì tới
+// `supabaseAuth`/session thật của user — không cần gọi signOut() vì client này bị hủy ngay sau
+// khi hàm return, không giữ lại state nào cần dọn.
 export async function verifyCurrentPassword(profile: ProfileAuthRow, password: string) {
   const candidates = Array.from(
     new Set([profile.auth_email, ...authEmailsForUsername(profile.username)]),
   )
 
+  const throwawayClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+
   for (const email of candidates) {
-    const result = await supabaseAuth.auth.signInWithPassword({ email, password })
+    const result = await throwawayClient.auth.signInWithPassword({ email, password })
     if (!result.error) {
-      await supabaseAuth.auth.signOut()
       return true
     }
   }
@@ -222,7 +247,7 @@ export async function verifyOtpChallenge(params: {
 }) {
   const { data, error } = await supabaseAdmin
     .from("security_otp_challenges")
-    .select("id, otp_hash, expires_at, consumed_at")
+    .select("id, expires_at, consumed_at")
     .eq("id", params.challengeId)
     .eq("user_id", params.userId)
     .eq("action_type", params.actionType)
@@ -240,9 +265,37 @@ export async function verifyOtpChallenge(params: {
     throw new Error("Mã OTP đã hết hạn")
   }
 
-  const matched = await bcrypt.compare(params.otp, data.otp_hash as string)
+  // Bug thật đã xác nhận 2026-08-07 (audit bảo mật): trước đây không có bất kỳ giới hạn số lần
+  // thử nào — mã OTP 6 số (900.000 khả năng) có thể bị brute-force trực tiếp qua endpoint này
+  // trong suốt 10 phút hiệu lực. RPC `security_otp_challenge_claim_attempt` tăng `attempt_count`
+  // và trả về `otp_hash` MỚI NHẤT một cách atomic — mệnh đề `attempt_count < 5` nằm ngay trong
+  // câu UPDATE nên dù bao nhiêu request đoán OTP được gửi song song, tối đa đúng 5 lần "claim"
+  // thành công, không thể lách qua bằng cách gửi dồn dập để né rate-limit.
+  const { data: claimRows, error: claimError } = await supabaseAdmin.rpc(
+    "security_otp_challenge_claim_attempt",
+    {
+      p_challenge_id: params.challengeId,
+      p_user_id: params.userId,
+      p_action_type: params.actionType,
+    },
+  )
+
+  const claim = (Array.isArray(claimRows) ? claimRows[0] : claimRows) as
+    | { otp_hash: string; attempt_count: number }
+    | undefined
+
+  if (claimError || !claim) {
+    throw new Error("Đã nhập sai quá nhiều lần hoặc mã OTP không còn hiệu lực, vui lòng yêu cầu mã mới.")
+  }
+
+  const matched = await bcrypt.compare(params.otp, claim.otp_hash)
   if (!matched) {
-    throw new Error("Mã OTP không đúng")
+    const remaining = Math.max(0, MAX_OTP_ATTEMPTS - claim.attempt_count)
+    throw new Error(
+      remaining > 0
+        ? `Mã OTP không đúng (còn ${remaining} lần thử)`
+        : "Mã OTP không đúng. Đã hết lượt thử, vui lòng yêu cầu mã mới.",
+    )
   }
 
   await supabaseAdmin
@@ -251,19 +304,56 @@ export async function verifyOtpChallenge(params: {
     .eq("id", data.id as string)
 }
 
-export async function issueSensitiveActionToken(payload: ActionTokenPayload) {
-  return new SignJWT(payload)
+// Bug thật đã xác nhận 2026-08-07 (audit bảo mật): trước đây actionToken không có `jti`, chỉ được
+// xác thực bằng chữ ký + hạn 10 phút + khớp userId/actionType — nghĩa là CÙNG 1 actionToken có thể
+// tái sử dụng NHIỀU LẦN để lặp lại cùng 1 thao tác nhạy cảm (đổi chữ ký/PIN/mật khẩu) trong suốt
+// 10 phút hiệu lực, dù ý định thiết kế là "1 lần xác thực OTP = 1 lần đổi". Giờ gắn `jti` ngẫu
+// nhiên vào token VÀ lưu lại đúng challenge đã sinh ra nó — `verifySensitiveActionToken()` đánh
+// dấu `action_token_used_at` atomically khi tiêu thụ, token dùng lần 2 sẽ bị từ chối dù chữ ký và
+// hạn vẫn còn hợp lệ.
+export async function issueSensitiveActionToken(payload: ActionTokenPayload, challengeId: string) {
+  const jti = randomUUID()
+
+  const token = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
+    .setJti(jti)
     .setExpirationTime("10m")
     .sign(ACTION_TOKEN_SECRET)
+
+  const { error } = await supabaseAdmin
+    .from("security_otp_challenges")
+    .update({ action_token_jti: jti })
+    .eq("id", challengeId)
+
+  if (error) {
+    throw new Error("Không tạo được xác thực thay đổi")
+  }
+
+  return token
 }
 
 export async function verifySensitiveActionToken(token: string, userId: string, actionType: SensitiveActionType) {
   const verified = await jwtVerify(token, ACTION_TOKEN_SECRET)
-  const payload = verified.payload as Partial<ActionTokenPayload>
-  if (payload.userId !== userId || payload.actionType !== actionType) {
+  const payload = verified.payload as Partial<ActionTokenPayload> & { jti?: string }
+  if (payload.userId !== userId || payload.actionType !== actionType || !payload.jti) {
     throw new Error("Xác thực thay đổi không hợp lệ")
+  }
+
+  // `.update(...).is("action_token_used_at", null)` dịch thành đúng 1 câu
+  // `UPDATE ... WHERE action_token_jti = ? AND action_token_used_at IS NULL` — Postgres tự
+  // serialize các UPDATE cùng dòng nên atomic: chỉ lần gọi ĐẦU TIÊN với đúng jti này khớp được
+  // điều kiện, các lần gọi lại sau (kể cả gửi song song) đều không còn dòng nào để cập nhật.
+  const { data, error } = await supabaseAdmin
+    .from("security_otp_challenges")
+    .update({ action_token_used_at: new Date().toISOString() })
+    .eq("action_token_jti", payload.jti)
+    .is("action_token_used_at", null)
+    .select("id")
+    .maybeSingle()
+
+  if (error || !data) {
+    throw new Error("Xác thực thay đổi đã được sử dụng hoặc không còn hiệu lực, vui lòng thực hiện lại từ đầu.")
   }
 }
 

@@ -108,6 +108,39 @@ export function isAuthSessionError(error: unknown) {
   )
 }
 
+// Bug thật đã xác nhận 2026-08-07 qua console log + stack trace đầy đủ (không phải suy đoán):
+// khi refresh token đã bị Supabase server thu hồi thật sự (AuthSessionMissingError / error_code
+// "session_not_found", status 400 — đã verify token?grant_type=refresh_token trả về đúng 400
+// này qua tab Network, không phải bị treo ở tầng mạng), lệnh gọi supabase.auth.refreshSession()
+// đôi khi KHÔNG BAO GIỜ resolve/reject phía JS dù request HTTP bên dưới đã hoàn tất — đã đối
+// chiếu source `@supabase/auth-js` (GoTrueClient.ts _refreshAccessToken/_callRefreshToken,
+// dùng `_acquireLock` qua Web Locks API ở locks.ts) nhưng không xác định được chắc chắn nút thắt
+// chính xác nằm ở đâu bên trong SDK. Vì đây là code vendor (node_modules), không sửa trực tiếp
+// được — giải pháp phòng thủ là bọc timeout cứng ở TẦNG APP để đảm bảo UI luôn thoát khỏi trạng
+// thái "Đang xử lý..." trong một khoảng thời gian xác định, bất kể nguyên nhân treo bên trong SDK
+// là gì. Timeout không "hủy" được promise gốc (JS không có cơ chế hủy Promise thật), chỉ ngừng
+// chờ nó ở phía app — nếu SDK thực sự bị kẹt 1 Web Lock ở nền, lock đó sẽ tự giải phóng khi tab
+// được tải lại/điều hướng đi nơi khác (vd sau khi bị đăng xuất và chuyển về /login).
+const AUTH_OP_TIMEOUT_MS = 8_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}: hết thời gian chờ sau ${ms}ms — có thể do phiên đăng nhập đã bị thu hồi`))
+    }, ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 // Nhiều nơi trong app gọi getFreshAuthSession() độc lập với nhau (interval 60s, focus/visibility
 // listener trong dashboard/layout.tsx, các lệnh gọi trực tiếp từ settings.tsx khi đổi PIN/chữ
 // ký/mật khẩu...). Nếu 2 lệnh gọi này rơi đúng lúc access token sắp hết hạn, cả 2 có thể cùng
@@ -118,7 +151,11 @@ export function isAuthSessionError(error: unknown) {
 let refreshInFlight: Promise<Session | null> | null = null
 
 async function refreshSessionOnce(): Promise<Session | null> {
-  const { data, error } = await supabase.auth.refreshSession()
+  const { data, error } = await withTimeout(
+    supabase.auth.refreshSession(),
+    AUTH_OP_TIMEOUT_MS,
+    "refreshSession()",
+  )
   if (error) {
     console.error(
       `getFreshAuthSession: refreshSession() thất bại — ${error.name}: ${error.message}` +
@@ -152,10 +189,19 @@ export async function forceRefreshAuthSession() {
   return refreshInFlight
 }
 
+// signOut() cũng đi qua cùng client Supabase (và có thể cùng Web Lock) như refreshSession() —
+// bọc timeout tương tự để không lặp lại đúng kiểu treo vô thời hạn khi phiên đăng nhập đã hỏng.
+// Dọn sạch storage cục bộ (clearLegacySession/clearSupabaseBrowserSession) không phụ thuộc mạng
+// nên luôn chạy được trong `finally`, đảm bảo hàm này luôn kết thúc trong khoảng AUTH_OP_TIMEOUT_MS
+// dù supabase.auth.signOut() có treo hay không.
 export async function signOutEverywhere() {
   clearLegacySession()
   try {
-    await supabase.auth.signOut()
+    await withTimeout(supabase.auth.signOut(), AUTH_OP_TIMEOUT_MS, "signOut()")
+  } catch (error) {
+    console.error(
+      `signOutEverywhere: signOut() thất bại hoặc hết thời gian chờ — ${error instanceof Error ? error.message : error}`,
+    )
   } finally {
     clearSupabaseBrowserSession()
   }
