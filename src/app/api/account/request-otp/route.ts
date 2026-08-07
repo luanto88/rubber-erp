@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   accountErrorResponse,
+  assertNotRateLimited,
   createOtpChallenge,
   generateOtp,
   getProfileAuthRow,
   invalidateExistingOtpChallenges,
   maskEmail,
+  recordFailedVerifyAttempt,
   requireAuthUser,
   resolveOtpRecipient,
   sendOtpEmail,
@@ -31,15 +33,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Loại thao tác không hợp lệ" }, { status: 400 })
     }
 
+    // Kiểm tra tài khoản đang active nằm trong getProfileAuthRow() bên dưới. Rate-limit đứng
+    // TRƯỚC mọi lần thử mật khẩu/PIN — chặn brute-force cả 2 nếu đã sai quá 5 lần trong 15 phút.
+    await assertNotRateLimited(userId)
+
     const profile = await getProfileAuthRow(userId)
 
     const passwordOk = await verifyCurrentPassword(profile, String(currentPassword))
     if (!passwordOk) {
+      await recordFailedVerifyAttempt(userId)
       return NextResponse.json({ error: "Mật khẩu hiện tại không đúng" }, { status: 401 })
     }
 
     const pinOk = await verifyCurrentPin(userId, String(currentPin))
     if (!pinOk) {
+      await recordFailedVerifyAttempt(userId)
       return NextResponse.json({ error: "PIN hiện tại không đúng" }, { status: 401 })
     }
 

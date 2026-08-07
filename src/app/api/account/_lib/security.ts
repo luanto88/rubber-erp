@@ -63,6 +63,61 @@ type ProfileAuthRow = {
   auth_email: string
   factory_id: string | null
   full_name: string
+  status: string
+}
+
+// Audit bảo mật 2026-08-07, mục #4: trước đây các route account chỉ xác thực token Supabase còn
+// hợp lệ (requireAuthUser), không kiểm tra profiles.status — một tài khoản vừa bị admin khóa
+// (`disabled`) hoặc còn `pending` vẫn có thể đổi mật khẩu/PIN/chữ ký của chính họ cho tới khi
+// access token tự hết hạn tự nhiên. Gọi hàm này ngay sau requireAuthUser() ở MỌI route nhạy cảm.
+export async function assertAccountActive(userId: string): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("status")
+    .eq("id", userId)
+    .single()
+
+  if (error || !data) {
+    throw new Error("Không tìm thấy hồ sơ người dùng")
+  }
+
+  if (data.status !== "active") {
+    throw new Error(
+      data.status === "disabled"
+        ? "Tài khoản đã bị khóa, không thể thực hiện thao tác này."
+        : "Tài khoản đang chờ duyệt, không thể thực hiện thao tác này.",
+    )
+  }
+}
+
+// Audit bảo mật 2026-08-07, mục #3: giới hạn 5 lần thử sai mật khẩu/PIN trong 15 phút — trước đây
+// không giới hạn, kẻ tấn công đã có access token hợp lệ của nạn nhân có thể vét cạn PIN (nếu biết
+// trước mật khẩu) hoặc ngược lại. Rate-limit theo user, không tách riêng theo actionType vì đều
+// cùng dùng chung 1 mật khẩu/PIN của tài khoản đó.
+const MAX_VERIFY_ATTEMPTS = 5
+const VERIFY_ATTEMPTS_WINDOW_MINUTES = 15
+
+export async function assertNotRateLimited(userId: string): Promise<void> {
+  const since = new Date(Date.now() - VERIFY_ATTEMPTS_WINDOW_MINUTES * 60 * 1000).toISOString()
+  const { count, error } = await supabaseAdmin
+    .from("security_sensitive_action_attempts")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", since)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  if ((count || 0) >= MAX_VERIFY_ATTEMPTS) {
+    throw new Error(
+      `Bạn đã nhập sai mật khẩu hoặc PIN quá nhiều lần. Vui lòng thử lại sau ${VERIFY_ATTEMPTS_WINDOW_MINUTES} phút.`,
+    )
+  }
+}
+
+export async function recordFailedVerifyAttempt(userId: string): Promise<void> {
+  await supabaseAdmin.from("security_sensitive_action_attempts").insert({ user_id: userId })
 }
 
 export async function requireAuthUser(req: NextRequest): Promise<SupabaseUser> {
@@ -92,7 +147,7 @@ export async function requireAuthUser(req: NextRequest): Promise<SupabaseUser> {
 export async function getProfileAuthRow(userId: string): Promise<ProfileAuthRow> {
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, username, auth_email, factory_id, full_name")
+    .select("id, username, auth_email, factory_id, full_name, status")
     .eq("id", userId)
     .single()
 
@@ -100,7 +155,16 @@ export async function getProfileAuthRow(userId: string): Promise<ProfileAuthRow>
     throw new Error("Không tìm thấy hồ sơ người dùng")
   }
 
-  return data as ProfileAuthRow
+  const profile = data as ProfileAuthRow
+  if (profile.status !== "active") {
+    throw new Error(
+      profile.status === "disabled"
+        ? "Tài khoản đã bị khóa, không thể thực hiện thao tác này."
+        : "Tài khoản đang chờ duyệt, không thể thực hiện thao tác này.",
+    )
+  }
+
+  return profile
 }
 
 // BUG THẬT ĐÃ XÁC NHẬN 2026-08-07 (nguyên nhân gốc của lỗi "Phiên đăng nhập đã hết hạn" tái diễn ở

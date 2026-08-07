@@ -133,6 +133,7 @@ Rule chính thức:
 - `geometry` lưu GeoJSON Polygon JSONB — không select trong list, chỉ load khi sửa
 - Import hàng loạt: upload file `.geojson`, dedup theo `ten`, upsert `onConflict: factory_id,ten`
 - Vẽ polygon trực tiếp trên bản đồ trong modal form (leaflet + `@geoman-io/leaflet-geoman-free`)
+- Bản đồ vẽ polygon (`src/app/dashboard/settings/_components/PolygonDrawMap.tsx`) có ô tìm kiếm địa điểm (Nominatim/OpenStreetMap, không cần API key, ưu tiên kết quả `countrycodes=kh,vn` vì nguồn nguyên liệu trải khắp Campuchia và Việt Nam) để bay nhanh tới vùng cần khoanh, không phải kéo/zoom tay từ tâm mặc định Kampong Thom — 2026-08-07
 - Module EUDR query DB trước, fallback file GeoJSON tĩnh nếu bảng rỗng
 
 ## Mục tiêu chất lượng trong cấu hình nhà máy

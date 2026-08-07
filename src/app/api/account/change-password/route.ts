@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   accountErrorResponse,
+  assertAccountActive,
   requireAuthUser,
   supabaseAdmin,
   verifySensitiveActionToken,
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Mật khẩu mới phải có ít nhất 6 ký tự" }, { status: 400 })
     }
 
+    await assertAccountActive(userId)
     await verifySensitiveActionToken(String(actionToken), userId, "change_password")
 
     const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {

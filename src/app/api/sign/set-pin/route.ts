@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import {
   accountErrorResponse,
+  assertAccountActive,
   requireAuthUser,
   supabaseAdmin,
   verifySensitiveActionToken,
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
     if (!/^\d{4,6}$/.test(pin)) {
       return NextResponse.json({ error: "PIN phải là 4-6 chữ số" }, { status: 400 })
     }
+
+    await assertAccountActive(userId)
 
     const { data: existingPin } = await supabaseAdmin
       .from("sign_pins")

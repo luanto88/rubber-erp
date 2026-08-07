@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   accountErrorResponse,
+  assertAccountActive,
   issueSensitiveActionToken,
   requireAuthUser,
   verifyOtpChallenge,
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
     if (!["change_pin", "change_signature", "change_password"].includes(actionType)) {
       return NextResponse.json({ error: "Loại thao tác không hợp lệ" }, { status: 400 })
     }
+
+    // Tài khoản có thể bị khóa GIỮA lúc request-otp và verify-otp (2 request cách nhau vài phút
+    // chờ đọc email) — chặn lại ở đây thay vì chỉ kiểm tra 1 lần ở bước request-otp.
+    await assertAccountActive(userId)
 
     await verifyOtpChallenge({
       userId,
