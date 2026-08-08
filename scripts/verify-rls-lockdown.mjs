@@ -13,6 +13,9 @@
 //   node --env-file=.env.local scripts/verify-rls-lockdown.mjs baseline       -> anon-only read probe (13-table group), run BEFORE that migration
 //   node --env-file=.env.local scripts/verify-rls-lockdown.mjs post           -> full anon + authenticated probe (13-table group), run AFTER that migration
 //   node --env-file=.env.local scripts/verify-rls-lockdown.mjs select-post    -> anon SELECT must now be BLOCKED for the 6-table group, run AFTER 20260823 migration
+//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs lot-transactions -> anon read+write must be BLOCKED, authenticated same-factory round-trip (incl. the
+//                                                                                  update_lot_master_totals trigger writing back to `lots`) must still work, run
+//                                                                                  AFTER 20260824_rls_lockdown_lot_transactions.sql
 //
 // "post" mode creates a temporary auth user + profile (factory A), verifies it can read/write
 // its own factory's rows and is blocked from factory B's rows, then deletes the temp user and
@@ -456,6 +459,164 @@ async function runSelectPost() {
   )
 }
 
+async function makeTempLotAndNgan(factoryId, label) {
+  const suffix = `${label}-${Date.now()}`
+  const { data: ngan, error: nganErr } = await admin
+    .from("ngans")
+    .insert({ factory_id: factoryId, ma_ngan: `__RLS_LT_${suffix}__`, ten_ngan: "RLS lot_transactions probe" })
+    .select("id")
+    .single()
+  if (nganErr) throw new Error(`tạo ngan test thất bại: ${nganErr.message}`)
+
+  const { data: lot, error: lotErr } = await admin
+    .from("lots")
+    .insert({
+      factory_id: factoryId,
+      ma_lo: `__RLS_LT_${suffix}__`,
+      num: 999999,
+      suffix: "probe",
+      year: "26",
+      ngay_sx: "2026-01-01",
+      ca: "A",
+      loai_csr: "10",
+      ngan_id: ngan.id,
+    })
+    .select("id")
+    .single()
+  if (lotErr) {
+    await safeDelete(admin, "ngans", "id", ngan.id)
+    throw new Error(`tạo lot test thất bại: ${lotErr.message}`)
+  }
+  return { lotId: lot.id, nganId: ngan.id }
+}
+
+async function cleanupTempLotAndNgan({ lotId, nganId }) {
+  await safeDelete(admin, "lots", "id", lotId) // ON DELETE CASCADE dọn luôn lot_transactions còn sót
+  await safeDelete(admin, "ngans", "id", nganId)
+}
+
+async function runLotTransactions() {
+  console.log("=== lot_transactions RLS VERIFY (20260824) ===\n")
+
+  console.log("--- 1) Anon SELECT phải bị chặn hoàn toàn ---")
+  {
+    const r = await anonSelectProbe("lot_transactions")
+    const pass = !r.ok || r.rowsReturned === 0
+    console.log(`${pass ? "✓ PASS" : "✗ FAIL"}  lot_transactions SELECT  rowsReturned=${r.rowsReturned} ${r.error ?? ""}`)
+  }
+
+  const { data: factoriesForProbe } = await admin.from("factories").select("id, code").order("code").limit(2)
+  const factoryA = factoriesForProbe?.[0]
+  const factoryB = factoriesForProbe?.[1]
+  if (!factoryA) throw new Error("Không tìm thấy factory nào để test — kiểm tra lại DB.")
+
+  console.log("\n--- 2) Anon INSERT phải bị chặn ---")
+  {
+    const probe = await makeTempLotAndNgan(factoryA.id, "anon-fixture")
+    const { error } = await anon.from("lot_transactions").insert({
+      lot_id: probe.lotId,
+      ngan_id: probe.nganId,
+      ca: "A",
+      ngay_nhap: "2026-01-01",
+      so_banh: 1,
+      so_kg: 35,
+    })
+    console.log(`${error ? "✓ PASS (bị chặn)" : "✗ FAIL — GHI ĐƯỢC KHI CHƯA ĐĂNG NHẬP!"}  ${error?.message ?? ""}`)
+    await cleanupTempLotAndNgan(probe)
+  }
+
+  console.log("\n--- 3) Authenticated cùng nhà máy: INSERT/SELECT/UPDATE/DELETE round-trip + trigger cập nhật lots ---")
+  let temp = null
+  let probeA = null
+  try {
+    temp = await makeTempUser(factoryA.id, "lt-a")
+    probeA = await makeTempLotAndNgan(factoryA.id, "same-factory")
+
+    const { data: inserted, error: insErr } = await temp.client
+      .from("lot_transactions")
+      .insert({
+        lot_id: probeA.lotId,
+        ngan_id: probeA.nganId,
+        ca: "A",
+        ngay_nhap: "2026-01-01",
+        kien_a: 144,
+        so_banh: 144,
+        so_kg: 5040,
+      })
+      .select("id")
+      .single()
+    console.log(`  ${insErr ? "✗ FAIL same-factory INSERT: " + insErr.message : "✓ PASS same-factory INSERT ok"}`)
+
+    if (inserted) {
+      const { data: readBack, error: readErr } = await temp.client
+        .from("lot_transactions")
+        .select("id, so_banh")
+        .eq("id", inserted.id)
+        .maybeSingle()
+      console.log(`  ${!readErr && readBack ? "✓ PASS same-factory SELECT ok" : "✗ FAIL same-factory SELECT: " + (readErr?.message ?? "no row")}`)
+
+      // Xác nhận trigger update_lot_master_totals() (SECURITY INVOKER) đã chạy thành công
+      // dưới role authenticated và ghi được vào `lots` — đúng lo ngại chính khi bật RLS.
+      const { data: lotAfter } = await admin.from("lots").select("tong_banh, trang_thai").eq("id", probeA.lotId).single()
+      const triggerOk = lotAfter?.tong_banh === 144
+      console.log(`  ${triggerOk ? "✓ PASS trigger update_lot_master_totals đã ghi lots.tong_banh=144" : "✗ FAIL trigger không cập nhật lots (tong_banh=" + lotAfter?.tong_banh + ")"}`)
+
+      const { error: updErr } = await temp.client
+        .from("lot_transactions")
+        .update({ ngay_nhap: "2026-01-02" })
+        .eq("id", inserted.id)
+      console.log(`  ${!updErr ? "✓ PASS same-factory UPDATE ok (mirror luồng \"Sửa theo ngày\" thật)" : "✗ FAIL same-factory UPDATE: " + updErr.message}`)
+
+      const { error: delErr } = await temp.client.from("lot_transactions").delete().eq("id", inserted.id)
+      console.log(`  ${!delErr ? "✓ PASS same-factory DELETE ok" : "✗ FAIL same-factory DELETE: " + delErr.message}`)
+
+      await safeDelete(admin, "lot_transactions", "id", inserted.id)
+    }
+
+    if (factoryB) {
+      console.log("\n--- 4) Authenticated khác nhà máy: phải bị chặn hoàn toàn ---")
+      const probeB = await makeTempLotAndNgan(factoryB.id, "cross-factory")
+      try {
+        const { error: crossInsErr } = await temp.client.from("lot_transactions").insert({
+          lot_id: probeB.lotId,
+          ngan_id: probeB.nganId,
+          ca: "A",
+          ngay_nhap: "2026-01-01",
+          so_banh: 1,
+          so_kg: 35,
+        })
+        console.log(`  ${crossInsErr ? "✓ PASS cross-factory INSERT blocked" : "✗ FAIL — ghi được lot_transactions cho nhà máy khác!"}`)
+
+        const { data: seedRow } = await admin
+          .from("lot_transactions")
+          .insert({ lot_id: probeB.lotId, ngan_id: probeB.nganId, ca: "A", ngay_nhap: "2026-01-01", so_banh: 1, so_kg: 35 })
+          .select("id")
+          .single()
+        const { data: crossRead } = await temp.client.from("lot_transactions").select("id").eq("lot_id", probeB.lotId)
+        console.log(`  ${!crossRead || crossRead.length === 0 ? "✓ PASS cross-factory SELECT returns 0 rows" : "✗ FAIL — đọc được lot_transactions nhà máy khác!"}`)
+        if (seedRow) {
+          const { data: crossUpd } = await temp.client
+            .from("lot_transactions")
+            .update({ ngay_nhap: "2026-01-03" })
+            .eq("id", seedRow.id)
+            .select("id")
+          const updBlocked = !crossUpd || crossUpd.length === 0
+          console.log(`  ${updBlocked ? "✓ PASS cross-factory UPDATE blocked (0 rows affected)" : "✗ FAIL — sửa được lot_transactions nhà máy khác!"}`)
+        }
+      } finally {
+        await cleanupTempLotAndNgan(probeB)
+      }
+    } else {
+      console.log("\n(chỉ có 1 factory trong DB — bỏ qua test cross-factory)")
+    }
+  } finally {
+    if (probeA) await cleanupTempLotAndNgan(probeA)
+    if (temp) await cleanupTempUser(temp.userId)
+  }
+
+  console.log("\nHoàn tất.")
+}
+
 if (mode === "baseline") {
   await runBaseline()
 } else if (mode === "post") {
@@ -464,7 +625,9 @@ if (mode === "baseline") {
   await runExtra()
 } else if (mode === "select-post") {
   await runSelectPost()
+} else if (mode === "lot-transactions") {
+  await runLotTransactions()
 } else {
-  console.error(`Unknown mode "${mode}" — dùng "baseline", "post", "extra" hoặc "select-post"`)
+  console.error(`Unknown mode "${mode}" — dùng "baseline", "post", "extra", "select-post" hoặc "lot-transactions"`)
   process.exit(1)
 }
