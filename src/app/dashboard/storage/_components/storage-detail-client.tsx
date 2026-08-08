@@ -9,8 +9,8 @@ import {
   buildStorageLookupPath,
   formatStorageDate,
   getKLFromTrip,
+  loadPublicStorageGeoJson,
   loadStorageDetailByLookup,
-  loadStorageGeoJson,
   summarizeStorageLots,
   type StorageDetailData,
   type StorageGeoJsonCollection,
@@ -90,7 +90,7 @@ export function StorageDetailClient({
       setGeoError(null)
 
       try {
-        const data = await loadStorageGeoJson(detail.ngan.factory_id, detail.ngan)
+        const data = await loadPublicStorageGeoJson(detail.ngan.factory_id, detail.ngan)
         setGeoJson(data)
       } catch (err) {
         setGeoJson(null)

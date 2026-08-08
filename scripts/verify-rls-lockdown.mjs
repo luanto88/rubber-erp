@@ -1,9 +1,18 @@
 // Verify RLS lockdown for the 13 previously-"Allow all" core tables (migrations
-// 20260821_rls_lockdown_master_data_full.sql + 20260822_rls_lockdown_factories_and_write_protect.sql).
+// 20260821_rls_lockdown_master_data_full.sql + 20260822_rls_lockdown_factories_and_write_protect.sql),
+// PLUS the follow-up SELECT lockdown of the 6 tables that `/storage` + `/product-label` used to
+// read directly with the anon key (migration
+// 20260823_rls_lockdown_storage_product_label_select.sql — lots, ngans, qc_results,
+// dispatch_entries, lot_prediction_lots, lot_prediction_batches). Those 2 public pages were
+// refactored (2026-08-08) to read through 3 new service-role API routes instead
+// (/api/storage/public-lookup, /api/storage/geojson, /api/product-label/lookup) — this script
+// does NOT exercise those routes (needs a running Next server); test them manually or via the
+// curl examples in the PR/commit notes after `npm run dev`.
 //
 // Usage:
-//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs baseline   -> anon-only read probe (safe, run BEFORE migration)
-//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs post       -> full anon + authenticated probe (run AFTER migration)
+//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs baseline       -> anon-only read probe (13-table group), run BEFORE that migration
+//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs post           -> full anon + authenticated probe (13-table group), run AFTER that migration
+//   node --env-file=.env.local scripts/verify-rls-lockdown.mjs select-post    -> anon SELECT must now be BLOCKED for the 6-table group, run AFTER 20260823 migration
 //
 // "post" mode creates a temporary auth user + profile (factory A), verifies it can read/write
 // its own factory's rows and is blocked from factory B's rows, then deletes the temp user and
@@ -37,6 +46,14 @@ const FULL_LOCK_TABLES = [
   "users",
 ]
 const WRITE_PROTECT_TABLES = ["lots", "ngans", "qc_results", "dispatch_entries"]
+const SELECT_LOCK_TABLES = [
+  "lots",
+  "ngans",
+  "qc_results",
+  "dispatch_entries",
+  "lot_prediction_lots",
+  "lot_prediction_batches",
+]
 
 async function anonSelectProbe(table) {
   const { data, error, count } = await anon.from(table).select("*", { count: "exact", head: false }).limit(1)
@@ -402,13 +419,52 @@ async function runExtra() {
   console.log("\nHoàn tất.")
 }
 
+async function runSelectPost() {
+  console.log("=== SELECT LOCKDOWN VERIFY (lots/ngans/qc_results/dispatch_entries/lot_prediction_*) ===\n")
+  console.log("--- Anon SELECT phải bị chặn hoàn toàn ở cả 6 bảng ---")
+  let allPass = true
+  for (const t of SELECT_LOCK_TABLES) {
+    const r = await anonSelectProbe(t)
+    const pass = !r.ok || r.rowsReturned === 0
+    if (!pass) allPass = false
+    console.log(`${pass ? "✓ PASS" : "✗ FAIL"}  ${t.padEnd(28)} rowsReturned=${r.rowsReturned} ${r.error ?? ""}`)
+  }
+
+  console.log("\n--- Authenticated cùng nhà máy vẫn đọc/ghi bình thường (round-trip) ---")
+  const { data: factoriesForProbe } = await admin.from("factories").select("id, code").order("code").limit(1)
+  const factoryA = factoriesForProbe?.[0]
+  if (!factoryA) throw new Error("Không tìm thấy factory nào để test — kiểm tra lại DB.")
+
+  let temp = null
+  try {
+    temp = await makeTempUser(factoryA.id, "select-lock")
+    const { data, error } = await temp.client.from("ngans").select("id").limit(1)
+    console.log(`  ${!error ? "✓ PASS ngans SELECT (authenticated, own factory)" : "✗ FAIL " + error.message} rows=${data?.length ?? 0}`)
+    const { data: lp, error: lpErr } = await temp.client.from("lot_prediction_lots").select("id").limit(1)
+    console.log(`  ${!lpErr ? "✓ PASS lot_prediction_lots SELECT (authenticated, own factory)" : "✗ FAIL " + lpErr.message} rows=${lp?.length ?? 0}`)
+  } finally {
+    if (temp) await cleanupTempUser(temp.userId)
+  }
+
+  console.log(
+    `\n${allPass ? "✓ Tất cả 6 bảng đã khóa SELECT đúng." : "✗ CÒN BẢNG CHƯA KHÓA — kiểm tra lại migration 20260823 đã chạy trên Supabase chưa."}`,
+  )
+  console.log(
+    "\nLưu ý: script này KHÔNG test 3 route service-role mới (/api/storage/public-lookup,",
+    "/api/storage/geojson, /api/product-label/lookup) — cần `npm run dev` rồi mở /storage và",
+    "/product-label thật (hoặc curl) để xác nhận 2 trang public vẫn hoạt động đúng sau khi khóa.",
+  )
+}
+
 if (mode === "baseline") {
   await runBaseline()
 } else if (mode === "post") {
   await runPost()
 } else if (mode === "extra") {
   await runExtra()
+} else if (mode === "select-post") {
+  await runSelectPost()
 } else {
-  console.error(`Unknown mode "${mode}" — dùng "baseline", "post" hoặc "extra"`)
+  console.error(`Unknown mode "${mode}" — dùng "baseline", "post", "extra" hoặc "select-post"`)
   process.exit(1)
 }

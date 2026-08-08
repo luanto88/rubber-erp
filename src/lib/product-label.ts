@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import { buildStorageLookupPath } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
@@ -59,8 +60,8 @@ const KIEN_LOWER: Record<KienLetter, string> = { A: "a", B: "b", C: "c", D: "d" 
 
 // Lấy dat_hang của phiếu KN mới nhất cho 1 lô thật — dedupe theo lan lớn nhất rồi created_at
 // mới nhất, mirror đúng logic getRotHangLotCount() trong module-tasks.ts.
-async function fetchLatestDatHang(lotId: string): Promise<string | null> {
-  const { data } = await supabase
+async function fetchLatestDatHang(lotId: string, client: SupabaseClient): Promise<string | null> {
+  const { data } = await client
     .from("qc_results")
     .select("lan, created_at, dat_hang")
     .eq("lot_id", lotId)
@@ -81,6 +82,7 @@ export async function resolveProductLabelLookupTarget(
   factoryId: string,
   maLo: string,
   kien: KienLetter,
+  client: SupabaseClient = supabase,
 ): Promise<ProductLabelLookupResult> {
   const normalizedFactoryId = normalizeLookupValue(factoryId)
   const normalizedMaLo = normalizeLookupValue(maLo)
@@ -107,7 +109,7 @@ export async function resolveProductLabelLookupTarget(
   }
 
   // Case 1 — lô thật (ưu tiên cao nhất, áp dụng cho mọi lô bất kể có qua dự đoán hay không)
-  const { data: lot } = await supabase
+  const { data: lot } = await client
     .from("lots")
     .select("id,ma_lo,loai_csr,loai_banh,boc,ngan_id")
     .eq("factory_id", normalizedFactoryId)
@@ -115,7 +117,7 @@ export async function resolveProductLabelLookupTarget(
     .maybeSingle()
 
   if (lot) {
-    const { data: txRows } = await supabase
+    const { data: txRows } = await client
       .from("lot_transactions")
       .select("ngan_id,ngay_nhap,ca,kien_a,kien_b,kien_c,kien_d")
       .eq("lot_id", lot.id)
@@ -140,10 +142,10 @@ export async function resolveProductLabelLookupTarget(
     const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null
     const maxPerKien = config?.max_per_kien ?? 36
 
-    const datHang = await fetchLatestDatHang(lot.id)
+    const datHang = await fetchLatestDatHang(lot.id, client)
 
     if (lastKienTx && existingBanh >= maxPerKien) {
-      const { data: ngan } = await supabase
+      const { data: ngan } = await client
         .from("ngans")
         .select("id,ma_ngan,ten_ngan")
         .eq("id", lastKienTx.ngan_id)
@@ -170,7 +172,7 @@ export async function resolveProductLabelLookupTarget(
     if (lastKienTx && existingBanh > 0) {
       // Kiện đã có MỘT PHẦN bành nhưng chưa đủ — khác "produced" (chưa xong) và khác "partial"
       // thuần túy (không phải "chưa có gì") — vẫn phải cho phép xác nhận sản xuất tiếp.
-      const { data: ngan } = await supabase
+      const { data: ngan } = await client
         .from("ngans")
         .select("id,ma_ngan,ten_ngan")
         .eq("id", lastKienTx.ngan_id)
@@ -201,7 +203,7 @@ export async function resolveProductLabelLookupTarget(
     let partialNganMa: string | null = null
     let partialNganTen: string | null = null
     if (lot.ngan_id) {
-      const { data: ngan } = await supabase
+      const { data: ngan } = await client
         .from("ngans")
         .select("ma_ngan,ten_ngan")
         .eq("id", lot.ngan_id)
@@ -230,7 +232,7 @@ export async function resolveProductLabelLookupTarget(
   }
 
   // Case 2 — chưa có lô thật, fallback dự đoán
-  const { data: predicted } = await supabase
+  const { data: predicted } = await client
     .from("lot_prediction_lots")
     .select("ma_lo,loai_csr,loai_banh,boc,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
     .eq("factory_id", normalizedFactoryId)
@@ -243,7 +245,7 @@ export async function resolveProductLabelLookupTarget(
     let nganMa: string | null = null
     let nganTen: string | null = null
     if (nganId) {
-      const { data: ngan } = await supabase
+      const { data: ngan } = await client
         .from("ngans")
         .select("ma_ngan,ten_ngan")
         .eq("id", nganId)
@@ -294,4 +296,23 @@ export async function resolveProductLabelLookupTarget(
 
 export function buildNganLookupPath(nganId?: string | null, nganMa?: string | null) {
   return buildStorageLookupPath(nganId, nganMa)
+}
+
+// Dùng cho trang công khai `/product-label` (`ProductLabelClient`) — khách quét QR nhãn kiện
+// chưa đăng nhập không còn đọc thẳng `lots`/`qc_results`/`ngans`/`lot_transactions`/
+// `lot_prediction_lots` bằng anon key được nữa sau khi khóa RLS SELECT (2026-08-08). Gọi qua
+// route service-role `/api/product-label/lookup` thay vì `resolveProductLabelLookupTarget()`
+// trực tiếp.
+export async function fetchProductLabelLookupPublic(
+  factoryId: string,
+  maLo: string,
+  kien: KienLetter,
+): Promise<ProductLabelLookupResult> {
+  const search = new URLSearchParams({ f: factoryId, lo: maLo, kien })
+  const res = await fetch(`/api/product-label/lookup?${search.toString()}`)
+  const json = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(json?.error || "Không tải được thông tin lô/kiện.")
+  }
+  return json as ProductLabelLookupResult
 }

@@ -69,7 +69,7 @@ export type StorageDetailData = {
   lots: StorageProducedLot[]
 }
 
-type StorageGeoJsonFeature = {
+export type StorageGeoJsonFeature = {
   type: "Feature"
   properties?: Record<string, unknown>
   geometry?: unknown
@@ -155,15 +155,18 @@ export function buildStorageLookupUrl(nganId?: string | null, nganCode?: string 
   return origin ? `${origin}${path}` : path
 }
 
-export async function resolveStorageLookupTarget(params: {
-  nganId?: string | null
-  nganCode?: string | null
-}) {
+export async function resolveStorageLookupTarget(
+  params: {
+    nganId?: string | null
+    nganCode?: string | null
+  },
+  client: SupabaseClient = supabase,
+) {
   const nganId = normalizeStorageLookupValue(params.nganId)
   const nganCode = normalizeStorageLookupValue(params.nganCode)
 
   if (nganId) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("ngans")
       .select("id,factory_id,ma_ngan,ten_ngan")
       .eq("id", nganId)
@@ -173,7 +176,7 @@ export async function resolveStorageLookupTarget(params: {
   }
 
   if (nganCode) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("ngans")
       .select("id,factory_id,ma_ngan,ten_ngan")
       .eq("ma_ngan", nganCode)
@@ -440,7 +443,18 @@ export async function loadDispatchTripsByDateRange(factoryId: string, fromDate: 
   return sortTrips(Array.from(tripsByUid.values()))
 }
 
-export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNgan, "id" | "ten_ngan" | "ma_ngan" | "loai_nl" | "trips">) {
+async function fetchStaticForestPlotGeoJson(): Promise<{ features?: StorageGeoJsonFeature[] }> {
+  const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
+  if (!res.ok) throw new Error("Không tải được file GeoJSON gốc")
+  return res.json() as Promise<{ features?: StorageGeoJsonFeature[] }>
+}
+
+export async function loadStorageGeoJson(
+  factoryId: string,
+  ngan: Pick<StorageNgan, "id" | "ten_ngan" | "ma_ngan" | "loai_nl" | "trips">,
+  client: SupabaseClient = supabase,
+  loadStaticFallback: () => Promise<{ features?: StorageGeoJsonFeature[] }> = fetchStaticForestPlotGeoJson,
+) {
   const tripUids = Array.isArray(ngan.trips) ? ngan.trips.filter(Boolean) : []
   if (!factoryId || tripUids.length === 0) {
     return {
@@ -457,7 +471,7 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
     } satisfies StorageGeoJsonCollection
   }
 
-  const { data: dispatchRows, error: dispatchError } = await supabase
+  const { data: dispatchRows, error: dispatchError } = await client
     .from("dispatch_entries")
     .select("id,ngay,rows")
     .eq("factory_id", factoryId)
@@ -498,7 +512,7 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
   }
 
   let features: StorageGeoJsonFeature[] = []
-  const { data: plotRows } = await supabase
+  const { data: plotRows } = await client
     .from("forest_plots")
     .select("ten, geometry, nong_truong, doi, dien_tich_ha")
     .eq("factory_id", factoryId)
@@ -523,9 +537,7 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
       geometry: plot.geometry,
     }))
   } else {
-    const res = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
-    if (!res.ok) throw new Error("Không tải được file GeoJSON gốc")
-    const full = await res.json() as { features?: StorageGeoJsonFeature[] }
+    const full = await loadStaticFallback()
     features = (full.features || []).filter((feature) =>
       plotCodes.includes(String(feature.properties?.Ten || feature.properties?.ma_lo || "").trim()),
     )
@@ -545,8 +557,29 @@ export async function loadStorageGeoJson(factoryId: string, ngan: Pick<StorageNg
   } satisfies StorageGeoJsonCollection
 }
 
-export async function loadStorageLots(factoryId: string, nganId: string) {
-  const { data, error } = await supabase
+// Bản dùng cho luồng công khai `/storage` (`StorageDetailClient`'s bản đồ lô thu hoạch) — cùng
+// lý do với `loadStorageDetailByLookup` ở trên: khách chưa đăng nhập không còn đọc thẳng
+// `dispatch_entries` bằng anon key được nữa sau khi khóa RLS SELECT (2026-08-08). Trang dashboard
+// đã đăng nhập (`storage/page.tsx`'s nút "Xuất GeoJSON") vẫn dùng thẳng `loadStorageGeoJson`
+// (không đổi) vì RLS factory-scoped đã đủ bảo vệ trong ngữ cảnh đó.
+export async function loadPublicStorageGeoJson(
+  factoryId: string,
+  ngan: Pick<StorageNgan, "id" | "ten_ngan" | "ma_ngan" | "loai_nl" | "trips">,
+): Promise<StorageGeoJsonCollection> {
+  const res = await fetch("/api/storage/geojson", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ factoryId, ngan }),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(json?.error || "Không tải được dữ liệu bản đồ của ngăn.")
+  }
+  return json as StorageGeoJsonCollection
+}
+
+export async function loadStorageLots(factoryId: string, nganId: string, client: SupabaseClient = supabase) {
+  const { data, error } = await client
     .from("lot_transactions")
     .select(`
       id,
@@ -607,7 +640,7 @@ export async function loadStorageLots(factoryId: string, nganId: string) {
   // Không có lot_transactions thì query trên bỏ sót hoàn toàn — bù bằng cách đọc thẳng
   // `lots` theo `ngan_id`, chỉ lấy các lô CHƯA có transaction nào ở trên để tránh trùng.
   const coveredLotIds = new Set(rows.map((r) => r.lot_id).filter(Boolean))
-  const { data: fallbackLots, error: fallbackError } = await supabase
+  const { data: fallbackLots, error: fallbackError } = await client
     .from("lots")
     .select("id, ma_lo, ngay_sx, ca, loai_csr, loai_banh, boc, tong_banh, tong_kg, trang_thai")
     .eq("factory_id", factoryId)
@@ -636,7 +669,11 @@ export async function loadStorageLots(factoryId: string, nganId: string) {
   )
 }
 
-export async function loadStorageLotsByNgans(factoryId: string, nganIds: string[]) {
+export async function loadStorageLotsByNgans(
+  factoryId: string,
+  nganIds: string[],
+  client: SupabaseClient = supabase,
+) {
   const uniqueNganIds = [...new Set(nganIds.filter(Boolean))]
   if (!factoryId || uniqueNganIds.length === 0) return {} as Record<string, StorageProducedLot[]>
   const grouped: Record<string, StorageProducedLot[]> = {}
@@ -644,7 +681,7 @@ export async function loadStorageLotsByNgans(factoryId: string, nganIds: string[
   const results = await Promise.allSettled(
     uniqueNganIds.map(async (nganId) => ({
       nganId,
-      lots: await loadStorageLots(factoryId, nganId),
+      lots: await loadStorageLots(factoryId, nganId, client),
     })),
   )
 
@@ -660,8 +697,12 @@ export async function loadStorageLotsByNgans(factoryId: string, nganIds: string[
   return grouped
 }
 
-export async function loadStorageDetail(factoryId: string, nganId: string): Promise<StorageDetailData> {
-  const { data: ngan, error: nganError } = await supabase
+export async function loadStorageDetail(
+  factoryId: string,
+  nganId: string,
+  client: SupabaseClient = supabase,
+): Promise<StorageDetailData> {
+  const { data: ngan, error: nganError } = await client
     .from("ngans")
     .select("id,factory_id,ma_ngan,ten_ngan,loai_nl,nguon_goc,xu_ly,chung_nhan,ngay_bd,ngay_kt,xe_tu_ngay,xe_den_ngay,trang_thai,tong_tuoi,tong_kho,trips,lo_nguon_goc,ghi_chu")
     .eq("factory_id", factoryId)
@@ -678,8 +719,9 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
         fromDate: (ngan.ngay_bd as string | null) || undefined,
         toDate: (ngan.ngay_kt as string | null) || (ngan.ngay_bd as string | null) || undefined,
       },
+      client,
     ),
-    loadStorageLots(factoryId, nganId),
+    loadStorageLots(factoryId, nganId, client),
   ])
 
   const tripSummary = summarizeStorageTrips(
@@ -703,7 +745,7 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
     !almostEqualStorageWeight(Number(ngan.tong_tuoi ?? 0), tong_tuoi) ||
     !almostEqualStorageWeight(Number(ngan.tong_kho ?? 0), tong_kho)
   ) {
-    await supabase
+    await client
       .from("ngans")
       .update({ tong_tuoi, tong_kho, trips: normalizedTripUids })
       .eq("factory_id", factoryId)
@@ -724,12 +766,29 @@ export async function loadStorageDetail(factoryId: string, nganId: string): Prom
   }
 }
 
+// Dùng cho luồng công khai (`/storage` và `/dashboard/storage/[id]` — xem
+// `dashboard/layout.tsx`'s `isPublicStorageLookup`, bypass hoàn toàn phiên đăng nhập). Sau khi
+// khóa RLS SELECT của `ngans`/`lots`/`dispatch_entries` về `authenticated`-only (2026-08-08),
+// khách quét QR chưa đăng nhập KHÔNG còn đọc thẳng các bảng này bằng anon key được nữa — hàm này
+// gọi qua route service-role `/api/storage/public-lookup` thay vì query trực tiếp như trước.
+// KHÔNG dùng cho luồng dashboard đã đăng nhập (dùng `loadStorageDetail(factoryId, nganId)` trực
+// tiếp — vẫn hoạt động bình thường nhờ RLS factory-scoped).
 export async function loadStorageDetailByLookup(params: {
   nganId?: string | null
   nganCode?: string | null
-}) {
-  const target = await resolveStorageLookupTarget(params)
-  return loadStorageDetail(target.factory_id, target.id)
+}): Promise<StorageDetailData> {
+  const search = new URLSearchParams()
+  const nganId = normalizeStorageLookupValue(params.nganId)
+  const nganCode = normalizeStorageLookupValue(params.nganCode)
+  if (nganId) search.set("id", nganId)
+  if (nganCode) search.set("code", nganCode)
+
+  const res = await fetch(`/api/storage/public-lookup?${search.toString()}`)
+  const json = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(json?.error || "Không tải được chi tiết ngăn lưu.")
+  }
+  return json as StorageDetailData
 }
 
 export function summarizeStorageLots(lots: StorageProducedLot[]) {

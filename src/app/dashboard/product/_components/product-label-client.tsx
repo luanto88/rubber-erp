@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, ClipboardCheck, Package, RotateCcw, Warehouse } from "lucide-react"
-import { buildNganLookupPath, resolveProductLabelLookupTarget, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
+import { buildNganLookupPath, fetchProductLabelLookupPublic, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
 import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n"
@@ -65,7 +65,7 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
       setLoading(true)
       setError(null)
       try {
-        const result = await resolveProductLabelLookupTarget(factoryId, maLo, kien)
+        const result = await fetchProductLabelLookupPublic(factoryId, maLo, kien)
         if (alive) setData(result)
       } catch (err) {
         if (alive) setError(err instanceof Error ? err.message : "Lỗi không xác định")
