@@ -274,6 +274,7 @@ export default function EudrClient() {
 
   const [uploading, setUploading] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [regeneratingToken, setRegeneratingToken] = useState(false)
   const [toast, setToast]        = useState<{msg:string;ok:boolean}|null>(null)
   const [showAttachmentDebug, setShowAttachmentDebug] = useState(false)
   const [attachmentDebug, setAttachmentDebug] = useState<AttachmentDebugState>({
@@ -1027,6 +1028,39 @@ export default function EudrClient() {
     setDownloading(false)
   }
 
+  // ── Cấp lại mã công khai (public_token) ────────────────────────────────────
+  // Dùng khi QR nhúng trong file DDS đã in/gửi trước đó bị lộ ra ngoài — vô hiệu hóa
+  // ngay mọi QR cũ, cần in lại DDS mới để có QR hợp lệ.
+  const handleRegeneratePublicToken = async () => {
+    if (!order) return
+    if (
+      !window.confirm(
+        "Cấp lại mã công khai sẽ vô hiệu hóa NGAY mọi QR đã in trên các file DDS cũ của đơn này — cần tải lại DDS mới để có QR hợp lệ. Tiếp tục?",
+      )
+    ) {
+      return
+    }
+    setRegeneratingToken(true)
+    try {
+      const token = await getEudrAuthToken()
+      const res = await fetch("/api/eudr/regenerate-public-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id }),
+      })
+      const payload = (await res.json().catch(() => null)) as { error?: string; public_token?: string } | null
+      if (!res.ok || !payload?.public_token) {
+        throw new Error(payload?.error || "Không cấp lại được mã công khai.")
+      }
+      setOrder((prev) => (prev ? { ...prev, public_token: payload.public_token } : prev))
+      showToast("Đã cấp lại mã công khai — tải lại DDS để có QR mới")
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Không cấp lại được mã công khai.", false)
+    } finally {
+      setRegeneratingToken(false)
+    }
+  }
+
   // ── GeoJSON style ─────────────────────────────────────────────────────────
   const geoStyle = useCallback((feature?: Feature) => {
     const team = feature?.properties?.Doi_2026 ?? "0"
@@ -1204,11 +1238,21 @@ export default function EudrClient() {
                   <FileText size={15} className="text-violet-600"/>
                   <span className="font-bold text-slate-700 text-sm">Tài liệu EUDR</span>
                 </div>
-                <button onClick={handleDownloadAll} disabled={downloading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all disabled:opacity-50">
-                  {downloading ? <Loader2 size={11} className="animate-spin"/> : <Download size={11}/>}
-                  Tải tất cả
-                </button>
+                <div className="flex items-center gap-2">
+                  {isAdminUser && (
+                    <button onClick={handleRegeneratePublicToken} disabled={regeneratingToken}
+                      title="Vô hiệu hóa QR đã in trước đó, cấp mã mới cho đơn này"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-bold rounded-lg transition-all disabled:opacity-50">
+                      {regeneratingToken ? <Loader2 size={11} className="animate-spin"/> : <Shield size={11}/>}
+                      Cấp lại mã công khai
+                    </button>
+                  )}
+                  <button onClick={handleDownloadAll} disabled={downloading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all disabled:opacity-50">
+                    {downloading ? <Loader2 size={11} className="animate-spin"/> : <Download size={11}/>}
+                    Tải tất cả
+                  </button>
+                </div>
               </div>
               <div className="p-3 space-y-1.5">
                 {/* DDS files — generated dynamically per order */}
