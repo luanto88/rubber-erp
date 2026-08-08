@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import { QRCodeSVG } from "qrcode.react"
 import {
   LOAI_VAN_BAN_LABEL,
@@ -28,7 +28,24 @@ export default function VanBanPrintPage() {
   useEffect(() => {
     const load = async () => {
       if (!docId) { setLoading(false); return }
-      const fid = await getActiveFactoryId()
+
+      // Trang in này trước đây không có bất kỳ kiểm tra đăng nhập/quyền nào — bất kỳ ai
+      // biết docId (kể cả chưa đăng nhập) đều xem được toàn bộ văn bản nội bộ của bất kỳ
+      // nhà máy nào. Gate giống mọi trang dashboard khác trước khi truy vấn.
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "documents.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      const fid = user.factory_id
       if (!fid) { setLoading(false); return }
 
       const [{ data: docData }, { data: factoryData }] = await Promise.all([

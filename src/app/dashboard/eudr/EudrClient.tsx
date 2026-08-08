@@ -21,6 +21,7 @@ import "leaflet/dist/leaflet.css"
 import type { FeatureCollection, Feature } from "geojson"
 import JSZip from "jszip"
 import { saveAs } from "file-saver"
+import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
 import {
   Search, FileDown, Upload, Trash2, Map, Shield, Package,
   AlertTriangle, Check, X, FileText, Globe, Download, Loader2,
@@ -36,21 +37,14 @@ type ExportOrder = {
   loai_banh: number; loai_pallet: string; loai_boc: string
   so_thong_bao: string; so_hoa_don: string; so_hop_dong: string
   public_token?: string | null
+  trang_thai?: string | null
   assignments: { lot_id: string; ma_lo: string; vehicleIdx: number; kien_a:number; kien_b:number; kien_c:number; kien_d:number }[]
   vehicles: { id:string; loai_xe:string; bien_truoc:string; bien_sau:string }[]
-  files: { name: string; url: string; path?: string; size?: number }[]
+  files: { name: string; url: string; path?: string; size?: number; uploadedBy?: string | null }[]
   customers?: { ma_kh:string; ten_kh_en:string; quoc_gia:string; dia_chi:string; email:string; nguoi_lien_he:string }
 }
 
 type ExportOrderFile = ExportOrder["files"][number]
-
-type EudrUploadedFile = {
-  name: string
-  url: string
-  path: string
-  size: number
-  source: "client" | "server-fallback"
-}
 
 type AttachmentDebugRow = {
   index: number
@@ -142,91 +136,13 @@ function resolveEudrStoragePath(fileUrl?: string | null) {
   }
 }
 
-function isStorageConfigError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "")
-  return /bucket.*not found|row-level security|permission denied|unauthorized|403/i.test(message)
-}
-
-function sanitizeEudrPathSegment(value: string) {
-  return value.trim().replace(/[^a-zA-Z0-9_-]/g, "_")
-}
-
-function sanitizeEudrFilename(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_")
-}
-
-function buildEudrStoragePath(factoryId: string, orderCode: string, fileName: string) {
-  return `${sanitizeEudrPathSegment(factoryId)}/${sanitizeEudrPathSegment(orderCode)}/${Date.now()}_${sanitizeEudrFilename(fileName)}`
-}
-
-async function uploadEudrFile(params: {
-  factoryId: string
-  orderCode: string
-  file: File
-}): Promise<EudrUploadedFile> {
-  const path = buildEudrStoragePath(params.factoryId, params.orderCode, params.file.name)
-  const uploadResult = await supabase.storage.from("eudr-files").upload(path, params.file, { upsert: true })
-
-  if (!uploadResult.error) {
-    const { data } = supabase.storage.from("eudr-files").getPublicUrl(uploadResult.data.path)
-    return {
-      name: params.file.name,
-      url: data.publicUrl,
-      path: uploadResult.data.path,
-      size: params.file.size,
-      source: "client",
-    }
-  }
-
-  if (!isStorageConfigError(uploadResult.error)) {
-    throw uploadResult.error
-  }
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-  if (sessionError) throw sessionError
-  if (!sessionData.session?.access_token) {
+async function getEudrAuthToken(): Promise<string> {
+  const { data, error } = await supabase.auth.getSession()
+  if (error) throw error
+  if (!data.session?.access_token) {
     throw new Error("Phien dang nhap da het han. Vui long dang nhap lai.")
   }
-
-  const body = new FormData()
-  body.append("factoryId", params.factoryId)
-  body.append("orderCode", params.orderCode)
-  body.append("file", params.file)
-
-  const response = await fetch("/api/eudr/upload", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${sessionData.session.access_token}`,
-    },
-    body,
-  })
-
-  const payload = (await response.json().catch(() => null)) as {
-    error?: string
-    name?: string
-    size?: number
-    path?: string
-    publicUrl?: string
-  } | null
-
-  if (!response.ok || !payload?.path || !payload.publicUrl) {
-    throw new Error(payload?.error || uploadResult.error.message || "Khong tai duoc file EUDR len may chu.")
-  }
-
-  console.warn("EUDR upload used server fallback after storage policy failure", {
-    orderCode: params.orderCode,
-    fileName: params.file.name,
-    initialError: uploadResult.error.message,
-    path: payload.path,
-  })
-
-  return {
-    name: payload.name || params.file.name,
-    url: payload.publicUrl,
-    path: payload.path,
-    size: typeof payload.size === "number" ? payload.size : params.file.size,
-    source: "server-fallback",
-  }
+  return data.session.access_token
 }
 
 function normalizeExportOrderFiles(files: unknown): ExportOrderFile[] {
@@ -335,6 +251,11 @@ export default function EudrClient() {
   const [searching, setSearching] = useState(false)
   const [notFound, setNotFound] = useState(false)
   const [factoryId, setFactoryId] = useState<string|null>(null)
+  const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null)
+  // true khi đơn đã phê duyệt hoặc đã cấp quyền cho khách hàng — từ lúc này chỉ Admin được
+  // thêm/xóa/thay tệp đính kèm EUDR. null = chưa xác định xong (đang tải/không rõ), coi như
+  // đã khóa để an toàn (ẩn nút cho tới khi biết chắc).
+  const [attachmentsLocked, setAttachmentsLocked] = useState<boolean | null>(null)
 
   const [geoData, setGeoData]   = useState<FeatureCollection|null>(null)
   const [selectedPlot, setSelectedPlot] = useState<EudrPlotProperties | null>(null)
@@ -382,6 +303,7 @@ export default function EudrClient() {
         window.location.replace("/dashboard")
         return
       }
+      if (user?.id) setCurrentUser({ id: user.id, role: user.role })
       const fid = user?.factory_id || await getActiveFactoryId()
       if (!fid) return
       setFactoryId(fid)
@@ -416,6 +338,7 @@ export default function EudrClient() {
     const f = fid ?? factoryId
     if (!ma.trim()) return
     setSearching(true); setNotFound(false); setOrder(null); setGeoData(null); setTraceInfo(null)
+    setAttachmentsLocked(null)
     const { data } = await supabase.from("export_orders")
       .select("*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)")
       .eq("ma_don", ma.trim())
@@ -440,6 +363,34 @@ export default function EudrClient() {
     if (error) throw error
     return normalizeExportOrderFiles(data?.files)
   }, [])
+
+  // Ai được thấy đơn đã "khóa" quản lý tệp đính kèm hay chưa phải hỏi server (service
+  // role) — RLS của export_order_customer_grants chỉ cho đúng người đã cấp quyền/admin
+  // thấy dòng grant, nên staff khác không tự tính được chính xác từ client.
+  useEffect(() => {
+    let alive = true
+    if (!order?.id) { setAttachmentsLocked(null); return }
+    const run = async () => {
+      try {
+        const token = await getEudrAuthToken()
+        const res = await fetch(`/api/eudr/order-lock-status?orderId=${encodeURIComponent(order.id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const json = (await res.json().catch(() => null)) as { locked?: boolean; error?: string } | null
+        if (!alive) return
+        if (!res.ok || typeof json?.locked !== "boolean") {
+          setAttachmentsLocked(true)
+          return
+        }
+        setAttachmentsLocked(json.locked)
+      } catch (error) {
+        console.error("EUDR order-lock-status failed", error)
+        if (alive) setAttachmentsLocked(true)
+      }
+    }
+    void run()
+    return () => { alive = false }
+  }, [order?.id])
 
   const refreshAttachmentDebug = useCallback(async () => {
     if (!order) return
@@ -687,212 +638,174 @@ export default function EudrClient() {
     setLoadingGeo(false)
   }
 
+  // ── Ai được thêm / xóa tệp đính kèm ────────────────────────────────────────
+  // Đơn CHƯA khóa (chưa phê duyệt, chưa cấp quyền khách hàng): bất kỳ ai đang ở trang này
+  // (đã qua guard export.view) đều thêm được file mới; xóa/thay 1 file cụ thể thì chỉ
+  // đúng người đã tải file đó lên (hoặc admin) — file cũ chưa từng ghi uploadedBy coi như
+  // "không ai sở hữu riêng", vẫn cho xóa khi chưa khóa để không khóa cứng dữ liệu cũ.
+  // Đơn ĐÃ khóa: chỉ Admin còn thêm/xóa/thay được, kể cả người đã tải lên ban đầu.
+  const isAdminUser = currentUser?.role === "admin"
+  const canAddAttachment = isAdminUser || attachmentsLocked === false
+  const canManageAttachment = useCallback((file: ExportOrderFile) => {
+    if (isAdminUser) return true
+    if (attachmentsLocked !== false) return false
+    return file.uploadedBy == null || file.uploadedBy === currentUser?.id
+  }, [isAdminUser, attachmentsLocked, currentUser?.id])
+
   // ── Upload file ───────────────────────────────────────────────────────────
-  /*
-    if (!order || !factoryId) return
+  // Toàn bộ việc upload (Storage + patch export_orders.files) giờ đi qua
+  // /api/eudr/upload (service role) — nơi DUY NHẤT enforce khóa đơn + ghi nhận đúng người
+  // tải lên (uploadedBy lấy từ JWT server-side, không tin giá trị client tự khai).
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!order) return
     const files = Array.from(e.target.files || [])
     if (!files.length) return
+
+    if (!canAddAttachment) {
+      showToast("Đơn hàng đã phê duyệt hoặc đã cấp quyền cho khách hàng — chỉ Admin được thêm tệp đính kèm.", false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
+    }
+
     setUploading(true)
     const previousFiles = normalizeExportOrderFiles(order.files)
-    const newFiles = [...previousFiles]
     const selectedUploadFiles = toSelectedFileDebugRows(files, "selected-for-upload")
     const uploadResults: AttachmentDebugRow[] = []
     const uploadErrors: string[] = []
-    for (const file of files) {
-      const path = `${factoryId}/${order.ma_don}/${Date.now()}_${file.name}`
-      const { data, error } = await supabase.storage.from("eudr-files").upload(path, file, { upsert: true })
-      if (error) { showToast(`Lỗi: ${error.message}`, false); continue }
-      const { data: urlData } = supabase.storage.from("eudr-files").getPublicUrl(data.path)
-      newFiles.push({ name: file.name, url: urlData.publicUrl, path: data.path, size: file.size })
-    }
-    const normalizedNewFiles = normalizeExportOrderFiles(newFiles)
-    const { error } = await supabase.from("export_orders").update({ files: normalizedNewFiles }).eq("id", order.id)
-    if (error) { showToast(error.message, false) } else {
-      const dbAfterUpload = await fetchLatestOrderFiles(order.id).catch((fetchError: unknown) => {
-        console.error("Failed to reload export order files right after upload", fetchError)
-        return []
-      })
-      const effectiveFiles = dbAfterUpload.length > 0 || normalizedNewFiles.length === 0
-        ? mergeExportOrderFiles(dbAfterUpload, normalizedNewFiles)
-        : normalizedNewFiles
+    let latestFiles: ExportOrderFile[] = previousFiles
 
-      setAttachmentDebug({
-        stage: "after-upload",
-        updatedAt: new Date().toISOString(),
-        orderId: order.id,
-        orderCode: order.ma_don,
-        selectedUploadFiles,
-        currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
-        latestFiles: [],
-        filesForZip: [],
-        uploadFiles: toAttachmentDebugRows(normalizedNewFiles, "upload-payload"),
-        uploadResults,
-        dbAfterUpload: toAttachmentDebugRows(dbAfterUpload, "db-after-upload"),
-        attachmentResults: [],
-        uploadErrors,
-        attachmentErrors: [],
-        note: dbAfterUpload.length !== normalizedNewFiles.length
-          ? "So luong file trong DB sau upload khac voi payload vua save."
-          : "DB da tra ve cung so luong file voi payload vua save.",
-      })
-      setShowAttachmentDebug(true)
+    try {
+      const token = await getEudrAuthToken()
 
-      console.info("EUDR upload verification", {
-        orderId: order.id,
-        orderCode: order.ma_don,
-        previousFiles,
-        normalizedNewFiles,
-        dbAfterUpload,
-        effectiveFiles,
-      })
-      setOrder(prev => prev ? { ...prev, files: effectiveFiles } : prev)
-      if (dbAfterUpload.length !== normalizedNewFiles.length) {
-        console.warn("EUDR upload DB mismatch after save", {
-          orderId: order.id,
-          orderCode: order.ma_don,
-          normalizedNewFiles,
-          dbAfterUpload,
-        })
-        showToast(`Upload xong nhung DB dang tra ve ${dbAfterUpload.length}/${normalizedNewFiles.length} file. Xem panel debug.`, false)
+      for (const file of files) {
+        try {
+          const body = new FormData()
+          body.append("orderId", order.id)
+          body.append("file", file)
+
+          const res = await fetch("/api/eudr/upload", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body,
+          })
+          const payload = (await res.json().catch(() => null)) as {
+            error?: string
+            file?: ExportOrderFile
+            files?: ExportOrderFile[]
+          } | null
+
+          if (!res.ok || !payload?.file || !payload.files) {
+            throw new Error(payload?.error || "Khong tai duoc file EUDR len may chu.")
+          }
+
+          latestFiles = normalizeExportOrderFiles(payload.files)
+          uploadResults.push({
+            index: uploadResults.length,
+            name: payload.file.name,
+            url: payload.file.url,
+            path: payload.file.path ?? null,
+            resolvedPath: payload.file.path ?? null,
+            size: typeof payload.file.size === "number" ? payload.file.size : file.size,
+            source: "upload-result",
+            downloadStatus: "ok",
+            downloadError: null,
+            blobSize: typeof payload.file.size === "number" ? payload.file.size : file.size,
+            zipEntryName: null,
+          })
+        } catch (uploadError) {
+          const message = uploadError instanceof Error ? uploadError.message : "Unknown upload error"
+          uploadErrors.push(`${file.name}: ${message}`)
+          uploadResults.push({
+            index: uploadResults.length,
+            name: file.name,
+            url: "",
+            path: null,
+            resolvedPath: null,
+            size: file.size,
+            source: "upload-result",
+            downloadStatus: "error",
+            downloadError: message,
+            blobSize: null,
+            zipEntryName: null,
+          })
+          console.error("EUDR upload failed", { fileName: file.name, error: uploadError })
+        }
       }
-      showToast(`Đã đính kèm ${files.length} file`)
+    } catch (tokenError) {
+      showToast(tokenError instanceof Error ? tokenError.message : "Không lấy được phiên đăng nhập.", false)
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
     }
+
+    const successfulUploads = uploadResults.filter(row => row.downloadStatus === "ok").length
+
+    setAttachmentDebug({
+      stage: "after-upload",
+      updatedAt: new Date().toISOString(),
+      orderId: order.id,
+      orderCode: order.ma_don,
+      selectedUploadFiles,
+      currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
+      latestFiles: toAttachmentDebugRows(latestFiles, "db-after-upload"),
+      filesForZip: [],
+      uploadFiles: [],
+      uploadResults,
+      dbAfterUpload: toAttachmentDebugRows(latestFiles, "db-after-upload"),
+      attachmentResults: [],
+      uploadErrors,
+      attachmentErrors: [],
+      note: successfulUploads === 0
+        ? "Khong co file nao upload thanh cong. Kiem tra bang 'Ket qua upload tung file'."
+        : "Da luu vao DB qua /api/eudr/upload.",
+    })
+    if (EUDR_DEBUG_ENABLED) setShowAttachmentDebug(true)
+
+    setOrder(prev => prev ? { ...prev, files: latestFiles } : prev)
+
+    if (successfulUploads === 0) {
+      showToast("Không có file nào tải lên thành công.", false)
+    } else if (successfulUploads < files.length) {
+      showToast(`Chỉ tải lên thành công ${successfulUploads}/${files.length} file.`, false)
+    } else {
+      showToast(`Đã đính kèm ${successfulUploads} file`)
+    }
+
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   // ── Delete attached file ──────────────────────────────────────────────────
-  */
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!order || !factoryId) return
-    const files = Array.from(e.target.files || [])
-    if (!files.length) return
-
-    setUploading(true)
-    const previousFiles = normalizeExportOrderFiles(order.files)
-    const newFiles = [...previousFiles]
-    const selectedUploadFiles = toSelectedFileDebugRows(files, "selected-for-upload")
-    const uploadResults: AttachmentDebugRow[] = []
-    const uploadErrors: string[] = []
-
-    for (const file of files) {
-      try {
-        const uploaded = await uploadEudrFile({ factoryId, orderCode: order.ma_don, file })
-        newFiles.push({ name: uploaded.name, url: uploaded.url, path: uploaded.path, size: uploaded.size })
-        uploadResults.push({
-          index: uploadResults.length,
-          name: uploaded.name,
-          url: uploaded.url,
-          path: uploaded.path,
-          resolvedPath: uploaded.path,
-          size: uploaded.size,
-          source: uploaded.source === "client" ? "upload-result" : "upload-result-server-fallback",
-          downloadStatus: "ok",
-          downloadError: null,
-          blobSize: uploaded.size,
-          zipEntryName: null,
-        })
-      } catch (uploadError) {
-        const message = uploadError instanceof Error ? uploadError.message : "Unknown upload error"
-        const path = buildEudrStoragePath(factoryId, order.ma_don, file.name)
-        uploadErrors.push(`${file.name}: ${message}`)
-        uploadResults.push({
-          index: uploadResults.length,
-          name: file.name,
-          url: "",
-          path,
-          resolvedPath: path,
-          size: file.size,
-          source: "upload-result",
-          downloadStatus: "error",
-          downloadError: message,
-          blobSize: null,
-          zipEntryName: null,
-        })
-        console.error("EUDR upload failed before DB save", { fileName: file.name, path, error: uploadError })
-      }
-    }
-
-    const normalizedNewFiles = normalizeExportOrderFiles(newFiles)
-    const { error } = await supabase.from("export_orders").update({ files: normalizedNewFiles }).eq("id", order.id)
-
-    if (error) {
-      showToast(error.message, false)
-    } else {
-      const dbAfterUpload = await fetchLatestOrderFiles(order.id).catch((fetchError: unknown) => {
-        console.error("Failed to reload export order files right after upload", fetchError)
-        return []
-      })
-      const effectiveFiles = dbAfterUpload.length > 0 || normalizedNewFiles.length === 0
-        ? mergeExportOrderFiles(dbAfterUpload, normalizedNewFiles)
-        : normalizedNewFiles
-      const successfulUploads = uploadResults.filter(row => row.downloadStatus === "ok").length
-
-      setAttachmentDebug({
-        stage: "after-upload",
-        updatedAt: new Date().toISOString(),
-        orderId: order.id,
-        orderCode: order.ma_don,
-        selectedUploadFiles,
-        currentFiles: toAttachmentDebugRows(previousFiles, "state-before-upload"),
-        latestFiles: [],
-        filesForZip: [],
-        uploadFiles: toAttachmentDebugRows(normalizedNewFiles, "upload-payload"),
-        uploadResults,
-        dbAfterUpload: toAttachmentDebugRows(dbAfterUpload, "db-after-upload"),
-        attachmentResults: [],
-        uploadErrors,
-        attachmentErrors: [],
-        note:
-          successfulUploads === 0
-            ? "Khong co file nao upload thanh cong len storage. Kiem tra bang 'Ket qua upload tung file'."
-            : dbAfterUpload.length !== normalizedNewFiles.length
-              ? "So luong file trong DB sau upload khac voi payload vua save."
-              : "DB da tra ve cung so luong file voi payload vua save.",
-      })
-      setShowAttachmentDebug(true)
-
-      console.info("EUDR upload verification", {
-        orderId: order.id,
-        orderCode: order.ma_don,
-        previousFiles,
-        selectedUploadFiles,
-        uploadResults,
-        uploadErrors,
-        normalizedNewFiles,
-        dbAfterUpload,
-        effectiveFiles,
-      })
-
-      setOrder(prev => prev ? { ...prev, files: effectiveFiles } : prev)
-
-      if (successfulUploads === 0) {
-        showToast("Khong co file nao upload thanh cong. Xem panel debug.", false)
-      } else if (dbAfterUpload.length !== normalizedNewFiles.length) {
-        console.warn("EUDR upload DB mismatch after save", {
-          orderId: order.id,
-          orderCode: order.ma_don,
-          normalizedNewFiles,
-          dbAfterUpload,
-        })
-        showToast(`Upload xong nhung DB dang tra ve ${dbAfterUpload.length}/${normalizedNewFiles.length} file. Xem panel debug.`, false)
-      } else if (successfulUploads < files.length) {
-        showToast(`Chi upload thanh cong ${successfulUploads}/${files.length} file. Xem panel debug.`, false)
-      } else {
-        showToast(`Da dinh kem ${successfulUploads} file`)
-      }
-    }
-
-    setUploading(false)
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
-
-  const handleDeleteFile = async (url: string) => {
+  // Đi qua /api/eudr/remove-file — route tự kiểm tra quyền (admin / đúng người tải lên +
+  // đơn chưa khóa) và xóa luôn file thật khỏi Storage, không chỉ gỡ khỏi danh sách.
+  const handleDeleteFile = async (file: ExportOrderFile) => {
     if (!order) return
-    const newFiles = normalizeExportOrderFiles(order.files).filter(f => f.url !== url)
-    await supabase.from("export_orders").update({ files: newFiles }).eq("id", order.id)
-    setOrder(prev => prev ? { ...prev, files: newFiles } : prev)
-    showToast("Đã xóa file")
+    if (!canManageAttachment(file)) {
+      showToast(
+        attachmentsLocked
+          ? "Đơn hàng đã phê duyệt hoặc đã cấp quyền cho khách hàng — chỉ Admin được xóa tệp đính kèm."
+          : "Chỉ người đã tải file này lên (hoặc Admin) mới được xóa.",
+        false,
+      )
+      return
+    }
+    try {
+      const token = await getEudrAuthToken()
+      const res = await fetch("/api/eudr/remove-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, fileUrl: file.url }),
+      })
+      const payload = (await res.json().catch(() => null)) as { error?: string; files?: ExportOrderFile[] } | null
+      if (!res.ok || !payload?.files) {
+        throw new Error(payload?.error || "Không xóa được tệp đính kèm.")
+      }
+      const newFiles = normalizeExportOrderFiles(payload.files)
+      setOrder(prev => prev ? { ...prev, files: newFiles } : prev)
+      showToast("Đã xóa file")
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Không xóa được tệp đính kèm.", false)
+    }
   }
 
   // ── Download single DDS ───────────────────────────────────────────────────
@@ -903,7 +816,7 @@ export default function EudrClient() {
       const blob = n === 1
         ? await generateDDS1(order, geoData, factory, lotCertMap)
         : await generateDDS2(order, lotDetails, extractionDates, factory)
-      saveAs(blob, `${order.ma_don}_DDS_${n === 1 ? "Plantation" : "Shipment"}.pdf`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_DDS_${n === 1 ? "Plantation" : "Shipment"}.pdf`)
     } catch (error: unknown) {
       showToast("Lỗi tạo PDF: " + (error instanceof Error ? error.message : "Unknown error"), false)
     }
@@ -925,9 +838,10 @@ export default function EudrClient() {
 
     try {
       const { generateDDS1, generateDDS2, getUniqueZipEntryName } = await import("./dds-generator")
-      const plantationName = `${order.ma_don}_DDS_Plantation.pdf`
-      const shipmentName = `${order.ma_don}_DDS_Shipment.pdf`
-      const geojsonName = `${order.ma_don}_supply_chain.geojson`
+      const safeMaDon = sanitizeOrderCodeForFile(order.ma_don)
+      const plantationName = `${safeMaDon}_DDS_Plantation.pdf`
+      const shipmentName = `${safeMaDon}_DDS_Shipment.pdf`
+      const geojsonName = `${safeMaDon}_supply_chain.geojson`
 
       usedEntryNames.add(plantationName)
       usedEntryNames.add(shipmentName)
@@ -1099,7 +1013,7 @@ export default function EudrClient() {
       setShowAttachmentDebug(true)
 
       const blob = await zip.generateAsync({ type: "blob" })
-      saveAs(blob, `EUDR_${order.ma_don}.zip`)
+      saveAs(blob, `EUDR_${safeMaDon}.zip`)
       if (attachmentErrors.length > 0) {
         showToast(`ZIP thiếu ${attachmentErrors.length} file đính kèm. Xem console để biết chi tiết.`, false)
       } else if (filesForZip.length === 0) {
@@ -1302,7 +1216,7 @@ export default function EudrClient() {
                   <div key={f.n} className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
                     <FileText size={13} className="text-blue-500 shrink-0"/>
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-slate-700 truncate">{`${order.ma_don}_DDS_${f.suffix}.pdf`}</div>
+                      <div className="text-xs text-slate-700 truncate">{`${sanitizeOrderCodeForFile(order.ma_don)}_DDS_${f.suffix}.pdf`}</div>
                       <div className="text-[10px] text-slate-400">DDS {f.desc}</div>
                     </div>
                     <button onClick={() => handleDownloadDDS(f.n)}
@@ -1316,10 +1230,10 @@ export default function EudrClient() {
                 {geoData && (
                   <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-100">
                     <Map size={13} className="text-emerald-600 shrink-0"/>
-                    <span className="flex-1 text-xs text-slate-700 truncate">{order.ma_don}_supply_chain.geojson</span>
+                    <span className="flex-1 text-xs text-slate-700 truncate">{sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson</span>
                     <button onClick={() => {
                       const blob = new Blob([JSON.stringify(geoData,null,2)], { type:"application/json" })
-                      saveAs(blob, `${order.ma_don}_supply_chain.geojson`)
+                      saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson`)
                     }} className="p-1 hover:bg-emerald-100 rounded text-emerald-600" title="Tải về"><FileDown size={13}/></button>
                   </div>
                 )}
@@ -1330,18 +1244,28 @@ export default function EudrClient() {
                     <FileText size={13} className="text-slate-400 shrink-0"/>
                     <span className="flex-1 text-xs text-slate-700 truncate" title={f.name}>{f.name}</span>
                     <a href={f.url} download className="p-1 hover:bg-slate-200 rounded text-slate-500" title="Tải về"><FileDown size={13}/></a>
-                    <button onClick={()=>handleDeleteFile(f.url)} className="p-1 hover:bg-red-50 rounded text-red-400" title="Xóa"><Trash2 size={11}/></button>
+                    {canManageAttachment(f) && (
+                      <button onClick={()=>handleDeleteFile(f)} className="p-1 hover:bg-red-50 rounded text-red-400" title="Xóa"><Trash2 size={11}/></button>
+                    )}
                   </div>
                 ))}
 
                 {/* Upload button */}
-                <div>
-                  <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload}/>
-                  <button onClick={()=>fileInputRef.current?.click()} disabled={uploading}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-lg text-xs text-slate-500 hover:text-emerald-600 transition-all disabled:opacity-50">
-                    {uploading ? <><Loader2 size={13} className="animate-spin"/> Đang tải lên...</> : <><Upload size={13}/> Đính kèm file ngoài 2 DDS</>}
-                  </button>
-                </div>
+                {canAddAttachment ? (
+                  <div>
+                    <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload}/>
+                    <button onClick={()=>fileInputRef.current?.click()} disabled={uploading}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-lg text-xs text-slate-500 hover:text-emerald-600 transition-all disabled:opacity-50">
+                      {uploading ? <><Loader2 size={13} className="animate-spin"/> Đang tải lên...</> : <><Upload size={13}/> Đính kèm file ngoài 2 DDS</>}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 rounded-lg border border-dashed border-slate-200 text-[11px] text-slate-400 text-center">
+                    {attachmentsLocked === null
+                      ? "Đang kiểm tra quyền quản lý tệp đính kèm..."
+                      : "Đơn hàng đã phê duyệt hoặc đã cấp quyền cho khách hàng — chỉ Admin được thêm tệp đính kèm."}
+                  </div>
+                )}
               </div>
             </div>
 

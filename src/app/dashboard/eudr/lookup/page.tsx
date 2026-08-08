@@ -6,13 +6,11 @@ import Link from "next/link"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import {
-  broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
   onCustomerPortalLangChange,
   tCustomerPortal,
   type CustomerPortalLang,
 } from "@/lib/customer-portal-i18n"
-import { CustomerPortalLangToggle } from "@/app/dashboard/customer-portal/_components/lang-toggle"
 
 type LookupStatus = "checking" | "redirecting" | "missing_code" | "not_found" | "no_access"
 
@@ -103,9 +101,6 @@ function EudrLookupContent() {
 
   return (
     <div className="mx-auto max-w-md">
-      <div className="mb-4 flex justify-end">
-        <CustomerPortalLangToggle lang={lang} onChange={broadcastCustomerPortalLangChange} />
-      </div>
       <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
         <AlertTriangle size={36} className="mx-auto mb-3 text-amber-500" />
         <p className="text-sm font-semibold text-slate-600">{message}</p>

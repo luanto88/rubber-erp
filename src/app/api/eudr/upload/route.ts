@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import {
+  EudrFileOpError,
+  ensureExportViewPermission,
+  loadOrderForFileOps,
+  normalizeEudrFiles,
+} from "@/app/api/eudr/_lib/eudr-file-permissions"
 
 const EUDR_BUCKET = "eudr-files"
 const EUDR_BUCKET_CONFIG = {
@@ -18,36 +24,6 @@ function sanitizeFilename(name: string) {
 function isBucketNotFound(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "")
   return /bucket.*not found|404/i.test(message)
-}
-
-// Route trước đây chỉ kiểm tra "cùng nhà máy" — bất kỳ nhân viên active nào trong nhà
-// máy (kể cả không có quyền vào module Xuất hàng/EUDR) đều gọi được. Mirror đúng ngữ
-// nghĩa fetchPermissionCodesForUser() (src/lib/auth.ts): có quyền explicit trong
-// user_permissions thì CHỈ dùng đúng tập đó, không cộng thêm role_permissions.
-async function ensureExportViewPermission(userId: string, role: string) {
-  if (role === "admin") return
-
-  const { data: explicitRows } = await supabaseAdmin
-    .from("user_permissions")
-    .select("permission_code")
-    .eq("user_id", userId)
-    .eq("granted", true)
-
-  let allowed: boolean
-  if (explicitRows && explicitRows.length > 0) {
-    allowed = explicitRows.some((r) => r.permission_code === "export.view")
-  } else {
-    const { data: roleRows } = await supabaseAdmin
-      .from("role_permissions")
-      .select("permission_code")
-      .eq("role", role)
-      .eq("permission_code", "export.view")
-    allowed = (roleRows?.length || 0) > 0
-  }
-
-  if (!allowed) {
-    throw new Error("Ban khong co quyen tai file EUDR len.")
-  }
 }
 
 async function ensureBucket() {
@@ -78,17 +54,21 @@ async function ensureBucket() {
   }
 }
 
+// Route này giờ là ĐƯỜNG DUY NHẤT để đính kèm tệp EUDR — làm cả 2 việc: upload lên
+// Storage VÀ patch export_orders.files (trước đây 2 việc tách rời, phần patch DB đi qua
+// client trực tiếp nên không có chỗ nào để enforce khóa/ghi nhận người tải lên đáng tin
+// cậy). factoryId/orderCode không còn nhận từ client — luôn suy ra từ chính bản ghi
+// export_orders theo orderId, tránh giả mạo qua form field.
 export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
     const formData = await req.formData()
 
-    const factoryId = sanitizeSegment(String(formData.get("factoryId") || ""))
-    const orderCode = sanitizeSegment(String(formData.get("orderCode") || ""))
+    const orderId = String(formData.get("orderId") || "").trim()
     const fileEntry = formData.get("file")
 
-    if (!factoryId || !orderCode) {
-      return NextResponse.json({ error: "Thieu thong tin upload EUDR." }, { status: 400 })
+    if (!orderId) {
+      return NextResponse.json({ error: "Thieu ma don xuat hang." }, { status: 400 })
     }
 
     if (!(fileEntry instanceof File)) {
@@ -113,20 +93,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Tai khoan khong con hoat dong." }, { status: 403 })
     }
 
-    if (profile.factory_id !== factoryId) {
-      return NextResponse.json({ error: "Khong dung nha may upload du lieu." }, { status: 403 })
-    }
+    const role = (profile.role as string) || ""
 
     try {
-      await ensureExportViewPermission(authUser.id, (profile.role as string) || "")
+      await ensureExportViewPermission(authUser.id, role)
     } catch (permError) {
       const message = permError instanceof Error ? permError.message : "Khong co quyen."
       return NextResponse.json({ error: message }, { status: 403 })
     }
 
+    const { order, locked } = await loadOrderForFileOps(orderId, profile.factory_id)
+
+    if (locked && role !== "admin") {
+      return NextResponse.json(
+        { error: "Don hang da duoc phe duyet hoac da cap quyen cho khach hang — chi Admin duoc them tep dinh kem." },
+        { status: 403 },
+      )
+    }
+
     await ensureBucket()
 
-    const storagePath = `${factoryId}/${orderCode}/${Date.now()}_${sanitizeFilename(fileEntry.name)}`
+    const storagePath = `${sanitizeSegment(order.factory_id)}/${sanitizeSegment(order.ma_don)}/${Date.now()}_${sanitizeFilename(fileEntry.name)}`
     const fileBuffer = Buffer.from(await fileEntry.arrayBuffer())
     const uploadResult = await supabaseAdmin.storage.from(EUDR_BUCKET).upload(storagePath, fileBuffer, {
       upsert: true,
@@ -139,13 +126,40 @@ export async function POST(req: NextRequest) {
 
     const { data: publicData } = supabaseAdmin.storage.from(EUDR_BUCKET).getPublicUrl(storagePath)
 
-    return NextResponse.json({
+    // Đọc lại files mới nhất ngay trước khi ghi để giảm khoảng hở race khi có nhiều người
+    // cùng thao tác — vẫn có thể mất 1 lượt hiếm khi 2 request chạm nhau chính xác cùng
+    // lúc (bảng export_orders chưa có cơ chế optimistic lock), chấp nhận được cho tần suất
+    // thao tác thực tế của module này.
+    const { data: freshOrder, error: freshOrderError } = await supabaseAdmin
+      .from("export_orders")
+      .select("files")
+      .eq("id", orderId)
+      .single()
+
+    if (freshOrderError) throw freshOrderError
+
+    const newFileEntry = {
       name: fileEntry.name,
-      size: fileEntry.size,
+      url: publicData.publicUrl,
       path: storagePath,
-      publicUrl: publicData.publicUrl,
-    })
+      size: fileEntry.size,
+      uploadedBy: authUser.id,
+    }
+
+    const nextFiles = [...normalizeEudrFiles(freshOrder?.files), newFileEntry]
+
+    const { error: updateError } = await supabaseAdmin
+      .from("export_orders")
+      .update({ files: nextFiles })
+      .eq("id", orderId)
+
+    if (updateError) throw updateError
+
+    return NextResponse.json({ file: newFileEntry, files: nextFiles })
   } catch (error) {
+    if (error instanceof EudrFileOpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error("EUDR server upload failed", error)
     const message = error instanceof Error ? error.message : "Khong tai duoc file EUDR len may chu."
     return NextResponse.json({ error: message }, { status: 500 })

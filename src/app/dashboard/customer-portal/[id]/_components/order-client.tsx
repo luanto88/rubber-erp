@@ -7,16 +7,14 @@ import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere
 import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import { ArrowLeft, Download, FileDown, FileText, Loader2, MapPin, Package } from "lucide-react"
-import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, sanitizeOrderCodeForFile, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
-  broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
   onCustomerPortalLangChange,
   tCustomerPortal,
   type CustomerPortalLang,
 } from "@/lib/customer-portal-i18n"
-import { CustomerPortalLangToggle } from "@/app/dashboard/customer-portal/_components/lang-toggle"
 
 type PortalOrderDetail = {
   id: string
@@ -72,11 +70,6 @@ export default function CustomerPortalOrderClient() {
     return onCustomerPortalLangChange(setLang)
   }, [])
 
-  const changeLang = (next: CustomerPortalLang) => {
-    setLang(next)
-    broadcastCustomerPortalLangChange(next)
-  }
-
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
     setTimeout(() => setToast(null), 3500)
@@ -131,7 +124,7 @@ export default function CustomerPortalOrderClient() {
         data.factory,
         data.lotCertMap,
       )
-      saveAs(blob, `${data.order.ma_don}_Plantation.pdf`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_Plantation.pdf`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {
@@ -152,7 +145,7 @@ export default function CustomerPortalOrderClient() {
         data.extractionDates,
         data.factory,
       )
-      saveAs(blob, `${data.order.ma_don}_Shipment.pdf`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_Shipment.pdf`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {
@@ -165,7 +158,7 @@ export default function CustomerPortalOrderClient() {
     setDownloading("geojson")
     try {
       const blob = new Blob([JSON.stringify(data.geoData, null, 2)], { type: "application/geo+json" })
-      saveAs(blob, `${data.order.ma_don}_supply_chain.geojson`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_supply_chain.geojson`)
     } finally {
       setDownloading(null)
     }
@@ -192,7 +185,7 @@ export default function CustomerPortalOrderClient() {
         data.lotCertMap,
         data.order.files || [],
       )
-      saveAs(zipBlob, `${data.order.ma_don}_EUDR.zip`)
+      saveAs(zipBlob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_EUDR.zip`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {
@@ -224,14 +217,13 @@ export default function CustomerPortalOrderClient() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div className="mb-4">
         <Link
           href="/dashboard/customer-portal"
           className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-700"
         >
           <ArrowLeft size={14} /> {t("backToList")}
         </Link>
-        <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4">

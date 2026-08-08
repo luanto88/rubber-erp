@@ -6,6 +6,7 @@ import { ArrowLeft, Printer } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import { currencySymbol } from "../_components/maintenance-data"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1736,7 +1737,40 @@ export default function MaintenancePrintPage() {
     return `${window.location.origin}/dashboard/maintenance/records/${recordId}`
   }, [recordId])
 
+  const [authFactoryId, setAuthFactoryId] = useState<string | null>(null)
+
+  // Trang in này trước đây không có bất kỳ kiểm tra đăng nhập/quyền nào, và truy vấn chính
+  // (maintenance_records theo record_id/asset_id/vehicle_id từ URL) không lọc theo nhà máy
+  // — bất kỳ ai (kể cả chưa đăng nhập) biết id là xem được biên bản/lý lịch bảo trì của bất
+  // kỳ nhà máy nào. Gate rõ ràng, chỉ cho load() chạy sau khi xác định được factory_id thật.
   useEffect(() => {
+    const check = async () => {
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "maintenance.print")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      if (!user.factory_id) {
+        setError("Không xác định được nhà máy đang đăng nhập.")
+        setLoading(false)
+        return
+      }
+      setAuthFactoryId(user.factory_id)
+    }
+    void check()
+  }, [])
+
+  useEffect(() => {
+    if (!authFactoryId) return
+    const fid = authFactoryId
     const load = async () => {
       setLoading(true)
       try {
@@ -1789,12 +1823,13 @@ export default function MaintenancePrintPage() {
               .from("maintenance_assets")
               .select("id, ma_tb, ten_tb, bo_phan, loai, nam_sd, bien_so, mo_ta")
               .in("id", assetIdList)
+              .eq("factory_id", fid)
             const assetMap = new Map(((assetsData || []) as (AssetInfo & { id: string })[]).map((a) => [a.id, a]))
             const result: { info: AssetInfo; rows: HistoryRow[] }[] = []
             for (const aid of assetIdList) {
               const info = assetMap.get(aid)
               if (!info) continue
-              const rows = await fetchRowsForAsset(aid)
+              const rows = await fetchRowsForAsset(aid, fid)
               result.push({ info, rows })
             }
             setMultiAssets(result)
@@ -1803,9 +1838,10 @@ export default function MaintenancePrintPage() {
               .from("maintenance_assets")
               .select("ma_tb, ten_tb, bo_phan, loai, nam_sd, bien_so, mo_ta")
               .eq("id", assetId)
+              .eq("factory_id", fid)
               .single()
             setAssetInfo(asset as AssetInfo | null)
-            const rows = await fetchRowsForAsset(assetId)
+            const rows = await fetchRowsForAsset(assetId, fid)
             setHistoryRows(rows)
           }
         } else if (printType === "ly_lich_xe") {
@@ -1822,6 +1858,7 @@ export default function MaintenancePrintPage() {
               .from("dispatch_vehicles")
               .select("id, code, name, vehicle_type, plate_number, factory_id")
               .eq("id", vid)
+              .eq("factory_id", fid)
               .single()
             if (!veh) return null
             const v = veh as VehicleInfo
@@ -1922,6 +1959,7 @@ export default function MaintenancePrintPage() {
             .from("maintenance_records")
             .select("*")
             .eq("id", recordId)
+            .eq("factory_id", fid)
             .single()
           if (!rec) { setError("Không tìm thấy biên bản"); return }
 
@@ -1962,7 +2000,7 @@ export default function MaintenancePrintPage() {
       }
     }
     void load()
-  }, [printType, recordId, assetId, assetIdsParam, vehicleId, vehicleIdsParam, filterFrom, filterTo])
+  }, [authFactoryId, printType, recordId, assetId, assetIdsParam, vehicleId, vehicleIdsParam, filterFrom, filterTo])
 
   useEffect(() => {
     if (!loading && !error) {

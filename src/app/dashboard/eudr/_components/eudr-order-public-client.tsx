@@ -11,7 +11,7 @@ import { useEffect, useState } from "react"
 import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import { Download, FileDown, FileText, Loader2, MapPin, Package, ShieldCheck } from "lucide-react"
-import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, sanitizeOrderCodeForFile, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
   broadcastCustomerPortalLangChange,
@@ -118,7 +118,7 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
         data.factory,
         data.lotCertMap,
       )
-      saveAs(blob, `${data.order.ma_don}_Plantation.pdf`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_Plantation.pdf`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {
@@ -139,7 +139,7 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
         data.extractionDates,
         data.factory,
       )
-      saveAs(blob, `${data.order.ma_don}_Shipment.pdf`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_Shipment.pdf`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {
@@ -152,7 +152,7 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
     setDownloading("geojson")
     try {
       const blob = new Blob([JSON.stringify(data.geoData, null, 2)], { type: "application/geo+json" })
-      saveAs(blob, `${data.order.ma_don}_supply_chain.geojson`)
+      saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_supply_chain.geojson`)
     } finally {
       setDownloading(null)
     }
@@ -177,7 +177,7 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
         data.lotCertMap,
         data.order.files || [],
       )
-      saveAs(zipBlob, `${data.order.ma_don}_EUDR.zip`)
+      saveAs(zipBlob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_EUDR.zip`)
     } catch {
       showToast(t("errorGenerateDds"), false)
     } finally {

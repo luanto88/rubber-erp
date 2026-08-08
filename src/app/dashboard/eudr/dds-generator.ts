@@ -3,6 +3,7 @@ import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
 import JSZip from "jszip"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
+import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -312,11 +313,17 @@ export type EudrZipAttachment = {
   url: string
 }
 
+// Tái xuất từ module nhẹ dùng chung (xem lib/eudr-filename.ts để biết lý do đầy đủ) — để
+// các nơi đang import từ dds-generator.ts (order-client.tsx, eudr-order-public-client.tsx)
+// không phải sửa lại đường import.
+export { sanitizeOrderCodeForFile }
+
 // Đặt tên file không trùng nhau trong 1 lần build ZIP — nếu 2 tệp đính kèm trùng tên,
 // tự thêm hậu tố " (2)", " (3)"... thay vì để JSZip ghi 2 entry cùng tên (phần mềm giải
-// nén xử lý entry trùng tên không nhất quán, dễ mất dữ liệu âm thầm).
+// nén xử lý entry trùng tên không nhất quán, dễ mất dữ liệu âm thầm). Cũng sanitize luôn
+// "/" trong chính tên entry — bảo vệ luôn tệp đính kèm nếu tên file gốc lỡ có ký tự này.
 export function getUniqueZipEntryName(name: string, usedNames: Set<string>): string {
-  const trimmed = name.trim() || "attachment"
+  const trimmed = sanitizeOrderCodeForFile(name).trim() || "attachment"
   if (!usedNames.has(trimmed)) {
     usedNames.add(trimmed)
     return trimmed

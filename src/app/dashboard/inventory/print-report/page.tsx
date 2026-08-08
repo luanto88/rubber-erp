@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { ArrowLeft, Printer } from "lucide-react"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import {
   loadInventoryMovementData,
   type InventoryItemOption,
@@ -86,6 +87,23 @@ export default function InventoryPrintReportPage() {
   useEffect(() => {
     const bootstrap = async () => {
       setLoading(true)
+      // Trang in này trước đây không kiểm tra đăng nhập/quyền — chưa đăng nhập thì
+      // loadInventoryMovementData() âm thầm rơi vào dữ liệu mẫu (không phải rò rỉ dữ liệu
+      // thật), nhưng người có quyền module khác vẫn xem/in được báo cáo Kho vật tư. Gate
+      // rõ ràng giống mọi trang dashboard khác trước khi tải dữ liệu thật.
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "inventory.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       try {
         const inventoryData = await loadInventoryMovementData()
         setWarning(inventoryData.warning)

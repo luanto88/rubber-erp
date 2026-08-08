@@ -13,8 +13,9 @@ import {
   WARN_SEVERITY,
   writeBackToDispatch,
 } from "./output-types"
-import { normalizeDateInput } from "@/lib/date-utils"
+import { normalizeDateInput, formatDateDisplay } from "@/lib/date-utils"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
+import { isBlankNoteContent } from "@/lib/note-filter"
 import type { SessionUser } from "@/lib/auth"
 
 // Danh sách loại mủ cho bảng xem trước (Step 2) — chỉ cột của loại có dữ liệu trong file mới hiện.
@@ -401,6 +402,36 @@ export function OutputImport({
     )
   }, [matched])
 
+  // Tổng hợp theo ngày -> loại mủ -> ghi chú (kg), dùng cho khối "Tổng hợp trước khi nhập"
+  // ở footer Bước 2. Mỗi giá trị Ghi chú khác rỗng/"0" tách thành dòng riêng để không gộp
+  // nhầm sản lượng có nguồn gốc/điều kiện khác nhau vào chung 1 dòng.
+  const dailySummaries = useMemo(() => {
+    type SummaryRow = { label: string; note: string | null; tuoi: number; kho: number }
+    const dayMap = new Map<string, Map<string, SummaryRow>>()
+    matched.forEach((row) => {
+      const note = isBlankNoteContent(row.ghi_chu) ? null : row.ghi_chu.trim()
+      let materialMap = dayMap.get(row.ngay)
+      if (!materialMap) { materialMap = new Map(); dayMap.set(row.ngay, materialMap) }
+      PREVIEW_MATERIALS.forEach((def) => {
+        const tuoi = Number(row[def.tuoiKey] ?? 0)
+        const kho = Number(row[def.khoKey] ?? 0)
+        if (tuoi <= 0 && kho <= 0) return
+        const key = `${def.label}__${note ?? ""}`
+        const existing = materialMap!.get(key)
+        if (existing) { existing.tuoi += tuoi; existing.kho += kho }
+        else materialMap!.set(key, { label: def.label, note, tuoi, kho })
+      })
+    })
+    return [...dayMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([ngay, materialMap]) => ({
+        ngay,
+        rows: [...materialMap.values()].sort((a, b) =>
+          a.label.localeCompare(b.label) || (a.note ?? "").localeCompare(b.note ?? "")
+        ),
+      }))
+  }, [matched])
+
   const handleConfirm = async (options?: { skipInvalidNotes?: boolean }) => {
     setImporting(true)
     setImportError(null)
@@ -540,7 +571,35 @@ export function OutputImport({
       onClose={onClose}
       maxWidth="5xl"
       footer={(step === 1 || step === 2) && (
-        <div className="flex flex-col items-end gap-2 w-full sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 w-full">
+          {step === 2 && dailySummaries.length > 0 && (
+            <details className="rounded-xl border border-slate-200 bg-slate-50">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-bold text-slate-600">
+                Tổng hợp trước khi nhập ({dailySummaries.length} ngày)
+              </summary>
+              <div className="max-h-40 overflow-y-auto px-3 pb-2 space-y-2">
+                {dailySummaries.map((day) => (
+                  <div key={day.ngay}>
+                    <p className="text-xs font-bold text-slate-700">{formatDateDisplay(day.ngay) || day.ngay}</p>
+                    <div className="mt-0.5 space-y-0.5">
+                      {day.rows.map((row, idx) => (
+                        <div key={idx} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                          <span className="truncate">
+                            {row.label}
+                            {row.note && <span className="ml-1.5 text-slate-400">· {row.note}</span>}
+                          </span>
+                          <span className="shrink-0 font-medium text-slate-700">
+                            {row.tuoi.toLocaleString("vi-VN")} kg tươi / {row.kho.toLocaleString("vi-VN")} kg khô
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          <div className="flex flex-col items-end gap-2 w-full sm:flex-row sm:items-center sm:justify-between">
           <button
             onClick={() => { if (step === 2) setStep(1); else onClose() }}
             className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
@@ -574,6 +633,7 @@ export function OutputImport({
               </button>
             </div>
           )}
+          </div>
         </div>
       )}
     >

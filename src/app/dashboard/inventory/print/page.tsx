@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, ArrowLeft, Ban, CheckCircle2, Printer } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { getActiveFactoryId } from "@/lib/auth"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { loadInventoryAdminData, type InventoryWarehouseOption } from "../_components/inventory-data"
@@ -308,8 +308,24 @@ export default function InventoryPrintPage() {
     const bootstrap = async () => {
       setLoading(true)
       setError(null)
+      // Trang in này trước đây chỉ đọc factory_id từ cache session (getActiveFactoryId),
+      // không kiểm tra quyền module Kho vật tư — bất kỳ tài khoản nào cũng xem/in được
+      // phiếu nhập/xuất/chuyển kho miễn còn đăng nhập. Gate rõ ràng giống mọi trang khác.
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "inventory.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       try {
-        const factoryId = await getActiveFactoryId()
+        const factoryId = user.factory_id
         if (!factoryId) {
           setError("Chưa xác định được nhà máy đang thao tác.")
           return

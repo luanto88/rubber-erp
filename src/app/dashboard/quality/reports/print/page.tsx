@@ -2,6 +2,7 @@
 
 import { Fragment, Suspense, useEffect, useState, type CSSProperties } from "react"
 import { useSearchParams } from "next/navigation"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import {
   Bar, CartesianGrid, ComposedChart, LabelList, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -405,8 +406,39 @@ function QualityReportsPrintInner() {
   const giamDoc = params.get("giamDoc") || ""
   const nguoiThucHien = params.get("nguoiThucHien") || ""
 
+  const [authorized, setAuthorized] = useState(false)
+
+  // Trang in này trước đây không có bất kỳ kiểm tra đăng nhập/quyền nào — factoryId đọc
+  // thẳng từ query string, bất kỳ ai (kể cả chưa đăng nhập) đổi ?factoryId=... là xem được
+  // báo cáo thống kê chất lượng của bất kỳ nhà máy nào. Chỉ cho tải dữ liệu khi phiên đăng
+  // nhập hợp lệ, có quyền quality.print, VÀ đúng nhà máy khớp với factoryId trên URL.
   useEffect(() => {
-    if (!factoryId) { setError("Thiếu thông tin nhà máy"); setLoading(false); return }
+    const check = async () => {
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "quality.print")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      if (!factoryId || user.factory_id !== factoryId) {
+        setError("Không có quyền xem báo cáo của nhà máy này")
+        setLoading(false)
+        return
+      }
+      setAuthorized(true)
+    }
+    void check()
+  }, [factoryId])
+
+  useEffect(() => {
+    if (!authorized) return
     const load = async () => {
       try {
         if (includeSummary) {
@@ -430,7 +462,7 @@ function QualityReportsPrintInner() {
     }
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [factoryId, nam, thang])
+  }, [authorized, factoryId, nam, thang])
 
   useEffect(() => {
     if (!loading && !error) {

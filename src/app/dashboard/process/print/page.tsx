@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Printer, Share2, Download, X, ZoomIn, AlertTriangle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import type { QuickMeasurementSheet, QuickMeasurementRow } from "../_components/process-types"
 
 type NganInfo = { id: string; ten_ngan: string; ma_ngan: string; loai_nl: string; ngay_bd: string }
@@ -59,10 +60,31 @@ export default function ProcessPrintPage() {
   useEffect(() => {
     const load = async () => {
       if (!sheetId) { setError("Thiếu sheetId"); setLoading(false); return }
+
+      // Trang in này trước đây không có bất kỳ kiểm tra đăng nhập/quyền nào — bất kỳ ai
+      // biết sheetId (kể cả chưa đăng nhập) đều xem được phiếu đo nhanh của bất kỳ nhà
+      // máy nào. Gate giống mọi trang dashboard khác trước khi truy vấn.
+      const { session, user } = await hydrateActiveSession().catch(() => ({ session: null, user: null }))
+      const blocked = authBlockReason(user)
+      if (!session?.user || blocked) {
+        setLoading(false)
+        await signOutEverywhere()
+        window.location.replace(`/login${blocked ? `?reason=${blocked}` : ""}`)
+        return
+      }
+      if (!hasPermission(user, "process.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      const fid = user.factory_id
+      if (!fid) { setError("Không xác định được nhà máy đang đăng nhập."); setLoading(false); return }
+
       const { data, error: err } = await supabase
         .from("quick_measurements")
         .select("*, rows:quick_measurement_rows(*)")
         .eq("id", sheetId)
+        .eq("factory_id", fid)
         .single()
 
       if (err || !data) { setError("Không tìm thấy phiếu"); setLoading(false); return }
