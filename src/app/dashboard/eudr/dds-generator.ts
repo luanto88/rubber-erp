@@ -1,6 +1,7 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import QRCode from "qrcode"
+import JSZip from "jszip"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
@@ -304,6 +305,81 @@ export async function generateDDS1(
   }
 
   return new Blob([doc.output("arraybuffer")], { type: "application/pdf" })
+}
+
+export type EudrZipAttachment = {
+  name: string
+  url: string
+}
+
+// Đặt tên file không trùng nhau trong 1 lần build ZIP — nếu 2 tệp đính kèm trùng tên,
+// tự thêm hậu tố " (2)", " (3)"... thay vì để JSZip ghi 2 entry cùng tên (phần mềm giải
+// nén xử lý entry trùng tên không nhất quán, dễ mất dữ liệu âm thầm).
+export function getUniqueZipEntryName(name: string, usedNames: Set<string>): string {
+  const trimmed = name.trim() || "attachment"
+  if (!usedNames.has(trimmed)) {
+    usedNames.add(trimmed)
+    return trimmed
+  }
+
+  const dotIndex = trimmed.lastIndexOf(".")
+  const base = dotIndex > 0 ? trimmed.slice(0, dotIndex) : trimmed
+  const ext = dotIndex > 0 ? trimmed.slice(dotIndex) : ""
+
+  let index = 2
+  let candidate = `${base} (${index})${ext}`
+  while (usedNames.has(candidate)) {
+    index += 1
+    candidate = `${base} (${index})${ext}`
+  }
+  usedNames.add(candidate)
+  return candidate
+}
+
+// Gói 2 file DDS + GeoJSON + tệp đính kèm vào 1 file ZIP DUY NHẤT — mọi file nằm thẳng ở
+// gốc ZIP, KHÔNG bọc thêm thư mục con nào bên trong. Phần mềm giải nén (Explorer/macOS
+// Archive Utility...) tự tạo đúng 1 thư mục theo tên file zip khi giải nén; nếu zip còn tự
+// bọc thêm 1 thư mục con nữa bên trong (như bản cũ của EudrClient.tsx dùng zip.folder(...))
+// thì người dùng phải mở lồng 2 cấp thư mục mới thấy file — đây chính là điều cần tránh.
+// Dùng chung cho Customer Portal (order-client.tsx) và trang public /eudr-order
+// (eudr-order-public-client.tsx) — 2 nơi trước đây có cùng 1 đoạn code lặp lại y hệt nhau.
+export async function buildEudrOrderZipBlob(
+  order: OrderForDDS,
+  geoData: FeatureCollection | null,
+  factory: FactoryProfile,
+  lotDetails: LotDetail[],
+  extractionDates: Record<string, string>,
+  lotCertMap: Record<string, string>,
+  files: EudrZipAttachment[],
+): Promise<Blob> {
+  const [dds1Blob, dds2Blob] = await Promise.all([
+    generateDDS1(order, geoData, factory, lotCertMap),
+    generateDDS2(order, lotDetails, extractionDates, factory),
+  ])
+
+  const zip = new JSZip()
+  const usedNames = new Set<string>()
+  zip.file(getUniqueZipEntryName(`${order.ma_don}_Plantation.pdf`, usedNames), dds1Blob)
+  zip.file(getUniqueZipEntryName(`${order.ma_don}_Shipment.pdf`, usedNames), dds2Blob)
+  if (geoData) {
+    zip.file(
+      getUniqueZipEntryName(`${order.ma_don}_supply_chain.geojson`, usedNames),
+      JSON.stringify(geoData, null, 2),
+    )
+  }
+
+  for (const f of files) {
+    try {
+      const res = await fetch(f.url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      zip.file(getUniqueZipEntryName(f.name, usedNames), blob)
+    } catch {
+      // bỏ qua tệp đính kèm lỗi, tiếp tục với các tệp còn lại
+    }
+  }
+
+  return zip.generateAsync({ type: "blob" })
 }
 
 export async function generateDDS2(

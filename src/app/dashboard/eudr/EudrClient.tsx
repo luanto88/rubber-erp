@@ -239,27 +239,6 @@ function normalizeExportOrderFiles(files: unknown): ExportOrderFile[] {
   ))
 }
 
-function getUniqueZipEntryName(name: string, usedNames: Set<string>) {
-  const trimmed = name.trim() || "attachment"
-  if (!usedNames.has(trimmed)) {
-    usedNames.add(trimmed)
-    return trimmed
-  }
-
-  const dotIndex = trimmed.lastIndexOf(".")
-  const base = dotIndex > 0 ? trimmed.slice(0, dotIndex) : trimmed
-  const ext = dotIndex > 0 ? trimmed.slice(dotIndex) : ""
-
-  let index = 2
-  let candidate = `${base} (${index})${ext}`
-  while (usedNames.has(candidate)) {
-    index += 1
-    candidate = `${base} (${index})${ext}`
-  }
-  usedNames.add(candidate)
-  return candidate
-}
-
 function mergeExportOrderFiles(primary: ExportOrderFile[], fallback: ExportOrderFile[]) {
   const merged = new globalThis.Map<string, ExportOrderFile>()
 
@@ -938,12 +917,14 @@ export default function EudrClient() {
       return
     }
     setDownloading(true)
+    // Mọi file nằm thẳng ở gốc ZIP (KHÔNG bọc thêm thư mục con order.ma_don như trước) —
+    // phần mềm giải nén tự tạo đúng 1 thư mục theo tên file zip khi giải nén, mở ra thấy
+    // ngay 3 file chính + tệp đính kèm ở cùng 1 cấp, không phải đào thêm 1 lớp thư mục nữa.
     const zip = new JSZip()
-    const folder = zip.folder(order.ma_don) || zip
     const usedEntryNames = new Set<string>()
 
     try {
-      const { generateDDS1, generateDDS2 } = await import("./dds-generator")
+      const { generateDDS1, generateDDS2, getUniqueZipEntryName } = await import("./dds-generator")
       const plantationName = `${order.ma_don}_DDS_Plantation.pdf`
       const shipmentName = `${order.ma_don}_DDS_Shipment.pdf`
       const geojsonName = `${order.ma_don}_supply_chain.geojson`
@@ -952,11 +933,11 @@ export default function EudrClient() {
       usedEntryNames.add(shipmentName)
       usedEntryNames.add(geojsonName)
 
-      folder.file(plantationName, await generateDDS1(order, geoData, factory, lotCertMap))
-      folder.file(shipmentName, await generateDDS2(order, lotDetails, extractionDates, factory))
+      zip.file(plantationName, await generateDDS1(order, geoData, factory, lotCertMap))
+      zip.file(shipmentName, await generateDDS2(order, lotDetails, extractionDates, factory))
 
       if (geoData) {
-        folder.file(geojsonName, JSON.stringify(geoData, null, 2))
+        zip.file(geojsonName, JSON.stringify(geoData, null, 2))
       }
 
       const currentFiles = normalizeExportOrderFiles(order.files)
@@ -1056,7 +1037,7 @@ export default function EudrClient() {
           }
 
           const entryName = getUniqueZipEntryName(f.name, usedEntryNames)
-          folder.file(entryName, fileBlob)
+          zip.file(entryName, fileBlob)
           attachmentResults.push({
             index,
             name: f.name,

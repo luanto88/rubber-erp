@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { hasPermission, hydrateActiveSession } from "@/lib/auth";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { Printer, ChevronLeft } from "lucide-react";
 import Image from "next/image";
@@ -64,29 +65,50 @@ function PrintContent() {
   const [factory, setFactory] = useState<{ name: string } | null>(null);
 
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId) {
+      setLoading(false);
+      return;
+    }
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase
-        .from("export_orders")
-        .select(
-          "*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)",
-        )
-        .eq("id", orderId)
-        .single();
+      try {
+        // Trang in này trước đây không có bất kỳ kiểm tra đăng nhập/quyền nào — bất kỳ
+        // ai biết orderId (kể cả chưa đăng nhập) đều xem được toàn bộ đơn xuất hàng của
+        // bất kỳ nhà máy nào. Gate + lọc factory_id giống mọi trang dashboard khác.
+        const { user } = await hydrateActiveSession().catch(() => ({ user: null }));
+        if (!hasPermission(user, "export.view")) {
+          window.location.replace("/dashboard");
+          return;
+        }
+        const fid = user?.factory_id;
+        if (!fid) {
+          window.location.replace("/dashboard");
+          return;
+        }
 
-      if (data) {
-        setOrder(data as ExportOrder);
-        const { data: fData } = await supabase
-          .from("factories")
-          .select("name")
-          .eq("id", data.factory_id)
+        const { data } = await supabase
+          .from("export_orders")
+          .select(
+            "*, customers(ma_kh,ten_kh_en,quoc_gia,dia_chi,email,nguoi_lien_he)",
+          )
+          .eq("id", orderId)
+          .eq("factory_id", fid)
           .single();
-        if (fData) setFactory(fData);
+
+        if (data) {
+          setOrder(data as ExportOrder);
+          const { data: fData } = await supabase
+            .from("factories")
+            .select("name")
+            .eq("id", data.factory_id)
+            .single();
+          if (fData) setFactory(fData);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
-    load();
+    void load();
   }, [orderId]);
 
   if (loading)

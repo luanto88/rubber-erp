@@ -10,9 +10,8 @@
 import { useEffect, useState } from "react"
 import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
-import JSZip from "jszip"
 import { Download, FileDown, FileText, Loader2, MapPin, Package, ShieldCheck } from "lucide-react"
-import { generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
   broadcastCustomerPortalLangChange,
@@ -167,27 +166,17 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
     setDownloading("all")
     try {
       const orderForDds = { ...data.order, customers: data.order.customers ?? undefined }
-      const [dds1Blob, dds2Blob] = await Promise.all([
-        generateDDS1(orderForDds, data.geoData, data.factory, data.lotCertMap),
-        generateDDS2(orderForDds, data.lotDetails, data.extractionDates, data.factory),
-      ])
-      const zip = new JSZip()
-      zip.file(`${data.order.ma_don}_Plantation.pdf`, dds1Blob)
-      zip.file(`${data.order.ma_don}_Shipment.pdf`, dds2Blob)
-      zip.file(`${data.order.ma_don}_supply_chain.geojson`, JSON.stringify(data.geoData, null, 2))
-
-      for (const f of data.order.files || []) {
-        try {
-          const res = await fetch(f.url)
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          const blob = await res.blob()
-          zip.file(f.name, blob)
-        } catch {
-          // bỏ qua file đính kèm lỗi, tiếp tục với các file khác
-        }
-      }
-
-      const zipBlob = await zip.generateAsync({ type: "blob" })
+      // buildEudrOrderZipBlob() gói 3 file chính (2 DDS + GeoJSON) và tệp đính kèm vào 1 ZIP
+      // phẳng (không có thư mục con bên trong), giống hệt luồng Customer Portal.
+      const zipBlob = await buildEudrOrderZipBlob(
+        orderForDds,
+        data.geoData,
+        data.factory,
+        data.lotDetails,
+        data.extractionDates,
+        data.lotCertMap,
+        data.order.files || [],
+      )
       saveAs(zipBlob, `${data.order.ma_don}_EUDR.zip`)
     } catch {
       showToast(t("errorGenerateDds"), false)

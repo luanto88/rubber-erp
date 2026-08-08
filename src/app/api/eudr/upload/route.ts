@@ -20,6 +20,36 @@ function isBucketNotFound(error: unknown) {
   return /bucket.*not found|404/i.test(message)
 }
 
+// Route trước đây chỉ kiểm tra "cùng nhà máy" — bất kỳ nhân viên active nào trong nhà
+// máy (kể cả không có quyền vào module Xuất hàng/EUDR) đều gọi được. Mirror đúng ngữ
+// nghĩa fetchPermissionCodesForUser() (src/lib/auth.ts): có quyền explicit trong
+// user_permissions thì CHỈ dùng đúng tập đó, không cộng thêm role_permissions.
+async function ensureExportViewPermission(userId: string, role: string) {
+  if (role === "admin") return
+
+  const { data: explicitRows } = await supabaseAdmin
+    .from("user_permissions")
+    .select("permission_code")
+    .eq("user_id", userId)
+    .eq("granted", true)
+
+  let allowed: boolean
+  if (explicitRows && explicitRows.length > 0) {
+    allowed = explicitRows.some((r) => r.permission_code === "export.view")
+  } else {
+    const { data: roleRows } = await supabaseAdmin
+      .from("role_permissions")
+      .select("permission_code")
+      .eq("role", role)
+      .eq("permission_code", "export.view")
+    allowed = (roleRows?.length || 0) > 0
+  }
+
+  if (!allowed) {
+    throw new Error("Ban khong co quyen tai file EUDR len.")
+  }
+}
+
 async function ensureBucket() {
   const existingBucket = await supabaseAdmin.storage.getBucket(EUDR_BUCKET)
 
@@ -71,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
-      .select("factory_id, status")
+      .select("factory_id, status, role")
       .eq("id", authUser.id)
       .single()
 
@@ -85,6 +115,13 @@ export async function POST(req: NextRequest) {
 
     if (profile.factory_id !== factoryId) {
       return NextResponse.json({ error: "Khong dung nha may upload du lieu." }, { status: 403 })
+    }
+
+    try {
+      await ensureExportViewPermission(authUser.id, (profile.role as string) || "")
+    } catch (permError) {
+      const message = permError instanceof Error ? permError.message : "Khong co quyen."
+      return NextResponse.json({ error: message }, { status: 403 })
     }
 
     await ensureBucket()
