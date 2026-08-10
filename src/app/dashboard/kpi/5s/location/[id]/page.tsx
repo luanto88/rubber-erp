@@ -28,7 +28,7 @@ import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { Kpi5sResultPicker } from "@/app/dashboard/kpi/_components/kpi-5s-result-picker"
 import {
   buildKpi5sLocationUrl,
-  computeKpi5sDeadline,
+  computeKpi5sNextDeadline,
   fetchKpi5sEvaluations,
   fetchKpi5sLocation,
   fetchLocationCleaners,
@@ -152,10 +152,7 @@ export default function Kpi5sLocationDetailPage() {
   const canEvaluateThisWeek = !!location?.is_active && user?.id === location?.nguoi_cham_id && !currentWeekEvaluation
   const isAdmin = user?.role === "admin"
 
-  const deadline = useMemo(
-    () => (location ? computeKpi5sDeadline(location, currentWeekStart) : null),
-    [location, currentWeekStart],
-  )
+  const deadline = useMemo(() => (location ? computeKpi5sNextDeadline(location) : null), [location])
   const hasEvaluatedThisWeek = !!currentWeekEvaluation
   const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
   const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)

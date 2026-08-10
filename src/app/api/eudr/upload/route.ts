@@ -2,24 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import {
   EudrFileOpError,
+  appendEudrFileEntry,
   ensureExportViewPermission,
   loadOrderForFileOps,
-  normalizeEudrFiles,
 } from "@/app/api/eudr/_lib/eudr-file-permissions"
+import { EUDR_BUCKET, sanitizeFilename, sanitizeSegment } from "@/lib/eudr-attachments"
 
-const EUDR_BUCKET = "eudr-files"
 const EUDR_BUCKET_CONFIG = {
   public: true,
   fileSizeLimit: 50 * 1024 * 1024,
 } as const
-
-function sanitizeSegment(value: string) {
-  return value.trim().replace(/[^a-zA-Z0-9_-]/g, "_")
-}
-
-function sanitizeFilename(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_")
-}
 
 function isBucketNotFound(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "")
@@ -54,11 +46,14 @@ async function ensureBucket() {
   }
 }
 
-// Route này giờ là ĐƯỜNG DUY NHẤT để đính kèm tệp EUDR — làm cả 2 việc: upload lên
-// Storage VÀ patch export_orders.files (trước đây 2 việc tách rời, phần patch DB đi qua
-// client trực tiếp nên không có chỗ nào để enforce khóa/ghi nhận người tải lên đáng tin
-// cậy). factoryId/orderCode không còn nhận từ client — luôn suy ra từ chính bản ghi
-// export_orders theo orderId, tránh giả mạo qua form field.
+// Route này giờ chỉ còn là FALLBACK khi client không upload thẳng được lên Supabase Storage
+// (lỗi cấu hình bucket/RLS) — đường chính là `EudrClient.tsx` upload thẳng bằng anon client rồi
+// gọi `/api/eudr/register-file` (JSON nhỏ gọn, không dính giới hạn body của Vercel). Route này
+// vẫn nhận multipart qua `req.formData()` nên vẫn bị giới hạn cứng ~4.5MB request body của
+// Vercel Serverless Function — chỉ dùng được đúng cho file nhỏ khi đường chính thất bại, KHÔNG
+// còn là đường duy nhất như trước (xem plan fix bug upload file lớn, 2026-08-08).
+// factoryId/orderCode không nhận từ client — luôn suy ra từ chính bản ghi export_orders theo
+// orderId, tránh giả mạo qua form field.
 export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
@@ -126,36 +121,15 @@ export async function POST(req: NextRequest) {
 
     const { data: publicData } = supabaseAdmin.storage.from(EUDR_BUCKET).getPublicUrl(storagePath)
 
-    // Đọc lại files mới nhất ngay trước khi ghi để giảm khoảng hở race khi có nhiều người
-    // cùng thao tác — vẫn có thể mất 1 lượt hiếm khi 2 request chạm nhau chính xác cùng
-    // lúc (bảng export_orders chưa có cơ chế optimistic lock), chấp nhận được cho tần suất
-    // thao tác thực tế của module này.
-    const { data: freshOrder, error: freshOrderError } = await supabaseAdmin
-      .from("export_orders")
-      .select("files")
-      .eq("id", orderId)
-      .single()
-
-    if (freshOrderError) throw freshOrderError
-
-    const newFileEntry = {
+    const { file, files } = await appendEudrFileEntry(orderId, {
       name: fileEntry.name,
       url: publicData.publicUrl,
       path: storagePath,
       size: fileEntry.size,
       uploadedBy: authUser.id,
-    }
+    })
 
-    const nextFiles = [...normalizeEudrFiles(freshOrder?.files), newFileEntry]
-
-    const { error: updateError } = await supabaseAdmin
-      .from("export_orders")
-      .update({ files: nextFiles })
-      .eq("id", orderId)
-
-    if (updateError) throw updateError
-
-    return NextResponse.json({ file: newFileEntry, files: nextFiles })
+    return NextResponse.json({ file, files })
   } catch (error) {
     if (error instanceof EudrFileOpError) {
       return NextResponse.json({ error: error.message }, { status: error.status })

@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import type { DepartmentOption } from "@/lib/kpi-department-leaders"
+import { getTodayISODate } from "@/lib/date-utils"
 import {
   KPI_MODULE_OPTIONS,
   KPI_REPORT_REQ_LABEL,
@@ -20,6 +21,7 @@ import {
   KPI_WEEKDAY_OPTIONS,
   updateKpiTaskTemplate,
   type KpiGroupOption,
+  type KpiTaskCadenceType,
   type KpiTaskTemplate,
 } from "@/lib/kpi-templates"
 
@@ -47,6 +49,9 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
   const [tieuDe, setTieuDe] = useState(editing?.tieu_de || "")
   const [moTa, setMoTa] = useState(editing?.mo_ta || "")
   const [weekdays, setWeekdays] = useState<number[]>(editing?.apply_weekdays || [1, 2, 3, 4, 5, 6, 7])
+  const [cadenceType, setCadenceType] = useState<KpiTaskCadenceType>(editing?.cadence_type || "weekday")
+  const [intervalDays, setIntervalDays] = useState(String(editing?.interval_days ?? 2))
+  const [anchorDate, setAnchorDate] = useState(editing?.anchor_date || getTodayISODate())
   const [gioHan, setGioHan] = useState((editing?.gio_han || "17:00:00").slice(0, 5))
   const [yeuCau, setYeuCau] = useState<KpiReportRequirement[]>(editing?.yeu_cau_bao_cao || [])
   const [isActive, setIsActive] = useState(editing?.is_active ?? true)
@@ -80,7 +85,11 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
     if (!groupId) { setError("Vui lòng chọn nhóm."); return }
     if (!assignedUserId) { setError("Vui lòng chọn người nhận cố định."); return }
     if (!tieuDe.trim()) { setError("Vui lòng nhập tiêu đề."); return }
-    if (weekdays.length === 0) { setError("Vui lòng chọn ít nhất 1 ngày áp dụng."); return }
+    if (cadenceType === "weekday" && weekdays.length === 0) { setError("Vui lòng chọn ít nhất 1 ngày áp dụng."); return }
+    if (cadenceType === "interval") {
+      if (!Number(intervalDays) || Number(intervalDays) < 1) { setError("Vui lòng nhập số ngày lặp lại hợp lệ (tối thiểu 1)."); return }
+      if (!anchorDate) { setError("Vui lòng chọn Ngày bắt đầu chu kỳ."); return }
+    }
     setSaving(true)
     setError(null)
     try {
@@ -92,6 +101,9 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
         tieuDe,
         moTa,
         applyWeekdays: weekdays,
+        cadenceType,
+        intervalDays: cadenceType === "interval" ? Number(intervalDays) : null,
+        anchorDate: cadenceType === "interval" ? anchorDate : null,
         gioHan: `${gioHan}:00`,
         yeuCauBaoCao: yeuCau,
         isActive,
@@ -223,30 +235,85 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
         </div>
 
         <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Thứ áp dụng *</label>
-          <div className="flex flex-wrap gap-1.5">
-            {KPI_WEEKDAY_OPTIONS.map((d) => {
-              const checked = weekdays.includes(d)
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => toggleWeekday(d)}
-                  className={
-                    "px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors " +
-                    (checked ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
-                  }
-                >
-                  {KPI_WEEKDAY_LABEL[d]}
-                </button>
-              )
-            })}
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhịp độ lặp lại *</label>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCadenceType("weekday")}
+              className={
+                "flex-1 rounded-xl border px-3 py-2 text-xs font-bold transition-colors " +
+                (cadenceType === "weekday" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+              }
+            >
+              Theo Thứ trong tuần
+            </button>
+            <button
+              type="button"
+              onClick={() => setCadenceType("interval")}
+              className={
+                "flex-1 rounded-xl border px-3 py-2 text-xs font-bold transition-colors " +
+                (cadenceType === "interval" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+              }
+            >
+              Theo chu kỳ N ngày
+            </button>
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Chọn nhiều thứ = việc lặp lại hàng ngày (theo đúng các thứ đã chọn). Chỉ chọn 1 thứ
-            (vd chỉ Chủ nhật) = việc lặp lại theo tuần vào đúng thứ đó — không cần cấu hình gì
-            thêm để có nhịp độ &quot;hàng tuần&quot;.
-          </p>
+
+          {cadenceType === "weekday" ? (
+            <>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {KPI_WEEKDAY_OPTIONS.map((d) => {
+                  const checked = weekdays.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleWeekday(d)}
+                      className={
+                        "px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors " +
+                        (checked ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      {KPI_WEEKDAY_LABEL[d]}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Chọn nhiều thứ = việc lặp lại hàng ngày (theo đúng các thứ đã chọn). Chỉ chọn 1 thứ
+                (vd chỉ Chủ nhật) = việc lặp lại theo tuần vào đúng thứ đó — không cần cấu hình gì
+                thêm để có nhịp độ &quot;hàng tuần&quot;.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Lặp lại mỗi (ngày) *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={intervalDays}
+                    onChange={(e) => setIntervalDays(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Ngày bắt đầu chu kỳ *</label>
+                  <input
+                    type="date"
+                    value={anchorDate}
+                    onChange={(e) => setAnchorDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Vd nhập &quot;2&quot; + ngày bắt đầu hôm nay = việc lặp lại đúng 2 ngày 1 lần (hôm
+                nay, +2 ngày, +4 ngày...), không phụ thuộc Thứ nào trong tuần.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 items-end">

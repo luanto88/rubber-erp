@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuthUser } from "@/app/api/account/_lib/security"
+import { accountErrorResponse, requireAuthUser } from "@/app/api/account/_lib/security"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 
 export const dynamic = "force-dynamic"
@@ -66,9 +66,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ users })
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Lỗi server" },
-      { status: 401 },
-    )
+    return accountErrorResponse(err, "Lỗi server", 401)
   }
 }

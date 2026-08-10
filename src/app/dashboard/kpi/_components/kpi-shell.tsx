@@ -28,11 +28,21 @@
 // Phase 4: thêm tab "Bảng điểm KPI" (kpi_monthly_scores) — xem điểm tháng A/B/C/D + hệ số chuyên
 // cần + tổng (bản nháp, chưa khóa sổ). Mọi kpi.view user xem điểm của chính mình; xem toàn nhà
 // máy chỉ dành cho admin/kpi.view_all + lãnh đạo phòng ban.
+//
+// Redesign IA (2026-08-19): thêm badge số đỏ trên từng tab — Shell tự bootstrap (session +
+// factory) và tự gọi getKpiTasks() độc lập với trang con (không nhận props, mirror cách Bell ở
+// layout.tsx tự fetch độc lập trên mọi route) rồi nhóm items theo field `tab` (gắn sẵn trong
+// getKpiTasks, xem module-tasks.ts) — không suy luận qua label. "/dashboard/kpi" cũng đổi thành
+// trang chủ tổng hợp thật (xem kpi/page.tsx) thay vì chỉ redirect.
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Award, ClipboardCheck, ClipboardList, Flag, Repeat, Sparkles, type LucideIcon } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getKpiTasks } from "@/app/dashboard/_components/module-tasks"
+
+type KpiBadgeTab = "tasks" | "5s" | "templates" | "appeals"
 
 type NavTab = {
   href: string
@@ -42,11 +52,14 @@ type NavTab = {
   matchPrefixes?: string[]
   activeClass: string
   hoverClass: string
+  // Khớp field `tab` của ModuleTaskItem (module-tasks.ts) — tab nào không có giá trị (Chấm điểm
+  // chuyên môn, Bảng điểm KPI) thì không bao giờ hiện badge, vì getKpiTasks() chưa có tín hiệu
+  // "cần chú ý" nào cho 2 khu vực đó.
+  badgeKey?: KpiBadgeTab
 }
 
-// "Tổng quan" (route /dashboard/kpi) không còn là tab riêng — Fix 6 (2026-08-06): trang này giờ
-// chỉ redirect thẳng sang "Công việc chuyên môn" tab "Việc của tôi" (xem kpi/page.tsx), để mặc
-// định luôn vào đúng danh sách việc cần làm thay vì 1 trang tổng quan trung gian ít việc ở đó.
+// "Tổng quan" (route /dashboard/kpi) không còn là tab riêng trong thanh điều hướng — nay là
+// trang chủ tổng hợp thật (xem kpi/page.tsx), không active-highlight bất kỳ tab nào ở đây.
 const tabs: NavTab[] = [
   {
     href: "/dashboard/kpi/tasks",
@@ -56,6 +69,7 @@ const tabs: NavTab[] = [
     matchPrefixes: ["/dashboard/kpi/tasks"],
     activeClass: "bg-gradient-to-br from-sky-100 to-blue-100 text-sky-700 border-sky-200 shadow-sm",
     hoverClass: "hover:bg-sky-50 hover:text-sky-600",
+    badgeKey: "tasks",
   },
   {
     href: "/dashboard/kpi/templates",
@@ -65,6 +79,7 @@ const tabs: NavTab[] = [
     matchPrefixes: ["/dashboard/kpi/templates"],
     activeClass: "bg-gradient-to-br from-teal-100 to-emerald-100 text-teal-700 border-teal-200 shadow-sm",
     hoverClass: "hover:bg-teal-50 hover:text-teal-600",
+    badgeKey: "templates",
   },
   {
     href: "/dashboard/kpi/5s",
@@ -74,6 +89,7 @@ const tabs: NavTab[] = [
     matchPrefixes: ["/dashboard/kpi/5s"],
     activeClass: "bg-gradient-to-br from-amber-100 to-orange-100 text-amber-700 border-amber-200 shadow-sm",
     hoverClass: "hover:bg-amber-50 hover:text-amber-600",
+    badgeKey: "5s",
   },
   {
     href: "/dashboard/kpi/evaluate",
@@ -92,6 +108,7 @@ const tabs: NavTab[] = [
     matchPrefixes: ["/dashboard/kpi/appeals"],
     activeClass: "bg-gradient-to-br from-rose-100 to-pink-100 text-rose-700 border-rose-200 shadow-sm",
     hoverClass: "hover:bg-rose-50 hover:text-rose-600",
+    badgeKey: "appeals",
   },
   {
     href: "/dashboard/kpi/scores",
@@ -147,6 +164,54 @@ export function KpiShell({ children }: KpiShellProps) {
     }
   }, [])
 
+  // Badge số trên tab — Shell tự bootstrap độc lập với trang con (không nhận props), fail-silent
+  // hoàn toàn (lỗi/thiếu quyền/thiếu migration chỉ khiến không có badge nào, không phá layout).
+  const [session, setSession] = useState<{ factoryId: string; user: SessionUser } | null>(null)
+  const [badgeByTab, setBadgeByTab] = useState<Partial<Record<KpiBadgeTab, number>>>({})
+
+  useEffect(() => {
+    const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+    if (!hasPermission(cachedUser, "kpi.view")) return
+    let alive = true
+    void (async () => {
+      try {
+        const fid = await getActiveFactoryId()
+        if (!fid) return
+        const { user } = await hydrateActiveSession()
+        if (!user || !alive) return
+        setSession({ factoryId: fid, user })
+      } catch {
+        // im lặng — không có badge, tab bar vẫn hoạt động bình thường
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Refetch mỗi lần đổi route trong module KPI (mirror đúng cách Bell ở layout.tsx tự cập nhật
+  // theo pathname) — để hoàn thành 1 việc rồi chuyển tab sẽ thấy badge giảm ngay, không cần F5.
+  useEffect(() => {
+    if (!session) return
+    let alive = true
+    void getKpiTasks(session.factoryId, session.user)
+      .then((summary) => {
+        if (!alive) return
+        const next: Partial<Record<KpiBadgeTab, number>> = {}
+        for (const it of summary.items) {
+          if (!it.tab) continue
+          next[it.tab] = (next[it.tab] || 0) + it.count
+        }
+        setBadgeByTab(next)
+      })
+      .catch(() => {
+        // im lặng
+      })
+    return () => {
+      alive = false
+    }
+  }, [session, pathname])
+
   return (
     <div className="space-y-4">
       <div className="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -154,18 +219,24 @@ export function KpiShell({ children }: KpiShellProps) {
           {tabs.map((tab) => {
             const active = isActive(pathname, tab)
             const Icon = tab.icon
+            const badgeCount = tab.badgeKey ? badgeByTab[tab.badgeKey] || 0 : 0
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
                 className={
-                  "hover-lift flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap border transition-colors " +
+                  "hover-lift relative flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap border transition-colors " +
                   (active ? tab.activeClass : `bg-white text-slate-600 border-transparent ${tab.hoverClass}`)
                 }
               >
                 <Icon size={14} />
                 <span className="hidden sm:inline">{tab.label}</span>
                 <span className="sm:hidden">{tab.shortLabel}</span>
+                {badgeCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-extrabold text-white">
+                    {badgeCount > 99 ? "99+" : badgeCount}
+                  </span>
+                )}
               </Link>
             )
           })}

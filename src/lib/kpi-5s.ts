@@ -7,7 +7,7 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Database Schema" (5S) + "UI".
 
 import { supabase } from "@/lib/supabase"
-import { addDaysISO } from "@/lib/date-utils"
+import { addDaysISO, getIsoWeekStart, getTodayISODate } from "@/lib/date-utils"
 import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
 
 export type Kpi5sResult = "dat" | "tuong_doi" | "khong_dat"
@@ -51,6 +51,12 @@ export type Kpi5sLocation = {
   // này. NULL = không giới hạn, chấm bất kỳ ngày nào trong tuần (hành vi mặc định/cũ).
   deadline_weekdays: number[] | null
   deadline_time: string | null
+  // Ngày lịch chấm hiện tại bắt đầu có hiệu lực — DO TRIGGER DB TỰ GHI mỗi khi
+  // deadline_weekdays/deadline_time thay đổi giá trị (xem migration
+  // 20260818_kpi_5s_deadline_effective_from.sql), không phải field client tự set. Dùng để tránh
+  // báo "trễ hạn" ngay khi vừa cấu hình lịch mới cho 1 occurrence đã trôi qua trong tuần này —
+  // xem computeKpi5sNextDeadline().
+  deadline_effective_from: string | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -72,7 +78,7 @@ export type Kpi5sEvaluation = {
 }
 
 const LOCATION_COLS =
-  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, phong_ban_id, assigned_by, assigned_at, deadline_weekdays, deadline_time, is_active, sort_order, created_at, updated_at"
+  "id, factory_id, ma_vi_tri, ten_vi_tri, mo_ta, nguoi_don_id, nguoi_cham_id, zone_id, phong_ban_id, assigned_by, assigned_at, deadline_weekdays, deadline_time, deadline_effective_from, is_active, sort_order, created_at, updated_at"
 const EVAL_COLS =
   "id, factory_id, location_id, tuan_bat_dau, nguoi_don_id, nguoi_cham_id, ket_qua, ly_do, image_urls, danh_gia_luc, created_at"
 
@@ -201,6 +207,31 @@ export function computeKpi5sDeadline(
   const dateISO = addDaysISO(weekStartISO, weekday - 1) // 1=Thứ 2 (weekStartISO chính nó) .. 7=CN
   const d = new Date(`${dateISO}T${location.deadline_time}`)
   return Number.isNaN(d.getTime()) ? null : d
+}
+
+// Hạn chấm điểm THỰC SỰ áp dụng tính từ "bây giờ" — mirror computeKpi5sDeadline() cho đúng tuần
+// hiện tại, nhưng tự LÙI SANG TUẦN KẾ TIẾP nếu occurrence của tuần hiện tại rơi vào TRƯỚC ngày
+// `deadline_effective_from` (lịch vừa được cấu hình sau khi occurrence tuần này đã trôi qua —
+// vd hôm nay Chủ nhật, vừa chọn hạn Thứ 7, occurrence Thứ 7 tuần này đã ở quá khứ). Đây là hàm
+// NÊN DÙNG ở mọi nơi hiển thị badge/cảnh báo hạn chấm — computeKpi5sDeadline() (1 tuần, không
+// biết effective_from) chỉ còn là building block nội bộ.
+export function computeKpi5sNextDeadline(
+  location: Pick<Kpi5sLocation, "deadline_weekdays" | "deadline_time" | "deadline_effective_from">,
+  nowISO: string = getTodayISODate(),
+): Date | null {
+  if (!location.deadline_weekdays?.length || !location.deadline_time) return null
+  const currentWeekStart = getIsoWeekStart(nowISO)
+  const currentDeadline = computeKpi5sDeadline(location, currentWeekStart)
+  if (!currentDeadline) return null
+  const effectiveFrom = location.deadline_effective_from
+  if (effectiveFrom) {
+    const occurrenceDateISO = addDaysISO(currentWeekStart, location.deadline_weekdays[0] - 1)
+    if (occurrenceDateISO < effectiveFrom) {
+      const nextWeekStart = addDaysISO(currentWeekStart, 7)
+      return computeKpi5sDeadline(location, nextWeekStart)
+    }
+  }
+  return currentDeadline
 }
 
 // Chỉ quá hạn khi tuần này CHƯA có bản chấm — đã chấm xong thì không còn "quá hạn" nữa dù qua

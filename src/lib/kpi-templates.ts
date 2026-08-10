@@ -22,6 +22,8 @@ export const KPI_WEEKDAY_LABEL: Record<number, string> = {
   7: "CN",
 }
 
+export type KpiTaskCadenceType = "weekday" | "interval"
+
 export type KpiTaskTemplate = {
   id: string
   factory_id: string
@@ -30,6 +32,12 @@ export type KpiTaskTemplate = {
   tieu_de: string
   mo_ta: string | null
   apply_weekdays: number[]
+  // 'weekday' (mặc định) = lặp theo tập hợp Thứ trong tuần (apply_weekdays, như trước).
+  // 'interval' = lặp mỗi `interval_days` ngày kể từ `anchor_date`, bất kể rơi vào Thứ nào —
+  // đáp ứng nhu cầu "N ngày một lần" (vd 2 ngày/lần) mà apply_weekdays không diễn đạt được.
+  cadence_type: KpiTaskCadenceType
+  interval_days: number | null
+  anchor_date: string | null
   gio_han: string // "HH:MM:SS"
   yeu_cau_bao_cao: KpiReportRequirement[]
   is_active: boolean
@@ -44,7 +52,7 @@ export type KpiTaskTemplate = {
 }
 
 const TEMPLATE_COLS =
-  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, module_code, created_by, created_at, updated_at"
+  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, cadence_type, interval_days, anchor_date, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, module_code, created_by, created_at, updated_at"
 
 export type KpiSubstitutionStatus = "cho_duyet" | "da_duyet" | "tu_choi"
 
@@ -113,6 +121,9 @@ export type KpiTaskTemplateInput = {
   tieuDe: string
   moTa: string
   applyWeekdays: number[]
+  cadenceType: KpiTaskCadenceType
+  intervalDays: number | null
+  anchorDate: string | null
   gioHan: string
   yeuCauBaoCao: KpiReportRequirement[]
   isActive: boolean
@@ -120,8 +131,32 @@ export type KpiTaskTemplateInput = {
   moduleCode: string | null
 }
 
-export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promise<KpiTaskTemplate> {
+// Chuẩn hóa payload theo cadenceType trước khi ghi DB — validate đúng field bắt buộc theo từng
+// kiểu lịch, và LUÔN ghi apply_weekdays đủ 7 ngày khi cadenceType='interval' (cột NOT NULL,
+// giá trị này không được RPC đọc tới khi cadence_type='interval' nên không ảnh hưởng logic sinh
+// việc — chỉ để thỏa constraint).
+function buildTemplateCadencePayload(input: Pick<KpiTaskTemplateInput, "applyWeekdays" | "cadenceType" | "intervalDays" | "anchorDate">) {
+  if (input.cadenceType === "interval") {
+    if (!input.intervalDays || input.intervalDays < 1) throw new Error("Vui lòng nhập số ngày lặp lại (tối thiểu 1).")
+    if (!input.anchorDate) throw new Error("Vui lòng chọn Ngày bắt đầu chu kỳ.")
+    return {
+      apply_weekdays: [1, 2, 3, 4, 5, 6, 7],
+      cadence_type: "interval" as const,
+      interval_days: input.intervalDays,
+      anchor_date: input.anchorDate,
+    }
+  }
   if (!input.applyWeekdays.length) throw new Error("Vui lòng chọn ít nhất 1 ngày áp dụng.")
+  return {
+    apply_weekdays: input.applyWeekdays,
+    cadence_type: "weekday" as const,
+    interval_days: null,
+    anchor_date: null,
+  }
+}
+
+export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promise<KpiTaskTemplate> {
+  const cadencePayload = buildTemplateCadencePayload(input)
   const { data, error } = await supabase
     .from("kpi_task_templates")
     .insert({
@@ -131,7 +166,7 @@ export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promis
       assigned_user_id: input.assignedUserId,
       tieu_de: input.tieuDe.trim(),
       mo_ta: input.moTa.trim() || null,
-      apply_weekdays: input.applyWeekdays,
+      ...cadencePayload,
       gio_han: input.gioHan,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,
@@ -148,7 +183,7 @@ export async function updateKpiTaskTemplate(
   id: string,
   input: Omit<KpiTaskTemplateInput, "factoryId" | "createdBy">,
 ): Promise<void> {
-  if (!input.applyWeekdays.length) throw new Error("Vui lòng chọn ít nhất 1 ngày áp dụng.")
+  const cadencePayload = buildTemplateCadencePayload(input)
   const { error } = await supabase
     .from("kpi_task_templates")
     .update({
@@ -156,7 +191,7 @@ export async function updateKpiTaskTemplate(
       assigned_user_id: input.assignedUserId,
       tieu_de: input.tieuDe.trim(),
       mo_ta: input.moTa.trim() || null,
-      apply_weekdays: input.applyWeekdays,
+      ...cadencePayload,
       gio_han: input.gioHan,
       yeu_cau_bao_cao: input.yeuCauBaoCao,
       is_active: input.isActive,

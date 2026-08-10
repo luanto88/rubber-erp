@@ -10,15 +10,37 @@
 // component (vốn kéo theo state/effect/UI không liên quan, không có ý nghĩa tái sử dụng ở đây).
 
 import { supabase } from "@/lib/supabase"
-import type { SessionUser } from "@/lib/auth"
+import { hasPermission, type SessionUser } from "@/lib/auth"
+import { getIsoWeekStart } from "@/lib/date-utils"
 import { buildEffectiveStockBalances } from "@/app/dashboard/inventory/_components/inventory-stock"
 import type {
   InventoryItemOption,
   InventoryStockBalanceRow,
   InventoryOilPoolBalanceRow,
 } from "@/app/dashboard/inventory/_components/inventory-data"
+import {
+  computeKpi5sNextDeadline,
+  fetchAllLocationCleanerMemberships,
+  fetchLatestKpi5sEvaluationsByLocationIds,
+  getEffectiveCleanerIds,
+  isKpi5sDeadlineDueSoon,
+  isKpi5sDeadlineOverdue,
+  type Kpi5sLocation,
+} from "@/lib/kpi-5s"
+import { fetchPendingSubstitutionsForApprover } from "@/lib/kpi-templates"
 
-export type ModuleTaskItem = { label: string; count: number; link: string }
+export type ModuleTaskItem = {
+  label: string
+  count: number
+  link: string
+  // Chỉ set bởi getKpiTasks() — cho phép trang chủ tổng hợp (/dashboard/kpi) nhóm item theo vai
+  // trò ("nhan" = việc chính bạn phải làm, "giao" = việc bạn giao/quản lý cần xử lý cho người
+  // khác) và cho KpiShell tính badge số trên từng tab, KHÔNG phải suy luận qua chuỗi label dễ vỡ
+  // khi label đổi câu chữ. Các module khác (ISO, Văn bản, Xuất hàng...) không set 2 field này —
+  // luôn undefined, Bell/widget không đọc tới nên không bị ảnh hưởng.
+  role?: "nhan" | "giao"
+  tab?: "tasks" | "5s" | "templates" | "appeals"
+}
 export type ModuleTaskSummary = { moduleLabel: string; items: ModuleTaskItem[] }
 
 function isUnderRoute(pathname: string, base: string): boolean {
@@ -319,6 +341,53 @@ export async function getQualityTasks(factoryId: string): Promise<ModuleTaskSumm
   return { moduleLabel: "Chất lượng", items: [{ label: "Lô đang rớt hạng", count, link: "/dashboard/quality" }] }
 }
 
+// ── 5S — vị trí tôi phụ trách (dọn hoặc chấm) đang quá hạn/sắp đến hạn ──────────────────────
+// Chỉ tính vị trí ĐANG ÁP DỤNG và CÓ cấu hình hạn chấm (deadline_weekdays NOT NULL) — mirror
+// đúng ngữ nghĩa isKpi5sDeadlineOverdue/DueSoon (vị trí không cấu hình hạn không bao giờ "quá
+// hạn"). Số vị trí 5S của 1 nhà máy nhỏ (chục dòng) nên không cần phân trang thêm.
+type Kpi5sDeadlineRow = Pick<
+  Kpi5sLocation,
+  "id" | "nguoi_don_id" | "nguoi_cham_id" | "deadline_weekdays" | "deadline_time" | "deadline_effective_from"
+>
+
+async function getKpi5sDueCounts(factoryId: string, userId: string): Promise<{ overdue: number; dueSoon: number }> {
+  const weekStart = getIsoWeekStart()
+  const [{ data: locRows }, cleanerMap] = await Promise.all([
+    supabase
+      .from("kpi_5s_locations")
+      .select("id, nguoi_don_id, nguoi_cham_id, deadline_weekdays, deadline_time, deadline_effective_from")
+      .eq("factory_id", factoryId)
+      .eq("is_active", true)
+      .not("deadline_weekdays", "is", null),
+    fetchAllLocationCleanerMemberships(factoryId),
+  ])
+  const locs = (locRows || []) as Kpi5sDeadlineRow[]
+  const mine = locs.filter((l) => l.nguoi_cham_id === userId || getEffectiveCleanerIds(l, cleanerMap).includes(userId))
+  if (mine.length === 0) return { overdue: 0, dueSoon: 0 }
+
+  const latestMap = await fetchLatestKpi5sEvaluationsByLocationIds(mine.map((l) => l.id))
+  let overdue = 0
+  let dueSoon = 0
+  for (const loc of mine) {
+    const hasEvaluatedThisWeek = latestMap.get(loc.id)?.tuan_bat_dau === weekStart
+    const deadline = computeKpi5sNextDeadline(loc)
+    if (isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)) overdue++
+    else if (isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)) dueSoon++
+  }
+  return { overdue, dueSoon }
+}
+
+// ── Khiếu nại — chỉ đếm cho admin/kpi.manage_config (đúng phạm vi thật sự XỬ LÝ được, khác
+// RLS kpi_appeals_select vốn còn cho chủ khiếu nại thấy CỦA CHÍNH HỌ dù họ không giải quyết được).
+async function getKpiAppealsPendingCount(factoryId: string): Promise<number> {
+  const { count } = await supabase
+    .from("kpi_appeals")
+    .select("id", { count: "exact", head: true })
+    .eq("factory_id", factoryId)
+    .eq("trang_thai", "cho_xu_ly")
+  return count || 0
+}
+
 // ── Công việc & KPI ──────────────────────────────────────────────────────────
 // Chỉ tính trên các task còn "sống" (chưa hoàn thành/hủy) — bảng kpi_tasks không có khả
 // năng vượt 1000 dòng ở phạm vi "đang mở" của 1 nhà máy nên không cần phân trang thêm.
@@ -330,8 +399,9 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
   const isAdmin = user.role === "admin"
   const nowMs = Date.now()
   const soonCutoffMs = nowMs + 24 * 3600_000
+  const canResolveAppeals = isAdmin || hasPermission(user, "kpi.manage_config")
 
-  const [{ data: memberRows }, { data: taskRows }, { count: transferCount }] = await Promise.all([
+  const [{ data: memberRows }, { data: taskRows }, { count: transferCount }, kpi5sDue, pendingSubs, appealsPendingCount] = await Promise.all([
     supabase.from("kpi_task_members").select("task_id").eq("user_id", user.id).eq("is_active", true),
     supabase
       .from("kpi_tasks")
@@ -345,6 +415,12 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
       .select("id", { count: "exact", head: true })
       .eq("den_nguoi_id", user.id)
       .eq("trang_thai", "cho_duyet"),
+    // Gộp thêm tín hiệu từ 3 tab còn lại (5S, Việc định kỳ, Khiếu nại) — trước đây Bell chỉ
+    // biết về tab "Công việc chuyên môn", khiến người dùng phải tự mở từng tab mới biết có việc
+    // 5S/khiếu nại/duyệt thay thế đang chờ hay không (xem .claude/rules/27-kpi-module.md).
+    getKpi5sDueCounts(factoryId, user.id),
+    fetchPendingSubstitutionsForApprover(user.id, factoryId),
+    canResolveAppeals ? getKpiAppealsPendingCount(factoryId) : Promise.resolve(0),
   ])
 
   const myActiveTaskIds = new Set((memberRows || []).map((r: { task_id: string }) => r.task_id))
@@ -352,8 +428,14 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
 
   let pendingCount = 0
   let approvalCount = 0
-  let dueSoonCount = 0
-  let overdueCount = 0
+  // Tách riêng theo vai trò (2026-08-19) — trước đây "sắp đến hạn"/"quá hạn" gộp chung
+  // iAmMember||iAmGiver vào 1 số duy nhất, không phân biệt được đó là việc TÔI phải làm hay việc
+  // TÔI GIAO đang trễ ở người khác. Trang chủ tổng hợp (/dashboard/kpi) cần tách rõ 2 khối
+  // "Cần bạn LÀM" / "Cần bạn DUYỆT-XỬ LÝ" nên phải tách ngay từ đây, không suy luận qua label.
+  let dueSoonMineCount = 0
+  let overdueMineCount = 0
+  let dueSoonGivenCount = 0
+  let overdueGivenCount = 0
 
   for (const t of tasks) {
     const iAmMember = myActiveTaskIds.has(t.id)
@@ -364,11 +446,17 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
     if (t.trang_thai === "cho_nghiem_thu" && (iAmGiver || isAdmin)) {
       approvalCount++
     }
-    if (iAmMember || iAmGiver) {
-      const dueMs = new Date(t.han_hoan_thanh).getTime()
-      if (!Number.isNaN(dueMs)) {
-        if (dueMs < nowMs) overdueCount++
-        else if (dueMs <= soonCutoffMs) dueSoonCount++
+    const dueMs = new Date(t.han_hoan_thanh).getTime()
+    if (!Number.isNaN(dueMs)) {
+      const overdue = dueMs < nowMs
+      const dueSoon = !overdue && dueMs <= soonCutoffMs
+      if (iAmMember) {
+        if (overdue) overdueMineCount++
+        else if (dueSoon) dueSoonMineCount++
+      }
+      if (iAmGiver) {
+        if (overdue) overdueGivenCount++
+        else if (dueSoon) dueSoonGivenCount++
       }
     }
   }
@@ -381,11 +469,17 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
   return {
     moduleLabel: "Công việc & KPI",
     items: [
-      { label: "Việc cần cập nhật/nộp", count: pendingCount, link: "/dashboard/kpi/tasks?tab=mine" },
-      { label: "Việc chờ nghiệm thu", count: approvalCount, link: approvalLink },
-      { label: "Lời mời chuyển giao chờ phản hồi", count: transferCount || 0, link: "/dashboard/kpi/tasks?tab=mine" },
-      { label: "Việc sắp đến hạn (24h)", count: dueSoonCount, link: "/dashboard/kpi/tasks?tab=mine" },
-      { label: "Việc đã quá hạn", count: overdueCount, link: "/dashboard/kpi/tasks?tab=mine" },
+      { label: "Việc cần cập nhật/nộp", count: pendingCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
+      { label: "Việc của bạn sắp đến hạn (24h)", count: dueSoonMineCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
+      { label: "Việc của bạn đã quá hạn", count: overdueMineCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
+      { label: "Lời mời chuyển giao chờ phản hồi", count: transferCount || 0, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
+      { label: "Vị trí 5S đã quá hạn", count: kpi5sDue.overdue, link: "/dashboard/kpi/5s", role: "nhan", tab: "5s" },
+      { label: "Vị trí 5S sắp đến hạn (24h)", count: kpi5sDue.dueSoon, link: "/dashboard/kpi/5s", role: "nhan", tab: "5s" },
+      { label: "Việc chờ nghiệm thu", count: approvalCount, link: approvalLink, role: "giao", tab: "tasks" },
+      { label: "Việc bạn giao đã quá hạn", count: overdueGivenCount, link: "/dashboard/kpi/tasks?tab=mine", role: "giao", tab: "tasks" },
+      { label: "Việc bạn giao sắp đến hạn (24h)", count: dueSoonGivenCount, link: "/dashboard/kpi/tasks?tab=mine", role: "giao", tab: "tasks" },
+      { label: "Đăng ký thay thế chờ bạn duyệt", count: pendingSubs.length, link: "/dashboard/kpi/templates", role: "giao", tab: "templates" },
+      { label: "Khiếu nại chờ xử lý", count: appealsPendingCount, link: "/dashboard/kpi/appeals", role: "giao", tab: "appeals" },
     ],
   }
 }

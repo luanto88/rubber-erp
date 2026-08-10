@@ -1,6 +1,7 @@
 "use client"
 
 import { supabase } from "@/lib/supabase"
+import { forceRefreshAuthSession, getFreshAuthSession } from "@/lib/auth"
 
 // Cấp quyền xem 1 đơn xuất hàng cụ thể (không phải toàn bộ theo customer_id) cho 1 tài
 // khoản role="customer". Mirror đúng pattern của operation_note_shares (xem
@@ -35,13 +36,31 @@ export type ExportOrderGrant = {
 // Route đích bắt buộc requireAuthUser() (xem api/export/customer-grant-candidates/route.ts)
 // nên PHẢI đính kèm Authorization Bearer token, nếu không sẽ luôn nhận lỗi
 // "Phiên đăng nhập không hợp lệ" dù admin đang đăng nhập hợp lệ.
-export async function fetchGrantCandidates(factoryId: string): Promise<GrantCandidate[]> {
-  const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData.session?.access_token || ""
+//
+// Dùng getFreshAuthSession() (biên độ refresh 300s, xem src/lib/auth.ts) thay vì
+// supabase.auth.getSession() thô (biên độ refresh mặc định của SDK chỉ 90s) — nếu vẫn bị server
+// từ chối với code "session_expired" (token hết hạn thật giữa lúc gửi request), retry đúng 1 lần
+// bằng forceRefreshAuthSession() (ép refresh, bỏ qua check "còn hạn hay chưa"), mirror đúng
+// pattern retry-once đã dùng ổn định ở settings/page.tsx.
+async function requestGrantCandidates(factoryId: string, token: string) {
   const res = await fetch(`/api/export/customer-grant-candidates?factoryId=${encodeURIComponent(factoryId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  const json = (await res.json().catch(() => null)) as { users?: GrantCandidate[]; error?: string } | null
+  const json = (await res.json().catch(() => null)) as { users?: GrantCandidate[]; error?: string; code?: string } | null
+  return { res, json }
+}
+
+export async function fetchGrantCandidates(factoryId: string): Promise<GrantCandidate[]> {
+  const session = await getFreshAuthSession()
+  let token = session?.access_token || ""
+  let { res, json } = await requestGrantCandidates(factoryId, token)
+
+  if (!res.ok && json?.code === "session_expired") {
+    const freshSession = await forceRefreshAuthSession()
+    token = freshSession?.access_token || ""
+    ;({ res, json } = await requestGrantCandidates(factoryId, token))
+  }
+
   if (!res.ok) throw new Error(json?.error || "Không tải được danh sách khách hàng.")
   return json?.users || []
 }

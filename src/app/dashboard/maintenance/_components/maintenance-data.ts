@@ -219,13 +219,19 @@ export async function generateMaBB(factoryId: string, ngay: string, boPhan: stri
   const deptCode = BO_PHAN_PREFIX[boPhan] || "MT"
   const prefix = `${deptCode}-${dd}${mm}${yy}`
 
-  // Count existing records for this date + department
   const { data } = await supabase
     .from("maintenance_records")
     .select("ma_bb")
     .eq("factory_id", factoryId)
     .like("ma_bb", `${prefix}/%`)
 
-  const count = (data || []).length + 1
-  return `${prefix}/${String(count).padStart(3, "0")}`
+  // Lấy SỐ LỚN NHẤT đã dùng + 1 — không đếm số dòng, vì lỗ hổng trong dãy số (vd 1 biên
+  // bản ở giữa đã bị "Xóa hẳn") khiến đếm dòng luôn sinh ra đúng mã đã tồn tại, gây
+  // duplicate key vĩnh viễn không tự phục hồi (xem bug 2026-08-08: /001 + /003 tồn tại,
+  // /002 bị thiếu -> đếm dòng = 2 -> luôn sinh /003).
+  const maxSeq = (data || []).reduce((max, row) => {
+    const n = parseInt(row.ma_bb?.slice(prefix.length + 1) || "", 10)
+    return Number.isFinite(n) && n > max ? n : max
+  }, 0)
+  return `${prefix}/${String(maxSeq + 1).padStart(3, "0")}`
 }

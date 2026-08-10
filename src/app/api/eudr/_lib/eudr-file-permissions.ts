@@ -104,3 +104,39 @@ export async function loadOrderForFileOps(orderId: string, profileFactoryId: str
 
   return { order: order as EudrOrderForFileOps, locked }
 }
+
+export type NewEudrFileInput = {
+  name: string
+  url: string
+  path: string
+  size?: number
+  uploadedBy: string
+}
+
+// Re-read `export_orders.files` mới nhất ngay trước khi ghi (giảm khoảng hở race khi nhiều
+// người cùng thao tác) rồi append 1 entry mới. Dùng chung bởi CẢ `/api/eudr/upload` (fallback
+// multipart khi client không upload thẳng được) LẪN `/api/eudr/register-file` (đường chính, sau
+// khi client đã upload thẳng lên Storage) — không được viết lại logic này ở 2 nơi.
+export async function appendEudrFileEntry(
+  orderId: string,
+  newFileEntry: NewEudrFileInput,
+): Promise<{ file: EudrOrderFileEntry; files: EudrOrderFileEntry[] }> {
+  const { data: freshOrder, error: freshOrderError } = await supabaseAdmin
+    .from("export_orders")
+    .select("files")
+    .eq("id", orderId)
+    .single()
+
+  if (freshOrderError) throw freshOrderError
+
+  const nextFiles = [...normalizeEudrFiles(freshOrder?.files), newFileEntry]
+
+  const { error: updateError } = await supabaseAdmin
+    .from("export_orders")
+    .update({ files: nextFiles })
+    .eq("id", orderId)
+
+  if (updateError) throw updateError
+
+  return { file: newFileEntry, files: nextFiles }
+}

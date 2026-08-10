@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CalendarClock, Pencil, Plus, Power, RefreshCw, Repeat, Trash2, UserCog } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { formatDateDisplay } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
@@ -347,16 +348,22 @@ export default function KpiTemplatesPage() {
                       Giao cho: <strong className="text-slate-700">{resolveName(t.assigned_user_id)}</strong>
                     </div>
                     <div className="text-xs text-slate-500 mt-1">Hạn mỗi ngày: {t.gio_han.slice(0, 5)}</div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {KPI_WEEKDAY_OPTIONS.map((d) => (
-                        <span
-                          key={d}
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${t.apply_weekdays.includes(d) ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-300"}`}
-                        >
-                          {KPI_WEEKDAY_LABEL[d]}
-                        </span>
-                      ))}
-                    </div>
+                    {t.cadence_type === "interval" ? (
+                      <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+                        Mỗi {t.interval_days} ngày (từ {t.anchor_date ? formatDateDisplay(t.anchor_date) : "—"})
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {KPI_WEEKDAY_OPTIONS.map((d) => (
+                          <span
+                            key={d}
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${t.apply_weekdays.includes(d) ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-300"}`}
+                          >
+                            {KPI_WEEKDAY_LABEL[d]}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {t.yeu_cau_bao_cao.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
                         {t.yeu_cau_bao_cao.map((r) => (

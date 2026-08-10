@@ -4499,3 +4499,203 @@ route nào lỗi.
    query sau khi ngừng gõ ~300ms; lưu/xoá 1 ghi chú — xác nhận danh sách cập nhật ngay không "nhấp
    nháy" tải lại toàn bộ; "Tải thêm" nhiều lần — xác nhận mỗi lần chỉ fetch đúng 1 trang mới, không
    phình to dần; đính kèm tới 10 ảnh cho 1 ghi chú — xác nhận lưu và hiển thị đủ.
+
+## Cập nhật 2026-08-10 — Fix hạn chấm 5S "sinh non", thêm Việc định kỳ chu kỳ N ngày, gộp tín
+hiệu 5 tab còn lại vào Bell (ĐÃ CODE XONG, CẦN CHẠY 2 MIGRATION MỚI, CHƯA TEST TAY)
+
+Người dùng báo 2 vấn đề thật + 1 vấn đề UX sau khi dùng module 1 thời gian:
+
+1. **Bug hạn chấm 5S "sinh non"**: nếu hôm nay Chủ nhật, cấu hình hạn chấm mới cho 1 vị trí là
+   Thứ 7 (đã trôi qua trong TUẦN NÀY), app báo "Quá hạn" ngay lập tức dù chưa từng có cơ hội
+   chấm đúng hạn — vì `computeKpi5sDeadline()` (`src/lib/kpi-5s.ts`) luôn tính occurrence theo
+   TUẦN ISO HIỆN TẠI, không biết lịch này vừa mới được cấu hình.
+2. **Thiếu cơ chế "N ngày một lần"**: "Việc định kỳ" (`kpi_task_templates`) chỉ hỗ trợ lặp theo
+   tập hợp Thứ trong tuần (`apply_weekdays`) — không có cách nào diễn đạt "2 ngày 1 lần" (7 không
+   chia hết cho nhiều số, weekday cố định không đại diện được chu kỳ lẻ).
+3. **Tab-overload**: 6 tab, người dùng khó biết việc chuyên môn/5S cần làm/5S cần chấm ở đâu —
+   Bell (`getKpiTasks()` trong `src/app/dashboard/_components/module-tasks.ts`) trước đây chỉ
+   tổng hợp tín hiệu từ tab "Công việc chuyên môn" + chuyển giao, hoàn toàn thiếu 5S đến hạn,
+   khiếu nại chờ xử lý, đăng ký thay thế chờ duyệt.
+
+### 1. Fix hạn chấm 5S "sinh non"
+
+- Migration `supabase/migrations/20260818_kpi_5s_deadline_effective_from.sql` (**cần chạy thủ
+  công, CHƯA CHẠY**) — thêm `kpi_5s_locations.deadline_effective_from DATE`, do **trigger DB tự
+  ghi** (`kpi_5s_locations_set_deadline_effective_from`, `BEFORE INSERT OR UPDATE`) mỗi khi
+  `deadline_weekdays`/`deadline_time` THAY ĐỔI GIÁ TRỊ (không set lại khi sửa field khác như
+  tên/mô tả/người dọn) — không phụ thuộc client nào ghi đúng. Backfill 1 lần cho dữ liệu cũ đã
+  có sẵn deadline = `created_at::date` (coi như đã hiệu lực từ lâu).
+- Hàm mới `computeKpi5sNextDeadline(location, nowISO?)` (`src/lib/kpi-5s.ts`) — mirror
+  `computeKpi5sDeadline()` cho tuần hiện tại, nhưng tự **lùi sang tuần kế tiếp** nếu occurrence
+  của tuần hiện tại rơi vào TRƯỚC `deadline_effective_from`. Đây là hàm NÊN DÙNG ở mọi nơi hiển
+  thị badge/cảnh báo hạn — `computeKpi5sDeadline()` (1 tuần, không biết effective_from) chỉ còn
+  là building block nội bộ, giữ nguyên chữ ký cũ (không phá vỡ call site nào khác).
+- 2 call site đã đổi: `kpi/5s/page.tsx`, `kpi/5s/location/[id]/page.tsx` — cả 2 gọi
+  `computeKpi5sNextDeadline(loc)` thay vì `computeKpi5sDeadline(loc, currentWeekStart)`.
+  `hasEvaluatedThisWeek` (so với `currentWeekStart` thật) KHÔNG đổi — chỉ giá trị `deadline` dùng
+  để tính overdue/dueSoon là được làm thông minh hơn.
+
+### 2. Việc định kỳ theo chu kỳ N ngày
+
+- Migration `supabase/migrations/20260818_kpi_task_templates_interval_cadence.sql` (**cần chạy
+  thủ công, CHƯA CHẠY**) — thêm `kpi_task_templates.cadence_type TEXT NOT NULL DEFAULT
+  'weekday'` (`'weekday'|'interval'`), `interval_days INTEGER`, `anchor_date DATE`, CHECK ràng
+  buộc `cadence_type='interval'` bắt buộc có đủ `interval_days`+`anchor_date`.
+  `CREATE OR REPLACE FUNCTION kpi_ensure_today_task_instances` — thân hàm giữ NGUYÊN VẸN mọi fix
+  trước đó (skip-if-stuck từ `20260812`, lọc `trang_thai='da_duyet'` từ `20260807`, `module_code`
+  từ `20260816`), chỉ mở rộng điều kiện chọn template đủ điều kiện sinh hôm nay:
+  `(cadence_type='weekday' AND v_dow = ANY(apply_weekdays)) OR (cadence_type='interval' AND
+  v_today >= anchor_date AND MOD((v_today - anchor_date), interval_days) = 0)`.
+- `src/lib/kpi-templates.ts`: `KpiTaskCadenceType`, `KpiTaskTemplate`/`KpiTaskTemplateInput`
+  thêm 3 field trên. Hàm nội bộ `buildTemplateCadencePayload()` validate đúng field bắt buộc theo
+  từng kiểu lịch — khi `cadenceType='interval'`, luôn ghi `apply_weekdays=[1..7]` (cột NOT NULL,
+  giá trị này KHÔNG được RPC đọc tới khi `cadence_type='interval'`, chỉ để thỏa constraint).
+- `template-form-modal.tsx`: thêm toggle "Theo Thứ trong tuần" / "Theo chu kỳ N ngày" — nhánh
+  interval hiện 2 input "Lặp lại mỗi (ngày)" + "Ngày bắt đầu chu kỳ" (mặc định hôm nay). Card
+  danh sách (`kpi/templates/page.tsx`) hiện badge teal "Mỗi N ngày (từ dd/mm/yyyy)" thay vì dãy
+  chip Thứ khi `cadence_type='interval'`.
+
+### 3. Gộp tín hiệu 5 tab còn lại vào Bell
+
+`getKpiTasks()` (`module-tasks.ts`) — vẫn 1 hàm duy nhất cho route `/dashboard/kpi/*`, thêm 2
+helper mới cùng file:
+
+- `getKpi5sDueCounts(factoryId, userId)` — lọc `kpi_5s_locations` đang áp dụng + có cấu hình hạn
+  chấm mà user là người chấm HOẶC nằm trong đội ngũ dọn dẹp (dùng lại `getEffectiveCleanerIds`),
+  tính overdue/dueSoon qua đúng `computeKpi5sNextDeadline`/`isKpi5sDeadlineOverdue`/`DueSoon` như
+  trang 5S đang dùng — không viết logic tính hạn thứ 2.
+- `getKpiAppealsPendingCount(factoryId)` — chỉ gọi khi `isAdmin || hasPermission(user,
+  "kpi.manage_config")` (đúng phạm vi THỰC SỰ xử lý được, khác RLS `kpi_appeals_select` vốn còn
+  cho chủ khiếu nại thấy CỦA CHÍNH HỌ dù họ không giải quyết được).
+- Tái dùng `fetchPendingSubstitutionsForApprover(userId, factoryId)` có sẵn (từ Phase "Việc định
+  kỳ") cho mục "Đăng ký thay thế chờ bạn duyệt".
+
+4 item mới nối vào `items[]` của `getKpiTasks()`: "Vị trí 5S đã quá hạn", "Vị trí 5S sắp đến hạn
+(24h)" (cả 2 link `/dashboard/kpi/5s`), "Đăng ký thay thế chờ bạn duyệt" (link
+`/dashboard/kpi/templates`), "Khiếu nại chờ xử lý" (link `/dashboard/kpi/appeals`) — Bell UI
+(`layout.tsx`) không cần sửa gì, danh sách item vốn đã render generic (`moduleTasks.items.map`).
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (toàn bộ file đã sửa), và `npm run build` đều sạch — build liệt
+kê đủ mọi route KPI.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy 2 migration mới trước
+
+1. Chạy `20260818_kpi_5s_deadline_effective_from.sql` rồi
+   `20260818_kpi_task_templates_interval_cadence.sql` trên Supabase SQL Editor.
+2. Đúng kịch bản gốc: hôm nay Chủ nhật (hoặc giả lập), cấu hình 1 vị trí 5S mới với hạn Thứ 7 →
+   xác nhận KHÔNG báo "Quá hạn" ngay (badge chỉ xuất hiện khi thực sự qua mốc Thứ 7 TUẦN KẾ TIẾP
+   nếu chưa chấm). Sửa lại hạn của 1 vị trí đã tồn tại lâu (đổi Thứ/giờ) → xác nhận
+   `deadline_effective_from` cũng reset đúng theo trigger; sửa các field KHÔNG liên quan hạn (vd
+   đổi tên/mô tả) → xác nhận `deadline_effective_from` KHÔNG bị reset.
+3. Tạo 1 Việc định kỳ "Theo chu kỳ N ngày" (vd mỗi 2 ngày, bắt đầu hôm nay) → xác nhận hôm nay
+   sinh việc, ngày mai KHÔNG sinh (vì việc hôm nay còn đang mở — đúng rule "skip nếu còn instance
+   mở"), sau khi hoàn thành việc hôm nay + đợi đúng 2 ngày kể từ anchor_date → xác nhận sinh đúng
+   nhịp độ (không lệch sang thứ khác trong tuần qua nhiều chu kỳ).
+4. Xác nhận card "Việc định kỳ" hiện đúng badge "Mỗi N ngày (từ ...)" cho template interval, vẫn
+   hiện dãy chip Thứ như cũ cho template weekday (regression check).
+5. Test Bell: tạo 1 vị trí 5S quá hạn cho user A (A là người chấm hoặc trong đội dọn dẹp) → đăng
+   nhập A, mở Bell ở bất kỳ trang nào dưới `/dashboard/kpi/*` → xác nhận mục "Vị trí 5S đã quá
+   hạn" đúng số, bấm vào tới đúng `/dashboard/kpi/5s`. Tương tự cho "Đăng ký thay thế chờ bạn
+   duyệt" (đăng nhập đúng người có quyền duyệt) và "Khiếu nại chờ xử lý" (chỉ admin/
+   kpi.manage_config thấy số > 0, tài khoản khác thấy 0 dù có khiếu nại của chính họ đang chờ).
+
+## Cập nhật 2026-08-19 — Redesign IA: trang chủ tổng hợp `/dashboard/kpi` + badge số trên tab
+(ĐÃ CODE XONG, KHÔNG CẦN MIGRATION, CHƯA TEST TAY)
+
+Người dùng phản ánh "quá nhiều tab, không biết việc chuyên môn/5S cần làm hay cần chấm nằm ở
+đâu". Đã hỏi qua `AskUserQuestion` (3 câu, xác nhận cả 3 phương án khuyến nghị) trước khi code:
+xây trang chủ tổng hợp **kèm** badge số trên tab, tách theo 2 vai trò LÀM/DUYỆT, badge là số đếm
+cụ thể (không phải chấm tròn đơn thuần).
+
+### 1. `getKpiTasks()` (`src/app/dashboard/_components/module-tasks.ts`) — gắn `role`/`tab` vào
+từng item, tách đôi due-soon/overdue theo vai trò
+
+- `ModuleTaskItem` thêm 2 field optional: `role?: "nhan" | "giao"`, `tab?: "tasks" | "5s" |
+  "templates" | "appeals"` — **chỉ `getKpiTasks()` set 2 field này**, mọi `getXxxTasks()` khác
+  (ISO/Văn bản/Xuất hàng/Kho vật tư/Chất lượng) không đụng tới, Bell/`TasksSummaryWidget` không
+  đọc 2 field mới nên không bị ảnh hưởng gì (đã build sạch, không có regression).
+- Trước đây "Việc sắp đến hạn (24h)"/"Việc đã quá hạn" gộp chung `iAmMember || iAmGiver` vào 1
+  con số — không tách được "việc của tôi" khỏi "việc tôi giao đang trễ ở người khác". Đã tách
+  vòng lặp thành 4 counter riêng: `dueSoonMineCount`/`overdueMineCount` (chỉ `iAmMember`) và
+  `dueSoonGivenCount`/`overdueGivenCount` (chỉ `iAmGiver`) — Bell giờ hiện **11 item** thay vì 9
+  (2 item cũ tách đôi thành 4), nhãn đổi rõ ràng hơn ("Việc của bạn sắp đến hạn" vs "Việc bạn
+  giao sắp đến hạn") — cải thiện luôn độ rõ ràng của chính Bell, không chỉ phục vụ trang chủ mới.
+- Mapping `role`: `nhan` = việc cần cập nhật/nộp, việc của bạn sắp/quá hạn, lời mời chuyển giao,
+  2 mục 5S (đã quá hạn/sắp đến hạn). `giao` = việc chờ nghiệm thu, việc bạn giao sắp/quá hạn,
+  đăng ký thay thế chờ duyệt, khiếu nại chờ xử lý.
+- Mapping `tab`: mọi item gốc "Công việc chuyên môn" → `"tasks"`; 2 item 5S → `"5s"`; "Đăng ký
+  thay thế" → `"templates"`; "Khiếu nại" → `"appeals"`. Tab "Chấm điểm chuyên môn" và "Bảng điểm
+  KPI" **không có tín hiệu nào** trong `getKpiTasks()` hiện tại — 2 tab này không bao giờ hiện
+  badge (không phải bug, chỉ đơn giản là chưa có khái niệm "việc chờ xử lý" ở 2 khu vực đó).
+
+### 2. `KpiShell` (`src/app/dashboard/kpi/_components/kpi-shell.tsx`) — tự bootstrap + tự gọi
+`getKpiTasks()` độc lập, không nhận props
+
+- Quyết định kiến trúc: KpiShell được render ở **8 nơi** (6 trang danh sách + 2 trang chi tiết
+  `tasks/[id]`, `5s/location/[id]`) — thay vì thread `user`/`factoryId` props qua cả 8 file (rủi
+  ro cao, đụng nhiều trang đang chạy ổn định), Shell **tự fetch độc lập** (session qua
+  `getActiveFactoryId()`+`hydrateActiveSession()`, rồi `getKpiTasks()`) — mirror đúng cách Bell ở
+  `layout.tsx` đã làm từ trước (tự fetch theo `pathname`, không nhận state từ trang cha). Đánh
+  đổi: có 1 lượt query nhẹ trùng lặp giữa Shell và trang con (mỗi trang vẫn tự bootstrap session
+  riêng như cũ) — chấp nhận được, nhất quán với pattern hiện có của cả app (không nơi nào trong
+  app dùng React Context để chia sẻ state giữa layout và children).
+- Badge tính bằng cách gộp `summary.items` theo field `tab` (không suy luận qua label) —
+  `badgeByTab: Partial<Record<"tasks"|"5s"|"templates"|"appeals", number>>`. Refetch mỗi lần đổi
+  `pathname` trong module KPI (mirror đúng Bell) — hoàn thành 1 việc rồi chuyển tab thấy badge
+  giảm ngay, không cần F5.
+- Badge render dạng chấm tròn đỏ góc trên-phải mỗi tab (`absolute -top-1.5 -right-1.5`), số cụ
+  thể (`99+` nếu vượt 99), chỉ hiện khi `count > 0`. Fail-silent hoàn toàn — lỗi/thiếu quyền
+  `kpi.view`/thiếu migration chỉ khiến không có badge nào, không phá layout hay chặn nav.
+
+### 3. `/dashboard/kpi/page.tsx` — từ redirect-stub thành trang chủ thật
+
+- Bootstrap giống hệt 6 trang KPI khác (cached permission check → `getActiveFactoryId` →
+  `hydrateActiveSession`). Gọi `getKpiTasks(factoryId, user)` (1 lần độc lập với Shell — xem lý
+  do ở mục 2) + `resolveMyLeaderDepartmentId` (bỏ qua nếu đã `isAdmin`, tiết kiệm 1 round-trip).
+- 2 khối:
+  - **"Cần bạn LÀM"** (`role="nhan"`) — luôn hiện cho mọi `kpi.view` user.
+  - **"Cần bạn DUYỆT / XỬ LÝ"** (`role="giao"`) — chỉ hiện khi `isAdmin || isDeptLeader ||
+    hasPermission(user, "kpi.manage_config")` — tránh nhân viên thường thấy 1 khối toàn số 0.
+- Mỗi khối chỉ liệt kê item có `count > 0` (khác Bell — Bell là dropdown tham chiếu nên hiện đủ
+  cả 11 item kể cả 0 để giữ ngữ cảnh; trang chủ là landing chính, mục đích duy nhất là "việc cần
+  chú ý ngay", liệt kê toàn số 0 sẽ gây rối mắt không cần thiết). Nếu TOÀN BỘ (cả 2 khối gộp lại)
+  đều 0 → 1 banner ăn mừng duy nhất thay cho 2 card rỗng.
+- Tô màu mỗi dòng theo mức khẩn cấp suy từ chính label (`toneOf()`, thuần cosmetic, chỉ dùng ở
+  trang này): chứa "quá hạn" → đỏ; chứa "sắp đến hạn" → hổ phách; còn lại (chờ nghiệm thu/chờ
+  duyệt/chờ xử lý) → tím — không thêm field mới vào `ModuleTaskItem` cho việc này vì chỉ 1 nơi
+  dùng, không cần tái sử dụng.
+- **Cố ý KHÔNG duplicate banner "Nhóm chính"** (đã có sẵn ở đầu `kpi/tasks/page.tsx` từ Fix 6) —
+  giữ nguyên 1 chỗ duy nhất, tránh hiện trùng 2 lần khi người dùng bấm tiếp vào tab "Công việc".
+- `kpi-shell.tsx`'s `tabs[]` không có mục "Trang chủ" (giữ nguyên từ trước) — trang chủ không
+  active-highlight bất kỳ tab nào, đúng như hành vi cũ khi route này còn là redirect-stub.
+
+### Đã xác nhận
+
+`npx tsc --noEmit`, `npx eslint` (3 file: `module-tasks.ts`, `kpi-shell.tsx`, `kpi/page.tsx`), và
+`npm run build` đều sạch — build liệt kê đúng `/dashboard/kpi` (static), không route KPI nào lỗi.
+Không cần migration nào (không đổi schema, chỉ đổi tầng tính toán/hiển thị client-side).
+
+### Chưa test tay — cần làm ở phiên sau
+
+1. Đăng nhập 1 nhân viên thường (không phải admin/lãnh đạo phòng ban) đang có 1 việc chuyên môn
+   sắp đến hạn + 1 vị trí 5S cần chấm tuần này → vào `/dashboard/kpi` → xác nhận chỉ thấy khối
+   "Cần bạn LÀM" (không thấy khối "Cần bạn DUYỆT"), đúng 2 dòng liệt kê, bấm vào từng dòng dẫn
+   đúng tới `/dashboard/kpi/tasks?tab=mine` và `/dashboard/kpi/5s`; đồng thời xác nhận 2 tab
+   "Công việc" và "5S" trên thanh điều hướng có đúng số đỏ tương ứng.
+2. Đăng nhập 1 lãnh đạo phòng ban đang có việc chờ nghiệm thu + 1 đăng ký thay thế chờ duyệt →
+   xác nhận thấy đủ cả 2 khối, khối "Cần bạn DUYỆT" liệt kê đúng 2 dòng, tab "Công việc" và
+   "Định kỳ" có badge đúng số.
+3. Đăng nhập 1 tài khoản không có việc gì (mọi thứ đã xử lý xong) → xác nhận trang chủ hiện đúng
+   banner ăn mừng duy nhất, không có card rỗng nào, mọi tab trên thanh điều hướng không có badge
+   (hoặc badge = 0, ẩn hẳn).
+4. Hoàn thành 1 việc (nộp/nghiệm thu) rồi bấm sang tab khác trong module KPI → quay lại tab "Công
+   việc" hoặc trang chủ → xác nhận badge/số đếm giảm đúng ngay, không cần tải lại trang (F5).
+5. Đối chiếu lại Bell (chuông thông báo góc trên) ở bất kỳ trang `/dashboard/kpi/*` nào — xác
+   nhận giờ hiện đủ 11 mục (không còn 9), 2 mục cũ "Việc sắp đến hạn"/"Việc đã quá hạn" đã tách
+   thành 4 mục rõ vai trò hơn; kiểm tra `TasksSummaryWidget` ở Dashboard chính (`/dashboard`)
+   cũng phản ánh đúng danh sách 11 mục mới, không lỗi hiển thị do tăng số lượng item.
+6. Test tài khoản `kpi.manage_config` nhưng KHÔNG phải admin/lãnh đạo phòng ban nào (nếu có cấu
+   hình role này trong hệ thống) — xác nhận vẫn thấy khối "Cần bạn DUYỆT" (điều kiện OR đã cộng
+   `hasPermission(user, "kpi.manage_config")`).

@@ -1052,13 +1052,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       let recordId = id !== "new" ? id : null
 
       if (isNew) {
-        const { data: inserted, error: insErr } = await supabase
-          .from("maintenance_records")
-          .insert(headerPayload)
-          .select("id")
-          .single()
-        if (insErr) { setSaveError(insErr.message); return }
-        recordId = inserted.id
+        // Retry khi trùng ma_bb (23505) — hiếm gặp, chỉ xảy ra nếu 2 người bấm Lưu gần
+        // như đồng thời cho cùng bộ phận + cùng ngày. generateMaBB() giờ đã lấy số lớn
+        // nhất + 1 nên lần thử lại sẽ tự nhảy qua số vừa bị chiếm. Lỗi khác 23505 báo
+        // ngay, không retry.
+        let insertAttempt = 0
+        let insertedId: string | null = null
+        let lastError: { message: string; code?: string } | null = null
+        while (insertAttempt < 3 && !insertedId) {
+          insertAttempt += 1
+          const maBBAttempt = insertAttempt === 1 ? maBB : await generateMaBB(factoryId, ngay, boPhan)
+          const { data: inserted, error: insErr } = await supabase
+            .from("maintenance_records")
+            .insert({ ...headerPayload, ma_bb: maBBAttempt })
+            .select("id")
+            .single()
+          if (!insErr) {
+            insertedId = inserted.id
+            break
+          }
+          lastError = insErr
+          if (insErr.code !== "23505") break
+        }
+        if (!insertedId) { setSaveError(lastError?.message || "Không tạo được biên bản"); return }
+        recordId = insertedId
       } else {
         const { error: updErr } = await supabase
           .from("maintenance_records")

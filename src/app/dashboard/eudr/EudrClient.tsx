@@ -22,6 +22,7 @@ import type { FeatureCollection, Feature } from "geojson"
 import JSZip from "jszip"
 import { saveAs } from "file-saver"
 import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
+import { EUDR_BUCKET, buildEudrStoragePath } from "@/lib/eudr-attachments"
 import {
   Search, FileDown, Upload, Trash2, Map, Shield, Package,
   AlertTriangle, Check, X, FileText, Globe, Download, Loader2,
@@ -143,6 +144,83 @@ async function getEudrAuthToken(): Promise<string> {
     throw new Error("Phien dang nhap da het han. Vui long dang nhap lai.")
   }
   return data.session.access_token
+}
+
+function isEudrStorageConfigError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  return /bucket.*not found|row-level security|permission denied|unauthorized|403/i.test(message)
+}
+
+// Fallback multipart — chỉ hoạt động đúng cho file dưới ~4.5MB (giới hạn body của Vercel
+// Serverless Function). Dùng khi upload thẳng lên Storage thất bại vì lý do cấu hình.
+async function uploadEudrFileViaServer(
+  orderId: string,
+  file: File,
+  token: string,
+): Promise<{ file: ExportOrderFile; files: ExportOrderFile[] }> {
+  const body = new FormData()
+  body.append("orderId", orderId)
+  body.append("file", file)
+
+  const res = await fetch("/api/eudr/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body,
+  })
+  const payload = (await res.json().catch(() => null)) as {
+    error?: string
+    file?: ExportOrderFile
+    files?: ExportOrderFile[]
+  } | null
+
+  if (!res.ok || !payload?.file || !payload.files) {
+    throw new Error(payload?.error || "Khong tai duoc file EUDR len may chu.")
+  }
+
+  return { file: payload.file, files: normalizeExportOrderFiles(payload.files) }
+}
+
+// Upload thẳng từ browser lên Supabase Storage — request không đi qua route Next.js nào nên
+// không dính giới hạn ~4.5MB body của Vercel Serverless Function, khắc phục lỗi upload file lớn
+// (vd .rar 8MB) trên production. Ghi metadata qua route JSON nhỏ gọn /api/eudr/register-file.
+// Nếu upload thẳng lỗi vì cấu hình bucket/RLS thì fallback về route multipart cũ.
+async function uploadEudrFile(
+  order: { id: string; factory_id: string; ma_don: string },
+  file: File,
+  token: string,
+): Promise<{ file: ExportOrderFile; files: ExportOrderFile[] }> {
+  const path = buildEudrStoragePath(order.factory_id, order.ma_don, file.name)
+  const uploadResult = await supabase.storage.from(EUDR_BUCKET).upload(path, file, {
+    upsert: true,
+    contentType: file.type || "application/octet-stream",
+  })
+
+  if (uploadResult.error) {
+    if (!isEudrStorageConfigError(uploadResult.error)) throw uploadResult.error
+    return uploadEudrFileViaServer(order.id, file, token)
+  }
+
+  const res = await fetch("/api/eudr/register-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      orderId: order.id,
+      path: uploadResult.data.path,
+      name: file.name,
+      size: file.size,
+    }),
+  })
+  const payload = (await res.json().catch(() => null)) as {
+    error?: string
+    file?: ExportOrderFile
+    files?: ExportOrderFile[]
+  } | null
+
+  if (!res.ok || !payload?.file || !payload.files) {
+    throw new Error(payload?.error || "Khong ghi nhan duoc file dinh kem.")
+  }
+
+  return { file: payload.file, files: normalizeExportOrderFiles(payload.files) }
 }
 
 function normalizeExportOrderFiles(files: unknown): ExportOrderFile[] {
@@ -654,9 +732,10 @@ export default function EudrClient() {
   }, [isAdminUser, attachmentsLocked, currentUser?.id])
 
   // ── Upload file ───────────────────────────────────────────────────────────
-  // Toàn bộ việc upload (Storage + patch export_orders.files) giờ đi qua
-  // /api/eudr/upload (service role) — nơi DUY NHẤT enforce khóa đơn + ghi nhận đúng người
-  // tải lên (uploadedBy lấy từ JWT server-side, không tin giá trị client tự khai).
+  // uploadEudrFile() upload thẳng lên Supabase Storage (bỏ qua giới hạn body ~4.5MB của Vercel
+  // Serverless Function) rồi ghi metadata qua /api/eudr/register-file; fallback về multipart
+  // /api/eudr/upload khi upload thẳng lỗi cấu hình. Cả 2 route đều enforce khóa đơn + ghi nhận
+  // đúng người tải lên (uploadedBy lấy từ JWT server-side, không tin giá trị client tự khai).
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!order) return
     const files = Array.from(e.target.files || [])
@@ -680,37 +759,20 @@ export default function EudrClient() {
 
       for (const file of files) {
         try {
-          const body = new FormData()
-          body.append("orderId", order.id)
-          body.append("file", file)
+          const { file: uploadedFile, files: nextFiles } = await uploadEudrFile(order, file, token)
 
-          const res = await fetch("/api/eudr/upload", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body,
-          })
-          const payload = (await res.json().catch(() => null)) as {
-            error?: string
-            file?: ExportOrderFile
-            files?: ExportOrderFile[]
-          } | null
-
-          if (!res.ok || !payload?.file || !payload.files) {
-            throw new Error(payload?.error || "Khong tai duoc file EUDR len may chu.")
-          }
-
-          latestFiles = normalizeExportOrderFiles(payload.files)
+          latestFiles = nextFiles
           uploadResults.push({
             index: uploadResults.length,
-            name: payload.file.name,
-            url: payload.file.url,
-            path: payload.file.path ?? null,
-            resolvedPath: payload.file.path ?? null,
-            size: typeof payload.file.size === "number" ? payload.file.size : file.size,
+            name: uploadedFile.name,
+            url: uploadedFile.url,
+            path: uploadedFile.path ?? null,
+            resolvedPath: uploadedFile.path ?? null,
+            size: typeof uploadedFile.size === "number" ? uploadedFile.size : file.size,
             source: "upload-result",
             downloadStatus: "ok",
             downloadError: null,
-            blobSize: typeof payload.file.size === "number" ? payload.file.size : file.size,
+            blobSize: typeof uploadedFile.size === "number" ? uploadedFile.size : file.size,
             zipEntryName: null,
           })
         } catch (uploadError) {

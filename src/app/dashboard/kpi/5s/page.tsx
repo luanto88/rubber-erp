@@ -13,7 +13,7 @@ import { Kpi5sAutoAssignModal } from "../_components/kpi-5s-auto-assign-modal"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import {
-  computeKpi5sDeadline,
+  computeKpi5sNextDeadline,
   fetchAllLocationCleanerMemberships,
   fetchKpi5sLocations,
   fetchLatestKpi5sEvaluationsByLocationIds,
@@ -247,7 +247,7 @@ export default function Kpi5sLocationListPage() {
               const cleanerIds = getEffectiveCleanerIds(loc, cleanersByLocation)
               const iAmCleaner = !!user && cleanerIds.includes(user.id)
               const iAmScorer = !!user && user.id === loc.nguoi_cham_id
-              const deadline = computeKpi5sDeadline(loc, currentWeekStart)
+              const deadline = computeKpi5sNextDeadline(loc)
               const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
               const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
               const canRemindLocation = (isAdmin || user?.id === loc.assigned_by) && !!deadline && !hasEvaluatedThisWeek
