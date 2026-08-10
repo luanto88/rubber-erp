@@ -8,12 +8,15 @@
 // 5S lẫn /dashboard/kpi/5s (nút đặt cạnh "Quản lý vị trí") — component thuần túy, không phụ
 // thuộc gì vào layout Settings.
 //
-// Cập nhật cùng đợt — fix bug "chọn rất nhiều nhân sự không liên quan": pool giờ lọc theo Phòng
-// ban của vị trí (deptUserIdsByDept, tra qua /api/kpi/dept-users) + chỉ ưu tiên người ĐANG là
-// người dọn/chấm ở vị trí khác (establishedUserIds, tự nới lỏng nếu phòng ban chưa từng gán ai)
-// — xem đầy đủ trong kpi-5s-auto-assign.ts. Dropdown sửa tay trong preview cũng chỉ còn hiện
-// đúng `eligibleUserIds` đã được thuật toán dùng để random (loại người không liên quan), fallback
-// về danh sách đầy đủ nếu pool đó rỗng (tránh dropdown trống hoàn toàn).
+// Cập nhật 2026-07-29 — fix bug "chọn rất nhiều nhân sự không liên quan": pool lọc theo Phòng
+// ban của vị trí (deptUserIdsByDept, tra qua /api/kpi/dept-users) + Khu vực nếu có.
+//
+// Cập nhật 2026-08-19 (theo phản hồi người dùng): "đã từng dọn/chấm" (establishedUserIds) KHÔNG
+// còn thu hẹp dropdown sửa tay nữa — dropdown luôn hiện đủ nhân sự đúng Phòng ban/Khu vực (kể cả
+// người mới chưa từng làm 5S), chỉ được RANDOM ưu tiên chọn người có kinh nghiệm hơn (trọng số).
+// Cũng fix bug "Random 1 vị trí": khi modal chỉ nhận đúng 1 vị trí, mặc định chuyển sang "Phân
+// công lại toàn bộ" thay vì "Chỉ vị trí chưa gán đủ" — nếu không, vị trí đã có sẵn cả 2 người sẽ
+// luôn có targetCount=0, nút "Tạo đề xuất" bị khóa vĩnh viễn.
 
 import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, RefreshCw, Shuffle, Users } from "lucide-react"
@@ -48,7 +51,9 @@ export function Kpi5sAutoAssignModal({
   const [loadingCandidates, setLoadingCandidates] = useState(true)
   const [loadError, setLoadError] = useState("")
 
-  const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+  // Random đúng 1 vị trí (đã có sẵn người) thì mặc định "Phân công lại toàn bộ" — nếu giữ mặc
+  // định "Chỉ vị trí chưa gán đủ" sẽ luôn ra targetCount=0 vì vị trí đó đã có đủ người.
+  const [onlyUnassigned, setOnlyUnassigned] = useState(locations.length !== 1)
   const [avoidSameGroup, setAvoidSameGroup] = useState(true)
   const [rows, setRows] = useState<RowState[] | null>(null)
 
@@ -218,8 +223,9 @@ export function Kpi5sAutoAssignModal({
           <div className="flex items-center gap-2 text-sm text-slate-600">
             <Users size={15} className="text-violet-600" />
             Random <strong>có trọng số theo tải hiện tại</strong>, chỉ trong số nhân sự thuộc đúng
-            Phòng ban của vị trí và ưu tiên người ĐANG là người dọn/chấm ở vị trí khác — không lấy
-            người hoàn toàn không liên quan.
+            Phòng ban (và Khu vực nếu có) của vị trí — ưu tiên người ĐANG là người dọn/chấm ở vị
+            trí khác nhưng không loại người mới; dropdown bên dưới vẫn cho chọn tay bất kỳ ai
+            trong Phòng ban đó.
           </div>
           <div className="space-y-2.5">
             <label className="flex items-start gap-2 text-sm">
@@ -282,16 +288,16 @@ export function Kpi5sAutoAssignModal({
                       </label>
                       <div className="text-[11px] font-bold text-violet-700">{l.ma_vi_tri}</div>
                       <div className="text-sm font-semibold text-slate-700">{l.ten_vi_tri}</div>
-                      {(r.deptPoolRelaxed || r.establishedRelaxed) && (
+                      {(r.deptPoolRelaxed || r.noEstablishedCandidate) && (
                         <div className="mt-0.5 flex flex-col gap-0.5">
                           {r.deptPoolRelaxed && (
                             <span className="text-[10px] text-amber-600 flex items-center gap-1">
                               <AlertTriangle size={9} /> Chưa tra được phòng ban — không lọc được
                             </span>
                           )}
-                          {r.establishedRelaxed && (
-                            <span className="text-[10px] text-amber-600 flex items-center gap-1">
-                              <AlertTriangle size={9} /> Phòng ban chưa từng gán ai — đã nới lỏng
+                          {r.noEstablishedCandidate && (
+                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                              Phòng ban chưa từng gán ai — random ngẫu nhiên, không ưu tiên
                             </span>
                           )}
                         </div>

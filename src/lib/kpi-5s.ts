@@ -255,6 +255,64 @@ export function formatKpi5sDeadlineLabel(location: Pick<Kpi5sLocation, "deadline
   return `${KPI_WEEKDAY_LABEL[location.deadline_weekdays[0]]}, ${location.deadline_time.slice(0, 5)}`
 }
 
+// Nhãn ĐẦY ĐỦ "Thứ X, dd/mm/yyyy HH:MM" cho hạn kế tiếp thực sự áp dụng — mirror
+// formatKpi5sDeadlineLabel nhưng dùng NGÀY THẬT (tính từ computeKpi5sNextDeadline, đã tự lùi
+// tuần nếu cần) thay vì chỉ tên Thứ suông. Trước đây chỉ hiện "CN, 17:00" — không rõ là CN tuần
+// nào, gây hiểu lầm khi hạn đã tự động lùi sang tuần kế tiếp (2026-08-19, phản hồi người dùng).
+export function formatKpi5sNextDeadlineLabel(
+  location: Pick<Kpi5sLocation, "deadline_weekdays" | "deadline_time" | "deadline_effective_from">,
+  nowISO: string = getTodayISODate(),
+): string | null {
+  if (!location.deadline_weekdays?.length || !location.deadline_time) return null
+  const deadline = computeKpi5sNextDeadline(location, nowISO)
+  if (!deadline) return null
+  const weekdayLabel = KPI_WEEKDAY_LABEL[location.deadline_weekdays[0]]
+  const dd = String(deadline.getDate()).padStart(2, "0")
+  const mm = String(deadline.getMonth() + 1).padStart(2, "0")
+  const hh = String(deadline.getHours()).padStart(2, "0")
+  const mi = String(deadline.getMinutes()).padStart(2, "0")
+  return `${weekdayLabel}, ${dd}/${mm}/${deadline.getFullYear()} ${hh}:${mi}`
+}
+
+// ── Chặn chấm điểm quá sớm (2026-08-19) ─────────────────────────────────────────────────────
+// Xác nhận qua trao đổi trực tiếp với người dùng: 5S trước đây không chặn ai chấm "Đạt" ngay đầu
+// tuần, trước khi thực sự dọn dẹp xong. Chặn CỨNG server-side bằng trigger DB trên
+// kpi_5s_evaluations (xem migration 20260819_kpi_5s_early_score_block.sql) — hàm dưới đây chỉ là
+// bản mirror THUẦN CLIENT để hiện UI disable/thông báo sớm, KHÔNG phải nguồn thực thi chính (đã
+// có admin bypass ở tầng DB trigger, hàm client này không cần biết ai đang là admin).
+export const KPI_5S_EARLY_BLOCK_HOURS = 48
+
+export function isKpi5sTooEarlyToScore(deadline: Date | null, nowMs = Date.now()): boolean {
+  if (!deadline) return false
+  return nowMs < deadline.getTime() - KPI_5S_EARLY_BLOCK_HOURS * 3600_000
+}
+
+export function formatKpi5sEarliestAllowedLabel(deadline: Date): string {
+  const earliest = new Date(deadline.getTime() - KPI_5S_EARLY_BLOCK_HOURS * 3600_000)
+  const dd = String(earliest.getDate()).padStart(2, "0")
+  const mm = String(earliest.getMonth() + 1).padStart(2, "0")
+  const hh = String(earliest.getHours()).padStart(2, "0")
+  const mi = String(earliest.getMinutes()).padStart(2, "0")
+  return `${hh}:${mi} ${dd}/${mm}/${earliest.getFullYear()}`
+}
+
+// ── "Lịch sử" — nhật ký các lần chấm điểm gần đây trên toàn nhà máy (2026-08-19) ────────────
+// Khác "Việc hôm nay"/"Tất cả vị trí" (liệt kê VỊ TRÍ) — đây liệt kê từng LẦN CHẤM, mới nhất
+// trước, để không phải bấm vào từng vị trí mới biết ai vừa chấm gì. Trang gọi hàm này TỰ LỌC
+// tiếp theo `visibleLocations` (phạm vi hiển thị đã tính sẵn) để không lộ dữ liệu ngoài phạm vi
+// của người xem — RLS bảng này rộng trong factory (thiết kế "công khai trong factory" từ Phase 2)
+// nên việc thu hẹp là trách nhiệm của tầng UI, không phải RLS.
+export async function fetchRecentKpi5sEvaluations(factoryId: string, limit = 60): Promise<Kpi5sEvaluation[]> {
+  const { data, error } = await supabase
+    .from("kpi_5s_evaluations")
+    .select(EVAL_COLS)
+    .eq("factory_id", factoryId)
+    .order("danh_gia_luc", { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data || []) as Kpi5sEvaluation[]
+}
+
 // Tuần hiện tại (Thứ Hai) đã có bản chấm chưa — quyết định có hiện nút "Chấm điểm tuần này".
 export async function fetchKpi5sEvaluationForWeek(locationId: string, weekStartISO: string): Promise<Kpi5sEvaluation | null> {
   const { data, error } = await supabase

@@ -6,7 +6,8 @@
 // tạm thời".
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CalendarClock, Pencil, Plus, Power, RefreshCw, Repeat, Trash2, UserCog } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { CalendarClock, Pencil, Plus, Power, RefreshCw, Repeat, Target, Trash2, UserCog } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -48,11 +49,16 @@ import { PendingSubstitutionsBanner } from "@/app/dashboard/kpi/_components/pend
 
 export default function KpiTemplatesPage() {
   const revealRef = useScrollReveal()
+  const searchParams = useSearchParams()
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const [subTab, setSubTab] = useState<"templates" | "substitutions">("templates")
+  // Deep-link từ Bell ("Đăng ký thay thế chờ bạn duyệt" → ?tab=substitutions) — ưu tiên query
+  // param ngay từ lần render đầu, không đợi effect "mặc định cho người không quản lý" bên dưới.
+  const [subTab, setSubTab] = useState<"templates" | "substitutions">(() =>
+    searchParams.get("tab") === "substitutions" ? "substitutions" : "templates",
+  )
   const [templates, setTemplates] = useState<KpiTaskTemplate[]>([])
   const [substitutions, setSubstitutions] = useState<KpiUserSubstitution[]>([])
   const [groups, setGroups] = useState<KpiGroupOption[]>([])
@@ -352,6 +358,10 @@ export default function KpiTemplatesPage() {
                       <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
                         Mỗi {t.interval_days} ngày (từ {t.anchor_date ? formatDateDisplay(t.anchor_date) : "—"})
                       </div>
+                    ) : t.cadence_type === "day_of_month" ? (
+                      <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+                        Ngày {(t.days_of_month || []).join(", ")} hàng tháng
+                      </div>
                     ) : (
                       <div className="mt-2 flex flex-wrap gap-1">
                         {KPI_WEEKDAY_OPTIONS.map((d) => (
@@ -362,6 +372,11 @@ export default function KpiTemplatesPage() {
                             {KPI_WEEKDAY_LABEL[d]}
                           </span>
                         ))}
+                      </div>
+                    )}
+                    {t.muc_tieu_so_luong != null && (
+                      <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-violet-50 text-violet-700">
+                        <Target size={10} /> Mục tiêu: {t.muc_tieu_so_luong}
                       </div>
                     )}
                     {t.yeu_cau_bao_cao.length > 0 && (

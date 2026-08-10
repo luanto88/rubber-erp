@@ -4,7 +4,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, AlertTriangle, Bell, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { AlertCircle, AlertTriangle, Bell, History, MapPin, Settings, Shuffle, Sparkles, Users } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { formatWeekRangeLabel, getIsoWeekStart } from "@/lib/date-utils"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -17,6 +18,8 @@ import {
   fetchAllLocationCleanerMemberships,
   fetchKpi5sLocations,
   fetchLatestKpi5sEvaluationsByLocationIds,
+  fetchRecentKpi5sEvaluations,
+  formatKpi5sNextDeadlineLabel,
   getEffectiveCleanerIds,
   getKpi5sErrorMessage,
   isKpi5sDeadlineDueSoon,
@@ -27,10 +30,19 @@ import {
   type Kpi5sLocation,
 } from "@/lib/kpi-5s"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
-import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
+
+// Nhãn cho ?highlight= từ Bell (module-tasks.ts's getKpi5sDueCounts) — mirror KPI_TASK_HIGHLIGHT_LABEL
+// bên tasks/page.tsx nhưng riêng cho 5S (không dùng chung type vì Bell chỉ có 2 giá trị đơn giản).
+const KPI_5S_HIGHLIGHT_LABEL: Record<string, string> = {
+  overdue: "Vị trí 5S đã quá hạn",
+  dueSoon: "Vị trí 5S sắp đến hạn (24h)",
+}
 
 export default function Kpi5sLocationListPage() {
   const revealRef = useScrollReveal()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const highlight = searchParams.get("highlight") // "overdue" | "dueSoon" | null — từ Bell
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
@@ -42,7 +54,10 @@ export default function Kpi5sLocationListPage() {
   const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
-  const [subTab, setSubTab] = useState<"today" | "all">("today")
+  const [subTab, setSubTab] = useState<"today" | "all" | "history">("today")
+  const [historyEvals, setHistoryEvals] = useState<Kpi5sEvaluation[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [showAutoAssign, setShowAutoAssign] = useState(false)
   const [assignSummary, setAssignSummary] = useState<{ userId: string; ten: string; donZones: string[]; chamZones: string[] }[] | null>(null)
   // Nút "Nhắc nhở" thủ công inline trên từng thẻ — chỉ Telegram, khoá tạm 45s/vị trí sau khi
@@ -137,6 +152,49 @@ export default function Kpi5sLocationListPage() {
     [visibleLocations, user, latestByLocation, currentWeekStart],
   )
 
+  // Vị trí "của tôi" (đội dọn dẹp hoặc người chấm) đang quá hạn / sắp đến hạn — dùng cho
+  // ?highlight= từ Bell, mirror ĐÚNG công thức getKpi5sDueCounts() (module-tasks.ts) để số đếm
+  // và danh sách lọc luôn khớp nhau tuyệt đối.
+  const { myOverdue, myDueSoon } = useMemo(() => {
+    const overdue: Kpi5sLocation[] = []
+    const dueSoon: Kpi5sLocation[] = []
+    if (!user) return { myOverdue: overdue, myDueSoon: dueSoon }
+    for (const loc of visibleLocations) {
+      const cleanerIds = getEffectiveCleanerIds(loc, cleanersByLocation)
+      const isMine = loc.nguoi_cham_id === user.id || cleanerIds.includes(user.id)
+      if (!isMine) continue
+      const hasEvaluatedThisWeek = latestByLocation.get(loc.id)?.tuan_bat_dau === currentWeekStart
+      const deadline = computeKpi5sNextDeadline(loc)
+      if (isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)) overdue.push(loc)
+      else if (isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)) dueSoon.push(loc)
+    }
+    return { myOverdue: overdue, myDueSoon: dueSoon }
+  }, [visibleLocations, user, cleanersByLocation, latestByLocation, currentWeekStart])
+
+  const highlightedLocations = highlight === "overdue" ? myOverdue : highlight === "dueSoon" ? myDueSoon : null
+
+  const clearHighlight = () => router.replace("/dashboard/kpi/5s")
+
+  useEffect(() => {
+    if (subTab !== "history" || historyLoaded || !factoryId) return
+    let alive = true
+    setHistoryLoading(true)
+    fetchRecentKpi5sEvaluations(factoryId)
+      .then((rows) => { if (alive) { setHistoryEvals(rows); setHistoryLoaded(true) } })
+      .catch(() => { if (alive) setHistoryEvals([]) })
+      .finally(() => { if (alive) setHistoryLoading(false) })
+    return () => { alive = false }
+  }, [subTab, historyLoaded, factoryId])
+
+  // Chỉ giữ lại lịch sử thuộc phạm vi vị trí người xem được thấy (fetchRecentKpi5sEvaluations
+  // trả về toàn nhà máy — RLS đọc mở rộng, nhưng UI phải tự thu hẹp theo visibleLocations).
+  const visibleLocationIds = useMemo(() => new Set(visibleLocations.map((l) => l.id)), [visibleLocations])
+  const scopedHistoryEvals = useMemo(
+    () => historyEvals.filter((e) => visibleLocationIds.has(e.location_id)),
+    [historyEvals, visibleLocationIds],
+  )
+  const locationById = useMemo(() => Object.fromEntries(locations.map((l) => [l.id, l])), [locations])
+
   const handleRemindLocation = (loc: Kpi5sLocation) => {
     if (!factoryId) return
     sendKpiNotify({
@@ -161,7 +219,13 @@ export default function Kpi5sLocationListPage() {
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
 
-  const shownLocations = subTab === "today" ? todayLocations : visibleLocations
+  const shownLocations = highlightedLocations ?? (subTab === "today" ? todayLocations : visibleLocations)
+  // Đổi tab BẰNG TAY phải đồng thời xoá `?highlight=` khỏi URL — cùng lý do đã áp dụng ở
+  // tasks/page.tsx (highlight đọc trực tiếp từ searchParams, không phải state).
+  const goToSubTab = (t: "today" | "all" | "history") => {
+    setSubTab(t)
+    router.replace("/dashboard/kpi/5s")
+  }
 
   return (
     <KpiShell>
@@ -213,30 +277,80 @@ export default function Kpi5sLocationListPage() {
           </div>
         )}
 
-        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
-          <button
-            onClick={() => setSubTab("today")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "today" ? "bg-amber-500 text-white" : "text-slate-600"}`}
-          >
-            Việc hôm nay{todayLocations.length > 0 ? ` (${todayLocations.length})` : ""}
-          </button>
-          <button
-            onClick={() => setSubTab("all")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "all" ? "bg-amber-500 text-white" : "text-slate-600"}`}
-          >
-            Tất cả vị trí
-          </button>
-        </div>
+        {highlight && highlight in KPI_5S_HIGHLIGHT_LABEL ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-violet-300 bg-violet-50 px-4 py-3">
+            <span className="text-sm font-bold text-violet-800">
+              Đang lọc: {KPI_5S_HIGHLIGHT_LABEL[highlight]} ({shownLocations.length})
+            </span>
+            <button onClick={clearHighlight} className="text-xs font-bold text-violet-600 hover:text-violet-800 underline">
+              Xóa lọc — xem theo tab
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
+            <button
+              onClick={() => goToSubTab("today")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "today" ? "bg-amber-500 text-white" : "text-slate-600"}`}
+            >
+              Việc hôm nay{todayLocations.length > 0 ? ` (${todayLocations.length})` : ""}
+            </button>
+            <button
+              onClick={() => goToSubTab("all")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "all" ? "bg-amber-500 text-white" : "text-slate-600"}`}
+            >
+              Tất cả vị trí
+            </button>
+            <button
+              onClick={() => goToSubTab("history")}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold ${subTab === "history" ? "bg-amber-500 text-white" : "text-slate-600"}`}
+            >
+              <History size={13} /> Lịch sử
+            </button>
+          </div>
+        )}
 
-        {dataLoading ? (
+        {!highlight && subTab === "history" ? (
+          historyLoading ? (
+            <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          ) : scopedHistoryEvals.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+              Chưa có lần chấm điểm nào trong phạm vi bạn xem được.
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+              {scopedHistoryEvals.map((e) => {
+                const loc = locationById[e.location_id]
+                return (
+                  <Link
+                    key={e.id}
+                    href={`/dashboard/kpi/5s/location/${e.location_id}`}
+                    className="row-hover flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-slate-800 truncate">{loc ? `${loc.ma_vi_tri} — ${loc.ten_vi_tri}` : e.location_id}</div>
+                      <div className="text-xs text-slate-500">
+                        Tuần {e.tuan_bat_dau} · Người chấm: {resolveName(e.nguoi_cham_id)}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg ${KPI_5S_RESULT_BADGE_CLASS[e.ket_qua]}`}>
+                      {KPI_5S_RESULT_LABEL[e.ket_qua]}
+                    </span>
+                  </Link>
+                )
+              })}
+            </div>
+          )
+        ) : dataLoading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : dataError ? (
           <div className="bg-white rounded-2xl border border-red-200 p-8 text-center text-red-600">{dataError}</div>
         ) : shownLocations.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-            {subTab === "today"
-              ? "Không có vị trí nào cần bạn chấm điểm tuần này."
-              : `Chưa có vị trí 5S nào. ${canManageLocations ? "Vào \"Quản lý vị trí\" để thêm." : ""}`}
+            {highlight
+              ? "Không có vị trí nào khớp bộ lọc này."
+              : subTab === "today"
+                ? "Không có vị trí nào cần bạn chấm điểm tuần này."
+                : `Chưa có vị trí 5S nào. ${canManageLocations ? "Vào \"Quản lý vị trí\" để thêm." : ""}`}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -284,7 +398,7 @@ export default function Kpi5sLocationListPage() {
                   {deadline && !hasEvaluatedThisWeek && (
                     <div className={`mb-1.5 flex items-center gap-1 text-xs font-semibold ${overdue ? "text-red-600" : dueSoon ? "text-amber-600" : "text-slate-500"}`}>
                       {(overdue || dueSoon) && <AlertTriangle size={12} />}
-                      {overdue ? "Quá hạn — " : ""}Hạn: {KPI_WEEKDAY_LABEL[loc.deadline_weekdays![0]]}, {loc.deadline_time!.slice(0, 5)}
+                      {overdue ? "Quá hạn — " : ""}Hạn: {formatKpi5sNextDeadlineLabel(loc)}
                     </div>
                   )}
                   <div className="text-sm font-extrabold text-slate-800">{loc.ten_vi_tri}</div>

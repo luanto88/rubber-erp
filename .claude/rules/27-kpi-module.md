@@ -4500,6 +4500,239 @@ route nào lỗi.
    nháy" tải lại toàn bộ; "Tải thêm" nhiều lần — xác nhận mỗi lần chỉ fetch đúng 1 trang mới, không
    phình to dần; đính kèm tới 10 ảnh cho 1 ghi chú — xác nhận lưu và hiển thị đủ.
 
+## Cập nhật 2026-08-19 — Redesign homepage KPI (badge có link chính xác) + 9 điểm feedback sau khi
+dùng thử module (ĐÃ CODE XONG, CẦN CHẠY 3 MIGRATION MỚI, CHƯA TEST TAY)
+
+Sau khi hoàn tất redesign `/dashboard/kpi` thành trang chủ thật (tách "Cần bạn LÀM"/"Cần bạn
+DUYỆT", badge số đếm trên `KpiShell`), người dùng dùng thử và gửi 9 nhận xét — đã hỏi lại qua
+`AskUserQuestion` cho 4 điểm rủi ro thiết kế cao trước khi code (Q1 dùng câu trả lời tự do, không
+chọn 1 trong 3 lựa chọn đề xuất — xem đúng nguyên văn ở mục 4 bên dưới).
+
+### Migration mới (**CẦN CHẠY THỦ CÔNG theo đúng thứ tự này**, sau mọi migration KPI trước đó)
+
+1. `supabase/migrations/20260819_kpi_5s_appeal_correction_workflow.sql` — thêm cột
+   `proposed_ket_qua/proposed_ly_do/proposed_by/proposed_at` vào `kpi_appeals`, thêm trạng thái
+   `'cho_duyet_sua'`, RPC `kpi_appeal_propose_correction`/`kpi_appeal_decide_correction`, mở rộng
+   `kpi_appeals_select`.
+2. `supabase/migrations/20260819_kpi_5s_early_score_block.sql` — trigger `BEFORE INSERT` trên
+   `kpi_5s_evaluations` chặn chấm điểm sớm hơn 48 giờ trước hạn (admin bypass).
+3. `supabase/migrations/20260819_kpi_task_templates_quantity_and_day_of_month.sql` — thêm
+   `days_of_month INTEGER[]`/`muc_tieu_so_luong INTEGER` vào `kpi_task_templates`, thêm
+   `cadence_type='day_of_month'`, `CREATE OR REPLACE` lại `kpi_ensure_today_task_instances` (giữ
+   nguyên mọi fix trước đó: skip-if-stuck, substitution `da_duyet`, `module_code`).
+
+### 1. Badge/homepage phải link tới danh sách lọc CHÍNH XÁC (không rơi về "Việc của tôi" chung)
+
+- `src/lib/kpi-tasks.ts` thêm `KpiTaskHighlight` (7 giá trị: `pendingMine/dueSoonMine/
+  overdueMine/transferMine/approval/dueSoonGiven/overdueGiven`), `KPI_TASK_HIGHLIGHT_LABEL`, và
+  `matchesKpiTaskHighlight(task, highlight, ctx)` — hàm predicate DÙNG CHUNG giữa
+  `module-tasks.ts` (đếm số cho Bell) và `tasks/page.tsx` (lọc danh sách khi click vào) để 2 nơi
+  không bao giờ lệch nhau.
+- `module-tasks.ts`'s `getKpiTasks()`: mọi `link` trong `items[]` đổi từ `?tab=mine`/`?tab=all`
+  chung chung sang `?highlight=<giá trị>` chính xác (riêng "Đăng ký thay thế chờ bạn duyệt" →
+  `/dashboard/kpi/templates?tab=substitutions`, "Khiếu nại chờ xử lý" → `/dashboard/kpi/appeals`
+  không đổi vì đã đúng).
+- `tasks/page.tsx`: đọc `?highlight=` qua `useSearchParams()`, nếu khớp 1 trong 7 giá trị →
+  ghi đè hoàn toàn hiển thị (banner tím "Đang lọc: {label} (N)" + nút "Xóa lọc", không kết hợp
+  với tab today/mine/all/history).
+- `5s/page.tsx`: tương tự nhưng riêng 2 giá trị `overdue`/`dueSoon` (khớp đúng `getKpi5sDueCounts`
+  đã có từ 2026-08-10) — thêm `myOverdue`/`myDueSoon` memo mirror chính xác công thức đếm ở Bell.
+
+### 2. Tab "Lịch sử" cho Công việc (hoàn thành + đã hủy)
+
+`tasks/page.tsx`: `myTasksAll` (không lọc trạng thái) → `myTasks` (ẩn `hoan_thanh`/`huy` trừ khi
+người dùng đã tự chọn filter trạng thái) + `historyTasks` (chỉ `hoan_thanh`/`huy`). Thêm nút tab
+thứ 4 "Lịch sử (N)" cạnh "Việc hôm nay/Việc của tôi/Tất cả công việc".
+
+### 3. Tab "Lịch sử" cho 5S (các lần đã chấm)
+
+- `kpi-5s.ts` thêm `fetchRecentKpi5sEvaluations(factoryId, limit=60)` — 60 lần chấm gần nhất TOÀN
+  NHÀ MÁY (RLS rộng, thiết kế "công khai trong factory" từ Phase 2); trang gọi hàm này rồi TỰ LỌC
+  lại theo `visibleLocations` đã tính sẵn (không lộ ngoài phạm vi người xem).
+- `5s/page.tsx` thêm tab thứ 3 "Lịch sử" (lazy-load khi bấm vào), mỗi dòng: vị trí + tuần + người
+  chấm + badge kết quả, click vào trang chi tiết vị trí.
+
+### 4. Khiếu nại 5S — quy trình 3 bước MỚI (thay thế "chỉ admin sửa trực tiếp")
+
+**Nguyên văn câu trả lời tự do của người dùng (Q1)**: "Chỉ người bị chấm khiếu nại sau đó người
+chấm sửa kết quả thông báo đến lãnh đạo phòng ban đó/admin duyệt/không duyệt quy trình kết thúc."
+→ diễn giải thành: (1) người BỊ chấm (`nguoi_don_id`) nộp khiếu nại — **không đổi**, vẫn như cũ;
+(2) **NGƯỜI CHẤM** (`nguoi_cham_id` của đúng lần chấm) tự đề xuất kết quả sửa lại — **MỚI**; (3)
+**lãnh đạo phòng ban của vị trí đó** (`kpi_is_department_leader`, mirror
+`20260807_kpi_department_scoping.sql`) hoặc admin/kpi.manage_config duyệt/từ chối — chỉ khi DUYỆT
+mới thực sự ghi đè `kpi_5s_evaluations.ket_qua/ly_do`.
+
+- `kpi-appeals.ts`: `KpiAppealStatus` thêm `"cho_duyet_sua"`; `KpiAppeal` thêm 4 field
+  `proposed_*`; 2 wrapper mới `proposeKpi5sAppealCorrection()`/`decideKpi5sAppealCorrection()`.
+- `5s/location/[id]/page.tsx`: nút "Khiếu nại" cũ **giữ nguyên** (chỉ `nguoi_don_id`, theo fix
+  "Bug 1" trước đó). Thêm nút "Đề xuất sửa kết quả" (chỉ hiện cho `nguoi_cham_id` khi có 1 khiếu
+  nại `cho_xu_ly` đang mở trên đúng lần chấm đó) → modal `Kpi5sResultPicker` → gọi
+  `proposeKpi5sAppealCorrection`. Badge trạng thái đề xuất hiển thị ngay dưới nút hành động.
+- `appeals/page.tsx`: nút "Đã giải quyết" (bypass sửa trực tiếp) **đã bị gỡ khỏi** nhánh khiếu
+  nại 5S ở trạng thái `cho_xu_ly` (chỉ còn "Từ chối" thẳng nếu khiếu nại rõ ràng vô lý) — buộc đi
+  qua đúng quy trình 3 bước; nhánh task/điểm tháng không đổi. Thêm 2 nút "Duyệt đề xuất"/"Từ chối
+  đề xuất" khi `trang_thai === "cho_duyet_sua"`, gate bởi `canDecideAppeal()` (admin/
+  kpi.manage_config hoặc đúng lãnh đạo phòng ban của vị trí — tra qua `locationRefs[...].location
+  .phong_ban_id` so với `myLeaderDepartmentId`).
+- **Cơ chế cũ `kpi_5s_evaluation_correct`/`correctKpi5sEvaluationDirect` (admin tự sửa NGAY,
+  không qua khiếu nại) GIỮ NGUYÊN KHÔNG ĐỔI** — vẫn còn nút "Sửa kết quả" trên trang chi tiết vị
+  trí, độc lập hoàn toàn với luồng 3 bước mới, là đường tắt dành riêng cho admin.
+
+### 5. Kẽ hở chấm điểm 5S quá sớm — ĐÃ XÁC NHẬN CÓ, đã chặn cứng theo Q2 ("chặn cứng theo khung
+giờ trước hạn", KPI_5S_EARLY_BLOCK_HOURS=48)
+
+- `kpi-5s.ts`: `KPI_5S_EARLY_BLOCK_HOURS=48`, `isKpi5sTooEarlyToScore()`,
+  `formatKpi5sEarliestAllowedLabel()` — bản mirror THUẦN CLIENT để hiện UI, nguồn thực thi chính
+  là trigger DB (`kpi_5s_prevent_early_score`, migration #2 ở trên) — chỉ chặn INSERT (lần chấm
+  gốc), không chặn UPDATE (2 RPC sửa kết quả sau này không INSERT dòng mới). Admin bypass cả 2
+  tầng.
+- `5s/location/[id]/page.tsx`: `canEvaluateThisWeek` thêm điều kiện `!tooEarly`; banner mới
+  (khác banner "Đến lượt bạn chấm điểm") hiện khi quá sớm: "Chưa tới thời điểm được chấm điểm —
+  hạn chấm là ..., có thể chấm từ ...".
+
+### 6a. Hạn 5S chỉ hiện giờ, không hiện ngày → đã fix bằng nhãn đầy đủ có ngày
+
+`kpi-5s.ts` thêm `formatKpi5sNextDeadlineLabel(location, nowISO?)` — "Thứ X, dd/mm/yyyy HH:MM"
+dùng NGÀY THẬT từ `computeKpi5sNextDeadline()` (đã tự lùi tuần nếu cần) thay vì chỉ tên Thứ suông.
+Áp dụng ở mọi nơi hiển thị hạn: card danh sách (`5s/page.tsx`), badge header + nhãn cạnh QR
+(`5s/location/[id]/page.tsx`). `formatKpi5sDeadlineLabel()` cũ (không ngày) vẫn giữ nguyên — còn
+dùng cho nhãn in QR PDF (`kpi-5s-pdf.ts`, không đổi vì in ra giấy dán cố định, không cần biết
+"tuần nào").
+
+### 6b. Nút nhắc nhở vẫn sáng dù đã chấm — ĐÃ XÁC NHẬN LÀ ĐÚNG, không phải bug
+
+Đọc lại cả 2 nơi (`5s/page.tsx`'s `canRemindLocation`, `5s/location/[id]/page.tsx`'s dòng tương
+đương): điều kiện đã có sẵn `!hasEvaluatedThisWeek` — nút tự tắt đúng khi tuần này đã chấm xong.
+Không có thay đổi code cho mục này.
+
+### 6c. "Lịch sử — 3 kết quả gần nhất" dưới badge kết quả
+
+Giải quyết bằng chính tab "Lịch sử" mới (mục 3) — không thêm khối riêng trong từng card, vì tab
+Lịch sử đã liệt kê đủ lịch sử (không giới hạn 3) và có thể lọc/xem theo vị trí qua click-through.
+
+### 7. "Việc định kỳ" vs "5S" có trùng lặp không? — Trả lời: KHÔNG, bổ sung `day_of_month`
+
+Ví dụ gốc "Dọn dẹp căn tin ngày 15 và 30 hàng tháng" không mô hình hóa được bằng 5S (5S là chấm
+điểm THEO TUẦN cho 1 VỊ TRÍ cố định, không phải "việc cần làm 2 lần/tháng"). Đã thêm
+`cadence_type='day_of_month'` (mảng `days_of_month`, vd `[15,30]`) làm lựa chọn thứ 3 song song
+`weekday`/`interval` — không gộp 2 module lại, giữ đúng 2 khái niệm khác nhau (5S = đánh giá định
+kỳ 1 vị trí vật lý; Việc định kỳ = giao việc lặp lại cho 1 người/nhóm).
+
+- `kpi-templates.ts`: `KpiTaskCadenceType` thêm `"day_of_month"`, `buildTemplateCadencePayload()`
+  validate nhánh mới.
+- `template-form-modal.tsx`: thêm nút toggle thứ 3 "Ngày trong tháng" + lưới chọn 1-31.
+- `templates/page.tsx`: badge card hiển thị "Ngày 15, 30 hàng tháng" cho cadence này.
+
+### 8. Việc định kỳ hỗ trợ mục tiêu số lượng (vd "đo 4 mẫu mỗi ngày")
+
+Tái dùng NGUYÊN VẸN cơ chế mục tiêu số lượng đã có cho việc giao tay (`kpi_tasks.
+muc_tieu_so_luong`, `kpi_task_link_and_complete`, xem mục "Cập nhật 2026-07-25 (tiếp 2)" phía
+trên) — không tạo cơ chế mới. `kpi_task_templates` thêm cột cùng tên; RPC
+`kpi_ensure_today_task_instances` copy giá trị này xuống mỗi instance sinh ra + ép
+`phan_loai='chinh'` cho người được giao (mirror đúng `createKpiTask()` khi có `nguoiChinhId`).
+`template-form-modal.tsx` thêm field "Mục tiêu số lượng chung (tuỳ chọn)".
+
+### 9. "Random 1 vị trí" — dropdown sửa tay quá hẹp + mặc định "Chỉ vị trí chưa gán đủ" gây khóa nút
+
+- **9a (bug thật)**: modal "Phân công thông minh" mở với đúng 1 vị trí (đã có sẵn cả 2 người) →
+  mặc định `onlyUnassigned=true` khiến `targetCount=0`, nút "Tạo đề xuất" khóa vĩnh viễn. Fix:
+  `kpi-5s-auto-assign-modal.tsx`'s `onlyUnassigned` mặc định `locations.length !== 1` (đúng 1 vị
+  trí → mặc định "Phân công lại toàn bộ").
+- **9b (theo Q4, "mở rộng dropdown, chỉ ưu tiên khi random")**: `kpi-5s-auto-assign.ts` bỏ hẳn
+  tầng lọc cứng "đã từng dọn/chấm" (`establishedUserIds` từng là HARD FILTER thu hẹp
+  `eligibleUserIds` dùng cho dropdown) — giờ chỉ còn là TRỌNG SỐ ưu tiên khi random
+  (`ESTABLISHED_WEIGHT_BOOST=4` nhân vào `weightedPick`). `eligibleUserIds` (dropdown sửa tay)
+  giờ luôn là toàn bộ pool đã lọc Phòng ban + Khu vực — không còn ẩn người mới chưa từng làm 5S.
+  Field `establishedRelaxed` đổi tên/ý nghĩa thành `noEstablishedCandidate` (thông báo trung tính
+  "chưa có ai ưu tiên — random hoàn toàn ngẫu nhiên", không còn là cảnh báo "đã nới lỏng").
+
+### Cập nhật trạng thái (2026-08-19, cùng ngày, sau khi 3 migration chạy xong)
+
+- **Bug đã fix**: migration `20260819_kpi_task_templates_quantity_and_day_of_month.sql` lỗi
+  `ERROR 0A000: cannot use subquery in check constraint` ở constraint
+  `kpi_task_templates_days_of_month_check` (Postgres không cho `SELECT...FROM unnest(...)` bên
+  trong `CHECK`). Đã sửa sang dùng array containment `days_of_month <@ ARRAY[1..31]` (literal
+  tường minh, không subquery) — không cần file migration mới, sửa trực tiếp file cũ vì lần chạy
+  trước đó lỗi giữa chừng, không để lại state nào trên DB.
+- Cả 3 migration đã chạy xong trên Supabase, người dùng xác nhận **đã test trên localhost — đạt**
+  (chưa rõ đã đi qua đủ hết 10 mục checklist chi tiết bên dưới hay chỉ test tổng quát/smoke test
+  — session sau nên hỏi lại người dùng phạm vi cụ thể đã test nếu cần xác nhận từng mục).
+
+### Chưa test tay — cần làm ở phiên sau (nếu người dùng xác nhận chưa test hết từng mục)
+
+1. ~~Chạy 3 migration theo đúng thứ tự liệt kê ở đầu mục này trên Supabase SQL Editor.~~ ĐÃ CHẠY XONG.
+2. **Mục 1**: bấm từng item trên trang chủ `/dashboard/kpi` (hoặc Bell) — xác nhận mỗi link dẫn
+   đúng tới danh sách CHỈ chứa đúng số lượng item khớp con số đã hiện, không lẫn item khác; nút
+   "Xóa lọc" trả về đúng view mặc định.
+3. **Mục 2**: hoàn thành/hủy vài công việc → xác nhận chúng biến mất khỏi "Việc của tôi" nhưng
+   xuất hiện đúng ở tab "Lịch sử"; test filter trạng thái thủ công vẫn hiện được `hoan_thanh`/
+   `huy` khi người dùng chủ động chọn.
+4. **Mục 3**: chấm điểm vài vị trí 5S → xác nhận tab "Lịch sử" của trang 5S liệt kê đúng, đúng
+   phạm vi hiển thị (user thường không thấy lịch sử của vị trí ngoài phạm vi mình).
+5. **Mục 4 (quan trọng nhất)**: người BỊ chấm nộp khiếu nại → xác nhận người CHẤM (không phải ai
+   khác) thấy nút "Đề xuất sửa kết quả" → gửi đề xuất → xác nhận `kpi_5s_evaluations.ket_qua`
+   KHÔNG đổi ngay (chỉ badge "Chờ duyệt đề xuất sửa") → đăng nhập đúng lãnh đạo phòng ban của vị
+   trí đó (hoặc admin) → thấy 2 nút "Duyệt/Từ chối đề xuất" ở `/dashboard/kpi/appeals` → Duyệt →
+   xác nhận kết quả gốc đổi đúng theo đề xuất, khiếu nại chuyển `da_giai_quyet`. Thử đăng nhập
+   lãnh đạo phòng ban KHÁC (không phải phòng ban của vị trí đó) → xác nhận KHÔNG thấy 2 nút này.
+6. **Mục 5**: cấu hình hạn chấm 1 vị trí xa hơn 48h từ hiện tại → xác nhận nút "Chấm điểm ngay"
+   không xuất hiện, banner "Chưa tới thời điểm..." hiện đúng mốc giờ sớm nhất; thử gọi thẳng RPC
+   `submitKpi5sEvaluation`/INSERT qua devtools trước mốc đó (không phải admin) → bị trigger DB
+   chặn; admin thử chấm sớm → không bị chặn.
+7. **Mục 6a**: xác nhận nhãn hạn ở mọi nơi hiện đủ "Thứ X, dd/mm/yyyy HH:MM" (không chỉ "CN,
+   17:00" như trước).
+8. **Mục 7**: tạo 1 Việc định kỳ "Ngày trong tháng" chọn 15 và 30 → xác nhận CHỈ sinh đúng 2 ngày
+   đó trong tháng test (không sinh các ngày khác).
+9. **Mục 8**: tạo 1 Việc định kỳ có "Mục tiêu số lượng" = 4 → xác nhận instance sinh ra có đúng
+   `muc_tieu_so_luong=4`, người được giao là `phan_loai='chinh'`, task chỉ Hoàn thành sau khi gắn
+   đủ 4 bằng chứng qua đúng module đã chọn.
+10. **Mục 9**: mở "Phân công thông minh" cho ĐÚNG 1 vị trí đã có sẵn người → xác nhận nút "Tạo đề
+    xuất" không còn bị khóa; xác nhận dropdown sửa tay hiện đủ nhân sự phòng ban (không chỉ người
+    đã từng làm 5S trước đó); random nhiều lần → xác nhận người "đã từng dọn/chấm" có xu hướng
+    được chọn nhiều hơn (không phải 100% luôn được chọn).
+
+## Cập nhật (cùng ngày, tiếp) — Thêm thông báo Khiếu nại cho NGƯỜI CHẤM (trước đây chỉ admin/
+lãnh đạo phòng ban có badge)
+
+Người dùng phản hồi: tab "Khiếu nại" chỉ hiện số đếm (Bell + badge trên `KpiShell`) cho
+admin/kpi.manage_config/lãnh đạo phòng ban (`getKpiAppealsPendingCount`, đếm mọi khiếu nại
+`cho_xu_ly` toàn nhà máy) — người CHẤM (bước 2 của quy trình 3 bước, mục 4 ở trên) hoàn toàn
+không có thông báo nào báo họ có khiếu nại đang chờ đề xuất sửa, phải tự nhớ vào kiểm tra.
+
+- `module-tasks.ts`: thêm `getKpiAppealsPendingForScorer(factoryId, userId)` — đếm
+  `kpi_appeals` (`trang_thai='cho_xu_ly'`) join `kpi_5s_evaluations!inner(nguoi_cham_id)` lọc
+  đúng `nguoi_cham_id = userId` (RLS `kpi_appeals_select` đã cho phép người chấm đọc appeal của
+  đúng lần chấm mình từ migration `20260819_kpi_5s_appeal_correction_workflow.sql`, và
+  `kpi_5s_evaluations` SELECT vốn đã rộng trong factory nên embed filter không bị chặn). Thêm
+  item mới `"Khiếu nại cần bạn đề xuất sửa"` (`role: "nhan"`, `tab: "appeals"`) — tự động cộng
+  vào badge đỏ trên tab "Khiếu nại" (KpiShell) và hiện ở khối "Cần bạn LÀM" trên trang chủ
+  `/dashboard/kpi`, độc lập với item `"Khiếu nại chờ xử lý"` (role `"giao"`, chỉ
+  admin/kpi.manage_config).
+- `appeals/page.tsx`: thêm luôn nút **"Đề xuất sửa kết quả"** trực tiếp trong danh sách (trước
+  đây chỉ có ở trang chi tiết vị trí 5S, người chấm phải bấm thêm 1 lần qua link "Vị trí 5S:
+  ..." mới tới được nút hành động) — hiện khi `a.trang_thai === "cho_xu_ly"` VÀ
+  `locationRef.eval.nguoi_cham_id === user.id` (không phụ thuộc `canResolve`). Tách nút "Đã giải
+  quyết"/"Từ chối" ra khỏi điều kiện `canResolve` chung ở div bọc ngoài — mỗi nút giờ tự gate
+  riêng (Đã giải quyết + Từ chối vẫn `canResolve`-only, Đề xuất sửa kết quả chỉ theo đúng người
+  chấm). Thêm `LocationEvalRef.nguoi_cham_id` (mở rộng SELECT `kpi_5s_evaluations`) + state/modal
+  `proposeTarget`/`Kpi5sResultPicker` (tái dùng `proposeKpi5sAppealCorrection` đã có sẵn trong
+  `kpi-appeals.ts`, mirror đúng modal ở `5s/location/[id]/page.tsx`). Cập nhật câu mô tả đầu
+  trang cho người không phải admin: "...hoặc khiếu nại về lần chấm điểm bạn phụ trách (đề xuất
+  sửa kết quả tại đây)".
+
+`npx tsc --noEmit`, `npx eslint` (2 file: `module-tasks.ts`, `appeals/page.tsx`), và
+`npm run build` đều sạch. Không cần migration mới (chỉ dùng RLS + bảng đã có từ migration
+`20260819_kpi_5s_appeal_correction_workflow.sql`).
+
+**Chưa test tay** — cần: người BỊ chấm nộp khiếu nại cho 1 lần chấm → đăng nhập đúng NGƯỜI CHẤM
+của lần đó → xác nhận thấy badge đỏ trên tab "Khiếu nại" (cả `KpiShell` lẫn trang chủ
+`/dashboard/kpi`, khối "Cần bạn LÀM") → vào `/dashboard/kpi/appeals` → xác nhận thấy nút "Đề
+xuất sửa kết quả" NGAY trong danh sách (không cần bấm qua trang chi tiết vị trí) → gửi đề xuất →
+xác nhận badge biến mất đúng (đổi sang `cho_duyet_sua`, không còn khớp điều kiện đếm nữa). Đăng
+nhập 1 tài khoản KHÁC không phải người chấm của lần chấm đó → xác nhận KHÔNG thấy badge này (dù
+có thể vẫn thấy dòng khiếu nại đó trong danh sách nếu họ là admin/lãnh đạo phòng ban, nhưng
+không có badge "cần bạn đề xuất sửa").
+
 ## Cập nhật 2026-08-10 — Fix hạn chấm 5S "sinh non", thêm Việc định kỳ chu kỳ N ngày, gộp tín
 hiệu 5 tab còn lại vào Bell (ĐÃ CODE XONG, CẦN CHẠY 2 MIGRATION MỚI, CHƯA TEST TAY)
 

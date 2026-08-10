@@ -7,16 +7,20 @@
 import { supabase } from "@/lib/supabase"
 import type { Kpi5sResult } from "@/lib/kpi-5s"
 
-export type KpiAppealStatus = "cho_xu_ly" | "da_giai_quyet" | "tu_choi"
+// "cho_duyet_sua" — riêng cho khiếu nại 5S: người chấm đã đề xuất kết quả sửa lại, đang chờ
+// lãnh đạo phòng ban/admin duyệt (xem proposeKpi5sAppealCorrection/decideKpi5sAppealCorrection).
+export type KpiAppealStatus = "cho_xu_ly" | "cho_duyet_sua" | "da_giai_quyet" | "tu_choi"
 
 export const KPI_APPEAL_STATUS_LABEL: Record<KpiAppealStatus, string> = {
   cho_xu_ly: "Chờ xử lý",
+  cho_duyet_sua: "Chờ duyệt đề xuất sửa",
   da_giai_quyet: "Đã giải quyết",
   tu_choi: "Từ chối",
 }
 
 export const KPI_APPEAL_STATUS_BADGE_CLASS: Record<KpiAppealStatus, string> = {
   cho_xu_ly: "bg-amber-100 text-amber-700",
+  cho_duyet_sua: "bg-sky-100 text-sky-700",
   da_giai_quyet: "bg-emerald-100 text-emerald-700",
   tu_choi: "bg-slate-200 text-slate-500",
 }
@@ -32,12 +36,16 @@ export type KpiAppeal = {
   trang_thai: KpiAppealStatus
   phan_hoi: string | null
   nguoi_xu_ly_id: string | null
+  proposed_ket_qua: Kpi5sResult | null
+  proposed_ly_do: string | null
+  proposed_by: string | null
+  proposed_at: string | null
   created_at: string
   updated_at: string
 }
 
 const APPEAL_COLS =
-  "id, factory_id, task_id, location_evaluation_id, monthly_score_id, nguoi_khieu_nai_id, noi_dung, trang_thai, phan_hoi, nguoi_xu_ly_id, created_at, updated_at"
+  "id, factory_id, task_id, location_evaluation_id, monthly_score_id, nguoi_khieu_nai_id, noi_dung, trang_thai, phan_hoi, nguoi_xu_ly_id, proposed_ket_qua, proposed_ly_do, proposed_by, proposed_at, created_at, updated_at"
 
 export function getKpiAppealErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error) return err.message
@@ -80,6 +88,39 @@ export async function createKpiAppealForLocationEvaluation(input: {
     location_evaluation_id: input.locationEvaluationId,
     nguoi_khieu_nai_id: input.nguoiKhieuNaiId,
     noi_dung: input.noiDung.trim(),
+  })
+  if (error) throw error
+}
+
+// Bước 2 của quy trình khiếu nại 5S (2026-08-19) — NGƯỜI CHẤM (đúng nguoi_cham_id của lần chấm
+// bị khiếu nại) tự đề xuất kết quả sửa lại. Chuyển khiếu nại sang 'cho_duyet_sua', CHƯA đụng
+// kpi_5s_evaluations — chỉ khi lãnh đạo phòng ban/admin duyệt (decideKpi5sAppealCorrection) mới
+// thực sự ghi đè kết quả gốc.
+export async function proposeKpi5sAppealCorrection(input: {
+  appealId: string
+  newKetQua: Kpi5sResult
+  newLyDo: string
+}): Promise<void> {
+  const { error } = await supabase.rpc("kpi_appeal_propose_correction", {
+    p_appeal_id: input.appealId,
+    p_new_ket_qua: input.newKetQua,
+    p_new_ly_do: input.newLyDo.trim() || null,
+  })
+  if (error) throw error
+}
+
+// Bước 3 — lãnh đạo phòng ban của vị trí (hoặc admin/kpi.manage_config) duyệt/từ chối đề xuất ở
+// bước 2. approve=true mới thực sự ghi đè kpi_5s_evaluations.ket_qua/ly_do; false chỉ đóng
+// khiếu nại "Từ chối", giữ nguyên kết quả gốc.
+export async function decideKpi5sAppealCorrection(input: {
+  appealId: string
+  approve: boolean
+  ghiChu: string
+}): Promise<void> {
+  const { error } = await supabase.rpc("kpi_appeal_decide_correction", {
+    p_appeal_id: input.appealId,
+    p_approve: input.approve,
+    p_ghi_chu: input.ghiChu.trim() || null,
   })
   if (error) throw error
 }

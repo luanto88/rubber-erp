@@ -52,14 +52,19 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
   const [cadenceType, setCadenceType] = useState<KpiTaskCadenceType>(editing?.cadence_type || "weekday")
   const [intervalDays, setIntervalDays] = useState(String(editing?.interval_days ?? 2))
   const [anchorDate, setAnchorDate] = useState(editing?.anchor_date || getTodayISODate())
+  const [daysOfMonth, setDaysOfMonth] = useState<number[]>(editing?.days_of_month || [])
   const [gioHan, setGioHan] = useState((editing?.gio_han || "17:00:00").slice(0, 5))
   const [yeuCau, setYeuCau] = useState<KpiReportRequirement[]>(editing?.yeu_cau_bao_cao || [])
+  const [mucTieuSoLuong, setMucTieuSoLuong] = useState(editing?.muc_tieu_so_luong != null ? String(editing.muc_tieu_so_luong) : "")
   const [isActive, setIsActive] = useState(editing?.is_active ?? true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const toggleWeekday = (d: number) => {
     setWeekdays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)))
+  }
+  const toggleDayOfMonth = (d: number) => {
+    setDaysOfMonth((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)))
   }
 
   // Đổi phòng ban → tải lại ứng viên đúng phòng ban đó; gỡ người nhận đã chọn nếu không còn
@@ -90,6 +95,11 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
       if (!Number(intervalDays) || Number(intervalDays) < 1) { setError("Vui lòng nhập số ngày lặp lại hợp lệ (tối thiểu 1)."); return }
       if (!anchorDate) { setError("Vui lòng chọn Ngày bắt đầu chu kỳ."); return }
     }
+    if (cadenceType === "day_of_month" && daysOfMonth.length === 0) { setError("Vui lòng chọn ít nhất 1 ngày trong tháng."); return }
+    if (mucTieuSoLuong.trim() && (!Number(mucTieuSoLuong) || Number(mucTieuSoLuong) < 1)) {
+      setError("Mục tiêu số lượng phải là số nguyên dương, hoặc để trống nếu không cần.")
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -104,9 +114,11 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
         cadenceType,
         intervalDays: cadenceType === "interval" ? Number(intervalDays) : null,
         anchorDate: cadenceType === "interval" ? anchorDate : null,
+        daysOfMonth: cadenceType === "day_of_month" ? daysOfMonth : [],
         gioHan: `${gioHan}:00`,
         yeuCauBaoCao: yeuCau,
         isActive,
+        mucTieuSoLuong: mucTieuSoLuong.trim() ? Number(mucTieuSoLuong) : null,
       }
       if (editing) {
         await updateKpiTaskTemplate(editing.id, payload)
@@ -257,9 +269,44 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
             >
               Theo chu kỳ N ngày
             </button>
+            <button
+              type="button"
+              onClick={() => setCadenceType("day_of_month")}
+              className={
+                "flex-1 rounded-xl border px-3 py-2 text-xs font-bold transition-colors " +
+                (cadenceType === "day_of_month" ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+              }
+            >
+              Ngày trong tháng
+            </button>
           </div>
 
-          {cadenceType === "weekday" ? (
+          {cadenceType === "day_of_month" ? (
+            <>
+              <div className="mt-2 grid grid-cols-7 gap-1">
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => {
+                  const checked = daysOfMonth.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleDayOfMonth(d)}
+                      className={
+                        "rounded-lg border py-1.5 text-xs font-bold transition-colors " +
+                        (checked ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      {d}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Vd chọn 15 và 30 = việc lặp lại đúng ngày 15 và 30 hàng tháng (VD &quot;Dọn dẹp căn
+                tin&quot;) — tháng thiếu ngày 30/31 sẽ tự bỏ qua ngày đó trong tháng.
+              </p>
+            </>
+          ) : cadenceType === "weekday" ? (
             <>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {KPI_WEEKDAY_OPTIONS.map((d) => {
@@ -330,6 +377,23 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4 accent-violet-600" />
             Đang áp dụng
           </label>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Mục tiêu số lượng chung (tuỳ chọn)</label>
+          <input
+            type="number"
+            min={1}
+            value={mucTieuSoLuong}
+            onChange={(e) => setMucTieuSoLuong(e.target.value)}
+            placeholder="VD: 4 (đo 4 mẫu/ngày)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Để trống nếu việc chỉ cần 1 hành động là xong. Có giá trị → người được giao là
+            &quot;chính&quot;, việc chỉ Hoàn thành khi đã gắn đủ N bằng chứng (qua &quot;Gắn bằng
+            chứng&quot; ở đúng module liên quan) — mỗi lần sinh việc mới đều mang theo mục tiêu này.
+          </p>
         </div>
 
         <div>

@@ -28,6 +28,7 @@ import {
   type Kpi5sLocation,
 } from "@/lib/kpi-5s"
 import { fetchPendingSubstitutionsForApprover } from "@/lib/kpi-templates"
+import { KPI_TASK_HIGHLIGHT_LABEL } from "@/lib/kpi-tasks"
 
 export type ModuleTaskItem = {
   label: string
@@ -388,6 +389,22 @@ async function getKpiAppealsPendingCount(factoryId: string): Promise<number> {
   return count || 0
 }
 
+// Khiếu nại 5S đang chờ NGƯỜI CHẤM đề xuất sửa kết quả (bước 2 của quy trình 3 bước, xem
+// 20260819_kpi_5s_appeal_correction_workflow.sql) — trước đây CHỈ admin/trưởng phòng ban có
+// thông báo (getKpiAppealsPendingCount ở trên), người chấm hoàn toàn không biết có khiếu nại
+// đang chờ chính mình xử lý (phản hồi người dùng). RLS kpi_appeals_select đã cho phép người chấm
+// đọc appeal của đúng lần chấm mình, và kpi_5s_evaluations SELECT rộng trong factory nên embed
+// filter dưới đây không bị chặn.
+async function getKpiAppealsPendingForScorer(factoryId: string, userId: string): Promise<number> {
+  const { count } = await supabase
+    .from("kpi_appeals")
+    .select("id, kpi_5s_evaluations!inner(nguoi_cham_id)", { count: "exact", head: true })
+    .eq("factory_id", factoryId)
+    .eq("trang_thai", "cho_xu_ly")
+    .eq("kpi_5s_evaluations.nguoi_cham_id", userId)
+  return count || 0
+}
+
 // ── Công việc & KPI ──────────────────────────────────────────────────────────
 // Chỉ tính trên các task còn "sống" (chưa hoàn thành/hủy) — bảng kpi_tasks không có khả
 // năng vượt 1000 dòng ở phạm vi "đang mở" của 1 nhà máy nên không cần phân trang thêm.
@@ -401,7 +418,7 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
   const soonCutoffMs = nowMs + 24 * 3600_000
   const canResolveAppeals = isAdmin || hasPermission(user, "kpi.manage_config")
 
-  const [{ data: memberRows }, { data: taskRows }, { count: transferCount }, kpi5sDue, pendingSubs, appealsPendingCount] = await Promise.all([
+  const [{ data: memberRows }, { data: taskRows }, { count: transferCount }, kpi5sDue, pendingSubs, appealsPendingCount, appealsPendingForScorer] = await Promise.all([
     supabase.from("kpi_task_members").select("task_id").eq("user_id", user.id).eq("is_active", true),
     supabase
       .from("kpi_tasks")
@@ -421,6 +438,7 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
     getKpi5sDueCounts(factoryId, user.id),
     fetchPendingSubstitutionsForApprover(user.id, factoryId),
     canResolveAppeals ? getKpiAppealsPendingCount(factoryId) : Promise.resolve(0),
+    getKpiAppealsPendingForScorer(factoryId, user.id),
   ])
 
   const myActiveTaskIds = new Set((memberRows || []).map((r: { task_id: string }) => r.task_id))
@@ -461,24 +479,20 @@ export async function getKpiTasks(factoryId: string, user: SessionUser): Promise
     }
   }
 
-  // approvalCount gồm cả task admin không phải nguoi_giao_id (admin thấy toàn bộ hàng chờ
-  // duyệt) — link phải trỏ tab "all" cho admin, nếu không bấm vào tab "mine" sẽ không thấy
-  // đúng việc đó (task đó không thuộc "của họ" theo nghĩa thành viên/người giao).
-  const approvalLink = isAdmin ? "/dashboard/kpi/tasks?tab=all" : "/dashboard/kpi/tasks?tab=mine"
-
   return {
     moduleLabel: "Công việc & KPI",
     items: [
-      { label: "Việc cần cập nhật/nộp", count: pendingCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
-      { label: "Việc của bạn sắp đến hạn (24h)", count: dueSoonMineCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
-      { label: "Việc của bạn đã quá hạn", count: overdueMineCount, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
-      { label: "Lời mời chuyển giao chờ phản hồi", count: transferCount || 0, link: "/dashboard/kpi/tasks?tab=mine", role: "nhan", tab: "tasks" },
-      { label: "Vị trí 5S đã quá hạn", count: kpi5sDue.overdue, link: "/dashboard/kpi/5s", role: "nhan", tab: "5s" },
-      { label: "Vị trí 5S sắp đến hạn (24h)", count: kpi5sDue.dueSoon, link: "/dashboard/kpi/5s", role: "nhan", tab: "5s" },
-      { label: "Việc chờ nghiệm thu", count: approvalCount, link: approvalLink, role: "giao", tab: "tasks" },
-      { label: "Việc bạn giao đã quá hạn", count: overdueGivenCount, link: "/dashboard/kpi/tasks?tab=mine", role: "giao", tab: "tasks" },
-      { label: "Việc bạn giao sắp đến hạn (24h)", count: dueSoonGivenCount, link: "/dashboard/kpi/tasks?tab=mine", role: "giao", tab: "tasks" },
-      { label: "Đăng ký thay thế chờ bạn duyệt", count: pendingSubs.length, link: "/dashboard/kpi/templates", role: "giao", tab: "templates" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.pendingMine, count: pendingCount, link: "/dashboard/kpi/tasks?highlight=pendingMine", role: "nhan", tab: "tasks" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.dueSoonMine, count: dueSoonMineCount, link: "/dashboard/kpi/tasks?highlight=dueSoonMine", role: "nhan", tab: "tasks" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.overdueMine, count: overdueMineCount, link: "/dashboard/kpi/tasks?highlight=overdueMine", role: "nhan", tab: "tasks" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.transferMine, count: transferCount || 0, link: "/dashboard/kpi/tasks?highlight=transferMine", role: "nhan", tab: "tasks" },
+      { label: "Vị trí 5S đã quá hạn", count: kpi5sDue.overdue, link: "/dashboard/kpi/5s?highlight=overdue", role: "nhan", tab: "5s" },
+      { label: "Vị trí 5S sắp đến hạn (24h)", count: kpi5sDue.dueSoon, link: "/dashboard/kpi/5s?highlight=dueSoon", role: "nhan", tab: "5s" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.approval, count: approvalCount, link: "/dashboard/kpi/tasks?highlight=approval", role: "giao", tab: "tasks" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.overdueGiven, count: overdueGivenCount, link: "/dashboard/kpi/tasks?highlight=overdueGiven", role: "giao", tab: "tasks" },
+      { label: KPI_TASK_HIGHLIGHT_LABEL.dueSoonGiven, count: dueSoonGivenCount, link: "/dashboard/kpi/tasks?highlight=dueSoonGiven", role: "giao", tab: "tasks" },
+      { label: "Đăng ký thay thế chờ bạn duyệt", count: pendingSubs.length, link: "/dashboard/kpi/templates?tab=substitutions", role: "giao", tab: "templates" },
+      { label: "Khiếu nại cần bạn đề xuất sửa", count: appealsPendingForScorer, link: "/dashboard/kpi/appeals", role: "nhan", tab: "appeals" },
       { label: "Khiếu nại chờ xử lý", count: appealsPendingCount, link: "/dashboard/kpi/appeals", role: "giao", tab: "appeals" },
     ],
   }

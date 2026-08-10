@@ -13,11 +13,13 @@ import {
   ArrowLeft,
   Bell,
   CheckCircle2,
+  Clock,
   Flag,
   Loader2,
   MapPin,
   Pencil,
   Printer,
+  ThumbsUp,
   Users,
 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -32,10 +34,12 @@ import {
   fetchKpi5sEvaluations,
   fetchKpi5sLocation,
   fetchLocationCleaners,
-  formatKpi5sDeadlineLabel,
+  formatKpi5sEarliestAllowedLabel,
+  formatKpi5sNextDeadlineLabel,
   getKpi5sErrorMessage,
   isKpi5sDeadlineDueSoon,
   isKpi5sDeadlineOverdue,
+  isKpi5sTooEarlyToScore,
   KPI_5S_RESULT_BADGE_CLASS,
   KPI_5S_RESULT_LABEL,
   submitKpi5sEvaluation,
@@ -45,8 +49,15 @@ import {
 } from "@/lib/kpi-5s"
 import { downloadKpi5sLocationBulkQrPdf } from "@/lib/kpi-5s-pdf"
 import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
-import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
-import { correctKpi5sEvaluationDirect, createKpiAppealForLocationEvaluation, getKpiAppealErrorMessage } from "@/lib/kpi-appeals"
+import {
+  correctKpi5sEvaluationDirect,
+  createKpiAppealForLocationEvaluation,
+  fetchKpiAppeals,
+  getKpiAppealErrorMessage,
+  proposeKpi5sAppealCorrection,
+  KPI_APPEAL_STATUS_LABEL,
+  type KpiAppeal,
+} from "@/lib/kpi-appeals"
 import { sendKpiNotify } from "@/lib/kpi-notify"
 import { Kpi5sImagePicker } from "../../_components/kpi-5s-image-picker"
 
@@ -90,6 +101,16 @@ export default function Kpi5sLocationDetailPage() {
   const [correctSaving, setCorrectSaving] = useState(false)
   const [correctError, setCorrectError] = useState("")
 
+  // Bước 2 (2026-08-19) — NGƯỜI CHẤM tự đề xuất kết quả sửa lại cho lần chấm đang bị khiếu nại
+  // (khác hẳn "Sửa kết quả" ở trên — đó là admin sửa NGAY không cần duyệt). Đề xuất phải chờ
+  // lãnh đạo phòng ban/admin duyệt ở trang Khiếu nại mới thực sự ghi đè kết quả.
+  const [appeals, setAppeals] = useState<KpiAppeal[]>([])
+  const [proposeTarget, setProposeTarget] = useState<{ eval: Kpi5sEvaluation; appeal: KpiAppeal } | null>(null)
+  const [proposeKetQua, setProposeKetQua] = useState<Kpi5sResult>("dat")
+  const [proposeLyDo, setProposeLyDo] = useState("")
+  const [proposeSaving, setProposeSaving] = useState(false)
+  const [proposeError, setProposeError] = useState("")
+
   useEffect(() => {
     const bootstrap = async () => {
       const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
@@ -116,16 +137,19 @@ export default function Kpi5sLocationDetailPage() {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [locationRow, evalRows, candidateData, cleanerRows] = await Promise.all([
+      const [locationRow, evalRows, candidateData, cleanerRows, appealRows] = await Promise.all([
         fetchKpi5sLocation(locationId),
         fetchKpi5sEvaluations(locationId),
         loadKpiTaskCandidates(fid),
         fetchLocationCleaners(locationId),
+        fetchKpiAppeals(fid),
       ])
       setLocation(locationRow)
       setEvaluations(evalRows)
       setCandidates(candidateData.people)
       setCleanerIds(cleanerRows)
+      const evalIds = new Set(evalRows.map((e) => e.id))
+      setAppeals(appealRows.filter((a) => a.location_evaluation_id && evalIds.has(a.location_evaluation_id)))
     } catch (err) {
       setDataError(getKpi5sErrorMessage(err, "Không tải được dữ liệu vị trí."))
     } finally {
@@ -149,16 +173,32 @@ export default function Kpi5sLocationDetailPage() {
     () => evaluations.find((e) => e.tuan_bat_dau === currentWeekStart) || null,
     [evaluations, currentWeekStart],
   )
-  const canEvaluateThisWeek = !!location?.is_active && user?.id === location?.nguoi_cham_id && !currentWeekEvaluation
   const isAdmin = user?.role === "admin"
 
   const deadline = useMemo(() => (location ? computeKpi5sNextDeadline(location) : null), [location])
   const hasEvaluatedThisWeek = !!currentWeekEvaluation
   const overdue = isKpi5sDeadlineOverdue(deadline, hasEvaluatedThisWeek)
   const dueSoon = isKpi5sDeadlineDueSoon(deadline, hasEvaluatedThisWeek)
-  // Nhãn "Thứ X, HH:MM" hiển thị ngay cạnh QR (kể cả khi tuần này đã chấm xong) — khác badge
-  // cảnh báo quá hạn/sắp hạn phía trên vốn chỉ hiện khi CHƯA chấm tuần này.
-  const deadlineLabel = location ? formatKpi5sDeadlineLabel(location) : null
+  // Chặn chấm quá sớm (2026-08-19) — bản mirror client của trigger DB
+  // (kpi_5s_prevent_early_score), chỉ để hiện UI disable/thông báo sớm; admin không bị chặn ở
+  // đây vì trigger DB đã tự bypass cho admin, chặn ở UI cho admin chỉ gây khó chịu không cần thiết.
+  const tooEarly = !isAdmin && isKpi5sTooEarlyToScore(deadline)
+  const canEvaluateThisWeek = !!location?.is_active && user?.id === location?.nguoi_cham_id && !currentWeekEvaluation && !tooEarly
+  // Nhãn "Thứ X, dd/mm/yyyy HH:MM" hiển thị ngay cạnh QR (kể cả khi tuần này đã chấm xong) — khác
+  // badge cảnh báo quá hạn/sắp hạn phía trên vốn chỉ hiện khi CHƯA chấm tuần này.
+  const deadlineLabel = location ? formatKpi5sNextDeadlineLabel(location) : null
+
+  // Đề xuất sửa kết quả đang MỞ (cho_xu_ly hoặc cho_duyet_sua) của mỗi lần chấm — mới nhất trước.
+  const openAppealByEval = useMemo(() => {
+    const map = new Map<string, KpiAppeal>()
+    for (const a of appeals) {
+      if (!a.location_evaluation_id) continue
+      if (a.trang_thai !== "cho_xu_ly" && a.trang_thai !== "cho_duyet_sua") continue
+      const existing = map.get(a.location_evaluation_id)
+      if (!existing || a.created_at > existing.created_at) map.set(a.location_evaluation_id, a)
+    }
+    return map
+  }, [appeals])
 
   // Đội ngũ dọn dẹp thực tế (Fix 4/5a) — ưu tiên bảng multi-select mới, fallback về
   // nguoi_don_id đơn nếu vị trí chưa từng được gán qua bảng mới. Khóa dropdown "chấm điểm" và
@@ -297,6 +337,47 @@ export default function Kpi5sLocationDetailPage() {
     }
   }
 
+  const openPropose = (e: Kpi5sEvaluation, appeal: KpiAppeal) => {
+    setProposeTarget({ eval: e, appeal })
+    setProposeKetQua(e.ket_qua)
+    setProposeLyDo(e.ly_do || "")
+    setProposeError("")
+  }
+
+  const handleSavePropose = async () => {
+    if (!proposeTarget) return
+    if (proposeKetQua !== "dat" && !proposeLyDo.trim()) {
+      setProposeError(`Vui lòng nhập lý do khi kết quả đề xuất là ${KPI_5S_RESULT_LABEL[proposeKetQua]}.`)
+      return
+    }
+    setProposeSaving(true)
+    setProposeError("")
+    try {
+      await proposeKpi5sAppealCorrection({
+        appealId: proposeTarget.appeal.id,
+        newKetQua: proposeKetQua,
+        newLyDo: proposeLyDo,
+      })
+      if (factoryId && location) {
+        sendKpiNotify({
+          factoryId,
+          title: "Đề xuất sửa kết quả 5S — chờ duyệt",
+          lines: [
+            `🧹 Vị trí: ${location.ma_vi_tri} — ${location.ten_vi_tri}`,
+            `📅 Tuần ${formatWeekRangeLabel(proposeTarget.eval.tuan_bat_dau)} · Đề xuất: ${KPI_5S_RESULT_LABEL[proposeKetQua]}`,
+          ],
+          link: "/dashboard/kpi/appeals",
+        })
+      }
+      setProposeTarget(null)
+      if (factoryId) void loadData(factoryId)
+    } catch (err) {
+      setProposeError(getKpiAppealErrorMessage(err, "Không gửi được đề xuất sửa kết quả."))
+    } finally {
+      setProposeSaving(false)
+    }
+  }
+
   // Nút "Nhắc nhở" thủ công — chỉ Telegram, không có cơ chế tự động (repo không có hạ tầng
   // cron). Khoá tạm 45s sau khi bấm (chỉ state cục bộ, không ghi DB) để tránh gửi trùng.
   const [remindCooldown, setRemindCooldown] = useState(false)
@@ -363,7 +444,7 @@ export default function Kpi5sLocationDetailPage() {
                       }`}
                     >
                       {(overdue || dueSoon) && <AlertTriangle size={11} />}
-                      {overdue ? "Quá hạn — " : ""}Hạn: {KPI_WEEKDAY_LABEL[location!.deadline_weekdays![0]]}, {location!.deadline_time!.slice(0, 5)}
+                      {overdue ? "Quá hạn — " : ""}Hạn: {formatKpi5sNextDeadlineLabel(location)}
                     </span>
                   )}
                 </div>
@@ -437,6 +518,13 @@ export default function Kpi5sLocationDetailPage() {
               </div>
             )}
 
+            {location.is_active && user?.id === location.nguoi_cham_id && !currentWeekEvaluation && tooEarly && deadline && (
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+                <Clock size={16} className="shrink-0 text-slate-400" />
+                Chưa tới thời điểm được chấm điểm — hạn chấm là <strong>{formatKpi5sNextDeadlineLabel(location)}</strong>,
+                có thể chấm từ <strong>{formatKpi5sEarliestAllowedLabel(deadline)}</strong>.
+              </div>
+            )}
             {!location.is_active && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-500">
                 Vị trí đang tạm ngưng — không thể chấm điểm.
@@ -564,24 +652,42 @@ export default function Kpi5sLocationDetailPage() {
                           </div>
                         )}
                       </div>
-                      <div className="shrink-0 flex items-center gap-1.5">
-                        {/* Bug 1 fix: chỉ người BỊ chấm (nguoi_don_id) mới khiếu nại — người chấm
-                            không được khiếu nại về chính lần chấm do họ tạo ra. */}
-                        {!!user && user.id === e.nguoi_don_id && (
-                          <button
-                            onClick={() => openAppeal(e)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-[11px] font-bold text-slate-500"
-                          >
-                            <Flag size={11} /> Khiếu nại
-                          </button>
-                        )}
-                        {canCorrectResult && (
-                          <button
-                            onClick={() => openCorrect(e)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-violet-50 hover:text-violet-600 text-[11px] font-bold text-slate-500"
-                          >
-                            <Pencil size={11} /> Sửa kết quả
-                          </button>
+                      <div className="shrink-0 flex flex-col items-end gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {/* Bug 1 fix: chỉ người BỊ chấm (nguoi_don_id) mới khiếu nại — người
+                              chấm không được khiếu nại về chính lần chấm do họ tạo ra. Không cho
+                              khiếu nại thêm khi đã có 1 đề xuất đang mở cho đúng lần chấm này. */}
+                          {!!user && user.id === e.nguoi_don_id && !openAppealByEval.has(e.id) && (
+                            <button
+                              onClick={() => openAppeal(e)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-[11px] font-bold text-slate-500"
+                            >
+                              <Flag size={11} /> Khiếu nại
+                            </button>
+                          )}
+                          {/* Bước 2 (2026-08-19) — người chấm tự đề xuất sửa kết quả cho lần
+                              chấm đang bị khiếu nại 'cho_xu_ly'. */}
+                          {!!user && user.id === e.nguoi_cham_id && openAppealByEval.get(e.id)?.trang_thai === "cho_xu_ly" && (
+                            <button
+                              onClick={() => openPropose(e, openAppealByEval.get(e.id)!)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-[11px] font-bold text-sky-700"
+                            >
+                              <ThumbsUp size={11} /> Đề xuất sửa kết quả
+                            </button>
+                          )}
+                          {canCorrectResult && (
+                            <button
+                              onClick={() => openCorrect(e)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-violet-50 hover:text-violet-600 text-[11px] font-bold text-slate-500"
+                            >
+                              <Pencil size={11} /> Sửa kết quả
+                            </button>
+                          )}
+                        </div>
+                        {openAppealByEval.has(e.id) && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700">
+                            {KPI_APPEAL_STATUS_LABEL[openAppealByEval.get(e.id)!.trang_thai]}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -688,6 +794,44 @@ export default function Kpi5sLocationDetailPage() {
               />
             </div>
             {correctError && <div className="text-xs font-semibold text-red-600">{correctError}</div>}
+          </div>
+        </ModalShell>
+      )}
+
+      {proposeTarget && (
+        <ModalShell
+          title="Đề xuất sửa kết quả"
+          onClose={() => setProposeTarget(null)}
+          maxWidth="md"
+          footer={
+            <>
+              <button onClick={() => setProposeTarget(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Hủy
+              </button>
+              <button
+                onClick={() => void handleSavePropose()}
+                disabled={proposeSaving}
+                className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md disabled:opacity-60"
+              >
+                {proposeSaving ? "Đang gửi..." : "Gửi đề xuất — chờ duyệt"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Tuần {formatWeekRangeLabel(proposeTarget.eval.tuan_bat_dau)} — kết quả gốc:{" "}
+              <strong>{KPI_5S_RESULT_LABEL[proposeTarget.eval.ket_qua]}</strong>. Đề xuất này CHƯA có hiệu lực ngay —
+              lãnh đạo phòng ban (hoặc admin) sẽ duyệt/từ chối tại mục &quot;Khiếu nại&quot;.
+            </p>
+            <Kpi5sResultPicker
+              ketQua={proposeKetQua}
+              onKetQuaChange={setProposeKetQua}
+              lyDo={proposeLyDo}
+              onLyDoChange={setProposeLyDo}
+              disabled={proposeSaving}
+            />
+            {proposeError && <div className="text-xs font-semibold text-red-600">{proposeError}</div>}
           </div>
         </ModalShell>
       )}

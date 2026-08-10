@@ -18,16 +18,19 @@
 //
 // Cập nhật 2026-07-29 (fix bug thật — "chọn rất nhiều nhân sự không liên quan"): trước đây pool
 // hoàn toàn KHÔNG lọc theo Phòng ban (`kpi_5s_locations.phong_ban_id`) dù vị trí đã có trường
-// này — chỉ lọc theo "Khu vực" (tùy chọn, thường bỏ trống). Đã thêm 2 tầng lọc MỚI, áp dụng
-// TRƯỚC tầng "Khu vực" hiện có, mỗi tầng có cờ nới lỏng riêng (khớp quyết định đã chốt với người
-// dùng: "Phòng ban + chỉ người đã từng dọn/chấm"):
-//   1. `deptPoolRelaxed` — lọc theo Phòng ban của vị trí (deptUserIdsByDept, không nới lỏng: nếu
-//      vị trí có phong_ban_id và có mapping, BẮT BUỘC chỉ chọn trong số nhân sự phòng ban đó —
-//      đây chính là fix chính cho bug).
-//   2. `establishedRelaxed` — trong số đã lọc theo phòng ban, ưu tiên CHỈ những người ĐANG là
-//      người dọn/chấm ở BẤT KỲ vị trí nào khác (established5sUserIds) — tự động nới lỏng về pool
-//      phòng ban thuần túy nếu phòng ban đó chưa từng có ai được gán 5S (tránh pool rỗng vĩnh
-//      viễn khi mới thiết lập phòng ban).
+// này — chỉ lọc theo "Khu vực" (tùy chọn, thường bỏ trống). Đã thêm tầng lọc MỚI theo Phòng ban,
+// áp dụng TRƯỚC tầng "Khu vực" hiện có:
+//   `deptPoolRelaxed` — lọc theo Phòng ban của vị trí (deptUserIdsByDept, không nới lỏng: nếu
+//   vị trí có phong_ban_id và có mapping, BẮT BUỘC chỉ chọn trong số nhân sự phòng ban đó — đây
+//   chính là fix chính cho bug).
+//
+// Cập nhật 2026-08-19 (theo phản hồi người dùng — dropdown sửa tay quá hẹp): "đã từng dọn/chấm"
+// (established5sUserIds) KHÔNG CÒN là một tầng lọc cứng nữa — trước đây nó thu hẹp
+// `eligibleUserIds` (dùng để giới hạn dropdown sửa tay trong modal) xuống chỉ còn người đã từng
+// giữ vai trò 5S, khiến dropdown "gần như trống" với phòng ban mới. Giờ nó chỉ còn là TRỌNG SỐ ƯU
+// TIÊN khi random (ESTABLISHED_WEIGHT_BOOST) — dropdown (`eligibleUserIds`) luôn hiển thị TOÀN BỘ
+// nhân sự đủ điều kiện theo Phòng ban + Khu vực, việc random vẫn có xu hướng ưu tiên người đã có
+// kinh nghiệm nhưng không loại hẳn người mới.
 
 export type AutoAssignCandidate = { userId: string; ten: string; primaryGroupId: string | null; zoneIds: string[] }
 export type AutoAssignLocationInput = {
@@ -46,12 +49,19 @@ export type AutoAssignSuggestion = {
   groupConstraintRelaxed: boolean
   zonePoolRelaxed: boolean
   deptPoolRelaxed: boolean
-  establishedRelaxed: boolean
-  // Danh sách ứng viên cuối cùng đã dùng để random cho vị trí này (sau mọi tầng lọc/nới lỏng) —
-  // dùng để giới hạn luôn dropdown sửa tay trong modal, tránh chọn tay ra người "không liên quan"
-  // mà thuật toán vừa cố loại bỏ.
+  // true = trong pool cuối cùng (đã lọc Phòng ban + Khu vực) không có ai từng giữ vai trò 5S
+  // (dọn/chấm) trước đây — random hoàn toàn ngẫu nhiên, không có ai được ưu tiên trọng số. KHÔNG
+  // còn ý nghĩa "đã nới lỏng bộ lọc" như trước 2026-08-19 (established không còn là bộ lọc).
+  noEstablishedCandidate: boolean
+  // Danh sách ứng viên cuối cùng đã dùng để random cho vị trí này (sau lọc Phòng ban + Khu vực,
+  // KHÔNG thu hẹp thêm theo "đã từng dọn/chấm") — dùng cho dropdown sửa tay trong modal, luôn
+  // hiển thị đủ nhân sự đúng phòng ban/khu vực, không loại người mới chưa từng làm 5S.
   eligibleUserIds: string[]
 }
+
+// Hệ số ưu tiên khi random cho ứng viên "đã từng dọn/chấm 5S" — không loại hẳn người khác, chỉ
+// tăng xác suất được chọn (xem weightedPick).
+const ESTABLISHED_WEIGHT_BOOST = 4
 
 /** Union userId đang là người dọn (kpi_5s_location_cleaners, fallback nguoi_don_id khi vị trí
  *  chưa có dòng multi-cleaner nào) HOẶC người chấm (nguoi_cham_id) của BẤT KỲ vị trí nào trong
@@ -73,10 +83,14 @@ function weightedPick(
   pool: AutoAssignCandidate[],
   loadByUser: Map<string, number>,
   exclude: Set<string>,
+  preferredIds?: Set<string>,
 ): AutoAssignCandidate | null {
   const candidates = pool.filter((p) => !exclude.has(p.userId))
   if (candidates.length === 0) return null
-  const weights = candidates.map((c) => 1 / ((loadByUser.get(c.userId) || 0) + 1))
+  const weights = candidates.map((c) => {
+    const base = 1 / ((loadByUser.get(c.userId) || 0) + 1)
+    return preferredIds?.has(c.userId) ? base * ESTABLISHED_WEIGHT_BOOST : base
+  })
   const total = weights.reduce((a, b) => a + b, 0)
   let r = Math.random() * total
   for (let i = 0; i < candidates.length; i++) {
@@ -133,28 +147,24 @@ export function buildAutoAssignSuggestions(
       deptPoolRelaxed = true // có phòng ban nhưng chưa tra được mapping — không lọc được, ghi nhận để cảnh báo
     }
 
-    // Tầng 2 — "Đã từng dọn/chấm" (mềm, tự nới lỏng về deptPool nếu phòng ban chưa từng gán ai).
-    let establishedPool = deptPool
-    let establishedRelaxed = false
-    if (opts.establishedUserIds) {
-      const filtered = deptPool.filter((p) => opts.establishedUserIds!.has(p.userId))
-      if (filtered.length >= 2) establishedPool = filtered
-      else establishedRelaxed = true
-    }
-
-    // Tầng 3 — Khu vực (hiện có từ trước) — cần ít nhất 2 người mới đủ để phân biệt người dọn/
-    // người chấm; không đủ thì nới lỏng về pool đã lọc ở 2 tầng trên.
-    let zonePool = establishedPool
+    // Tầng 2 — Khu vực (hiện có từ trước) — cần ít nhất 2 người mới đủ để phân biệt người dọn/
+    // người chấm; không đủ thì nới lỏng về deptPool.
+    let zonePool = deptPool
     let zonePoolRelaxed = false
     if (loc.zone_id) {
-      const filtered = establishedPool.filter((p) => p.zoneIds.includes(loc.zone_id!))
+      const filtered = deptPool.filter((p) => p.zoneIds.includes(loc.zone_id!))
       if (filtered.length >= 2) zonePool = filtered
       else zonePoolRelaxed = true
     }
 
+    // "Đã từng dọn/chấm" giờ chỉ là TRỌNG SỐ ưu tiên khi random (weightedPick), KHÔNG còn thu hẹp
+    // pool — eligibleUserIds (dropdown) luôn là toàn bộ zonePool.
+    const preferredIds = opts.establishedUserIds
+    const noEstablishedCandidate = !preferredIds || !zonePool.some((p) => preferredIds.has(p.userId))
+
     let donId = keepDon ? loc.nguoi_don_id : null
     if (!donId) {
-      const picked = weightedPick(zonePool, loadByUser, new Set())
+      const picked = weightedPick(zonePool, loadByUser, new Set(), preferredIds)
       donId = picked?.userId || null
       if (donId) loadByUser.set(donId, (loadByUser.get(donId) || 0) + 1)
     }
@@ -170,7 +180,7 @@ export function buildAutoAssignSuggestions(
         if (filtered.length > 0) pool = filtered
         else groupConstraintRelaxed = true
       }
-      const picked = weightedPick(pool, loadByUser, exclude)
+      const picked = weightedPick(pool, loadByUser, exclude, preferredIds)
       chamId = picked?.userId || null
       if (chamId) loadByUser.set(chamId, (loadByUser.get(chamId) || 0) + 1)
     }
@@ -184,7 +194,7 @@ export function buildAutoAssignSuggestions(
       groupConstraintRelaxed,
       zonePoolRelaxed,
       deptPoolRelaxed,
-      establishedRelaxed,
+      noEstablishedCandidate,
       eligibleUserIds,
     })
   }

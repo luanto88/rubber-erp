@@ -26,12 +26,15 @@ import {
   daysOverdue,
   isTaskDueSoon,
   isTaskOverdue,
+  matchesKpiTaskHighlight,
   KPI_STATUS_BADGE_CLASS,
   KPI_STATUS_LABEL,
+  KPI_TASK_HIGHLIGHT_LABEL,
   loadKpiTaskCandidates,
   type KpiTask,
   type KpiTaskCandidate,
   type KpiTaskCandidateGroup,
+  type KpiTaskHighlight,
   type KpiTaskMember,
   type KpiTaskStatus,
 } from "@/lib/kpi-tasks"
@@ -69,7 +72,15 @@ export default function KpiTasksPage() {
   // "Giao việc mới" (field "Vị trí 5S liên quan" cho việc đột xuất 5S).
   const [kpi5sLocations, setKpi5sLocations] = useState<Kpi5sLocation[]>([])
 
-  const [tab, setTab] = useState<"today" | "mine" | "all">(() => (searchParams.get("tab") === "all" ? "all" : searchParams.get("tab") === "mine" ? "mine" : "today"))
+  const [tab, setTab] = useState<"today" | "mine" | "all" | "history">(() =>
+    searchParams.get("tab") === "all" ? "all" : searchParams.get("tab") === "mine" ? "mine" : "today",
+  )
+  // "Highlight" — bấm 1 mục ở Bell/trang chủ KPI (vd "Việc sắp hết hạn (2)") phải lọc ĐÚNG danh
+  // sách mục đó, không rơi về "Việc của tôi" chung chung (bug thật 2026-08-19). Có mặt = ghi đè
+  // hoàn toàn hiển thị theo tab, không kết hợp với today/mine/all.
+  const highlightParam = searchParams.get("highlight")
+  const highlight: KpiTaskHighlight | null =
+    highlightParam && highlightParam in KPI_TASK_HIGHLIGHT_LABEL ? (highlightParam as KpiTaskHighlight) : null
   const [view, setView] = useState<"list" | "calendar">("list")
   const [statusFilter, setStatusFilter] = useState<KpiTaskStatus[]>([])
   const [showCreate, setShowCreate] = useState(false)
@@ -200,9 +211,20 @@ export default function KpiTasksPage() {
     return map
   }, [members])
 
-  const myTasks = useMemo(
+  const myTasksAll = useMemo(
     () => tasks.filter((t) => t.nguoi_giao_id === user?.id || myActiveTaskIds.has(t.id) || pendingIncomingTaskIds.has(t.id)),
     [tasks, user, myActiveTaskIds, pendingIncomingTaskIds],
+  )
+  // "Việc của tôi" mặc định ẩn việc đã Hoàn thành/Đã hủy (nay có tab "Lịch sử" riêng cho 2 trạng
+  // thái này) — TRỪ KHI người dùng đã tự chọn trạng thái cụ thể qua bộ lọc phía dưới (tôn trọng
+  // nguyên vẹn lựa chọn thủ công, không tự ý ẩn đè lên).
+  const myTasks = useMemo(
+    () => (statusFilter.length > 0 ? myTasksAll : myTasksAll.filter((t) => t.trang_thai !== "hoan_thanh" && t.trang_thai !== "huy")),
+    [myTasksAll, statusFilter],
+  )
+  const historyTasks = useMemo(
+    () => myTasksAll.filter((t) => t.trang_thai === "hoan_thanh" || t.trang_thai === "huy"),
+    [myTasksAll],
   )
 
   // "Việc hôm nay" — sub-tab mặc định khi vào trang: việc "của tôi" đã quá hạn, sắp đến hạn
@@ -214,7 +236,38 @@ export default function KpiTasksPage() {
     [myTasks, today],
   )
 
-  const visibleTasks = tab === "all" ? tasks : tab === "today" ? todayTasks : myTasks
+  // "Highlight" (bấm số ở Bell/trang chủ) ghi đè hoàn toàn hiển thị theo tab — lọc trên TOÀN BỘ
+  // `tasks` đã tải (không giới hạn theo tab đang chọn), dùng ĐÚNG cùng công thức đã đếm ở
+  // getKpiTasks() (module-tasks.ts) qua matchesKpiTaskHighlight.
+  const highlightedTasks = useMemo(() => {
+    if (!highlight || !user) return []
+    return tasks.filter((t) =>
+      matchesKpiTaskHighlight(t, highlight, {
+        isAdmin,
+        isMember: myActiveTaskIds.has(t.id),
+        isGiver: t.nguoi_giao_id === user.id,
+        isPendingIncomingTransfer: pendingIncomingTaskIds.has(t.id),
+      }),
+    )
+  }, [highlight, tasks, user, isAdmin, myActiveTaskIds, pendingIncomingTaskIds])
+
+  const visibleTasks = highlight
+    ? highlightedTasks
+    : tab === "all"
+      ? tasks
+      : tab === "today"
+        ? todayTasks
+        : tab === "history"
+          ? historyTasks
+          : myTasks
+
+  const clearHighlight = () => router.replace("/dashboard/kpi/tasks?tab=mine")
+  // Đổi tab BẰNG TAY phải đồng thời xoá `?highlight=` khỏi URL — nếu không, view lọc highlight sẽ
+  // tiếp tục đè lên vì `highlight` được đọc trực tiếp từ searchParams mỗi render, không phải state.
+  const goToTab = (t: "today" | "mine" | "all" | "history") => {
+    setTab(t)
+    router.replace(`/dashboard/kpi/tasks?tab=${t}`)
+  }
 
   const handleRemindTask = (t: KpiTask, taskMembers: KpiTaskMember[]) => {
     sendKpiNotify({
@@ -286,28 +339,45 @@ export default function KpiTasksPage() {
           </div>
         )}
 
-        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
-          <button
-            onClick={() => setTab("today")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "today" ? "bg-violet-600 text-white" : "text-slate-600"}`}
-          >
-            Việc hôm nay{todayTasks.length > 0 ? ` (${todayTasks.length})` : ""}
-          </button>
-          <button
-            onClick={() => setTab("mine")}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "mine" ? "bg-violet-600 text-white" : "text-slate-600"}`}
-          >
-            Việc của tôi
-          </button>
-          {canViewAll && (
-            <button
-              onClick={() => setTab("all")}
-              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "all" ? "bg-violet-600 text-white" : "text-slate-600"}`}
-            >
-              Tất cả công việc
+        {highlight ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-violet-300 bg-violet-50 px-4 py-3">
+            <span className="text-sm font-bold text-violet-800">
+              Đang lọc: {KPI_TASK_HIGHLIGHT_LABEL[highlight]} ({highlightedTasks.length})
+            </span>
+            <button onClick={clearHighlight} className="text-xs font-bold text-violet-600 hover:text-violet-800 underline">
+              Xóa lọc — xem theo tab
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1 bg-white rounded-xl border border-slate-200 p-1 w-fit">
+            <button
+              onClick={() => goToTab("today")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "today" ? "bg-violet-600 text-white" : "text-slate-600"}`}
+            >
+              Việc hôm nay{todayTasks.length > 0 ? ` (${todayTasks.length})` : ""}
+            </button>
+            <button
+              onClick={() => goToTab("mine")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "mine" ? "bg-violet-600 text-white" : "text-slate-600"}`}
+            >
+              Việc của tôi
+            </button>
+            {canViewAll && (
+              <button
+                onClick={() => goToTab("all")}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "all" ? "bg-violet-600 text-white" : "text-slate-600"}`}
+              >
+                Tất cả công việc
+              </button>
+            )}
+            <button
+              onClick={() => goToTab("history")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${tab === "history" ? "bg-violet-600 text-white" : "text-slate-600"}`}
+            >
+              Lịch sử{historyTasks.length > 0 ? ` (${historyTasks.length})` : ""}
+            </button>
+          </div>
+        )}
 
         <FilterBar activeCount={statusFilter.length}>
           <FilterMultiSelect
@@ -326,7 +396,13 @@ export default function KpiTasksPage() {
           <KpiTaskCalendar tasks={visibleTasks} />
         ) : visibleTasks.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-            {tab === "today" ? "Không có việc nào cần chú ý hôm nay — đã xong hoặc chưa tới hạn." : "Không có công việc nào."}
+            {highlight
+              ? "Không có việc nào khớp bộ lọc này."
+              : tab === "today"
+                ? "Không có việc nào cần chú ý hôm nay — đã xong hoặc chưa tới hạn."
+                : tab === "history"
+                  ? "Chưa có việc nào Hoàn thành/Đã hủy."
+                  : "Không có công việc nào."}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

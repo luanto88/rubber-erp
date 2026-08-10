@@ -202,6 +202,54 @@ export function daysOverdue(task: Pick<KpiTask, "han_hoan_thanh" | "trang_thai">
   return Math.floor((nowMs - due) / 86_400_000)
 }
 
+// ── "Highlight" — bấm 1 mục trong Bell/trang chủ KPI phải lọc ĐÚNG danh sách mục đó, không rơi
+// về "Việc của tôi" chung chung (bug thật đã báo 2026-08-19). Predicate ở đây PHẢI khớp chính
+// xác công thức đếm trong getKpiTasks() (module-tasks.ts) — dùng CHUNG 1 nguồn để badge Bell/
+// trang chủ và bộ lọc trên trang /dashboard/kpi/tasks không bao giờ lệch nhau.
+export type KpiTaskHighlight =
+  | "pendingMine"
+  | "dueSoonMine"
+  | "overdueMine"
+  | "transferMine"
+  | "approval"
+  | "dueSoonGiven"
+  | "overdueGiven"
+
+export const KPI_TASK_HIGHLIGHT_LABEL: Record<KpiTaskHighlight, string> = {
+  pendingMine: "Việc cần cập nhật/nộp",
+  dueSoonMine: "Việc của bạn sắp đến hạn (24h)",
+  overdueMine: "Việc của bạn đã quá hạn",
+  transferMine: "Lời mời chuyển giao chờ phản hồi",
+  approval: "Việc chờ nghiệm thu",
+  dueSoonGiven: "Việc bạn giao sắp đến hạn (24h)",
+  overdueGiven: "Việc bạn giao đã quá hạn",
+}
+
+export function matchesKpiTaskHighlight(
+  task: KpiTask,
+  highlight: KpiTaskHighlight,
+  ctx: { isAdmin: boolean; isMember: boolean; isGiver: boolean; isPendingIncomingTransfer: boolean },
+): boolean {
+  switch (highlight) {
+    case "pendingMine":
+      return ctx.isMember && (task.trang_thai === "moi_giao" || task.trang_thai === "dang_thuc_hien" || task.trang_thai === "tra_ve")
+    case "dueSoonMine":
+      return ctx.isMember && isTaskDueSoon(task)
+    case "overdueMine":
+      return ctx.isMember && isTaskOverdue(task)
+    case "transferMine":
+      return ctx.isPendingIncomingTransfer
+    case "approval":
+      return task.trang_thai === "cho_nghiem_thu" && (ctx.isGiver || ctx.isAdmin)
+    case "dueSoonGiven":
+      return ctx.isGiver && isTaskDueSoon(task)
+    case "overdueGiven":
+      return ctx.isGiver && isTaskOverdue(task)
+    default:
+      return false
+  }
+}
+
 // Export dùng chung — filter theo Phòng ban cho cả candidate list kiểu maintenance_staff
 // (loadKpiTaskCandidates) lẫn danh sách profile thô (vd form Vị trí 5S, kpi-5s-locations-tab.tsx).
 export async function fetchDepartmentUserIds(factoryId: string, departmentId: string): Promise<Set<string>> {
