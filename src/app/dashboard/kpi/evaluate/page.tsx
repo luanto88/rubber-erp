@@ -116,18 +116,40 @@ export default function KpiEvaluatePage() {
   const groupNameById = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g.name])), [groups])
 
   const selectedCandidate = useMemo(() => candidates.find((c) => c.userId === selectedUserId) || null, [candidates, selectedUserId])
+  // Lọc 2 chiều — chọn Nhóm trước thì Người bị thu hẹp theo đúng nhóm đó, chọn Người trước thì
+  // Nhóm bị thu hẹp theo đúng người đó; chưa chọn bên nào thì bên còn lại hiện đầy đủ. Trước đây
+  // chỉ lọc 1 chiều (Người → Nhóm) và khoá cứng dropdown Nhóm cho tới khi chọn Người, khiến chọn
+  // Nhóm không có tác dụng gì với danh sách Người (bug thật đã xác nhận).
+  const candidatesForGroup = useMemo(
+    () => (selectedGroupId ? candidates.filter((c) => c.groupIds.includes(selectedGroupId)) : candidates),
+    [candidates, selectedGroupId],
+  )
   const groupOptionsForUser = useMemo(
-    () => (selectedCandidate ? groups.filter((g) => selectedCandidate.groupIds.includes(g.id)) : []),
+    () => (selectedCandidate ? groups.filter((g) => selectedCandidate.groupIds.includes(g.id)) : groups),
     [selectedCandidate, groups],
   )
   const previewLoai = selectedCandidate && selectedGroupId && selectedCandidate.primaryGroupId === selectedGroupId ? "chinh" : "choang"
 
   // Khi đổi người: nhóm đã chọn có thể không còn hợp lệ (người mới không thuộc nhóm đó) — tự gỡ.
+  // CHỈ phụ thuộc `selectedUserId` (không phải `selectedGroupId`) — nếu liệt kê cả `selectedGroupId`
+  // vào deps, effect này sẽ tự kích hoạt ngay khi người dùng đổi Nhóm và xoá luôn giá trị Nhóm vừa
+  // chọn (do người hiện tại chưa chắc thuộc nhóm mới), phá vỡ chiều lọc "chọn Nhóm trước" vừa thêm.
   useEffect(() => {
     if (selectedGroupId && selectedCandidate && !selectedCandidate.groupIds.includes(selectedGroupId)) {
       setSelectedGroupId("")
     }
-  }, [selectedUserId, selectedCandidate, selectedGroupId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cố ý chỉ phản ứng khi đổi Người, xem comment trên
+  }, [selectedUserId])
+
+  // Đối xứng chiều ngược lại: khi đổi nhóm, người đang chọn có thể không còn thuộc nhóm mới — tự
+  // gỡ. CHỈ phụ thuộc `selectedGroupId`, cùng lý do đối xứng với effect trên — 2 effect tách biệt
+  // theo đúng field kích hoạt, không effect nào tự xoá giá trị vừa được người dùng chọn.
+  useEffect(() => {
+    if (selectedGroupId && selectedCandidate && !selectedCandidate.groupIds.includes(selectedGroupId)) {
+      setSelectedUserId("")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cố ý chỉ phản ứng khi đổi Nhóm, xem comment trên
+  }, [selectedGroupId])
 
   // Tải tiêu chí + lượt chấm đã có (nếu có) mỗi khi đủ 3 điều kiện (ngày + người + nhóm).
   useEffect(() => {
@@ -273,18 +295,20 @@ export default function KpiEvaluatePage() {
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
                 >
                   <option value="">-- Chọn người --</option>
-                  {candidates.map((c) => (
+                  {candidatesForGroup.map((c) => (
                     <option key={c.userId} value={c.userId}>{c.ten}</option>
                   ))}
                 </select>
+                {selectedGroupId && candidatesForGroup.length === 0 && (
+                  <p className="mt-1 text-[11px] text-amber-600">Nhóm này chưa có ai.</p>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-600">Nhóm chuyên môn *</label>
                 <select
                   value={selectedGroupId}
                   onChange={(e) => setSelectedGroupId(e.target.value)}
-                  disabled={!selectedUserId}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:bg-slate-50 disabled:text-slate-400"
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
                 >
                   <option value="">-- Chọn nhóm --</option>
                   {groupOptionsForUser.map((g) => (

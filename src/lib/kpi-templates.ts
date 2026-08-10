@@ -9,6 +9,7 @@
 // (KpiLinkPrompt tự tìm mọi task đang mở của người dùng, không phân biệt nguồn gốc).
 
 import { supabase } from "@/lib/supabase"
+import { formatDateDisplay } from "@/lib/date-utils"
 import type { KpiReportRequirement } from "@/lib/kpi-tasks"
 
 export const KPI_WEEKDAY_OPTIONS = [1, 2, 3, 4, 5, 6, 7] as const
@@ -55,13 +56,18 @@ export type KpiTaskTemplate = {
   // luôn là 'chinh'. Task chỉ thực sự Hoàn thành khi đã gắn đủ N bằng chứng (cùng cơ chế mục
   // tiêu số lượng đã có cho việc giao tay, xem 20260725_kpi_task_quantity_target.sql).
   muc_tieu_so_luong: number | null
+  // Vị trí 5S liên quan (tuỳ chọn) — copy sang kpi_tasks.kpi_5s_location_id (cột đã có sẵn từ
+  // 20260817_kpi_tasks_5s_adhoc.sql) mỗi khi sinh instance. Cho phép tạo/quản lý "việc định kỳ
+  // 5S" (vd dọn dẹp định kỳ 1 vị trí) ngay trong khu vực 5S, tái dùng nguyên cadence engine này —
+  // xem 20260821_kpi_task_templates_5s_location.sql.
+  kpi_5s_location_id: string | null
   created_by: string
   created_at: string
   updated_at: string
 }
 
 const TEMPLATE_COLS =
-  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, cadence_type, interval_days, anchor_date, days_of_month, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, module_code, muc_tieu_so_luong, created_by, created_at, updated_at"
+  "id, factory_id, group_id, assigned_user_id, tieu_de, mo_ta, apply_weekdays, cadence_type, interval_days, anchor_date, days_of_month, gio_han, yeu_cau_bao_cao, is_active, phong_ban_id, module_code, muc_tieu_so_luong, kpi_5s_location_id, created_by, created_at, updated_at"
 
 export type KpiSubstitutionStatus = "cho_duyet" | "da_duyet" | "tu_choi"
 
@@ -96,6 +102,21 @@ export type KpiUserSubstitution = {
 
 const SUBSTITUTION_COLS =
   "id, factory_id, original_user_id, substitute_user_id, template_id, tu_ngay, den_ngay, ly_do, created_by, created_at, trang_thai, nguoi_duyet_id, duyet_luc, ly_do_tu_choi"
+
+// Nhãn nhịp độ lặp lại ngắn gọn (1 dòng) — trích từ đúng 3 nhánh hiển thị đã lặp lại inline ở
+// templates/page.tsx (card "Việc định kỳ") thành 1 hàm dùng chung, để khu vực 5S (section "Việc
+// định kỳ tại vị trí này") tái dùng thay vì copy-paste JSX.
+export function formatKpiTaskCadenceLabel(
+  t: Pick<KpiTaskTemplate, "cadence_type" | "interval_days" | "anchor_date" | "days_of_month" | "apply_weekdays">,
+): string {
+  if (t.cadence_type === "interval") {
+    return `Mỗi ${t.interval_days} ngày (từ ${t.anchor_date ? formatDateDisplay(t.anchor_date) : "—"})`
+  }
+  if (t.cadence_type === "day_of_month") {
+    return `Ngày ${(t.days_of_month || []).join(", ")} hàng tháng`
+  }
+  return t.apply_weekdays.map((d) => KPI_WEEKDAY_LABEL[d]).join(", ")
+}
 
 export type KpiGroupOption = { id: string; name: string }
 
@@ -140,6 +161,7 @@ export type KpiTaskTemplateInput = {
   phongBanId: string | null
   moduleCode: string | null
   mucTieuSoLuong: number | null
+  kpi5sLocationId: string | null
 }
 
 // Chuẩn hóa payload theo cadenceType trước khi ghi DB — validate đúng field bắt buộc theo từng
@@ -199,6 +221,7 @@ export async function createKpiTaskTemplate(input: KpiTaskTemplateInput): Promis
       phong_ban_id: input.phongBanId,
       module_code: input.moduleCode,
       muc_tieu_so_luong: input.mucTieuSoLuong,
+      kpi_5s_location_id: input.kpi5sLocationId,
     })
     .select(TEMPLATE_COLS)
     .single()
@@ -225,6 +248,7 @@ export async function updateKpiTaskTemplate(
       phong_ban_id: input.phongBanId,
       module_code: input.moduleCode,
       muc_tieu_so_luong: input.mucTieuSoLuong,
+      kpi_5s_location_id: input.kpi5sLocationId,
     })
     .eq("id", id)
   if (error) throw error

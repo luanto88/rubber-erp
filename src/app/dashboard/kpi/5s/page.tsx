@@ -438,9 +438,10 @@ export default function Kpi5sLocationListPage() {
         )}
       </div>
 
-      {showAutoAssign && factoryId && (
+      {showAutoAssign && factoryId && user && (
         <Kpi5sAutoAssignModal
           factoryId={factoryId}
+          currentUserId={user.id}
           locations={visibleLocations}
           onClose={() => setShowAutoAssign(false)}
           onAssigned={(summary) => {

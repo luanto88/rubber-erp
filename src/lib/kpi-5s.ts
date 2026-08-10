@@ -32,8 +32,9 @@ export type Kpi5sLocation = {
   ma_vi_tri: string
   ten_vi_tri: string
   mo_ta: string | null
-  // LEGACY — không còn được form ghi trực tiếp (nguồn thật là kpi_5s_location_cleaners), chỉ
-  // giữ làm fallback hiển thị/cho "Phân công thông minh". Xem getEffectiveCleanerIds().
+  // LEGACY — không còn được form Thêm/Sửa hay "Phân công thông minh" ghi trực tiếp nữa (nguồn
+  // thật là kpi_5s_location_cleaners), chỉ giữ làm fallback hiển thị cho dữ liệu cũ. Xem
+  // getEffectiveCleanerIds().
   nguoi_don_id: string | null
   nguoi_cham_id: string | null
   // Khu vực (kpi_5s_zones.id, tầng LỚN) — giới hạn pool ứng viên khi "Phân công thông
@@ -168,11 +169,10 @@ export async function updateKpi5sLocation(
   }
 }
 
-// Sửa nhanh 1 vài cột đơn giản (vd "Tạm ngưng"/"Kích hoạt lại", hoặc cột LEGACY nguoi_don_id/
-// nguoi_cham_id do "Phân công thông minh" ghi — xem ghi chú TODO trong kpi-5s-auto-assign-modal.tsx
-// về việc chưa đồng bộ công cụ đó với kpi_5s_location_cleaners) KHÔNG động tới đội ngũ dọn dẹp hay
-// "Người giao" — tách riêng khỏi updateKpi5sLocation (dùng cho form Sửa đầy đủ) để không vô tình
-// ghi đè assigned_by/assigned_at hay xoá sạch cleaner set hiện có.
+// Sửa nhanh 1 vài cột đơn giản (hiện chỉ còn dùng cho "Tạm ngưng"/"Kích hoạt lại" is_active) —
+// KHÔNG động tới đội ngũ dọn dẹp hay "Người giao". Tách riêng khỏi updateKpi5sLocation (dùng cho
+// form Sửa đầy đủ VÀ "Phân công thông minh" — cả 2 đều cần đồng bộ kpi_5s_location_cleaners) để
+// không vô tình ghi đè assigned_by/assigned_at hay xoá sạch cleaner set hiện có.
 export async function patchKpi5sLocation(
   id: string,
   patch: Partial<Pick<Kpi5sLocationInput, "is_active">> & { nguoi_don_id?: string | null; nguoi_cham_id?: string | null },

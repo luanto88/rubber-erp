@@ -12,14 +12,18 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bell,
+  CalendarClock,
   CheckCircle2,
   Clock,
   Flag,
   Loader2,
   MapPin,
   Pencil,
+  Plus,
+  Power,
   Printer,
   ThumbsUp,
+  Trash2,
   Users,
 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -28,6 +32,8 @@ import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { Kpi5sResultPicker } from "@/app/dashboard/kpi/_components/kpi-5s-result-picker"
+import { fetchDepartmentOptions, resolveMyLeaderDepartmentId, type DepartmentOption } from "@/lib/kpi-department-leaders"
+import { TemplateFormModal } from "@/app/dashboard/kpi/templates/_components/template-form-modal"
 import {
   buildKpi5sLocationUrl,
   computeKpi5sNextDeadline,
@@ -48,7 +54,17 @@ import {
   type Kpi5sResult,
 } from "@/lib/kpi-5s"
 import { downloadKpi5sLocationBulkQrPdf } from "@/lib/kpi-5s-pdf"
-import { loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import { getKpiErrorMessage, loadKpiTaskCandidates, type KpiTaskCandidate } from "@/lib/kpi-tasks"
+import {
+  deleteKpiTaskTemplate,
+  ensureTodayKpiTaskInstances,
+  fetchKpiTaskTemplates,
+  formatKpiTaskCadenceLabel,
+  loadAllPersonnelGroups,
+  setKpiTaskTemplateActive,
+  type KpiGroupOption,
+  type KpiTaskTemplate,
+} from "@/lib/kpi-templates"
 import {
   correctKpi5sEvaluationDirect,
   createKpiAppealForLocationEvaluation,
@@ -111,6 +127,19 @@ export default function Kpi5sLocationDetailPage() {
   const [proposeSaving, setProposeSaving] = useState(false)
   const [proposeError, setProposeError] = useState("")
 
+  // "Việc định kỳ tại vị trí này" (2026-08-21) — theo yêu cầu người dùng: tạo/quản lý việc định
+  // kỳ 5S ngay trong khu vực 5S, tái dùng nguyên hạ tầng kpi_task_templates + cadence đã có sẵn
+  // cho "Việc định kỳ" chung, chỉ lọc theo kpi_5s_location_id === locationId.
+  const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
+  const [locationTemplates, setLocationTemplates] = useState<KpiTaskTemplate[]>([])
+  const [templateGroups, setTemplateGroups] = useState<KpiGroupOption[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
+  const [showTemplateForm, setShowTemplateForm] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<KpiTaskTemplate | null>(null)
+  const [templateBusyId, setTemplateBusyId] = useState<string | null>(null)
+  const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<KpiTaskTemplate | null>(null)
+  const [templateActionError, setTemplateActionError] = useState<string | null>(null)
+
   useEffect(() => {
     const bootstrap = async () => {
       const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
@@ -133,16 +162,30 @@ export default function Kpi5sLocationDetailPage() {
     void bootstrap()
   }, [])
 
-  const loadData = useCallback(async (fid: string) => {
+  const loadData = useCallback(async (fid: string, uid: string) => {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [locationRow, evalRows, candidateData, cleanerRows, appealRows] = await Promise.all([
+      const [
+        locationRow,
+        evalRows,
+        candidateData,
+        cleanerRows,
+        appealRows,
+        templateRows,
+        groupRows,
+        deptRows,
+        leaderDeptId,
+      ] = await Promise.all([
         fetchKpi5sLocation(locationId),
         fetchKpi5sEvaluations(locationId),
         loadKpiTaskCandidates(fid),
         fetchLocationCleaners(locationId),
         fetchKpiAppeals(fid),
+        fetchKpiTaskTemplates(fid),
+        loadAllPersonnelGroups(fid),
+        fetchDepartmentOptions(),
+        resolveMyLeaderDepartmentId(uid, fid),
       ])
       setLocation(locationRow)
       setEvaluations(evalRows)
@@ -150,6 +193,10 @@ export default function Kpi5sLocationDetailPage() {
       setCleanerIds(cleanerRows)
       const evalIds = new Set(evalRows.map((e) => e.id))
       setAppeals(appealRows.filter((a) => a.location_evaluation_id && evalIds.has(a.location_evaluation_id)))
+      setLocationTemplates(templateRows.filter((t) => t.kpi_5s_location_id === locationId))
+      setTemplateGroups(groupRows)
+      setDepartments(deptRows)
+      setMyLeaderDepartmentId(leaderDeptId)
     } catch (err) {
       setDataError(getKpi5sErrorMessage(err, "Không tải được dữ liệu vị trí."))
     } finally {
@@ -158,8 +205,8 @@ export default function Kpi5sLocationDetailPage() {
   }, [locationId])
 
   useEffect(() => {
-    if (factoryId) void loadData(factoryId)
-  }, [factoryId, loadData])
+    if (factoryId && user) void loadData(factoryId, user.id)
+  }, [factoryId, user, loadData])
 
   const nameByUserId = useMemo(() => {
     const map: Record<string, string> = Object.fromEntries(candidates.map((c) => [c.userId, c.ten]))
@@ -174,6 +221,11 @@ export default function Kpi5sLocationDetailPage() {
     [evaluations, currentWeekStart],
   )
   const isAdmin = user?.role === "admin"
+  // Khớp đúng RLS kpi_task_templates_insert/update/delete (migration
+  // 20260807_kpi_department_scoping.sql) — chỉ đúng lãnh đạo CỦA PHÒNG BAN vị trí này (khác
+  // templates/page.tsx vốn quản lý mọi phòng ban nên chỉ cần "là lãnh đạo bất kỳ phòng ban nào").
+  const isDeptLeader = myLeaderDepartmentId != null && !!location && location.phong_ban_id === myLeaderDepartmentId
+  const canManageTemplatesHere = isAdmin || hasPermission(user, "kpi.manage_config") || isDeptLeader
 
   const deadline = useMemo(() => (location ? computeKpi5sNextDeadline(location) : null), [location])
   const hasEvaluatedThisWeek = !!currentWeekEvaluation
@@ -258,7 +310,7 @@ export default function Kpi5sLocationDetailPage() {
         link: `/dashboard/kpi/5s/location/${location.id}`,
       })
       setShowForm(false)
-      void loadData(factoryId)
+      void loadData(factoryId, user.id)
     } catch (err) {
       setSaveError(getKpi5sErrorMessage(err, "Không lưu được kết quả chấm điểm."))
     } finally {
@@ -329,7 +381,7 @@ export default function Kpi5sLocationDetailPage() {
         ghiChu: correctGhiChu,
       })
       setCorrectTarget(null)
-      if (factoryId) void loadData(factoryId)
+      if (factoryId && user) void loadData(factoryId, user.id)
     } catch (err) {
       setCorrectError(getKpiAppealErrorMessage(err, "Không sửa được kết quả."))
     } finally {
@@ -370,7 +422,7 @@ export default function Kpi5sLocationDetailPage() {
         })
       }
       setProposeTarget(null)
-      if (factoryId) void loadData(factoryId)
+      if (factoryId && user) void loadData(factoryId, user.id)
     } catch (err) {
       setProposeError(getKpiAppealErrorMessage(err, "Không gửi được đề xuất sửa kết quả."))
     } finally {
@@ -407,6 +459,54 @@ export default function Kpi5sLocationDetailPage() {
     } finally {
       setPrinting(false)
     }
+  }
+
+  const openAddTemplate = () => {
+    setEditingTemplate(null)
+    setShowTemplateForm(true)
+  }
+  const openEditTemplate = (t: KpiTaskTemplate) => {
+    setEditingTemplate(t)
+    setShowTemplateForm(true)
+  }
+
+  const handleToggleTemplateActive = async (t: KpiTaskTemplate) => {
+    setTemplateBusyId(t.id)
+    setTemplateActionError(null)
+    try {
+      await setKpiTaskTemplateActive(t.id, !t.is_active)
+      if (factoryId && user) await loadData(factoryId, user.id)
+    } catch (err) {
+      setTemplateActionError(getKpiErrorMessage(err, "Không cập nhật được trạng thái."))
+    } finally {
+      setTemplateBusyId(null)
+    }
+  }
+
+  const handleDeleteTemplate = async () => {
+    if (!deleteTemplateTarget) return
+    setTemplateBusyId(deleteTemplateTarget.id)
+    setTemplateActionError(null)
+    try {
+      await deleteKpiTaskTemplate(deleteTemplateTarget.id)
+      setDeleteTemplateTarget(null)
+      if (factoryId && user) await loadData(factoryId, user.id)
+    } catch (err) {
+      setTemplateActionError(getKpiErrorMessage(err, "Không xóa được việc định kỳ."))
+    } finally {
+      setTemplateBusyId(null)
+    }
+  }
+
+  // Sau khi thêm/sửa việc định kỳ 5S: chủ động sinh lại việc hôm nay ngay trong phiên hiện tại
+  // (mirror templates/page.tsx's syncTodaySilently) — lỗi không chặn việc đóng modal/tải lại.
+  const handleTemplateSaved = () => {
+    setShowTemplateForm(false)
+    setEditingTemplate(null)
+    if (!factoryId || !user) return
+    void ensureTodayKpiTaskInstances(factoryId)
+      .catch(() => {})
+      .then(() => loadData(factoryId, user.id))
   }
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
@@ -695,6 +795,77 @@ export default function Kpi5sLocationDetailPage() {
                 </div>
               )}
             </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 font-extrabold text-sm text-slate-700">
+                  <CalendarClock size={15} className="text-teal-600" /> Việc định kỳ tại vị trí này ({locationTemplates.length})
+                </div>
+                {canManageTemplatesHere && (
+                  <button
+                    onClick={openAddTemplate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-lg text-xs"
+                  >
+                    <Plus size={13} /> Thêm việc định kỳ cho vị trí này
+                  </button>
+                )}
+              </div>
+              {templateActionError && (
+                <div className="px-5 py-2 text-xs font-semibold text-red-600 bg-red-50 border-b border-red-100">{templateActionError}</div>
+              )}
+              {locationTemplates.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">
+                  Chưa có việc định kỳ nào gắn với vị trí này.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {locationTemplates.map((t) => (
+                    <div key={t.id} className="row-hover p-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-extrabold text-slate-800">{t.tieu_de}</span>
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              t.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"
+                            }`}
+                          >
+                            {t.is_active ? "Đang áp dụng" : "Tạm ngưng"}
+                          </span>
+                        </div>
+                        {t.mo_ta && <p className="text-xs text-slate-500 mt-0.5">{t.mo_ta}</p>}
+                        <div className="text-xs text-slate-500 mt-1">
+                          {formatKpiTaskCadenceLabel(t)} · Hạn mỗi ngày {t.gio_han.slice(0, 5)} · Giao cho:{" "}
+                          <strong className="text-slate-700">{resolveName(t.assigned_user_id)}</strong>
+                        </div>
+                      </div>
+                      {canManageTemplatesHere && (
+                        <div className="shrink-0 flex items-center gap-1.5">
+                          <button
+                            onClick={() => openEditTemplate(t)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] font-bold"
+                          >
+                            <Pencil size={11} /> Sửa
+                          </button>
+                          <button
+                            onClick={() => void handleToggleTemplateActive(t)}
+                            disabled={templateBusyId === t.id}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-bold disabled:opacity-60"
+                          >
+                            <Power size={11} /> {t.is_active ? "Tạm ngưng" : "Kích hoạt lại"}
+                          </button>
+                          <button
+                            onClick={() => setDeleteTemplateTarget(t)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold"
+                          >
+                            <Trash2 size={11} /> Xóa
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -833,6 +1004,49 @@ export default function Kpi5sLocationDetailPage() {
             />
             {proposeError && <div className="text-xs font-semibold text-red-600">{proposeError}</div>}
           </div>
+        </ModalShell>
+      )}
+
+      {showTemplateForm && factoryId && user && location && (
+        <TemplateFormModal
+          factoryId={factoryId}
+          createdBy={user.id}
+          groups={templateGroups}
+          candidates={candidates}
+          departments={departments}
+          kpi5sLocations={[location]}
+          fixedKpi5sLocationId={location.id}
+          editing={editingTemplate}
+          onClose={() => { setShowTemplateForm(false); setEditingTemplate(null) }}
+          onSaved={handleTemplateSaved}
+        />
+      )}
+
+      {deleteTemplateTarget && (
+        <ModalShell
+          title="Xóa việc định kỳ"
+          onClose={() => setDeleteTemplateTarget(null)}
+          maxWidth="sm"
+          footer={
+            <>
+              <button onClick={() => setDeleteTemplateTarget(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+                Không
+              </button>
+              <button
+                onClick={() => void handleDeleteTemplate()}
+                disabled={templateBusyId === deleteTemplateTarget.id}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-md disabled:opacity-60"
+              >
+                {templateBusyId === deleteTemplateTarget.id ? "Đang xóa..." : "Xác nhận xóa"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-600">
+            Xóa <strong>&quot;{deleteTemplateTarget.tieu_de}&quot;</strong> — các công việc đã sinh
+            ra trước đó vẫn giữ nguyên (không bị xóa), chỉ ngừng sinh thêm từ ngày mai. Bạn có
+            chắc chắn?
+          </p>
         </ModalShell>
       )}
     </KpiShell>

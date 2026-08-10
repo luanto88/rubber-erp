@@ -18,6 +18,7 @@ import {
   resolveMyLeaderDepartmentId,
   type DepartmentOption,
 } from "@/lib/kpi-department-leaders"
+import { fetchKpi5sLocations, type Kpi5sLocation } from "@/lib/kpi-5s"
 import {
   formatKpiDateTime,
   getKpiErrorMessage,
@@ -66,6 +67,9 @@ export default function KpiTemplatesPage() {
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [pendingSubs, setPendingSubs] = useState<KpiUserSubstitution[]>([])
   const [myLeaderDepartmentId, setMyLeaderDepartmentId] = useState<string | null>(null)
+  // Tải 1 lần ở trang cha, truyền xuống TemplateFormModal — field "Vị trí 5S liên quan" (tuỳ
+  // chọn), mirror cách tasks/page.tsx đã làm cho "Việc đột xuất 5S".
+  const [kpi5sLocations, setKpi5sLocations] = useState<Kpi5sLocation[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -105,13 +109,14 @@ export default function KpiTemplatesPage() {
     setDataLoading(true)
     setDataError(null)
     try {
-      const [templateRows, subRows, groupRows, candidateData, deptRows, leaderDeptId] = await Promise.all([
+      const [templateRows, subRows, groupRows, candidateData, deptRows, leaderDeptId, locationRows] = await Promise.all([
         fetchKpiTaskTemplates(fid),
         fetchKpiUserSubstitutions(fid),
         loadAllPersonnelGroups(fid),
         loadKpiTaskCandidates(fid),
         fetchDepartmentOptions(),
         resolveMyLeaderDepartmentId(uid, fid),
+        fetchKpi5sLocations(fid),
       ])
       setTemplates(templateRows)
       setSubstitutions(subRows)
@@ -119,6 +124,7 @@ export default function KpiTemplatesPage() {
       setCandidates(candidateData.people)
       setDepartments(deptRows)
       setMyLeaderDepartmentId(leaderDeptId)
+      setKpi5sLocations(locationRows)
     } catch (err) {
       setDataError(getKpiErrorMessage(err, "Không tải được dữ liệu."))
     } finally {
@@ -164,6 +170,10 @@ export default function KpiTemplatesPage() {
   }, [candidates, user])
   const resolveName = useCallback((uid: string) => nameByUserId[uid] || `Người dùng ${uid.slice(0, 8)}`, [nameByUserId])
   const groupNameById = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g.name])), [groups])
+  const locationById = useMemo(
+    () => Object.fromEntries(kpi5sLocations.map((l) => [l.id, l])),
+    [kpi5sLocations],
+  )
   const templateTitleById = useMemo(() => Object.fromEntries(templates.map((t) => [t.id, t.tieu_de])), [templates])
 
   if (loading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
@@ -343,6 +353,11 @@ export default function KpiTemplatesPage() {
                             Chưa gắn module
                           </span>
                         )}
+                        {t.kpi_5s_location_id && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700">
+                            5S: {locationById[t.kpi_5s_location_id]?.ma_vi_tri || "—"}
+                          </span>
+                        )}
                       </div>
                       <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg ${t.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
                         {t.is_active ? "Đang áp dụng" : "Tạm ngưng"}
@@ -474,6 +489,7 @@ export default function KpiTemplatesPage() {
           groups={groups}
           candidates={candidates}
           departments={departments}
+          kpi5sLocations={kpi5sLocations}
           editing={editingTemplate}
           onClose={() => setShowTemplateForm(false)}
           onSaved={() => {

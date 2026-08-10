@@ -30,7 +30,7 @@
 //   {Hạng, điểm, có phải bạn không} qua 2 RPC SECURITY DEFINER, không lộ tên người khác.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Award, Calculator, Flag, History, ListTree, Lock, ListOrdered, TrendingUp } from "lucide-react"
+import { ArrowLeft, Award, Calculator, Eye, Flag, History, ListTree, Lock, ListOrdered, TrendingUp } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
@@ -96,6 +96,10 @@ export default function KpiScoresPage() {
   const [computeMsg, setComputeMsg] = useState("")
 
   const [scoreView, setScoreView] = useState<"tong-quan" | "chi-tiet" | "xep-hang">("tong-quan")
+  // Xem chi tiết cách tính điểm của NGƯỜI KHÁC (admin/lãnh đạo, từ bảng "Toàn nhà máy") — null =
+  // đang xem của chính mình. RLS đã xác nhận cho phép (kpi_task_members_select có nhánh
+  // kpi.view_all đọc mọi dòng, kpi_5s_evaluations/kpi_daily_evaluations SELECT rộng trong factory).
+  const [detailUserId, setDetailUserId] = useState<string | null>(null)
 
   // Phase 5: khóa sổ, khiếu nại điểm tháng, lịch sử điều chỉnh
   const [lockingId, setLockingId] = useState<string | null>(null)
@@ -337,7 +341,7 @@ export default function KpiScoresPage() {
             <TrendingUp size={14} /> Tổng quan
           </button>
           <button
-            onClick={() => setScoreView("chi-tiet")}
+            onClick={() => { setDetailUserId(null); setScoreView("chi-tiet") }}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${scoreView === "chi-tiet" ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}
           >
             <ListTree size={14} />
@@ -444,6 +448,7 @@ export default function KpiScoresPage() {
                           <th className="px-2 py-2">Hệ số CC</th>
                           <th className="px-2 py-2 text-right">Tổng</th>
                           <th className="py-2 pl-2">Trạng thái</th>
+                          <th className="py-2 pl-2" />
                         </tr>
                       </thead>
                       <tbody>
@@ -473,6 +478,14 @@ export default function KpiScoresPage() {
                                 )}
                               </div>
                             </td>
+                            <td className="py-2 pl-2">
+                              <button
+                                onClick={() => { setDetailUserId(s.user_id); setScoreView("chi-tiet") }}
+                                className="flex items-center gap-1 whitespace-nowrap rounded-lg bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-100"
+                              >
+                                <Eye size={10} /> Xem chi tiết
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -483,7 +496,26 @@ export default function KpiScoresPage() {
             )}
           </>
         ) : scoreView === "chi-tiet" ? (
-          user && factoryId && <MyScoreExplain factoryId={factoryId} userId={user.id} nam={nam} thang={thang} />
+          user &&
+          factoryId && (
+            <>
+              {detailUserId && detailUserId !== user.id && (
+                <button
+                  onClick={() => setDetailUserId(null)}
+                  className="flex items-center gap-1.5 text-xs font-bold text-violet-600 hover:text-violet-800"
+                >
+                  <ArrowLeft size={12} /> Quay lại xem của tôi
+                </button>
+              )}
+              <MyScoreExplain
+                factoryId={factoryId}
+                userId={detailUserId ?? user.id}
+                subjectName={detailUserId && detailUserId !== user.id ? nameByUserId[detailUserId] || detailUserId : "bạn"}
+                nam={nam}
+                thang={thang}
+              />
+            </>
+          )
         ) : (
           user && factoryId && <ScoreRankingView factoryId={factoryId} userId={user.id} nam={nam} thang={thang} />
         )}
@@ -571,8 +603,23 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
-// Sub-tab "Chi tiết cách tính điểm" — chỉ hiện của CHÍNH userId đang xem, tính lại real-time.
-function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; userId: string; nam: number; thang: number }) {
+// Sub-tab "Chi tiết cách tính điểm" — mặc định của chính người xem, nhưng admin/lãnh đạo có thể
+// mở của người khác qua nút "Xem chi tiết" ở bảng "Toàn nhà máy" (userId khi đó là user_id của
+// dòng đã bấm, subjectName là tên hiển thị tương ứng). Tính lại real-time, không đọc
+// kpi_monthly_scores.chi_tiet.
+function MyScoreExplain({
+  factoryId,
+  userId,
+  subjectName,
+  nam,
+  thang,
+}: {
+  factoryId: string
+  userId: string
+  subjectName: string
+  nam: number
+  thang: number
+}) {
   const [loadingBd, setLoadingBd] = useState(true)
   const [bdError, setBdError] = useState("")
   const [primaryGroup, setPrimaryGroup] = useState<MyPrimaryGroup>(null)
@@ -652,9 +699,11 @@ function MyScoreExplain({ factoryId, userId, nam, thang }: { factoryId: string; 
   return (
     <div className="space-y-4">
       <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 text-sm font-extrabold text-slate-700">Trọng số áp dụng cho bạn</div>
+        <div className="mb-2 text-sm font-extrabold text-slate-700">Trọng số áp dụng cho {subjectName}</div>
         <p className="mb-2 text-xs text-slate-500">
-          {primaryGroup ? <>Theo nhóm chuyên môn chính: <strong>{primaryGroup.name}</strong></> : "Bạn chưa thuộc nhóm chuyên môn nào — dùng cấu hình mặc định toàn nhà máy."}
+          {primaryGroup
+            ? <>Theo nhóm chuyên môn chính: <strong>{primaryGroup.name}</strong></>
+            : `${subjectName === "bạn" ? "Bạn" : subjectName} chưa thuộc nhóm chuyên môn nào — dùng cấu hình mặc định toàn nhà máy.`}
           {applicable?.group_id == null && primaryGroup && " (nhóm này chưa có cấu hình riêng, đang dùng mặc định toàn nhà máy)"}
         </p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

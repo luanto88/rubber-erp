@@ -41,10 +41,14 @@ export type AutoAssignLocationInput = {
   nguoi_cham_id: string | null
   zone_id: string | null
   phong_ban_id: string | null
+  // Đội ngũ dọn dẹp THẬT (kpi_5s_location_cleaners, fallback [nguoi_don_id] nếu vị trí chưa từng
+  // gán qua bảng multi) — quyết định SỐ LƯỢNG người dọn sẽ được đề xuất khi random lại (giữ
+  // nguyên số lượng hiện có, không tụt về 1).
+  current_cleaner_ids: string[]
 }
 export type AutoAssignSuggestion = {
   locationId: string
-  nguoiDonId: string | null
+  nguoiDonIds: string[]
   nguoiChamId: string | null
   groupConstraintRelaxed: boolean
   zonePoolRelaxed: boolean
@@ -121,19 +125,19 @@ export function buildAutoAssignSuggestions(
   // đúng khối lượng thật đang gánh, kể cả những vị trí không nằm trong lượt phân công này.
   const loadByUser = new Map<string, number>()
   for (const loc of locations) {
-    if (loc.nguoi_don_id) loadByUser.set(loc.nguoi_don_id, (loadByUser.get(loc.nguoi_don_id) || 0) + 1)
+    for (const uid of loc.current_cleaner_ids) loadByUser.set(uid, (loadByUser.get(uid) || 0) + 1)
     if (loc.nguoi_cham_id) loadByUser.set(loc.nguoi_cham_id, (loadByUser.get(loc.nguoi_cham_id) || 0) + 1)
   }
 
   const targetLocations = opts.onlyUnassigned
-    ? locations.filter((loc) => !loc.nguoi_don_id || !loc.nguoi_cham_id)
+    ? locations.filter((loc) => loc.current_cleaner_ids.length === 0 || !loc.nguoi_cham_id)
     : locations
   const sorted = [...targetLocations].sort((a, b) => a.ma_vi_tri.localeCompare(b.ma_vi_tri, "vi"))
 
   const results: AutoAssignSuggestion[] = []
 
   for (const loc of sorted) {
-    const keepDon = opts.onlyUnassigned && !!loc.nguoi_don_id
+    const keepDon = opts.onlyUnassigned && loc.current_cleaner_ids.length > 0
     const keepCham = opts.onlyUnassigned && !!loc.nguoi_cham_id
 
     // Tầng 1 — Phòng ban (bắt buộc, không nới lỏng): chỉ giữ nhân sự thuộc đúng phong_ban_id của
@@ -162,21 +166,30 @@ export function buildAutoAssignSuggestions(
     const preferredIds = opts.establishedUserIds
     const noEstablishedCandidate = !preferredIds || !zonePool.some((p) => preferredIds.has(p.userId))
 
-    let donId = keepDon ? loc.nguoi_don_id : null
-    if (!donId) {
-      const picked = weightedPick(zonePool, loadByUser, new Set(), preferredIds)
-      donId = picked?.userId || null
-      if (donId) loadByUser.set(donId, (loadByUser.get(donId) || 0) + 1)
+    let donIds: string[]
+    if (keepDon) {
+      donIds = loc.current_cleaner_ids
+    } else {
+      // Giữ nguyên SỐ LƯỢNG người dọn hiện có (mặc định 1 nếu vị trí chưa từng gán ai) — random
+      // lần lượt, mỗi lượt loại trừ những người đã được chọn ở lượt trước (không trùng người).
+      const targetCleanerCount = loc.current_cleaner_ids.length > 0 ? loc.current_cleaner_ids.length : 1
+      donIds = []
+      for (let i = 0; i < targetCleanerCount; i++) {
+        const picked = weightedPick(zonePool, loadByUser, new Set(donIds), preferredIds)
+        if (!picked) break
+        donIds.push(picked.userId)
+        loadByUser.set(picked.userId, (loadByUser.get(picked.userId) || 0) + 1)
+      }
     }
 
     let chamId = keepCham ? loc.nguoi_cham_id : null
     let groupConstraintRelaxed = false
     if (!chamId) {
-      const exclude = new Set<string>(donId ? [donId] : [])
-      const donGroup = donId ? people.find((p) => p.userId === donId)?.primaryGroupId : null
+      const exclude = new Set<string>(donIds)
+      const donGroups = new Set(donIds.map((uid) => people.find((p) => p.userId === uid)?.primaryGroupId).filter(Boolean))
       let pool = zonePool
-      if (opts.avoidSameGroup && donGroup) {
-        const filtered = zonePool.filter((p) => p.primaryGroupId !== donGroup)
+      if (opts.avoidSameGroup && donGroups.size > 0) {
+        const filtered = zonePool.filter((p) => !p.primaryGroupId || !donGroups.has(p.primaryGroupId))
         if (filtered.length > 0) pool = filtered
         else groupConstraintRelaxed = true
       }
@@ -189,7 +202,7 @@ export function buildAutoAssignSuggestions(
 
     results.push({
       locationId: loc.id,
-      nguoiDonId: donId,
+      nguoiDonIds: donIds,
       nguoiChamId: chamId,
       groupConstraintRelaxed,
       zonePoolRelaxed,

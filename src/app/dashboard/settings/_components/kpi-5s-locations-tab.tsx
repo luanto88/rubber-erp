@@ -672,6 +672,7 @@ export function Kpi5sLocationsTab({
       {showAutoAssign && factoryId && (
         <Kpi5sAutoAssignModal
           factoryId={factoryId}
+          currentUserId={currentUserId}
           locations={locations}
           onClose={() => setShowAutoAssign(false)}
           onAssigned={(summary) => {
@@ -696,6 +697,7 @@ export function Kpi5sLocationsTab({
       {autoAssignLocation && factoryId && (
         <Kpi5sAutoAssignModal
           factoryId={factoryId}
+          currentUserId={currentUserId}
           locations={[autoAssignLocation]}
           onClose={() => setAutoAssignLocation(null)}
           onAssigned={(summary) => {

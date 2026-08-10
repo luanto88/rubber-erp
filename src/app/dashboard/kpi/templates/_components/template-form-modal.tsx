@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import type { DepartmentOption } from "@/lib/kpi-department-leaders"
+import type { Kpi5sLocation } from "@/lib/kpi-5s"
 import { getTodayISODate } from "@/lib/date-utils"
 import {
   KPI_MODULE_OPTIONS,
@@ -34,14 +35,34 @@ type TemplateFormModalProps = {
   candidates: KpiTaskCandidate[]
   departments: DepartmentOption[]
   editing: KpiTaskTemplate | null
+  // Việc định kỳ 5S (tuỳ chọn) — danh sách vị trí để chọn "Vị trí 5S liên quan".
+  kpi5sLocations: Kpi5sLocation[]
+  // Khi mở từ trang chi tiết 1 vị trí 5S: khoá cứng field "Vị trí 5S liên quan" đúng vị trí đó,
+  // không cho đổi (người dùng không cần nghĩ tới field này khi đã ở đúng ngữ cảnh 5S).
+  fixedKpi5sLocationId?: string
   onClose: () => void
   onSaved: () => void
 }
 
-export function TemplateFormModal({ factoryId, createdBy, groups, candidates, departments, editing, onClose, onSaved }: TemplateFormModalProps) {
+export function TemplateFormModal({
+  factoryId,
+  createdBy,
+  groups,
+  candidates,
+  departments,
+  editing,
+  kpi5sLocations,
+  fixedKpi5sLocationId,
+  onClose,
+  onSaved,
+}: TemplateFormModalProps) {
+  // Khi tạo mới từ trang chi tiết 1 vị trí 5S (fixedKpi5sLocationId có giá trị, editing = null):
+  // mặc định Phòng ban theo đúng phòng ban của vị trí đó — người dùng không cần chọn lại.
+  const fixedLocation = fixedKpi5sLocationId ? kpi5sLocations.find((l) => l.id === fixedKpi5sLocationId) : null
   const [groupId, setGroupId] = useState(editing?.group_id || "")
-  const [phongBanId, setPhongBanId] = useState(editing?.phong_ban_id || "")
+  const [phongBanId, setPhongBanId] = useState(editing?.phong_ban_id || fixedLocation?.phong_ban_id || "")
   const [moduleCode, setModuleCode] = useState(editing?.module_code || "")
+  const [kpi5sLocationId, setKpi5sLocationId] = useState(fixedKpi5sLocationId || editing?.kpi_5s_location_id || "")
   const [assignedUserId, setAssignedUserId] = useState(editing?.assigned_user_id || "")
   // Ứng viên "Người nhận cố định" thu hẹp theo phòng ban đã chọn — mặc định = candidates chung
   // (toàn nhà máy) khi chưa chọn phòng ban, để không chặn dữ liệu cũ chưa gán phòng ban.
@@ -119,6 +140,7 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
         yeuCauBaoCao: yeuCau,
         isActive,
         mucTieuSoLuong: mucTieuSoLuong.trim() ? Number(mucTieuSoLuong) : null,
+        kpi5sLocationId: fixedKpi5sLocationId || kpi5sLocationId || null,
       }
       if (editing) {
         await updateKpiTaskTemplate(editing.id, payload)
@@ -210,6 +232,32 @@ export function TemplateFormModal({ factoryId, createdBy, groups, candidates, de
             dẹp, kiểm tra thiết bị...).
           </p>
         </div>
+
+        {(fixedLocation || kpi5sLocations.length > 0) && (
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Vị trí 5S liên quan (tuỳ chọn)</label>
+            {fixedLocation ? (
+              <div className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-600">
+                {fixedLocation.ma_vi_tri} — {fixedLocation.ten_vi_tri}
+              </div>
+            ) : (
+              <select
+                value={kpi5sLocationId}
+                onChange={(e) => setKpi5sLocationId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+              >
+                <option value="">-- Không liên quan vị trí 5S nào --</option>
+                {kpi5sLocations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>{loc.ma_vi_tri} — {loc.ten_vi_tri}</option>
+                ))}
+              </select>
+            )}
+            <p className="mt-1 text-[11px] text-slate-400">
+              Việc sinh ra hàng ngày/tuần từ đây sẽ hiển thị luôn tại trang chi tiết vị trí 5S đó,
+              ngoài cách hiển thị bình thường ở tab Công việc.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

@@ -4932,3 +4932,114 @@ Không cần migration nào (không đổi schema, chỉ đổi tầng tính to�
 6. Test tài khoản `kpi.manage_config` nhưng KHÔNG phải admin/lãnh đạo phòng ban nào (nếu có cấu
    hình role này trong hệ thống) — xác nhận vẫn thấy khối "Cần bạn DUYỆT" (điều kiện OR đã cộng
    `hasPermission(user, "kpi.manage_config")`).
+
+## Cập nhật 2026-08-21 — 4 fix: multi-select người dọn khi random, lọc 2 chiều Nhóm↔Người ở
+chấm điểm chuyên môn, admin/lãnh đạo xem chi tiết điểm người khác, việc định kỳ 5S tạo ngay
+trong khu vực 5S (ĐÃ CODE XONG — `tsc`/`eslint`/`npm run build` đều sạch — CẦN CHẠY 1 MIGRATION
+MỚI, CHƯA TEST TAY)
+
+### 1. "Phân công thông minh" 5S — random ra nhiều người dọn, không còn tụt về 1
+
+- Bug đã xác nhận: `nguoi_don_id` (cột legacy đơn) vẫn là nơi DUY NHẤT "Phân công thông minh" ghi
+  vào — không đụng `kpi_5s_location_cleaners` (bảng multi thật). Random lại 1 vị trí đang có 3
+  người dọn → chỉ còn 1 người sau khi xác nhận.
+- `src/lib/kpi-5s-auto-assign.ts`: `AutoAssignLocationInput` thêm `current_cleaner_ids: string[]`
+  (quyết định SỐ LƯỢNG người dọn sẽ đề xuất — **giữ nguyên số lượng hiện có** khi random lại, mặc
+  định 1 nếu vị trí chưa từng gán ai — theo đúng lựa chọn người dùng đã chốt). `AutoAssignSuggestion
+  .nguoiDonId` → `nguoiDonIds: string[]`; vòng lặp `weightedPick` chọn đủ `targetCleanerCount`
+  người, loại trừ các `donIds` đã chọn trước đó, cập nhật `loadByUser` sau mỗi lượt; ràng buộc mềm
+  "tránh người chấm cùng nhóm chính với người dọn" giờ kiểm tra `Set` nhóm chính của TẤT CẢ
+  `donIds` (không chỉ 1 người).
+- `kpi-5s-auto-assign-modal.tsx`: "Người dọn" đổi từ `<select>` đơn sang checklist multi-select
+  (`toggleRowCleaner`); ghi kết quả đổi từ `patchKpi5sLocation` (chỉ sửa cột legacy) sang
+  `updateKpi5sLocation(locationId, {nguoi_cham_id}, nguoiDonIds, currentUserId)` — hàm ĐÚNG đã có
+  sẵn, đồng bộ cả `kpi_5s_location_cleaners`. Thêm prop bắt buộc `currentUserId: string` — đã
+  truyền ở cả 2 nơi gọi modal (`kpi-5s-locations-tab.tsx` × 2 lần render, `5s/page.tsx`).
+- `kpi-5s.ts`: sửa lại 2 comment lỗi thời (không còn nói "Phân công thông minh ghi trực tiếp cột
+  legacy" — giờ dùng chung `updateKpi5sLocation` với form thủ công).
+
+### 2. "Chấm điểm chuyên môn" — lọc 2 chiều Nhóm ↔ Người
+
+- Bug: dropdown "Người được chấm" luôn hiện toàn bộ nhân sự bất kể đã chọn Nhóm nào (lọc chỉ chạy
+  1 chiều: chọn Người → Nhóm bị lọc theo người đó; dropdown Nhóm còn khóa cứng tới khi chọn Người).
+- `evaluate/page.tsx`: thêm `candidatesForGroup` (lọc theo `selectedGroupId` nếu có); dropdown
+  "Nhóm chuyên môn" bỏ `disabled={!selectedUserId}`, `groupOptionsForUser` fallback về TOÀN BỘ
+  `groups` khi chưa chọn người (thay vì rỗng); thêm effect đối xứng thứ 2 (đổi Nhóm → gỡ Người nếu
+  không hợp lệ), mỗi effect chỉ phụ thuộc đúng field kích hoạt của nó (`[selectedUserId]` riêng,
+  `[selectedGroupId]` riêng, có `eslint-disable-next-line react-hooks/exhaustive-deps` kèm giải
+  thích) để tránh vòng lặp xóa lẫn nhau giữa 2 effect.
+
+### 3. Bảng điểm KPI — admin/lãnh đạo xem chi tiết cách tính điểm của người khác
+
+- Xác nhận qua đọc RLS `kpi_task_members_select`: đã có sẵn nhánh
+  `current_profile_has_permission('kpi.view_all')` cho đọc MỌI dòng — **không cần migration**.
+- `scores/page.tsx`: thêm state `detailUserId: string | null`; bảng "Toàn nhà máy" mỗi dòng thêm
+  nút "Xem chi tiết" (`setDetailUserId(s.user_id); setScoreView("chi-tiet")`); `MyScoreExplain`
+  nhận thêm `userId`/`subjectName` (thay vì hard-code `user.id`), tiêu đề card đổi động theo
+  `subjectName`; nút "← Quay lại xem của tôi" khi đang xem người khác.
+
+### 4. Việc định kỳ 5S — tạo/quản lý ngay trong khu vực 5S, tái dùng cadence có sẵn
+
+Theo đúng câu trả lời người dùng đã chốt: **tạo ở logic 5S, chọn nhịp độ lặp lại như logic Việc
+định kỳ đã có** — không xây hệ thống cadence song song, chỉ thêm 1 điểm vào (entry point) mới.
+
+- Migration mới **`supabase/migrations/20260821_kpi_task_templates_5s_location.sql` (CẦN CHẠY
+  THỦ CÔNG, CHƯA CHẠY)** — thêm `kpi_task_templates.kpi_5s_location_id UUID REFERENCES
+  kpi_5s_locations(id) ON DELETE SET NULL`; `CREATE OR REPLACE FUNCTION
+  kpi_ensure_today_task_instances` copy nguyên thân hàm mới nhất từ
+  `20260819_kpi_task_templates_quantity_and_day_of_month.sql` (giữ nguyên toàn bộ skip-if-stuck,
+  substitution `da_duyet`, `module_code`, `muc_tieu_so_luong`, `day_of_month`), chỉ thêm
+  `kpi_5s_location_id` vào cột/giá trị của `INSERT INTO kpi_tasks`.
+- `kpi-templates.ts`: `KpiTaskTemplate`/`KpiTaskTemplateInput`/`TEMPLATE_COLS` thêm
+  `kpi_5s_location_id`/`kpi5sLocationId`; `createKpiTaskTemplate`/`updateKpiTaskTemplate` ghi cột
+  này. Hàm mới `formatKpiTaskCadenceLabel(t)` — gộp 3 nhánh hiển thị cadence (interval/day_of_month
+  /weekday) thành 1 dòng text, dùng cho trang chi tiết vị trí 5S (mục dưới); **không** thay thế
+  cách hiển thị chip-theo-thứ hiện có ở `templates/page.tsx` (trang đó vẫn giữ nguyên UI cũ, không
+  đổi phần cadence).
+- `template-form-modal.tsx`: thêm prop `kpi5sLocations: Kpi5sLocation[]` (bắt buộc) và
+  `fixedKpi5sLocationId?: string` (tuỳ chọn — khi có, field "Vị trí 5S liên quan" hiển thị tĩnh,
+  khóa cứng, và `phongBanId` mặc định lấy theo đúng `phong_ban_id` của vị trí đó).
+- `templates/page.tsx` (trang quản trị chung — vẫn giữ nguyên vai trò, không bị thay thế):
+  `loadData()` tải thêm `fetchKpi5sLocations(fid)`; truyền `kpi5sLocations` xuống
+  `<TemplateFormModal>`; card mỗi template thêm badge "5S: {mã vị trí}" (màu amber) khi
+  `t.kpi_5s_location_id` có giá trị, cạnh badge module.
+- **`src/app/dashboard/kpi/5s/location/[id]/page.tsx` — điểm vào chính theo yêu cầu người dùng**:
+  `loadData` mở rộng (đổi chữ ký thành `(fid, uid)`) tải thêm `fetchKpiTaskTemplates(fid)` (lọc
+  client-side `t.kpi_5s_location_id === locationId`), `loadAllPersonnelGroups(fid)`,
+  `fetchDepartmentOptions()`, `resolveMyLeaderDepartmentId(uid, fid)`. Thêm
+  `isDeptLeader`/`canManageTemplatesHere` — **khác** cách tính của `templates/page.tsx` (trang đó
+  chỉ cần "là lãnh đạo BẤT KỲ phòng ban nào" vì quản lý mọi phòng ban cùng lúc): ở đây bắt buộc
+  đúng `location.phong_ban_id === myLeaderDepartmentId` vì trang chỉ nói về 1 vị trí cố định.
+  Section mới "Việc định kỳ tại vị trí này" (đặt ngay dưới "Lịch sử chấm điểm") — liệt kê, mỗi
+  dòng dùng `formatKpiTaskCadenceLabel(t)`, nút Sửa/Tạm ngưng/Xóa (tái dùng nguyên
+  `setKpiTaskTemplateActive`/`deleteKpiTaskTemplate`, không viết logic mới) chỉ hiện khi
+  `canManageTemplatesHere`; nút "+ Thêm việc định kỳ cho vị trí này" mở `<TemplateFormModal
+  fixedKpi5sLocationId={location.id} kpi5sLocations={[location]} .../>`. Sau khi lưu
+  (`handleTemplateSaved`), gọi `ensureTodayKpiTaskInstances(factoryId)` (lỗi nuốt êm) rồi tải lại.
+- **Cố ý KHÔNG làm** (đúng phạm vi đã chốt): không đổi `getKpiTasks()`/badge Bell — instance sinh
+  từ template 5S vẫn tính vào nhóm `tab:"tasks"` như task thường; không xóa/hạn chế gì ở trang
+  `/dashboard/kpi/templates` — vẫn là nơi quản trị tổng hợp tất cả template kể cả loại 5S.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration trước
+
+1. Chạy `supabase/migrations/20260821_kpi_task_templates_5s_location.sql` trên Supabase SQL
+   Editor.
+2. Vị trí 5S đang có ≥2 người dọn → "Phân công thông minh" (cả nút bulk lẫn "Random vị trí này")
+   → xác nhận đề xuất ra đúng số lượng người MỚI bằng số cũ (không tụt về 1); xác nhận checklist
+   multi-select hoạt động đúng (tick/bỏ tick, tự gỡ khỏi "Người chấm" nếu trùng); xác nhận sau khi
+   xác nhận, `kpi_5s_location_cleaners` được ghi đúng (không chỉ cột `nguoi_don_id` legacy).
+3. Chấm điểm chuyên môn: chọn 1 Nhóm trước → xác nhận "Người được chấm" chỉ còn đúng người thuộc
+   nhóm đó; đổi Nhóm khác → danh sách cập nhật đúng; chọn Người trước rồi mới chọn Nhóm → vẫn hoạt
+   động (không breaking chiều cũ); chọn 1 nhóm không ai thuộc → thấy đúng thông báo "Nhóm này chưa
+   có ai."
+4. Đăng nhập admin/lãnh đạo phòng ban → Bảng điểm KPI → bấm "Xem chi tiết" 1 dòng trong "Toàn nhà
+   máy" → xác nhận đúng dữ liệu (task/5S/chấm điểm ngày) của ĐÚNG người đó; bấm "← Quay lại xem của
+   tôi" → về đúng dữ liệu bản thân.
+5. Tạo 1 Vị trí 5S (hoặc dùng vị trí có sẵn, gán đúng `phong_ban_id`) → vào trang chi tiết vị trí
+   → "+ Thêm việc định kỳ cho vị trí này" → thử cả 3 kiểu nhịp độ (Thứ trong tuần / N ngày / Ngày
+   trong tháng) → lưu → xác nhận xuất hiện đúng trong danh sách tại trang vị trí VÀ trong
+   `/dashboard/kpi/templates` (kèm badge "5S: ..."); xác nhận `kpi_tasks` sinh ra mang đúng
+   `kpi_5s_location_id`, vẫn hiển thị bình thường ở `/dashboard/kpi/tasks`.
+6. Test quyền tại trang chi tiết vị trí: tài khoản là lãnh đạo phòng ban KHÁC (không phải đúng
+   phòng ban của vị trí) → xác nhận KHÔNG thấy nút "Thêm/Sửa/Tạm ngưng/Xóa" của "Việc định kỳ tại
+   vị trí này"; tài khoản đúng lãnh đạo phòng ban của vị trí đó → thấy đầy đủ.

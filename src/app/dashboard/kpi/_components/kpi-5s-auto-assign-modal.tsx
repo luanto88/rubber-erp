@@ -21,7 +21,13 @@
 import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, RefreshCw, Shuffle, Users } from "lucide-react"
 import { ModalShell } from "../../_components/modal-shell"
-import { patchKpi5sLocation, fetchAllLocationCleanerMemberships, getKpi5sErrorMessage, type Kpi5sLocation } from "@/lib/kpi-5s"
+import {
+  updateKpi5sLocation,
+  fetchAllLocationCleanerMemberships,
+  getEffectiveCleanerIds,
+  getKpi5sErrorMessage,
+  type Kpi5sLocation,
+} from "@/lib/kpi-5s"
 import { fetchAllZoneMemberships } from "@/lib/kpi-5s-zones"
 import { loadKpiTaskCandidates, fetchDepartmentUserIds, type KpiTaskCandidate } from "@/lib/kpi-tasks"
 import {
@@ -31,15 +37,25 @@ import {
   type AutoAssignSuggestion,
 } from "@/lib/kpi-5s-auto-assign"
 
-type RowState = AutoAssignSuggestion & { originalDon: string | null; originalCham: string | null }
+// Trả về true nếu 2 mảng chứa đúng cùng tập giá trị (không quan tâm thứ tự) — dùng để phát hiện
+// dòng nào thực sự thay đổi đội ngũ dọn dẹp trước khi ghi.
+function arraysEqualAsSets(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const setB = new Set(b)
+  return a.every((v) => setB.has(v))
+}
+
+type RowState = AutoAssignSuggestion & { originalCleanerIds: string[]; originalCham: string | null }
 
 export function Kpi5sAutoAssignModal({
   factoryId,
+  currentUserId,
   locations,
   onClose,
   onAssigned,
 }: {
   factoryId: string
+  currentUserId: string
   locations: Kpi5sLocation[]
   onClose: () => void
   onAssigned: (summary: { userId: string; ten: string; donZones: string[]; chamZones: string[] }[]) => void
@@ -47,6 +63,7 @@ export function Kpi5sAutoAssignModal({
   const [candidatesRaw, setCandidatesRaw] = useState<KpiTaskCandidate[]>([])
   const [zoneMembership, setZoneMembership] = useState<Map<string, string[]>>(new Map())
   const [deptUserIdsByDept, setDeptUserIdsByDept] = useState<Map<string, Set<string>>>(new Map())
+  const [cleanerMembership, setCleanerMembership] = useState<Map<string, string[]>>(new Map())
   const [establishedUserIds, setEstablishedUserIds] = useState<Set<string>>(new Set())
   const [loadingCandidates, setLoadingCandidates] = useState(true)
   const [loadError, setLoadError] = useState("")
@@ -78,7 +95,7 @@ export function Kpi5sAutoAssignModal({
       setLoadError("")
       try {
         const distinctDeptIds = [...new Set(locations.map((l) => l.phong_ban_id).filter((v): v is string => !!v))]
-        const [taskData, membership, cleanerMembership, deptEntries] = await Promise.all([
+        const [taskData, membership, cleanerMap, deptEntries] = await Promise.all([
           loadKpiTaskCandidates(factoryId),
           fetchAllZoneMemberships(factoryId),
           fetchAllLocationCleanerMemberships(factoryId),
@@ -88,7 +105,8 @@ export function Kpi5sAutoAssignModal({
         setCandidatesRaw(taskData.people)
         setZoneMembership(membership)
         setDeptUserIdsByDept(new Map(deptEntries))
-        setEstablishedUserIds(computeEstablished5sUserIds(locations, cleanerMembership))
+        setCleanerMembership(cleanerMap)
+        setEstablishedUserIds(computeEstablished5sUserIds(locations, cleanerMap))
       } catch (err) {
         if (alive) setLoadError(getKpi5sErrorMessage(err, "Không tải được danh sách nhân sự."))
       } finally {
@@ -133,6 +151,7 @@ export function Kpi5sAutoAssignModal({
         nguoi_cham_id: l.nguoi_cham_id,
         zone_id: l.zone_id,
         phong_ban_id: l.phong_ban_id,
+        current_cleaner_ids: getEffectiveCleanerIds(l, cleanerMembership),
       })),
       candidates,
       { onlyUnassigned, avoidSameGroup, deptUserIdsByDept, establishedUserIds },
@@ -140,13 +159,31 @@ export function Kpi5sAutoAssignModal({
     setRows(
       suggestions.map((s) => {
         const l = locationById[s.locationId]
-        return { ...s, originalDon: l?.nguoi_don_id || null, originalCham: l?.nguoi_cham_id || null }
+        return {
+          ...s,
+          originalCleanerIds: l ? getEffectiveCleanerIds(l, cleanerMembership) : [],
+          originalCham: l?.nguoi_cham_id || null,
+        }
       }),
     )
     setSaveError("")
   }
 
-  const updateRow = (locationId: string, patch: Partial<Pick<RowState, "nguoiDonId" | "nguoiChamId">>) => {
+  // Bấm/bỏ 1 người trong ô "Người dọn" — tự gỡ khỏi vai trò "Người chấm" nếu đang được set (1
+  // người không thể vừa dọn vừa chấm), mirror toggleFormCleaner() ở kpi-5s-locations-tab.tsx.
+  const toggleRowCleaner = (locationId: string, userId: string) => {
+    setRows((prev) =>
+      (prev || []).map((r) => {
+        if (r.locationId !== locationId) return r
+        const nguoiDonIds = r.nguoiDonIds.includes(userId)
+          ? r.nguoiDonIds.filter((id) => id !== userId)
+          : [...r.nguoiDonIds, userId]
+        return { ...r, nguoiDonIds, nguoiChamId: r.nguoiChamId === userId ? null : r.nguoiChamId }
+      }),
+    )
+  }
+
+  const updateRow = (locationId: string, patch: Partial<Pick<RowState, "nguoiChamId">>) => {
     setRows((prev) => (prev || []).map((r) => (r.locationId === locationId ? { ...r, ...patch } : r)))
   }
 
@@ -156,10 +193,12 @@ export function Kpi5sAutoAssignModal({
     setSaveError("")
     try {
       const changed = rows.filter(
-        (r) => !skippedIds.has(r.locationId) && (r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham),
+        (r) =>
+          !skippedIds.has(r.locationId) &&
+          (!arraysEqualAsSets(r.nguoiDonIds, r.originalCleanerIds) || r.nguoiChamId !== r.originalCham),
       )
       await Promise.all(
-        changed.map((r) => patchKpi5sLocation(r.locationId, { nguoi_don_id: r.nguoiDonId, nguoi_cham_id: r.nguoiChamId })),
+        changed.map((r) => updateKpi5sLocation(r.locationId, { nguoi_cham_id: r.nguoiChamId }, r.nguoiDonIds, currentUserId)),
       )
 
       // Tổng hợp theo người để hiện thông báo/thông tin cho bước sau (Telegram) — mỗi người có
@@ -172,7 +211,9 @@ export function Kpi5sAutoAssignModal({
       for (const r of changed) {
         const l = locationById[r.locationId]
         const label = l ? `${l.ma_vi_tri} — ${l.ten_vi_tri}` : r.locationId
-        if (r.nguoiDonId && r.nguoiDonId !== r.originalDon) ensure(r.nguoiDonId).donZones.push(label)
+        for (const uid of r.nguoiDonIds) {
+          if (!r.originalCleanerIds.includes(uid)) ensure(uid).donZones.push(label)
+        }
         if (r.nguoiChamId && r.nguoiChamId !== r.originalCham) ensure(r.nguoiChamId).chamZones.push(label)
       }
       onAssigned(Array.from(byUser.values()))
@@ -184,7 +225,11 @@ export function Kpi5sAutoAssignModal({
   }
 
   const changedCount = rows
-    ? rows.filter((r) => !skippedIds.has(r.locationId) && (r.nguoiDonId !== r.originalDon || r.nguoiChamId !== r.originalCham)).length
+    ? rows.filter(
+        (r) =>
+          !skippedIds.has(r.locationId) &&
+          (!arraysEqualAsSets(r.nguoiDonIds, r.originalCleanerIds) || r.nguoiChamId !== r.originalCham),
+      ).length
     : 0
 
   return (
@@ -305,24 +350,31 @@ export function Kpi5sAutoAssignModal({
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5 flex items-center gap-1">
-                        Người dọn
+                        Người dọn ({r.nguoiDonIds.length})
                         {r.zonePoolRelaxed && (
                           <span title="Khu vực không đủ 2 người — đã tự nới lỏng">
                             <AlertTriangle size={10} className="text-amber-500" />
                           </span>
                         )}
                       </label>
-                      <select
-                        value={r.nguoiDonId || ""}
-                        onChange={(e) => updateRow(r.locationId, { nguoiDonId: e.target.value || null })}
-                        disabled={skipped}
-                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-violet-500 disabled:bg-slate-100"
-                      >
-                        <option value="">— Chưa gán —</option>
-                        {options.map((c) => (
-                          <option key={c.userId} value={c.userId} disabled={c.userId === r.nguoiChamId}>{c.ten}</option>
-                        ))}
-                      </select>
+                      <div className="max-h-28 space-y-0.5 overflow-y-auto rounded-lg border border-slate-300 p-1.5">
+                        {options.length === 0 ? (
+                          <div className="px-1 py-1 text-[11px] text-slate-400">Không có ứng viên phù hợp.</div>
+                        ) : (
+                          options.map((c) => (
+                            <label key={c.userId} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={r.nguoiDonIds.includes(c.userId)}
+                                onChange={() => toggleRowCleaner(r.locationId, c.userId)}
+                                disabled={skipped}
+                                className="h-3.5 w-3.5 rounded accent-violet-600"
+                              />
+                              {c.ten}
+                            </label>
+                          ))
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5 flex items-center gap-1">
@@ -346,7 +398,7 @@ export function Kpi5sAutoAssignModal({
                       >
                         <option value="">— Chưa gán —</option>
                         {options.map((c) => (
-                          <option key={c.userId} value={c.userId} disabled={c.userId === r.nguoiDonId}>{c.ten}</option>
+                          <option key={c.userId} value={c.userId} disabled={r.nguoiDonIds.includes(c.userId)}>{c.ten}</option>
                         ))}
                       </select>
                     </div>
