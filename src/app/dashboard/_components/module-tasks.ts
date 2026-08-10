@@ -342,6 +342,24 @@ export async function getQualityTasks(factoryId: string): Promise<ModuleTaskSumm
   return { moduleLabel: "Chất lượng", items: [{ label: "Lô đang rớt hạng", count, link: "/dashboard/quality" }] }
 }
 
+// ── Bảo trì ──────────────────────────────────────────────────────────────────
+// Chỉ hiện khi user có quyền maintenance.approve (hasPermission tự bypass cho admin).
+// Không có quyền → trả items rỗng, layout.tsx tự fallback về "Thông báo chung".
+export async function getMaintenanceTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+  if (!hasPermission(user, "maintenance.approve")) {
+    return { moduleLabel: "Bảo trì", items: [] }
+  }
+  const { count } = await supabase
+    .from("maintenance_records")
+    .select("id", { count: "exact", head: true })
+    .eq("factory_id", factoryId)
+    .eq("trang_thai", "cho_duyet")
+  return {
+    moduleLabel: "Bảo trì",
+    items: [{ label: "Biên bản chờ phê duyệt", count: count || 0, link: "/dashboard/maintenance/records" }],
+  }
+}
+
 // ── 5S — vị trí tôi phụ trách (dọn hoặc chấm) đang quá hạn/sắp đến hạn ──────────────────────
 // Chỉ tính vị trí ĐANG ÁP DỤNG và CÓ cấu hình hạn chấm (deadline_weekdays NOT NULL) — mirror
 // đúng ngữ nghĩa isKpi5sDeadlineOverdue/DueSoon (vị trí không cấu hình hạn không bao giờ "quá
@@ -511,6 +529,7 @@ export async function getModuleTasks(
   if (isUnderRoute(pathname, "/dashboard/quality") || isUnderRoute(pathname, "/dashboard/quality-analytics")) {
     return getQualityTasks(factoryId)
   }
+  if (isUnderRoute(pathname, "/dashboard/maintenance")) return getMaintenanceTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/kpi")) return getKpiTasks(factoryId, user)
   return null
 }

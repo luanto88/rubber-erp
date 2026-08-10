@@ -16,7 +16,13 @@ Chuông thông báo cũ (`src/app/dashboard/layout.tsx`) chỉ hiển thị 1 da
 Export chính: `getModuleTasks(pathname, factoryId, user: SessionUser): Promise<ModuleTaskSummary | null>`.
 
 ```ts
-type ModuleTaskItem = { label: string; count: number; link: string }
+type ModuleTaskItem = {
+  label: string; count: number; link: string
+  // role/tab: chỉ set bởi getKpiTasks() — dùng để module /dashboard/kpi tự nhóm item theo
+  // vai trò ("nhan"/"giao") và tính badge số trên từng tab. Các module khác để undefined.
+  role?: "nhan" | "giao"
+  tab?: "tasks" | "5s" | "templates" | "appeals"
+}
 type ModuleTaskSummary = { moduleLabel: string; items: ModuleTaskItem[] }
 ```
 
@@ -31,8 +37,10 @@ Switch theo tiền tố route qua `isUnderRoute(pathname, base)` (khớp `pathna
 | `/dashboard/export` | `getExportTasks` | `src/app/dashboard/export/page.tsx` (`canApproveOrders` qua `maintenance_staff.chuc_vu_chinh_quyen`, `EXPORT_ORDER_STATUS_PENDING`) + lô rớt hạng dùng chung `getRotHangLotCount` |
 | `/dashboard/inventory` | `getInventoryTasks` | `inventory_documents.status='draft'` + `buildEffectiveStockBalances` (tái dùng pure function từ `inventory/_components/inventory-stock.ts`) + công thức `alertRows` ở `inventory/analytics/page.tsx` |
 | `/dashboard/quality`, `/dashboard/quality-analytics` | `getQualityTasks` | dùng chung `getRotHangLotCount` |
+| `/dashboard/maintenance` | `getMaintenanceTasks` | `maintenance_records.trang_thai='cho_duyet'`, chỉ hiện với người có quyền `maintenance.approve` (`hasPermission`, tự bypass cho admin) |
+| `/dashboard/kpi` | `getKpiTasks` | Module lớn, nhiều item (`role`/`tab`) — xem trực tiếp code `getKpiTasks` trong `module-tasks.ts`, không chép lại logic vào rule này vì thay đổi thường xuyên |
 
-Route khác (dispatch, storage, product, warehouse, maintenance, settings, dashboard...) → `getModuleTasks` trả `null`, fallback "Thông báo chung".
+Route khác (dispatch, storage, product, warehouse, settings, dashboard, process, notes, warehouse-thành-phẩm, map, eudr, customer-portal...) → `getModuleTasks` trả `null`, fallback "Thông báo chung".
 
 ### Helper dùng chung `getRotHangLotCount(factoryId)`
 
@@ -62,3 +70,9 @@ Route khác (dispatch, storage, product, warehouse, maintenance, settings, dashb
 2. Thêm nhánh trong `getModuleTasks()` dùng `isUnderRoute(pathname, "/dashboard/xxx")`, kiểm tra kỹ có route anh em nào dễ bị khớp nhầm bằng `startsWith` trần không (như case `quality` vs `quality-analytics`).
 3. Nếu logic đếm cần quét bảng có khả năng vượt 1000 dòng (lịch sử giao dịch, kết quả kiểm nghiệm...), PHẢI giới hạn phạm vi (theo trạng thái còn "sống"/đang xử lý, không quét toàn bộ lịch sử) hoặc chunk theo batch — không lặp lại rủi ro đã ghi ở `.claude/rules/04-code-patterns.md`.
 4. Không tự ý quyết định phạm vi dữ liệu nghiệp vụ mơ hồ (ví dụ "thế nào là lô đang cần xử lý") — hỏi lại người dùng như đã làm với case Xuất hàng/Chất lượng ở trên.
+
+## Cập nhật — module Bảo trì + fix bug mobile chỉ hiển thị 1 dòng
+
+- Đã thêm `getMaintenanceTasks` (xem bảng ở trên). Module KPI (`getKpiTasks`) cũng đã có từ trước nhưng không được ghi vào bảng gốc — đã bổ sung.
+- **Bug đã fix**: trên mobile, panel chuông (bottom-sheet) chỉ hiển thị được đúng 1 dòng, gần như không cuộn được dù CSS scroll (`max-h-[65dvh] overflow-y-auto`) hoàn toàn đúng. Nguyên nhân: `<header>` (`layout.tsx`) có class `backdrop-blur-sm` — theo spec CSS, `backdrop-filter` (cùng nhóm `filter`/`transform`/`perspective`/`will-change`/`contain`) khiến phần tử đó trở thành **containing block mới cho mọi hậu duệ `position: fixed`**. Panel chuông dùng `fixed inset-x-0 bottom-0` trên mobile (chỉ override `md:absolute` từ `md:` trở lên) — vì `<header>` là tổ tiên có `backdrop-blur-sm`, `bottom-0`/`inset-x-0` bị tính theo hộp mỏng ~52px của `<header>` thay vì theo viewport, đẩy gần hết nội dung panel ra tọa độ y âm (ngoài màn hình), chỉ còn lọt vào vùng nhìn thấy đúng 1 dòng. Đã fix bằng cách bỏ hẳn `backdrop-blur-sm` khỏi `<header>` — giải quyết dứt điểm, không cần đổi cấu trúc panel (`createPortal`...).
+- **Landmine cần nhớ cho code sau này**: KHÔNG thêm `filter`/`backdrop-filter`/`transform`/`perspective`/`will-change`/`contain` vào `<header>` (hoặc bất kỳ ancestor `sticky`/tĩnh nào bao ngoài các overlay `position: fixed` dùng cho mobile bottom-sheet/drawer) — các thuộc tính này âm thầm biến ancestor đó thành containing block cho `fixed`, làm hỏng positioning trên mobile mà desktop (`md:absolute`) không hề lộ ra vì `absolute` dừng containing-block sớm hơn ở ancestor `relative` gần nhất. Nếu thực sự cần hiệu ứng blur/transform trên 1 vùng, đặt nó lệch khỏi cây chứa các overlay `fixed` (hoặc portal overlay ra `document.body`), không đặt chung 1 ancestor.
