@@ -21,6 +21,7 @@ import {
   FileText,
   Flag,
   Link2,
+  Loader2,
   MapPin,
   PenSquare,
   RotateCcw,
@@ -110,12 +111,19 @@ function ProgressForm({
   const [locating, setLocating] = useState(false)
   const [saving, setSaving] = useState<"cap_nhat_tien_do" | "nop" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Ảnh/file bằng chứng đang upload dở — khoá nút Lưu/Nộp trong lúc đó, tránh mất bằng chứng do
+  // race condition (xem KpiEvidencePicker.onUploadingChange).
+  const [evidenceUploading, setEvidenceUploading] = useState(false)
 
   const req = task.yeu_cau_bao_cao
-  const missingReq =
-    (req.includes("anh") && imageUrls.length === 0) ||
-    (req.includes("file") && fileUrls.length === 0) ||
-    (req.includes("dinh_vi") && viDo === null)
+  const missingReqItems = req.filter((r) => {
+    if (r === "anh") return imageUrls.length === 0
+    if (r === "file") return fileUrls.length === 0
+    if (r === "dinh_vi") return viDo === null
+    if (r === "van_ban") return !noiDung.trim()
+    return false
+  })
+  const missingReq = missingReqItems.length > 0
 
   const handleLocate = () => {
     if (!navigator.geolocation) {
@@ -140,6 +148,10 @@ function ProgressForm({
   const handleSubmit = async (hanhDong: "cap_nhat_tien_do" | "nop") => {
     if (hanhDong === "cap_nhat_tien_do" && !noiDung.trim()) {
       setError("Vui lòng mô tả nội dung đã thực hiện.")
+      return
+    }
+    if (hanhDong === "nop" && missingReq) {
+      setError(`Công việc yêu cầu kèm theo: ${missingReqItems.map((r) => KPI_REPORT_REQ_LABEL[r]).join(", ")} — vui lòng bổ sung trước khi nộp.`)
       return
     }
     setSaving(hanhDong)
@@ -210,6 +222,7 @@ function ProgressForm({
         onImagesChange={setImageUrls}
         fileUrls={fileUrls}
         onFilesChange={setFileUrls}
+        onUploadingChange={setEvidenceUploading}
       />
 
       {req.includes("dinh_vi") && (
@@ -241,7 +254,13 @@ function ProgressForm({
 
       {missingReq && (
         <div className="text-xs font-semibold text-amber-600">
-          Công việc yêu cầu kèm theo: {req.map((r) => KPI_REPORT_REQ_LABEL[r]).join(", ")} — bạn có thể vẫn lưu nhưng nên bổ sung đầy đủ.
+          Cần bổ sung {missingReqItems.map((r) => KPI_REPORT_REQ_LABEL[r]).join(", ")}{" "}
+          trước khi Nộp — vẫn có thể &quot;Cập nhật tiến độ&quot; tạm thời.
+        </div>
+      )}
+      {evidenceUploading && (
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+          <Loader2 size={12} className="animate-spin" /> Đang tải ảnh/file lên — vui lòng đợi trước khi lưu...
         </div>
       )}
       {error && <div className="text-xs font-semibold text-red-600">{error}</div>}
@@ -249,14 +268,14 @@ function ProgressForm({
       <div className="flex flex-wrap gap-2 pt-1">
         <button
           onClick={() => void handleSubmit("cap_nhat_tien_do")}
-          disabled={saving !== null}
+          disabled={saving !== null || evidenceUploading}
           className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold disabled:opacity-60"
         >
           {saving === "cap_nhat_tien_do" ? "Đang lưu..." : "Cập nhật tiến độ"}
         </button>
         <button
           onClick={() => void handleSubmit("nop")}
-          disabled={saving !== null}
+          disabled={saving !== null || evidenceUploading || missingReq}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold disabled:opacity-60"
         >
           <Send size={13} /> {saving === "nop" ? "Đang nộp..." : "Nộp"}
@@ -699,6 +718,13 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
   const [transfers, setTransfers] = useState<KpiTaskTransfer[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
+  // Bug thật đã fix: refetch nền do focus/visibilitychange (dòng ~800) gọi lại loadData(), set
+  // dataLoading=true — nếu gate loading ở dưới chặn CẢ TRANG theo dataLoading (không phân biệt lần
+  // tải đầu với refetch nền), <ProgressForm> (và mọi state đang gõ dở: ảnh vừa chọn, nội dung tiến
+  // độ, vị trí GPS...) bị UNMOUNT mỗi khi cửa sổ lấy lại focus — đúng lúc mở hộp thoại chọn ảnh từ
+  // hệ điều hành (native file picker khiến tab mất focus rồi lấy lại ngay khi đóng hộp thoại).
+  // Chỉ chặn toàn trang ở LẦN TẢI ĐẦU TIÊN; các lần refetch nền sau đó giữ nguyên cây component.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
 
   const [evaluateTarget, setEvaluateTarget] = useState<{ action: EvaluateAction; memberUserId: string; memberName: string } | null>(null)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
@@ -757,6 +783,7 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
       setDataError(getKpiErrorMessage(err, "Không tải được công việc."))
     } finally {
       setDataLoading(false)
+      setHasLoadedOnce(true)
     }
   }, [taskId])
 
@@ -800,8 +827,11 @@ export default function KpiTaskDetailPage({ params }: { params: Promise<{ id: st
 
   const resolveName = useCallback((uid: string) => nameByUserId[uid] || `Người dùng ${uid.slice(0, 8)}`, [nameByUserId])
 
-  if (loading || dataLoading) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
-  if (dataError || !task) {
+  // Chỉ chặn toàn trang ở LẦN TẢI ĐẦU TIÊN (dataLoading && !hasLoadedOnce) — các lần refetch nền
+  // sau đó (focus/visibilitychange, xem effect ở trên) giữ nguyên cây component đang render, để
+  // không làm mất state cục bộ đang gõ dở trong <ProgressForm> (ảnh vừa chọn, nội dung, vị trí...).
+  if (loading || (dataLoading && !hasLoadedOnce)) return <div className="p-12 text-center text-slate-400">Đang tải...</div>
+  if (!task) {
     return (
       <KpiShell>
         <div className="bg-white rounded-2xl border border-red-200 p-8 text-center text-red-600">{dataError || "Không tìm thấy công việc."}</div>

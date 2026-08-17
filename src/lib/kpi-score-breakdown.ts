@@ -9,13 +9,18 @@
 // personnel_group_members/maintenance_staff mirror đúng loadPrimaryGroup ở kpi/tasks/page.tsx).
 //
 // Công thức tham chiếu (KHÔNG đổi so với RPC kpi_compute_monthly_scores,
-// supabase/migrations/20260813_kpi_score_weights_monthly_scores.sql):
+// supabase/migrations/20260813_kpi_score_weights_monthly_scores.sql, đã renormalize theo
+// supabase/migrations/20260825_kpi_score_renormalize.sql):
 //   A = AVG(tien_do_nghiem_thu ?? tien_do) theo task is_active=true, ngay_giao trong tháng
 //   B = tỷ lệ da_nop_luc <= han_hoan_thanh trong số task ĐÃ ĐẾN HẠN (han_hoan_thanh <= cutoff)
 //   C = AVG(dat=100/tuong_doi=50/khong_dat=0) theo kpi_5s_evaluations.nguoi_don_id, tuan_bat_dau
 //       trong tháng
 //   D = trung bình (Điểm ngày ÷ Max ngày × 100) qua các ngày CÓ loai='chinh'; Điểm ngày =
 //       %chính×10 + Σ(%choàng_i×5); Max ngày = 10 + 5×số nhóm choàng có chấm ngày đó
+//   Thành phần nào KHÔNG có dữ liệu trong tháng (0 việc/0 việc đến hạn/0 lần chấm 5S/0 ngày chấm
+//   D) không còn mặc định = 100 — bị loại khỏi công thức, các thành phần còn lại được
+//   RENORMALIZE theo đúng tỷ trọng tương ứng (chia cho tổng trọng số của các thành phần CÒN LẠI,
+//   không phải chia cho 100). Nếu CẢ 4 thành phần đều thiếu dữ liệu, tháng đó không có điểm nào.
 //   Xem .claude/rules/27-kpi-module.md mục "Công thức tính điểm" (đầu file) để biết đầy đủ.
 
 import { supabase } from "@/lib/supabase"

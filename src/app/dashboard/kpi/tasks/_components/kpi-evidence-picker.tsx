@@ -5,7 +5,7 @@
 // NoteImagePicker (src/app/dashboard/_components/note-image-picker.tsx) nhưng gộp thêm
 // nhánh file bất kỳ (không giới hạn ảnh) vì kpi_task_logs.file_urls tách riêng image_urls.
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Camera, File as FileIcon, ImagePlus, Loader2, Paperclip, X } from "lucide-react"
 import { getKpiErrorMessage, uploadKpiEvidenceFile, uploadKpiEvidenceImage } from "@/lib/kpi-tasks"
 
@@ -19,6 +19,10 @@ type KpiEvidencePickerProps = {
   onImagesChange: (urls: string[]) => void
   fileUrls: { url: string; name: string }[]
   onFilesChange: (files: { url: string; name: string }[]) => void
+  // Báo cho component cha biết đang có ảnh/file upload dở — cha dùng để khoá tạm nút Lưu/Nộp,
+  // tránh race condition "chọn ảnh rồi bấm Lưu ngay" đọc phải imageUrls/fileUrls còn cũ (mất bằng
+  // chứng, không báo lỗi gì).
+  onUploadingChange?: (uploading: boolean) => void
 }
 
 export function KpiEvidencePicker({
@@ -28,6 +32,7 @@ export function KpiEvidencePicker({
   onImagesChange,
   fileUrls,
   onFilesChange,
+  onUploadingChange,
 }: KpiEvidencePickerProps) {
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
@@ -36,6 +41,10 @@ export function KpiEvidencePicker({
   const [uploadingFile, setUploadingFile] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [zoomUrl, setZoomUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    onUploadingChange?.(uploadingImage || uploadingFile)
+  }, [uploadingImage, uploadingFile, onUploadingChange])
 
   const handleImages = async (fileList: FileList | null) => {
     if (!fileList?.length) return

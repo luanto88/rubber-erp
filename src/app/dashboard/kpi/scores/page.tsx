@@ -603,6 +603,10 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
+function fmtPct(v: number | null): string {
+  return v === null ? "—" : `${v}%`
+}
+
 // Sub-tab "Chi tiết cách tính điểm" — mặc định của chính người xem, nhưng admin/lãnh đạo có thể
 // mở của người khác qua nút "Xem chi tiết" ở bảng "Toàn nhà máy" (userId khi đó là user_id của
 // dòng đã bấm, subjectName là tên hiển thị tương ứng). Tính lại real-time, không đọc
@@ -674,7 +678,8 @@ function MyScoreExplain({
   const heSoMax = applicable?.he_so_chuyen_can_max ?? d.he_so_chuyen_can_max
 
   // A
-  const scoreA = tasks.length === 0 ? 100 : round1(tasks.reduce((s, t) => s + (t.tien_do_nghiem_thu ?? t.tien_do), 0) / tasks.length)
+  const hasA = tasks.length > 0
+  const scoreA = hasA ? round1(tasks.reduce((s, t) => s + (t.tien_do_nghiem_thu ?? t.tien_do), 0) / tasks.length) : null
 
   // B — chỉ task đã đến hạn
   const cutoff = computeCutoffMs(nam, thang)
@@ -682,19 +687,30 @@ function MyScoreExplain({
     const due = new Date(t.han_hoan_thanh).getTime()
     return !Number.isNaN(due) && due <= cutoff
   })
+  const hasB = dueTasks.length > 0
   const onTimeCount = dueTasks.filter((t) => t.da_nop_luc && new Date(t.da_nop_luc).getTime() <= new Date(t.han_hoan_thanh).getTime()).length
-  const scoreB = dueTasks.length === 0 ? 100 : round1((onTimeCount / dueTasks.length) * 100)
+  const scoreB = hasB ? round1((onTimeCount / dueTasks.length) * 100) : null
 
   // C
   const to5sPoint = (k: Breakdown5s["ket_qua"]) => (k === "dat" ? 100 : k === "tuong_doi" ? 50 : 0)
-  const scoreC = evals5s.length === 0 ? 100 : round1(evals5s.reduce((s, e) => s + to5sPoint(e.ket_qua), 0) / evals5s.length)
+  const hasC = evals5s.length > 0
+  const scoreC = hasC ? round1(evals5s.reduce((s, e) => s + to5sPoint(e.ket_qua), 0) / evals5s.length) : null
 
   // D
   const dayScores = groupDailyByDay(daily)
-  const scoreD = dayScores.length === 0 ? 100 : round1(dayScores.reduce((s, dsc) => s + dsc.pctNgay, 0) / dayScores.length)
+  const hasD = dayScores.length > 0
+  const scoreD = hasD ? round1(dayScores.reduce((s, dsc) => s + dsc.pctNgay, 0) / dayScores.length) : null
 
   const heSoChuyenCan = Math.min(heSoMax, Math.max(heSoMin, dayScores.length / (ngayChuan || 1)))
-  const diemTong = round1(((wA * scoreA + wB * scoreB + wC * scoreC + wD * scoreD) / 100) * heSoChuyenCan)
+  const wAEff = hasA ? wA : 0
+  const wBEff = hasB ? wB : 0
+  const wCEff = hasC ? wC : 0
+  const wDEff = hasD ? wD : 0
+  const wSumEff = wAEff + wBEff + wCEff + wDEff
+  const diemTong =
+    wSumEff > 0
+      ? round1((((scoreA ?? 0) * wAEff + (scoreB ?? 0) * wBEff + (scoreC ?? 0) * wCEff + (scoreD ?? 0) * wDEff) / wSumEff) * heSoChuyenCan)
+      : null
 
   return (
     <div className="space-y-4">
@@ -720,10 +736,13 @@ function MyScoreExplain({
       <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-center justify-between text-sm font-extrabold text-slate-700">
           <span>A — Hoàn thành</span>
-          <span className="text-sky-600">Trung bình: {scoreA}%</span>
+          <span className="text-sky-600">Trung bình: {fmtPct(scoreA)}</span>
         </div>
         {tasks.length === 0 ? (
-          <div className="py-3 text-center text-xs text-slate-400">Không có việc nào trong tháng → mặc định 100%.</div>
+          <div className="py-3 text-center text-xs text-slate-400">
+            Không có việc nào trong tháng → không tính vào điểm tổng tháng này (đã loại khỏi công
+            thức, các thành phần còn lại được renormalize theo tỷ trọng tương ứng).
+          </div>
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
@@ -753,10 +772,13 @@ function MyScoreExplain({
       <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-center justify-between text-sm font-extrabold text-slate-700">
           <span>B — Đúng hạn</span>
-          <span className="text-amber-600">Trung bình: {scoreB}%</span>
+          <span className="text-amber-600">Trung bình: {fmtPct(scoreB)}</span>
         </div>
         {dueTasks.length === 0 ? (
-          <div className="py-3 text-center text-xs text-slate-400">Không có việc nào đã đến hạn trong tháng → mặc định 100%.</div>
+          <div className="py-3 text-center text-xs text-slate-400">
+            Không có việc nào đã đến hạn trong tháng → không tính vào điểm tổng tháng này (đã loại
+            khỏi công thức, các thành phần còn lại được renormalize theo tỷ trọng tương ứng).
+          </div>
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
@@ -789,10 +811,13 @@ function MyScoreExplain({
       <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-center justify-between text-sm font-extrabold text-slate-700">
           <span>C — 5S</span>
-          <span className="text-emerald-600">Trung bình: {scoreC}%</span>
+          <span className="text-emerald-600">Trung bình: {fmtPct(scoreC)}</span>
         </div>
         {evals5s.length === 0 ? (
-          <div className="py-3 text-center text-xs text-slate-400">Không có lượt chấm 5S nào trong tháng → mặc định 100%.</div>
+          <div className="py-3 text-center text-xs text-slate-400">
+            Không có lượt chấm 5S nào trong tháng → không tính vào điểm tổng tháng này (đã loại
+            khỏi công thức, các thành phần còn lại được renormalize theo tỷ trọng tương ứng).
+          </div>
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
             <table className="w-full text-xs">
@@ -822,10 +847,14 @@ function MyScoreExplain({
       <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-center justify-between text-sm font-extrabold text-slate-700">
           <span>D — Chuyên môn</span>
-          <span className="text-violet-600">Trung bình: {scoreD}%</span>
+          <span className="text-violet-600">Trung bình: {fmtPct(scoreD)}</span>
         </div>
         {dayScores.length === 0 ? (
-          <div className="py-3 text-center text-xs text-slate-400">Không có ngày nào có chấm chuyên môn (nhóm chính) trong tháng → mặc định 100%.</div>
+          <div className="py-3 text-center text-xs text-slate-400">
+            Không có ngày nào có chấm chuyên môn (nhóm chính) trong tháng → không tính vào điểm
+            tổng tháng này (đã loại khỏi công thức, các thành phần còn lại được renormalize theo
+            tỷ trọng tương ứng).
+          </div>
         ) : (
           <>
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
@@ -861,14 +890,28 @@ function MyScoreExplain({
 
       <div className="hover-lift rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm">
         <div className="mb-2 text-sm font-extrabold text-violet-700">Kết quả cuối cùng (tính lại real-time)</div>
-        <div className="text-sm text-slate-700">
-          ({wA}×{scoreA} + {wB}×{scoreB} + {wC}×{scoreC} + {wD}×{scoreD}) / 100 × {round1(heSoChuyenCan)} = <strong className="text-lg text-violet-700">{diemTong}</strong>
-        </div>
-        <p className="mt-2 text-[11px] text-slate-500">
-          Số liệu tính lại real-time từ dữ liệu hiện tại — có thể khác với điểm đã lưu ở tab
-          &quot;Tổng quan&quot; nếu dữ liệu thay đổi sau lần admin bấm &quot;Tính điểm tháng&quot;
-          gần nhất.
-        </p>
+        {wSumEff === 0 ? (
+          <p className="text-sm text-slate-600">
+            Chưa đủ dữ liệu để chấm điểm tháng này — {subjectName === "bạn" ? "Bạn" : subjectName}{" "}
+            không có việc nào, không có việc đến hạn, không phụ trách 5S, và không có ngày chấm
+            chuyên môn nào trong tháng.
+          </p>
+        ) : (
+          <>
+            <div className="text-sm text-slate-700">
+              (
+              {[hasA ? `${wA}×${scoreA}` : null, hasB ? `${wB}×${scoreB}` : null, hasC ? `${wC}×${scoreC}` : null, hasD ? `${wD}×${scoreD}` : null]
+                .filter((v): v is string => v !== null)
+                .join(" + ")}
+              ) / {wSumEff} × {round1(heSoChuyenCan)} = <strong className="text-lg text-violet-700">{diemTong}</strong>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Số liệu tính lại real-time từ dữ liệu hiện tại — có thể khác với điểm đã lưu ở tab
+              &quot;Tổng quan&quot; nếu dữ liệu thay đổi sau lần admin bấm &quot;Tính điểm
+              tháng&quot; gần nhất.
+            </p>
+          </>
+        )}
       </div>
     </div>
   )

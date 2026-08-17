@@ -5043,3 +5043,446 @@ Theo đúng câu trả lời người dùng đã chốt: **tạo ở logic 5S, c
 6. Test quyền tại trang chi tiết vị trí: tài khoản là lãnh đạo phòng ban KHÁC (không phải đúng
    phòng ban của vị trí) → xác nhận KHÔNG thấy nút "Thêm/Sửa/Tạm ngưng/Xóa" của "Việc định kỳ tại
    vị trí này"; tài khoản đúng lãnh đạo phòng ban của vị trí đó → thấy đầy đủ.
+
+## Kế hoạch phiên sau (2026-08-XX) — 3 cải tiến sau khi dùng thử thực tế: renormalize điểm KPI, bắt buộc bằng chứng, fix bug mất ảnh
+
+Người dùng đã chạy đủ migration `20260806`→`20260824` và dùng thử module trên **localhost**
+(nhánh này CHƯA deploy lên production — sẽ chỉ deploy sau khi hoàn tất 3 cải tiến dưới đây), phát
+hiện 3 vấn đề. Đã điều tra kỹ bằng Explore agent + xác nhận trực tiếp qua code thật, đã chốt 3
+quyết định thiết kế qua trao đổi trực tiếp — session trước đó chỉ viết đặc tả, CHƯA CODE. Việc đầu
+tiên của phiên này: code đúng theo đặc tả dưới đây, không cần điều tra lại.
+
+### A. Renormalize công thức tính điểm KPI tháng khi thiếu dữ liệu
+
+**Bug quan sát được**: 1 người không có dữ liệu ở CẢ 4 thành phần A/B/C/D trong tháng vẫn ra điểm
+KPI = 75 (không phải NULL/không chấm) — vì mỗi thành phần COALESCE mặc định = 100, rồi hệ số
+chuyên cần sàn 0.75 (do 0 ngày có chấm / 24 ngày chuẩn) nhân vào: `100 × 0.75 = 75`. Đây đúng như
+thiết kế "bản nháp Phase 4" đã ghi rõ trong migration `20260813_kpi_score_weights_monthly_scores.sql`
+(dòng 24-27): *"Thiếu dữ liệu 1 thành phần → mặc định 100 cho riêng thành phần đó, KHÔNG
+renormalize... nếu sau vài tháng quan sát thấy bất hợp lý → cần quay lại thiết kế ở Phase 5."*
+Nay đã tới lúc quay lại sửa.
+
+**2 quyết định đã chốt** (không cần hỏi lại):
+1. Cả 4 thành phần A,B,C,D đều KHÔNG có dữ liệu → **không tạo dòng `kpi_monthly_scores` nào** cho
+   user đó tháng đó (không phải NULL — đơn giản không có dòng, không xuất hiện ở bảng "Toàn nhà
+   máy"/bảng xếp hạng ẩn danh tháng đó).
+2. Chỉ MỘT SỐ thành phần có dữ liệu (vd chỉ A,B có, C,D không) → **renormalize trọng số chỉ trên
+   các thành phần CÓ dữ liệu** (vd `diem_tong = (wA×A + wB×B)/(wA+wB) × hệ_số_chuyên_cần`), KHÔNG
+   mặc định C,D=100 rồi cộng vào như hiện tại.
+
+**Migration mới `supabase/migrations/20260825_kpi_score_renormalize.sql`** —
+`CREATE OR REPLACE FUNCTION public.kpi_compute_monthly_scores(p_factory_id UUID, p_nam INTEGER,
+p_thang INTEGER)` — GIỮ NGUYÊN chữ ký 3 tham số hệt hiện tại (không cần `DROP FUNCTION`, chỉ đổi
+tên tham số mới cần DROP trước — ở đây không đổi tên nào). Sửa các CTE sau (nguyên văn đang có ở
+`20260813_kpi_score_weights_monthly_scores.sql` dòng 174-323):
+
+1. **`a_data`** (dòng 174-182) và **`c_data`** (dòng 195-202): thêm `COUNT(*) AS so_task` /
+   `COUNT(*) AS so_lan_cham` vào SELECT (đều đã có `GROUP BY`, nên số dòng > 0 tương đương có dữ
+   liệu — thêm cột đếm tường minh cho dễ đọc, không bắt buộc về logic nhưng nên làm). `b_data` (đã
+   có sẵn `tong_da_den_han`) và `d_data` (đã có sẵn `so_ngay_co_cham`) không cần sửa gì thêm.
+
+2. **`final_calc`** (dòng 253-270) — bỏ TOÀN BỘ `COALESCE(..., 100)`, giữ NULL thô khi thiếu dữ
+   liệu, thêm 4 cờ boolean `has_a/has_b/has_c/has_d`:
+   ```sql
+   final_calc AS (
+     SELECT
+       wr.user_id,
+       a.diem_hoan_thanh                                     AS diem_hoan_thanh,   -- NULL nếu thiếu
+       COALESCE(a.so_task, 0) > 0                             AS has_a,
+       CASE WHEN b.tong_da_den_han > 0
+            THEN (b.dung_han::numeric / b.tong_da_den_han) * 100
+            ELSE NULL END                                     AS diem_dung_han,
+       COALESCE(b.tong_da_den_han, 0) > 0                      AS has_b,
+       c.diem_5s                                               AS diem_5s,
+       COALESCE(c.so_lan_cham, 0) > 0                          AS has_c,
+       d.diem_chuyen_mon                                       AS diem_chuyen_mon,
+       COALESCE(d.so_ngay_co_cham, 0) > 0                      AS has_d,
+       COALESCE(d.so_ngay_co_cham, 0)                          AS so_ngay_co_cham,
+       wr.w_a, wr.w_b, wr.w_c, wr.w_d, wr.ngay_chuan, wr.he_so_min, wr.he_so_max
+     FROM weight_row wr
+     LEFT JOIN a_data a ON a.user_id = wr.user_id
+     LEFT JOIN b_data b ON b.user_id = wr.user_id
+     LEFT JOIN c_data c ON c.user_id = wr.user_id
+     LEFT JOIN d_data d ON d.user_id = wr.user_id
+   )
+   ```
+   Cột `diem_hoan_thanh`/`diem_dung_han`/`diem_5s`/`diem_chuyen_mon` trong bảng `kpi_monthly_scores`
+   vốn đã KHÔNG có `NOT NULL` — lưu NULL hợp lệ về schema, `Metric` component
+   (`scores/page.tsx` dòng 593-599) đã tự render `value ?? "—"` sẵn, không cần sửa UI riêng lẻ.
+
+3. **`scored`** (dòng 271-276) — thêm trọng số hiệu lực (0 nếu không có dữ liệu) + tổng trọng số
+   hiệu lực:
+   ```sql
+   scored AS (
+     SELECT
+       fc.*,
+       LEAST(fc.he_so_max, GREATEST(fc.he_so_min,
+         fc.so_ngay_co_cham::numeric / NULLIF(fc.ngay_chuan, 0))) AS he_so_chuyen_can,
+       CASE WHEN fc.has_a THEN fc.w_a ELSE 0 END AS w_a_eff,
+       CASE WHEN fc.has_b THEN fc.w_b ELSE 0 END AS w_b_eff,
+       CASE WHEN fc.has_c THEN fc.w_c ELSE 0 END AS w_c_eff,
+       CASE WHEN fc.has_d THEN fc.w_d ELSE 0 END AS w_d_eff
+     FROM final_calc fc
+   ),
+   scored2 AS (
+     SELECT s.*, (s.w_a_eff + s.w_b_eff + s.w_c_eff + s.w_d_eff) AS w_sum_eff FROM scored s
+   )
+   ```
+
+4. **Công thức `diem_tong` renormalize** (thay dòng 292-295):
+   ```sql
+   round(
+     ( COALESCE(s.diem_hoan_thanh,0) * s.w_a_eff
+     + COALESCE(s.diem_dung_han,0)   * s.w_b_eff
+     + COALESCE(s.diem_5s,0)         * s.w_c_eff
+     + COALESCE(s.diem_chuyen_mon,0) * s.w_d_eff )
+     / s.w_sum_eff * s.he_so_chuyen_can,
+     1
+   )
+   ```
+   **BẮT BUỘC `COALESCE(diem_x, 0)` khi nhân** — vì `0 * NULL = NULL` trong SQL, nếu không
+   COALESCE thì dù trọng số hiệu lực = 0, cả tổng sẽ thành NULL. Khi đủ cả 4 thành phần,
+   `w_sum_eff` = tổng trọng số cấu hình gốc (thường = 100) → công thức tương đương y hệt bản cũ,
+   **không có regression** cho trường hợp dữ liệu đầy đủ.
+
+5. **WHERE lọc bỏ user không đủ dữ liệu**: trong `INSERT ... SELECT ... FROM scored2 s`, thêm
+   `WHERE s.w_sum_eff > 0` ngay trước `ON CONFLICT`. Vì lọc ngay trong SELECT nguồn của INSERT,
+   user không đủ dữ liệu **không xuất hiện trong tập kết quả** → `ON CONFLICT` không kích hoạt cho
+   họ ở lần chạy này → nếu trước đó ĐÃ có dòng điểm (từ lần tính có dữ liệu), dòng đó **giữ
+   nguyên, không bị xoá/update** — chấp nhận đây là giới hạn của giai đoạn nháp, không cần dọn dẹp
+   tự động.
+
+6. **`chi_tiet` JSONB mới** — bổ sung `trong_so_hieu_luc` (trọng số SAU renormalize) và `co_du_lieu`
+   (cờ has_a/b/c/d), giữ `trong_so` (trọng số GỐC) để tương thích ngược:
+   ```sql
+   jsonb_build_object(
+     'a', round(s.diem_hoan_thanh, 1), 'b', round(s.diem_dung_han, 1),
+     'c', round(s.diem_5s, 1), 'd', round(s.diem_chuyen_mon, 1),
+     'trong_so', jsonb_build_object('a', s.w_a, 'b', s.w_b, 'c', s.w_c, 'd', s.w_d),
+     'trong_so_hieu_luc', jsonb_build_object('a', s.w_a_eff, 'b', s.w_b_eff, 'c', s.w_c_eff, 'd', s.w_d_eff),
+     'co_du_lieu', jsonb_build_object('a', s.has_a, 'b', s.has_b, 'c', s.has_c, 'd', s.has_d),
+     'he_so_chuyen_can', round(s.he_so_chuyen_can, 3),
+     'so_ngay_co_cham', s.so_ngay_co_cham, 'ngay_chuan', s.ngay_chuan
+   )
+   ```
+   Cột `diem_hoan_thanh`/... trong bảng cũng lưu `round(s.diem_x, 1)` trực tiếp (NULL hợp lệ),
+   không còn `COALESCE(...,100)`.
+
+**`src/lib/kpi-scores.ts`** — mở rộng `KpiMonthlyScoreDetail` (dòng ~120-129):
+```ts
+export type KpiMonthlyScoreDetail = {
+  a: number | null; b: number | null; c: number | null; d: number | null
+  trong_so: { a: number; b: number; c: number; d: number }
+  trong_so_hieu_luc?: { a: number; b: number; c: number; d: number }  // optional — dòng cũ trước migration không có
+  co_du_lieu?: { a: boolean; b: boolean; c: boolean; d: boolean }
+  he_so_chuyen_can: number; so_ngay_co_cham: number; ngay_chuan: number
+}
+```
+
+**`src/app/dashboard/kpi/scores/page.tsx`, component `MyScoreExplain`** (dòng 676-697 phần tính
+toán, dòng 726/759/795/828 text "mặc định 100%", dòng 862-872 khối "Kết quả cuối cùng"):
+- Đổi `scoreA/scoreB/scoreC/scoreD` từ `... ? 100 : ...` sang `... ? null : ...` (giữ nguyên
+  `round1(...)` phần else).
+- Thêm `wAEff/wBEff/wCEff/wDEff` (= trọng số gốc nếu `hasX`, else 0) và `wSumEff` (tổng 4 giá trị
+  trên).
+- `diemTong` đổi thành:
+  ```ts
+  const diemTong = wSumEff > 0
+    ? round1((((scoreA ?? 0) * wAEff + (scoreB ?? 0) * wBEff + (scoreC ?? 0) * wCEff + (scoreD ?? 0) * wDEff) / wSumEff) * heSoChuyenCan)
+    : null
+  ```
+- 4 dòng text "mặc định 100%" (726/759/795/828) đổi thành "→ không tính vào điểm tổng tháng này
+  (đã loại khỏi công thức, các thành phần còn lại được renormalize theo tỷ trọng tương ứng)."
+- Khối "Kết quả cuối cùng" (862-872): nếu `wSumEff === 0` → thay TOÀN BỘ nội dung box bằng thông
+  báo `"Chưa đủ dữ liệu để chấm điểm tháng này — {subjectName} không có việc nào, không có việc
+  đến hạn, không phụ trách 5S, và không có ngày chấm chuyên môn nào trong tháng."` (không hiện
+  công thức/con số nào); nếu `wSumEff > 0`, công thức hiển thị chỉ liệt kê các thành phần
+  `hasX=true`.
+
+**`src/lib/kpi-score-breakdown.ts`** — sửa lại comment công thức tham chiếu đầu file (dòng 11-19,
+đang mô tả "mặc định 100") cho khớp với hành vi renormalize mới, tránh gây hiểu lầm cho người đọc
+sau. File này chỉ fetch dữ liệu thô, không tự tính điểm — không cần sửa logic bên trong.
+
+**Đã xác nhận không cần sửa gì thêm**: RPC `kpi_score_ranking_by_group`/
+`kpi_score_ranking_by_department` (migration `20260814_kpi_score_lock_adjust_rank.sql`) đọc trực
+tiếp từ bảng `kpi_monthly_scores` — người không có dòng điểm tự động không xuất hiện trong xếp
+hạng, không cần sửa 2 RPC này.
+
+### B. Bắt buộc bằng chứng theo yêu cầu báo cáo khi bấm "Nộp"
+
+**Hiện trạng xác nhận qua điều tra**: hoàn toàn KHÔNG có chặn cứng ở đâu — kể cả nút "Nộp" ở
+`ProgressForm` cũng chỉ `disabled={saving !== null}`, không tham chiếu `missingReq`. RPC
+`kpi_task_member_update` (`supabase/migrations/20260724_kpi_tasks_phase1a.sql` dòng 229-308) hoàn
+toàn không đọc `kpi_tasks.yeu_cau_bao_cao`. Field "Văn bản" (`van_ban`) chưa hề được implement —
+`missingReq` hiện tại (`page.tsx` dòng 114-118) chỉ có 3 nhánh `anh/file/dinh_vi`, thiếu hẳn
+`van_ban`.
+
+**2 quyết định đã chốt**: (1) "Văn bản" → dùng field `noiDung` có sẵn; (2) chặn cứng CHỈ áp dụng
+khi `p_hanh_dong = 'nop'`, "Cập nhật tiến độ" vẫn cho lưu dù thiếu bằng chứng.
+
+**Migration mới `supabase/migrations/20260826_kpi_task_evidence_required_on_submit.sql`** —
+`CREATE OR REPLACE FUNCTION public.kpi_task_member_update(...)` GIỮ NGUYÊN chữ ký 9 tham số hiện
+tại y hệt (không cần DROP FUNCTION). Thêm `v_missing TEXT[] := '{}';` vào `DECLARE`, chèn khối
+kiểm tra sau khi đã có `v_task` (từ `SELECT * INTO v_task ... FOR UPDATE` dòng 264) và SAU check
+trạng thái task còn mở (dòng 268-270), TRƯỚC khi fetch `v_member` (dòng 272):
+
+```sql
+IF p_hanh_dong = 'nop' AND v_task.yeu_cau_bao_cao IS NOT NULL THEN
+  v_missing := '{}';
+  IF 'anh' = ANY(v_task.yeu_cau_bao_cao) AND COALESCE(array_length(p_image_urls, 1), 0) = 0 THEN
+    v_missing := array_append(v_missing, 'Ảnh');
+  END IF;
+  IF 'file' = ANY(v_task.yeu_cau_bao_cao) AND COALESCE(array_length(p_file_urls, 1), 0) = 0 THEN
+    v_missing := array_append(v_missing, 'File');
+  END IF;
+  IF 'dinh_vi' = ANY(v_task.yeu_cau_bao_cao) AND p_vi_do IS NULL THEN
+    v_missing := array_append(v_missing, 'Định vị');
+  END IF;
+  IF 'van_ban' = ANY(v_task.yeu_cau_bao_cao) AND (p_noi_dung IS NULL OR trim(p_noi_dung) = '') THEN
+    v_missing := array_append(v_missing, 'Văn bản');
+  END IF;
+  IF array_length(v_missing, 1) > 0 THEN
+    RAISE EXCEPTION 'Công việc yêu cầu kèm theo: % — vui lòng bổ sung trước khi nộp.', array_to_string(v_missing, ', ');
+  END IF;
+END IF;
+```
+
+Phần còn lại của hàm (UPDATE `kpi_task_members`, INSERT `kpi_task_logs`, UPDATE `kpi_tasks`) giữ
+nguyên không đổi.
+
+**Client `ProgressForm`** (`src/app/dashboard/kpi/tasks/[id]/page.tsx`):
+- Thay `missingReq` (dòng 114-118) bằng danh sách cụ thể:
+  ```ts
+  const missingReqItems = req.filter((r) => {
+    if (r === "anh") return imageUrls.length === 0
+    if (r === "file") return fileUrls.length === 0
+    if (r === "dinh_vi") return viDo === null
+    if (r === "van_ban") return !noiDung.trim()
+    return false
+  })
+  const missingReq = missingReqItems.length > 0
+  ```
+- `handleSubmit` (dòng 140-144, giữ nguyên guard `cap_nhat_tien_do` cũ) thêm guard mới cho `nop`:
+  ```ts
+  if (hanhDong === "nop" && missingReq) {
+    setError(`Công việc yêu cầu kèm theo: ${missingReqItems.map((r) => KPI_REPORT_REQ_LABEL[r]).join(", ")} — vui lòng bổ sung trước khi nộp.`)
+    return
+  }
+  ```
+- Cảnh báo amber (dòng 242-246) đổi văn phong (không còn "vẫn có thể lưu"):
+  `"Cần bổ sung {danh sách} trước khi Nộp — vẫn có thể \"Cập nhật tiến độ\" tạm thời."`
+- Nút "Nộp" (dòng 257-263) thêm `missingReq` vào điều kiện disable:
+  `disabled={saving !== null || evidenceUploading || missingReq}` (biến `evidenceUploading` xem
+  mục C bên dưới). Nút "Cập nhật tiến độ" (dòng 250-256) KHÔNG thêm `missingReq`, chỉ thêm
+  `evidenceUploading` (mục C).
+
+Không cần migration đổi schema — chỉ `CREATE OR REPLACE FUNCTION`, không đụng cột nào.
+
+### C. Fix bug: chọn ảnh/file bằng chứng rồi lưu ngay → mất, không báo lỗi
+
+**Nguyên nhân xác nhận (race condition, độ tin cậy cao nhất trong các khả năng đã xét)**:
+`KpiEvidencePicker` (`kpi-evidence-picker.tsx` dòng 40-58) — `handleImages` là async, chờ
+`await Promise.all(...upload...)` xong mới gọi `onImagesChange(...)`. Trong lúc upload, state
+`uploadingImage`/`uploadingFile` (dòng 35-36) là state NỘI BỘ, **không hề được expose ra props
+cho component cha**. `ProgressForm` (dòng 249-263 nút Submit) chỉ `disabled={saving !== null}` —
+không biết ảnh đang upload dở. Người dùng chọn ảnh rồi bấm Nộp/Cập nhật NGAY → `handleSubmit` đọc
+`imageUrls` (closure tại thời điểm click, vẫn là giá trị CŨ vì `onImagesChange` chưa kịp chạy) →
+RPC nhận thiếu ảnh, chạy THÀNH CÔNG bình thường (không lỗi) → form đóng, ảnh "mồ côi" tiếp tục
+upload lên Storage nhưng không gắn với task nào — đúng khớp mô tả "mất, không báo lỗi gì".
+
+**Fix (thuần client, không cần migration)**:
+
+`KpiEvidencePicker` (`src/app/dashboard/kpi/tasks/_components/kpi-evidence-picker.tsx`) — thêm
+prop mới:
+```ts
+type KpiEvidencePickerProps = {
+  // ... 6 field hiện có, giữ nguyên
+  onUploadingChange?: (uploading: boolean) => void   // MỚI
+}
+```
+Import thêm `useEffect` từ `"react"` (hiện file chỉ import `useRef, useState`), thêm ngay sau
+khai báo `const [zoomUrl, setZoomUrl] = useState<string | null>(null)` (dòng 38):
+```tsx
+useEffect(() => {
+  onUploadingChange?.(uploadingImage || uploadingFile)
+}, [uploadingImage, uploadingFile, onUploadingChange])
+```
+Không cần sửa `handleImages`/`handleFiles` — state cũ vẫn set như hiện tại, `useEffect` tự đồng
+bộ ra ngoài.
+
+`ProgressForm` (`page.tsx`) — thêm state mới, truyền prop, dùng để khoá CẢ 2 nút (độc lập với mục
+B — bug mất ảnh xảy ra ở MỌI hành động lưu, không riêng "Nộp"):
+```ts
+const [evidenceUploading, setEvidenceUploading] = useState(false)
+```
+```tsx
+<KpiEvidencePicker
+  factoryId={factoryId} taskId={taskId}
+  imageUrls={imageUrls} onImagesChange={setImageUrls}
+  fileUrls={fileUrls} onFilesChange={setFileUrls}
+  onUploadingChange={setEvidenceUploading}   // MỚI
+/>
+```
+2 nút Submit thêm `evidenceUploading` vào `disabled`:
+```tsx
+<button onClick={() => void handleSubmit("cap_nhat_tien_do")} disabled={saving !== null || evidenceUploading} ... />
+<button onClick={() => void handleSubmit("nop")} disabled={saving !== null || evidenceUploading || missingReq} ... />
+```
+Thêm affordance UI ngay trên hàng nút (`Loader2` đã import sẵn ở `kpi-evidence-picker.tsx`, cần
+thêm import riêng vào `page.tsx` — hiện `page.tsx` import nhiều icon từ `lucide-react` (dòng
+11-31) nhưng CHƯA có `Loader2`, kiểm tra lại trước khi thêm để tránh trùng):
+```tsx
+{evidenceUploading && (
+  <div className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+    <Loader2 size={12} className="animate-spin" /> Đang tải ảnh/file lên — vui lòng đợi trước khi lưu...
+  </div>
+)}
+```
+
+**Ghi chú vấn đề phụ (không bắt buộc sửa ngay)**: `Promise.all` trong `handleImages`/`handleFiles`
+(dòng 51, 71) — nếu 1 ảnh/file lỗi giữa chừng, các ảnh/file khác đã upload thành công cũng bị loại
+khỏi kết quả (mồ côi trên Storage, không gắn task nào). Cân nhắc đổi sang `Promise.allSettled` ở
+đợt sửa sau nếu có thời gian, không bắt buộc trong đợt fix bug chính này.
+
+### Chưa test tay (việc BẮT BUỘC làm sau khi code xong, trước khi coi là hoàn tất)
+
+- **Mục A (renormalize)**:
+  - User có đủ cả 4 thành phần dữ liệu → điểm tổng khớp y hệt công thức cũ (không regression khi
+    dữ liệu đầy đủ).
+  - User hoàn toàn không có dữ liệu cả A/B/C/D (vd nhân viên mới) → xác nhận KHÔNG có dòng nào
+    trong `kpi_monthly_scores`, không xuất hiện ở "Toàn nhà máy"/bảng xếp hạng ẩn danh.
+  - User chỉ có A,B (không C,D) → `diem_tong` renormalize đúng trên (wA,wB), không cộng thêm
+    C=100/D=100.
+  - Chạy `kpi_compute_monthly_scores` LẦN 2 cho user trước đó CÓ dòng điểm nhưng nay dữ liệu cả 4
+    thành phần đã mất → dòng cũ GIỮ NGUYÊN, không bị update về NULL/xoá.
+  - Chạy lại trên dòng `trang_thai='da_khoa'` → vẫn bị bỏ qua (hành vi cũ giữ nguyên).
+  - Tab "Chi tiết cách tính điểm" (`MyScoreExplain`) cho cả 3 case trên — số khớp RPC, case "thiếu
+    hoàn toàn" hiện đúng "Chưa đủ dữ liệu" thay vì 1 con số sai.
+  - Kiểm tra `chi_tiet` JSONB có đủ `trong_so_hieu_luc`/`co_du_lieu`, giá trị đúng.
+
+- **Mục B (bắt buộc bằng chứng)**:
+  - Task `yeu_cau_bao_cao=['van_ban']`, bấm Nộp khi "Nội dung đã thực hiện" trống → cả client (nút
+    khoá) lẫn gọi thẳng RPC qua SQL Editor (bỏ qua client) đều phải chặn, message liệt kê đúng
+    "Văn bản".
+  - Task yêu cầu nhiều loại (vd `['anh','dinh_vi','van_ban']`) → message liệt kê ĐẦY ĐỦ, ĐÚNG các
+    loại còn thiếu, phân cách bằng ", ".
+  - Bấm "Cập nhật tiến độ" (không phải Nộp) khi thiếu bằng chứng → vẫn lưu được bình thường.
+  - Task không có `yeu_cau_bao_cao` (rỗng/NULL) → Nộp bình thường không bị chặn.
+  - Bổ sung đủ bằng chứng rồi Nộp lại → thành công.
+
+- **Mục C (bug mất ảnh)**:
+  - Chọn ảnh (mạng chậm/throttle), bấm Nộp NGAY trong lúc đang upload → nút bị khoá, hiện đúng
+    text "Đang tải ảnh/file lên...".
+  - Chờ upload xong (nút tự mở khoá) rồi Nộp/Cập nhật → ảnh có mặt đầy đủ trong
+    `kpi_task_logs.image_urls` sau khi lưu.
+  - Test tương tự với file đính kèm, và trường hợp chọn cả ảnh lẫn file cùng lúc.
+  - Test trên mobile (nút "Chụp ảnh" — luồng camera có thể trễ khác luồng thư viện).
+  - Regression: task không yêu cầu bằng chứng, không chọn ảnh/file nào → nút hoạt động bình
+    thường ngay lập tức, không bị khoá "giả" do state mặc định sai.
+
+## Cập nhật (tiếp) — ĐÃ CODE XONG cả 3 mục A/B/C ở trên, CẦN CHẠY 2 MIGRATION MỚI, CHƯA TEST TAY
+
+Đã code đúng theo đặc tả ở mục "Kế hoạch phiên sau (2026-08-XX)" phía trên, không lệch thiết kế
+nào — `npx tsc --noEmit`, `npx eslint` (5 file đã sửa), và `npm run build` đều sạch (build liệt kê
+đủ mọi route KPI, kể cả `/dashboard/kpi/scores` và `/dashboard/kpi/tasks/[id]`).
+
+- **Mục A**: `supabase/migrations/20260825_kpi_score_renormalize.sql` (**CẦN CHẠY THỦ CÔNG, CHƯA
+  CHẠY**) — `CREATE OR REPLACE FUNCTION kpi_compute_monthly_scores` (giữ nguyên chữ ký 3 tham số).
+  `src/lib/kpi-scores.ts` (`KpiMonthlyScoreDetail` thêm `trong_so_hieu_luc?`/`co_du_lieu?` optional),
+  `src/app/dashboard/kpi/scores/page.tsx` (`MyScoreExplain`: 4 thành phần A/B/C/D giờ `number |
+  null` khi thiếu dữ liệu, renormalize qua `wSumEff`, thêm helper `fmtPct()`, khối "Kết quả cuối
+  cùng" hiện thông báo riêng khi `wSumEff === 0`), `src/lib/kpi-score-breakdown.ts` (chỉ sửa lại
+  comment tham chiếu công thức, không đổi logic — file này thuần fetch dữ liệu thô).
+- **Mục B**: `supabase/migrations/20260826_kpi_task_evidence_required_on_submit.sql` (**CẦN CHẠY
+  THỦ CÔNG, CHƯA CHẠY** — chạy sau migration A, thứ tự giữa 2 file không phụ thuộc nhau nhưng nên
+  chạy theo đúng thứ tự ngày) — `CREATE OR REPLACE FUNCTION kpi_task_member_update` (giữ nguyên
+  chữ ký 9 tham số), chặn cứng khi `p_hanh_dong='nop'` và thiếu bằng chứng theo
+  `kpi_tasks.yeu_cau_bao_cao` (`anh`/`file`/`dinh_vi`/`van_ban`, "Văn bản" dùng field `p_noi_dung`
+  có sẵn). `src/app/dashboard/kpi/tasks/[id]/page.tsx` (`ProgressForm`): `missingReqItems`/
+  `missingReq` liệt kê đúng loại còn thiếu (đã bổ sung nhánh `van_ban` trước đây bị bỏ sót), guard
+  chặn `handleSubmit("nop")` phía client trước khi gọi RPC, nút "Nộp" thêm `missingReq` vào
+  `disabled`, text cảnh báo amber đổi văn phong (không còn "vẫn có thể lưu").
+- **Mục C**: thuần client, không cần migration. `kpi-evidence-picker.tsx` thêm prop
+  `onUploadingChange?` (qua 1 `useEffect` đồng bộ `uploadingImage || uploadingFile` ra ngoài).
+  `ProgressForm` thêm state `evidenceUploading`, truyền `onUploadingChange={setEvidenceUploading}`,
+  cả 2 nút "Cập nhật tiến độ"/"Nộp" thêm `evidenceUploading` vào `disabled`, thêm dòng affordance
+  "Đang tải ảnh/file lên..." (icon `Loader2` animate-spin) khi đang upload dở.
+
+### Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy đủ cả 2 migration trước
+
+1. Chạy `20260825_kpi_score_renormalize.sql` rồi `20260826_kpi_task_evidence_required_on_submit.sql`
+   trên Supabase SQL Editor.
+2. **Mục A** — user có đủ cả 4 thành phần dữ liệu trong 1 tháng → tính điểm, đối chiếu điểm tổng
+   khớp y hệt công thức cũ (không regression khi dữ liệu đầy đủ, vì `w_sum_eff` = tổng trọng số
+   cấu hình = 100 trong trường hợp này).
+3. User hoàn toàn không có dữ liệu cả A/B/C/D (vd nhân viên mới, tháng chưa phát sinh gì) → tính
+   điểm tháng đó → xác nhận KHÔNG có dòng nào trong `kpi_monthly_scores` cho user đó (không hiện ở
+   bảng "Toàn nhà máy"/"Bảng xếp hạng"); mở "Chi tiết cách tính điểm" của chính họ → xác nhận hiện
+   đúng khối "Chưa đủ dữ liệu để chấm điểm tháng này..." (không hiện công thức/số nào).
+4. User chỉ có A,B (không C,D — vd chưa từng phụ trách 5S, chưa từng được chấm chuyên môn theo
+   ngày) → xác nhận điểm tổng renormalize đúng trên (wA,wB) — không còn cộng thêm C=100/D=100 vào
+   công thức; "Chi tiết cách tính điểm" hiện đúng 2 khối C/D với text mới "→ không tính vào điểm
+   tổng tháng này...", khối "Kết quả cuối cùng" chỉ liệt kê đúng 2 số hạng A,B, chia cho `wA+wB`
+   (không phải 100).
+5. Chạy "Tính điểm tháng" LẦN 2 cho 1 user trước đó ĐÃ có dòng điểm nhưng nay dữ liệu cả 4 thành
+   phần đã mất hết (vd xoá hết task/5S/chấm điểm test) → xác nhận dòng cũ GIỮ NGUYÊN, không bị
+   update/xoá (đúng thiết kế `WHERE s.w_sum_eff > 0` chỉ lọc ở SELECT nguồn INSERT).
+6. Chạy lại trên 1 dòng đã `trang_thai='da_khoa'` (Phase 5) → vẫn bị bỏ qua như hành vi cũ.
+7. **Mục B** — task `yeu_cau_bao_cao=['van_ban']`, để trống "Nội dung đã thực hiện", bấm "Nộp" →
+   cả client (nút khoá, `missingReq=true`) lẫn gọi thẳng RPC qua SQL Editor (bỏ qua client) đều
+   phải chặn, message liệt kê đúng "Văn bản".
+8. Task yêu cầu nhiều loại cùng lúc (vd `['anh','dinh_vi','van_ban']`) → message liệt kê ĐẦY ĐỦ,
+   ĐÚNG các loại còn thiếu, phân cách bằng ", ".
+9. Bấm "Cập nhật tiến độ" (không phải "Nộp") khi thiếu bằng chứng → vẫn lưu được bình thường
+   (không bị chặn — đúng quyết định "chỉ chặn khi Nộp").
+10. Task không có `yeu_cau_bao_cao` (rỗng) → "Nộp" bình thường không bị chặn gì. Bổ sung đủ bằng
+    chứng rồi Nộp lại → thành công.
+11. **Mục C** — chọn ảnh (mạng chậm/throttle DevTools), bấm "Nộp" NGAY trong lúc đang upload → xác
+    nhận cả 2 nút bị khoá, hiện đúng dòng "Đang tải ảnh/file lên...". Chờ upload xong (nút tự mở
+    khoá) rồi Nộp/Cập nhật → xác nhận ảnh có mặt đầy đủ trong `kpi_task_logs.image_urls` sau khi
+    lưu (không còn ảnh "mồ côi" trên Storage không gắn task nào).
+12. Test tương tự với file đính kèm, và trường hợp chọn cả ảnh lẫn file cùng lúc; test trên mobile
+    (nút "Chụp ảnh" — luồng camera có thể trễ khác luồng thư viện).
+13. Regression: task không yêu cầu bằng chứng, không chọn ảnh/file nào → nút hoạt động bình
+    thường ngay lập tức, không bị khoá "giả" do state `evidenceUploading` mặc định sai.
+
+## Cập nhật (tiếp 2) — Bug thật đã fix: chọn ảnh bằng chứng "không phản hồi" (mất trắng, không lỗi)
+
+Sau khi chạy 2 migration ở mục trên, người dùng test tay báo: chọn ảnh từ "Thư viện" ở form "Cập
+nhật tiến độ" (`/dashboard/kpi/tasks/[id]`) — không upload, không thumbnail, không cảnh báo gì.
+
+**Điều tra đã loại trừ**: viết script `scripts/investigate-kpi-evidence-upload.mjs` (đăng nhập
+thật qua magic link, KHÔNG dùng service role) thử upload trực tiếp lên đúng path
+`{factory_id}/kpi/tasks/{taskId}/...` của bucket `order-files` — **thành công 200 OK**, xác nhận
+RLS/Storage hoàn toàn không phải nguyên nhân.
+
+**Nguyên nhân thật**: trang có 2 cơ chế tương tác xấu với nhau —
+1. `useEffect` refetch dữ liệu mỗi khi cửa sổ lấy lại `focus`/`visibilitychange` (thêm từ Phase
+   1a.1, mục đích: thấy ngay bằng chứng gắn từ module khác) — gọi `loadData()`, set
+   `dataLoading = true`.
+2. Gate loading ở đầu component: `if (loading || dataLoading) return <div>Đang tải...</div>` —
+   chặn TOÀN BỘ cây component, không phân biệt "lần tải đầu" với "refetch nền".
+
+Khi bấm "Thư viện", hộp thoại chọn file của hệ điều hành mở ra → tab mất `focus`; chọn xong ảnh,
+hộp thoại đóng → tab lấy lại `focus` ngay → refetch kích hoạt → `<ProgressForm>` (đang có ảnh vừa
+chọn trong state cục bộ) bị **unmount** đúng lúc đó → ảnh có thể đã upload lên Storage nhưng không
+còn instance nào để lưu URL vào state → mất trắng, không lỗi (không phải bug upload — là bug mất
+state do unmount ngoài ý muốn).
+
+**Đã fix** (`src/app/dashboard/kpi/tasks/[id]/page.tsx`): thêm cờ `hasLoadedOnce` — chỉ chặn toàn
+trang bằng "Đang tải..." ở **lần tải đầu tiên** (`dataLoading && !hasLoadedOnce`); các lần refetch
+nền sau đó giữ nguyên cây component đang render (dữ liệu `task`/`members` cập nhật ngầm qua props,
+KHÔNG unmount `ProgressForm` nên state cục bộ — ảnh/nội dung/vị trí đang nhập dở — được giữ
+nguyên). Nhánh lỗi cũng sửa tương tự: đổi `if (dataError || !task)` → `if (!task)` — 1 lần refetch
+nền bị lỗi mạng không còn xoá mất trang đang hiển thị đúng, chỉ lần tải đầu thất bại mới hiện màn
+lỗi toàn trang.
+
+**Đã rà thêm**: chỉ 2 trang trong module có `visibilitychange`/`focus` listener tự thêm
+(`kpi/tasks/page.tsx` danh sách, `kpi/tasks/[id]/page.tsx` chi tiết — trang đã fix). Trang
+`kpi/5s/location/[id]/page.tsx` (chấm điểm 5S, cũng có form + upload ảnh) **không có** cơ chế
+refetch-on-focus nên không bị bug này. `kpi/tasks/page.tsx` (danh sách) chỉ gate loading ở PHẠM VI
+danh sách (không phải toàn trang, modal "Giao việc mới" nằm ngoài vùng gate) nên rủi ro mất state
+thấp hơn nhiều — không sửa, chỉ ghi nhận.
+
+`npx tsc --noEmit`, `npx eslint` sạch. Người dùng đã test tay xác nhận **upload ảnh hoạt động
+đúng** sau fix. Coi bug này là đã đóng.

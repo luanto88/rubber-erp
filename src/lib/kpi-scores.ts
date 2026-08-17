@@ -118,11 +118,15 @@ export async function deleteKpiScoreWeights(id: string): Promise<void> {
 
 // ── kpi_monthly_scores ────────────────────────────────────────────────────────
 export type KpiMonthlyScoreDetail = {
-  a: number
-  b: number
-  c: number
-  d: number
+  a: number | null
+  b: number | null
+  c: number | null
+  d: number | null
   trong_so: { a: number; b: number; c: number; d: number }
+  // Trọng số SAU renormalize (0 nếu thành phần tương ứng thiếu dữ liệu) — optional vì dòng điểm
+  // tính trước migration 20260825_kpi_score_renormalize.sql chưa có 2 field này trong chi_tiet.
+  trong_so_hieu_luc?: { a: number; b: number; c: number; d: number }
+  co_du_lieu?: { a: boolean; b: boolean; c: boolean; d: boolean }
   he_so_chuyen_can: number
   so_ngay_co_cham: number
   ngay_chuan: number
