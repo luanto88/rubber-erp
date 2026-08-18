@@ -5424,9 +5424,11 @@ nào — `npx tsc --noEmit`, `npx eslint` (5 file đã sửa), và `npm run buil
    công thức; "Chi tiết cách tính điểm" hiện đúng 2 khối C/D với text mới "→ không tính vào điểm
    tổng tháng này...", khối "Kết quả cuối cùng" chỉ liệt kê đúng 2 số hạng A,B, chia cho `wA+wB`
    (không phải 100).
-5. Chạy "Tính điểm tháng" LẦN 2 cho 1 user trước đó ĐÃ có dòng điểm nhưng nay dữ liệu cả 4 thành
+5. ~~Chạy "Tính điểm tháng" LẦN 2 cho 1 user trước đó ĐÃ có dòng điểm nhưng nay dữ liệu cả 4 thành
    phần đã mất hết (vd xoá hết task/5S/chấm điểm test) → xác nhận dòng cũ GIỮ NGUYÊN, không bị
-   update/xoá (đúng thiết kế `WHERE s.w_sum_eff > 0` chỉ lọc ở SELECT nguồn INSERT).
+   update/xoá (đúng thiết kế `WHERE s.w_sum_eff > 0` chỉ lọc ở SELECT nguồn INSERT).~~ **ĐÃ ĐỔI
+   HÀNH VI** — xem mục "Cập nhật (tiếp 3)" bên dưới: kể từ migration `20260827`, dòng "mồ côi" này
+   giờ bị RPC tự XÓA (không còn "giữ nguyên").
 6. Chạy lại trên 1 dòng đã `trang_thai='da_khoa'` (Phase 5) → vẫn bị bỏ qua như hành vi cũ.
 7. **Mục B** — task `yeu_cau_bao_cao=['van_ban']`, để trống "Nội dung đã thực hiện", bấm "Nộp" →
    cả client (nút khoá, `missingReq=true`) lẫn gọi thẳng RPC qua SQL Editor (bỏ qua client) đều
@@ -5486,3 +5488,72 @@ thấp hơn nhiều — không sửa, chỉ ghi nhận.
 
 `npx tsc --noEmit`, `npx eslint` sạch. Người dùng đã test tay xác nhận **upload ảnh hoạt động
 đúng** sau fix. Coi bug này là đã đóng.
+
+## Cập nhật (tiếp 3) — 3 fix Bảng điểm KPI sau khi test tay bảng "Toàn nhà máy — Tháng 8/2026"
+(ĐÃ CODE XONG, CẦN CHẠY 1 MIGRATION MỚI, CHƯA TEST TAY)
+
+Sau khi deploy migration `20260825` (renormalize), người dùng test tay bảng "Toàn nhà máy" và
+phát hiện 3 vấn đề. Đã hỏi và chốt 2 quyết định chính sách trước khi code (không thêm ngưỡng tối
+thiểu số lượng việc cho A/B/C; RPC tự dọn dòng "mồ côi" mỗi lần tính điểm, không cần banner riêng).
+
+### Vấn đề 1 (nghiêm trọng nhất) — Người không làm gì vẫn hiện 75 điểm
+
+**Nguyên nhân xác nhận bằng dữ liệu thật**: các dòng "75 điểm" có `updated_at` TRƯỚC khi migration
+`20260825` tồn tại, và `chi_tiet` KHÔNG có key `co_du_lieu`/`trong_so_hieu_luc` — đúng định dạng RPC
+CŨ (mặc định A/B/C/D=100 khi thiếu dữ liệu → `100 × hệ_số_chuyên_cần_sàn_0.75 = 75`). Đây là hệ quả
+1 giới hạn đã ghi rõ trong chính `20260825`: RPC chỉ INSERT/UPDATE dòng nằm trong tập `w_sum_eff >
+0`, không có cơ chế xóa dòng cũ của user giờ không còn dữ liệu nào — dòng cũ tồn tại vĩnh viễn.
+
+**Fix** — migration mới `supabase/migrations/20260827_kpi_score_cleanup_stale_rows.sql` (**CẦN
+CHẠY THỦ CÔNG, CHƯA CHẠY** — chạy sau `20260825`/`20260826`) — `CREATE OR REPLACE FUNCTION
+kpi_compute_monthly_scores` (giữ nguyên chữ ký 3 tham số, copy nguyên vẹn logic renormalize từ
+`20260825`, không đổi công thức), thêm 1 câu `DELETE` ngay sau khi tính `v_affected`: xóa các dòng
+`kpi_monthly_scores` của đúng `(factory_id, nam, thang)` đang tính, `trang_thai <> 'da_khoa'`, và
+KHÔNG có bất kỳ dữ liệu nào trong `kpi_task_members`/`kpi_5s_evaluations`/`kpi_daily_evaluations`
+cho đúng tháng đó (3 điều kiện `NOT EXISTS`). `NOT EXISTS kpi_task_members` đã đủ suy ra cả `has_a`
+lẫn `has_b` đều false (B là tập con của A, chỉ lọc thêm theo hạn).
+
+### Vấn đề 2 — Tiêu đề "Toàn nhà máy" không phản ánh bộ lọc phòng ban
+
+`src/app/dashboard/kpi/scores/page.tsx` — tiêu đề bảng trước đây cố định `"Toàn nhà máy — Tháng
+{thang}/{nam}"`, không tham chiếu `deptFilter`/`isDeptLeader`/`myLeaderDepartmentId` dù
+`visibleFactoryScores` đã lọc đúng theo phòng ban (lãnh đạo phòng ban luôn khóa cứng theo phòng
+ban mình; admin theo dropdown `deptFilter` nếu có chọn). Đã fix: thêm biến `effectiveDeptId`/
+`effectiveDeptName` (mirror chính xác điều kiện lọc của `visibleFactoryScores`), tiêu đề đổi thành
+`{effectiveDeptName || "Toàn nhà máy"} — Tháng {thang}/{nam}`.
+
+### Vấn đề 3 — Badge "Nháp"/"Đã khóa" tràn chữ trên mobile
+
+2 vị trí (card "Lịch sử điểm của bạn" và bảng "Toàn nhà máy") chỉ có `whitespace-nowrap` trên
+`<div>` CHA (bọc cả badge lẫn nút "Khóa"), không có trực tiếp trên `<span>` badge — nếu `<td>` bị
+ép hẹp trên mobile, badge có thể bị flex cha ép co lại khiến chữ tràn khỏi nền bo góc. Đã thêm
+`shrink-0 whitespace-nowrap` trực tiếp vào class của cả 2 `<span>` badge.
+
+### Vấn đề phụ (tiện sửa luôn) — fallback tên khi user không có trong candidates
+
+`{nameByUserId[s.user_id] || s.user_id}` in thẳng UUID ra UI khi user không có trong
+`candidates`/`nameByUserId` (tài khoản bị vô hiệu hóa hoặc chưa liên kết `maintenance_staff`). Đã
+thêm hàm `resolveName(uid)` (mirror `resolveName` đã có ở `kpi/tasks/[id]/page.tsx`) — fallback
+`"Người dùng ${uid.slice(0, 8)}"` thay vì UUID đầy đủ — áp dụng cho cả bảng "Toàn nhà máy" và
+`subjectName` của "Chi tiết cách tính điểm".
+
+`npx tsc --noEmit`, `npx eslint src/app/dashboard/kpi/scores/page.tsx`, và `npm run build` đều
+sạch (build liệt kê đúng mọi route KPI, không route nào lỗi).
+
+**Chưa test tay — cần làm ở phiên sau, BẮT BUỘC chạy migration `20260827` trước** (sau khi đã chắc
+chắn `20260825`/`20260826` đã chạy xong):
+
+1. Bấm lại "Tính điểm tháng" cho tháng 8/2026 → xác nhận các dòng "75 điểm không hoạt động gì" biến
+   mất khỏi bảng "Toàn nhà máy"; user CÓ dữ liệu thật vẫn còn, cột C/D hiện đúng "—" (không phải
+   "100") nếu thực sự chưa có dữ liệu 5S/chấm điểm chuyên môn tháng đó.
+2. Chọn 1 phòng ban ở dropdown (tài khoản admin) → xác nhận tiêu đề bảng đổi theo đúng tên phòng
+   ban đã chọn, không còn cố định "Toàn nhà máy".
+3. Đăng nhập 1 tài khoản lãnh đạo phòng ban (không phải admin) → xác nhận tiêu đề tự hiện đúng tên
+   phòng ban của họ (không có dropdown).
+4. Mở trang trên viewport mobile thật (hoặc DevTools responsive mode) → xác nhận badge "Nháp"/"Đã
+   khóa" không còn tràn chữ ra ngoài nền bo góc, ở cả "Lịch sử điểm của bạn" và bảng "Toàn nhà máy".
+5. Xác nhận không còn dòng nào hiển thị UUID trần thay vì tên (nếu có user như vậy, kiểm tra hiện
+   đúng `"Người dùng xxxxxxxx"`).
+6. Chạy lại "Tính điểm tháng" trên 1 dòng đã `trang_thai='da_khoa'` (Phase 5) → dòng đó vẫn giữ
+   nguyên (không bị xóa lẫn không bị update), đúng điều kiện `trang_thai <> 'da_khoa'` trong cả
+   khối UPDATE lẫn khối DELETE mới.

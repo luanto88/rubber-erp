@@ -21,6 +21,10 @@ import {
   saveLotTransaction,
 } from "@/app/dashboard/product/actions";
 import {
+  loadActiveShiftLocks,
+  type ActiveShiftLock,
+} from "@/app/dashboard/product/shift-lock";
+import {
   dedupeLotsByMaLo,
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
@@ -65,6 +69,7 @@ import {
   FileDown,
   Loader2,
   ScanLine,
+  ShieldCheck,
 } from "lucide-react";
 
 // Types
@@ -1310,6 +1315,10 @@ export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
   const [skHistory, setSkHistory] = useState<SkHistoryRow[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
+  // "Khóa ca sản xuất" — key `${ngay_sx}|${ca}` -> thông tin khóa (chỉ chứa ca đang active).
+  // Xem .claude/rules/06-module-production.md mục "Khóa ca sản xuất".
+  const [lockedShiftKeys, setLockedShiftKeys] = useState<Map<string, ActiveShiftLock>>(new Map());
+  const [shiftLockModalDate, setShiftLockModalDate] = useState<string | null>(null);
   const [, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [factoryId, setFactoryId] = useState<string | null>(null);
@@ -1430,7 +1439,7 @@ export default function ProductPage() {
         return all;
       };
 
-      const [lotsData, { data: ngansData }, { data: historyData }] = await Promise.all([
+      const [lotsData, { data: ngansData }, { data: historyData }, activeLocks] = await Promise.all([
         fetchAllLots(),
         supabase
           .from("ngans")
@@ -1444,7 +1453,9 @@ export default function ProductPage() {
           .eq("factory_id", fid)
           .order("created_at", { ascending: false })
           .limit(50),
+        loadActiveShiftLocks(fid).catch(() => [] as ActiveShiftLock[]),
       ]);
+      setLockedShiftKeys(new Map(activeLocks.map((l) => [`${l.ngaySx}|${l.ca}`, l])));
       const normalizedLots = (lotsData || []).map((lot) => ({
         ...lot,
         trang_thai: normalizeLotStatus(lot.trang_thai),
@@ -1483,6 +1494,14 @@ export default function ProductPage() {
       setSkHistoryLoading(false);
     }
   }, []);
+
+  // Tải lại riêng bảng khóa ca sản xuất — dùng sau khi Khóa/Mở khóa trong ShiftLockModal,
+  // tránh gọi lại loadData() nặng (query toàn bộ lots + lot_transactions).
+  const refreshShiftLocks = useCallback(async () => {
+    if (!factoryId) return;
+    const activeLocks = await loadActiveShiftLocks(factoryId).catch(() => [] as ActiveShiftLock[]);
+    setLockedShiftKeys(new Map(activeLocks.map((l) => [`${l.ngaySx}|${l.ca}`, l])));
+  }, [factoryId]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -2995,6 +3014,7 @@ export default function ProductPage() {
                 so_banh: added_banh,
                 so_kg: addedKg,
               },
+              actorUserId: currentUser?.id ?? null,
             });
             if (!saveResult.success) {
               setSaveError(`Không lưu được lô ${ma_lo}: ${saveResult.error}`);
@@ -3196,6 +3216,38 @@ export default function ProductPage() {
     if (duplicateMaLos.length > 0) {
       setSaveError(`Trùng mã lô sau khi đổi header: ${duplicateMaLos.join(", ")}`);
       return;
+    }
+
+    // Pre-check UX cho khóa ca sản xuất (xem .claude/rules/06-module-production.md mục
+    // "Khóa ca sản xuất") — chặn sớm trước khi query DB, RLS lot_transactions_update/
+    // lots_update là lớp phòng thủ thật sự cho request thô ngoài UI.
+    if (currentUser?.role !== "admin") {
+      const affectedCas = Array.from(
+        new Set(
+          editableLots
+            .flatMap((lot) =>
+              (lot.lot_transactions || [])
+                .filter((tx) => tx.ngay_nhap === editDateModal)
+                .map((tx) => tx.ca),
+            )
+            .filter(Boolean) as string[],
+        ),
+      );
+      if (affectedCas.length > 0) {
+        const { data: lockRows } = await supabase
+          .from("product_shift_locks")
+          .select("ca")
+          .eq("factory_id", factoryId)
+          .eq("ngay_sx", editDateModal)
+          .eq("is_active", true)
+          .in("ca", affectedCas);
+        if (lockRows && lockRows.length > 0) {
+          setSaveError(
+            `Ca ${lockRows.map((r) => r.ca).join(", ")} ngày ${editDateModal} đã được duyệt & khóa. Liên hệ quản trị viên để mở khóa trước khi sửa.`,
+          );
+          return;
+        }
+      }
     }
 
     setSaving(true);
@@ -3536,6 +3588,7 @@ export default function ProductPage() {
           so_banh: editForm.tong_banh,
           so_kg: nextTransactionKg,
         },
+        actorUserId: currentUser?.id ?? null,
       });
 
       if (!saveResult.success) {
@@ -3621,7 +3674,10 @@ export default function ProductPage() {
 
     if (transactionId) {
       try {
-        const result = await deleteLotTransaction({ transactionId });
+        const result = await deleteLotTransaction({
+          transactionId,
+          actorUserId: currentUser?.id ?? null,
+        });
         if (!result.success) {
           setSaveError(result.error);
           setDelConfirm(null);
@@ -5132,6 +5188,16 @@ export default function ProductPage() {
               .flat()
               .reduce((sum, c) => sum + c.tong_kg_cua_ca, 0);
 
+            // "Khóa ca sản xuất" — icon header Ngày đại diện cho tổng trạng thái khóa của cả
+            // ngày (mở modal chi tiết theo từng ca). Xem .claude/rules/06-module-production.md
+            // mục "Khóa ca sản xuất".
+            const casInDate = Object.keys(dateGroups);
+            const lockedCasInDate = casInDate.filter((ca) => lockedShiftKeys.has(`${date}|${ca}`));
+            const isAdminUser = currentUser?.role === "admin";
+            const canApproveShift = isAdminUser || hasPermission(currentUser, "product.approve_shift");
+            const dateHasAnyLockedCa = lockedCasInDate.length > 0;
+            const dateEditDisabled = dateHasAnyLockedCa && !isAdminUser;
+
             return (
               <div
                 key={date}
@@ -5174,10 +5240,32 @@ export default function ProductPage() {
                           e.stopPropagation();
                           void openReportPdfModal(date);
                         }}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
+                        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 shrink-0"
                         title="Xem phiếu báo thành phẩm PDF của ngày này"
                       >
-                        <FileDown size={12} /> Xem phiếu PDF
+                        <FileDown size={16} />
+                      </button>
+                    )}
+                    {date !== "Chưa có ngày" && (dateHasAnyLockedCa || canApproveShift) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShiftLockModalDate(date);
+                        }}
+                        className={`rounded-lg p-1.5 shrink-0 ${
+                          !dateHasAnyLockedCa
+                            ? "text-emerald-600 hover:bg-emerald-50"
+                            : lockedCasInDate.length === casInDate.length
+                              ? "text-red-600 hover:bg-red-50"
+                              : "text-amber-600 hover:bg-amber-50"
+                        }`}
+                        title={
+                          !dateHasAnyLockedCa
+                            ? "Duyệt & khóa ca sản xuất ngày này"
+                            : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa — bấm để xem chi tiết`
+                        }
+                      >
+                        {!dateHasAnyLockedCa ? <ShieldCheck size={16} /> : <Lock size={16} />}
                       </button>
                     )}
                     {deleteMode === date ? (
@@ -5219,20 +5307,30 @@ export default function ProductPage() {
                             e.stopPropagation();
                             openCreate(date);
                           }}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                          className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 shrink-0"
                           title="Thêm ca sản xuất cho ngày này"
                         >
-                          <Plus size={12} /> Thêm
+                          <Plus size={16} />
                         </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (dateEditDisabled) return;
                             openEditDate(date);
                           }}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors shrink-0"
-                          title="Sửa lô trong ngày này"
+                          disabled={dateEditDisabled}
+                          className={`rounded-lg p-1.5 shrink-0 ${
+                            dateEditDisabled
+                              ? "text-slate-300 cursor-not-allowed"
+                              : "text-blue-600 hover:bg-blue-50"
+                          }`}
+                          title={
+                            dateEditDisabled
+                              ? "Ngày này có ca đã được duyệt & khóa — chỉ admin sửa được"
+                              : "Sửa lô trong ngày này"
+                          }
                         >
-                          <Edit2 size={12} /> Sửa
+                          <Edit2 size={16} />
                         </button>
                         <button
                           onClick={(e) => {
@@ -5240,10 +5338,10 @@ export default function ProductPage() {
                             setDeleteMode(date);
                             setSelectedDeleteIds(new Set());
                           }}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                          className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 shrink-0"
                           title="Xóa lô trong ngày này"
                         >
-                          <Trash2 size={12} /> Xóa
+                          <Trash2 size={16} />
                         </button>
                       </>
                     )}
@@ -5264,6 +5362,9 @@ export default function ProductPage() {
                           (sum, c) => sum + c.tong_kg_cua_ca,
                           0,
                         );
+                        const caLock = lockedShiftKeys.get(`${date}|${ca}`);
+                        const isCaLocked = !!caLock;
+                        const caCheckboxDisabled = isCaLocked && !isAdminUser;
 
                         return (
                           <div key={ca}>
@@ -5275,6 +5376,14 @@ export default function ProductPage() {
                                 {caBanh.toLocaleString("vi-VN")} bành ·{" "}
                                 {fmtKg(caKg)}
                               </span>
+                              {isCaLocked && (
+                                <span
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold"
+                                  title={`Đã duyệt & khóa bởi ${caLock.lockedByName} · ${new Date(caLock.lockedAt).toLocaleString("vi-VN")}`}
+                                >
+                                  <Lock size={10} /> Đã khóa
+                                </span>
+                              )}
                             </div>
                             <ResponsiveTableWrapper className="rounded-xl">
                               <table className="w-full text-sm">
@@ -5337,6 +5446,12 @@ export default function ProductPage() {
                                           <input
                                             type="checkbox"
                                             checked={allSelected}
+                                            disabled={caCheckboxDisabled}
+                                            title={
+                                              caCheckboxDisabled
+                                                ? "Ca này đã được duyệt & khóa — chỉ admin xóa được"
+                                                : undefined
+                                            }
                                             onChange={() =>
                                               setSelectedDeleteIds((prev) => {
                                                 const next = new Set(prev);
@@ -5347,7 +5462,7 @@ export default function ProductPage() {
                                                 return next;
                                               })
                                             }
-                                            className="w-4 h-4 rounded accent-red-500"
+                                            className="w-4 h-4 rounded accent-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
                                           />
                                         </td>
                                       )}
@@ -6771,13 +6886,183 @@ export default function ProductPage() {
           </div>
         );
       })()}
+
+      {shiftLockModalDate && factoryId && (
+        <ShiftLockModal
+          factoryId={factoryId}
+          date={shiftLockModalDate}
+          cas={Object.keys(groupedByDateAndCa[shiftLockModalDate] || {}).sort()}
+          lockedShiftKeys={lockedShiftKeys}
+          canApproveShift={hasPermission(currentUser, "product.approve_shift") || currentUser?.role === "admin"}
+          isAdmin={currentUser?.role === "admin"}
+          onClose={() => setShiftLockModalDate(null)}
+          onChanged={() => void refreshShiftLocks()}
+        />
+      )}
     </div>
   );
 }
 
+// Modal chi tiết "Khóa ca sản xuất" — mở từ icon header Ngày (mục 6.2). Xem
+// .claude/rules/06-module-production.md mục "Khóa ca sản xuất".
+function ShiftLockModal({
+  factoryId,
+  date,
+  cas,
+  lockedShiftKeys,
+  canApproveShift,
+  isAdmin,
+  onClose,
+  onChanged,
+}: {
+  factoryId: string;
+  date: string;
+  cas: string[];
+  lockedShiftKeys: Map<string, ActiveShiftLock>;
+  canApproveShift: boolean;
+  isAdmin: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [busyCa, setBusyCa] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [unlockCa, setUnlockCa] = useState<string | null>(null);
+  const [unlockReason, setUnlockReason] = useState("");
 
+  const handleLock = async (ca: string) => {
+    setBusyCa(ca);
+    setError(null);
+    try {
+      const { error: rpcError } = await supabase.rpc("product_lock_shift", {
+        p_factory_id: factoryId,
+        p_ngay_sx: date,
+        p_ca: ca,
+      });
+      if (rpcError) throw rpcError;
+      onChanged();
+    } catch (err) {
+      setError(getErrorMessage(err, "Không khóa được ca sản xuất này."));
+    } finally {
+      setBusyCa(null);
+    }
+  };
 
+  const handleUnlock = async (ca: string) => {
+    if (!unlockReason.trim()) {
+      setError("Vui lòng nhập lý do mở khóa.");
+      return;
+    }
+    setBusyCa(ca);
+    setError(null);
+    try {
+      const { error: rpcError } = await supabase.rpc("product_unlock_shift", {
+        p_factory_id: factoryId,
+        p_ngay_sx: date,
+        p_ca: ca,
+        p_reason: unlockReason.trim(),
+      });
+      if (rpcError) throw rpcError;
+      setUnlockCa(null);
+      setUnlockReason("");
+      onChanged();
+    } catch (err) {
+      setError(getErrorMessage(err, "Không mở khóa được ca sản xuất này."));
+    } finally {
+      setBusyCa(null);
+    }
+  };
 
+  return (
+    <ModalShell
+      title={`Khóa ca sản xuất — ${new Date(date).toLocaleDateString("vi-VN")}`}
+      onClose={onClose}
+      maxWidth="md"
+    >
+      <div className="space-y-3">
+        {error && (
+          <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-600">
+            {error}
+          </div>
+        )}
+        {cas.map((ca) => {
+          const lock = lockedShiftKeys.get(`${date}|${ca}`);
+          const isBusy = busyCa === ca;
+          return (
+            <div key={ca} className="p-3 border border-slate-200 rounded-xl">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 bg-blue-100 text-blue-700 font-extrabold rounded-lg text-sm">
+                    Ca {ca}
+                  </span>
+                  {lock ? (
+                    <span className="text-xs text-slate-600">
+                      <span className="inline-flex items-center gap-1 font-bold text-red-600">
+                        <Lock size={12} /> Đã khóa
+                      </span>{" "}
+                      bởi {lock.lockedByName} · {new Date(lock.lockedAt).toLocaleString("vi-VN")}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-bold">Chưa khóa</span>
+                  )}
+                </div>
+                {!lock && canApproveShift && (
+                  <button
+                    onClick={() => void handleLock(ca)}
+                    disabled={isBusy}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
+                  >
+                    <ShieldCheck size={13} /> {isBusy ? "Đang khóa..." : "Khóa"}
+                  </button>
+                )}
+                {lock && isAdmin && unlockCa !== ca && (
+                  <button
+                    onClick={() => {
+                      setUnlockCa(ca);
+                      setUnlockReason("");
+                      setError(null);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors shrink-0"
+                  >
+                    Mở khóa
+                  </button>
+                )}
+              </div>
+              {lock && isAdmin && unlockCa === ca && (
+                <div className="mt-2.5 space-y-2">
+                  <textarea
+                    value={unlockReason}
+                    onChange={(e) => setUnlockReason(e.target.value)}
+                    placeholder="Lý do mở khóa (bắt buộc)..."
+                    rows={2}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none focus:border-amber-500"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setUnlockCa(null);
+                        setUnlockReason("");
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={() => void handleUnlock(ca)}
+                      disabled={isBusy || !unlockReason.trim()}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
+                    >
+                      {isBusy ? "Đang mở khóa..." : "Xác nhận mở khóa"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </ModalShell>
+  );
+}
 
 
 

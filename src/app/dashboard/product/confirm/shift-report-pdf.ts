@@ -370,21 +370,94 @@ export function downloadShiftReportPdfDoc(doc: jsPDF, fileName: string): void {
   doc.save(fileName);
 }
 
-// Chia sẻ trực tiếp qua Web Share API (Zalo/Telegram...) nếu trình duyệt hỗ trợ, fallback tải
-// file PDF về máy — mirror đúng pattern "Chia sẻ ảnh nhanh" của module Kiểm soát quá trình
-// (measurements/page.tsx handleQuickShare). Nhận thẳng jsPDF doc đã dựng sẵn (không tự build lại).
-export async function shareShiftReportPdfDoc(doc: jsPDF, fileName: string): Promise<void> {
-  const blob = doc.output("blob") as Blob;
-  const file = new File([blob], fileName, { type: "application/pdf" });
+// Ghép toàn bộ trang PDF thành 1 ảnh PNG dài duy nhất rồi chia sẻ — thay cho chia sẻ PDF thô, vì
+// nhiều app chat (Zalo/Messenger) hiển thị preview ảnh tốt hơn PDF. Rasterize bằng pdfjs-dist
+// (đã là dependency sẵn có, dùng lại đúng cách render canvas PDF ở SignPlacementModal của ISO —
+// worker PHẢI trỏ asset local qua import.meta.url, KHÔNG dùng CDN, để ổn định trên Vercel
+// production). Nút "Tải phiếu PDF" không đổi, vẫn dùng downloadShiftReportPdfDoc ở trên.
+export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const imageFileName = fileName.replace(/\.pdf$/i, ".png");
 
-  if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [file] })) {
+  const pdfjsLib = await import("pdfjs-dist");
+  if ((globalThis as Record<string, unknown>).pdfjsWorker) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+  } else {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.mjs",
+      import.meta.url,
+    ).toString();
+  }
+
+  const blob = doc.output("blob") as Blob;
+  const pdfBytes = await blob.arrayBuffer();
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+
+  const scale = 2;
+  const pageCanvases: HTMLCanvasElement[] = [];
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    pageCanvases.push(canvas);
+  }
+
+  const imageFile = await new Promise<File | null>((resolve) => {
+    if (pageCanvases.length === 0) {
+      resolve(null);
+      return;
+    }
+    const gap = 6; // khoảng trắng phân cách giữa các trang để dễ nhìn ranh giới
+    const width = Math.max(...pageCanvases.map((c) => c.width));
+    const height =
+      pageCanvases.reduce((sum, c) => sum + c.height, 0) + gap * (pageCanvases.length - 1);
+    const masterCanvas = document.createElement("canvas");
+    masterCanvas.width = width;
+    masterCanvas.height = height;
+    const ctx = masterCanvas.getContext("2d");
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    let offsetY = 0;
+    for (const canvas of pageCanvases) {
+      ctx.drawImage(canvas, 0, offsetY);
+      offsetY += canvas.height + gap;
+    }
+    masterCanvas.toBlob((pngBlob) => {
+      resolve(pngBlob ? new File([pngBlob], imageFileName, { type: "image/png" }) : null);
+    }, "image/png");
+  });
+
+  if (!imageFile) {
+    // Không rasterize được — fallback tải PDF gốc thay vì để im lặng không làm gì.
+    downloadShiftReportPdfDoc(doc, fileName);
+    return;
+  }
+
+  if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [imageFile] })) {
     try {
-      await navigator.share({ files: [file], title: fileName });
+      await navigator.share({ files: [imageFile], title: imageFileName });
       return;
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
-      // Rơi xuống tải file nếu share thất bại vì lý do khác (không hỗ trợ định dạng...).
+      // Rơi xuống tải file nếu share thất bại vì lý do khác.
     }
   }
-  downloadShiftReportPdfDoc(doc, fileName);
+
+  const url = URL.createObjectURL(imageFile);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = imageFileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

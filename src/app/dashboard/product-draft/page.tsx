@@ -1389,6 +1389,7 @@ export default function ProductPage() {
               so_banh: added_banh,
               so_kg: Math.round(added_banh * session.loai_banh * 100) / 100,
             },
+            actorUserId: null,
           });
           if (!saveResult.success) {
             setSaveError(`Không lưu được lô ${ma_lo}: ${saveResult.error}`);
@@ -1620,6 +1621,7 @@ export default function ProductPage() {
           so_banh: deltaBanh,
           so_kg: Math.round(deltaBanh * editForm.loai_banh * 100) / 100,
         },
+        actorUserId: null,
       });
 
       if (!saveResult.success) {
@@ -1712,7 +1714,7 @@ export default function ProductPage() {
         return;
       }
       try {
-        const result = await deleteLotTransaction({ transactionId });
+        const result = await deleteLotTransaction({ transactionId, actorUserId: null });
         if (!result.success) {
           setSaveError(result.error);
           setDelConfirm(null);
@@ -1730,7 +1732,10 @@ export default function ProductPage() {
 
     if (transactionCount === 1 && lot.lot_transactions?.[0]?.id) {
       try {
-        const result = await deleteLotTransaction({ transactionId: lot.lot_transactions[0].id });
+        const result = await deleteLotTransaction({
+          transactionId: lot.lot_transactions[0].id,
+          actorUserId: null,
+        });
         if (!result.success) {
           setSaveError(result.error);
           setDelConfirm(null);

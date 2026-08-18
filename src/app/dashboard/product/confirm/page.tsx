@@ -16,6 +16,7 @@ import {
   Inbox,
   Layers,
   Loader2,
+  Lock,
   Minus,
   Package,
   Pencil,
@@ -42,6 +43,7 @@ import {
   loadDrafts,
   loadFactoryShiftNames,
   loadShiftHistory,
+  loadShiftLockStatus,
   loadShiftReportData,
   loadUserChucVu,
   loadUserShiftAssignment,
@@ -55,6 +57,7 @@ import {
   type LotCompletenessWarning,
   type OtherIncompleteLot,
   type ShiftHistoryEntry,
+  type ShiftLockStatus,
 } from "@/app/dashboard/product/confirm/actions";
 import {
   buildShiftReportFileName,
@@ -249,6 +252,10 @@ export default function ConfirmKienProductionPage() {
   const [history, setHistory] = useState<ShiftHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // "Khóa ca sản xuất" — CHỈ hiển thị trạng thái (đọc), không có nút hành động ở Hub. Hành động
+  // Duyệt/Khóa/Mở khóa đặt ở module Thành phẩm chính (product/page.tsx), xem
+  // .claude/rules/06-module-production.md mục "Khóa ca sản xuất".
+  const [shiftLock, setShiftLock] = useState<ShiftLockStatus | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Mục 2: sửa 1 dòng lịch sử đã gửi (thay vì phải xóa rồi quét lại)
@@ -321,8 +328,12 @@ export default function ConfirmKienProductionPage() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const rows = await loadShiftHistory(factoryId, historyNgay, historyCa, isAdmin);
+      const [rows, lockStatus] = await Promise.all([
+        loadShiftHistory(factoryId, historyNgay, historyCa, isAdmin),
+        loadShiftLockStatus(factoryId, historyNgay, historyCa),
+      ]);
       setHistory(rows);
+      setShiftLock(lockStatus);
     } catch (err) {
       setHistoryError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
@@ -613,7 +624,7 @@ export default function ConfirmKienProductionPage() {
   const handleDeleteEntry = async (entry: ShiftHistoryEntry) => {
     setDeletingId(entry.transactionId);
     try {
-      const result = await deleteShiftHistoryEntry(entry.transactionId);
+      const result = await deleteShiftHistoryEntry(entry.transactionId, currentUser?.id ?? null);
       if (!result.success) {
         setHistoryError(result.error);
         setToast({ message: result.error, variant: "error" });
@@ -661,6 +672,7 @@ export default function ConfirmKienProductionPage() {
         boc: input.boc || null,
         pallet: input.pallet,
         chiThi: input.chiThi || null,
+        actorUserId: currentUser?.id ?? null,
       });
       if (!result.success) {
         setEditError(result.error);
@@ -926,6 +938,7 @@ export default function ConfirmKienProductionPage() {
                 history={history}
                 historyLoading={historyLoading}
                 historyError={historyError}
+                shiftLock={shiftLock}
                 deleteConfirmId={deleteConfirmId}
                 deletingId={deletingId}
                 onAskDelete={setDeleteConfirmId}
@@ -1434,6 +1447,7 @@ function HubView({
   history,
   historyLoading,
   historyError,
+  shiftLock,
   deleteConfirmId,
   deletingId,
   onAskDelete,
@@ -1468,6 +1482,7 @@ function HubView({
   history: ShiftHistoryEntry[];
   historyLoading: boolean;
   historyError: string | null;
+  shiftLock: ShiftLockStatus | null;
   deleteConfirmId: string | null;
   deletingId: string | null;
   onAskDelete: (id: string) => void;
@@ -1623,6 +1638,16 @@ function HubView({
             </select>
           </div>
         </div>
+
+        {shiftLock?.isActive && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
+            <Lock size={14} className="mt-0.5 shrink-0 text-red-500" />
+            <p className="text-xs font-semibold text-red-700">
+              Ca này đã được duyệt & khóa bởi {shiftLock.lockedByName} · {formatDMYHMS(new Date(shiftLock.lockedAt))}.
+              Liên hệ quản trị viên (module Thành phẩm) để mở khóa.
+            </p>
+          </div>
+        )}
 
         {historyLoading ? (
           <p className="py-4 text-center text-xs text-slate-400">{tt("dangTai")}</p>

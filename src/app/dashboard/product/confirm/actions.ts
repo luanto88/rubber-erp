@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { KienLetter } from "@/lib/product-label";
 import { getExistingRealKg, markLotPredictionRealized } from "@/app/dashboard/product/predict/actions";
 import { deleteLotTransaction, saveLotTransaction } from "@/app/dashboard/product/actions";
+import { assertShiftNotLocked } from "@/app/dashboard/product/shift-lock";
 import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { getTodayISODate } from "@/lib/date-utils";
@@ -557,6 +558,7 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
           pallet: input.pallet ?? null,
           chi_thi: input.chiThi ?? null,
         },
+        actorUserId: input.userId ?? null,
       }),
       supabase.from("lot_prediction_lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", maLo).maybeSingle(),
     ]);
@@ -915,6 +917,19 @@ export async function loadShiftHistory(
   const rows = await loadShiftTransactions(factoryId, ngaySx, ca);
   const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
 
+  // "Khóa ca sản xuất" — scope của hàm này luôn đúng 1 (ngaySx, ca), chỉ cần 1 query duy nhất
+  // (không cần Set/Map theo dòng). Admin bypass, giữ đúng nguyên tắc bypass khóa toàn hệ thống.
+  const supabaseLock = getSupabaseAdmin();
+  const { data: lockRow } = await supabaseLock
+    .from("product_shift_locks")
+    .select("id")
+    .eq("factory_id", factoryId)
+    .eq("ngay_sx", ngaySx)
+    .eq("ca", ca)
+    .eq("is_active", true)
+    .maybeSingle();
+  const isShiftLocked = !!lockRow && !isAdmin;
+
   const xuatHangLotIds = isAdmin
     ? [...new Set(
         rows
@@ -945,10 +960,11 @@ export async function loadShiftHistory(
         return Number(row[key] || 0) > 0;
       }).join("");
       const lotStatus = normalizeLotStatus(lotInfo?.trang_thai);
-      const canDelete = lotStatus === "Dở dang";
+      const canDelete = lotStatus === "Dở dang" && !isShiftLocked;
       const canEdit =
-        lotStatus === "Dở dang" ||
-        (isAdmin && !(lotStatus === "Xuất hàng" && lotIdsWithQc.has(row.lot_id)));
+        !isShiftLocked &&
+        (lotStatus === "Dở dang" ||
+          (isAdmin && !(lotStatus === "Xuất hàng" && lotIdsWithQc.has(row.lot_id))));
       const maLo = lotInfo?.ma_lo || "";
       const num = Number(maLo.match(/^(\d+)/)?.[1] || 0);
       return {
@@ -987,12 +1003,47 @@ export async function loadShiftHistory(
     });
 }
 
+export type ShiftLockStatus = {
+  isActive: boolean;
+  lockedByName: string;
+  lockedAt: string;
+};
+
+// Trạng thái khóa (chỉ đọc) của đúng (ngaySx, ca) — dùng cho badge thông tin ở Hub quét QR (Hub
+// không có nút hành động khóa/mở khóa, chỉ hiển thị để người dùng hiểu vì sao Sửa/Xóa bị ẩn; xem
+// .claude/rules/06-module-production.md mục "Khóa ca sản xuất").
+export async function loadShiftLockStatus(
+  factoryId: string,
+  ngaySx: string,
+  ca: string,
+): Promise<ShiftLockStatus | null> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("product_shift_locks")
+    .select("locked_by, locked_at")
+    .eq("factory_id", factoryId)
+    .eq("ngay_sx", ngaySx)
+    .eq("ca", ca)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!data) return null;
+  const nameMap = await resolveProfileNames([data.locked_by]);
+  return {
+    isActive: true,
+    lockedByName: nameMap.get(data.locked_by) || "—",
+    lockedAt: data.locked_at,
+  };
+}
+
 export type DeleteShiftHistoryResult = { success: true } | { success: false; error: string };
 
 // Cho phép sửa lỗi nhập sai: xóa 1 giao dịch đã gửi trong Hub — chỉ khi lô liên quan vẫn đang
 // "Dở dang" (chưa đi qua Kiểm nghiệm/Xuất hàng), re-check ở server chứ không tin canDelete phía
 // client. Dùng lại deleteLotTransaction() (product/actions.ts) — đã tự đồng bộ lại lots.
-export async function deleteShiftHistoryEntry(transactionId: string): Promise<DeleteShiftHistoryResult> {
+export async function deleteShiftHistoryEntry(
+  transactionId: string,
+  actorUserId: string | null,
+): Promise<DeleteShiftHistoryResult> {
   try {
     const supabase = getSupabaseAdmin();
     const { data: tx, error: txError } = await supabase
@@ -1007,7 +1058,9 @@ export async function deleteShiftHistoryEntry(transactionId: string): Promise<De
       return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể xóa từ đây." };
     }
 
-    const result = await deleteLotTransaction({ transactionId });
+    // Guard "Khóa ca sản xuất" thực sự nằm trong RPC delete_lot_transaction (đã bảo vệ), truyền
+    // actorUserId xuống để RPC xác định đúng admin có được bypass hay không.
+    const result = await deleteLotTransaction({ transactionId, actorUserId });
     if (!result.success) return { success: false, error: result.error };
 
     // Đồng bộ lại trạng thái ngăn (best-effort — không chặn kết quả xóa nếu lỗi, ngăn có thể
@@ -1039,6 +1092,9 @@ export type EditShiftHistoryInput = {
   boc: string | null;
   pallet: string[] | null;
   chiThi: string | null;
+  // Dùng riêng cho check "Khóa ca sản xuất" (assertShiftNotLocked) — KHÔNG dùng chung với
+  // isAdmin ở trên (isAdmin phục vụ đúng mục đích cũ: bypass qc_results/Xuất hàng).
+  actorUserId: string | null;
 };
 
 export type EditShiftHistoryResult = { success: true } | { success: false; error: string };
@@ -1057,7 +1113,7 @@ export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promi
     const { data: tx, error: txError } = await supabase
       .from("lot_transactions")
       .select(
-        "id, lot_id, ngan_id, so_kg, kien_a, kien_b, kien_c, kien_d, lots!inner(id, ma_lo, loai_csr, loai_banh, trang_thai, factory_id)",
+        "id, lot_id, ngan_id, so_kg, ngay_nhap, ca, kien_a, kien_b, kien_c, kien_d, lots!inner(id, ma_lo, loai_csr, loai_banh, trang_thai, factory_id)",
       )
       .eq("id", input.transactionId)
       .maybeSingle();
@@ -1067,6 +1123,22 @@ export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promi
     if (!lotInfo || lotInfo.factory_id !== input.factoryId) {
       return { success: false, error: "Giao dịch không thuộc nhà máy hiện tại." };
     }
+
+    // Guard "Khóa ca sản xuất" — check cả (ngày, ca) HIỆN TẠI của giao dịch lẫn (ngày, ca) ĐÍCH
+    // (input.ngaySx/input.ca có thể khác nếu người dùng đổi ca/ngày) — chặn cả cách "lách khóa"
+    // bằng cách chuyển giao dịch vào 1 ca đã khóa.
+    await assertShiftNotLocked({
+      factoryId: input.factoryId,
+      ngaySx: tx.ngay_nhap,
+      ca: tx.ca,
+      actorUserId: input.actorUserId,
+    });
+    await assertShiftNotLocked({
+      factoryId: input.factoryId,
+      ngaySx: input.ngaySx,
+      ca: input.ca,
+      actorUserId: input.actorUserId,
+    });
 
     const lotStatus = normalizeLotStatus(lotInfo.trang_thai);
     if (!input.isAdmin) {

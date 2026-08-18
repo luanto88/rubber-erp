@@ -6,6 +6,7 @@ import {
   normalizeLotStatus,
   pickCanonicalLot,
 } from "@/app/dashboard/product/shared";
+import { assertShiftNotLocked } from "@/app/dashboard/product/shift-lock";
 
 type SaveLotTransactionInput = {
   lot: {
@@ -51,10 +52,19 @@ type SaveLotTransactionInput = {
     pallet?: string[] | null;
     chi_thi?: string | null;
   };
+  // Người thực hiện thao tác — dùng để check "Khóa ca sản xuất" (product_shift_locks). Admin
+  // luôn được bypass khóa. Không bắt buộc (null cho phép các call site cũ trước khi tính năng
+  // khóa ca tồn tại vẫn build được), nhưng thiếu giá trị này thì mọi ca đã khóa đều bị chặn
+  // ghi (kể cả với admin) vì không tra được role — luôn truyền currentUser?.id/input.userId.
+  actorUserId?: string | null;
 };
 
 type DeleteLotTransactionInput = {
   transactionId: string;
+  // Dùng để check "Khóa ca sản xuất" — xem SaveLotTransactionInput.actorUserId. Truyền null nếu
+  // không xác định được actor (call site không có session context) — an toàn, chỉ khiến RPC coi
+  // actor đó là non-admin (không bypass được khóa), không bao giờ mở khóa nhầm.
+  actorUserId: string | null;
 };
 
 function logProductActionError(
@@ -125,6 +135,13 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
   try {
     const supabase = getSupabaseAdmin();
     if (!maLo) throw new Error("Thieu ma lo.");
+
+    await assertShiftNotLocked({
+      factoryId: lot.factory_id,
+      ngaySx: transaction.ngay_nhap,
+      ca: transaction.ca,
+      actorUserId: input.actorUserId,
+    });
 
     const parsedLotCode = parseLotCode(maLo);
     const kienA = transaction.kien_a ?? 0;
@@ -284,13 +301,14 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
 // UPDATE, tự gỡ liên kết lot_prediction_lots trước khi xóa lots, tất cả trong 1 transaction duy
 // nhất (thành công toàn bộ hoặc rollback toàn bộ, không còn trạng thái nửa vời).
 export async function deleteLotTransaction(input: DeleteLotTransactionInput) {
-  const { transactionId } = input;
+  const { transactionId, actorUserId } = input;
 
   try {
     const supabase = getSupabaseAdmin();
 
     const { data: rpcData, error: rpcError } = await supabase.rpc("delete_lot_transaction", {
       p_transaction_id: transactionId,
+      p_actor_id: actorUserId,
     });
     if (rpcError) throw new Error(`Khong xoa duoc giao dich: ${rpcError.message}`);
 

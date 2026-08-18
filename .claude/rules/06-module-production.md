@@ -152,6 +152,152 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - `ca`, `bọc`, `pallet`, `thảm` nên là nhóm chọn nhanh dễ bấm, dễ đọc để người dùng không nhầm giữa header phiếu và dòng nhập.
 - Modal sửa nên hiển thị thêm thông tin tỷ lệ dự kiến của ngăn sau lưu để cảnh báo sớm trước khi bấm lưu.
 
+## 4.4b. Khóa ca sản xuất (2026-08-28)
+
+### Bối cảnh
+
+`lot_transactions` không có snapshot/khóa nào — "Ngày sản xuất" trên form quét QR
+(`/dashboard/product/confirm`) hoàn toàn tự do, không validate so với ngày hệ thống. Nếu công
+nhân chọn nhầm ngày, dữ liệu ghi thẳng vào ngày sai mà không ai cản, kể cả sau khi bấm "Kết thúc
+ca" (hành động đó chỉ sinh PDF, không khóa gì). Tính năng này thêm 1 lớp khóa theo
+`(factory_id, ngay_sx, ca)` — sau khi khóa, không ai (trừ admin) ghi/sửa/xóa được
+`lot_transactions` của đúng ca đó nữa, dù ghi qua kênh nào (quét QR hay nhập tay module Thành
+phẩm chính). **Không** giải quyết triệt để việc nhập sai ngày TRƯỚC khi khóa — đây là rủi ro còn
+tồn tại, chỉ chặn được các thao tác SAU thời điểm duyệt.
+
+### Schema
+
+- `product_shift_locks` — `factory_id, ngay_sx DATE, ca TEXT, is_active BOOLEAN, locked_by,
+  locked_at, unlocked_by, unlocked_at, unlock_reason`. Lưu lịch sử đầy đủ (khóa → mở khóa → khóa
+  lại tạo dòng mới, không ghi đè) — partial unique index `WHERE is_active` đảm bảo chỉ 1 khóa
+  active tại 1 thời điểm cho mỗi `(factory_id, ngay_sx, ca)`.
+- RLS chỉ có SELECT cho `authenticated` — không có INSERT/UPDATE/DELETE nào cho client, mọi ghi
+  đi qua 2 RPC `product_lock_shift`/`product_unlock_shift`.
+- Permission `product.approve_shift` — cấp mặc định `admin` + `manager` (không cấp `user`).
+- `product_lock_shift(p_factory_id, p_ngay_sx, p_ca)` — `SECURITY DEFINER`, gọi TRỰC TIẾP từ
+  client (không qua server action) để dùng `auth.uid()` thật, tránh giả mạo actor. Check
+  `current_profile_has_permission('product.approve_shift')`.
+- `product_unlock_shift(p_factory_id, p_ngay_sx, p_ca, p_reason)` — cũng gọi trực tiếp từ
+  client, chỉ `profiles.role = 'admin'`, bắt buộc `p_reason` non-empty, giữ lại dòng lịch sử cũ
+  (`is_active=false` + `unlock_reason`), không xóa.
+- Cả 2 RPC dùng `pg_advisory_xact_lock` theo hash `(factory_id, ngay_sx, ca)` để tránh race khi
+  bấm khóa/mở khóa đồng thời.
+
+### 6 điểm guard (tất cả đường ghi `lot_transactions` đã xác nhận qua code)
+
+| # | Hàm/RPC | Cơ chế | Cách chèn |
+|---|---|---|---|
+| 1 | `saveLotTransaction()` — `product/actions.ts` | JS `"use server"`, service role | `assertShiftNotLocked()` đầu hàm, nhận `actorUserId` |
+| 2 | `delete_lot_transaction` RPC | `SECURITY DEFINER` | Guard trong SQL, nhận thêm `p_actor_id` |
+| 3 | `submit_confirm_draft_batch` RPC | `SECURITY DEFINER`, atomic | Guard trong vòng lặp draft, dùng `p_user_id` sẵn có |
+| 4 | `editShiftHistoryEntry()` — `confirm/actions.ts` | JS `"use server"` | 2 lần `assertShiftNotLocked()` (ca nguồn + ca đích nếu đổi ca) |
+| 5 | `deleteShiftHistoryEntry()` — `confirm/actions.ts` | Gọi lại #2 | Thread `actorUserId` xuống |
+| 6 | `handleDateHeaderSave()` — `product/page.tsx` | **Ghi thẳng bằng browser client, chịu RLS thật** | Pre-check UX phía client + mở rộng RLS `lot_transactions_update`/`lots_update` |
+
+Helper dùng chung `assertShiftNotLocked()` trong `src/app/dashboard/product/shift-lock.ts`
+(`"use server"`) — vì #1/#3/#4/#5 chạy bằng service role (không có `auth.uid()`), phải thread
+`actorUserId` như tham số rồi tra `profiles.role` để xác định admin. Không tin thẳng 1 boolean
+từ client.
+
+### UI
+
+- Hành động Duyệt/Mở khóa đặt **duy nhất** ở `/dashboard/product` (module Thành phẩm chính) —
+  header mỗi nhóm Ngày có 1 icon đại diện tổng trạng thái khóa của cả ngày (`ShieldCheck` màu
+  emerald nếu chưa khóa gì và có quyền; `Lock` đỏ nếu khóa hết, hổ phách nếu khóa một phần; ẩn
+  hẳn nếu chưa khóa gì và không có quyền). Click mở `ShiftLockModal` — liệt kê từng `ca` trong
+  ngày, cho khóa/mở khóa riêng từng ca (mở khóa bắt buộc nhập lý do).
+- Cụm icon header Ngày (Xem phiếu PDF/Duyệt-khóa/Thêm/Sửa/Xóa) dùng style icon-only
+  (`rounded-lg p-1.5 text-{color}-600 hover:bg-{color}-50`, không nền màu, không chữ, chỉ
+  `title` tooltip) — đồng bộ với style đã dùng ở Điều xe/Sản lượng. Chế độ xóa hàng loạt
+  (`deleteMode === date`) vẫn giữ dạng có chữ (cần hiện số lượng đã chọn động).
+- Nút "Sửa" cấp ngày disable khi ngày đó có bất kỳ ca nào đã khóa và người xem không phải admin.
+- Mỗi bảng con theo `ca` có badge "🔒 Đã khóa" cạnh nhãn "Ca {ca}" nếu ca đó đang khóa; checkbox
+  chọn xóa hàng loạt bị disable cho ca đã khóa (trừ admin).
+- Hub quét QR (`/dashboard/product/confirm`) **chỉ hiển thị badge thông tin** (đỏ, "Ca này đã
+  được duyệt & khóa bởi {tên} · {giờ}. Liên hệ quản trị viên...") — KHÔNG có nút hành động ở đây,
+  tránh 2 nơi cùng có logic khóa/mở khóa dễ lệch nhau. Nút Sửa/Xóa trong "Lịch sử ca" tự ẩn theo
+  `canEdit`/`canDelete` đã tính lại ở server (`loadShiftHistory()`).
+
+### Chia sẻ phiếu báo thành phẩm dạng ảnh (2026-08-28, không phụ thuộc khóa ca)
+
+`ShiftReportPreviewBar` (`confirm/shift-report-preview-bar.tsx`) — nút "Chia sẻ phiếu" giờ gọi
+`shareShiftReportImage()` (`shift-report-pdf.ts`): rasterize toàn bộ trang PDF qua `pdfjs-dist`
+(worker local, không CDN — theo đúng convention repo) rồi **ghép dọc thành 1 ảnh PNG dài duy
+nhất** trước khi chia sẻ qua Web Share API (fallback tải PNG nếu không hỗ trợ). Nút "Tải phiếu
+PDF" **không đổi**, vẫn tải PDF gốc qua `downloadShiftReportPdfDoc()`. Hàm `shareShiftReportPdfDoc`
+cũ (chia sẻ thẳng PDF) đã bị xóa vì không còn call site nào.
+
+## 4.4c. Điều tra `product-draft/page.tsx` — code mồ côi, kế hoạch xử lý phiên sau (2026-08-28)
+
+Trong lúc rà toàn bộ call site của `saveLotTransaction`/`deleteLotTransaction` cho tính năng
+"Khóa ca sản xuất" (mục 4.4b), phát hiện `src/app/dashboard/product-draft/page.tsx` — 1 route
+gần như song song với `/dashboard/product` nhưng **không có guard quyền nào cả** (không gọi
+`hydrateActiveSession()`/`hasPermission()`, chỉ có `getActiveFactoryId()`) — vi phạm trực tiếp
+invariant bắt buộc "Mọi trang dashboard phải có permission guard" đã ghi trong CLAUDE.md. Đã
+điều tra kỹ bằng git history (không đoán) trước khi kết luận, để phiên sau không phải điều tra
+lại từ đầu:
+
+### Bằng chứng đã xác nhận
+
+- **`git log --follow` gây nhiễu**: lần đầu chạy `git log --follow` cho ra lịch sử dài y hệt
+  `product/page.tsx` (kể cả commit "Initial setup") — đây là **rename-detection giả** của Git
+  (heuristic theo độ giống nội dung, không phải lịch sử thật của đúng file này). Lịch sử THẬT
+  (dùng `git log` không kèm `--follow`) chỉ có **4 commit**:
+  `9de125b` (06/05/2026, tạo file — cùng lúc với hàng trăm file khác trong 1 commit lớn, giống
+  dấu hiệu gộp snapshot thư mục làm việc) → `fa774a9`/`0fc32e2` (06/05/2026, cùng nội dung fix
+  "xóa lô dở dang ca này xóa luôn ca kia") → `53432b5` (02/07/2026, "Cải tiến giao diện mobile
+  GD4.1") — **và dừng hẳn từ đó**.
+- **Đã đóng băng 85 commit / ~6.5 tuần** (từ 02/07/2026 tới thời điểm điều tra 28/08/2026) trong
+  khi `product/page.tsx` tiếp tục phát triển mạnh — đã tăng từ 6498 dòng (tại thời điểm
+  `product-draft` bị bỏ) lên 7072+ dòng, kèm theo TOÀN BỘ các fix dữ liệu quan trọng đã ghi
+  trong file này từ mục "Cập nhật 2026-07-03" trở đi (lô mồ côi, `sync_lot_master_snapshot`
+  atomic RPC, race condition, luồng quét QR/"Lưu tạm" viết lại hoàn toàn, KPI evidence-linking,
+  và giờ là "Khóa ca sản xuất" mục 4.4b) — **không có fix nào trong số này lan sang
+  `product-draft`**.
+- **Nội dung file bị lỗi encoding UTF-8 nặng** — dòng đầu có BOM thừa (`﻿"use client";`), nhiều
+  comment tiếng Việt bị mojibake (`â”€â”€â”€ Types â”€â”€â”€...`) — dấu hiệu file từng bị lưu/ghi đè qua 1
+  công cụ xử lý encoding sai, càng củng cố đây là bản sao/backup cũ, không phải code đang được
+  chủ động soạn thảo.
+- **Không có bất kỳ nơi nào trong app trỏ tới route này** — đã `grep -rn "product-draft"` toàn bộ
+  `src/`, chỉ tìm thấy đúng 1 kết quả NGOÀI chính file đó: dòng
+  `revalidatePath("/dashboard/product-draft")` trong `revalidateLotScreens()`
+  (`product/actions.ts`). Dòng này (theo `git blame`) cũng được thêm đúng ngày 06/05/2026, cùng
+  lúc file được đồng bộ lần 2 — chưa từng bị sửa lại kể từ đó. Không có link sidebar, không có
+  `<Link>`/`router.push`/redirect nào trỏ tới route này ở bất kỳ đâu khác trong codebase — chỉ
+  truy cập được nếu gõ thẳng URL.
+- File vẫn **import đúng các hàm service-role hiện tại** (`saveLotTransaction`,
+  `deleteLotTransaction`, `dedupeLotsByMaLo`, `normalizeLotStatus` từ `product/actions.ts`/
+  `product/shared.ts`) — nghĩa là các guard tầng backend mới (kể cả "Khóa ca sản xuất" mục 4.4b)
+  **vẫn áp dụng đúng** nếu ai đó thao tác qua trang này, vì guard nằm trong chính các hàm dùng
+  chung. Rủi ro còn lại chỉ nằm ở tầng UI/business-rule cũ kỹ của chính trang (thiếu mọi cải tiến
+  nghiệp vụ 6+ tuần qua) và việc thiếu permission guard (bất kỳ tài khoản đăng nhập hợp lệ nào,
+  không phân biệt quyền `product.view`/`product.edit`, đều dùng được trang này nếu biết URL).
+
+### Kết luận
+
+Đây là code mồ côi/bản backup cá nhân bị bỏ quên, **không phải tính năng đang dùng** — không có
+route nào trong app dẫn tới nó, và nó đã tụt hậu quá xa so với module thật để còn an toàn nếu
+dùng nhầm (thiếu mọi fix toàn vẹn dữ liệu quan trọng). Rủi ro thực tế thấp (không ai vô tình bấm
+vào được) nhưng không phải zero (ai đó nhớ/đoán được URL vẫn thao tác được, bỏ qua toàn bộ
+permission gate).
+
+### Kế hoạch xử lý — CHƯA LÀM, cần làm ở phiên sau
+
+1. **Hỏi trực tiếp người dùng trước khi xóa bất cứ gì** — xác nhận đây có đúng là bản backup cá
+   nhân bỏ quên hay có mục đích cố ý nào khác (vd sandbox test riêng) mà rule file này chưa biết.
+2. Nếu xác nhận không cần giữ:
+   - Xóa hẳn thư mục `src/app/dashboard/product-draft/`.
+   - Xóa dòng `revalidatePath("/dashboard/product-draft")` trong `revalidateLotScreens()`
+     (`product/actions.ts`) — dead reference, không còn ý nghĩa gì sau khi xóa route.
+   - Chạy `npx tsc --noEmit`, `npx eslint`, `npm run build` xác nhận sạch — đã verify trước
+     (mục 4.4b) rằng đây là 2 điểm chạm DUY NHẤT trong toàn bộ codebase, nên rủi ro breaking rất
+     thấp.
+3. Nếu người dùng muốn giữ lại (vd làm sandbox test an toàn tách biệt): tối thiểu phải thêm đúng
+   permission guard chuẩn (`hydrateActiveSession()` + `hasPermission(user, "product.view")`,
+   theo đúng Pattern A đã mô tả ở `.claude/rules/12-settings-permissions.md`) trước khi coi là
+   an toàn để tồn tại tiếp — và ghi rõ mục đích tồn tại của nó vào rule file này để không bị hiểu
+   nhầm là mồ côi ở các phiên sau.
+
 ## 4.5. Sang kiện / Thay bọc (Atomic RPC — 2026-06-19)
 
 Kể từ migration `20260619_sk_atomic_rpc.sql`, **toàn bộ thao tác Sang kiện / Thay bọc phải gọi RPC `perform_sang_kien_thay_boc`** — không dùng lại 3 bước DB riêng biệt.

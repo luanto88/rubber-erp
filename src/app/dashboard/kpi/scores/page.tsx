@@ -166,6 +166,7 @@ export default function KpiScoresPage() {
   }, [factoryId, user, canViewAll, nam, thang, loadData])
 
   const nameByUserId = useMemo(() => Object.fromEntries(candidates.map((c) => [c.userId, c.ten])), [candidates])
+  const resolveName = useCallback((uid: string) => nameByUserId[uid] || `Người dùng ${uid.slice(0, 8)}`, [nameByUserId])
 
   // Lãnh đạo phòng ban (không phải admin) tự động chỉ thấy đúng phòng ban mình — mirror hành vi
   // đã áp dụng cho Công việc/Việc định kỳ/5S. Admin lọc tùy chọn qua dropdown (mặc định "Tất cả").
@@ -178,6 +179,12 @@ export default function KpiScoresPage() {
     }
     return factoryScores
   }, [factoryScores, isDeptLeader, isAdmin, userDeptMap, myLeaderDepartmentId, deptFilter])
+
+  // Tiêu đề bảng "Toàn nhà máy" phải phản ánh đúng bộ lọc phòng ban đang áp dụng — mirror chính
+  // xác điều kiện lọc của visibleFactoryScores ở trên (lãnh đạo phòng ban luôn khóa cứng theo
+  // phòng ban mình; admin theo dropdown deptFilter nếu có chọn).
+  const effectiveDeptId = isDeptLeader && !isAdmin ? myLeaderDepartmentId : isAdmin ? deptFilter || null : null
+  const effectiveDeptName = effectiveDeptId ? departments.find((d) => d.id === effectiveDeptId)?.name ?? null : null
 
   const handleCompute = async () => {
     if (!factoryId) return
@@ -414,7 +421,7 @@ export default function KpiScoresPage() {
                       <div className="flex items-center gap-3">
                         <div className="w-40"><KpiProgressBar percent={s.diem_tong ?? 0} size="sm" /></div>
                         <span className="w-14 text-right text-sm font-extrabold text-slate-800">{s.diem_tong ?? "—"}</span>
-                        <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${s.trang_thai === "da_khoa" ? "bg-slate-200 text-slate-600" : "bg-amber-100 text-amber-700"}`}>
+                        <span className={`shrink-0 whitespace-nowrap rounded-lg px-2 py-0.5 text-[10px] font-bold ${s.trang_thai === "da_khoa" ? "bg-slate-200 text-slate-600" : "bg-amber-100 text-amber-700"}`}>
                           {s.trang_thai === "da_khoa" ? "Đã khóa" : "Nháp"}
                         </span>
                       </div>
@@ -428,7 +435,9 @@ export default function KpiScoresPage() {
             {canViewAll && (
               <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-extrabold text-slate-700">Toàn nhà máy — Tháng {thang}/{nam}</div>
+                  <div className="text-sm font-extrabold text-slate-700">
+                  {effectiveDeptName || "Toàn nhà máy"} — Tháng {thang}/{nam}
+                </div>
                 </div>
                 {dataLoading ? (
                   <div className="py-6 text-center text-sm text-slate-400">Đang tải...</div>
@@ -454,7 +463,7 @@ export default function KpiScoresPage() {
                       <tbody>
                         {visibleFactoryScores.map((s) => (
                           <tr key={s.id} className="row-hover border-b border-slate-100 last:border-0">
-                            <td className="py-2 pr-3 font-semibold text-slate-700">{nameByUserId[s.user_id] || s.user_id}</td>
+                            <td className="py-2 pr-3 font-semibold text-slate-700">{resolveName(s.user_id)}</td>
                             <td className="px-2 py-2 text-slate-500">{userDeptMap.get(s.user_id)?.name || "—"}</td>
                             <td className="px-2 py-2 text-slate-500">{s.diem_hoan_thanh ?? "—"}</td>
                             <td className="px-2 py-2 text-slate-500">{s.diem_dung_han ?? "—"}</td>
@@ -464,7 +473,7 @@ export default function KpiScoresPage() {
                             <td className="px-2 py-2 text-right text-base font-extrabold text-violet-700">{s.diem_tong ?? "—"}</td>
                             <td className="py-2 pl-2">
                               <div className="flex items-center gap-1.5 whitespace-nowrap">
-                                <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${s.trang_thai === "da_khoa" ? "bg-slate-200 text-slate-600" : "bg-amber-100 text-amber-700"}`}>
+                                <span className={`shrink-0 whitespace-nowrap rounded-lg px-2 py-0.5 text-[10px] font-bold ${s.trang_thai === "da_khoa" ? "bg-slate-200 text-slate-600" : "bg-amber-100 text-amber-700"}`}>
                                   {s.trang_thai === "da_khoa" ? "Đã khóa" : "Nháp"}
                                 </span>
                                 {canCompute && s.trang_thai === "nhap" && (
@@ -510,7 +519,7 @@ export default function KpiScoresPage() {
               <MyScoreExplain
                 factoryId={factoryId}
                 userId={detailUserId ?? user.id}
-                subjectName={detailUserId && detailUserId !== user.id ? nameByUserId[detailUserId] || detailUserId : "bạn"}
+                subjectName={detailUserId && detailUserId !== user.id ? resolveName(detailUserId) : "bạn"}
                 nam={nam}
                 thang={thang}
               />
