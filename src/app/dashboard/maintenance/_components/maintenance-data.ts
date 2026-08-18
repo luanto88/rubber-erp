@@ -1,4 +1,8 @@
 import { supabase } from "@/lib/supabase"
+import { convertCurrency, currencySymbol as sharedCurrencySymbol } from "@/lib/currency"
+
+// Re-export để không phải sửa các import cũ trong module Bảo trì đang dùng currencySymbol từ đây.
+export const currencySymbol = sharedCurrencySymbol
 
 export const BO_PHAN_LIST = [
   "Mủ tạp",
@@ -178,18 +182,8 @@ export async function loadMaintenanceExtMaterials(factoryId: string): Promise<Ma
 
 // Auto-classify repair type based on cost (USD threshold = 200)
 export function suggestLoaiSuaChua(chiPhi: number, loaiTien: string): "lon" | "nho" {
-  const usdEquiv =
-    loaiTien === "USD" ? chiPhi :
-    loaiTien === "KHR" ? chiPhi / 4100 :
-    loaiTien === "VND" ? chiPhi / 25000 : 0
+  const usdEquiv = convertCurrency(chiPhi, loaiTien, "USD")
   return usdEquiv > 200 ? "lon" : "nho"
-}
-
-// Format currency symbol
-export function currencySymbol(loaiTien: string): string {
-  if (loaiTien === "KHR") return "៛"
-  if (loaiTien === "VND") return "₫"
-  return "$"
 }
 
 // Nhãn hiển thị trạng thái biên bản — dùng chung cho danh sách và trang chi tiết

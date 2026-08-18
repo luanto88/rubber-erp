@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
@@ -70,6 +71,8 @@ type ItemRow = {
   equipment_name: string | null
   uses_shared_oil_stock: boolean
   is_active: boolean
+  don_gia: number
+  loai_tien: string
   categoryName: string
   warehouseCodes: string[]
 }
@@ -106,6 +109,8 @@ type ItemForm = {
   equipment_name: string
   uses_shared_oil_stock: boolean
   is_active: boolean
+  don_gia: string
+  loai_tien: string
 }
 
 type NormPreviewRow = {
@@ -152,6 +157,8 @@ const fallbackItems: ItemRow[] = [
     equipment_name: null,
     uses_shared_oil_stock: false,
     is_active: true,
+    don_gia: 0,
+    loai_tien: "USD",
     categoryName: "Vật tư hóa chất",
     warehouseCodes: ["KB"],
   },
@@ -173,6 +180,8 @@ const fallbackItems: ItemRow[] = [
     equipment_name: null,
     uses_shared_oil_stock: false,
     is_active: true,
+    don_gia: 0,
+    loai_tien: "USD",
     categoryName: "Vật tư hóa chất",
     warehouseCodes: ["KB"],
   },
@@ -194,6 +203,8 @@ const fallbackItems: ItemRow[] = [
     equipment_name: null,
     uses_shared_oil_stock: true,
     is_active: true,
+    don_gia: 0,
+    loai_tien: "USD",
     categoryName: "Nhiên liệu chế biến",
     warehouseCodes: ["KDDX", "KDMFL"],
   },
@@ -242,6 +253,8 @@ function emptyItemForm(): ItemForm {
     equipment_name: "",
     uses_shared_oil_stock: false,
     is_active: true,
+    don_gia: "",
+    loai_tien: "USD",
   }
 }
 
@@ -352,7 +365,7 @@ export default function InventorySettingsPage() {
         supabase
           .from("inventory_items")
           .select(
-            "id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, image_url, equipment_name, uses_shared_oil_stock, is_active",
+            "id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, image_url, equipment_name, uses_shared_oil_stock, is_active, don_gia, loai_tien",
           )
           .eq("factory_id", fid)
           .order("code"),
@@ -495,6 +508,8 @@ export default function InventorySettingsPage() {
             equipment_name: row.equipment_name || "",
             uses_shared_oil_stock: row.uses_shared_oil_stock,
             is_active: row.is_active,
+            don_gia: row.don_gia ? String(row.don_gia) : "",
+            loai_tien: row.loai_tien || "USD",
           }
         : {
             ...emptyItemForm(),
@@ -600,6 +615,7 @@ export default function InventorySettingsPage() {
     if (!itemForm.name.trim()) { setFormError("Tên vật tư không được để trống."); return }
     if (!itemForm.unit.trim()) { setFormError("Đơn vị tính không được để trống."); return }
     if (itemForm.selected_warehouse_ids.length === 0) { setFormError("Phai chon it nhat 1 kho chua."); return }
+    if (!(Number(itemForm.don_gia) > 0)) { setFormError("Vui lòng nhập Đơn giá (bắt buộc, dùng để tự điền khi chọn vật tư trong biên bản Bảo trì)."); return }
     setSaving(true)
     setFormError("")
     try {
@@ -620,6 +636,8 @@ export default function InventorySettingsPage() {
         equipment_name: itemForm.equipment_name.trim() || null,
         uses_shared_oil_stock: itemForm.uses_shared_oil_stock,
         is_active: itemForm.is_active,
+        don_gia: Number(itemForm.don_gia) || 0,
+        loai_tien: itemForm.loai_tien || "USD",
       }
       const result = editingId
         ? await supabase.from("inventory_items").update(payload).eq("id", editingId).eq("factory_id", factoryId).select("id").single()
@@ -1298,6 +1316,32 @@ export default function InventorySettingsPage() {
                         onChange={(e) => setItemForm((prev) => ({ ...prev, opening_stock: e.target.value }))}
                         className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
                       />
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Đơn giá *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={itemForm.don_gia}
+                        onChange={(e) => setItemForm((prev) => ({ ...prev, don_gia: e.target.value }))}
+                        placeholder="Bắt buộc — dùng để tự điền khi chọn vật tư trong biên bản Bảo trì"
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Loại tiền</label>
+                      <select
+                        value={itemForm.loai_tien}
+                        onChange={(e) => setItemForm((prev) => ({ ...prev, loai_tien: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
+                      >
+                        {CURRENCIES.map((c) => (
+                          <option key={c} value={c}>{c} ({currencySymbol(c)})</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">

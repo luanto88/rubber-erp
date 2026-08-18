@@ -17,6 +17,7 @@ const PolygonDrawMap = dynamic(
 )
 import { supabase } from "@/lib/supabase"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
+import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
@@ -347,6 +348,8 @@ type InvItemRow = {
   min_stock: number
   max_stock: number
   is_active: boolean
+  don_gia: number
+  loai_tien: string
   categoryName: string
   warehouseCodes: string[]
 }
@@ -358,6 +361,7 @@ type InvItemForm = {
   selected_warehouse_ids: string[]; location_codes: Record<string, string>
   manages_lot: boolean; manages_expiry: boolean
   min_stock: string; max_stock: string; is_active: boolean
+  don_gia: string; loai_tien: string
 }
 
 type DispatchDeliveryPointRow = {
@@ -688,10 +692,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     items: {
       filename: "mau_nhap_vat_tu.csv",
       rows: [
-        "ma_nhom,ma_vat_tu,ten_vat_tu,don_vi,quy_cach,ma_kho,quan_ly_lo,quan_ly_han,ton_min,ton_max",
-        "VT,VT001,Dầu nhớt máy,Lít,SAE 40,KA,false,false,50,500",
-        "HC,HC001,Acid sulfuric,Kg,H2SO4 98%,KB,true,true,20,200",
+        "ma_nhom,ma_vat_tu,ten_vat_tu,don_vi,quy_cach,ma_kho,quan_ly_lo,quan_ly_han,ton_min,ton_max,don_gia,loai_tien",
+        "VT,VT001,Dầu nhớt máy,Lít,SAE 40,KA,false,false,50,500,25,USD",
+        "HC,HC001,Acid sulfuric,Kg,H2SO4 98%,KB,true,true,20,200,15000,KHR",
         "# Ghi chú: ma_kho hỗ trợ nhiều kho ngăn cách dấu chấm phẩy vd: KA;KB",
+        "# don_gia là bắt buộc (>0); loai_tien nhận USD/KHR/VND, bỏ trống mặc định USD",
       ],
     },
     "delivery-points": {
@@ -793,7 +798,7 @@ export default function SettingsPage() {
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
-  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
   const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
   const [dispatchDriverForm, setDispatchDriverForm] = useState<DispatchDriverForm>(emptyDispatchDriverForm())
   const [dispatchVehicleForm, setDispatchVehicleForm] = useState<DispatchVehicleForm>(emptyDispatchVehicleForm())
@@ -948,7 +953,7 @@ export default function SettingsPage() {
       const [wRes, cRes, iItemsRes, iCatCountRes, dRes] = await Promise.all([
         supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
-        supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active").eq("factory_id", fid).order("code"),
+        supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active, don_gia, loai_tien").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
         supabase.from("dispatch_delivery_points").select("id, factory_id, ma_lo, doi, lat, lng, phien_a, phien_b, phien_c, phien_d, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("ma_lo"),
       ])
@@ -1327,10 +1332,11 @@ export default function SettingsPage() {
     if (!invItemForm.name.trim()) { setConfigError("Tên vật tư không được để trống"); return }
     if (!invItemForm.unit.trim()) { setConfigError("Đơn vị tính không được để trống"); return }
     if (invItemForm.selected_warehouse_ids.length === 0) { setConfigError("Phải chọn ít nhất 1 kho chứa"); return }
+    if (!(Number(invItemForm.don_gia) > 0)) { setConfigError("Vui lòng nhập Đơn giá (bắt buộc, dùng để tự điền khi chọn vật tư trong biên bản Bảo trì)"); return }
     setConfigSaving(true)
     setConfigError("")
     try {
-      const payload = { factory_id: factoryId, category_id: invItemForm.category_id, code: invItemForm.code.trim().toUpperCase(), name: invItemForm.name.trim(), unit: invItemForm.unit.trim(), specification: invItemForm.specification.trim() || null, default_warehouse_ids: invItemForm.selected_warehouse_ids, manages_lot: invItemForm.manages_lot, manages_expiry: invItemForm.manages_expiry, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, is_active: invItemForm.is_active }
+      const payload = { factory_id: factoryId, category_id: invItemForm.category_id, code: invItemForm.code.trim().toUpperCase(), name: invItemForm.name.trim(), unit: invItemForm.unit.trim(), specification: invItemForm.specification.trim() || null, default_warehouse_ids: invItemForm.selected_warehouse_ids, manages_lot: invItemForm.manages_lot, manages_expiry: invItemForm.manages_expiry, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, is_active: invItemForm.is_active, don_gia: Number(invItemForm.don_gia) || 0, loai_tien: invItemForm.loai_tien || "USD" }
       const result = configEditId
         ? await supabase.from("inventory_items").update(payload).eq("id", configEditId).eq("factory_id", factoryId).select("id").single()
         : await supabase.from("inventory_items").insert(payload).select("id").single()
@@ -1660,17 +1666,21 @@ export default function SettingsPage() {
           if (error) { errors.push(`Dòng ${rowNum} (${code}): ${error.message}`); continue }
           success++
         } else if (configTab === "items") {
-          const [cat_code, code, name, unit, specification, wh_codes_str, manages_lot_str, manages_expiry_str, min_stock_str, max_stock_str] = row
+          const [cat_code, code, name, unit, specification, wh_codes_str, manages_lot_str, manages_expiry_str, min_stock_str, max_stock_str, don_gia_str, loai_tien_str] = row
           if (!cat_code || !code || !name || !unit || !wh_codes_str) { errors.push(`Dòng ${rowNum}: thiếu trường bắt buộc (mã nhóm, mã vật tư, tên, đơn vị, mã kho)`); continue }
+          if (!(Number(don_gia_str) > 0)) { errors.push(`Dòng ${rowNum} (${code}): thiếu Đơn giá hợp lệ (bắt buộc, > 0)`); continue }
           const cat = invCategories.find((c) => c.code === cat_code.trim().toUpperCase())
           if (!cat) { errors.push(`Dòng ${rowNum} (${code}): không tìm thấy nhóm "${cat_code}" — hãy nhập Nhóm vật tư trước`); continue }
           const whCodes = wh_codes_str.split(";").map((w) => w.trim().toUpperCase())
           const whs = whCodes.map((wc) => invWarehouses.find((w) => w.code === wc)).filter(Boolean) as InvWarehouseRow[]
           if (whs.length === 0) { errors.push(`Dòng ${rowNum} (${code}): không tìm thấy kho "${wh_codes_str}" — hãy nhập Kho trước`); continue }
+          const loaiTien = CURRENCIES.includes((loai_tien_str || "").trim().toUpperCase() as (typeof CURRENCIES)[number])
+            ? loai_tien_str.trim().toUpperCase()
+            : "USD"
           const { data: itemData, error: itemErr } = await supabase
             .from("inventory_items")
             .upsert(
-              { factory_id: factoryId, category_id: cat.id, code: code.toUpperCase(), name, unit, specification: specification || null, default_warehouse_ids: whs.map((w) => w.id), manages_lot: manages_lot_str?.toLowerCase() === "true", manages_expiry: manages_expiry_str?.toLowerCase() === "true", min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, is_active: true },
+              { factory_id: factoryId, category_id: cat.id, code: code.toUpperCase(), name, unit, specification: specification || null, default_warehouse_ids: whs.map((w) => w.id), manages_lot: manages_lot_str?.toLowerCase() === "true", manages_expiry: manages_expiry_str?.toLowerCase() === "true", min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, is_active: true, don_gia: Number(don_gia_str), loai_tien: loaiTien },
               { onConflict: "factory_id,code" },
             )
             .select("id")
@@ -3371,7 +3381,7 @@ export default function SettingsPage() {
                         setConfigModal("category")
                       } else if (configTab === "items") {
                         setConfigEditId(null)
-                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true })
+                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
                         setConfigModal("item")
                       } else if (configTab === "delivery-points") {
                         setConfigEditId(null)
@@ -3527,14 +3537,14 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Mã", "Tên vật tư", "Nhóm", "Kho chứa", "Lô/Hạn", "Min-Max", ""].map((h) => (
+                      {["Mã", "Tên vật tư", "Nhóm", "Kho chứa", "Lô/Hạn", "Min-Max", "Đơn giá", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {invItems.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
                     ) : invItems.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
@@ -3556,10 +3566,13 @@ export default function SettingsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{row.min_stock.toLocaleString("vi-VN")} – {row.max_stock.toLocaleString("vi-VN")}</td>
+                        <td className="px-4 py-3 text-slate-700 text-xs font-semibold">
+                          {row.don_gia > 0 ? `${currencySymbol(row.loai_tien)} ${row.don_gia.toLocaleString("vi-VN")}` : <span className="text-rose-500">Chưa có giá</span>}
+                        </td>
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], location_codes: {}, manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active }); setConfigModal("item"); if (factoryId) { void supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", row.id).eq("factory_id", factoryId).then(({ data }) => { if (data) setInvItemForm((prev) => ({ ...prev, location_codes: Object.fromEntries(data.filter((r) => r.location_code).map((r) => [r.warehouse_id as string, (r.location_code as string) || ""])) })) }) } }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], location_codes: {}, manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active, don_gia: row.don_gia ? String(row.don_gia) : "", loai_tien: row.loai_tien || "USD" }); setConfigModal("item"); if (factoryId) { void supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", row.id).eq("factory_id", factoryId).then(({ data }) => { if (data) setInvItemForm((prev) => ({ ...prev, location_codes: Object.fromEntries(data.filter((r) => r.location_code).map((r) => [r.warehouse_id as string, (r.location_code as string) || ""])) })) }) } }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setConfigDelConfirm({ type: "item", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -5353,6 +5366,19 @@ export default function SettingsPage() {
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tồn tối đa</label>
                       <input value={invItemForm.max_stock} onChange={(e) => setInvItemForm((p) => ({ ...p, max_stock: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn giá *</label>
+                      <input type="number" value={invItemForm.don_gia} onChange={(e) => setInvItemForm((p) => ({ ...p, don_gia: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                      <p className="text-[11px] text-slate-400 mt-1">Tự điền vào biên bản Bảo trì khi chọn vật tư này — vẫn sửa tay được sau khi điền.</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tiền</label>
+                      <select value={invItemForm.loai_tien} onChange={(e) => setInvItemForm((p) => ({ ...p, loai_tien: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                        {CURRENCIES.map((c) => <option key={c} value={c}>{currencySymbol(c)} {c}</option>)}
+                      </select>
                     </div>
                   </div>
                   <div className="flex gap-4">

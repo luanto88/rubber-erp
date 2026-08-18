@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation"
 import { AlertTriangle, Ban, Check, CheckCircle2, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
@@ -91,6 +92,8 @@ type QuickItemForm = {
   specification: string
   min_stock: string
   max_stock: string
+  don_gia: string
+  loai_tien: string
   manages_lot: boolean
   manages_expiry: boolean
   is_active: boolean
@@ -147,6 +150,8 @@ function emptyQuickItemForm(categoryId = ""): QuickItemForm {
     specification: "",
     min_stock: "0",
     max_stock: "0",
+    don_gia: "",
+    loai_tien: "USD",
     manages_lot: false,
     manages_expiry: false,
     is_active: true,
@@ -825,6 +830,10 @@ export default function InventoryReceiptsPage() {
       setQuickFormError("Đơn vị tính không được để trống.")
       return
     }
+    if (!(Number(quickItemForm.don_gia) > 0)) {
+      setQuickFormError("Vui lòng nhập Đơn giá (bắt buộc, dùng để tự điền khi chọn vật tư trong biên bản Bảo trì).")
+      return
+    }
 
     setQuickSaving(true)
     setQuickFormError(null)
@@ -844,6 +853,8 @@ export default function InventoryReceiptsPage() {
         opening_stock: 0,
         uses_shared_oil_stock: false,
         is_active: quickItemForm.is_active,
+        don_gia: Number(quickItemForm.don_gia) || 0,
+        loai_tien: quickItemForm.loai_tien || "USD",
       }
 
       const { data, error } = await supabase
@@ -1853,6 +1864,33 @@ export default function InventoryReceiptsPage() {
                     onChange={(event) => setQuickItemForm((prev) => ({ ...prev, max_stock: event.target.value }))}
                     className={INPUT_CLASS}
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Đơn giá *</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={quickItemForm.don_gia}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, don_gia: event.target.value }))}
+                    placeholder="Bắt buộc — dùng để tự điền khi chọn vật tư trong biên bản Bảo trì"
+                    className={INPUT_CLASS}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-600">Loại tiền</label>
+                  <select
+                    value={quickItemForm.loai_tien}
+                    onChange={(event) => setQuickItemForm((prev) => ({ ...prev, loai_tien: event.target.value }))}
+                    className={INPUT_CLASS}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c} value={c}>{c} ({currencySymbol(c)})</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

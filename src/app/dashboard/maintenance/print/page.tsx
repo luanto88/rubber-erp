@@ -611,7 +611,7 @@ function PrintF15({ record, qrUrl, staffMap }: { record: RecordData; qrUrl: stri
                     {content || ".............................."}
                   </p>
                 )}
-                {allMats.length > 0 && <MaterialsTable materials={allMats} showDonGia={false} />}
+                {allMats.length > 0 && <MaterialsTable materials={allMats} showDonGia />}
               </div>
             )
           })}
@@ -833,7 +833,7 @@ function PrintImages({ lines, record }: { lines: LineData[]; record: RecordData 
               {imgs.map((url, i) => (
                 <div key={i} className="overflow-hidden rounded border border-slate-200" style={{ aspectRatio: "4/3" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                  <img src={url} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" />
                 </div>
               ))}
             </div>
@@ -1041,7 +1041,7 @@ function PrintF15BaoDuong({ record, qrUrl, staffMap }: { record: RecordData; qrU
                     {content ? <span style={{ whiteSpace: "pre-wrap" }}>{content}</span> : ".............................."}
                   </p>
                 )}
-                {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia={false} />}
+                {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia />}
               </div>
             )
           })}
@@ -1248,7 +1248,7 @@ function PrintImagesPage({ record }: { record: RecordData }) {
             {commonImgs.map((url, i) => (
               <div key={i} className="overflow-hidden rounded border border-slate-200" style={{ aspectRatio: "4/3" }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt={`Ảnh chung ${i + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                <img src={url} alt={`Ảnh chung ${i + 1}`} className="w-full h-full object-cover" />
               </div>
             ))}
           </div>
@@ -1270,7 +1270,7 @@ function PrintImagesPage({ record }: { record: RecordData }) {
               {imgs.map((url, i) => (
                 <div key={i} className="overflow-hidden rounded border border-slate-200" style={{ aspectRatio: "4/3" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                  <img src={url} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" />
                 </div>
               ))}
             </div>
@@ -1470,7 +1470,7 @@ function PrintF15SmallVehicle({ record, qrUrl, staffMap }: { record: RecordData;
                     {content || ".............................."}
                   </p>
                 )}
-                {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia={false} />}
+                {line.materials.length > 0 && <MaterialsTable materials={line.materials} showDonGia />}
               </div>
             )
           })}

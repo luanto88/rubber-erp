@@ -28,6 +28,8 @@ import {
 } from "../../_components/maintenance-data"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
+import { compressImageForUpload, validateImageFile, withRetry } from "@/lib/image-upload"
+import { CURRENCIES, convertCurrency } from "@/lib/currency"
 
 type InventoryItemOption = {
   id: string
@@ -43,6 +45,9 @@ type InventoryItemOption = {
   // inventory_item_warehouse_rules, fallback default_warehouse_ids[0]
   primaryWarehouseId: string | null
   primaryWarehouseCode: string | null
+  // Đơn giá master data — tự điền vào Đơn giá/Loại tiền khi chọn vật tư "Trong kho"
+  don_gia: number
+  loai_tien: string
 }
 
 type DispatchVehicle = {
@@ -96,7 +101,6 @@ type InventoryCategory = {
   name: string
 }
 
-const CURRENCIES = ["USD", "KHR", "VND"]
 const IMAGE_BUCKET = "order-files"
 // Nhóm nhân sự hợp lệ cho "Người thực hiện" — chỉ người trực tiếp làm công việc bảo trì
 // (xem Cài đặt → Bảo trì → Nhân sự bảo trì để gán nhóm cho từng người). "Nhân viên phụ trách"
@@ -109,6 +113,20 @@ function sanitizeFilename(name: string) {
 
 function emptyMaterial(): DraftMaterial {
   return { id: crypto.randomUUID(), nguon: "ben_ngoai", inventory_item_id: "", ten_vat_tu: "", dvt: "", so_luong: "", don_gia: "", loai_tien: "USD" }
+}
+
+// "Chi phí ước tính" cấp thiết bị/dòng tự tổng hợp từ danh sách vật tư của đúng dòng đó — quy đổi
+// mỗi vật tư về USD (theo loai_tien riêng của vật tư), cộng tổng, rồi quy về targetCurrency (loại
+// tiền đang chọn cho dòng). Không tính cong_tho (chi phí công thợ, field riêng).
+function computeLineChiPhiFromMaterials(materials: DraftMaterial[], targetCurrency: string): number {
+  let totalUsd = 0
+  for (const m of materials) {
+    const soLuong = parseFloat(m.so_luong) || 0
+    const donGia = parseFloat(m.don_gia) || 0
+    if (soLuong <= 0 || donGia <= 0) continue
+    totalUsd += convertCurrency(soLuong * donGia, m.loai_tien || "USD", "USD")
+  }
+  return convertCurrency(totalUsd, "USD", targetCurrency)
 }
 
 function emptyLine(asset?: MaintenanceAsset): DraftLine {
@@ -346,32 +364,40 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
+  // Tính lại chi_phi_dk (tự tổng hợp từ vật tư) + loai_sua_chua cho 1 dòng — gọi lại mỗi khi danh
+  // sách vật tư của dòng đó thay đổi (thêm/xóa/sửa) hoặc khi đổi Loại tiền hiển thị của dòng.
+  const recomputeLineDerived = (line: DraftLine, materials: DraftMaterial[], loaiTien?: string): DraftLine => {
+    const targetCurrency = loaiTien ?? line.loai_tien
+    const chiPhi = computeLineChiPhiFromMaterials(materials, targetCurrency)
+    const next: DraftLine = { ...line, materials, loai_tien: targetCurrency, chi_phi_dk: String(chiPhi) }
+    if (hangMuc === "Sửa chữa") next.loai_sua_chua = suggestLoaiSuaChua(chiPhi, targetCurrency)
+    return next
+  }
+
   const updateLine = (lineId: string, patch: Partial<DraftLine>) => {
     setLines((prev) => prev.map((l) => {
       if (l.id !== lineId) return l
-      const next = { ...l, ...patch }
-      // Auto-suggest loai_sua_chua khi thay doi chi_phi_dk hoac loai_tien
-      if ((patch.chi_phi_dk !== undefined || patch.loai_tien !== undefined) && hangMuc === "Sửa chữa") {
-        const cost = parseFloat(next.chi_phi_dk) || 0
-        next.loai_sua_chua = suggestLoaiSuaChua(cost, next.loai_tien)
-      }
-      return next
+      // Đổi Loại tiền của dòng: tính lại chi_phi_dk theo đúng loại tiền mới (giá trị này giờ luôn
+      // tự tổng hợp từ vật tư, không còn nhập tay).
+      if (patch.loai_tien !== undefined) return recomputeLineDerived(l, l.materials, patch.loai_tien)
+      return { ...l, ...patch }
     }))
   }
 
   const addMaterial = (lineId: string) => {
-    setLines((prev) => prev.map((l) => l.id === lineId ? { ...l, materials: [...l.materials, emptyMaterial()] } : l))
+    setLines((prev) => prev.map((l) => l.id === lineId ? recomputeLineDerived(l, [...l.materials, emptyMaterial()]) : l))
   }
 
   const updateMaterial = (lineId: string, matId: string, patch: Partial<DraftMaterial>) => {
     setLines((prev) => prev.map((l) => {
       if (l.id !== lineId) return l
-      return { ...l, materials: l.materials.map((m) => m.id === matId ? { ...m, ...patch } : m) }
+      const materials = l.materials.map((m) => m.id === matId ? { ...m, ...patch } : m)
+      return recomputeLineDerived(l, materials)
     }))
   }
 
   const removeMaterial = (lineId: string, matId: string) => {
-    setLines((prev) => prev.map((l) => l.id === lineId ? { ...l, materials: l.materials.filter((m) => m.id !== matId) } : l))
+    setLines((prev) => prev.map((l) => l.id === lineId ? recomputeLineDerived(l, l.materials.filter((m) => m.id !== matId)) : l))
   }
 
   const handleSlotClick = (lineId: string) => {
@@ -380,32 +406,59 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     slotInputRef.current?.click()
   }
 
+  // Upload từng ảnh độc lập — 1 ảnh lỗi (quá size/sai định dạng/mạng chập chờn) không được làm mất
+  // các ảnh khác đã tải thành công trong cùng lượt chọn. Đường dẫn có salt random + upsert:false
+  // để tránh va chạm âm thầm khi nhiều ảnh trùng tên (phổ biến khi chia sẻ ảnh hàng loạt từ điện
+  // thoại). Xem .claude/rules/14-maintenance-module.md.
+  const uploadImagesForSlot = async (files: File[]): Promise<{ urls: string[]; errors: string[] }> => {
+    const urls: string[] = []
+    const errors: string[] = []
+    for (const rawFile of files) {
+      const validation = validateImageFile(rawFile)
+      if (!validation.ok) {
+        errors.push(`${rawFile.name}: ${validation.reason}`)
+        continue
+      }
+      try {
+        const file = await compressImageForUpload(rawFile)
+        const path = `${factoryId}/maintenance/${Date.now()}_${Math.random().toString(36).slice(2)}_${sanitizeFilename(file.name)}`
+        const uploadResult = await withRetry(async () => {
+          const res = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, { upsert: false })
+          if (res.error) throw res.error
+          return res
+        })
+        const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploadResult.data.path)
+        urls.push(urlData.publicUrl)
+      } catch (err) {
+        errors.push(`${rawFile.name}: ${err instanceof Error ? err.message : "không tải được"}`)
+      }
+    }
+    return { urls, errors }
+  }
+
   const handleSlotFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     const active = activeSlotRef.current
     if (!files.length || !active || !factoryId) { e.target.value = ""; return }
     setUploadingSlot(active.lineId)
     try {
-      const uploadedUrls: string[] = []
-      for (const file of files) {
-        const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
-        const { data: uploaded, error: upErr } = await supabase.storage
-          .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
-        if (upErr) throw upErr
-        const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
-        uploadedUrls.push(urlData.publicUrl)
+      const { urls: uploadedUrls, errors } = await uploadImagesForSlot(files)
+      if (uploadedUrls.length > 0) {
+        setLines((prev) => prev.map((l) => {
+          if (l.id !== active.lineId) return l
+          const existing = l.image_urls.filter(Boolean)
+          const merged = [...existing, ...uploadedUrls].slice(0, 6)
+          return { ...l, image_urls: merged }
+        }))
       }
-      setLines((prev) => prev.map((l) => {
-        if (l.id !== active.lineId) return l
-        const existing = l.image_urls.filter(Boolean)
-        const merged = [...existing, ...uploadedUrls].slice(0, 6)
-        return { ...l, image_urls: merged }
-      }))
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Không tải được ảnh")
+      if (errors.length > 0) {
+        setSaveError(`Một số ảnh không tải được:\n${errors.join("\n")}`)
+      }
     } finally {
       setUploadingSlot(null)
-      activeSlotRef.current = null
+      // Chỉ gỡ ref nếu vẫn đang trỏ đúng dòng này — tránh dòng khác vừa bấm "Thêm ảnh" bị mất
+      // lựa chọn do finally của lượt upload trước xóa nhầm activeSlotRef của lượt sau.
+      if (activeSlotRef.current?.lineId === active.lineId) activeSlotRef.current = null
       e.target.value = ""
     }
   }
@@ -420,26 +473,25 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (!files.length || !factoryId) { e.target.value = ""; return }
     setUploadingChungSlot(true)
     try {
-      const uploadedUrls: string[] = []
-      for (const file of files) {
-        const path = `${factoryId}/maintenance/${Date.now()}_${sanitizeFilename(file.name)}`
-        const { data: uploaded, error: upErr } = await supabase.storage
-          .from(IMAGE_BUCKET).upload(path, file, { upsert: true })
-        if (upErr) throw upErr
-        const { data: urlData } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(uploaded.path)
-        uploadedUrls.push(urlData.publicUrl)
+      const { urls: uploadedUrls, errors } = await uploadImagesForSlot(files)
+      if (uploadedUrls.length > 0) {
+        setImageUrlsChung((prev) => {
+          const existing = prev.filter(Boolean)
+          return [...existing, ...uploadedUrls].slice(0, 6)
+        })
       }
-      setImageUrlsChung((prev) => {
-        const existing = prev.filter(Boolean)
-        return [...existing, ...uploadedUrls].slice(0, 6)
-      })
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Không tải được ảnh")
+      if (errors.length > 0) {
+        setSaveError(`Một số ảnh không tải được:\n${errors.join("\n")}`)
+      }
     } finally {
       setUploadingChungSlot(false)
       e.target.value = ""
     }
   }
+
+  // Đang có ảnh còn upload dở (dòng thiết bị hoặc ảnh chung) — chặn mọi hành động lưu/gửi/duyệt
+  // trong lúc này để không mất ảnh (ảnh chỉ được gộp vào state SAU khi upload xong hoàn toàn).
+  const isUploadingAnyImage = uploadingSlot !== null || uploadingChungSlot
 
   const isCreator = isNew || (
     record?.nguoi_tao != null &&
@@ -522,7 +574,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }, { data: primaryRules }, { data: warehouses }] = await Promise.all([
-      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id").eq("factory_id", fid).eq("is_active", true).order("code"),
+      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id, don_gia, loai_tien").eq("factory_id", fid).eq("is_active", true).order("code"),
       supabase.from("inventory_stock_balances").select("item_id, warehouse_id, on_hand").eq("factory_id", fid),
       supabase.from("inventory_item_categories").select("id, code, name").eq("factory_id", fid).order("sort_order").order("code"),
       supabase.from("inventory_item_warehouse_rules").select("item_id, warehouse_id").eq("factory_id", fid).eq("is_primary", true),
@@ -547,7 +599,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
 
     setInventoryItems(
-      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null }[]).map((item) => {
+      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null; don_gia: number | null; loai_tien: string | null }[]).map((item) => {
         const default_warehouse_ids = item.default_warehouse_ids || []
         const primaryWarehouseId = primaryRuleMap.get(item.id) || default_warehouse_ids[0] || null
         return {
@@ -557,6 +609,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           currentStock: primaryWarehouseId ? (balanceMap.get(`${item.id}:${primaryWarehouseId}`) ?? 0) : 0,
           primaryWarehouseId,
           primaryWarehouseCode: primaryWarehouseId ? (warehouseCodeMap.get(primaryWarehouseId) || null) : null,
+          don_gia: item.don_gia || 0,
+          loai_tien: item.loai_tien || "USD",
         }
       })
     )
@@ -1011,7 +1065,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       for (const m of l.materials.filter((m) => m.ten_vat_tu.trim())) {
         if (!m.dvt.trim()) fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Đơn vị tính`)
         if (!(parseFloat(m.so_luong) > 0)) fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Số lượng hợp lệ`)
-        if (m.nguon === "ben_ngoai" && !(parseFloat(m.don_gia) > 0)) {
+        if (!(parseFloat(m.don_gia) > 0)) {
           fieldViolations.push(`Vật tư ${m.ten_vat_tu} (thiết bị ${tenTb}): thiếu Đơn giá`)
         }
       }
@@ -1141,8 +1195,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ten_vat_tu: m.ten_vat_tu.trim(),
               dvt: m.dvt.trim() || null,
               so_luong: parseFloat(m.so_luong) || 0,
-              don_gia: m.nguon === "ben_ngoai" ? (parseFloat(m.don_gia) || null) : null,
-              loai_tien: m.nguon === "ben_ngoai" ? (m.loai_tien || null) : null,
+              don_gia: parseFloat(m.don_gia) || null,
+              loai_tien: m.loai_tien || null,
             }))
 
           if (matPayloads.length > 0) {
@@ -1516,6 +1570,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          {isUploadingAnyImage && (
+            <span className="flex items-center gap-1 px-2 py-1.5 bg-amber-50 text-amber-700 text-xs font-bold rounded-lg border border-amber-200">
+              <Loader2 size={12} className="animate-spin" /> Đang tải ảnh lên — vui lòng đợi trước khi lưu...
+            </span>
+          )}
           {!isNew && record && (
             <>
               {record.trang_thai === "da_duyet" ? (
@@ -1590,7 +1649,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
             <button
               onClick={handleNotify}
-              disabled={notifying}
+              disabled={notifying || isUploadingAnyImage}
               className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
             >
               <Send size={12} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
@@ -1600,7 +1659,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "tu_choi" && isCreator && (
             <button
               onClick={handleResubmit}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
             >
               <Send size={12} /> {saving ? "Đang gửi..." : "Gửi duyệt lại"}
@@ -1610,7 +1669,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
             <button
               onClick={handleCancel}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50"
             >
               <X size={12} /> Hủy biên bản
@@ -1619,7 +1678,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "da_duyet" && isAdmin && (
             <button
               onClick={handleCancel}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50"
             >
               <X size={12} /> Hủy biên bản
@@ -1629,7 +1688,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && canDelete && (
             <button
               onClick={handleDeleteRecord}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
               <Trash2 size={12} /> Xóa biên bản
@@ -1639,7 +1698,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
             <button
               onClick={handleApprove}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
               <CheckCircle2 size={13} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
@@ -1649,7 +1708,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
             <button
               onClick={() => setShowRejectModal(true)}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg border border-rose-200 transition-all disabled:opacity-50"
             >
               <X size={12} /> Từ chối
@@ -1659,7 +1718,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isNew && record?.trang_thai === "da_duyet" && isGdOrBgd && (
             <button
               onClick={handleUnApprove}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg border border-amber-200 transition-all disabled:opacity-50"
             >
               <RotateCcw size={12} /> {saving ? "Đang xử lý..." : "Hủy phê duyệt"}
@@ -1669,7 +1728,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {!isReadOnly && (
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || isUploadingAnyImage}
               className="flex items-center gap-1 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
               <Save size={13} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
@@ -2041,7 +2100,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 {imageUrlsChung.filter(Boolean).length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {imageUrlsChung.filter(Boolean).map((url, slotIdx) => (
-                      <div key={slotIdx} className="relative w-14 h-14">
+                      <div key={url} className="relative w-14 h-14">
                         <img
                           src={url}
                           alt={`Ảnh chung ${slotIdx + 1}`}
@@ -2201,13 +2260,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               {/* Cost */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chi phí ước tính</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chi phí ước tính (tự tổng hợp từ vật tư)</label>
                   <input
-                    type="number"
-                    value={line.chi_phi_dk}
-                    onChange={(e) => updateLine(line.id, { chi_phi_dk: e.target.value })}
-                    disabled={isReadOnly}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                    type="text"
+                    value={`${currencySymbol(line.loai_tien)} ${Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                    disabled
+                    readOnly
+                    title="Tự động bằng tổng (Đơn giá × Số lượng) của vật tư gắn với thiết bị này — sửa bằng cách thêm/sửa/xóa vật tư"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm bg-slate-50 text-slate-600 font-semibold cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -2492,7 +2552,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                     key={item.id}
                                     type="button"
                                     onClick={() => {
-                                      updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "" })
+                                      // Vật tư "Trong kho" tự điền Đơn giá/Loại tiền theo danh mục Kho
+                                      // vật tư (vẫn sửa tay được sau khi điền) — "Mua ngoài" giữ nguyên
+                                      // hành vi nhập tay vì giá mua ngoài thay đổi theo từng lần mua.
+                                      const priceFields = mat.nguon === "trong_kho"
+                                        ? { don_gia: item.don_gia > 0 ? String(item.don_gia) : mat.don_gia, loai_tien: item.loai_tien }
+                                        : {}
+                                      updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "", ...priceFields })
                                       setActiveMaterialDropdown(null)
                                     }}
                                     className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-50 flex justify-between gap-2 border-b border-slate-50 last:border-0 ${mat.inventory_item_id === item.id ? "bg-emerald-50 font-bold" : ""}`}
@@ -2557,32 +2623,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             )
                           })()}
                         </div>
-                        {/* Đơn giá + Loại tiền (chỉ ben_ngoai) */}
-                        {mat.nguon === "ben_ngoai" && (
-                          <>
-                            <div className="w-[72px]">
-                              <label className="text-xs font-bold text-slate-500 block mb-1">Đơn giá</label>
-                              <input
-                                type="number"
-                                value={mat.don_gia}
-                                onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
-                                disabled={isReadOnly}
-                                className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                              />
-                            </div>
-                            <div className="w-[74px]">
-                              <label className="text-xs font-bold text-slate-500 block mb-1">Tiền tệ</label>
-                              <select
-                                value={mat.loai_tien}
-                                onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
-                                disabled={isReadOnly}
-                                className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
-                              >
-                                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                              </select>
-                            </div>
-                          </>
-                        )}
+                        {/* Đơn giá + Loại tiền — cả "Trong kho" (tự điền từ danh mục Kho vật tư,
+                            vẫn sửa tay được) và "Mua ngoài" (nhập tay) đều hiện đủ 2 trường này,
+                            để bảng "Vật tư sử dụng" trên biên bản luôn hiển thị đúng tiền. */}
+                        <div className="w-[72px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Đơn giá</label>
+                          <input
+                            type="number"
+                            value={mat.don_gia}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
+                            disabled={isReadOnly}
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                          />
+                        </div>
+                        <div className="w-[74px]">
+                          <label className="text-xs font-bold text-slate-500 block mb-1">Tiền tệ</label>
+                          <select
+                            value={mat.loai_tien}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
+                            disabled={isReadOnly}
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                          >
+                            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
                         {/* Xóa */}
                         {!isReadOnly && (
                           <button onClick={() => removeMaterial(line.id, mat.id)} className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg self-end">
@@ -2621,7 +2685,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 {line.image_urls.filter(Boolean).length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {line.image_urls.filter(Boolean).map((url, slotIdx) => (
-                      <div key={slotIdx} className="relative w-14 h-14">
+                      <div key={url} className="relative w-14 h-14">
                         <img
                           src={url}
                           alt={`Ảnh ${slotIdx + 1}`}
