@@ -4,13 +4,20 @@ import "./globals.css"
 // để đảm bảo CSS Leaflet luôn có trong bundle chính — tránh nguy cơ blank map do
 // leaflet.css không được include đúng khi chỉ import bên trong component dynamic import.
 import "leaflet/dist/leaflet.css"
+import { ServiceWorkerRegister } from "./_components/sw-register"
 export const metadata: Metadata = {
   title: "Công ty TNHH PTCS Phước Hòa Kampong - NMCB",
   description: "Nhà máy chế biến cao su Phước Hòa Kampong Thom - Sản xuất CSR10, CSR20, CSR3L theo tiêu chuẩn PEFC CS. Thành lập 2019 tại Campuchia.",
+  manifest: "/manifest.json",
   icons: {
     icon: "/logo-nha-may-5.jpg",
     shortcut: "/logo-nha-may-5.jpg",
-    apple: "/logo-nha-may-5.jpg",
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "QLSX PHK",
   },
 }
 // Thiếu viewport meta khiến trình duyệt mobile (đặc biệt webview Zalo/Facebook) render
@@ -20,6 +27,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
+  themeColor: "#059669",
 }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -29,7 +37,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
       </head>
-      <body className="bg-slate-50 min-h-screen" style={{ fontFamily: "'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif" }}>{children}</body>
+      <body className="bg-slate-50 min-h-screen" style={{ fontFamily: "'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   )
 }
