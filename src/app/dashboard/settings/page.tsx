@@ -17,6 +17,7 @@ const PolygonDrawMap = dynamic(
 )
 import { supabase } from "@/lib/supabase"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
+import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
@@ -2283,7 +2284,7 @@ export default function SettingsPage() {
 
   const saveRequiredNote = async () => {
     if (!factoryId) return
-    if (!requiredNoteForm.content.trim()) { setRequiredNoteError("Nội dung ghi chú không được để trống"); return }
+    if (isBlankNoteContent(requiredNoteForm.content)) { setRequiredNoteError("Nội dung ghi chú không hợp lệ (không được để trống hoặc là số 0)"); return }
     setRequiredNoteSaving(true)
     setRequiredNoteError("")
     try {

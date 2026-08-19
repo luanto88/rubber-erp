@@ -32,3 +32,10 @@ export function describeNoteFilter(filterValue: string) {
   if (isEmptyNoteFilter(filterValue)) return "ghi chú trống"
   return `ghi chú ${filterValue.trim()}`
 }
+
+export function describeNoteFilterMulti(selected: string[]) {
+  const values = (selected || []).filter(Boolean)
+  if (values.length === 0) return ""
+  const labels = values.map((v) => (isEmptyNoteFilter(v) ? "trống" : v.trim()))
+  return `ghi chú ${labels.join(", ")}`
+}

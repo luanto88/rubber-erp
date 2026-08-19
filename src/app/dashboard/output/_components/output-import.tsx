@@ -48,7 +48,7 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
   const XLSX = await import("xlsx")
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" })
   const ws = wb.Sheets[wb.SheetNames[0]]
-  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: 0 })
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" })
   const dataRows = raw.slice(2) // bỏ 2 dòng header
 
   const result: ParsedSlRow[] = []
@@ -246,8 +246,8 @@ export function matchRows(
 // ────────────────────────────────────────────────────────────────
 
 function isNoteKnown(note: string, catalog: string[]): boolean {
+  if (isBlankNoteContent(note)) return true
   const trimmed = note.trim()
-  if (!trimmed) return true
   return catalog.some((content) => content.trim().toLowerCase() === trimmed.toLowerCase())
 }
 
@@ -467,7 +467,7 @@ export function OutputImport({
         dispatch_entry_id: r.dispatch_entry_id,
         warn_codes: r.warn_codes,
         import_batch_id: batchId,
-        ghi_chu: r.ghi_chu || null,
+        ghi_chu: isBlankNoteContent(r.ghi_chu) ? null : r.ghi_chu.trim(),
         nguoi_upload: currentUser?.full_name || currentUser?.username || null,
         created_by: currentUser?.id ?? null,
       }))

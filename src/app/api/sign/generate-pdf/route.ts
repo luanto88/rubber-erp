@@ -130,18 +130,14 @@ const TRANG_THAI_LABEL_SERVER: Record<string, string> = {
 }
 
 const HEADER_VALUE_PLACEHOLDER_RE = /^[_\-\.\s/|:]*$/
-const FOOTER_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*(ngay\s*hieu\s*luc|ngay\s*ban\s*hanh|ngay\s*ap\s*dung).*(tinh\s*trang|trang\s*thai)/i
-const FOOTER_FILLED_RE = /\b[A-Z]{2,}(?:-[A-Z0-9Đ]{2,})+\s*\(\d{2}-\d{2}\/\d{2}\/\d{4}\)\s*.+/i
 const FOOTER_LABEL = "Footer mẫu"
-const FOOTER_PARTIAL_TEMPLATE_RE = /ma\s*tai\s*lieu.*lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet).*\d{1,2}\/\d{1,2}\/\d{4}.*(tinh\s*trang|trang\s*thai)/i
-// Footer đã có mã và ngày, nhưng trạng thái vẫn là placeholder: "PHK-QT10 (Lần ban hành-01/06/2024) Tình trạng"
-const FOOTER_PARTIAL_FILLED_STATUS_RE = /^[a-z]{2,}(?:-[a-z0-9]{2,})+\s*\(.*?\d{1,2}\/\d{1,2}\/\d{4}.*?\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
-// Footer dùng label gốc + date thực + trạng thái placeholder: "Mã tài liệu (01-01/09/2024) Tình trạng"
-const FOOTER_LABEL_WITH_DATE_RE = /^(ma\s*tai\s*lieu|ma\s*ho\s*so)\s*\(.*\d{1,2}\/\d{1,2}\/\d{4}.*\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
-// Footer có mã thật + số lần thật + text placeholder thay date: "PHK-QT07-F06 (03-Ngày hiệu lực) Tình trạng"
-const FOOTER_CODE_TEXT_PLACEHOLDER_RE = /^[a-z]{2,}(?:-[a-z0-9đ]{2,})+\s*\(\d{1,2}-(?!\d{2}\/)[^)]+\)\s*(tinh\s*trang|trang\s*thai)\s*$/i
-// Footer đã fill với placeholder date "Ngày hiệu lực": "PHK-QT10 (01-Ngày hiệu lực) Chờ xem xét"
-const FOOTER_PENDING_DATE_RE = /^[a-z]{2,}(?:-[a-z0-9đ]{2,})+\s*\(\d{1,2}-ngay\s*hieu\s*luc\)\s+\S/i
+// 4 nhãn footer — dùng để phân loại 1 dòng trong vùng footer theo đúng tinh thần của header
+// (hasRealHeaderValue): còn nguyên văn nhãn placeholder nào thì đó là chỗ cần điền; không còn
+// nhãn nào (đã là nội dung khác, bất kể nội dung gì) thì coi là đã điền, giữ nguyên vĩnh viễn.
+const FOOTER_TAG_MA_TAI_LIEU_RE = /ma\s*(tai\s*lieu|ho\s*so)/i
+const FOOTER_TAG_LAN_RE = /lan\s*(ban\s*hanh|sua\s*doi|soat\s*xet)/i
+const FOOTER_TAG_NGAY_HIEU_LUC_RE = /ngay\s*hieu\s*luc/i
+const FOOTER_TAG_TINH_TRANG_RE = /tinh\s*trang|trang\s*thai/i
 const HEADER_FOOTER_FONT_SIZE = 11
 
 function isLikelyFooterMismatchText(searchText: string): boolean {
@@ -431,16 +427,29 @@ function buildFooterValueForLine(lineText: string, maTl: string, lsStr: string, 
   return buildFooterValue(maTl, lsStr, extractDateFromText(lineText) || dateStr || "Ngày hiệu lực", statusText)
 }
 
-function isFooterFillCandidate(lineText: string, searchText: string): boolean {
-  return (
-    FOOTER_FILLED_RE.test(lineText) ||
-    FOOTER_TEMPLATE_RE.test(searchText) ||
-    FOOTER_PARTIAL_TEMPLATE_RE.test(searchText) ||
-    FOOTER_PARTIAL_FILLED_STATUS_RE.test(searchText) ||
-    FOOTER_LABEL_WITH_DATE_RE.test(searchText) ||
-    FOOTER_CODE_TEXT_PLACEHOLDER_RE.test(searchText) ||
-    FOOTER_PENDING_DATE_RE.test(searchText)
-  )
+type FooterLineClass = "needs_fill" | "already_complete" | "not_footer"
+
+/**
+ * Phân loại 1 dòng trong vùng footer, cùng tinh thần với hasRealHeaderValue() ở header:
+ * còn nguyên văn bất kỳ nhãn nào trong 4 nhãn (Mã tài liệu / Lần ban hành-Lần sửa đổi /
+ * Ngày hiệu lực / Tình trạng) → dòng đó còn chỗ cần điền. Không còn nhãn nào (đã là nội dung
+ * khác, bất kể nội dung gì) và có chứa đúng mã tài liệu thật của hồ sơ → coi là đã điền đầy đủ,
+ * giữ nguyên vĩnh viễn, không đoán định dạng ngày/trạng thái nào cả.
+ */
+function classifyFooterLine(searchText: string, maTl: string): FooterLineClass {
+  const hasAnyTag =
+    FOOTER_TAG_MA_TAI_LIEU_RE.test(searchText) ||
+    FOOTER_TAG_LAN_RE.test(searchText) ||
+    FOOTER_TAG_NGAY_HIEU_LUC_RE.test(searchText) ||
+    FOOTER_TAG_TINH_TRANG_RE.test(searchText)
+  if (hasAnyTag) return "needs_fill"
+
+  const normalizedMaTl = normalizeTagText(maTl)
+  if (normalizedMaTl && normalizedMaTl !== "-" && searchText.includes(normalizedMaTl)) {
+    return "already_complete"
+  }
+
+  return "not_footer"
 }
 
 async function drawDefaultChildQr(pdfDoc: PDFDocument, page: PDFPage, qrBuffer: Buffer) {
@@ -940,7 +949,9 @@ async function fillMetadataPlaceholders(
         }
 
         if (isFooter && shouldTouchFooter) {
-          if (isFooterFillCandidate(lineText, searchText)) {
+          const footerClass = classifyFooterLine(searchText, maTl)
+
+          if (footerClass === "needs_fill") {
             found.add(FOOTER_LABEL)
             pageFound.add(FOOTER_LABEL)
             if (isSkippedLabel(skipLabels, FOOTER_LABEL)) continue
@@ -962,6 +973,16 @@ async function fillMetadataPlaceholders(
               color: rgb(0, 0, 0),
             })
             filled.add(FOOTER_LABEL)
+            footerFilledPages.add(pageIdx)
+            continue
+          }
+
+          if (footerClass === "already_complete") {
+            // Footer đã có đủ nội dung thật (không còn nhãn placeholder nào) — giữ nguyên
+            // vĩnh viễn, không vẽ/whitewash gì cả; chỉ đánh dấu để drawFooterOnAllPages() bỏ
+            // qua trang này (không bị ghi đè bởi fallback canh giữa).
+            found.add(FOOTER_LABEL)
+            pageFound.add(FOOTER_LABEL)
             footerFilledPages.add(pageIdx)
             continue
           }

@@ -10,8 +10,11 @@ import {
 } from "@/lib/storage-detail"
 import { PDF_FONT_NAME, addQrImage, ensurePdfFont, safeName } from "@/lib/pdf-qr-shared"
 
-const ORG_LINE_1 = "Nhà máy chế biến"
-const ORG_LINE_2 = "Báo cáo ngăn lưu nguyên liệu"
+const COMPANY_LINE = "NHÀ MÁY CHẾ BIẾN CAO SU PHƯỚC HÒA KAMPONG THOM"
+const PERIOD_REPORT_TITLE = "BÁO CÁO CÂN ĐỐI NGĂN LƯU THEO KỲ"
+const PERIOD_REPORT_DOC_CODE = "NMCB-QT01-F10 (03-01/08/2026) Có hiệu lực"
+const DETAIL_TITLE_PREFIX = "THEO DÕI VÒNG ĐỜI NGĂN LƯU"
+const DETAIL_DOC_CODE = "NMCB-QT01-F03 (03-01/08/2026) Có hiệu lực"
 
 type PdfWithTable = jsPDF & {
   lastAutoTable?: {
@@ -34,35 +37,35 @@ function formatKg(value: number) {
 
 function renderHeader(doc: jsPDF, title: string, contextLine?: string) {
   const pageWidth = doc.internal.pageSize.getWidth()
-  doc.setFillColor(16, 185, 129)
-  doc.roundedRect(10, 8, pageWidth - 20, 32, 4, 4, "F")
 
-  doc.setTextColor(255, 255, 255)
+  doc.setTextColor(15, 23, 42)
   doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(10)
-  doc.text(ORG_LINE_1, 16, 18)
-  doc.text(ORG_LINE_2, 16, 26)
-  doc.setFontSize(16)
-  doc.text(title, pageWidth / 2, 20, { align: "center" })
+  doc.setFontSize(11)
+  doc.text(COMPANY_LINE, 14, 15)
+
+  doc.setFontSize(15)
+  doc.text(title, pageWidth / 2, 25, { align: "center" })
 
   if (contextLine) {
     doc.setFont(PDF_FONT_NAME, "normal")
-    doc.setFontSize(9)
-    doc.text(contextLine, pageWidth / 2, 29, { align: "center" })
+    doc.setFontSize(9.5)
+    doc.text(contextLine, pageWidth / 2, 31, { align: "center" })
   }
 
   doc.setTextColor(15, 23, 42)
 }
 
-function renderFooter(doc: jsPDF) {
+function renderFooter(doc: jsPDF, docCode: string) {
   const pageCount = doc.getNumberOfPages()
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.setFontSize(8)
+  doc.setTextColor(15, 23, 42)
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
-    doc.text(`Trang ${i}/${pageCount}`, pageW - 12, pageH - 8, { align: "right" })
+    doc.text(docCode, 14, pageH - 8)
+    doc.text(`Trang ${i}/${pageCount}`, pageW - 14, pageH - 8, { align: "right" })
   }
 }
 
@@ -190,8 +193,7 @@ export async function downloadStorageDetailPdf(detail: StorageDetailData) {
 
   renderHeader(
     doc,
-    `Phiếu chi tiết ngăn ${detail.ngan.ten_ngan}`,
-    `Nguyên liệu ${formatStorageDate(detail.ngan.ngay_bd)} - ${formatStorageDate(detail.ngan.ngay_kt)}`,
+    `${DETAIL_TITLE_PREFIX}: ${detail.ngan.ten_ngan || detail.ngan.ma_ngan || "—"}`,
   )
 
   doc.setFillColor(255, 255, 255)
@@ -272,7 +274,7 @@ export async function downloadStorageDetailPdf(detail: StorageDetailData) {
       : [["—", "—", "—", "Chưa có lô thành phẩm", "—", "—", "—"]],
   })
 
-  renderFooter(doc)
+  renderFooter(doc, DETAIL_DOC_CODE)
   doc.save(`chi-tiet-ngan-${safeName(detail.ngan.ten_ngan || detail.ngan.ma_ngan || detail.ngan.id)}.pdf`)
 }
 
@@ -293,8 +295,8 @@ export async function downloadStoragePeriodReportPdf(params: {
 
   renderHeader(
     doc,
-    "Báo cáo cân đối ngăn lưu theo kỳ",
-    `Kỳ ${formatStorageDate(params.from)} - ${formatStorageDate(params.to)}`,
+    PERIOD_REPORT_TITLE,
+    `Kỳ: ${formatStorageDate(params.from)} - ${formatStorageDate(params.to)}`,
   )
 
   autoTable(doc, {
@@ -366,6 +368,6 @@ export async function downloadStoragePeriodReportPdf(params: {
         ]],
   })
 
-  renderFooter(doc)
+  renderFooter(doc, PERIOD_REPORT_DOC_CODE)
   doc.save(`bao-cao-ngan-luu-${safeName(params.from)}-${safeName(params.to)}.pdf`)
 }

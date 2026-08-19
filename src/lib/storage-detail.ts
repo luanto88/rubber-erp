@@ -61,6 +61,10 @@ export type StorageProducedLot = {
   tong_banh: number
   tong_kg: number
   trang_thai: string
+  kien_a: number
+  kien_b: number
+  kien_c: number
+  kien_d: number
 }
 
 export type StorageDetailData = {
@@ -595,7 +599,11 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
         loai_csr,
         loai_banh,
         boc,
-        trang_thai
+        trang_thai,
+        kien_a,
+        kien_b,
+        kien_c,
+        kien_d
       )
     `)
     .eq("ngan_id", nganId)
@@ -617,6 +625,10 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
       loai_banh: number
       boc: string
       trang_thai: string
+      kien_a: number
+      kien_b: number
+      kien_c: number
+      kien_d: number
     } | null
   }>)
     .filter((tx) => Boolean(tx.lots))
@@ -632,6 +644,10 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
       tong_banh: Number(tx.so_banh || 0),
       tong_kg: Number(tx.so_kg || 0),
       trang_thai: tx.lots?.trang_thai || "",
+      kien_a: Number(tx.lots?.kien_a || 0),
+      kien_b: Number(tx.lots?.kien_b || 0),
+      kien_c: Number(tx.lots?.kien_c || 0),
+      kien_d: Number(tx.lots?.kien_d || 0),
     }))
 
   // Fallback: một số lô cũ (vd lô bị ghi trực tiếp vào `lots` ngoài luồng app — xem
@@ -642,7 +658,7 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
   const coveredLotIds = new Set(rows.map((r) => r.lot_id).filter(Boolean))
   const { data: fallbackLots, error: fallbackError } = await client
     .from("lots")
-    .select("id, ma_lo, ngay_sx, ca, loai_csr, loai_banh, boc, tong_banh, tong_kg, trang_thai")
+    .select("id, ma_lo, ngay_sx, ca, loai_csr, loai_banh, boc, tong_banh, tong_kg, trang_thai, kien_a, kien_b, kien_c, kien_d")
     .eq("factory_id", factoryId)
     .eq("ngan_id", nganId)
   if (fallbackError) throw new Error(fallbackError.message)
@@ -661,6 +677,10 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
       tong_banh: Number(lot.tong_banh || 0),
       tong_kg: Number(lot.tong_kg || 0),
       trang_thai: lot.trang_thai || "",
+      kien_a: Number(lot.kien_a || 0),
+      kien_b: Number(lot.kien_b || 0),
+      kien_c: Number(lot.kien_c || 0),
+      kien_d: Number(lot.kien_d || 0),
     }))
 
   return [...rows, ...fallbackRows].sort((a, b) =>
@@ -791,14 +811,56 @@ export async function loadStorageDetailByLookup(params: {
   return json as StorageDetailData
 }
 
+// `lots` truyền vào đây là danh sách theo TỪNG DÒNG `lot_transactions` (1 lô có thể có nhiều
+// dòng nếu được quét QR theo từng kiện riêng lẻ — xem `.claude/rules/06-module-production.md`
+// mục "Quét theo lượt"). Đếm `lots.length` trực tiếp sẽ đếm theo số lượt quét chứ không phải
+// số lô thật — phải dedupe theo lô trước khi đếm. `thanhPhamKg` không bị ảnh hưởng vì tổng kg
+// vẫn đúng khi cộng dồn qua mọi dòng, không cần dedupe.
+function storageLotDedupeKey(lot: StorageProducedLot) {
+  return lot.lot_id || lot.ma_lo || ""
+}
+
 export function summarizeStorageLots(lots: StorageProducedLot[]) {
   const thanhPhamKg = lots.reduce((sum, lot) => sum + (lot.tong_kg || 0), 0)
-  const doDangCount = lots.filter((lot) => lot.trang_thai === "Dở dang").length
+  const distinctLotKeys = new Set(lots.map(storageLotDedupeKey).filter(Boolean))
+  const dodangLotKeys = new Set(
+    lots.filter((lot) => lot.trang_thai === "Dở dang").map(storageLotDedupeKey).filter(Boolean),
+  )
   return {
-    totalLots: lots.length,
-    doDangCount,
+    totalLots: distinctLotKeys.size,
+    doDangCount: dodangLotKeys.size,
     thanhPhamKg,
   }
+}
+
+// Dùng cho cột "Số lô chi tiết" của Báo cáo cân đối ngăn lưu theo kỳ — mỗi lô chỉ liệt kê
+// đúng 1 lần (dedupe theo cùng khóa với `summarizeStorageLots`), lô đang "Dở dang" hiển thị
+// thêm breakdown số bành theo từng kiện (A/B/C/D) đã có, lấy trực tiếp từ `lots.kien_a-d` —
+// giá trị này luôn là tổng hợp hiện tại đã đồng bộ của lô đó (qua RPC `sync_lot_master_snapshot`),
+// giống nhau ở mọi dòng transaction cùng lô nên chọn dòng đại diện nào cũng cho kết quả đúng.
+export function buildStorageLotDetailLines(lots: StorageProducedLot[]): string[] {
+  const seen = new Map<string, StorageProducedLot>()
+  for (const lot of lots) {
+    const key = storageLotDedupeKey(lot)
+    if (!key || seen.has(key)) continue
+    seen.set(key, lot)
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }))
+    .map((lot) => {
+      const maLo = lot.ma_lo || ""
+      if (!maLo) return ""
+      if (lot.trang_thai !== "Dở dang") return maLo
+
+      const parts: string[] = []
+      if (lot.kien_a > 0) parts.push(`A=${lot.kien_a}`)
+      if (lot.kien_b > 0) parts.push(`B=${lot.kien_b}`)
+      if (lot.kien_c > 0) parts.push(`C=${lot.kien_c}`)
+      if (lot.kien_d > 0) parts.push(`D=${lot.kien_d}`)
+      return parts.length > 0 ? `${maLo} (${parts.join(", ")})` : maLo
+    })
+    .filter(Boolean)
 }
 
 export function summarizeStorageTrips(ngan: StorageNgan, trips: StorageTripItem[]) {

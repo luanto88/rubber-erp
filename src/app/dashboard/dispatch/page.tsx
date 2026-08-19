@@ -9,7 +9,7 @@ import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
 import { formatDateDisplay, getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
-import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter"
+import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
@@ -678,7 +678,7 @@ export default function DispatchPage() {
   const [loading, setLoading]     = useState(true)
   const [factoryId, setFactoryId] = useState<string|null>(null)
   const [search, setSearch]       = useState("")
-  const [filterGhiChu, setFilterGhiChu] = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState<string[]>([])
   const [filterLoai, setFilterLoai] = useState<string[]>([])
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
@@ -920,14 +920,14 @@ export default function DispatchPage() {
   }, [deliveryPoints, factoryId, loadData])
   const filterRowsByActiveFilters = useCallback((rows: DxRow[] = []) => {
     return rows.filter((row) => {
-      if (!matchesNoteFilter(row.ghi_chu, filterGhiChu)) return false
+      if (!matchesNoteFilterMulti(row.ghi_chu, filterGhiChu)) return false
       if (filterLoai.length === 0) return true
       const flags = getTripMaterialFlags(row)
       return filterLoai.some((material) => flags[material as keyof typeof flags])
     })
   }, [filterGhiChu, filterLoai])
 
-  const exportableEntries = filterGhiChu || filterLoai.length > 0
+  const exportableEntries = filterGhiChu.length > 0 || filterLoai.length > 0
     ? entries
       .map((entry) => ({
         ...entry,
@@ -1609,7 +1609,8 @@ export default function DispatchPage() {
       {/* Filters */}
       <FilterBar
         activeCount={
-          [search, filterFrom, filterTo, filterGhiChu].filter(Boolean).length +
+          [search, filterFrom, filterTo].filter(Boolean).length +
+          (filterGhiChu.length > 0 ? 1 : 0) +
           (filterLoai.length > 0 ? 1 : 0) +
           (statsDoi.length > 0 ? 1 : 0) +
           (statsVehicle.length > 0 ? 1 : 0)
@@ -1626,12 +1627,15 @@ export default function DispatchPage() {
         <span className="text-slate-400 text-sm">{"\u2192"}</span>
         <DateTextInput value={filterTo} onChange={setFilterTo}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-          <option value="">Tất cả ghi chú</option>
-          <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
-          {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
-        </select>
+        <FilterMultiSelect
+          options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+          selected={filterGhiChu}
+          onChange={setFilterGhiChu}
+          labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+          placeholder="Tất cả ghi chú"
+          searchPlaceholder="Tìm ghi chú..."
+          className="min-w-64"
+        />
         <FilterMultiSelect
           options={DISPATCH_MATERIAL_OPTIONS}
           selected={filterLoai}
@@ -1654,8 +1658,8 @@ export default function DispatchPage() {
           placeholder="Tất cả xe"
           searchPlaceholder="Tìm xe..."
         />
-        {(search||filterFrom||filterTo||filterGhiChu||filterLoai.length>0||statsDoi.length>0||statsVehicle.length>0) &&
-          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu(""); setFilterLoai([]); setStatsDoi([]); setStatsVehicle([]) }}
+        {(search||filterFrom||filterTo||filterGhiChu.length>0||filterLoai.length>0||statsDoi.length>0||statsVehicle.length>0) &&
+          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu([]); setFilterLoai([]); setStatsDoi([]); setStatsVehicle([]) }}
             className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
             <X size={14}/> Xóa lọc
           </button>}

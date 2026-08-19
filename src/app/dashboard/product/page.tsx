@@ -29,7 +29,8 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { loadRequiredNotes } from "@/lib/required-notes";
-import { EMPTY_NOTE_FILTER, matchesNoteFilter } from "@/lib/note-filter";
+import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter";
+import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
@@ -1342,7 +1343,7 @@ export default function ProductPage() {
   const [filterTT, setFilterTT] = useState("");
   const [filterCa, setFilterCa] = useState("");
   const [filterDC, setFilterDC] = useState("");
-  const [filterGhiChu, setFilterGhiChu] = useState("");
+  const [filterGhiChu, setFilterGhiChu] = useState<string[]>([]);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [expandedDates, setExpandedDates] = useState<string[]>([]);
@@ -1629,7 +1630,7 @@ export default function ProductPage() {
       if (filterTT && normalizeLotStatus(c.trang_thai) !== normalizeLotStatus(filterTT)) {
         return false;
       }
-      if (!matchesNoteFilter(c.ghi_chu, filterGhiChu)) return false;
+      if (!matchesNoteFilterMulti(c.ghi_chu, filterGhiChu)) return false;
       if (filterFrom && c.ngay_sx < filterFrom) return false;
       if (filterTo && c.ngay_sx > filterTo) return false;
       return true;
@@ -5040,7 +5041,10 @@ export default function ProductPage() {
       })()}
 
       <FilterBar
-        activeCount={[search, filterDC, filterLoai, filterTT, filterCa, filterGhiChu, filterFrom, filterTo].filter(Boolean).length}
+        activeCount={
+          [search, filterDC, filterLoai, filterTT, filterCa, filterFrom, filterTo].filter(Boolean).length +
+          (filterGhiChu.length > 0 ? 1 : 0)
+        }
       >
         <div className="flex items-center gap-2 flex-1 min-w-48">
           <Search size={15} className="text-slate-400" />
@@ -5117,21 +5121,15 @@ export default function ProductPage() {
             </option>
           ))}
         </select>
-        <select
-          value={filterGhiChu}
-          onChange={(e) => {
-            setFilterGhiChu(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
-        >
-          <option value="">Tất cả ghi chú</option>
-          <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
-          {requiredNotes.map((note) => (
-            <option key={note} value={note}>
-              {note}
-            </option>
-          ))}
-        </select>
+        <FilterMultiSelect
+          options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+          selected={filterGhiChu}
+          onChange={setFilterGhiChu}
+          labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+          placeholder="Tất cả ghi chú"
+          searchPlaceholder="Tìm ghi chú..."
+          className="min-w-64"
+        />
         <input
           type="date"
           value={filterFrom}
@@ -5152,7 +5150,7 @@ export default function ProductPage() {
         {(filterLoai ||
           filterTT ||
           filterCa ||
-          filterGhiChu ||
+          filterGhiChu.length > 0 ||
           filterFrom ||
           filterTo ||
           search ||
@@ -5162,7 +5160,7 @@ export default function ProductPage() {
               setFilterLoai("");
               setFilterTT("");
               setFilterCa("");
-              setFilterGhiChu("");
+              setFilterGhiChu([]);
               setFilterFrom("");
               setFilterTo("");
               setSearch("");

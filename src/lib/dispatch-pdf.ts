@@ -12,7 +12,7 @@ import {
   type DispatchMaterialTotals,
   type DispatchFlatTrip,
 } from "@/lib/dispatch-analytics"
-import { describeNoteFilter } from "@/lib/note-filter"
+import { describeNoteFilterMulti } from "@/lib/note-filter"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -396,10 +396,10 @@ function buildStatsContext(params: {
   mode: "all" | "doi" | "vehicle"
   selectedDois?: string[]
   selectedVehicles?: string[]
-  selectedNote?: string
+  selectedNote?: string[]
 }) {
   const range = `T\u1eeb ng\u00e0y ${params.from ? formatDateVi(params.from) : "t\u1ea5t c\u1ea3"} \u0111\u1ebfn ng\u00e0y ${params.to ? formatDateVi(params.to) : "t\u1ea5t c\u1ea3"}`
-  const noteLabel = describeNoteFilter(params.selectedNote || "")
+  const noteLabel = describeNoteFilterMulti(params.selectedNote || [])
   const note = noteLabel ? `; ${noteLabel}` : ""
   const dois = params.selectedDois || []
   const vehicles = params.selectedVehicles || []
@@ -416,7 +416,7 @@ export async function downloadDispatchStatsPdf(params: {
   mode: "all" | "doi" | "vehicle"
   selectedDois?: string[]
   selectedVehicles?: string[]
-  selectedNote?: string
+  selectedNote?: string[]
   makerName?: string
 }) {
   const isVehicleMode = params.mode === "vehicle"

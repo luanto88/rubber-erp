@@ -1,6 +1,6 @@
 import type { LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
 import type { DiemGN } from "@/lib/dispatch-master"
-import { matchesNoteFilter } from "@/lib/note-filter"
+import { matchesNoteFilterMulti } from "@/lib/note-filter"
 
 export type DispatchAnalyticsEntry = {
   id: string
@@ -194,11 +194,11 @@ function addTrip(summary: DispatchGroupSummary, trip: DispatchFlatTrip) {
 export function buildDispatchAnalytics(
   entries: DispatchAnalyticsEntry[],
   deliveryPoints: DiemGN[],
-  filters?: { dois?: string[]; vehicles?: string[]; note?: string; materials?: string[] },
+  filters?: { dois?: string[]; vehicles?: string[]; note?: string[]; materials?: string[] },
 ): DispatchAnalytics {
   const vehicleFilters = new Set((filters?.vehicles || []).map((v) => v.trim().toLowerCase()).filter(Boolean))
   const doiFilters = (filters?.dois || []).map(Number).filter((d) => Number.isFinite(d) && d > 0)
-  const noteFilter = (filters?.note || "").trim()
+  const noteFilter = filters?.note || []
   const selectedMaterials = filters?.materials || []
   const trips: DispatchFlatTrip[] = []
   const vehicles = new Set<string>()
@@ -217,7 +217,7 @@ export function buildDispatchAnalytics(
   for (const entry of entries) {
     for (const row of entry.rows || []) {
       const dois = getTripDois(row, deliveryPoints)
-      if (!matchesNoteFilter(row.ghi_chu, noteFilter)) continue
+      if (!matchesNoteFilterMulti(row.ghi_chu, noteFilter)) continue
       if (doiFilters.length > 0 && !dois.some((d) => doiFilters.includes(d))) continue
       if (vehicleFilters.size > 0 && !vehicleFilters.has((row.so_xe || "").toLowerCase())) continue
       if (selectedMaterials.length > 0) {

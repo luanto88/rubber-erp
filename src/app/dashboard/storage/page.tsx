@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { loadRequiredNotes } from "@/lib/required-notes"
-import { EMPTY_NOTE_FILTER, matchesNoteFilter, matchesNoteFilterMulti } from "@/lib/note-filter"
+import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
@@ -14,6 +14,7 @@ import {
   addDaysISO,
   buildDispatchTripRef,
   buildStorageLookupPath,
+  buildStorageLotDetailLines,
   formatStorageDate,
   getKLFromTrip,
   loadDispatchTripsByDateRange,
@@ -203,7 +204,7 @@ export default function StoragePage() {
   const [search, setSearch]     = useState("")
   const [filterTT, setFilterTT] = useState("")
   const [nganTab, setNganTab]   = useState<"active" | "history" | "print">("active")
-  const [filterGhiChu, setFilterGhiChu] = useState("")
+  const [filterGhiChu, setFilterGhiChu] = useState<string[]>([])
   const [dayChuyen, setDayChuyen] = useState<"Mủ tạp" | "Mủ nước">("Mủ tạp")
   const [requiredNotes, setRequiredNotes] = useState<string[]>([])
   const [reportFrom, setReportFrom] = useState("")
@@ -597,7 +598,7 @@ export default function StoragePage() {
     if (!dcLoaiNL.includes(n.loai_nl)) return false
     if (filterTT && n.trang_thai !== filterTT) return false
     if (reportLoaiNL && n.loai_nl !== reportLoaiNL) return false
-    if (!matchesNoteFilter(n.ghi_chu, filterGhiChu)) return false
+    if (!matchesNoteFilterMulti(n.ghi_chu, filterGhiChu)) return false
     if (search &&
       !n.ten_ngan?.toLowerCase().includes(search.toLowerCase()) &&
       !n.ma_ngan?.toLowerCase().includes(search.toLowerCase())
@@ -912,13 +913,7 @@ export default function StoragePage() {
         .map((ngan) => {
           const lots = lotMap[ngan.id] || []
           const summary = summarizeStorageLots(lots)
-          const lotDetailsText = lots.length > 0
-            ? [...lots]
-                .sort((a, b) => a.ngay_sx.localeCompare(b.ngay_sx) || a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }))
-                .map((lot) => lot.ma_lo || "")
-                .filter(Boolean)
-                .join(", ")
-            : ""
+          const lotDetailsText = buildStorageLotDetailLines(lots).join(", ")
           return {
             ngan,
             thanhPhamKg: summary.thanhPhamKg,
@@ -1226,7 +1221,10 @@ export default function StoragePage() {
         {/* Filters */}
         <FilterBar
           className="mb-5"
-          activeCount={[search, filterTT, filterGhiChu, reportFrom, reportTo, reportLoaiNL].filter(Boolean).length}
+          activeCount={
+            [search, filterTT, reportFrom, reportTo, reportLoaiNL].filter(Boolean).length +
+            (filterGhiChu.length > 0 ? 1 : 0)
+          }
         >
           <div className="flex flex-wrap gap-3 items-center w-full">
             <div className="flex items-center gap-2 flex-1 min-w-48">
@@ -1242,17 +1240,20 @@ export default function StoragePage() {
               <option value="">Tất cả trạng thái</option>
               {TRANG_THAI_OPTS.filter(t => t !== STORAGE_STATUS_PRODUCED).map(t => <option key={t}>{t}</option>)}
             </select>
-            <select value={filterGhiChu} onChange={e => setFilterGhiChu(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400">
-              <option value="">Tất cả ghi chú</option>
-              <option value={EMPTY_NOTE_FILTER}>Không có ghi chú</option>
-              {requiredNotes.map(note => <option key={note} value={note}>{note}</option>)}
-            </select>
-            {(search || filterTT || filterGhiChu || reportFrom || reportTo || reportLoaiNL) && (
+            <FilterMultiSelect
+              options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+              selected={filterGhiChu}
+              onChange={setFilterGhiChu}
+              labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+              placeholder="Tất cả ghi chú"
+              searchPlaceholder="Tìm ghi chú..."
+              className="min-w-64"
+            />
+            {(search || filterTT || filterGhiChu.length > 0 || reportFrom || reportTo || reportLoaiNL) && (
               <button onClick={() => {
                 setSearch("")
                 setFilterTT("")
-                setFilterGhiChu("")
+                setFilterGhiChu([])
                 setReportFrom("")
                 setReportTo("")
                 setReportLoaiNL("")

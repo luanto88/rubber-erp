@@ -1,6 +1,7 @@
 "use client"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { isBlankNoteContent } from "@/lib/note-filter"
 
 export type RequiredNote = {
   id: string
@@ -35,7 +36,7 @@ export async function createRequiredNote(
   content: string,
 ) {
   const trimmed = content.trim()
-  if (!trimmed) throw new Error("Ghi chú không được để trống")
+  if (isBlankNoteContent(trimmed)) throw new Error("Ghi chú không hợp lệ (không được để trống hoặc là số 0)")
 
   const { data: existing } = await supabase
     .from("required_notes")
