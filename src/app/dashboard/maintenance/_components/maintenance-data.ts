@@ -16,6 +16,9 @@ export const BO_PHAN_LIST = [
 
 export type BoPhan = (typeof BO_PHAN_LIST)[number]
 
+export const HANG_MUC_LIST = ["Sửa chữa", "Bảo dưỡng"] as const
+export type HangMuc = (typeof HANG_MUC_LIST)[number]
+
 export type MaintenanceAsset = {
   id: string
   factory_id: string

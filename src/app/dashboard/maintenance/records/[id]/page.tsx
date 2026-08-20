@@ -29,7 +29,7 @@ import {
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { compressImageForUpload, validateImageFile, withRetry } from "@/lib/image-upload"
-import { CURRENCIES, convertCurrency } from "@/lib/currency"
+import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 
 type InventoryItemOption = {
   id: string
@@ -794,11 +794,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setFactoryId(fid)
       setUser(sessionUser)
 
-      const [a, s, e] = await Promise.all([
+      const [a, s, e, factoryRates] = await Promise.all([
         loadMaintenanceAssets(fid),
         loadMaintenanceStaff(fid),
         loadMaintenanceExtMaterials(fid),
+        supabase.from("factories").select("ty_gia_usd_vnd, ty_gia_usd_khr").eq("id", fid).maybeSingle(),
       ])
+      setCurrencyRates({ vnd: factoryRates.data?.ty_gia_usd_vnd, khr: factoryRates.data?.ty_gia_usd_khr })
       setAssets(a)
       setStaffList(s)
       setExtMaterials(e)

@@ -10,7 +10,24 @@ export type CurrencyCode = (typeof CURRENCIES)[number]
 // Tỷ giá quy đổi ra USD — giữ đúng số liệu đang dùng trong suggestLoaiSuaChua trước khi tách
 // (KHR÷4100, VND÷25000). Lưu ý: khác với số liệu cũ đã lỗi thời trong
 // .claude/rules/14-maintenance-module.md (4000/26500) — số ở đây là số THẬT đang chạy trong code.
-const USD_RATE: Record<string, number> = { USD: 1, KHR: 4100, VND: 25000 }
+const DEFAULT_USD_RATE: Record<string, number> = { USD: 1, KHR: 4100, VND: 25000 }
+
+// Mutable per-tab — factory có thể cấu hình tỷ giá riêng qua Cài đặt → Danh mục → Thông tin công
+// ty (factories.ty_gia_usd_vnd/ty_gia_usd_khr). Gọi setCurrencyRates() 1 lần lúc bootstrap mỗi
+// trang cần convertCurrency (sau khi đã có factory_id) — chưa gọi/giá trị null/0 thì giữ mặc định.
+let USD_RATE: Record<string, number> = { ...DEFAULT_USD_RATE }
+
+export function setCurrencyRates(rates: { vnd?: number | null; khr?: number | null }) {
+  USD_RATE = {
+    USD: 1,
+    VND: rates.vnd && rates.vnd > 0 ? rates.vnd : DEFAULT_USD_RATE.VND,
+    KHR: rates.khr && rates.khr > 0 ? rates.khr : DEFAULT_USD_RATE.KHR,
+  }
+}
+
+export function getCurrencyRates() {
+  return { ...USD_RATE }
+}
 
 export function currencySymbol(loaiTien: string): string {
   if (loaiTien === "KHR") return "៛"

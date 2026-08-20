@@ -7,11 +7,12 @@ import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
-import { currencySymbol } from "../_components/maintenance-data"
+import { currencySymbol, convertCurrency, setCurrencyRates, getCurrencyRates } from "@/lib/currency"
+import { BO_PHAN_LIST } from "../_components/maintenance-data"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PrintType = "su_co" | "de_nghi" | "ly_lich" | "su_co_nho" | "bao_duong" | "bao_duong_xe" | "sua_chua_nho_xe" | "ly_lich_xe"
+type PrintType = "su_co" | "de_nghi" | "ly_lich" | "su_co_nho" | "bao_duong" | "bao_duong_xe" | "sua_chua_nho_xe" | "ly_lich_xe" | "bao_cao_ky"
 
 type MaterialRow = {
   nguon: "trong_kho" | "ben_ngoai"
@@ -127,6 +128,19 @@ type VehicleHistoryRow = {
   nguoi_thuc_hien: string[]
   nv_phu_trach: string | null
 }
+
+type BaoCaoKyRow = {
+  ma_bb: string | null
+  ma_tb: string
+  km_dong_ho: number | null
+  ngay: string
+  noi_dung: string
+  gia_tri: number
+  loai_tien: string
+  hang_muc: string
+}
+
+type BaoCaoKySection = { bo_phan: string; rows: BaoCaoKyRow[] }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1701,6 +1715,80 @@ function PrintF02LyLich({ vehicle, drivers, maintRows, repairRows, filterFrom, f
   )
 }
 
+// ─── Template F07: Báo cáo công tác bảo trì theo kỳ ───────────────────────────
+
+function PrintBaoCaoKy({ section, from, to, rateVnd, rateKhr, lapBieuName }: {
+  section: BaoCaoKySection
+  from: string
+  to: string
+  rateVnd: number
+  rateKhr: number
+  lapBieuName: string
+}) {
+  const totalUsd = section.rows.reduce((sum, r) => sum + convertCurrency(r.gia_tri, r.loai_tien, "USD"), 0)
+  return (
+    <div className="print-page font-serif">
+      <CompanyHeader boPhan={section.bo_phan} />
+
+      <div className="text-center mt-2 mb-4">
+        <h2 className="font-extrabold uppercase tracking-wide" style={{ fontSize: "13pt" }}>
+          Báo cáo công tác bảo trì
+        </h2>
+        <div className="text-[10px] italic text-slate-500 mt-0.5">(KHXD-QT02-F07)</div>
+        <div className="text-xs mt-1">Kỳ: Từ {fmtDate(from)} – Đến {fmtDate(to)}</div>
+      </div>
+
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-slate-100">
+            <th className="border border-slate-400 px-2 py-1.5 text-center w-8">STT</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center">Số biên bản</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center">Số xe/Mã TB</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center">Số Km/giờ hoạt động</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Ngày thực hiện</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-left">Nội dung sửa chữa/bảo dưỡng</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center">Tổng giá trị</th>
+            <th className="border border-slate-400 px-2 py-1.5 text-center w-16">Hạng mục</th>
+          </tr>
+        </thead>
+        <tbody>
+          {section.rows.map((r, i) => (
+            <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
+              <td className="border border-slate-300 px-2 py-1.5 text-center">{i + 1}</td>
+              <td className="border border-slate-300 px-2 py-1.5 font-mono text-center">{r.ma_bb || "—"}</td>
+              <td className="border border-slate-300 px-2 py-1.5 font-mono text-center">{r.ma_tb}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-center">{r.km_dong_ho ?? "—"}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-center whitespace-nowrap">{fmtDate(r.ngay)}</td>
+              <td className="border border-slate-300 px-2 py-1.5" style={{ whiteSpace: "pre-wrap" }}>{r.noi_dung}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-right whitespace-nowrap">{fmtValue(r.gia_tri, r.loai_tien)}</td>
+              <td className="border border-slate-300 px-2 py-1.5 text-center">{r.hang_muc}</td>
+            </tr>
+          ))}
+          {section.rows.length === 0 && (
+            <tr>
+              <td colSpan={8} className="border border-slate-300 px-4 py-8 text-center text-slate-400 italic">
+                Không có dữ liệu bảo trì
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      <div className="text-xs mt-2">
+        Quy đổi sang đơn giá USD 1USD={rateVnd.toLocaleString()}VND; 1USD={rateKhr.toLocaleString()} Riel:{" "}
+        <strong>{totalUsd.toFixed(2)} USD</strong>
+      </div>
+
+      <SignatureRow cols={[
+        { role: "LÃNH ĐẠO ĐƠN VỊ" },
+        { role: "LẬP BIỂU", name: lapBieuName },
+      ]} />
+
+      <DocumentFooter code="KHXD-QT02-F07" />
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function MaintenancePrintPage() {
@@ -1713,6 +1801,8 @@ export default function MaintenancePrintPage() {
   const vehicleIdsParam = params.get("vehicle_ids") || ""  // comma-separated for multi-vehicle ly_lich_xe
   const filterFrom = params.get("from") || ""
   const filterTo = params.get("to") || ""
+  const boPhanParam = params.get("bo_phan") || ""    // comma-separated for bao_cao_ky
+  const hangMucParam = params.get("hang_muc") || ""  // comma-separated for bao_cao_ky
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -1731,6 +1821,8 @@ export default function MaintenancePrintPage() {
     maintRows: VehicleHistoryRow[]
     repairRows: VehicleHistoryRow[]
   }[]>([])
+  const [baoCaoKySections, setBaoCaoKySections] = useState<BaoCaoKySection[]>([])
+  const [lapBieuName, setLapBieuName] = useState("")
 
   const qrUrl = useMemo(() => {
     if (!recordId || typeof window === "undefined") return ""
@@ -1763,6 +1855,7 @@ export default function MaintenancePrintPage() {
         setLoading(false)
         return
       }
+      setLapBieuName(user.full_name || "")
       setAuthFactoryId(user.factory_id)
     }
     void check()
@@ -1953,6 +2046,92 @@ export default function MaintenancePrintPage() {
             }
             setMultiVehicles(results)
           }
+        } else if (printType === "bao_cao_ky") {
+          const boPhanList = boPhanParam ? boPhanParam.split(",").filter(Boolean) : [...BO_PHAN_LIST]
+          const hangMucList = hangMucParam ? hangMucParam.split(",").filter(Boolean) : ["Sửa chữa", "Bảo dưỡng"]
+          const assetIdList = assetIdsParam ? assetIdsParam.split(",").filter(Boolean) : []
+          const vehicleIdList = vehicleIdsParam ? vehicleIdsParam.split(",").filter(Boolean) : []
+
+          if (!filterFrom || !filterTo) { setError("Thiếu khoảng ngày (Từ ngày/Đến ngày)"); return }
+
+          const { data: fRow } = await supabase
+            .from("factories")
+            .select("ty_gia_usd_vnd, ty_gia_usd_khr")
+            .eq("id", fid)
+            .maybeSingle()
+          setCurrencyRates({ vnd: fRow?.ty_gia_usd_vnd, khr: fRow?.ty_gia_usd_khr })
+
+          const { data: records } = await supabase
+            .from("maintenance_records")
+            .select("id, ma_bb, hang_muc, ngay, bo_phan, noi_dung_chung, cac_khac_phuc_chung")
+            .eq("factory_id", fid)
+            .eq("trang_thai", "da_duyet")   // luôn cố định — báo cáo theo kỳ chỉ lấy biên bản đã duyệt
+            .in("bo_phan", boPhanList)
+            .in("hang_muc", hangMucList)
+            .gte("ngay", filterFrom)
+            .lte("ngay", filterTo)
+            .order("ngay", { ascending: true })
+
+          const recList = (records || []) as {
+            id: string; ma_bb: string | null; hang_muc: string; ngay: string; bo_phan: string
+            noi_dung_chung: string | null; cac_khac_phuc_chung: string | null
+          }[]
+          const recIds = recList.map((r) => r.id)
+          const recMap = new Map(recList.map((r) => [r.id, r]))
+
+          const rawLines = recIds.length > 0
+            ? (
+                await supabase
+                  .from("maintenance_record_lines")
+                  .select("record_id, asset_id, dispatch_vehicle_id, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, cong_tho, loai_tien, km_dong_ho")
+                  .in("record_id", recIds)
+              ).data
+            : []
+
+          const linesList = (rawLines || []) as {
+            record_id: string; asset_id: string | null; dispatch_vehicle_id: string | null
+            ma_tb: string; noi_dung: string | null; cac_khac_phuc: string | null
+            chi_phi_dk: number; cong_tho: number; loai_tien: string; km_dong_ho: number | null
+          }[]
+
+          const filteredLines = linesList.filter((l) =>
+            (assetIdList.length === 0 && vehicleIdList.length === 0) ||
+            (!!l.asset_id && assetIdList.includes(l.asset_id)) ||
+            (!!l.dispatch_vehicle_id && vehicleIdList.includes(l.dispatch_vehicle_id))
+          )
+
+          const sections = new Map<string, BaoCaoKyRow[]>()
+          for (const l of filteredLines) {
+            const rec = recMap.get(l.record_id)
+            if (!rec) continue
+            // Bảo dưỡng nhiều thiết bị: nội dung riêng từng dòng có thể trống vì đã nhập ở "Nội
+            // dung chung" cấp biên bản (xem .claude/rules/14-maintenance-module.md mục "Nội dung
+            // chung cho Bảo dưỡng nhiều thiết bị") — phải merge vào, không chỉ đọc riêng từng dòng.
+            const noiDung = rec.hang_muc === "Sửa chữa"
+              ? (l.cac_khac_phuc || l.noi_dung || "—")
+              : (mergeNoidung(rec.cac_khac_phuc_chung, l.cac_khac_phuc) || mergeNoidung(rec.noi_dung_chung, l.noi_dung) || "—")
+            const row: BaoCaoKyRow = {
+              ma_bb: rec.ma_bb,
+              ma_tb: l.ma_tb,
+              km_dong_ho: l.km_dong_ho,
+              ngay: rec.ngay,
+              noi_dung: noiDung,
+              gia_tri: (l.chi_phi_dk || 0) + (l.cong_tho || 0),
+              loai_tien: l.loai_tien || "USD",
+              hang_muc: rec.hang_muc,
+            }
+            const arr = sections.get(rec.bo_phan) || []
+            arr.push(row)
+            sections.set(rec.bo_phan, arr)
+          }
+
+          const orderedSections: BaoCaoKySection[] = BO_PHAN_LIST
+            .filter((bp) => sections.has(bp))
+            .map((bp) => ({
+              bo_phan: bp,
+              rows: [...sections.get(bp)!].sort((a, b) => a.ngay.localeCompare(b.ngay)),
+            }))
+          setBaoCaoKySections(orderedSections)
         } else {
           if (!recordId) { setError("Thiếu record_id"); return }
           const { data: rec } = await supabase
@@ -2000,7 +2179,7 @@ export default function MaintenancePrintPage() {
       }
     }
     void load()
-  }, [authFactoryId, printType, recordId, assetId, assetIdsParam, vehicleId, vehicleIdsParam, filterFrom, filterTo])
+  }, [authFactoryId, printType, recordId, assetId, assetIdsParam, vehicleId, vehicleIdsParam, filterFrom, filterTo, boPhanParam, hangMucParam])
 
   useEffect(() => {
     if (!loading && !error) {
@@ -2011,7 +2190,9 @@ export default function MaintenancePrintPage() {
 
   const backHref = recordId
     ? `/dashboard/maintenance/records/${recordId}`
-    : "/dashboard/maintenance/history"
+    : printType === "bao_cao_ky"
+      ? "/dashboard/maintenance/records"
+      : "/dashboard/maintenance/history"
 
   const printLabel = {
     su_co: "Biên bản kiểm tra sự cố (F13)",
@@ -2022,6 +2203,7 @@ export default function MaintenancePrintPage() {
     bao_duong_xe: "Bảo dưỡng xe (F03 + F15 + F06 + Ảnh)",
     sua_chua_nho_xe: "Sửa chữa nhỏ xe (F08_NB + F15 + F06 + Ảnh)",
     ly_lich_xe: "Lý lịch xe máy (F02)",
+    bao_cao_ky: "Báo cáo công tác bảo trì theo kỳ (F07)",
   }[printType] || ""
 
   return (
@@ -2120,6 +2302,31 @@ export default function MaintenancePrintPage() {
               />
             ) : null}
           </>
+        )}
+
+        {!loading && !error && printType === "bao_cao_ky" && (
+          baoCaoKySections.length === 0 ? (
+            <div className="print-page text-center py-16 text-slate-400">
+              Không có dữ liệu bảo trì đã duyệt trong kỳ đã chọn.
+            </div>
+          ) : (
+            baoCaoKySections.map((sec, idx) => {
+              const { VND: rateVnd, KHR: rateKhr } = getCurrencyRates()
+              return (
+                <div key={sec.bo_phan}>
+                  {idx > 0 && <div className="print:page-break-before-always mt-4 pt-4" />}
+                  <PrintBaoCaoKy
+                    section={sec}
+                    from={filterFrom}
+                    to={filterTo}
+                    rateVnd={rateVnd}
+                    rateKhr={rateKhr}
+                    lapBieuName={lapBieuName}
+                  />
+                </div>
+              )
+            })
+          )
         )}
       </div>
     </>

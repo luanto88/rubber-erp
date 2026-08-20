@@ -116,3 +116,12 @@ export function formatWeekRangeLabel(weekStartISO: string): string {
   const end = addDaysISO(weekStartISO, 6)
   return `${formatDateDisplay(weekStartISO)} — ${formatDateDisplay(end)}`
 }
+
+// Ngày đầu tháng chứa `dateISO` (mặc định hôm nay) — dùng làm giá trị mặc định cho bộ lọc
+// "Từ ngày" của các báo cáo theo kỳ.
+export function getFirstDayOfMonthISO(dateISO?: string): string {
+  const iso = dateISO ? normalizeDateInput(dateISO) : getTodayISODate()
+  const parts = getDateParts(iso)
+  if (!parts) return getTodayISODate()
+  return `${parts.year}-${parts.month}-01`
+}

@@ -525,7 +525,7 @@ Sau khi chạy migration thêm cột `email`, vào **Cài đặt → Bảo trì 
 
 ---
 
-## In biên bản (8 type)
+## In biên bản (9 type)
 
 | `?type=`          | Mẫu in                                | Áp dụng                                                   |
 | ----------------- | ------------------------------------- | --------------------------------------------------------- |
@@ -537,8 +537,86 @@ Sau khi chạy migration thêm cột `email`, vào **Cài đặt → Bảo trì 
 | `sua_chua_nho_xe` | F08 + F15SmallVehicle + F06 + Ảnh     | Sửa chữa + Đội xe + `loai_sua_chua = nho`                 |
 | `ly_lich`         | F01 — Lý lịch máy móc / thiết bị      | Thiết bị **ngoài** Đội xe, từ tab Lý lịch                 |
 | `ly_lich_xe`      | F02 — Lý lịch xe máy (3 section)      | Xe Đội xe (`dispatch_vehicles`), từ tab Lý lịch           |
+| `bao_cao_ky`      | F07 — Báo cáo công tác bảo trì theo kỳ | Từ tab **Biên bản** (`records/page.tsx`, không phải Lý lịch thiết bị), xem mục riêng bên dưới |
 
 Tất cả dùng chung `print/page.tsx`, phân nhánh theo `type` và `record_id` / `asset_ids` / `vehicle_id` query param.
+
+### F07 — Báo cáo công tác bảo trì theo kỳ (KHXD-QT02-F07, 2026-08-20)
+
+Đặt tại tab **Biên bản** (`src/app/dashboard/maintenance/records/page.tsx`), **không đụng** tab Lý
+lịch thiết bị (`history/page.tsx` — giữ nguyên 100% như trước, kể cả picker Thiết bị/Xe và logic
+"In lý lịch" F01/F02).
+
+- Tab Biên bản có thêm: `filterHangMuc`/`filterBoPhan` đổi từ đơn-select sang **multi-select**
+  (dùng `FilterMultiSelect`, `HANG_MUC_LIST`/`BO_PHAN_LIST` từ `maintenance-data.ts`, trống =
+  tất cả); thêm mới **Thiết bị/Xe** (multi-select gộp `maintenance_assets` + `dispatch_vehicles`,
+  lọc theo Bộ phận đã chọn — bộ phận "Đội xe" → hiện xe, các bộ phận khác → hiện thiết bị, trống
+  = gộp cả hai); thêm mới **Từ ngày/Đến ngày** (mặc định đầu tháng hiện tại → hôm nay qua
+  `getFirstDayOfMonthISO()`/`getTodayISODate()` trong `src/lib/date-utils.ts`, áp dụng lọc
+  `ngay` cho cả bảng trên màn hình lẫn báo cáo in). `filterTrangThai` giữ nguyên đơn-select.
+- Nút "In Báo cáo theo kỳ (F07)" ở header, gate `maintenance.print` (tái dùng đúng permission
+  duy nhất của mọi tính năng in trong module này) — disabled khi Từ ngày/Đến ngày trống. URL:
+  `?type=bao_cao_ky&from=...&to=...&bo_phan=...&hang_muc=...&asset_ids=...&vehicle_ids=...`
+  (4 param sau chỉ có khi đã chọn, trống = "tất cả" ở phía server).
+- **Quan trọng**: báo cáo in **LUÔN chỉ lấy biên bản `trang_thai = "da_duyet"`**, bất kể filter
+  Trạng thái trên màn hình đang chọn gì — `trang_thai` **không** được truyền qua URL, luôn hard-code
+  trong `print/page.tsx`. Có dòng chú thích nhỏ cạnh nút in nhắc điều này.
+- Khi chọn nhiều Bộ phận, báo cáo chia thành **các phiếu độc lập, ngắt trang riêng** (giống cách
+  F01 in mỗi thiết bị 1 trang) — mỗi Bộ phận có tiêu đề, bảng riêng (sắp theo ngày tăng dần,
+  KHÔNG tách theo Hạng mục), khối quy đổi USD riêng, khối ký tên (LÃNH ĐẠO ĐƠN VỊ | LẬP BIỂU)
+  riêng. Chỉ in Bộ phận thực sự có dữ liệu khớp bộ lọc trong kỳ.
+- 1 dòng báo cáo = 1 `maintenance_record_line` (không phải 1 biên bản — biên bản có thể có nhiều
+  thiết bị/xe). Nếu có lọc thêm Thiết bị/Xe cụ thể, chỉ dòng khớp thiết bị/xe đó được đưa vào
+  (không phải toàn bộ dòng của biên bản chứa nó).
+- Cột "Nội dung sửa chữa/bảo dưỡng" map theo Hạng mục của biên bản: Sửa chữa →
+  `cac_khac_phuc || noi_dung` (không có khái niệm "nội dung chung"); Bảo dưỡng → merge với nội
+  dung chung cấp biên bản theo đúng thứ tự canonical của F15
+  (`mergeNoidung(record.cac_khac_phuc_chung, line.cac_khac_phuc) ||
+  mergeNoidung(record.noi_dung_chung, line.noi_dung)`, hàm `mergeNoidung()` dùng chung đã có
+  sẵn trong `print/page.tsx`). Ô hiển thị dùng `whiteSpace: "pre-wrap"` để xuống dòng đúng khi
+  nội dung chung + nội dung riêng được nối bằng `\n`.
+  - **Bug đã fix (2026-08-20, sau test tay)**: bản đầu chỉ đọc `line.noi_dung`/`line.cac_khac_phuc`
+    riêng từng dòng, không merge nội dung chung cấp biên bản — với biên bản "Bảo dưỡng nhiều
+    thiết bị" dùng "Nội dung chung" (xem mục "Nội dung chung cho Bảo dưỡng nhiều thiết bị" phía
+    trên), TOÀN BỘ các dòng thiết bị trong biên bản đó in ra cột Nội dung trống (`—`) dù biên bản
+    có nội dung thật ở cấp chung — đã xác nhận bằng ảnh in thật (`cung_cap_dl/0.png`, biên bản
+    `MT-010826/001` in ra 11+ dòng đều `—`/`$0`). Query `records` đã thêm `noi_dung_chung,
+    cac_khac_phuc_chung` vào `.select()` để có dữ liệu merge.
+  - **Không lọc bỏ dòng có "Tổng giá trị" = 0** — người dùng xác nhận dòng có Nội dung thật nhưng
+    giá trị $0 vẫn phải hiển thị làm tham khảo (không phải rác cần loại), chỉ cột Nội dung là cần
+    sửa đúng, không cần thêm cơ chế lọc/ẩn dòng nào.
+- Cột "Tổng giá trị" = `chi_phi_dk + cong_tho` của dòng (cùng `loai_tien`).
+- Cột "Số Km/giờ hoạt động" = `km_dong_ho` — chỉ có giá trị thật cho dòng thuộc Đội xe (giới hạn
+  schema hiện có, không phải lỗi); các bộ phận khác luôn hiện "—".
+- Footer mỗi phiếu: `"Quy đổi sang đơn giá USD 1USD={rate}VND; 1USD={rate} Riel: {tổng} USD"` —
+  tổng = `Σ convertCurrency(chi_phi_dk+cong_tho, loai_tien, "USD")` theo tỷ giá đã hydrate (xem
+  mục "Tỷ giá quy đổi USD" bên dưới). "LẬP BIỂU" tự điền tên người đang đăng nhập
+  (`user.full_name`), "LÃNH ĐẠO ĐƠN VỊ" để trống chờ ký tay.
+
+### Tỷ giá quy đổi USD (2026-08-20) — cấu hình được, thay thế hard-code cũ
+
+- `src/lib/currency.ts`'s `USD_RATE` đổi từ hằng số sang biến mutable per-tab, có thể ghi đè qua
+  `setCurrencyRates({ vnd, khr })` (giữ nguyên mặc định `VND: 25000, KHR: 4100` nếu factory chưa
+  cấu hình/giá trị null/0). `getCurrencyRates()` đọc lại giá trị hiện tại. Chữ ký `CURRENCIES`/
+  `currencySymbol`/`convertCurrency` giữ nguyên, không đổi call site nào ngoài phạm vi hydrate.
+- Cấu hình tại **Cài đặt → Danh mục → Thông tin công ty**, card "Tỷ giá quy đổi USD" (2 field
+  `factories.ty_gia_usd_vnd`/`ty_gia_usd_khr`, migration
+  `supabase/migrations/20260820_factories_currency_rates.sql` — **cần chạy thủ công**). Dùng
+  chung nút "Lưu thông tin" đã có sẵn của card "Thông tin công ty (EUDR Seller)" (cả 3 card dùng
+  chung 1 state `factoryInfo`).
+- Hydrate ở 2 nơi cần `convertCurrency`: `records/[id]/page.tsx` (bootstrap, ảnh hưởng ngưỡng
+  Lớn/Nhỏ >200 USD và Chi phí ước tính từ vật tư) và `print/page.tsx` (chỉ khi
+  `type=bao_cao_ky`, trước khi tính tổng USD).
+- Đã verify bằng grep `convertCurrency` toàn repo: hàm này **chỉ dùng trong module Bảo trì** —
+  đổi tỷ giá không ảnh hưởng Kho vật tư/Cài đặt (2 nơi đó chỉ dùng `CURRENCIES`/`currencySymbol`,
+  không phụ thuộc tỷ giá).
+- Số liệu mặc định 25.000/4.100 là số THẬT đang chạy trong code kể từ trước khi có tính năng
+  này — không phải 4.000/26.500 như phần ghi chú lịch sử cũ phía dưới (đã lỗi thời).
+
+**Chưa test tay** (2026-08-20) — cần: chạy migration trên Supabase SQL Editor; nhập tỷ giá tùy
+chỉnh trong Cài đặt rồi xác nhận ngưỡng Lớn/Nhỏ và báo cáo F07 dùng đúng tỷ giá mới; test đủ các
+kịch bản filter (nhiều Bộ phận, Thiết bị/Xe cụ thể, đổi Trạng thái màn hình xem báo cáo vẫn chỉ
+in Đã duyệt, xóa Từ ngày để xác nhận nút bị khóa); xác nhận tab Lý lịch thiết bị không đổi gì.
 
 ### Nút in trên trang chi tiết — Sửa chữa + Đội xe (sau khi da_duyet)
 

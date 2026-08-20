@@ -100,6 +100,8 @@ type FactoryInfo = {
   ca_a_ten: string
   ca_b_ten: string
   ca_c_ten: string
+  ty_gia_usd_vnd: string
+  ty_gia_usd_khr: string
 }
 
 type FactoryOption = {
@@ -499,6 +501,8 @@ function emptyFactoryInfo(): FactoryInfo {
     ca_a_ten: "",
     ca_b_ten: "",
     ca_c_ten: "",
+    ty_gia_usd_vnd: "",
+    ty_gia_usd_khr: "",
   }
 }
 
@@ -1745,7 +1749,7 @@ export default function SettingsPage() {
       loadPermissions(),
       supabase
         .from("factories")
-        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ca_a_ten, ca_b_ten, ca_c_ten")
+        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ca_a_ten, ca_b_ten, ca_c_ten, ty_gia_usd_vnd, ty_gia_usd_khr")
         .order("name")
         .then(({ data }) => {
           const rows = data || []
@@ -1762,6 +1766,8 @@ export default function SettingsPage() {
               ca_a_ten: ownFactory.ca_a_ten || "",
               ca_b_ten: ownFactory.ca_b_ten || "",
               ca_c_ten: ownFactory.ca_c_ten || "",
+              ty_gia_usd_vnd: ownFactory.ty_gia_usd_vnd != null ? String(ownFactory.ty_gia_usd_vnd) : "",
+              ty_gia_usd_khr: ownFactory.ty_gia_usd_khr != null ? String(ownFactory.ty_gia_usd_khr) : "",
             })
           }
         }),
@@ -2034,7 +2040,16 @@ export default function SettingsPage() {
     if (!factoryId || !canManageSettings) return
     setSavingFactory(true)
     setFactoryMsg(null)
-    const { error: err } = await supabase.from("factories").update(factoryInfo).eq("id", factoryId)
+    const parseRate = (v: string) => {
+      const n = Number(v)
+      return v.trim() && Number.isFinite(n) && n > 0 ? n : null
+    }
+    const payload = {
+      ...factoryInfo,
+      ty_gia_usd_vnd: parseRate(factoryInfo.ty_gia_usd_vnd),
+      ty_gia_usd_khr: parseRate(factoryInfo.ty_gia_usd_khr),
+    }
+    const { error: err } = await supabase.from("factories").update(payload).eq("id", factoryId)
     setSavingFactory(false)
     setFactoryMsg(err ? { ok: false, text: err.message } : { ok: true, text: "Đã lưu thông tin công ty" })
     setTimeout(() => setFactoryMsg(null), 3000)
@@ -3930,6 +3945,41 @@ export default function SettingsPage() {
                       disabled={!canManageSettings}
                       placeholder="Vd: Sok Khum"
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {masterDataTab === "company" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mt-4">
+            <div className="bg-gradient-to-r from-teal-50 to-cyan-50 px-6 py-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Scale size={16} className="text-teal-600" />
+                <span className="font-extrabold text-slate-700">Tỷ giá quy đổi USD</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Dùng để quy đổi tổng giá trị Báo cáo công tác bảo trì theo kỳ (F07) và ngưỡng phân loại Sửa chữa Lớn/Nhỏ (&gt;200 USD) trong module Bảo trì. Để trống = dùng mặc định 1USD=25.000VND, 1USD=4.100KHR.
+              </p>
+            </div>
+            <div className="p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {[
+                  { label: "1 USD = ? VND", field: "ty_gia_usd_vnd" as const, placeholder: "Vd: 25000" },
+                  { label: "1 USD = ? Riel (KHR)", field: "ty_gia_usd_khr" as const, placeholder: "Vd: 4100" },
+                ].map(({ label, field, placeholder }) => (
+                  <div key={field}>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={factoryInfo[field]}
+                      onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
+                      disabled={!canManageSettings}
+                      placeholder={placeholder}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500 disabled:bg-slate-50 disabled:text-slate-400"
                     />
                   </div>
                 ))}
