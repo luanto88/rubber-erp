@@ -1306,7 +1306,27 @@ export default function QualityPage() {
           const cell = ws[addr]
           if (cell?.v instanceof Date) {
             const d = cell.v
-            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+            // Thư viện xlsx (SheetJS) có nhiều bug bù trừ múi giờ đã xác nhận bằng dữ liệu thật +
+            // đọc trực tiếp source (node_modules/xlsx/xlsx.js) khi giải mã ngày ở múi giờ Việt Nam
+            // (UTC+7): (1) cell kiểu "d" (ISO date — hay gặp ở file .xlsx lưu bởi Google Sheets/
+            // công cụ khác, không phải Excel gốc) bị hàm parseDate(str, fixdate=1) trừ nhầm đúng
+            // 7 tiếng dù chuỗi ISO vốn dĩ đã chuẩn UTC; (2) ngay cả cell Excel gốc kiểu số (serial
+            // + định dạng ngày) cũng lệch ~7 tiếng qua hàm numdate() nội bộ, vì mốc gốc lịch sử
+            // "1899-12-30" được dựng bằng constructor Date GIỜ ĐỊA PHƯƠNG (`new Date(1899,11,30)`)
+            // — múi giờ Đông Dương trước thời chuẩn hoá lệch thêm vài chục giây so với UTC+7 hiện
+            // đại, khiến phép bù trừ nội bộ không triệt tiêu hết. Cả 2 trường hợp đều làm Date
+            // object lệch khỏi đúng nửa đêm (cả UTC lẫn giờ địa phương) một khoảng dưới 12 tiếng,
+            // có thể tràn qua ranh giới ngày — đã xác nhận bằng dữ liệu thật: gõ "2026-08-16" vào
+            // file rồi tải lên tại máy giờ Việt Nam, app đọc ra "2026-08-15".
+            //
+            // Không dùng công thức bù trừ cứng (dễ sai theo từng nguồn lỗi khác nhau như trên) —
+            // LÀM TRÒN theo giờ ĐỊA PHƯƠNG của máy đang chạy (ngưỡng giữa trưa: quá 12h trưa thì
+            // tính là đã sang ngày hôm sau) để tự phục hồi đúng ngày lịch dự định trong MỌI trường
+            // hợp lệch dưới 12 tiếng, không cần biết chính xác nguyên nhân/độ lớn lệch bao nhiêu.
+            // Với cell vốn đã đúng (không lệch gì) phép làm tròn này là no-op, không đổi kết quả.
+            const rounded = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+            if (d.getHours() >= 12) rounded.setDate(rounded.getDate() + 1)
+            return `${rounded.getFullYear()}-${String(rounded.getMonth() + 1).padStart(2, "0")}-${String(rounded.getDate()).padStart(2, "0")}`
           }
         }
         return normDate(meta[colName] || "")

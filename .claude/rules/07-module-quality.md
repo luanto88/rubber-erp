@@ -133,6 +133,40 @@ Triệu chứng thật: import 1 file 8 lô đều tồn tại thật ("Hoàn th
 - **Bug 2 — so sánh `NGAY_SX` bằng chuỗi thô, không chuẩn hóa định dạng Excel**: `sheet_to_json({ raw:false, dateNF:"yyyy-mm-dd" })` ưu tiên cache định dạng hiển thị lưu sẵn trong file Excel (`cell.w`) hơn `dateNF` truyền vào — nếu ô Excel có định dạng số kiểu `m/d/yy` (Mỹ, năm 2 chữ số), giá trị đọc ra là chuỗi kiểu `"6/28/26"`, không khớp regex `normDate()` (đòi năm 4 chữ số) nên bị trả về nguyên văn, rồi so sánh chuỗi thô với `"2026-06-28"` từ DB → luôn lệch dù cùng 1 ngày thật. **Đã fix**: đọc thẳng giá trị `Date` gốc của ô Excel (hàng meta, nhờ `cellDates:true` đã bật sẵn) qua `ws[XLSX.utils.encode_cell({r:1,c:colIndex})]`, format bằng `getUTCFullYear/Month/Date()` để tránh lệch múi giờ — bỏ qua hoàn toàn ambiguity locale/định dạng hiển thị. `normDate()` cũ vẫn giữ nguyên làm fallback cho ô nhập tay dạng text (không phải cell Date thật).
 - Không đổi logic matching theo `ma_lo`, kiểm tra trùng KN, hay `calcGrade`.
 
+### Cập nhật 2026-08-21 — Bug thư viện `xlsx` bù trừ múi giờ sai, làm lùi 1 ngày ở `metaDateCell()`
+
+Triệu chứng thật: 7/7 lô bị bỏ qua với cảnh báo "Sai ngày hoàn thành" dù người dùng khẳng định đã
+gõ đúng ngày hoàn thành thật vào `NGAY_SX`/`NGAY_KN` — file luôn bị app đọc ra **sớm hơn đúng 1
+ngày tròn** so với những gì đã gõ (kiểm chứng bằng cách nâng cả 2 ngày lên +1 thì app mới chấp
+nhận). Đây **không phải** bug ở logic so khớp (vẫn nguyên vẹn từ 2026-07-08) mà là 2 bug độc lập
+trong chính thư viện `xlsx@0.18.5` (`package.json`), đã xác nhận bằng cách đọc trực tiếp
+`node_modules/xlsx/xlsx.js` và tái hiện bằng file `.xlsx` dựng tay (XML thô, không qua bộ ghi của
+chính thư viện):
+
+1. **Cell kiểu `"d"` (ISO date, Strict OOXML)** — sinh ra khi file được lưu bởi công cụ không
+   phải Excel gốc (khả năng cao nhất: Google Sheets xuất `.xlsx`, rất phổ biến tại VN). Hàm nội bộ
+   `parseDate(str, fixdate=1)` áp phép bù trừ theo `getTimezoneOffset()` của MÁY ĐANG CHẠY lên 1
+   chuỗi ISO vốn dĩ đã chuẩn UTC (không cần bù trừ gì) — ở VN (UTC+7) lùi đúng 7 tiếng, tràn qua
+   ranh giới nửa đêm UTC.
+2. **Cell kiểu số (serial Excel gốc thật) + định dạng ngày** — kể cả file Excel "sạch", không qua
+   công cụ nào khác — cũng bị lệch tương tự qua hàm `numdate()`: mốc gốc lịch sử `basedate = new
+   Date(1899, 11, 30)` được dựng bằng constructor giờ ĐỊA PHƯƠNG (không phải `Date.UTC`), và múi
+   giờ Đông Dương trước thời chuẩn hoá (IANA `Asia/Ho_Chi_Minh` cho năm 1899) lệch thêm ~6 phút so
+   với UTC+7 hiện đại — phép bù trừ nội bộ của thư viện không triệt tiêu hết chênh lệch này, luôn
+   để dư ~7 giờ trừ vài chục giây.
+
+**Đã fix** (`metaDateCell()`, dòng ~1302): bỏ hẳn việc dùng `getUTCFullYear/Month/Date()` trực
+tiếp trên `cell.v`. Thay bằng **làm tròn theo giờ ĐỊA PHƯƠNG của máy đang chạy, ngưỡng giữa trưa**
+(`d.getHours() >= 12` → tính là đã sang ngày hôm sau) — không dùng công thức bù trừ cứng theo
+từng nguồn lỗi (dễ sai lệch, như đã thấy ở 2 bug trên có độ lệch khác nhau vài chục giây), mà tự
+phục hồi đúng ngày lịch dự định cho MỌI trường hợp lệch dưới 12 tiếng bất kể nguyên nhân. Với cell
+vốn đã đúng (không lệch gì) phép làm tròn này là no-op.
+
+Đã kiểm chứng bằng script tạm dựng file `.xlsx` từ XML thô (bỏ qua bộ ghi của `xlsx`, mô phỏng
+đúng cả 2 nguồn lỗi trên) rồi đọc lại qua chính thư viện `xlsx` với `TZ=Asia/Ho_Chi_Minh` — cả 2
+kịch bản đều cho kết quả đúng sau fix (trước fix cả 2 đều lùi 1 ngày). Không đổi hành vi các
+trường hợp khác (`normDate()` cho ô text, DUPLICATE_IN_FILE, đối chiếu `ma_lo`...).
+
 ## Quan he xoa phieu va trang thai lo
 
 Khi xoa phieu kiem nghiem:
