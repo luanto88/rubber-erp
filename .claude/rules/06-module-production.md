@@ -66,6 +66,21 @@ description: Business logic các module sản xuất - Điều xe, Kho nguyên l
 - **Nút "Đồng bộ nhanh" trên card ngăn** (`storage/page.tsx`, `handleQuickSyncNgan`) giờ gọi thêm `sync_ngan_production_status` sau khi đồng bộ lại KL tươi/khô — cho admin công cụ tự tay bù lại trạng thái cho từng ngăn cụ thể mà không cần chạy script, thông báo kết quả có thêm phần "trạng thái X → Y" nếu có đổi.
 - **Chưa test tay trên UI thật** — cần: quét QR nhập 1 kiện cho ngăn `Chờ sản xuất` (cả trường hợp <100% và trường hợp 1 lần gửi đã đẩy thẳng lên ≥100%) → xác nhận card ngăn chuyển `Đang sản xuất` ngay; sửa/xóa 1 dòng trong "Lịch sử ca" đổi/xóa hết sản lượng của 1 ngăn → xác nhận trạng thái đồng bộ đúng theo cả 2 chiều; bấm nút "Đồng bộ nhanh" trên 1 ngăn cũ còn kẹt sai trạng thái → xác nhận UI cập nhật ngay không cần tải lại trang; xác nhận luồng nhập tay (`/dashboard/product`) không đổi hành vi.
 
+### Cập nhật 2026-08-30 — Fix ngăn kẹt "Chờ sản xuất" dù đã đầy thật (lô mồ côi + thiếu escape-hatch tay)
+
+Phát sinh từ báo cáo thật: ngăn N10 đạt tỷ lệ lấp đầy 107% (`152.460 / 142.498,24 kg`) nhưng `trang_thai` vẫn kẹt `Chờ sản xuất`, và admin không thấy bất kỳ nút nào trên card để tự sửa. Có 2 bug độc lập chồng lên nhau:
+
+- **Bug 1 (RPC)**: `sync_ngan_production_status()` (2026-08-08) tính `v_total_kg` chỉ từ `SUM(lot_transactions.so_kg)`, trong khi card ngăn ở `storage/page.tsx` tính `tpKg`/`tpPct` qua `loadStorageLots()` (`storage-detail.ts`), vốn CÓ thêm fallback cộng `lots.tong_kg` cho các lô "mồ côi" (có `ngan_id` đúng nhưng không có `lot_transactions` nào — xem mục "Invariant bắt buộc... lot_transactions backing" phía trên). Khi sản lượng thật của một ngăn đến từ (một phần) lô mồ côi, RPC thấy `v_total_kg` thấp hơn thực tế (có thể bằng 0) nên không bao giờ tự chuyển `Chờ sản xuất` → `Đang sản xuất`, dù UI hiển thị tỷ lệ lấp đầy > 100%. **Fix**: `CREATE OR REPLACE FUNCTION sync_ngan_production_status` (mới trong `supabase/migrations/20260830_sync_ngan_production_status_orphan_lots.sql`) cộng thêm `SUM(lots.tong_kg) WHERE lots.ngan_id = p_ngan_id AND NOT EXISTS (lot_transactions ứng với lô đó)` — cùng công thức với `loadStorageLots()`. Guard trạng thái, khóa `FOR UPDATE`, logic 2 chiều giữ nguyên không đổi.
+- **Bug 2 (UI)**: nhánh `nextManualStatus` trên card ngăn (`storage/page.tsx`) trước đây không có case nào cho `n.trang_thai === "Chờ sản xuất"` — nên dù RPC có đúng hay không, admin cũng không có nút thủ công nào để tự đẩy ngăn `Chờ sản xuất` sang `Đang sản xuất` khi phát hiện ngăn đã có sản lượng thật. **Fix**: thêm `canForceInProduction` (`n.trang_thai === "Chờ sản xuất" && tpPct > 0`) vào cascade `nextManualStatus`, nút mới "Bắt đầu SX" (chỉ admin thấy, màu emerald — cùng theme với trạng thái đích "Đang sản xuất"), vẫn gọi chung `handleNganStatusToggle()` như 3 nút chuyển trạng thái tay còn lại.
+- **Migration `20260830_sync_ngan_production_status_orphan_lots.sql` cần chạy thủ công trên Supabase SQL Editor** — bao gồm 1 vòng backfill `DO $$ ... $$` re-sync lại toàn bộ ngăn đang `Chờ sản xuất`/`Đang sản xuất` trên mọi nhà máy (idempotent, an toàn chạy lại nhiều lần) để các ngăn bị kẹt từ trước (vd N10) tự sửa ngay khi chạy migration, không cần đợi admin bấm nút "Bắt đầu SX" mới ở trên.
+- **Chưa test tay**:
+  - [ ] Chạy migration trên Supabase SQL Editor, xác nhận không lỗi.
+  - [ ] Ngăn N10 (hoặc ngăn tương tự đang kẹt) tự chuyển sang "Đang sản xuất" sau backfill mà không cần thao tác gì thêm (kiểm tra lại UI sau khi refresh `/dashboard/storage`).
+  - [ ] Xác nhận nút "Bắt đầu SX" xuất hiện đúng lúc `tpPct > 0` cho ngăn còn kẹt (nếu vì lý do nào đó backfill chưa xử lý hết) và biến mất sau khi bấm.
+  - [ ] Xác nhận nút "Đồng bộ nhanh" (`handleQuickSyncNgan`) trên 1 ngăn KHÔNG có lô mồ côi vẫn hoạt động bình thường như trước (không regression).
+  - [ ] Xác nhận RPC vẫn không đụng ngăn "Đang nhận"/"Đóng"/"Đã sản xuất" (gọi RPC tay qua Supabase SQL Editor trên 1 ngăn ở mỗi trạng thái đó, xác nhận `trang_thai` không đổi).
+  - [ ] Xác nhận 3 chuyển trạng thái tay hiện có (Đóng→Chờ SX, Đang SX→Đã SX ở ≥50%, Đã SX→Đang SX từ tab Lịch sử) không có regression.
+
 ## 4. Thành phẩm (`lots`)
 
 - `lots` là bảng master tổng hợp theo `ma_lo`.

@@ -1330,6 +1330,12 @@ export default function StoragePage() {
               const canCloseForProduction =
                 n.trang_thai === STORAGE_STATUS_CLOSED &&
                 canManuallyMoveClosedToWaiting(n.ngay_bd, todayMs)
+              // Ngăn "Chờ sản xuất" đã có thành phẩm thật (tpPct từ loadStorageLots(), đã gồm cả lô
+              // mồ côi) nhưng RPC sync_ngan_production_status có thể chưa kích hoạt được (vd bỏ sót
+              // lô mồ côi trước bản vá 20260830) -> escape-hatch tay cho admin.
+              const canForceInProduction =
+                n.trang_thai === STORAGE_STATUS_WAITING &&
+                tpPct > 0
               // Admin được đánh dấu "Đã sản xuất" khi ngăn đạt từ 50% trở lên (không giới hạn trên).
               // Ngưỡng 100%-110% ở banner hậu lưu trong module Thành phẩm (product/page.tsx) không đổi.
               const canMarkProduced =
@@ -1338,11 +1344,13 @@ export default function StoragePage() {
               const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
               const nextManualStatus = canCloseForProduction
                 ? STORAGE_STATUS_WAITING
-                : canMarkProduced
-                  ? STORAGE_STATUS_PRODUCED
-                  : canReturnToDraft
-                    ? STORAGE_STATUS_IN_PRODUCTION
-                    : null
+                : canForceInProduction
+                  ? STORAGE_STATUS_IN_PRODUCTION
+                  : canMarkProduced
+                    ? STORAGE_STATUS_PRODUCED
+                    : canReturnToDraft
+                      ? STORAGE_STATUS_IN_PRODUCTION
+                      : null
               const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
               const isCollapsed = collapsedCardIds.has(n.id)
               const normalizedStatus = normalizeStorageStatus(n.trang_thai)
@@ -1385,7 +1393,9 @@ export default function StoragePage() {
                               ? `Đánh dấu đã sản xuất (${tpPct.toFixed(1)}%)`
                               : nextManualStatus === STORAGE_STATUS_WAITING
                                 ? `Chuyển sang chờ sản xuất (${days ?? 0} ngày lưu)`
-                                : `Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`
+                                : canForceInProduction
+                                  ? `Đã có thành phẩm (${tpPct.toFixed(1)}%) — chuyển sang đang sản xuất`
+                                  : `Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`
                           }
                         >
                           {nganStatusSavingId === n.id
@@ -1394,7 +1404,9 @@ export default function StoragePage() {
                               ? "Đã SX"
                               : nextManualStatus === STORAGE_STATUS_WAITING
                                 ? "Chờ SX"
-                                : "Về đang SX"}
+                                : canForceInProduction
+                                  ? "Bắt đầu SX"
+                                  : "Về đang SX"}
                         </button>
                       )}
                       <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
