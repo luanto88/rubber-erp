@@ -183,7 +183,10 @@ export function groupDailyByDay(rows: BreakdownDailyEvaluation[]): DayScore[] {
     const chinh = entries.find((e) => e.loai === "chinh")
     if (!chinh) continue // ngày chỉ có choàng, không có chính → không tính vào D (đúng công thức)
     const choangEntries = entries.filter((e) => e.loai === "choang").map((e) => ({ group_ten: e.group_ten, pct: e.pct }))
-    const diemNgay = chinh.pct * 10 + choangEntries.reduce((s, c) => s + c.pct * 5, 0)
+    // pct đang ở thang 0-100 (từ computeDailyPercent) — phải quy về phân số 0-1 trước khi nhân
+    // trọng số, khớp đúng cách RPC SQL kpi_compute_monthly_scores tính (pct ở đó là AVG(1.0/0.5/0),
+    // không nhân 100). Thiếu bước chia 100 này khiến diemNgay/pctNgay bị thổi phồng 10x rồi 100x.
+    const diemNgay = (chinh.pct / 100) * 10 + choangEntries.reduce((s, c) => s + (c.pct / 100) * 5, 0)
     const maxNgay = 10 + choangEntries.length * 5
     result.push({ ngay, chinhPct: chinh.pct, choangEntries, diemNgay, maxNgay, pctNgay: (diemNgay / maxNgay) * 100 })
   }
