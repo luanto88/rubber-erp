@@ -628,14 +628,12 @@ export default function QualityPage() {
       .order("ngay_kn", { ascending: false })
       .order("pkn",     { ascending: false })
     if (filterLoai) q = q.eq("loai_csr",  filterLoai)
-    if (filterTT === "dat_hang") q = q.not("dat_hang", "ilike", "%RH")
-    else if (filterTT === "rot_hang") q = q.ilike("dat_hang", "%RH")
     if (filterFrom) q = q.gte("ngay_kn",  filterFrom)
     if (filterTo)   q = q.lte("ngay_kn",  filterTo)
     const { data } = await q
     setResults((data || []).map(normalizeQcResultDates))
     setLoading(false)
-  }, [filterLoai, filterTT, filterFrom, filterTo])
+  }, [filterLoai, filterFrom, filterTo])
 
   // ── Load stats (không filter trang_thai để stats luôn phản ánh thực tế) ───────
   const loadStats = useCallback(async (fid: string) => {
@@ -1617,11 +1615,56 @@ export default function QualityPage() {
     return true
   }), [results, search])
 
-  // Ẩn phiếu kl_rot_hang khỏi danh sách chính (chỉ hiện trong Giám sát KN)
-  const mainFiltered = useMemo(
-    () => filtered.filter(r => r.loai_kn !== "kl_rot_hang"),
-    [filtered]
-  )
+  // Map: qc_result.id gốc → kết quả KN lại rớt hạng mới nhất (để hiện badge)
+  const retestMap = useMemo(() => {
+    const byParent = new Map<string, QcResult>()
+    const byLotKey = new Map<string, QcResult>()
+    results.forEach(r => {
+      if (r.loai_kn === "kl_rot_hang") {
+        if (r.parent_id) {
+          const ex = byParent.get(r.parent_id)
+          if (!ex || (r.lan || 1) > (ex.lan || 1) || new Date(r.created_at || 0) > new Date(ex.created_at || 0)) {
+            byParent.set(r.parent_id, r)
+          }
+        }
+        const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
+        if (k) {
+          const ex = byLotKey.get(k)
+          if (!ex || (r.lan || 1) > (ex.lan || 1) || new Date(r.created_at || 0) > new Date(ex.created_at || 0)) {
+            byLotKey.set(k, r)
+          }
+        }
+      }
+    })
+    return { byParent, byLotKey }
+  }, [results])
+
+  const getEffectiveQc = useCallback((r: QcResult): QcResult => {
+    if (r.loai_kn === "kl_rot_hang") return r
+    if (r.id && retestMap.byParent.has(r.id)) return retestMap.byParent.get(r.id)!
+    const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
+    if (k && retestMap.byLotKey.has(k)) {
+      const retest = retestMap.byLotKey.get(k)!
+      if (new Date(retest.created_at || 0) >= new Date(r.created_at || 0)) {
+        return retest
+      }
+    }
+    return r
+  }, [retestMap])
+
+  // Ẩn phiếu kl_rot_hang khỏi danh sách chính (chỉ hiện trong Giám sát KN) & Lọc theo kết quả hiệu lực
+  const mainFiltered = useMemo(() => {
+    return filtered
+      .filter(r => r.loai_kn !== "kl_rot_hang")
+      .filter(r => {
+        if (!filterTT) return true
+        const eff = getEffectiveQc(r)
+        const isFailed = eff.dat_hang?.endsWith("RH") === true
+        if (filterTT === "dat_hang") return !isFailed
+        if (filterTT === "rot_hang") return isFailed
+        return true
+      })
+  }, [filtered, filterTT, getEffectiveQc])
 
   const dateGroups = useMemo(() => Array.from(
     mainFiltered.reduce((m,r)=>{ const d=r.ngay_kn?.slice(0,10)||"?"; if(!m.has(d)) m.set(d,[]); m.get(d)!.push(r); return m }, new Map<string,QcResult[]>())
@@ -1671,18 +1714,7 @@ export default function QualityPage() {
     pendingRetestLotRef.current = null
   }, [createForm.loai_kn, createForm.so_mau, eligibleLots, knDateFilter])
 
-  // Map: qc_result.id gốc → kết quả KN lại rớt hạng mới nhất (để hiện badge)
-  const retestByParentId = useMemo(() => {
-    const map = new Map<string, QcResult>()
-    results
-      .filter(r => r.loai_kn === "kl_rot_hang" && r.parent_id)
-      .forEach(r => {
-        const ex = map.get(r.parent_id!)
-        if (!ex || new Date(r.created_at||0) > new Date(ex.created_at||0))
-          map.set(r.parent_id!, r)
-      })
-    return map
-  }, [results])
+
 
   const { latestPerLot, stats } = useMemo(() => {
     // latestPerLot: dùng results (có filter) để hiển thị đúng trong list view
@@ -2143,8 +2175,8 @@ export default function QualityPage() {
                   {dateGroups.map(([date, dateResults]) => {
                     const expanded = expandedDates.has(date)
                     const inDeleteMode = deleteMode===date
-                    const dateDat = dateResults.filter(r=>!r.dat_hang?.endsWith("RH")).length
-                    const hasRetest = dateResults.some(r=>r.parent_id || retestByParentId.has(r.id))
+                    const dateDat = dateResults.filter(r => !getEffectiveQc(r).dat_hang?.endsWith("RH")).length
+                    const hasRetest = dateResults.some(r => r.parent_id || getEffectiveQc(r).id !== r.id)
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -2240,7 +2272,7 @@ export default function QualityPage() {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                               {dateResults.map(r => {
-                                const effectiveR = retestByParentId.get(r.id) || r
+                                const effectiveR = getEffectiveQc(r)
                                 const isRetested = effectiveR.id !== r.id
                                 const isEffectivePassed = !effectiveR.dat_hang?.endsWith("RH")
                                 return (
