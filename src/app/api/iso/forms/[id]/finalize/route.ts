@@ -479,7 +479,8 @@ export async function POST(
 
     const draftExt = (instance.draft_file_type as string | null) ?? "docx"
     const auto_convert_pdf = instance.auto_convert_pdf as boolean
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
+    const originFromReq = req.headers.get("origin") || (req.headers.get("host") ? `${req.headers.get("x-forwarded-proto") || "https"}://${req.headers.get("host")}` : "")
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || originFromReq || "https://qlsxkpt.vercel.app"
     const qrUrl = `${appUrl}/dashboard/iso/forms/${instanceId}`
 
     // Trích QR placement từ soan_thao_placement nếu có

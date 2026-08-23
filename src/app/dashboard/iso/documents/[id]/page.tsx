@@ -469,7 +469,7 @@ export default function IsoDocumentDetailPage() {
   const [confirmedSkipTags, setConfirmedSkipTags] = useState<string[]>([])
 
 
-  const appUrl = typeof window !== "undefined" ? window.location.origin : ""
+  const appUrl = (typeof window !== "undefined" && window.location.origin) ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app")
   const recordUrl = `${appUrl}/dashboard/iso/documents/${docId}`
 
   // Load profiles filtered by permission code — dùng API server-side để bypass RLS trên user_permissions
