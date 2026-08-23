@@ -16,7 +16,7 @@ import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
   RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
-  Upload, Download
+  Upload, Download, CheckCircle
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -180,6 +180,33 @@ function getLimits(loaiCsr: string, tieuChuan: string, customLimits?: LimitRow):
   if (tieuChuan === "TCVN 3769:2016") return TCVN[lk] || TCVN.CSR10
   if (customLimits) return customLimits
   return TCCS[lk] || TCCS.CSR10
+}
+
+function evalSampleFail(key: string, rawVal: number | string | undefined | null, lim?: LimitRow): boolean {
+  if (!lim || rawVal === undefined || rawVal === null || rawVal === "") return false
+  const val = Number(rawVal)
+  if (isNaN(val) || val <= 0) return false
+
+  switch (key) {
+    case "tap_chat":
+      return lim.tap_chat != null && val > lim.tap_chat
+    case "tro":
+      return lim.tro != null && val > lim.tro
+    case "bay_hoi":
+      return lim.bay_hoi != null && val > lim.bay_hoi
+    case "nito":
+      return lim.nito != null && val > lim.nito
+    case "po":
+      return lim.po_min != null && val < lim.po_min
+    case "pri":
+      return lim.pri_min != null && val < lim.pri_min
+    case "mooney":
+      return (lim.mooney_min != null && val < lim.mooney_min) || (lim.mooney_max != null && val > lim.mooney_max)
+    case "mau_sac":
+      return lim.mau_max != null && val > lim.mau_max
+    default:
+      return false
+  }
 }
 
 function calcGrade(
@@ -745,7 +772,7 @@ export default function QualityPage() {
           stillFailedMaLos.length
             ? supabase.from("lots").select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
                 .eq("factory_id", factoryId)
-                .or(stillFailedMaLos.map(mlo => `ma_lo.eq.${mlo},ma_lo.ilike.${mlo}/%`).join(","))
+                .in("ma_lo", stillFailedMaLos)
             : Promise.resolve({ data: [] as {id:string;factory_id:string;ma_lo:string;loai_csr:string;ngay_sx:string;ngay_ht?:string|null;trang_thai:string;tong_banh:number}[], error: null }),
         ])
         if (resById.error) throw resById.error
@@ -759,6 +786,39 @@ export default function QualityPage() {
               ?? latestByMaLo.get(stripYear(l.ma_lo)),
           })),
         ]
+
+        // Fallback for orphaned qc_results so downgraded lots are never dropped from the selection list
+        stillFailedIds.forEach(lid => {
+          const qc = latestByLotId.get(lid)
+          if (qc && !combined.some(l => l.id === qc.lot_id || l.id === qc.id)) {
+            combined.push({
+              id: qc.lot_id || qc.id,
+              factory_id: factoryId,
+              ma_lo: qc.ma_lo || "Lô chưa đặt tên",
+              loai_csr: qc.loai_csr || loaiCsr,
+              ngay_sx: qc.ngay_sx || qc.ngay_kn,
+              trang_thai: "Hoàn thành",
+              tong_banh: 0,
+              prev_qc: qc,
+            })
+          }
+        })
+        stillFailedMaLos.forEach(mlo => {
+          const qc = latestByMaLo.get(mlo)
+          if (qc && !combined.some(l => normalizeLotCode(l.ma_lo) === normalizeLotCode(qc.ma_lo))) {
+            combined.push({
+              id: qc.lot_id || qc.id,
+              factory_id: factoryId,
+              ma_lo: qc.ma_lo || mlo,
+              loai_csr: qc.loai_csr || loaiCsr,
+              ngay_sx: qc.ngay_sx || qc.ngay_kn,
+              trang_thai: "Hoàn thành",
+              tong_banh: 0,
+              prev_qc: qc,
+            })
+          }
+        })
+
         const seen = new Set<string>()
         if (reqId === eligibleLotsReqRef.current) {
           setEligibleLots(combined.filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true }))
@@ -1817,6 +1877,12 @@ export default function QualityPage() {
                   </span>
                 )}
               </div>
+              {createForm.loai_kn === "kl_rot_hang" && (
+                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl mb-3 flex items-center gap-1.5 font-medium">
+                  <span>ℹ️</span>
+                  <span>Danh sách lô rớt hạng đang được lọc theo Chủng loại <strong>[{createForm.chung_loai}]</strong>. Bạn có thể đổi Chủng loại ở form trên nếu tìm lô thuộc dải loại khác.</span>
+                </div>
+              )}
               {lotsLoading ? (
                 <div className="text-sm text-slate-400 py-4 text-center">Đang tải lô...</div>
               ) : displayLots.length === 0 ? (
@@ -1898,37 +1964,57 @@ export default function QualityPage() {
                     <div className="grid grid-cols-1 gap-4">
                       {createVisibleFields.map(f => {
                         const g = preview?.grade?.[f.key]
+                        const activeCustomLimits = customStds.find(s => s.id === createForm.tieu_chuan)?.limits
+                        const lim = getLimits(createLoaiCSR, createForm.tieu_chuan, activeCustomLimits)
+                        const isFieldFailed = g?.dat === false
                         return (
-                          <div key={f.key} className={`rounded-xl border p-4 ${
-                            g?.dat===false ? "border-red-200 bg-red-50" : "border-slate-200"}`}>
+                          <div key={f.key} className={`rounded-xl border p-4 transition-colors ${
+                            isFieldFailed ? "border-red-300 bg-red-50/60 shadow-sm" : "border-slate-200"}`}>
                             <div className="flex items-center justify-between mb-3">
-                              <span className="font-bold text-slate-700 text-sm">{f.label}</span>
+                              <span className={`font-bold text-sm ${isFieldFailed ? "text-red-700" : "text-slate-700"}`}>{f.label}</span>
                               {g && (
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                                  g.dat ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+                                <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${
+                                  g.dat ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600 border border-red-200 shadow-sm"}`}>
                                   {g.dat ? "✓ Đạt" : "✗ Không đạt"} · {g.detail}
                                 </span>
                               )}
                             </div>
                             <div className="flex gap-2 flex-wrap">
-                              {Array.from({length:createForm.so_mau},(_,i)=>(
-                                <div key={i} className="flex flex-col items-center gap-1">
-                                  <span className="text-xs text-emerald-600 font-bold">M{i+1}</span>
-                                  <input
-                                    value={(td.samples[f.key]?.[i] ?? "") as string}
-                                    onChange={e=>updateSample(activeTabLotId, f.key, i, e.target.value)}
-                                    className="w-16 h-14 text-center border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-emerald-400 focus:bg-emerald-50 focus:ring-1 focus:ring-emerald-200"
-                                    placeholder="—"/>
-                                </div>
-                              ))}
+                              {Array.from({length:createForm.so_mau},(_,i)=>{
+                                const rawVal = td.samples[f.key]?.[i]
+                                const isSampleFail = evalSampleFail(f.key, rawVal, lim)
+                                return (
+                                  <div key={i} className="flex flex-col items-center gap-1">
+                                    <span className={`text-xs font-bold ${isSampleFail ? "text-red-600 font-extrabold" : "text-emerald-600"}`}>M{i+1}</span>
+                                    <input
+                                      value={(rawVal ?? "") as string}
+                                      onChange={e=>updateSample(activeTabLotId, f.key, i, e.target.value)}
+                                      className={`w-16 h-14 text-center border rounded-xl text-sm font-mono outline-none transition-all ${
+                                        isSampleFail
+                                          ? "border-red-500 bg-red-100/90 text-red-700 font-extrabold focus:border-red-600 focus:bg-red-50 focus:ring-2 focus:ring-red-200 shadow-sm"
+                                          : "border-slate-200 focus:border-emerald-400 focus:bg-emerald-50 focus:ring-1 focus:ring-emerald-200"
+                                      }`}
+                                      placeholder="—"/>
+                                  </div>
+                                )
+                              })}
                             </div>
                             {/* Show previous values for re-test */}
                             {lot?.prev_qc && (
-                              <div className="mt-2 flex gap-2 flex-wrap">
-                                <span className="text-xs text-slate-400 self-center">KQ cũ:</span>
-                                {((lot.prev_qc.samples as any)?.[f.key]||[]).map((v:number,i:number)=>(
-                                  <span key={i} className="text-xs text-slate-400 font-mono">{v||"—"}</span>
-                                ))}
+                              <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-slate-500">KQ cũ:</span>
+                                {((lot.prev_qc.samples as any)?.[f.key]||[]).map((v:number,i:number)=>{
+                                  const isPrevFail = evalSampleFail(f.key, v, lim)
+                                  return (
+                                    <span key={i} className={`text-xs font-mono px-2 py-0.5 rounded ${
+                                      isPrevFail
+                                        ? "bg-red-100 text-red-700 font-extrabold border border-red-200 shadow-xs"
+                                        : "text-slate-500 bg-slate-100"
+                                    }`}>
+                                      M{i+1}: {v||"—"}
+                                    </span>
+                                  )
+                                })}
                               </div>
                             )}
                           </div>
@@ -2153,7 +2239,11 @@ export default function QualityPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {dateResults.map(r => (
+                              {dateResults.map(r => {
+                                const effectiveR = retestByParentId.get(r.id) || r
+                                const isRetested = effectiveR.id !== r.id
+                                const isEffectivePassed = !effectiveR.dat_hang?.endsWith("RH")
+                                return (
                                 <>
                                   <tr key={r.id} className="hover:bg-slate-50 transition-colors cursor-pointer row-hover"
                                     onClick={()=>setExpandedId(expandedId===r.id?null:r.id)}>
@@ -2170,35 +2260,41 @@ export default function QualityPage() {
                                     <td className="px-3 py-2.5 text-center font-bold text-violet-700 text-xs font-mono">
                                       {r.lo_kn||"—"}
                                       {r.parent_id && <span className="ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded">KN lại</span>}
-                                      {retestByParentId.has(r.id) && <span className="ml-1 px-1 py-0.5 bg-violet-100 text-violet-700 text-[9px] font-bold rounded">↺ KN lại</span>}
+                                      {isRetested && (
+                                        <span className={`ml-1 px-1.5 py-0.5 text-[9px] font-bold rounded ${
+                                          isEffectivePassed ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-amber-100 text-amber-700 border border-amber-200"
+                                        }`}>
+                                          ↺ KN lại: {isEffectivePassed ? `Đạt ${effectiveR.dat_hang}` : effectiveR.dat_hang}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-3 py-2.5 font-semibold text-emerald-700">{r.ma_lo}</td>
                                     <td className="px-3 py-2.5">
-                                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{r.loai_csr}</span>
+                                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{effectiveR.loai_csr}</span>
                                     </td>
-                                    <td className="px-3 py-2.5 text-slate-400 text-xs">{r.tieu_chuan}</td>
+                                    <td className="px-3 py-2.5 text-slate-400 text-xs">{effectiveR.tieu_chuan}</td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {r.grade?.tap_chat?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${r.grade?.tap_chat?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {r.grade?.tap_chat?.dat!=null?(r.grade.tap_chat.dat?"✓":"✗"):""}
+                                      {effectiveR.grade?.tap_chat?.tb?.toFixed(3)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.tap_chat?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.tap_chat?.dat!=null?(effectiveR.grade.tap_chat.dat?"✓":"✗"):""}
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {r.grade?.tro?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${r.grade?.tro?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {r.grade?.tro?.dat!=null?(r.grade.tro.dat?"✓":"✗"):""}
+                                      {effectiveR.grade?.tro?.tb?.toFixed(3)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.tro?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.tro?.dat!=null?(effectiveR.grade.tro.dat?"✓":"✗"):""}
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {r.grade?.pri?.tb?.toFixed(1)??"-"}
-                                      <span className={`ml-1 ${r.grade?.pri?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {r.grade?.pri?.dat!=null?(r.grade.pri.dat?"✓":"✗"):""}
+                                      {effectiveR.grade?.pri?.tb?.toFixed(1)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.pri?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.pri?.dat!=null?(effectiveR.grade.pri.dat?"✓":"✗"):""}
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5">
                                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                        !r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
-                                        {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang||"Rớt hạng"}`}
+                                        isEffectivePassed ?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
+                                        {isEffectivePassed ? `✓ ${effectiveR.dat_hang}` : `✗ ${effectiveR.dat_hang||"Rớt hạng"}`}
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5">
@@ -2212,34 +2308,58 @@ export default function QualityPage() {
                                   {expandedId===r.id && (
                                     <tr key={r.id+"_exp"}>
                                       <td colSpan={inDeleteMode?10:9} className="px-4 py-4 bg-slate-50">
-                                        <div className="flex flex-wrap gap-3 text-xs">
-                                          {ALL_FIELDS.filter(f=>r.grade?.[f.key]||(r.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
-                                            const vals=((r.samples as any)?.[f.key]||[]) as number[]
-                                            const g=r.grade?.[f.key]
-                                            return (
-                                              <div key={f.key} className={`rounded-xl p-3 border min-w-[110px] ${g?.dat===false?"border-red-200 bg-red-50":"border-slate-200 bg-white"}`}>
-                                                <div className="font-bold text-slate-600 mb-1.5">{f.label}</div>
-                                                {vals.map((v,i)=>(
-                                                  <div key={i} className="flex justify-between gap-3">
-                                                    <span className="text-slate-400">M{i+1}</span>
-                                                    <span className="font-mono font-semibold">{v||"—"}</span>
-                                                  </div>
-                                                ))}
-                                                {g && (
-                                                  <div className={`mt-1.5 pt-1 border-t text-[10px] ${g.dat?"text-emerald-600":"text-red-500"}`}>
-                                                    {g.dat?"✓ Đạt":"✗ Không đạt"}<br/>
-                                                    <span className="text-slate-400">{g.detail}</span>
-                                                  </div>
-                                                )}
+                                        <div className="space-y-3">
+                                          {isRetested && (
+                                            <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                              <CheckCircle size={14}/> Kết quả sau Kiểm nghiệm lại (Lần {effectiveR.lan || 2} - Ngày {effectiveR.ngay_kn}):
+                                            </div>
+                                          )}
+                                          <div className="flex flex-wrap gap-3 text-xs">
+                                            {ALL_FIELDS.filter(f=>effectiveR.grade?.[f.key]||(effectiveR.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
+                                              const vals=((effectiveR.samples as any)?.[f.key]||[]) as number[]
+                                              const g=effectiveR.grade?.[f.key]
+                                              return (
+                                                <div key={f.key} className={`rounded-xl p-3 border min-w-[110px] ${g?.dat===false?"border-red-200 bg-red-50":"border-slate-200 bg-white"}`}>
+                                                  <div className="font-bold text-slate-600 mb-1.5">{f.label}</div>
+                                                  {vals.map((v,i)=>(
+                                                    <div key={i} className="flex justify-between gap-3">
+                                                      <span className="text-slate-400">M{i+1}</span>
+                                                      <span className="font-mono font-semibold">{v||"—"}</span>
+                                                    </div>
+                                                  ))}
+                                                  {g && (
+                                                    <div className={`mt-1.5 pt-1 border-t text-[10px] ${g.dat?"text-emerald-600":"text-red-500"}`}>
+                                                      {g.dat?"✓ Đạt":"✗ Không đạt"}<br/>
+                                                      <span className="text-slate-400">{g.detail}</span>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )
+                                            })}
+                                          </div>
+                                          {isRetested && (
+                                            <div className="pt-2 border-t border-slate-200">
+                                              <div className="text-xs font-semibold text-slate-500 mb-2">Kết quả ban đầu (Lần 1 rớt hạng):</div>
+                                              <div className="flex flex-wrap gap-2 text-xs">
+                                                {ALL_FIELDS.filter(f=>r.grade?.[f.key]||(r.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
+                                                  const oldVals=((r.samples as any)?.[f.key]||[]) as number[]
+                                                  const og=r.grade?.[f.key]
+                                                  return (
+                                                    <div key={f.key} className={`rounded-lg px-2.5 py-1.5 border text-[11px] ${og?.dat===false?"bg-red-50 border-red-200 text-red-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>
+                                                      <span className="font-bold">{f.label}:</span> {oldVals.join(", ")} {og?.dat===false && " (✗)"}
+                                                    </div>
+                                                  )
+                                                })}
                                               </div>
-                                            )
-                                          })}
+                                            </div>
+                                          )}
                                         </div>
                                       </td>
                                     </tr>
                                   )}
                                 </>
-                              ))}
+                                )
+                              })}
                             </tbody>
                           </table>
                           </ResponsiveTableWrapper>
@@ -2258,7 +2378,7 @@ export default function QualityPage() {
               {/* Stats */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 {[
-                  { label:"KN lại rớt CT", value:gmsStats.rotCT, color:"text-amber-600", Icon:RefreshCw, ic:"text-amber-400" },
+                  { label:"Đã KN lại đạt hạng", value:gmsStats.rotCT, color:"text-emerald-600", Icon:CheckCircle, ic:"text-emerald-500" },
                   { label:"KN lại 6 tháng",value:gmsStats.thang6,color:"text-blue-600",  Icon:Clock,     ic:"text-blue-400"  },
                   { label:"Tổng giám sát", value:gmsStats.total, color:"text-slate-700", Icon:Eye,        ic:"text-slate-400" },
                 ].map(s=>(
