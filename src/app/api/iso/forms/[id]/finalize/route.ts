@@ -39,6 +39,19 @@ type SignPlacement = {
   prefixY?: number
   prefixWidth?: number
   prefixHeight?: number
+  extraPlacements?: Array<{
+    page: number
+    x: number
+    y: number
+    width: number
+    height: number
+    showSignature?: boolean
+    showSignerName?: boolean
+    nameX?: number
+    nameY?: number
+    nameWidth?: number
+    nameHeight?: number
+  }>
 }
 
 function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
@@ -192,6 +205,41 @@ async function stampPdf(
           color: rgb(0, 0, 0),
         })
       } catch { /* bỏ qua nếu vẽ tiền tố thất bại */ }
+    }
+
+    if (placement?.extraPlacements?.length) {
+      for (const extraP of placement.extraPlacements) {
+        const extraPageIndex = (extraP.page ?? 1) - 1
+        if (extraPageIndex < 0 || extraPageIndex >= pdfDoc.getPageCount()) continue
+        const targetPage = pdfDoc.getPage(extraPageIndex)
+        try {
+          if (sigImg && extraP.showSignature !== false) {
+            const embedded = await pdfDoc.embedPng(sigImg).catch(() => pdfDoc.embedJpg(sigImg))
+            targetPage.drawImage(embedded, {
+              x: extraP.x,
+              y: extraP.y,
+              width: extraP.width,
+              height: extraP.height,
+              opacity: 0.92,
+            })
+          }
+          if (signerName && extraP.showSignerName !== false) {
+            const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+            let nameFontSize = 13
+            while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(signerName, nameFontSize) > extraSlot.maxWidth) {
+              nameFontSize -= 0.5
+            }
+            const nameWidth = signerNameFont.widthOfTextAtSize(signerName, nameFontSize)
+            targetPage.drawText(signerName, {
+              x: extraSlot.xCenter - nameWidth / 2,
+              y: extraSlot.y,
+              size: nameFontSize,
+              font: signerNameFont,
+              color: rgb(0, 0, 0),
+            })
+          }
+        } catch { /* bỏ qua lỗi embed bản sao */ }
+      }
     }
   }
 

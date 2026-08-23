@@ -45,6 +45,19 @@ type SignPlacement = {
   qrY?: number
   qrWidth?: number
   qrHeight?: number
+  extraPlacements?: Array<{
+    page: number
+    x: number
+    y: number
+    width: number
+    height: number
+    showSignature?: boolean
+    showSignerName?: boolean
+    nameX?: number
+    nameY?: number
+    nameWidth?: number
+    nameHeight?: number
+  }>
 }
 
 // Vị trí QR đã "chốt" cho cả văn bản — lưu tại placement_ky.qr, thiết lập đúng 1 lần
@@ -436,6 +449,40 @@ async function stampPdfStep(
         color: rgb(0, 0, 0),
       })
     } catch { /* skip */ }
+  }
+
+  // Draw extra duplicate signatures & names if provided
+  if (placement?.extraPlacements?.length) {
+    for (const extraP of placement.extraPlacements) {
+      const extraPageIndex = (extraP.page ?? 1) - 1
+      if (extraPageIndex < 0 || extraPageIndex >= pdfDoc.getPageCount()) continue
+      const targetPage = pdfDoc.getPage(extraPageIndex)
+      try {
+        if (sigBuf && extraP.showSignature !== false) {
+          const embedded = await pdfDoc.embedPng(sigBuf).catch(() => pdfDoc.embedJpg(sigBuf))
+          targetPage.drawImage(embedded, {
+            x: extraP.x,
+            y: extraP.y,
+            width: extraP.width,
+            height: extraP.height,
+            opacity: 0.92,
+          })
+        }
+        if (signerName && signerFont && extraP.showSignerName !== false) {
+          const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+          let size = 10
+          while (size > 7 && signerFont.widthOfTextAtSize(signerName, size) > extraSlot.maxWidth) size -= 0.5
+          const tw = signerFont.widthOfTextAtSize(signerName, size)
+          targetPage.drawText(signerName, {
+            x: extraSlot.xCenter - tw / 2,
+            y: extraSlot.y,
+            size,
+            font: signerFont,
+            color: rgb(0, 0, 0),
+          })
+        }
+      } catch { /* skip */ }
+    }
   }
 
   // QR trỏ về trang chi tiết văn bản — vẽ trên TẤT CẢ trang. Ưu tiên vị trí người

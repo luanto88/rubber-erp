@@ -1572,8 +1572,8 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Nhúng các bản sao chữ ký (clone) cho file phụ soát xét (change_request)
-            if (signFileKind !== "main" && signaturePlacement?.extraPlacements?.length) {
+            // Nhúng các bản sao chữ ký (clone) nếu có
+            if (signaturePlacement?.extraPlacements?.length) {
               const extraSigImg = await getSigImage(factoryId, userId)
               const extraSignerName = signerNames.get(userId)?.trim()
               for (const extraP of signaturePlacement.extraPlacements) {
@@ -1754,6 +1754,41 @@ export async function POST(req: NextRequest) {
               font: signerNameFont,
               color: rgb(0, 0, 0),
             })
+          }
+
+          if (placement?.extraPlacements?.length) {
+            const extraSignerName = signerNames.get(signerUserId)?.trim()
+            for (const extraP of placement.extraPlacements) {
+              const extraPageIndex = extraP.page - 1
+              if (extraPageIndex < 0 || extraPageIndex >= originalPages.getPageCount()) continue
+              try {
+                if (sigImg && extraP.showSignature !== false) {
+                  const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
+                  originalPages.getPage(extraPageIndex).drawImage(embedded, {
+                    x: extraP.x,
+                    y: extraP.y,
+                    width: extraP.width,
+                    height: extraP.height,
+                    opacity: 0.92,
+                  })
+                }
+                if (extraSignerName && extraP.showSignerName !== false) {
+                  const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+                  let nameFontSize = 13
+                  while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
+                    nameFontSize -= 0.5
+                  }
+                  const nameWidth = signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize)
+                  originalPages.getPage(extraPageIndex).drawText(extraSignerName, {
+                    x: extraSlot.xCenter - nameWidth / 2,
+                    y: extraSlot.y,
+                    size: nameFontSize,
+                    font: signerNameFont,
+                    color: rgb(0, 0, 0),
+                  })
+                }
+              } catch { /* bỏ qua lỗi embed bản sao */ }
+            }
           }
         } catch (err) {
           sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })

@@ -729,35 +729,12 @@ Không sửa `handleReturn`/`handleUpload` để null hóa các trường file �
 
 ## Trạng thái triển khai
 
-- [x] Code: API routes (embed-doc, search, clone, finalize, batch-embed)
-- [x] Code: UI pages (forms/page.tsx, forms/[id]/page.tsx)
-- [x] Code: iso-types.ts + iso-shell.tsx đã cập nhật
-- [x] Code: Embed trigger fire-and-forget sau phe_duyet trong documents/[id]/page.tsx
-- [x] Feature: WorkflowStepper (Cấp 1/2 stepper, badge tra_ve/tu_choi)
-- [x] Feature: mo_ta_tim_kiem trên form soạn thảo + read-only trên form instance
-- [x] Feature: Drag-and-drop SignPlacementModal cho cả 3 bước
-- [x] Feature: replaceFormTags() cho Office signing
-- [x] Feature: soan_thao action handler trong finalize/route.ts
-- [x] Feature: Auto-upload + card file + PDF locks toggle (2026-06-07)
-- [x] Feature: Download filename = instance.tieu_de (2026-06-07)
-- [x] Feature: pdfjs local worker trong SignPlacementModal (2026-06-07)
-- [x] Feature: "Lập hồ sơ" quick dialog trong forms/page.tsx (2026-06-07)
-- [x] Feature: Quick-action badges trong forms list rows (2026-06-07)
-- [x] Feature: ISO form instances trong my-tasks/page.tsx (2026-06-07)
-- [x] Feature: Bell notification icon trong layout.tsx với Supabase Realtime (2026-06-07)
-- [x] Feature: SignPlacementModal hiển thị tên thật (`profiles.full_name`) + QR thật (`QRCodeSVG`) (2026-06-07)
-- [x] Feature: `canReturn` chỉ cho phép đúng `xem_xet_user_id` / `phe_duyet_user_id` (2026-06-07)
-- [x] Feature: Action buttons (Ký & Gửi / Ký xem xét / Phê duyệt / Trả về) nằm cùng hàng với WorkflowStepper (2026-06-07)
-- [x] Feature: `/api/iso/forms/notify/route.ts` — in-app + Telegram + Gmail cho mọi workflow action (2026-06-07)
-- [x] Feature: QR stamp trên tất cả trang PDF (loop `pdfDoc.getPages()`) trong finalize route (2026-06-07)
-- [x] Feature: `openSendModal` async auto-save config trước khi mở SignPlacementModal; xóa nút "Lưu cài đặt" (2026-06-08)
-- [x] Feature: Card gộp "Tiến trình & Lịch sử" thay thế 2 section riêng (2026-06-08)
-- [x] Feature: Badge action trong danh sách instances lớn hơn ~30%, cột tiêu đề giới hạn width (2026-06-08)
-- [x] Fix: DOCX QR broken image — unique `docPr id`, EMU 432000×432000 (12mm vuông), Buffer trực tiếp không qua `.buffer` (2026-06-09)
-- [x] Fix: Modal phê duyệt hiện "Không tải được PDF" — `openPheDuyetModal` dùng `isDraftPdf` check, bỏ qua `final_pdf_url` cho file Office (2026-06-09)
-- [x] Fix: Tags `{{CHU_KY_PHE_DUYET}}` / `{{TEN_PHE_DUYET}}` không được thay — `soan_thao` Office clear `final_pdf_url = null`; server `phe_duyet` không dùng `final_pdf_url` stale làm source cho DOCX (2026-06-09)
-- [x] Migration 1: `20260607_iso_forms_embedding.sql` ✅ Đã chạy
-- [x] Migration 2: `20260607_iso_form_instances.sql` ✅ Đã chạy
-- [x] Migration 3: `20260608_iso_forms_soan_thao_placement.sql` ✅ Đã chạy
-- [x] `GEMINI_API_KEY` đã thêm vào `.env.local`
-- [ ] `GEMINI_API_KEY` cần thêm vào Vercel nếu chưa có
+Toàn bộ code/feature/fix mô tả trong file này (API routes, UI, SignPlacementModal,
+notify, upload, QR...) đã hoàn tất — chi tiết từng mục nằm ở các section tương ứng
+phía trên, không lặp lại danh sách checklist ở đây nữa. 3 migration
+(`20260607_iso_forms_embedding.sql`, `20260607_iso_form_instances.sql`,
+`20260608_iso_forms_soan_thao_placement.sql`) đã chạy.
+
+**Còn 1 việc cần xác nhận**: `GEMINI_API_KEY` đã có trong `.env.local`, nhưng cần
+xác nhận đã thêm vào biến môi trường Vercel (production) hay chưa — nếu chưa, tính
+năng semantic search/embed sẽ lỗi trên production dù chạy đúng ở local.

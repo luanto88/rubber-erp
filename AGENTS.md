@@ -31,3 +31,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Popup và thẻ chi tiết lô trên map EUDR phải dùng bộ field đã merge nói trên để hiển thị gần tương đương module `ban_do_lo`.
 - Không render thẻ overlay HTML thường bên trong cây con của `MapContainer`. Các panel như legend, chi tiết lô, trạng thái tải phải nằm ngoài `MapContainer` để tránh lỗi runtime kiểu Leaflet `appendChild`.
 - Các callback truyền vào `GeoJSON` như `style` và `onEachFeature` nên giữ ổn định bằng `useCallback` nếu state UI bên ngoài map có thể thay đổi khi click/chọn lô.
+
+## Quy ước ISO & Nhân bản chữ ký / tên hiện tại
+
+- **Luồng ký ISO theo Cấp tài liệu**:
+  - **Cấp 1 (3 bước)**: Soạn thảo (Ký & Gửi xem xét) → Xem xét (Ký xem xét & Gửi phê duyệt) → Phê duyệt (Ký phê duyệt & Ban hành).
+  - **Cấp 2 (2 bước)**: Gửi phê duyệt (Người soạn ký & Gửi phê duyệt trực tiếp, bỏ qua bước Xem xét) → Phê duyệt (Ký phê duyệt & Ban hành). Giao diện Cấp 2 hiển thị nhãn `Cấp 2 (2 bước: Gửi phê duyệt → Phê duyệt)` và ẩn vùng thông tin xem xét.
+- **Quy tắc Nhân bản Chữ ký và Tên người ký (Signature & Name Duplication)**:
+  - Nút icon `+` (Nhân bản chữ ký và tên) hiển thị trên cả ô chữ ký gốc lẫn ô tên người ký gốc trong giao diện đặt vị trí ký (`SignPlacementModal`).
+  - Khi bấm `+`: Tạo ra cặp ô chữ ký bản sao và ô tên bản sao mới, vị trí khởi tạo nằm lệch 30px so với ô gốc để kéo-thả.
+  - Các bản sao được trang bị icon mắt (`👁`) để ẩn/hiện và nút xóa (`×`) để tắt/xóa nếu bấm nhầm.
+  - **Chỉ ô gốc (bản chính) mới có nút icon `+`** để tiếp tục nhân bản; các bản sao KHÔNG có nút `+`.
+  - Trong React JSX, mảng các bản sao `extraSigBoxes` phải dùng `<Fragment key={box.id}>` (không dùng wrapper `<div>`) và component kéo-thả `ExtraDraggableBox` phải đặt ở top-level scope ngoài Modal, chỉ dùng handler `onStop` (không dùng `onDrag` cập nhật state) để tránh `bounds="parent"` bị lỗi reset tọa độ `y = 0` hoặc nổ lỗi `findDOMNode` trên React 19.
+  - Phía backend (`generate-pdf`, `documents/sign`, `iso/forms/finalize`), đối với mọi loại file PDF (cả file chính và file phụ), đều tiếp nhận mảng `extraPlacements` để đóng dấu đầy đủ toàn bộ các bản sao chữ ký & tên lên file PDF kết quả.
+

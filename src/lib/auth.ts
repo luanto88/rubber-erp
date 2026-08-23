@@ -157,11 +157,15 @@ async function refreshSessionOnce(): Promise<Session | null> {
     "refreshSession()",
   )
   if (error) {
+    if (error.name === "AuthSessionMissingError" || (error as { status?: number }).status === 400 || error.message?.includes("Auth session missing")) {
+      console.warn(`getFreshAuthSession: refreshSession() — ${error.name}: ${error.message}`)
+      return null
+    }
     console.error(
       `getFreshAuthSession: refreshSession() thất bại — ${error.name}: ${error.message}` +
         ("status" in error && error.status ? ` (status=${error.status})` : ""),
     )
-    throw error
+    return null
   }
   return data.session
 }

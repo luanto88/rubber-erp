@@ -555,13 +555,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
       <aside
         className={
-          "fixed inset-y-0 left-0 z-50 flex w-72 flex-shrink-0 flex-col bg-slate-900 text-white transition-transform duration-300 md:relative md:z-auto md:w-auto md:translate-x-0 md:transition-all " +
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-shrink-0 flex-col bg-brand text-white transition-transform duration-300 md:relative md:z-auto md:w-auto md:translate-x-0 md:transition-all " +
           (mobileNavOpen ? "translate-x-0" : "-translate-x-full") +
           " " +
           (collapsed ? "md:w-16" : "md:w-64")
         }
       >
-        <div className="flex items-center gap-3 border-b border-slate-700 p-4">
+        <div className="flex items-center gap-3 border-b border-white/10 p-4">
           {!collapsed ? (
             <>
               <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-emerald-500/40 bg-white">
@@ -591,7 +591,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               />
             </div>
           )}
-          <button onClick={() => setCollapsed(!collapsed)} className="hidden text-slate-400 hover:text-white md:flex">
+          <button onClick={() => setCollapsed(!collapsed)} className="hidden text-white/60 hover:text-white md:flex">
             <Menu size={18} />
           </button>
         </div>
@@ -611,8 +611,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className={
                       "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors " +
                       (isChildActive
-                        ? "text-emerald-400"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white")
+                        ? "text-emerald-300"
+                        : "text-white/70 hover:bg-white/10 hover:text-white")
                     }
                   >
                     <item.icon size={18} />
@@ -641,8 +641,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           className={
                             "w-full flex items-center gap-3 py-2 pl-10 pr-4 text-sm transition-colors " +
                             (childActive
-                              ? "bg-slate-800 font-bold text-emerald-400"
-                              : "text-slate-400 hover:bg-slate-800 hover:text-white")
+                              ? "bg-white/10 font-bold text-emerald-300"
+                              : "text-white/55 hover:bg-white/10 hover:text-white")
                           }
                         >
                           <child.icon size={15} />
@@ -666,8 +666,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 className={
                   "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors " +
                   (itemActive
-                    ? "bg-slate-800 text-emerald-400"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white")
+                    ? "bg-white/10 text-emerald-300"
+                    : "text-white/70 hover:bg-white/10 hover:text-white")
                 }
               >
                 <item.icon size={18} />
@@ -679,7 +679,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-4 py-2.5 shadow-sm md:px-6">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-emerald-100 bg-white/95 px-4 py-2.5 shadow-sm md:px-6">
           <button
             onClick={() => setMobileNavOpen(true)}
             className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors md:hidden"

@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* ─── Design tokens: Pastel Rừng Cao Su ──────────────────────────────────────
+   Bổ sung thêm cho palette Tailwind mặc định (không xoá/đổi màu nào có sẵn).
+   Xem .claude/rules/05-ui-components.md mục "Pastel Rừng Cao Su" để biết
+   phạm vi áp dụng: khung sườn (sidebar/header) + 4 module Sản lượng, Điều xe/
+   Xuất hàng, Chất lượng, EUDR. Các module khác (ISO, Bảo trì, KPI, Cài đặt...)
+   cố ý giữ nguyên màu cũ. */
+@theme {
+  /* Nền trang mới — trắng ngả xanh rất nhạt, thay cho slate-50 */
+  --color-app-bg: #f2f8f5;
+
+  /* Thương hiệu / sidebar — xanh rừng đậm pastel (Sidebar phương án A đã chốt) */
+  --color-brand: #2f5d52;
+  --color-brand-deep: #1c3a32;
+
+  /* Module Chất lượng/Kiểm nghiệm — "Mint" riêng (phương án B đã chốt),
+     sáng & nhạt hơn Teal thật để không trùng với module Kiểm soát quá trình. */
+  --color-mint-50: #eafbf5;
+  --color-mint-100: #d3f6ea;
+  --color-mint-500: #4bc0a6;
+  --color-mint-600: #34a68d;
+  --color-mint-700: #1f6a58;
+}
+
 html, body { max-width: 100%; overflow-x: hidden; }
 body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 

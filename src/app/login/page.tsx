@@ -318,8 +318,24 @@ function LoginPageContent() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-      <div className="w-full max-w-md">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+        {/* Minh hoạ rừng cao su rất mờ phía sau — SVG tự vẽ, không tải asset ngoài */}
+        <svg
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[60vh] w-full opacity-[0.08]"
+          viewBox="0 0 800 320"
+          preserveAspectRatio="xMidYMax slice"
+          aria-hidden="true"
+        >
+          <g fill="none" stroke="#1c3a32" strokeWidth="2.4">
+            <path d="M60 320 V220 M60 220 C10 200 10 150 60 140 C60 100 110 90 110 140 C160 150 160 200 110 220 V320" />
+            <path d="M180 320 V190 M180 190 C130 170 130 110 180 100 C180 50 240 40 240 100 C290 110 290 170 240 190 V320" />
+            <path d="M310 320 V230 M310 230 C265 214 265 168 310 158 C310 122 360 114 360 158 C405 168 405 214 360 230 V320" />
+            <path d="M450 320 V170 M450 170 C395 148 395 82 450 70 C450 14 518 4 518 70 C573 82 573 148 518 170 V320" />
+            <path d="M600 320 V220 M600 220 C555 204 555 158 600 148 C600 112 650 104 650 148 C695 158 695 204 650 220 V320" />
+            <path d="M730 320 V210 M730 210 C685 194 685 148 730 138 C730 102 780 94 780 138 C825 148 825 194 780 210 V320" />
+          </g>
+        </svg>
+      <div className="relative w-full max-w-md">
         <div className="mb-3 flex justify-end">
           <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
         </div>
@@ -345,7 +361,7 @@ function LoginPageContent() {
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
+        <div className="rounded-3xl border border-white/60 bg-white/70 p-8 shadow-xl backdrop-blur-md">
           {booting && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />

@@ -1,13 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, Fragment } from "react"
 import type { RefObject } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft, Download, Upload, Eye, EyeOff, CheckCircle2, X,
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Plus,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -43,6 +43,12 @@ type FullPlacement = {
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
   showPrefix?: boolean
   prefixX?: number; prefixY?: number; prefixWidth?: number; prefixHeight?: number
+  extraPlacements?: Array<{
+    page: number
+    x: number; y: number; width: number; height: number
+    showSignature: boolean; showSignerName: boolean
+    nameX: number; nameY: number; nameWidth: number; nameHeight: number
+  }>
 }
 
 type ElemState = { x: number; y: number; w: number; h: number }
@@ -155,6 +161,38 @@ function ReturnModal({ onConfirm, onClose }: { onConfirm: (lyDo: string) => void
   )
 }
 
+function ExtraDraggableBox({
+  position,
+  onDrag,
+  onStop,
+  zIndex = 12,
+  children,
+}: {
+  position: { x: number; y: number }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onDrag?: (e: any, d: { x: number; y: number }) => void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onStop?: (e: any, d: { x: number; y: number }) => void
+  zIndex?: number
+  children: React.ReactNode
+}) {
+  const nodeRef = useRef<HTMLDivElement>(null)
+  return (
+    <Draggable
+      nodeRef={nodeRef as RefObject<HTMLElement>}
+      position={position}
+      onDrag={onDrag}
+      onStop={onStop}
+      bounds="parent"
+      cancel=".react-resizable-handle,button"
+    >
+      <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
+        {children}
+      </div>
+    </Draggable>
+  )
+}
+
 // ─── Sign Placement Modal ─────────────────────────────────────────────────────
 function SignPlacementModal({
   action,
@@ -216,6 +254,12 @@ function SignPlacementModal({
   const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
   const [showSig, setShowSig] = useState(true)
   const [showName, setShowName] = useState(true)
+  const [extraSigBoxes, setExtraSigBoxes] = useState<Array<{
+    id: number
+    sigX: number; sigY: number; sigW: number; sigH: number
+    nameX: number; nameY: number; nameW: number; nameH: number
+    showSignature: boolean; showSignerName: boolean
+  }>>([])
 
   // nodeRefs for react-draggable (React 19 requirement)
   const sigNodeRef = useRef<HTMLDivElement>(null)
@@ -349,6 +393,20 @@ function SignPlacementModal({
         showSignature: showSig,
         showSignerName: showName,
         nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
+      }
+
+      if (extraSigBoxes.length > 0) {
+        placement.extraPlacements = extraSigBoxes.map((box) => {
+          const sPdf = toPdf(box.sigX, box.sigY, box.sigW, box.sigH)
+          const nPdf = toPdf(box.nameX, box.nameY, box.nameW, box.nameH)
+          return {
+            page: currentPage,
+            x: sPdf.x, y: sPdf.y, width: sPdf.width, height: sPdf.height,
+            showSignature: box.showSignature,
+            showSignerName: box.showSignerName,
+            nameX: nPdf.x, nameY: nPdf.y, nameWidth: nPdf.width, nameHeight: nPdf.height,
+          }
+        })
       }
 
       if (action === "soan_thao") {
@@ -577,15 +635,44 @@ function SignPlacementModal({
                             <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
                           </div>
                         )}
-                        <button
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={() => setShowSig((v) => !v)}
-                          className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
-                          style={{ zIndex: 20 }}
-                          title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
-                        >
-                          {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
-                        </button>
+                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => setShowSig((v) => !v)}
+                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
+                          >
+                            {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => {
+                              const offset = 30 * (extraSigBoxes.length + 1)
+                              setExtraSigBoxes((prev) => [
+                                ...prev,
+                                {
+                                  id: Date.now() + Math.random(),
+                                  sigX: sigState.x + offset,
+                                  sigY: sigState.y + offset,
+                                  sigW: sigState.w,
+                                  sigH: sigState.h,
+                                  nameX: nameState.x + offset,
+                                  nameY: nameState.y + offset,
+                                  nameW: nameState.w,
+                                  nameH: nameState.h,
+                                  showSignature: true,
+                                  showSignerName: true,
+                                },
+                              ])
+                            }}
+                            className="w-5 h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold"
+                            title="Nhân bản chữ ký và tên (+)"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        </div>
                       </div>
                     </Resizable>
                   </div>
@@ -616,15 +703,44 @@ function SignPlacementModal({
                         ) : (
                           <span className="text-[10px] text-slate-400">Ẩn tên</span>
                         )}
-                        <button
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={() => setShowName((v) => !v)}
-                          className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50"
-                          style={{ zIndex: 20 }}
-                          title={showName ? "Ẩn tên" : "Hiện tên"}
-                        >
-                          {showName ? <EyeOff size={10} /> : <Eye size={10} />}
-                        </button>
+                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => setShowName((v) => !v)}
+                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            title={showName ? "Ẩn tên" : "Hiện tên"}
+                          >
+                            {showName ? <EyeOff size={10} /> : <Eye size={10} />}
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => {
+                              const offset = 30 * (extraSigBoxes.length + 1)
+                              setExtraSigBoxes((prev) => [
+                                ...prev,
+                                {
+                                  id: Date.now() + Math.random(),
+                                  sigX: sigState.x + offset,
+                                  sigY: sigState.y + offset,
+                                  sigW: sigState.w,
+                                  sigH: sigState.h,
+                                  nameX: nameState.x + offset,
+                                  nameY: nameState.y + offset,
+                                  nameW: nameState.w,
+                                  nameH: nameState.h,
+                                  showSignature: true,
+                                  showSignerName: true,
+                                },
+                              ])
+                            }}
+                            className="w-5 h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold"
+                            title="Nhân bản chữ ký và tên (+)"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        </div>
                       </div>
                     </Resizable>
                   </div>
@@ -653,6 +769,91 @@ function SignPlacementModal({
                     </div>
                   </Draggable>
                 )}
+
+                {/* Extra duplicate signature and name boxes */}
+                {extraSigBoxes.map((box, idx) => (
+                  <Fragment key={box.id}>
+                    <ExtraDraggableBox
+                      position={{ x: box.sigX, y: box.sigY }}
+                      onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b))}
+                    >
+                      <Resizable
+                        size={{ width: box.sigW, height: box.sigH }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigW: b.sigW + delta.width, sigH: b.sigH + delta.height } : b))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={40} minHeight={20}
+                      >
+                        <div className="w-full h-full border border-dashed border-emerald-500 bg-emerald-50/70 rounded relative select-none">
+                          {box.showSignature && signatureUrl && (
+                            <img src={signatureUrl} alt="Chữ ký bản sao" className="w-full h-full object-contain opacity-90" />
+                          )}
+                          {box.showSignature && !signatureUrl && (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <span className="text-[10px] text-slate-400">Chữ ký bản sao {idx + 1}</span>
+                            </div>
+                          )}
+                          {!box.showSignature && (
+                            <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
+                              <span className="text-[10px] text-slate-400">Ẩn chữ ký bản sao</span>
+                            </div>
+                          )}
+                          <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b))}
+                              className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                              title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
+                            >
+                              {box.showSignature ? <EyeOff size={10} /> : <Eye size={10} />}
+                            </button>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => setExtraSigBoxes((prev) => prev.filter((b) => b.id !== box.id))}
+                              className="w-5 h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold"
+                              title="Tắt / Xóa bản sao này"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      </Resizable>
+                    </ExtraDraggableBox>
+
+                    <ExtraDraggableBox
+                      position={{ x: box.nameX, y: box.nameY }}
+                      onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b))}
+                    >
+                      <Resizable
+                        size={{ width: box.nameW, height: box.nameH }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={60} minHeight={16}
+                      >
+                        <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
+                          {box.showSignerName ? (
+                            <span className="text-[10px] font-bold text-violet-700 truncate px-1">{userName || "Người ký"}</span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Ẩn tên bản sao</span>
+                          )}
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b))}
+                            className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            style={{ zIndex: 20 }}
+                            title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
+                          >
+                            {box.showSignerName ? <EyeOff size={10} /> : <Eye size={10} />}
+                          </button>
+                        </div>
+                      </Resizable>
+                    </ExtraDraggableBox>
+                  </Fragment>
+                ))}
               </>
             )}
           </div>
