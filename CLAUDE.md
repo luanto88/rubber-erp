@@ -1117,3 +1117,70 @@ cho trang này, cần bàn phương án cụ thể riêng, không tự suy diễ
    duyệt (Chrome/Edge/Firefox) — đây là kỹ thuật mới lần đầu dùng trong repo, dù đã verify hợp
    lệ theo spec SVG, nên cần xác nhận trực quan ít nhất 1 lần trước khi áp dụng thêm nơi khác.
 
+## Cập nhật 2026-08-24 (tiếp 7) — Trang đăng nhập + sidebar dùng ảnh cạo mủ thật, định hình
+phong cách "ảnh thật + mờ dần" cho các module sau này
+
+Người dùng cung cấp 2 ảnh mockup đích (`cung_cap_dl/dang_nhap.png`, `cung_cap_dl/sau_dn.png`/
+`slidebar.png`), 2 ảnh nền thật chủ đề cạo mủ cao su (`cung_cap_dl/r1.jpg` cho đăng nhập,
+`r2.jpg` cho sidebar), và 3 logo chứng nhận ISO thật (`9001_2015.png`, `14001_2015.png`,
+`14067_2018.png`) để thay cho SVG minh hoạ vẽ tay đang dùng.
+
+**Quy trình đã áp dụng (bắt buộc theo yêu cầu người dùng)**: dựng 2 file HTML tĩnh tham khảo
+trong `cung_cap_dl/` (`thiet_ke_dang_nhap_moi.html`, `thiet_ke_sidebar_moi.html`) trước — lặp
+chụp screenshot bằng `npx --yes playwright screenshot` (đã tự cài `chromium` qua
+`npx playwright install chromium` vì bản cache sẵn trên máy lệch version) để tự đối chiếu với
+ảnh mockup, chỉnh tới khi khớp, rồi mới đưa vào code thật. Ban đầu dùng `border-radius` hình
+elip lớn để tạo cạnh cong ngăn cách 2 cột (giống ý tưởng "vòng cung" trong mockup) nhưng người
+dùng phản hồi muốn đổi hẳn hướng: **ảnh cạo mủ lấn dần sang khoảng 50% chiều rộng trang rồi mờ
+dần hoà vào nền trắng của form**, không còn cạnh cứng nào — đã đổi sang kỹ thuật
+`mask-image`/`-webkit-mask-image` với `linear-gradient` ngang, xác nhận lại qua screenshot mới
+rồi mới duyệt.
+
+### Đã triển khai vào code thật
+
+- Asset copy vào `public/`: `login-bg-forest.jpg`, `sidebar-bg-forest.jpg`,
+  `badges/iso-9001.png`, `badges/iso-14001.png`, `badges/iso-14067.png`.
+- `src/app/login/page.tsx`: viết lại toàn bộ phần trình bày (JSX/className), **giữ nguyên 100%**
+  state/handler cũ (`handleLogin`, `handleRegister`, bootstrap effect, dropdown phòng ban,
+  `CustomerPortalLangToggle`...) — chỉ thêm 2 state UI-tĩnh mới `showPassword`/`rememberMe`
+  (không nối logic auth thật, đã chốt với người dùng khi duyệt thiết kế). Cột trái tách 2 nhánh
+  theo breakpoint: `lg:hidden` giữ nguyên y hệt bản gradient+SVG cũ cho mobile/tablet (không đụng
+  gì, tránh rủi ro hồi quy), `hidden lg:block` là bản mới dùng `next/image` (`/login-bg-forest.jpg`)
+  + mask-image ngang lấn-mờ-dần. Card form thêm avatar tròn nổi mép trên, divider icon `Leaf`,
+  input nền kem (`#fdf3d9`/`#f0e2b8`, literal hex — không dùng `var()` trong style) kèm icon
+  prefix (`User`/`Lock`/`Building2`), toggle ẩn/hiện mật khẩu (`Eye`/`EyeOff`), hàng "Ghi nhớ
+  đăng nhập"/"Quên mật khẩu?" tĩnh, 3 badge ISO dùng đúng logo thật (crop bằng
+  `backgroundSize: "235% auto"` + `backgroundPosition: "2% 4%"` để chỉ lộ dấu hiệu tròn, bỏ chữ
+  "QUACERT" rườm rà), hàng cam kết thương hiệu 4 mục cuối trang. Markup card này dùng chung cho
+  cả mobile lẫn desktop (chỉ nền/branding bên trái khác nhau).
+- `src/app/dashboard/layout.tsx`: `<aside>` thêm 1 lớp `next/image` (`/sidebar-bg-forest.jpg`)
+  `absolute inset-x-0 bottom-0 h-[52%] -z-10` với mask-image dọc (mờ dần từ dưới lên, hoà vào
+  `bg-brand`/`bg-brand-deep`), đặt sau lớp hoa văn rãnh cạo mủ hiện có, dùng `absolute` (không
+  phải `fixed`) để không đụng landmine containing-block đã ghi ở
+  `.claude/rules/24-notification-bell-module-tasks.md`. Header sidebar đổi tên nhà máy từ
+  `truncate` 1 dòng sang cho phép wrap 2 dòng, subtitle đổi màu mint uppercase tracked — không
+  đụng logic/permission/collapse/nav nào khác.
+- Đã ghi lại công thức mask-image + quy tắc mở rộng làm chuẩn cho các module sau vào
+  `.claude/rules/05-ui-components.md` mục "Ảnh thật + hiệu ứng mờ dần" (ngay dưới mục
+  `PageHeaderBanner`) — theo đúng yêu cầu "định hình phong cách mới làm nền tảng cho các module
+  sau này".
+
+### Đã kiểm chứng
+
+- `npx tsc --noEmit` và `npx eslint src/app/login/page.tsx src/app/dashboard/layout.tsx` đều
+  sạch.
+- Tự khởi động tạm 1 dev server cục bộ (xác nhận trước đó không có process `node.exe`/cổng 3000
+  nào đang chạy — an toàn theo đúng quy tắc "không chạy build khi không chắc dev server người
+  dùng đang chạy song song"), chụp screenshot `/login` thật ở cả desktop (1536×900) và mobile
+  (430×900) qua Playwright — xác nhận hiệu ứng ảnh lấn-mờ-dần hiển thị đúng như bản HTML tham
+  khảo đã được duyệt, mobile giữ nguyên y hệt thiết kế cũ. Đã tắt dev server tạm này ngay sau khi
+  xác nhận xong (`taskkill` đúng PID đang bind cổng 3000, không đụng các `node.exe` khác không
+  xác định được nguồn gốc).
+- **Chưa xác nhận trực quan `/dashboard` (sidebar) trên trình duyệt thật** — trang này yêu cầu
+  đăng nhập nên không tự động screenshot được; chỉ xác nhận gián tiếp qua log dev server (route
+  `/dashboard` compile và trả `200` thành công, không có lỗi React/TypeScript khi 1 tab trình
+  duyệt thật — có vẻ của người dùng, tự kết nối lại vào dev server tạm này — tải trang và gọi
+  API thành công). Cần người dùng tự mở `/dashboard` sau khi đăng nhập để xác nhận trực quan lớp
+  ảnh mờ dần ở đáy sidebar hiển thị đúng, không che khuất menu, không giảm độ tương phản chữ khi
+  cuộn danh sách dài, và responsive mobile (drawer trượt) vẫn hoạt động bình thường.
+

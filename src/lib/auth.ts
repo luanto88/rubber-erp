@@ -17,6 +17,9 @@ export type Profile = {
   approved_at: string | null
   disabled_by: string | null
   disabled_at: string | null
+  // true khi mật khẩu vừa được reset qua luồng "Quên mật khẩu" — bắt buộc đổi sang mật khẩu tự
+  // chọn trước khi vào được dashboard (xem dashboard/layout.tsx + force-change-password/page.tsx)
+  must_change_password: boolean
 }
 
 export type PermissionCode = string
@@ -215,7 +218,7 @@ export async function fetchProfileByAuthId(authUserId: string) {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, username, auth_email, full_name, factory_id, department, role, status, approved_by, approved_at, disabled_by, disabled_at",
+      "id, username, auth_email, full_name, factory_id, department, role, status, approved_by, approved_at, disabled_by, disabled_at, must_change_password",
     )
     .eq("id", authUserId)
     .single()

@@ -505,6 +505,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isPublicStorageLookup, loading, user, pathname, router])
 
+  // Tài khoản vừa đăng nhập bằng mật khẩu tạm (do luồng "Quên mật khẩu" sinh ra) bị ép sang
+  // trang đổi mật khẩu bắt buộc trước khi dùng bất kỳ trang nào khác — mirror đúng pattern gate
+  // của role="customer" ở trên. Không cần permission gì, chỉ cần đăng nhập hợp lệ.
+  useEffect(() => {
+    if (isPublicStorageLookup) return
+    if (loading || !user) return
+    if (user.must_change_password && !pathname.startsWith("/dashboard/force-change-password")) {
+      router.replace("/dashboard/force-change-password")
+    }
+  }, [isPublicStorageLookup, loading, user, pathname, router])
+
   // Đóng drawer menu mobile khi bấm phím Escape
   useEffect(() => {
     if (!mobileNavOpen) return
@@ -539,8 +550,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  // Print pages và trang xác nhận quét QR (full-screen, không sidebar) bypass layout entirely
-  if (pathname.includes("/print") || pathname.startsWith("/dashboard/product/confirm")) {
+  // Print pages, trang xác nhận quét QR, và trang bắt buộc đổi mật khẩu (full-screen, không
+  // sidebar) bypass layout entirely
+  if (
+    pathname.includes("/print") ||
+    pathname.startsWith("/dashboard/product/confirm") ||
+    pathname.startsWith("/dashboard/force-change-password")
+  ) {
     return <>{children}</>
   }
 
@@ -561,19 +577,40 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           (collapsed ? "md:w-16" : "md:w-64")
         }
       >
-        {/* Hoa văn "rãnh cạo mủ" — đường chéo lặp lại rất mờ, mirror đúng
-            TILE_PATTERN_FOREST (widget-shared.tsx) dùng cho tile Sản lượng.
-            position:absolute (không phải fixed) nên không đụng landmine
-            containing-block của transform/backdrop-filter trên <aside>. */}
+        {/* Ảnh cạo mủ thật (r2.jpg) mờ dần từ dưới lên hoà vào nền xanh — không cạnh cứng.
+            Đã bỏ hẳn hoa văn sọc chéo "rãnh cạo mủ" từng đặt ở đây (mirror
+            TILE_PATTERN_FOREST) — mockup gốc (cung_cap_dl/slidebar.png) chỉ có ảnh thuần,
+            không có sọc; kết hợp sọc + ảnh thật gây rối mắt (phản hồi người dùng 2026-08-24).
+            Đã duyệt qua file tham khảo cung_cap_dl/thiet_ke_sidebar_moi.html trước khi áp
+            dụng. absolute (không phải fixed) nên không đụng landmine containing-block của
+            overlay fixed khác trong app (xem .claude/rules/24-notification-bell-module-tasks.md). */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 -z-10"
+          className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-[52%] overflow-hidden"
           style={{
-            backgroundImage:
-              "repeating-linear-gradient(52deg, rgba(255,255,255,0.1) 0 2px, transparent 2px 22px)",
+            WebkitMaskImage:
+              "linear-gradient(to top, rgba(0,0,0,.95) 0%, rgba(0,0,0,.85) 28%, rgba(0,0,0,.35) 62%, transparent 100%)",
+            maskImage:
+              "linear-gradient(to top, rgba(0,0,0,.95) 0%, rgba(0,0,0,.85) 28%, rgba(0,0,0,.35) 62%, transparent 100%)",
           }}
-        />
-        <div className="flex items-center gap-3 border-b border-white/10 p-4">
+        >
+          <Image
+            src="/sidebar-bg-forest.jpg"
+            alt=""
+            fill
+            sizes="288px"
+            className="object-cover"
+            style={{ objectPosition: "62% 30%" }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                "linear-gradient(180deg, rgba(28,58,50,0) 0%, rgba(20,46,39,.55) 70%, rgba(15,36,30,.75) 100%)",
+            }}
+          />
+        </div>
+        <div className="relative flex items-center gap-3 border-b border-white/10 p-4">
           {!collapsed ? (
             <>
               <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-emerald-500/40 bg-white">
@@ -587,8 +624,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-extrabold">{tc("factoryNameShort")}</div>
-                <div className="truncate text-[10px] text-emerald-400">{tc("factorySystemShort")}</div>
+                <div className="text-[13px] font-extrabold leading-tight">{tc("factoryNameShort")}</div>
+                <div className="truncate text-[9.5px] font-bold uppercase tracking-wider text-emerald-300">
+                  {tc("factorySystemShort")}
+                </div>
               </div>
             </>
           ) : (

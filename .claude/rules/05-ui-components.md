@@ -215,6 +215,64 @@ module thật** (không phải widget Dashboard). Tách file riêng khỏi `Widg
 - Phạm vi cố ý dừng ở header — không lan xuống nút chính/filter bar/bảng dữ liệu bên dưới của
   trang (xem "Phạm vi áp dụng hiện tại" phía trên). Muốn mở rộng thêm phải hỏi lại người dùng.
 
+### Ảnh thật + hiệu ứng mờ dần (2026-08-24, tiếp) — nền tảng cho `/login` và sidebar dashboard
+
+Đã thay thế minh hoạ SVG rừng cao su vẽ tay bằng **ảnh chụp thật** (chủ đề cạo mủ cao su) ở 2
+nơi mang tính "khung sườn" của toàn app — trang đăng nhập (`src/app/login/page.tsx`) và sidebar
+dashboard (`src/app/dashboard/layout.tsx`). Quy trình bắt buộc đã áp dụng và nên lặp lại cho các
+lần thêm ảnh thật tương tự sau này: dựng file HTML tĩnh tham khảo trong `cung_cap_dl/` trước
+(`thiet_ke_dang_nhap_moi.html`, `thiet_ke_sidebar_moi.html`), lặp chụp screenshot bằng
+`npx playwright screenshot` để tự đối chiếu với ảnh mockup gốc, người dùng duyệt xong mới áp
+dụng vào code thật.
+
+**Asset gốc**: `public/login-bg-forest.jpg`, `public/sidebar-bg-forest.jpg` (copy từ
+`cung_cap_dl/r1.jpg`/`r2.jpg`), `public/badges/iso-9001.png`, `iso-14001.png`, `iso-14067.png`
+(logo chứng nhận thật, copy từ `cung_cap_dl/9001_2015.png`/`14001_2015.png`/`14067_2018.png`).
+
+**Kỹ thuật "ảnh lấn dần rồi mờ vào nền"** — kỹ thuật chính, dùng `mask-image`/`-webkit-mask-image`
+với `linear-gradient` để ảnh chụp thật hoà dần vào nền pastel thay vì cắt bằng cạnh cứng
+(border-radius/clip-path đã thử và bị loại vì trông giả tạo — xem lịch sử quyết định ở
+`.claude/plans/xem-logic-c-i-ti-n-rustling-avalanche.md` nếu cần đối chiếu). Áp dụng khác nhau
+theo hướng:
+
+- **Ngang** (trang đăng nhập, cột trái lấn sang phải): `mask-image: linear-gradient(to right,
+  #000 0%, #000 52%, rgba(0,0,0,.55) 68%, transparent 92%)` trên 1 wrapper riêng chứa
+  `<Image fill>` + lớp scrim gradient màu `--color-brand-deep` + hoa văn rãnh cạo mủ hiện có.
+  Container ảnh rộng hơn hẳn phần nội dung text hiển thị (`w-[58%]` chứa ảnh, nhưng
+  `.left-content`/text bên trong chỉ giới hạn `max-width` nhỏ hơn, vd `540px`) — để vùng mờ dần
+  luôn nằm ở khoảng trống giữa 2 cột, không đè lên chữ.
+- **Dọc** (sidebar, ảnh bám đáy mờ dần lên trên): `mask-image: linear-gradient(to top,
+  rgba(0,0,0,.95) 0%, rgba(0,0,0,.85) 28%, rgba(0,0,0,.35) 62%, transparent 100%)` trên 1 wrapper
+  `absolute inset-x-0 bottom-0 h-[52%]` (không phải `fixed` — tránh landmine containing-block đã
+  ghi ở `.claude/rules/24-notification-bell-module-tasks.md`), đặt sau lớp hoa văn hiện có, dùng
+  chung `-z-10` để nằm sau `<nav>`.
+- Luôn kèm 1 lớp scrim gradient màu thương hiệu (`linear-gradient(...)` với giá trị **literal
+  rgba**, không dùng `var(--color-x)` trong style — bài học 2026-08-24 mục 6) phía trên ảnh để
+  chữ trắng vẫn đọc rõ trên vùng ảnh còn đậm.
+
+**Card đăng nhập** — các yếu tố mới đã trở thành pattern chuẩn cho form card kiểu này: avatar
+tròn nổi lên mép trên card (`-top-8`, gradient `linear-gradient(135deg,#3fae66,#1f8a4c)` literal
+hex), divider ngắn có icon `Leaf` ở giữa, input nền kem (`border-[#f0e2b8] bg-[#fdf3d9]`) kèm
+icon prefix bên trái (`User`/`Lock`/`Building2` từ lucide-react, `absolute left-3.5`), toggle
+ẩn/hiện mật khẩu (`Eye`/`EyeOff`), hàng "Ghi nhớ đăng nhập"/"Quên mật khẩu?" **chỉ là UI tĩnh**
+(không có logic auth thật — nếu module khác cần bật thật, đó là quyết định nghiệp vụ riêng, hỏi
+lại người dùng), 3 badge chứng nhận ISO dùng ảnh logo thật (không phải icon generic) crop bằng
+`backgroundSize`/`backgroundPosition` để chỉ lộ phần dấu hiệu tròn, và hàng cam kết thương hiệu 4
+mục cuối trang.
+
+**Mobile giữ nguyên, không đụng**: `src/app/login/page.tsx` cố ý giữ handbrake nguyên bản thiết
+kế gradient + SVG cũ ở `<lg` (class `lg:hidden` trên block cũ, `hidden lg:block` trên block ảnh
+mới) — chỉ desktop (`lg:` trở lên) dùng ảnh thật + mask fade. Lý do: kỹ thuật overlap-mask dùng
+`position: absolute` cho toàn bộ layout 2 cột, không tương thích tự nhiên với flex-col stacking
+trên mobile; tách nhánh theo breakpoint an toàn hơn là viết lại toàn bộ responsive logic. Card
+form (avatar/divider/input kem/badge/cam kết) là markup DÙNG CHUNG cho cả mobile và desktop —
+chỉ phần nền/branding bên trái khác nhau theo breakpoint.
+
+**Khi mở rộng "ảnh thật + mờ dần" sang module khác**: tái dùng đúng công thức mask-image ở trên,
+không tự nghĩ lại cạnh cong/clip-path mới. Luôn dựng HTML tham khảo trong `cung_cap_dl/` trước,
+duyệt bằng screenshot rồi mới sửa code — quy trình này giờ là chuẩn cho mọi thay đổi UI lớn có
+ảnh thật, không riêng gì 2 màn hình này.
+
 ### Con lai chua lam (kho khan-tha kien va dat chu ky/QR ISO)
 
 Hai khu vuc dung ky thuat drag-and-drop HTML5 chua duoc lam mobile-friendly, theo dung quyet dinh cua nguoi dung ("de sau, chua quyet dinh huong xu ly"):
