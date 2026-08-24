@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { FlaskConical } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { hasPermission } from "@/lib/auth"
 import {
@@ -110,8 +111,10 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
     <WidgetCard
       title="Chất lượng"
       subtitle="Tỷ lệ đạt hạng theo mục tiêu & xu hướng chỉ tiêu chính"
+      theme="mint"
+      icon={FlaskConical}
       action={
-        <Link href="/dashboard/quality" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+        <Link href="/dashboard/quality" className="text-xs font-semibold text-white/90 hover:text-white">
           Xem tất cả →
         </Link>
       }

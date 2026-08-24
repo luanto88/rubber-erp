@@ -53,6 +53,8 @@ import {
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
   ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2
 } from "lucide-react"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL_POSITIONS = [
@@ -1100,6 +1102,7 @@ export default function StoragePage() {
   // ? Render ????
   return (
     <div>
+      <PageBackgroundMotif theme="amber"/>
       {kpiPrompt && (
         <KpiLinkPrompt
           factoryId={factoryId}
@@ -1151,22 +1154,20 @@ export default function StoragePage() {
       )}
 
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">
-            {dayChuyen === "Mủ tạp" ? "Ngăn lưu" : "Hồ chứa"}
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Quản lý {dayChuyen === "Mủ tạp" ? "ngăn lưu" : "hồ chứa"} mủ cao su
-          </p>
-        </div>
-        {canCreateStorage && (
-          <button onClick={openAdd}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
-            <Plus size={16} /> Thêm {subTerm.toLowerCase()}
-          </button>
-        )}
-      </div>
+      <PageHeaderBanner
+        title={dayChuyen === "Mủ tạp" ? "Ngăn lưu" : "Hồ chứa"}
+        subtitle={`Quản lý ${dayChuyen === "Mủ tạp" ? "ngăn lưu" : "hồ chứa"} mủ cao su`}
+        theme="amber"
+        icon={Warehouse}
+        action={
+          canCreateStorage ? (
+            <button onClick={openAdd}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-amber-800 font-bold rounded-xl shadow-sm transition-all btn-press hover:bg-white/90">
+              <Plus size={16} /> Thêm {subTerm.toLowerCase()}
+            </button>
+          ) : undefined
+        }
+      />
 
       {/* Scrollable content */}
       <div ref={revealRef} className="scroll-reveal">

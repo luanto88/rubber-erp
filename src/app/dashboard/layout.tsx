@@ -561,6 +561,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           (collapsed ? "md:w-16" : "md:w-64")
         }
       >
+        {/* Hoa văn "rãnh cạo mủ" — đường chéo lặp lại rất mờ, mirror đúng
+            TILE_PATTERN_FOREST (widget-shared.tsx) dùng cho tile Sản lượng.
+            position:absolute (không phải fixed) nên không đụng landmine
+            containing-block của transform/backdrop-filter trên <aside>. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(52deg, rgba(255,255,255,0.1) 0 2px, transparent 2px 22px)",
+          }}
+        />
         <div className="flex items-center gap-3 border-b border-white/10 p-4">
           {!collapsed ? (
             <>

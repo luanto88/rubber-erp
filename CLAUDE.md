@@ -550,3 +550,570 @@ Người dùng gửi 2 ảnh so sánh (bản hiện tại vs 1 ảnh tham khảo
 - Nội bộ đơn vị (`Don_vi`): thêm effect tự động chọn `soan_thao_user_id = userId` nếu người đang đăng nhập nằm trong danh sách nhân sự **hợp lệ** của phòng ban đã chọn (khớp đúng danh sách đã lọc bỏ người phê duyệt — `donViUsers.filter(u => u.id !== phe_duyet_user_id)` — để tránh bug `<select>` hiện sai do set value không khớp option nào, đúng loại lỗi đã từng gặp và ghi lại ở module Dự đoán số lô). Vẫn cho đổi tay (vd admin nhập hộ văn bản giấy của đồng nghiệp khác phòng ban) — effect chỉ set lại khi lựa chọn hiện tại không còn hợp lệ (vd đổi phòng ban), không ép buộc liên tục. Có hint xanh nhỏ "Mặc định: bạn — người đang tải lên" khi giá trị đang chọn trùng `userId`.
 - Nội bộ công ty (`Cong_ty`): trang này trước đây **không lưu `soan_thao_user_id`/`nguoi_soan_thao_display` nào cả** (luôn `null`) — nghĩa là văn bản Upload phạm vi công ty không ai (trừ admin) sửa lại được sau này (`documents/[id]/page.tsx`'s `isSoanThao = doc.soan_thao_user_id === user?.id || isAdmin` luôn `false` cho user thường), và "Người soạn thảo" trên trang chi tiết luôn hiện "—". Đã sửa: payload giờ luôn set `soan_thao_user_id = userId`, `nguoi_soan_thao_display = userFullName` cho nhánh Cong_ty (không có UI chọn — mirror đúng hành vi `new/page.tsx`, nơi người soạn thảo luôn là session user, không cho chọn tay ở cả 2 `pham_vi`).
 - **Chưa test tay**: tạo Upload Nội bộ đơn vị → chọn phòng ban của chính mình → xác nhận "Người lập" tự chọn đúng tên mình kèm hint xanh; đổi sang phòng ban khác không có mình → xác nhận về "— Chọn người lập —" (không bị set nhầm); tạo Upload Nội bộ công ty → lưu xong mở trang chi tiết xác nhận "Người soạn thảo" hiện đúng tên mình (không còn "—"), và tài khoản đó (không phải admin) giờ thấy được nút "Sửa" cho đúng văn bản mình vừa upload.
+
+## Cập nhật 2026-08-24 — Hoa văn theo module (mockup) + banner "Pastel Rừng Cao Su" cho Dashboard chính (code thật)
+
+Hai phần việc tách biệt hoàn toàn: (1) chỉ sửa 1 file mockup tĩnh, không đụng app; (2) sau khi
+người dùng đồng ý, đưa đúng hướng thiết kế đó vào code thật nhưng **phạm vi CHỈ giới hạn trang
+Dashboard chính** — đã hỏi và chốt rõ 2 điểm trước khi code (xem chi tiết quyết định trong
+`.claude/plans/wondrous-cuddling-hare.md` nếu cần tra lại). Ghi lại kỹ theo từng khu vực để
+phiên sau không nhầm cái nào đã đổi, cái nào cố ý giữ nguyên.
+
+### 1. File mockup (`cung_cap_dl/thiet_ke_moi_pastel_rung_cao_su.html`) — KHÔNG phải code app
+
+Đã publish lại Artifact hiện có (link cũ, favicon 🌳 giữ nguyên). Thêm hoa văn liên quan đúng
+nghiệp vụ từng module + sidebar:
+
+- **Sản lượng** (banner có ảnh thật): thêm lớp rãnh cạo mủ chéo mờ phủ trên scrim ảnh; 4 KPI
+  tile module này có vân chéo tinh tế cùng tông.
+- **Điều xe & Xuất hàng**: giữ nguyên đường sóng/đường xe cũ, bổ sung icon xe tải lớn mờ ở góc
+  phải banner; KPI tile có vân đường đi (đường đứt nét).
+- **Chất lượng**: trước đó module này **hoàn toàn chưa có** `.mod-banner` (chỉ có 1
+  `.data-card` thường) — đã thêm mới hẳn 1 banner (icon bình thí nghiệm `i-flask`, tiêu đề
+  "Kiểm nghiệm chất lượng", mô tả TCCS/TCVN, nút "+ Tạo phiếu kiểm nghiệm", hoa văn xoáy tròn +
+  icon kính hiển vi/ống nghiệm mờ); KPI tile có vân chấm bi (dot grid).
+- **EUDR**: giữ nguyên vòng tròn đồng mức cũ, bổ sung icon lá mờ trong `.motif` có sẵn; KPI
+  tile có vân vòng cung góc trên-phải.
+- **Sidebar demo trong mockup**: theo yêu cầu người dùng **giữ nguyên nền sáng** (không đổi
+  sang xanh đậm như ảnh chụp app thật) — chỉ thêm 1 lớp hoa văn đường đồng mức rất mờ
+  (`opacity: 0.08`) phía sau danh sách menu, bọc nội dung thật vào `.shell-sidebar-inner` mới
+  để hoa văn không đè lên chữ (kỹ thuật z-index y hệt các banner khác).
+- 3 icon `<symbol>` mới thêm vào bộ defs: `i-flask`, `i-microscope`, `i-testtube`.
+
+Toàn bộ nằm trong 1 file HTML tĩnh, không liên quan gì tới các mục 2-4 bên dưới.
+
+### 2. Phát hiện quan trọng khi khảo sát code thật trước khi làm mục 3
+
+`src/app/globals.css` đã có sẵn khối `@theme` "Pastel Rừng Cao Su" (`--color-app-bg`,
+`--color-brand`/`--color-brand-deep`, `--color-mint-*`) từ **trước phiên này** (commit
+`46d4af8`, đã merge vào `main`), và **đã áp dụng thật cho sidebar** (`dashboard/layout.tsx`
+dùng `bg-brand` — sidebar thật hiện là xanh rừng đậm, chữ trắng, KHÁC với nền sáng của file
+mockup ở mục 1). Nhưng comment trong file trỏ tới `.claude/rules/05-ui-components.md` mục
+"Pastel Rừng Cao Su" — **mục này chưa từng được viết**, và ngoài sidebar thì **chưa module nào**
+trong 4 module comment nêu tên (Sản lượng, Điều xe/Xuất hàng, Chất lượng, EUDR) thực sự dùng
+token này. Đây là công nợ tài liệu/triển khai dở dang từ trước, không phải do phiên này tạo ra
+— đã tiện thể vá lại (xem mục 3) khi làm Dashboard.
+
+### 3. Dashboard chính (`/dashboard`) — ĐÃ triển khai vào code thật
+
+Đã hỏi và chốt: (a) mở rộng đúng token "Pastel Rừng Cao Su" có sẵn (thêm họ `--color-ocean-*`
+cho Điều xe/Xuất hàng) thay vì bịa màu Tailwind cục bộ; (b) chỉ 3 khu vực khớp đúng module đã
+thiết kế trong mockup được banner + hoa văn đậm, phần còn lại giữ nguyên.
+
+**Đã đổi:**
+
+| File | Thay đổi |
+|---|---|
+| `src/app/globals.css` | Thêm `--color-ocean-50/100/500/600/700` (`#e3f0fb`→`#144171`, đúng giá trị đã dùng trong mockup) vào `@theme`; sửa lại comment đầu khối cho khớp phạm vi thật đã triển khai. |
+| `.claude/rules/05-ui-components.md` | Viết bổ sung mục "Pastel Rừng Cao Su" còn thiếu (vá công nợ tài liệu ở mục 2) — liệt kê đủ 3 họ token, phạm vi áp dụng thật, và convention `WidgetCard`'s `theme`/`icon` prop cho phiên sau. |
+| `src/app/dashboard/_components/widgets/widget-shared.tsx` | `WidgetCard` thêm 2 prop optional `theme?: "forest"\|"ocean"\|"mint"` và `icon?: LucideIcon`. Có `theme` → render banner màu (gradient + hoa văn CSS + icon lớn mờ + icon nhỏ trong vòng tròn) rồi mới tới thân trắng chứa `children`. Không có `theme` → **giữ nguyên y hệt** header trắng phẳng cũ, không đổi 1 dòng nào trong nhánh này. Export thêm 2 hằng className `TILE_PATTERN_FOREST`/`TILE_PATTERN_OCEAN` (Tailwind arbitrary-value `before:[...]`, không đụng CSS toàn cục) cho tile muốn có vân nhẹ mà không cần cả banner. |
+| `production-widget.tsx` | `theme="forest"`, `icon={Droplet}`; 3 tile thống kê (Tồn kho NL/Khô tháng này/Lũy kế năm) cộng thêm `TILE_PATTERN_FOREST` vào className hiện có (không đổi màu nền gốc `bg-blue-50`/`bg-amber-50`/`bg-emerald-50`). |
+| `export-widget.tsx` | `theme="ocean"`, `icon={FileOutput}`; link "Xem tất cả →" đổi màu `text-emerald-600 hover:text-emerald-700` → `text-white/90 hover:text-white` (đang nằm trong banner màu). |
+| `dispatch-widget.tsx` | `theme="ocean"`, `icon={Truck}`; 2 box "Tháng này"/"Năm nay" cộng thêm `TILE_PATTERN_OCEAN`; link "Xem tất cả →" đổi màu như export-widget. |
+| `quality-widget.tsx` | `theme="mint"`, `icon={FlaskConical}`; link "Xem tất cả →" đổi màu như trên. |
+
+**Cố ý KHÔNG đổi gì** (để phiên sau khỏi nhầm là đã làm): `finished-goods-widget.tsx`,
+`inventory-alerts-widget.tsx`, `tasks-summary-widget.tsx`, `quick-notes-widget.tsx`,
+`quick-actions-panel.tsx`, `process-drying-widget.tsx`, `overview-kpi-strip.tsx`, và bố cục
+tổng của `page.tsx` (`SectionTitle`, thứ tự các khu vực, header trang) — đúng 4/8 khu vực
+"Kho & Thành phẩm", "Cảnh báo & việc cần làm", "Việc cần làm", "Ghi chú" giữ y hệt trước.
+`export-widget.tsx`/`dispatch-widget.tsx` vẫn là **2 section/2 card riêng biệt** trong
+`page.tsx` (không gộp DOM thành 1 card như mockup) — chỉ dùng chung tông màu ocean để đọc như
+1 cặp.
+
+**Đã kiểm tra**: `npx tsc --noEmit`, `npx eslint` (các file đã sửa), `npm run build` — cả 3
+đều sạch, route `/dashboard` vẫn `○ Static` như trước khi sửa.
+
+**Chưa test tay trên trình duyệt thật** — phiên sau (hoặc người dùng) cần mở `npm run dev` →
+`/dashboard` và xác nhận:
+
+1. 3 banner (Sản lượng=xanh rừng, Xuất hàng+Điều xe=xanh dương "ocean", Chất lượng=mint) hiển
+   thị đúng màu, icon lớn mờ ở góc không đè lên chữ/số liệu, icon nhỏ trong vòng tròn hiển thị
+   đúng cạnh tiêu đề.
+2. Vân hoa văn trên 5 tile (3 ở Sản lượng, 2 ở Điều xe) hiển thị đúng, không quá đậm che số
+   liệu, không tràn ra ngoài bo góc tile.
+3. Link "Xem tất cả →" trong 3 banner đọc rõ trên nền màu (trắng/trắng-mờ), không bị chìm.
+4. Responsive mobile: banner không vỡ dòng khi màn hình hẹp (`sm:` breakpoint của header row
+   trong banner).
+5. 4 khu vực không đổi (Kho & Thành phẩm, Cảnh báo, Việc cần làm, Ghi chú) trông y hệt trước
+   khi sửa — đối chiếu nhanh bằng mắt để chắc chắn không có tác dụng phụ ngoài ý muốn từ việc
+   sửa `WidgetCard` dùng chung.
+6. Sidebar/header thật **không đổi gì** (vẫn xanh rừng đậm `bg-brand` như trước) — phạm vi lần
+   này không đụng tới, chỉ nhắc lại để tránh hiểu nhầm khi so với mockup.
+
+### 4. Việc chưa làm / cần hỏi lại trước khi mở rộng thêm (không tự ý làm ở phiên sau)
+
+- Nếu người dùng muốn Xuất hàng + Điều xe gộp thành **1 card DOM duy nhất** (đúng y hệt cấu
+  trúc mockup, thay vì 2 section riêng chỉ chung tông màu như hiện tại) — đây là thay đổi cấu
+  trúc `page.tsx` lớn hơn (đổi thứ tự/bố cục render), cần hỏi riêng trước khi làm, không suy
+  diễn từ yêu cầu "gộp tông màu" đã chốt lần này.
+- **Chưa mở rộng theme sang PHẦN CÒN LẠI của 4 trang module** (nút chính/badge trạng thái/
+  filter bar/bảng bên dưới header) — phạm vi đã chốt ở mục 5 dưới đây CHỈ là banner header đầu
+  trang. Nếu người dùng muốn tiếp tục xuống các phần khác của trang, hỏi lại phạm vi cụ thể
+  trước khi code (module nào, đúng những khu vực nào), theo đúng quy trình đã làm.
+- Các trang module khác chưa đụng tới: `dispatch/page.tsx` phần "Bảng phân xe"/"Chi tiết ngày"
+  (2 header phụ khác ở dòng ~1886/~1970, dùng `text-2xl`/`text-xl` riêng, không phải header
+  chính của trang — cố ý không đổi), ISO, Bảo trì, KPI, Cài đặt, và mọi trang module còn lại
+  ngoài 4 trang đã liệt kê ở mục 5.
+
+### 5. Mở rộng banner header sang 4 trang module thật (2026-08-24, tiếp) — ĐÃ triển khai
+
+Người dùng xác nhận qua 2 câu hỏi: (a) áp dụng cho đúng 4 trang — Điều xe, Xuất hàng, Chất
+lượng, EUDR; (b) phạm vi **chỉ phần header/banner đầu trang** (khuyến nghị, an toàn hơn) —
+không đổi nút chính/filter/bảng bên dưới.
+
+**Component mới**: `src/app/dashboard/_components/page-header-banner.tsx` — `PageHeaderBanner`,
+tách riêng khỏi `WidgetCard` (`widgets/widget-shared.tsx`, file đó ghi rõ "chỉ dùng cho widget
+Dashboard, không dùng cho trang/module khác" — không vi phạm comment đó bằng cách tạo component
+mới thay vì import chéo). Nhận `title`/`subtitle` render thành `<h1>` (khác `WidgetCard` dùng
+`<h2>` vì đây là header cấp trang, không phải cấp widget), `theme: "ocean"|"mint"|"moss"`,
+`icon` (LucideIcon), `action` (ReactNode, render bên phải — nhận nguyên khối JSX cũ gồm cả nút
+và logic ẩn/hiện theo quyền, không viết lại logic quyền).
+
+**Token mới**: `--color-moss-50/100/500/600/700` (`#eef1e0`→`#444d26`, đúng giá trị mockup) vào
+`globals.css`'s `@theme` — dùng cho banner EUDR. Không thêm `--color-earth-*` (mockup dùng cho
+text-on-light-bg, không cần vì banner luôn chữ trắng trên nền màu).
+
+**Đã đổi theo file** (chỉ đúng khối header, giữ nguyên mọi logic/điều kiện quyền cũ):
+
+| File | Theme | Icon | Ghi chú |
+|---|---|---|---|
+| `dispatch/page.tsx` | `ocean` | `Truck` | 2 nút "Bảng trắng"/"Thêm bảng" đổi màu cho hợp nền (trắng-mờ + trắng đặc) |
+| `export/page.tsx` | `ocean` | `FileOutput` | 1 nút "Tạo đơn xuất" đổi sang nền trắng/chữ `text-ocean-700` |
+| `quality/page.tsx` | `mint` | `FlaskConical` (mới import) | Giữ nguyên 3 nhánh `hasPermission(...)` đang có sẵn (đang là uncommitted work riêng của phiên trước, không đụng logic) — chỉ đổi màu 3 nút cho hợp nền mint |
+| `eudr/EudrClient.tsx` | `moss` | `Trees` (đã import sẵn) | Không có action nào — header đơn giản nhất, chỉ title+subtitle |
+
+Icon lớn mờ + icon nhỏ trong vòng tròn dùng chung cơ chế với `WidgetCard` (`absolute -right-3
+-bottom-4 opacity-15`), không tái tạo CSS riêng — copy đúng công thức gradient/pattern 3 theme
+đã có (`ocean`/`mint`) và thêm 1 pattern mới cho `moss` (radial dot nhẹ, style riêng không trùng
+`forest`/`ocean`/`mint`).
+
+**Đã kiểm tra**: `npx tsc --noEmit` sạch; `npx eslint` trên cả 5 file (4 trang + component mới)
+sạch tuyệt đối — đối chiếu bằng `git stash` xác nhận các warning/error còn lại ở `dispatch/
+page.tsx`/`quality/page.tsx` là pre-existing (10 lỗi `no-explicit-any` + nhiều warning
+`no-unused-vars`, không liên quan gì tới thay đổi lần này, số dòng chỉ dịch chuyển do xóa bớt
+dòng). `npm run build` pass, cả 4 route vẫn `○ Static` như trước khi sửa (không đổi kiểu render).
+
+**Chưa test tay trên trình duyệt thật** — cần mở `npm run dev` và xác nhận trên cả 4 trang:
+
+1. Banner hiển thị đúng màu (Điều xe/Xuất hàng = xanh dương ocean, Chất lượng = mint, EUDR =
+   xanh rêu moss), icon lớn mờ góc dưới-phải không đè lên chữ, icon nhỏ trong vòng tròn hiện
+   đúng cạnh tiêu đề.
+2. Các nút hành động trong banner (Điều xe: "Bảng trắng"/"Thêm bảng"; Xuất hàng: "Tạo đơn
+   xuất"; Chất lượng: "Tải mẫu"/"Nhập KN"/"Tạo phiếu KN") đọc rõ, bấm được, và **vẫn ẩn/hiện
+   đúng theo quyền** như trước khi đổi UI (đặc biệt Chất lượng — có 3 tầng `hasPermission`
+   lồng nhau, cần test với tài khoản thiếu từng quyền riêng lẻ).
+3. Responsive mobile: banner không vỡ dòng ở màn hình hẹp (`sm:` breakpoint chuyển từ
+   `flex-col` sang `flex-row` trong `PageHeaderBanner`).
+4. EUDR: banner không đè/che thanh tìm kiếm ngay bên dưới.
+5. Phần còn lại của cả 4 trang (bảng, filter, nút phụ, modal...) trông y hệt trước khi sửa —
+   xác nhận đúng phạm vi "chỉ header" như đã chốt, không có tác dụng phụ ngoài ý muốn.
+
+### 6. Fix bug 2026-08-24 (tiếp 2) — banner render trắng/mờ, nguyên nhân + cách xử lý
+
+Sau khi triển khai mục 5, người dùng báo banner ở cả 3 trang (Điều xe/Xuất hàng/EUDR) hiển thị
+**trắng/mờ** (chữ trắng gần như vô hình trên nền gần-trắng) thay vì màu gradient đúng theme.
+
+**2 nguyên nhân đã xác định, đã xử lý cả 2**:
+
+1. **Bug thật trong code**: `THEME_BANNER`/`PAGE_THEME_BANNER` (cả `WidgetCard` lẫn
+   `PageHeaderBanner`) build `background-image` qua style inline bằng
+   `var(--color-ocean-600)` — kỹ thuật đọc custom property Tailwind `@theme` runtime **chưa
+   từng được dùng/kiểm chứng ở đâu khác trong repo**. Đã đổi cả 2 nơi sang **literal hex trực
+   tiếp** (`#1b5590` thay vì `var(--color-ocean-600)`), khớp đúng pattern an toàn sẵn có
+   `TILE_PATTERN_FOREST`/`TILE_PATTERN_OCEAN` (dùng rgb literal, không dùng `var()`). Đây là
+   fix chắc chắn đúng bất kể nguyên nhân gốc là gì.
+2. **Nguyên nhân thực tế nhiều khả năng hơn**: trong phiên sửa lỗi, Claude đã chạy
+   `npm run build` (production build) **nhiều lần** để tự kiểm tra, trong khi phát hiện có
+   tiến trình `node.exe` ~1.7GB đang chạy (dấu hiệu `npm run dev` của người dùng đang sống
+   song song). `dev` và `build` dùng chung thư mục `.next/` — build đè lên trong lúc dev
+   server đang chạy là nguyên nhân kinh điển gây stale/vỡ CSS chunk ở dev session đang mở.
+   Sau khi restart `npm run dev` + hard-refresh trình duyệt, người dùng xác nhận **đã hiển thị
+   lại đúng** (ảnh chụp mockup Quality-card họ gửi kèm chỉ là ảnh tham chiếu thiết kế, không
+   phải bug report).
+
+**Quy tắc bắt buộc cho mọi phiên sau**: 
+
+- **Không chạy `npm run build` khi không chắc dev server của người dùng có đang chạy hay
+  không** — chỉ dùng `npx tsc --noEmit` + `npx eslint <file>` để tự kiểm tra (không đụng
+  `.next/`). Nếu thực sự cần build thử (ví dụ kiểm tra route `○ Static` có đổi không), hỏi
+  người dùng trước xem dev server có đang chạy không.
+- **Không dùng `var(--color-X)` trong style inline hay bất kỳ đâu đọc runtime từ `@theme`** —
+  luôn dùng literal hex/rgb trực tiếp trong code, dù Tailwind class (`bg-ocean-600`,
+  `text-mint-700`...) compile ra `var()` và vẫn hoạt động bình thường (đã xác nhận qua CSS
+  build thật — mọi class màu Tailwind, kể cả `bg-emerald-600`/`text-slate-800` built-in, đều
+  compile thành `var(--color-X)`, và app đã chạy ổn với cơ chế đó từ trước — nên KHÔNG cần đổi
+  các class Tailwind màu hiện có sang literal). Chỉ tránh riêng kiểu code TỰ VIẾT
+  `style={{...: \`var(${token})\`}}` — đây là kỹ thuật mới, chưa kiểm chứng, và là điểm khác
+  biệt duy nhất so với hàng nghìn usage `bg-X`/`text-X` khác đã chạy ổn định trong app.
+
+## Kế hoạch phiên sau (2026-08-24, tiếp 3) — Hoa văn nền theo module + Sidebar hoa văn cao su +
+Redesign màn hình đăng nhập
+
+Người dùng đã xác nhận qua browser thật: 4 banner header (mục 5-6 ở trên) hiển thị đúng màu sau
+khi restart dev server. Yêu cầu tiếp theo — **CHỈ ghi lại kế hoạch ở đây, CHƯA CODE gì ở phiên
+này** — gồm 3 việc độc lập:
+
+#### A. Hoa văn nền các module — hình vẽ đơn giản ẩn dưới nền trắng, liên quan chủ đề module
+
+Người dùng gửi kèm 1 ảnh tham khảo (thẻ bài "Chất lượng" từ mockup `cung_cap_dl/
+thiet_ke_moi_pastel_rung_cao_su.html`): nền trắng ngả xanh rất nhạt, phủ đường đồng mức
+(topographic contour lines) cực mờ + icon ống nghiệm, 2 kính hiển vi, xoáy tròn — tất cả đều
+là stroke mảnh, cùng tông xanh xám nhạt, gần như "ẩn" dưới mắt thường, chỉ nổi lên khi nhìn kỹ.
+Đây LÀ đúng phong cách mockup, KHÔNG phải ảnh báo lỗi.
+
+- Mục tiêu: đưa phong cách hoa văn nền này (khác hẳn banner gradient màu đặc đã làm ở mục 5)
+  vào các trang module thật — nền trắng của card/page vẫn giữ nguyên, chỉ phủ thêm 1 lớp SVG
+  motif rất mờ (opacity ~0.05-0.1) phía sau nội dung, liên quan chủ đề module đó.
+- **Nguồn tham khảo có sẵn, không cần vẽ lại từ đầu**: file mockup
+  `cung_cap_dl/thiet_ke_moi_pastel_rung_cao_su.html` đã có sẵn:
+  - Bộ `<symbol>` defs dùng chung: `i-flask`, `i-microscope`, `i-testtube` (Chất lượng),
+    cộng các icon khác đã liệt kê trong lịch sử phiên `2026-08-24` phần "Hoa văn theo module".
+  - Motif SVG riêng từng module đã vẽ sẵn cho: Sản lượng (rãnh cạo mủ chéo), Điều xe/Xuất hàng
+    (đường sóng/đường xe + icon xe tải lớn mờ), Chất lượng (xoáy tròn + ống nghiệm/kính hiển
+    vi — đúng ảnh user gửi), EUDR (vòng tròn đồng mức + icon lá).
+  - Đây là file HTML tĩnh (`cung_cap_dl/`), KHÔNG phải code app — phiên sau phải đọc file này
+    trước, trích xuất đúng path/symbol SVG cần dùng, không tự vẽ lại motif mới nếu mockup đã
+    có sẵn.
+- **Câu hỏi cần hỏi lại người dùng trước khi code** (theo đúng quy trình đã áp dụng suốt các
+  phiên trước — không tự suy diễn phạm vi):
+  1. Áp dụng cho đúng 4 trang đã có banner (Điều xe/Xuất hàng/Chất lượng/EUDR), hay thêm cả
+     các trang khác (Sản lượng/Thành phẩm/Bảo trì/Kho...)?
+  2. Phủ hoa văn ở đâu — toàn bộ nền trang (`bg-app-bg` phía sau mọi card), hay chỉ trong
+     từng card/section cụ thể (giống banner header — phạm vi hẹp, an toàn hơn)?
+  3. Độ mờ/độ dày hoa văn theo đúng ảnh tham khảo (rất nhẹ, gần như không nhận ra) hay có thể
+     đậm hơn 1 chút để nhận diện rõ module đang xem?
+- **Lưu ý kỹ thuật khi code**: SVG motif nền phải `pointer-events-none`, `aria-hidden="true"`,
+  và đặt sau nội dung theo z-index (giống cách login page hiện tại đã làm với SVG rừng cao su
+  mờ ở `src/app/login/page.tsx` dòng ~322-337 — có sẵn 1 ví dụ đúng kỹ thuật ngay trong app,
+  tham khảo trước khi viết mới). Không dùng màu qua `var(--color-X)` trong SVG `stroke`/`fill`
+  nếu vẽ bằng inline style — theo đúng bài học mục 6 ở trên, dùng literal hex. Nếu vẽ bằng
+  className Tailwind (`stroke-slate-300` chẳng hạn) thì không vấn đề gì (class Tailwind màu
+  vẫn hoạt động bình thường, chỉ tránh cách TỰ VIẾT `var()` trong style/SVG attribute).
+
+#### B. Sidebar — thêm hoa văn liên quan đến cao su (khác hoa văn đồng mức hiện có)
+
+- Sidebar thật (`dashboard/layout.tsx`, `bg-brand`) hiện **chưa có hoa văn nào** — khác với
+  sidebar DEMO trong mockup (đã có 1 lớp hoa văn đường đồng mức rất mờ `opacity: 0.08`, xem
+  lịch sử phiên "Hoa văn theo module" — nhưng đó là hoa văn địa hình/topography, KHÔNG phải
+  hoa văn cao su).
+- Yêu cầu lần này: hoa văn sidebar phải **liên quan trực tiếp đến cao su** — gợi ý (cần hỏi lại
+  người dùng chọn hướng cụ thể, không tự quyết định):
+  - Rãnh cạo mủ (tapping groove) dạng đường chéo lặp lại — đã có sẵn ý tưởng này dùng cho
+    banner Sản lượng trong mockup ("lớp rãnh cạo mủ chéo mờ phủ trên scrim ảnh"), có thể tái
+    dùng cùng pattern cho sidebar.
+  - Lá cao su (dạng lá 3 thùy đặc trưng) rải rác mờ.
+  - Giọt mủ latex (droplet) nhỏ rải rác.
+  - Thân cây cao su cách điệu — đã có sẵn 1 ví dụ SVG rừng cao su mờ ở chính
+    `src/app/login/page.tsx` (dòng ~322-337, minh họa hàng cây cao su cách điệu bằng path
+    cong) — có thể tái dùng/biến thể cho sidebar thay vì vẽ path mới từ đầu.
+- **Câu hỏi cần hỏi lại**: chọn hướng hoa văn nào trong 4 gợi ý trên (hoặc khác); độ mờ mong
+  muốn; có cần khác màu văn bản/icon sidebar hiện tại không (sidebar đang chữ trắng trên nền
+  `bg-brand` xanh rừng đậm — hoa văn phải đủ mờ để không giảm độ tương phản đọc menu).
+- Lưu ý: sidebar dùng `<nav>`/danh sách item thật (không tĩnh như banner) — phải test kỹ hoa
+  văn không che khuất/giảm tương phản chữ khi cuộn menu dài, và không lặp lại đúng bug đã ghi
+  ở `.claude/rules/24-notification-bell-module-tasks.md` (KHÔNG thêm `filter`/`backdrop-filter`/
+  `transform`/`perspective`/`will-change`/`contain` vào `<header>` hay ancestor bao ngoài các
+  overlay `position: fixed` mobile — sidebar cha `<div>` hiện đang dùng `transition-transform`
+  cho slide-in mobile, cần kiểm tra kỹ nếu thêm hoa văn bằng kỹ thuật `::before`/pseudo-element
+  có filter không để tránh phá vỡ containing-block của các overlay `fixed` bên trong).
+
+#### C. Redesign màn hình đăng nhập chuyên nghiệp hơn
+
+- File: `src/app/login/page.tsx` (550 dòng). Hiện tại: card `rounded-3xl bg-white/70
+  backdrop-blur-md` giữa nền gradient `from-emerald-50 via-white to-emerald-100`, có sẵn 1 lớp
+  SVG rừng cao su rất mờ (`opacity-[0.08]`) phía dưới, logo tròn + tên công ty + 2 tab
+  Đăng nhập/Đăng ký, và `CustomerPortalLangToggle` (chuyển ngôn ngữ cho Customer Portal) ở góc
+  trên-phải.
+- Đây là trang phức tạp hơn banner đơn thuần — có form đăng nhập/đăng ký thật, dropdown chọn
+  Nhà máy/Phòng ban (`FactoryOption`/`DepartmentOption`), xử lý lỗi/trạng thái booting. **Bắt
+  buộc đọc kỹ toàn bộ 550 dòng trước khi sửa** — không đoán cấu trúc, không viết lại từ đầu chỉ
+  vì "thiết kế lại", chỉ đổi phần trình bày/CSS, giữ nguyên toàn bộ logic auth/validate/state.
+- **Câu hỏi cần hỏi lại người dùng trước khi code** (chưa biết "chuyên nghiệp hơn" nghĩa là
+  gì cụ thể):
+  1. Có ảnh/mockup tham khảo cụ thể không, hay tự đề xuất hướng thiết kế?
+  2. Giữ nguyên bố cục 1 cột căn giữa hiện tại, hay đổi sang bố cục 2 cột (ảnh/hoa văn lớn bên
+     trái, form bên phải — phổ biến cho trang đăng nhập B2B/ERP "chuyên nghiệp")?
+  3. `CustomerPortalLangToggle` và toàn bộ luồng đăng ký (chọn Nhà máy/Phòng ban) phải giữ
+     nguyên chức năng — chỉ hỏi có cần đổi VỊ TRÍ hiển thị trong bố cục mới hay không.
+- **Lưu ý kỹ thuật**: card hiện dùng `backdrop-blur-md` — theo bài học đã ghi ở
+  `.claude/rules/24-notification-bell-module-tasks.md`, `backdrop-filter` trên 1 ancestor biến
+  nó thành containing-block cho mọi hậu duệ `position: fixed`. Trang login hiện không có overlay
+  `fixed` con nào bên trong card nên chưa phát sinh bug, nhưng nếu redesign thêm modal/dropdown
+  `fixed` bên trong vùng có `backdrop-blur`, phải test kỹ hoặc portal ra ngoài `document.body`.
+
+**Chung cho cả 3 việc**: dùng literal hex khi cần vẽ màu qua style/SVG inline (bài học mục 6);
+không chạy `npm run build` khi chưa chắc dev server người dùng có đang chạy song song hay
+không — ưu tiên `tsc`/`eslint`; hỏi đủ câu hỏi phạm vi ở trên trước khi viết code, theo đúng
+quy trình đã dùng xuyên suốt các phiên "Pastel Rừng Cao Su" trước đó.
+
+## Cập nhật 2026-08-24 (tiếp 4) — Đã triển khai xong cả 3 việc A/B/C của kế hoạch trên
+
+Đã hỏi lại đúng 4 câu hỏi phạm vi qua `AskUserQuestion` trước khi code (kết quả: A áp dụng cho
+đúng 4 trang đã có banner, phủ rất nhẹ toàn nền trang; B chọn hướng "rãnh cạo mủ"; C tự đề xuất
+bố cục 2 cột, không có mockup tham khảo). Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm
+tra (đều sạch, không đụng `npm run build`/`.next/` theo đúng quy tắc mục 6). **Chưa test tay
+trên trình duyệt thật** — checklist cuối mỗi mục.
+
+### A. Hoa văn nền cho 4 trang module (Điều xe/Xuất hàng/Chất lượng/EUDR)
+
+- Component mới `src/app/dashboard/_components/page-background-motif.tsx` — `PageBackgroundMotif`,
+  nhận `theme: "ocean"|"mint"|"moss"` (tái dùng đúng `PageBannerTheme` từ `page-header-banner.tsx`).
+  Tái dùng nguyên path icon (truck/flask/testtube/leaf) đã có sẵn trong bộ `<symbol>` của
+  `cung_cap_dl/thiet_ke_moi_pastel_rung_cao_su.html`, ghép thành 1 SVG `<pattern>` lặp lại (tile
+  260-320px) — khác với motif 1-hình-cố-định trong banner vì nền trang có chiều cao thay đổi
+  theo nội dung, cần pattern lặp thay vì 1 scene cố định. Màu literal hex khớp đúng
+  `--color-ocean-600`/`--color-mint-600`/`--color-moss-600` trong `globals.css` (không dùng
+  `var()`). Container `opacity: 0.06`, `pointer-events-none`, `aria-hidden`.
+- Dùng `position: fixed inset-0 -z-10` (không phải `absolute`) — cố ý để **không đụng
+  className/position của bất kỳ ancestor nào** trong 4 file trang (tránh rủi ro đổi containing
+  block cho các `position:absolute` khác đã có sẵn trong các file lớn 1500-2000+ dòng này); z âm
+  sâu đảm bảo luôn vẽ sau sidebar/header (có nền đặc, tự che đúng phần diện tích của chúng).
+- Đã chèn `<PageBackgroundMotif theme="..."/>` làm con đầu tiên **đúng nhánh JSX chứa
+  `<PageHeaderBanner>`** của từng trang (không phải mọi nhánh view khác của cùng file) — khớp
+  đúng phạm vi đã chốt "chỉ 4 trang đã có banner":
+  - `dispatch/page.tsx`: nhánh `if (view === "list") return (...)`, theme `ocean`.
+  - `export/page.tsx`: nhánh `if (view === "list") return (...)`, theme `ocean`.
+  - `quality/page.tsx`: nhánh `{view === "list" && (...)}`, theme `mint`.
+  - `eudr/EudrClient.tsx`: return duy nhất (không có nhánh view khác), theme `moss`.
+
+### B. Hoa văn "rãnh cạo mủ" cho sidebar thật
+
+- `src/app/dashboard/layout.tsx`: thêm 1 `<div>` trang trí ngay sau tag mở `<aside>` (trước khối
+  logo) — `position: absolute inset-0 -z-10 pointer-events-none`, `backgroundImage:
+  repeating-linear-gradient(52deg, rgba(255,255,255,0.1) 0 2px, transparent 2px 22px)` (đường
+  chéo lặp lại, mirror đúng công thức `TILE_PATTERN_FOREST` đã dùng cho tile Sản lượng ở
+  Dashboard — chỉ đổi alpha).
+- Dùng `absolute` (không phải `fixed`) vì `<aside>` đã tự là positioned ancestor (`fixed` mobile /
+  `relative` desktop) nên `absolute inset-0` tự động lấy đúng `<aside>` làm containing block —
+  không cần thêm `relative` vào đâu cả. Không đụng landmine containing-block của
+  `transform`/`backdrop-filter` (rule 24) vì đây là `absolute`, không phải `fixed`, nên không
+  quan tâm tới việc `<aside>` có `transform` (Tailwind `translate-x-0`) hay không.
+  `-z-10` bắt buộc (không để mặc định z-index:auto) — nếu không, theo thứ tự paint CSS
+  (non-positioned content paint TRƯỚC positioned z-auto content), motif sẽ đè lên logo/nav thay
+  vì nằm sau.
+
+### C. Redesign trang đăng nhập — bố cục 2 cột
+
+- Đã đọc kỹ toàn bộ 550 dòng gốc trước khi sửa (đúng yêu cầu bắt buộc) — chỉ đổi JSX
+  trình bày/layout, **giữ nguyên 100%** state/handlers (`handleLogin`, `handleRegister`,
+  bootstrap effect, `deptRef`/dropdown click-outside, `noticeText`, mọi validate) và toàn bộ
+  field/logic nghiệp vụ (chọn Nhà máy, dropdown Phòng ban, `CustomerPortalLangToggle`).
+- Bố cục mới: `flex flex-col lg:flex-row` — **cột trái** (`lg:w-[42%] xl:w-[38%]`, nền
+  `bg-gradient-to-br from-brand to-brand-deep` — dùng thẳng Tailwind class `from-brand`/
+  `to-brand-deep`, không phải hex/`var()`, vì đây là utility class tĩnh viết literal trong
+  source nên Tailwind v4 scanner nhận diện đúng, khác hẳn kiểu template-literal động đã từng
+  gây lỗi purge) chứa: hoa văn rãnh cạo mủ (dùng lại đúng công thức mục B, literal rgba), SVG
+  rừng cao su cũ (giữ nguyên path, chỉ đổi `stroke` từ `#1c3a32` sang `#ffffff` vì nền giờ tối),
+  logo + tên công ty, `<h1>` là `factorySubtitle`/`systemSubtitle` (đổi từ dòng chữ nhỏ sang
+  heading chính — 2 chuỗi này vốn ngắn: "NHÀ MÁY CHẾ BIẾN"/"HỆ THỐNG QUẢN LÝ SẢN XUẤT"), 3 dòng
+  bullet tóm tắt phạm vi hệ thống (chỉ hiện `lg:flex`, text tiếng Việt hard-code mới — không qua
+  `tCustomerPortal` vì đây là nội dung trang trí, không phải string nghiệp vụ cần dịch), và dòng
+  version ở cuối.
+  - **Cột phải** (`flex-1`, nền `bg-app-bg`) giữ nguyên nội dung form: `CustomerPortalLangToggle`
+    (vẫn góc trên-phải, chỉ đổi từ "góc trên toàn trang" sang "góc trên của cột phải" — đổi VỊ
+    TRÍ như mục hỏi 3 cho phép, KHÔNG đổi chức năng), rồi card form (`bg-white border
+    border-slate-200` — bỏ hẳn `backdrop-blur-md`/`bg-white/70` cũ vì nền giờ đã là mảng màu đặc
+    rõ ràng, không cần kính mờ nữa; tiện thể loại bỏ luôn rủi ro containing-block đã cảnh báo ở
+    mục "Lưu ý kỹ thuật" cũ vì card không còn `backdrop-filter`).
+  - Mobile (`<lg`): cột trái co lại thành 1 khối header gọn (logo+tên+heading, ẩn 3 bullet và
+    SVG minh hoạ co nhỏ `h-[42%]`), cột phải xếp ngay bên dưới full-width — không dùng `hidden`
+    cho toàn bộ cột trái (khác branding hoàn toàn biến mất trên mobile), chỉ ẩn phần nội dung
+    phụ (bullet list) để không chiếm quá nhiều màn hình nhỏ.
+  - Dòng version footer trùng lặp cũ (xuất hiện cả dưới form) đã bỏ — giờ chỉ còn đúng 1 nơi
+    (trong cột trái, luôn hiển thị cả mobile lẫn desktop).
+- Fallback `<Suspense>` (khi `useSearchParams` chưa sẵn sàng) đổi nền từ gradient emerald cũ
+  sang `bg-app-bg` cho khớp tông màu mới, tránh nháy màu khi chuyển từ fallback sang nội dung
+  thật.
+
+### Chưa test tay trên trình duyệt thật (cả A/B/C) — cần làm ở phiên sau hoặc người dùng tự xác nhận
+
+1. Mở `npm run dev` → `/dashboard/dispatch`, `/dashboard/export`, `/dashboard/quality`,
+   `/dashboard/eudr`: xác nhận hoa văn nền rất mờ hiển thị đúng theo từng theme, không che chữ/
+   số liệu, không gây rối mắt; cuộn trang dài (nhiều dòng bảng) xác nhận motif vẫn phủ đều (vì
+   dùng `fixed`, motif đứng yên theo viewport trong lúc nội dung cuộn — xác nhận hiệu ứng này
+   chấp nhận được về mặt thẩm mỹ, không phải bug).
+2. Sidebar: xác nhận hoa văn rãnh cạo mủ hiển thị đúng, không giảm độ tương phản đọc menu, thu
+   gọn sidebar (`collapsed` mode, chỉ còn icon) vẫn ổn; test mobile drawer (trượt sidebar ra/vào)
+   không bị vỡ layout hay motif tràn ra ngoài.
+3. `/login`: xác nhận bố cục 2 cột đúng trên desktop, co đúng về 1 cột trên mobile; test đăng
+   nhập thật + đăng ký thật (chọn Nhà máy, chọn Phòng ban, submit) hoạt động y hệt trước khi sửa;
+   xác nhận `CustomerPortalLangToggle` đổi ngôn ngữ vẫn hoạt động đúng vị trí mới; xác nhận banner
+   "Đang tải..."/lỗi "Không tải được danh sách nhà máy — Thử lại" vẫn hiển thị đúng trong card;
+   kiểm tra dropdown "Phòng ban" (mở lên trên card, `z-50`) không bị hoa văn/panel khác che khuất.
+4. Toàn bộ 3 việc: kiểm tra nhanh bằng mắt không có tác dụng phụ ngoài ý muốn tới phần nội dung
+   khác của các trang đã đụng tới (nút chính/filter/bảng của 4 trang module, và phần còn lại của
+   sidebar/dashboard) — phạm vi lần này chỉ thêm lớp hoa văn trang trí, không sửa logic/nút nào.
+
+## Cập nhật 2026-08-24 (tiếp 5) — Mở rộng banner + hoa văn nền sang 5 module nữa
+
+Người dùng xác nhận (sau khi test tay 4 trang ở mục "tiếp 4") muốn tiếp tục mở rộng
+`PageHeaderBanner`/`PageBackgroundMotif` sang: Sản lượng, Thành phẩm, Kho (nguyên liệu +
+vật tư), Bảo trì — kèm quyết định thêm cả banner (không chỉ hoa văn nền) cho các trang này vì
+trước đó chỉ có header trắng phẳng thường. Chỉ dùng `npx tsc --noEmit` + `npx eslint` (đều
+sạch), không chạy `npm run build`.
+
+### Mở rộng hệ theme dùng chung (2 file component)
+
+- `page-header-banner.tsx`: `PageBannerTheme` mở rộng từ `"ocean"|"mint"|"moss"` thành thêm
+  `"forest"|"amber"|"slate"`. `forest` dùng đúng `#2f5d52→#1c3a32` (khớp `--color-brand`/
+  `--color-brand-deep`, cùng giá trị `THEME_BANNER.forest` trong `widget-shared.tsx`).
+  `amber`/`slate` **không có token riêng trong `@theme`** — dùng thẳng hex chuẩn Tailwind
+  built-in (`amber-700→amber-900`, `slate-600→slate-800`), không thêm biến mới vào
+  `globals.css` vì Tailwind's built-in palette đã đủ dùng cho 2 theme phụ này.
+- `page-background-motif.tsx`: mở rộng theo đúng 3 theme mới. Khác 4 theme cũ (vốn tái dùng
+  icon từ file mockup), `forest`/`amber`/`slate` **không có tiền lệ trong mockup** nên chỉ
+  dùng đường nét hình học thuần (không icon) — khớp đúng phong cách gốc của chính motif Sản
+  lượng trong mockup (`motif-tap`, vốn cũng chỉ có đường chéo, không icon):
+  - `forest`: đường chéo lặp lại (rãnh cạo mủ, mirror sidebar/tile Sản lượng).
+  - `amber`: lưới 2 lớp vuông góc (gợi giá kệ/pallet kho).
+  - `slate`: vạch chéo dày cách đều (gợi vạch cảnh báo/kỹ thuật bảo trì).
+
+### 5 điểm chạm theo trang — tất cả chỉ đổi phần header, giữ nguyên nút/bảng/filter bên dưới
+
+| Trang | Theme | Icon | Ghi chú |
+|---|---|---|---|
+| `output/page.tsx` (Sản lượng) | forest | `Droplet` | 2 nút hành động (Import file, Thêm mới) đổi sang kiểu trắng/trắng-mờ cho hợp nền banner |
+| `product/page.tsx` (Thành phẩm) | forest | `Package` | 5 nút hành động (Đồng bộ trạng thái lô icon-only, Dự đoán số lô, Quét QR, Sang kiện/Thay bọc, Thêm lô) đổi màu tương tự |
+| `storage/page.tsx` (Kho nguyên liệu) | amber | `Warehouse` | Tiêu đề động theo `dayChuyen` ("Ngăn lưu"/"Hồ chứa") giữ nguyên qua prop `title` |
+| `inventory/_components/inventory-shell.tsx` (Kho vật tư) | amber | `Boxes` | **Sửa ở tầng shell dùng chung** (9 call site: on-hand/cards/item/analytics/issues/lookup/transfers/receipts/settings) thay vì từng trang — xem chi tiết kỹ thuật bên dưới |
+| `maintenance/page.tsx` (Bảo trì) | slate | `Wrench` | Nằm trong `<MaintenanceShell>`, banner render **sau** tab nav trắng của shell (thứ tự DOM cũ), không phải trước như các module khác |
+
+### `InventoryPageShell` — quyết định kỹ thuật quan trọng khi mở rộng sang Kho vật tư
+
+- Không sửa riêng lẻ 9 file gọi `<InventoryPageShell>` — sửa 1 lần tại chính component dùng
+  chung, tự động áp dụng cho toàn bộ module (giống cách sidebar/PageHeaderBanner đã làm ở nơi
+  khác). Bỏ hẳn prop `eyebrow` khỏi phần render (dòng chữ nhỏ "Nhập xuất tồn"/"Thống kê" phía
+  trên `<h1>` cũ) — **vẫn giữ `eyebrow?: string` trong type** để 9 call site khỏi phải sửa,
+  chỉ đơn giản là prop đó không còn được dùng ở đâu (không lỗi TS, không lỗi lint vì không bị
+  destructure ra biến).
+- **Quyết định quan trọng**: KHÔNG gộp `action` (nút hành động riêng của từng trang con, ví
+  dụ "Xuất Excel", "Về Cấu hình nhà máy") vào bên trong banner màu tối như đã làm ở 4-5 trang
+  khác. Lý do: đã rà cả 9 call site, phát hiện `settings/page.tsx`'s action
+  (`"Về Cấu hình nhà máy"`) dùng nút dạng viền trong suốt, **không có `bg-` nào cả**
+  (`border border-slate-200 ... text-slate-700 hover:bg-slate-50`) — thiết kế cho nền trắng,
+  nếu đặt trên banner amber tối sẽ gần như vô hình (chữ xám trên nền cam đậm). Thay vì sửa tay
+  từng nút ở 9 file (rủi ro cao, tốn công rà soát), giữ nguyên bố cục: banner amber chỉ có
+  title/subtitle/icon (không action), `action` + 2 nhóm tab pill vẫn nằm trong đúng card
+  trắng cũ như trước (chỉ bỏ `<h1>`/eyebrow/description ra khỏi card đó, phần còn lại y hệt).
+  Nhờ vậy toàn bộ nút hành động của 9 trang con giữ nguyên màu sắc, không cần rà/sửa gì thêm.
+
+### Việc CỐ Ý không làm (để tránh hiểu nhầm là thiếu sót)
+
+- Không đụng các trang con khác của Bảo trì (`maintenance/records/page.tsx`,
+  `maintenance/history/page.tsx`, `maintenance/print/*`) — chỉ trang tổng quan
+  `/dashboard/maintenance` được thêm banner, đúng tiền lệ "1 trang landing/module" như các
+  module khác (trừ Kho vật tư, nơi kiến trúc có 1 shell dùng chung nên tự nhiên phủ hết).
+- Không đụng `product/page.tsx`'s 2 view khác (`view === "create"` — "Nhập thành phẩm", và
+  nhánh detail khác nếu có) — chỉ view "list" (mặc định) có banner, mirror đúng cách làm ở
+  Điều xe/Xuất hàng trước đó (chỉ list view có `PageHeaderBanner`).
+
+### Phát hiện ngoài ý muốn — 2 file thay đổi KHÔNG PHẢI do phiên này
+
+Trong lúc rà `git status` để tổng kết, phát hiện `src/app/dashboard/quality-analytics/page.tsx`
+(diff thật, ~35 dòng, thêm `fetchAllPaginated` từ file mới `src/lib/supabase-helpers.ts` để
+fix đúng loại bug "PostgREST cắt 1000 dòng" đã ghi ở `.claude/rules/04-code-patterns.md`) và
+chính `src/lib/supabase-helpers.ts` (file mới, untracked) đã bị thay đổi/tạo mới **mà phiên
+này không hề chạm tới** — không nằm trong bất kỳ tool call nào của phiên. Đã cố tình **không
+đụng, không commit, không dọn** 2 file này (theo đúng nguyên tắc "điều tra trước khi
+xóa/ghi đè, file không do phiên này tạo ra thì không tự ý dọn") — có thể là kết quả của một
+tiến trình/phiên khác đang chạy song song trên cùng repo. Nếu người dùng không nhận ra thay
+đổi này, cần hỏi lại nguồn gốc trước khi commit bất cứ thứ gì trong repo.
+
+### Chưa test tay trên trình duyệt thật (5 module mới) — cần làm ở phiên sau hoặc người dùng tự xác nhận
+
+1. `/dashboard/output`, `/dashboard/product`: banner forest hiển thị đúng, các nút hành động
+   (đổi sang kiểu trắng/trắng-mờ) vẫn bấm được và đọc rõ chữ; hoa văn nền rất nhẹ không che
+   nội dung.
+2. `/dashboard/storage`: xác nhận tiêu đề đổi đúng theo Dây chuyền (Mủ tạp → "Ngăn lưu", Mủ
+   nước → "Hồ chứa") ngay trong banner; nút "Thêm ngăn lưu/hồ chứa" (chỉ hiện khi có quyền)
+   đọc rõ trên nền amber.
+3. `/dashboard/inventory/on-hand` (và các trang con khác: receipts/issues/transfers/cards/
+   lookup/analytics/settings/item): xác nhận banner amber + hoa văn hiển thị nhất quán trên
+   TẤT CẢ các trang (vì sửa ở tầng shell dùng chung); xác nhận action buttons (khi có) vẫn nằm
+   trong card trắng, đọc rõ, không bị "lạc" lên banner; đặc biệt kiểm tra nút "Về Cấu hình nhà
+   máy" ở `settings/page.tsx` (nút viền trong suốt) vẫn hiển thị đúng trên nền trắng như cũ.
+4. `/dashboard/maintenance`: xác nhận banner slate hiển thị đúng SAU tab nav trắng (Tổng quan/
+   Biên bản/Lý lịch thiết bị) — thứ tự này khác các module khác, xác nhận không bị coi là lỗi;
+   nút "Tạo biên bản" đọc rõ trên nền banner.
+5. Xác nhận `currencySymbol` warning (pre-existing, không liên quan phiên này) trong
+   `maintenance/page.tsx` không ảnh hưởng gì — chỉ là warning ESLint có sẵn từ trước.
+6. Hỏi lại người dùng về nguồn gốc 2 file `quality-analytics/page.tsx`/`supabase-helpers.ts`
+   đã đổi ngoài ý muốn (mục trên) trước khi bất kỳ ai commit toàn bộ working tree.
+
+## Cập nhật 2026-08-24 (tiếp 6) — 4 module nữa + kỹ thuật icon Lucide thật trong motif nền
+
+Người dùng yêu cầu "sáng tạo hơn" cho 5 thẻ còn lại (Công việc KPI, Ghi chú nhanh, Bản đồ lô,
+Kho thành phẩm, Kiểm soát quá trình) — không chỉ hoa văn đường nét trừu tượng mà cần **icon
+chìm liên quan trực tiếp chức năng module** (ví dụ cụ thể người dùng đưa ra: Kho thành phẩm
+có xe nâng/pallet/hàng pallet thẳng tắp). Đã làm 4/5 module; "Bản đồ lô" bị loại vì lý do kỹ
+thuật — xem mục riêng bên dưới.
+
+### Kỹ thuật mới: render thẳng component Lucide bên trong SVG `<pattern>`
+
+Khác hẳn 6 theme trước (copy tay path `d="..."` từ file mockup hoặc tự vẽ hình học), 4 theme
+mới dùng kỹ thuật: `<svg>` lồng trong `<svg>` là hợp lệ theo spec SVG, nên có thể render
+**thẳng component Lucide thật** (ví dụ `<Forklift color={color} size={40} strokeWidth={1.4} />`)
+làm con của `<pattern>`, bọc trong `<g transform="translate(x,y)">` để định vị. Ưu điểm so với
+copy path tay: chính xác pixel-perfect, khớp 100% bộ icon UI đang dùng khắp app, không cần tự
+tính `scale()` để quy đổi từ viewBox 24×24 gốc như cách cũ. Xác nhận bằng
+`ReactDOMServer.renderToStaticMarkup` rằng prop `color` của Lucide map đúng vào `stroke` SVG
+output. Kỹ thuật này có thể áp dụng ngược lại cho 6 theme cũ nếu cần sửa sau, nhưng phiên này
+**không đụng 6 theme cũ** (đã chạy ổn định, không cần sửa).
+
+### 4 theme mới (`page-header-banner.tsx` + `page-background-motif.tsx`)
+
+| Module | Theme | Màu (from→to) | Icon banner | Icon + hoa văn nền |
+|---|---|---|---|---|
+| Công việc & KPI | `violet` | `#7c3aed→#4c1d95` | `Target` | `Target` + 2 vòng tròn mục tiêu mờ |
+| Ghi chú nhanh | `rose` | `#e11d48→#881337` | `NotebookPen` (đã import sẵn trong trang) | `StickyNote` + 2 dòng kẻ giấy note |
+| Kho thành phẩm | `orange` | `#c2410c→#7c2d12` | `Forklift` | `Forklift` + 2 hàng pallet (dãy ô chữ nhật lặp lại) — đúng ví dụ người dùng đưa ra |
+| Kiểm soát quá trình | `teal` | `#0d9488→#134e4a` | `Gauge` | `Gauge` + vạch cung chia độ đứt nét |
+
+`teal` chọn để khớp đúng màu module này đã dùng sẵn (`process-shell.tsx`'s tab active:
+`bg-teal-50 text-teal-700 border-teal-200`) — không bịa màu mới cho module đã có màu riêng.
+Cả 4 theme đều hex Tailwind built-in, không thêm token mới vào `globals.css`.
+
+### 4 điểm chạm theo trang
+
+| Trang | Vị trí chèn | Ghi chú |
+|---|---|---|
+| `kpi/page.tsx` | Trong `<KpiShell>`, đầu `<div className="space-y-5">` | Không có `action` (trang chỉ có 2 khối danh sách, không có nút header) |
+| `notes/page.tsx` | Đầu `<div className="space-y-4">` | Nút "Thêm ghi chú" đổi sang `bg-white text-rose-700` |
+| `warehouse/page.tsx` | Đầu `<div className="p-4 h-full flex flex-col">` | 2 nút chọn Kho1/Kho2 đổi màu: đang chọn = `bg-white text-orange-800`, chưa chọn = viền trắng-mờ |
+| `process/page.tsx` | Trong `<ProcessShell>`, trước `<FilterBar>` | Trang này **trước đó không có `<h1>` nào cả** — banner là tiêu đề trang đầu tiên, không phải thay thế header cũ |
+
+### "Bản đồ lô" (`/dashboard/map`) — CỐ Ý KHÔNG thêm banner/motif, lý do kỹ thuật
+
+Đã đọc `map/page.tsx` + `MapClient.tsx` trước khi quyết định: đây là bản đồ Leaflet **full-bleed**
+(`h-[calc(100vh-48px)]`, không có `<h1>` nào cả, chỉ có nút "quay lại" và panel filter nổi
+`position: absolute z-[1000]` đè lên bản đồ). Hai lý do khiến cách làm giống 9 module kia không
+phù hợp:
+
+1. **`PageHeaderBanner`** sẽ chiếm mất chiều cao quý giá của bản đồ (vốn cố ý full-bleed để tối
+   đa vùng nhìn) — khác hẳn các trang khác vốn đã có sẵn `<h1>` phẳng chiếm chỗ tương đương.
+2. **`PageBackgroundMotif`** dùng `position:fixed -z-10` sẽ **hoàn toàn vô hình** — toàn bộ vùng
+   nhìn thấy bị phủ kín bởi tile bản đồ Leaflet đục (opaque), motif nền không có chỗ nào để lộ ra.
+
+Đã cân nhắc thêm phương án nhẹ hơn (chỉ đổi màu nút "quay lại"/panel filter nổi sang tông theme
+mới, không đụng bố cục) nhưng đây là loại thay đổi khác hẳn (styling lại UI nổi có sẵn, không
+phải thêm banner/motif) nên **chưa làm** — nếu người dùng vẫn muốn có điểm nhấn hình ảnh riêng
+cho trang này, cần bàn phương án cụ thể riêng, không tự suy diễn.
+
+### Chưa test tay trên trình duyệt thật (4 module mới)
+
+1. `/dashboard/kpi`: banner violet hiển thị đúng, không có action nên banner chỉ có
+   title/subtitle/icon — xác nhận không bị trống trải/lệch bố cục.
+2. `/dashboard/notes`: banner rose + icon `NotebookPen`; nút "Thêm ghi chú" (trắng, chữ rose)
+   đọc rõ; xác nhận ẩn đúng khi không có quyền `notes.create` (`action` trả `undefined`).
+3. `/dashboard/warehouse`: banner orange + icon `Forklift`; 2 nút chọn Kho1/Kho2 đổi màu đúng
+   theo trạng thái đang chọn, vẫn bấm chuyển kho hoạt động bình thường; xác nhận hoa văn nền
+   (hàng pallet + forklift mờ) không ảnh hưởng thao tác kéo-thả kiện trong sơ đồ kho bên dưới.
+4. `/dashboard/process`: banner teal + icon `Gauge` hiển thị **sau** tab nav trắng của
+   `ProcessShell` (giống thứ tự đã thấy ở Bảo trì) — xác nhận không bị hiểu nhầm là lỗi; xác
+   nhận đây là nội dung đầu tiên có `<h1>` thật của trang (trước đó trang này không có tiêu đề
+   nào), không phá vỡ bố cục filter bar/KPI cards bên dưới.
+5. Xác nhận kỹ thuật "component Lucide lồng trong `<pattern>`" render đúng trên nhiều trình
+   duyệt (Chrome/Edge/Firefox) — đây là kỹ thuật mới lần đầu dùng trong repo, dù đã verify hợp
+   lệ theo spec SVG, nên cần xác nhận trực quan ít nhất 1 lần trước khi áp dụng thêm nơi khác.
+

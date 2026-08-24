@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Droplet } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { hasPermission } from "@/lib/auth"
 import { CHART_PALETTE, ChartTooltip, formatKg } from "@/lib/chart-theme"
-import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, type WidgetProps } from "./widget-shared"
+import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, TILE_PATTERN_FOREST, type WidgetProps } from "./widget-shared"
 
 type ProdRow = {
   ngay: string
@@ -94,23 +95,28 @@ export function ProductionWidget({ factoryId, user }: WidgetProps) {
   if (!canView) return null
 
   return (
-    <WidgetCard title="Sản lượng" subtitle="Nguyên liệu tồn kho & sản lượng khô theo ngày trong tháng">
+    <WidgetCard
+      title="Sản lượng"
+      subtitle="Nguyên liệu tồn kho & sản lượng khô theo ngày trong tháng"
+      theme="forest"
+      icon={Droplet}
+    >
       {loading ? (
         <WidgetLoading />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {canViewStorage && (
-              <div className="bg-blue-50 rounded-xl p-3">
+              <div className={`bg-blue-50 rounded-xl p-3 ${TILE_PATTERN_FOREST}`}>
                 <div className="text-xs font-semibold text-blue-600 mb-1">Tồn kho NL hiện tại</div>
                 <div className="text-lg font-extrabold text-blue-800">{tonKho == null ? "—" : formatKg(tonKho)}</div>
               </div>
             )}
-            <div className="bg-amber-50 rounded-xl p-3">
+            <div className={`bg-amber-50 rounded-xl p-3 ${TILE_PATTERN_FOREST}`}>
               <div className="text-xs font-semibold text-amber-600 mb-1">Khô tháng này</div>
               <div className="text-lg font-extrabold text-amber-800">{formatKg(thangKho)}</div>
             </div>
-            <div className="bg-emerald-50 rounded-xl p-3">
+            <div className={`bg-emerald-50 rounded-xl p-3 ${TILE_PATTERN_FOREST}`}>
               <div className="text-xs font-semibold text-emerald-600 mb-1">Lũy kế năm</div>
               <div className="text-lg font-extrabold text-emerald-800">{formatKg(namKho)}</div>
             </div>

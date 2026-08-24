@@ -318,15 +318,29 @@ function LoginPageContent() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-        {/* Minh hoạ rừng cao su rất mờ phía sau — SVG tự vẽ, không tải asset ngoài */}
+    <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-white lg:flex-row">
+      {/* ── Cột trái: nhận diện thương hiệu — đầy đủ trên desktop, thu gọn trên mobile ── */}
+      <div className="relative flex shrink-0 flex-col justify-between overflow-hidden bg-gradient-to-br from-brand to-brand-deep px-8 py-8 text-white sm:px-12 sm:py-10 lg:w-[42%] lg:px-14 lg:py-14 xl:w-[38%]">
+        {/* Hoa văn "rãnh cạo mủ" — đồng bộ với sidebar dashboard (bg-brand), xem
+            .claude/rules/05-ui-components.md mục "Pastel Rừng Cao Su". Literal rgba,
+            không dùng var() trong style inline (bài học 2026-08-24 mục 6). */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(52deg, rgba(255,255,255,0.07) 0 2px, transparent 2px 22px)",
+          }}
+        />
+        {/* Minh hoạ rừng cao su rất mờ phía dưới — SVG tự vẽ, không tải asset ngoài.
+            Path giữ nguyên như bản 1 cột cũ, chỉ đổi stroke sang trắng cho nền tối. */}
         <svg
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[60vh] w-full opacity-[0.08]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] w-full opacity-[0.16] lg:h-[36%]"
           viewBox="0 0 800 320"
           preserveAspectRatio="xMidYMax slice"
           aria-hidden="true"
         >
-          <g fill="none" stroke="#1c3a32" strokeWidth="2.4">
+          <g fill="none" stroke="#ffffff" strokeWidth="2.4">
             <path d="M60 320 V220 M60 220 C10 200 10 150 60 140 C60 100 110 90 110 140 C160 150 160 200 110 220 V320" />
             <path d="M180 320 V190 M180 190 C130 170 130 110 180 100 C180 50 240 40 240 100 C290 110 290 170 240 190 V320" />
             <path d="M310 320 V230 M310 230 C265 214 265 168 310 158 C310 122 360 114 360 158 C405 168 405 214 360 230 V320" />
@@ -335,33 +349,62 @@ function LoginPageContent() {
             <path d="M730 320 V210 M730 210 C685 194 685 148 730 138 C730 102 780 94 780 138 C825 148 825 194 780 210 V320" />
           </g>
         </svg>
-      <div className="relative w-full max-w-md">
-        <div className="mb-3 flex justify-end">
-          <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
-        </div>
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex justify-center">
-            <Image
-              src="/logo-nha-may-5.jpg"
-              alt="Logo nhà máy Phước Hòa KPT"
-              width={120}
-              height={120}
-              className="h-28 w-28 rounded-full object-cover shadow-md"
-              priority
-            />
+
+        <div className="relative z-10">
+          <div className="mb-6 flex items-center gap-3">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white/30 bg-white shadow-md">
+              <Image
+                src="/logo-nha-may-5.jpg"
+                alt="Logo nhà máy Phước Hòa KPT"
+                width={56}
+                height={56}
+                className="h-11 w-11 object-contain"
+                priority
+              />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-extrabold uppercase tracking-tight">
+                CTY TNHH PTCS PHƯỚC HÒA
+              </div>
+              <div className="truncate text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                Kampong Thom
+              </div>
+            </div>
           </div>
-          <h1 className="text-2xl font-extrabold uppercase tracking-tight text-slate-800">
-            CTY TNHH PTCS PHƯỚC HÒA KAMPONG THOM
-          </h1>
-          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
-            {t("factorySubtitle")}
-          </p>
-          <p className="mt-2 text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
+          <h1 className="text-2xl font-extrabold leading-snug sm:text-3xl">{t("factorySubtitle")}</h1>
+          <p className="mt-3 text-sm font-medium uppercase tracking-[0.18em] text-emerald-100/80">
             {t("systemSubtitle")}
           </p>
         </div>
 
-        <div className="rounded-3xl border border-white/60 bg-white/70 p-8 shadow-xl backdrop-blur-md">
+        <ul className="relative z-10 mt-10 hidden flex-col gap-3 text-sm text-emerald-50/90 lg:flex">
+          <li className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-300" />
+            Điều xe · Kho nguyên liệu · Thành phẩm — theo dõi xuyên suốt dây chuyền
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-300" />
+            Kiểm nghiệm chất lượng theo TCCS/TCVN, gắn liền xuất hàng
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-300" />
+            Truy xuất chuỗi cung ứng EUDR đến từng lô vườn cao su
+          </li>
+        </ul>
+
+        <p className="relative z-10 mt-8 text-xs text-emerald-100/60 lg:mt-0">
+          v2.0 · NMCB Phước Hòa KPT © 2026
+        </p>
+      </div>
+
+      {/* ── Cột phải: form đăng nhập / đăng ký — toàn bộ logic/state giữ nguyên ── */}
+      <div className="relative flex flex-1 items-center justify-center bg-app-bg px-4 py-10 sm:px-8">
+      <div className="relative w-full max-w-md">
+        <div className="mb-3 flex justify-end">
+          <CustomerPortalLangToggle lang={lang} onChange={changeLang} />
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl">
           {booting && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
@@ -528,8 +571,7 @@ function LoginPageContent() {
             </button>
           </div>
         </div>
-
-        <p className="mt-6 text-center text-xs text-slate-400">v2.0 · NMCB Phước Hòa KPT © 2026</p>
+      </div>
       </div>
     </div>
   )
@@ -539,7 +581,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+        <div className="flex min-h-screen items-center justify-center bg-app-bg">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
         </div>
       }

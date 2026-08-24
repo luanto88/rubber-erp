@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation"
 import { ArrowRightLeft, BarChart3, Boxes, Layers, PackageMinus, PackagePlus, QrCode, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type PrimaryTab = {
   href: string
@@ -70,7 +72,6 @@ function matchesAnyPrefix(pathname: string, prefixes: string[]) {
 export function InventoryPageShell({
   title,
   description,
-  eyebrow = "Quản lý kho",
   action,
   children,
 }: InventoryPageShellProps) {
@@ -80,22 +81,16 @@ export function InventoryPageShell({
 
   return (
     <div className="space-y-4">
+      <PageBackgroundMotif theme="amber" />
+      <PageHeaderBanner title={title} subtitle={description} theme="amber" icon={Boxes} />
+
       <section
         ref={revealRef}
         className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-              {eyebrow}
-            </div>
-            <h1 className="mt-2 text-2xl font-extrabold text-slate-800">{title}</h1>
-            <p className="mt-1 text-sm text-slate-500">{description}</p>
-          </div>
-          {action ? <div className="flex items-center gap-2">{action}</div> : null}
-        </div>
+        {action ? <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{action}</div> : null}
 
-        <div className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5">
+        <div className="flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5">
           {primaryTabs.map((tab) => {
             const active = matchesAnyPrefix(pathname, tab.matchPrefixes)
             const Icon = tab.icon

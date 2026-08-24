@@ -18,6 +18,8 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
 
 // Types
@@ -1543,6 +1545,7 @@ export default function DispatchPage() {
   // Render: LIST
   if (view === "list") return (
     <div>
+      <PageBackgroundMotif theme="ocean"/>
       <ToastNotification/>
       {kpiPrompt && (
         <KpiLinkPrompt
@@ -1554,22 +1557,24 @@ export default function DispatchPage() {
           onDone={() => setKpiPrompt(null)}
         />
       )}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Điều xe</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Bảng phân xe thu mủ hằng ngày</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={openAddBlank}
-            className="flex items-center gap-2 px-4 py-2.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-sm transition-all">
-            <FileText size={16}/> Bảng trắng
-          </button>
-          <button onClick={openAdd}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
-            <Plus size={16}/> Thêm bảng
-          </button>
-        </div>
-      </div>
+      <PageHeaderBanner
+        title="Điều xe"
+        subtitle="Bảng phân xe thu mủ hằng ngày"
+        theme="ocean"
+        icon={Truck}
+        action={
+          <>
+            <button onClick={openAddBlank}
+              className="flex items-center gap-2 px-4 py-2.5 border border-white/40 bg-white/15 hover:bg-white/25 text-white font-bold rounded-xl shadow-sm transition-all">
+              <FileText size={16}/> Bảng trắng
+            </button>
+            <button onClick={openAdd}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-ocean-700 font-bold rounded-xl shadow-md transition-all">
+              <Plus size={16}/> Thêm bảng
+            </button>
+          </>
+        }
+      />
 
       <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         <button onClick={() => setListTab("list")}

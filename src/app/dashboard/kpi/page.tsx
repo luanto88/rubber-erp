@@ -17,11 +17,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, ClipboardCheck, ClipboardList, PartyPopper } from "lucide-react"
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, ClipboardCheck, ClipboardList, PartyPopper, Target } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import { getKpiTasks, type ModuleTaskItem } from "@/app/dashboard/_components/module-tasks"
 import { KpiShell } from "./_components/kpi-shell"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type Tone = "red" | "amber" | "action"
 
@@ -167,10 +169,13 @@ export default function KpiHomePage() {
   return (
     <KpiShell>
       <div className="space-y-5">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Công việc & KPI</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Tổng hợp việc bạn cần làm và cần xử lý — bấm vào 1 dòng để đi thẳng tới đúng chỗ.</p>
-        </div>
+        <PageBackgroundMotif theme="violet"/>
+        <PageHeaderBanner
+          title="Công việc & KPI"
+          subtitle="Tổng hợp việc bạn cần làm và cần xử lý — bấm vào 1 dòng để đi thẳng tới đúng chỗ."
+          theme="violet"
+          icon={Target}
+        />
 
         {dataLoading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-400">Đang tải...</div>

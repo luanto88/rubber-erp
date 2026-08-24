@@ -21,6 +21,8 @@ import {
   updateOperationNote,
   type OperationNote,
 } from "@/lib/operation-notes"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 const PAGE_SIZE = 60
 
@@ -205,22 +207,23 @@ export default function NotesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Ghi chú nhanh</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Ghi chú riêng tư kèm hình ảnh — chỉ bạn thấy, trừ khi bạn chia sẻ cho người khác
-          </p>
-        </div>
-        {canCreate && (
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            <Plus size={16} /> Thêm ghi chú
-          </button>
-        )}
-      </div>
+      <PageBackgroundMotif theme="rose"/>
+      <PageHeaderBanner
+        title="Ghi chú nhanh"
+        subtitle="Ghi chú riêng tư kèm hình ảnh — chỉ bạn thấy, trừ khi bạn chia sẻ cho người khác"
+        theme="rose"
+        icon={NotebookPen}
+        action={
+          canCreate ? (
+            <button
+              onClick={openAdd}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-rose-700 font-bold rounded-xl shadow-sm transition-all hover:bg-white/90"
+            >
+              <Plus size={16} /> Thêm ghi chú
+            </button>
+          ) : undefined
+        }
+      />
 
       <FilterBar activeCount={activeFilterCount}>
         <div className="relative min-w-[220px] flex-1">

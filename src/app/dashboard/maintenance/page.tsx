@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "./_components/maintenance-shell"
 import { currencySymbol } from "./_components/maintenance-data"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type KpiData = {
   totalMonth: number
@@ -95,18 +97,21 @@ export default function MaintenanceDashboardPage() {
 
   return (
     <MaintenanceShell>
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Bảo trì</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Quản lý sửa chữa và bảo dưỡng thiết bị, xe</p>
-        </div>
-        <Link
-          href="/dashboard/maintenance/records/new"
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
-        >
-          <Plus size={16} /> Tạo biên bản
-        </Link>
-      </div>
+      <PageBackgroundMotif theme="slate"/>
+      <PageHeaderBanner
+        title="Bảo trì"
+        subtitle="Quản lý sửa chữa và bảo dưỡng thiết bị, xe"
+        theme="slate"
+        icon={Wrench}
+        action={
+          <Link
+            href="/dashboard/maintenance/records/new"
+            className="flex items-center gap-2 px-5 py-2.5 bg-white text-slate-800 font-bold rounded-xl shadow-sm transition-all hover:bg-white/90"
+          >
+            <Plus size={16} /> Tạo biên bản
+          </Link>
+        }
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

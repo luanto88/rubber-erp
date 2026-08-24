@@ -9,6 +9,7 @@ import {
   BarChart3,
   CalendarDays,
   ChevronRight,
+  Droplet,
   Edit2,
   FileText,
   Plus,
@@ -17,6 +18,8 @@ import {
   Upload,
   X,
 } from "lucide-react"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import type { OutputFormState, ProductionRecord } from "./_components/output-types"
 import {
   WARN_LABELS,
@@ -543,6 +546,7 @@ export default function OutputPage() {
 
   return (
     <div className="p-4 sm:p-6">
+      <PageBackgroundMotif theme="forest"/>
       {kpiPrompt && (
         <KpiLinkPrompt
           factoryId={factoryId}
@@ -553,35 +557,32 @@ export default function OutputPage() {
           onDone={() => setKpiPrompt(null)}
         />
       )}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-xl font-extrabold text-slate-800 sm:text-2xl">
-            <BarChart3 size={26} className="shrink-0 text-emerald-600" />
-            Sản lượng
-          </h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Giữ nguyên dữ liệu Sản lượng, đổi giao diện theo cách hiển thị của module Điều xe.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-          <button
-            onClick={() => setShowImport(true)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-blue-700"
-          >
-            <Upload size={15} />
-            Import file
-          </button>
-          {isAdmin && (
+      <PageHeaderBanner
+        title="Sản lượng"
+        subtitle="Giữ nguyên dữ liệu Sản lượng, đổi giao diện theo cách hiển thị của module Điều xe."
+        theme="forest"
+        icon={Droplet}
+        action={
+          <>
             <button
-              onClick={() => { setEditRecord(null); setFormInitialDate(null); setShowForm(true) }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-bold text-white shadow-md transition-colors hover:bg-emerald-700"
+              onClick={() => setShowImport(true)}
+              className="flex items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/15 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/25"
             >
-              <Plus size={16} />
-              Thêm mới
+              <Upload size={15} />
+              Import file
             </button>
-          )}
-        </div>
-      </div>
+            {isAdmin && (
+              <button
+                onClick={() => { setEditRecord(null); setFormInitialDate(null); setShowForm(true) }}
+                className="flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 font-bold text-brand shadow-sm transition-all hover:bg-white/90"
+              >
+                <Plus size={16} />
+                Thêm mới
+              </button>
+            )}
+          </>
+        }
+      />
 
       <div className="mb-4 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">

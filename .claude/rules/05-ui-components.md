@@ -145,6 +145,76 @@ Voi modal co noi dung than (giua header va footer) vuot qua ~45 dong, KHONG thay
 
 Phan noi dung than (giua 2 edit nay) khong bi dung tay vao, du dai bao nhieu.
 
+## Pastel Rừng Cao Su (design tokens + banner theme cho Dashboard)
+
+Token khai báo trong `src/app/globals.css` (khối `@theme`, Tailwind v4 CSS-first — không có
+`tailwind.config.*`, mỗi `--color-X` tự sinh class `bg-X`/`text-X`/`border-X`...):
+
+- `--color-app-bg` (`#f2f8f5`) — nền trang, dùng ở `<body>` (`src/app/layout.tsx`).
+- `--color-brand` (`#2f5d52`) / `--color-brand-deep` (`#1c3a32`) — "forest", dùng cho sidebar
+  (`bg-brand` trong `dashboard/layout.tsx`) và widget Sản lượng trên Dashboard.
+- `--color-ocean-50/100/500/600/700` (`#e3f0fb`→`#144171`) — dùng cho widget Xuất hàng + Điều
+  xe trên Dashboard (2 widget riêng, chỉ dùng chung tông màu để đọc như 1 cặp, không gộp DOM).
+- `--color-mint-50/100/500/600/700` (`#eafbf5`→`#1f6a58`) — dùng cho widget Chất lượng trên
+  Dashboard.
+
+**Phạm vi áp dụng hiện tại** (đã triển khai thật, không phải dự kiến): khung sườn (sidebar/
+header, luôn `bg-brand`) + đúng 3/8 khu vực của `src/app/dashboard/page.tsx` (Sản lượng, Xuất
+hàng + Điều xe, Chất lượng) qua `WidgetCard`'s `theme` prop, **cộng thêm** banner header đầu
+trang (chỉ `<h1>`/subtitle/action, không đụng phần còn lại của trang) của 4 trang module thật —
+`dispatch/page.tsx` (ocean), `export/page.tsx` (ocean), `quality/page.tsx` (mint),
+`eudr/EudrClient.tsx` (moss) — qua component riêng `PageHeaderBanner` (xem mục ngay dưới). Các
+khu vực còn lại của Dashboard (Kho & Thành phẩm, Cảnh báo, Việc cần làm, Ghi chú), phần thân
+của 4 trang module trên (nút chính/filter/bảng bên dưới header), và mọi trang module khác
+(ISO, Bảo trì, KPI, Cài đặt...) cố ý giữ nguyên màu cũ.
+
+### `WidgetCard` theme convention (`src/app/dashboard/_components/widgets/widget-shared.tsx`)
+
+Muốn 1 widget Dashboard mới có banner màu theo theme, truyền thêm 2 prop:
+
+```tsx
+<WidgetCard title="..." subtitle="..." theme="forest" icon={Droplet}>
+```
+
+`theme` nhận `"forest" | "ocean" | "mint"`; `icon` là 1 component `LucideIcon` (không phải
+element đã render) — component tự vẽ icon nhỏ trong vòng tròn cạnh tiêu đề lẫn icon lớn mờ làm
+hoa văn nền, không cần truyền 2 icon riêng. Không truyền `theme` → giữ nguyên header trắng
+phẳng như cũ, không ảnh hưởng các widget hiện có.
+
+Nếu 1 widget có tile/stat-box muốn thêm hoa văn nhẹ khớp theme (không phải banner), dùng hằng
+số className dùng chung `TILE_PATTERN_FOREST`/`TILE_PATTERN_OCEAN` export từ cùng file — tự
+chứa trong Tailwind arbitrary-value (`before:[background-image:...]`), không cần thêm CSS toàn
+cục. Chỉ cộng thêm vào className hiện có của tile, không thay `bg-*-50` gốc của tile đó.
+
+### `PageHeaderBanner` — banner header cấp trang (khác `WidgetCard`)
+
+`src/app/dashboard/_components/page-header-banner.tsx` — dùng cho header đầu các **trang
+module thật** (không phải widget Dashboard). Tách file riêng khỏi `WidgetCard` có chủ đích
+(file đó tự ghi rõ "chỉ dùng cho widget Dashboard") — không import chéo.
+
+```tsx
+<PageHeaderBanner
+  title="Điều xe"
+  subtitle="Bảng phân xe thu mủ hằng ngày"
+  theme="ocean" // "ocean" | "mint" | "moss"
+  icon={Truck}
+  action={<button ...>...</button>}
+/>
+```
+
+- Render `<h1>` (không phải `<h2>` như `WidgetCard`) — đúng ngữ nghĩa heading cấp trang.
+- `action` nhận nguyên khối JSX (kể cả logic `hasPermission(...)` ẩn/hiện có sẵn) — component
+  không tự quyết định hiện nút nào, chỉ định vị trí render bên phải.
+- 3 theme hiện có: `ocean` (Điều xe, Xuất hàng), `mint` (Chất lượng), `moss` (EUDR — dùng
+  `--color-moss-*`, giá trị đúng theo mockup, không có bản `earth` vì banner luôn chữ trắng
+  trên nền màu, không cần token cho chữ-trên-nền-sáng).
+- Nút bên trong banner (action) phải tự đổi màu cho hợp nền màu — nút nền trắng dùng
+  `text-{theme}-700` (vd `text-ocean-700`), nút phụ dùng kiểu trong suốt
+  `bg-white/15 hover:bg-white/25 border-white/40 text-white`. Không giữ nguyên màu nút gốc
+  (`border-slate-300`, `bg-emerald-600`...) vì sẽ chìm/lệch tông trên nền banner màu.
+- Phạm vi cố ý dừng ở header — không lan xuống nút chính/filter bar/bảng dữ liệu bên dưới của
+  trang (xem "Phạm vi áp dụng hiện tại" phía trên). Muốn mở rộng thêm phải hỏi lại người dùng.
+
 ### Con lai chua lam (kho khan-tha kien va dat chu ky/QR ISO)
 
 Hai khu vuc dung ky thuat drag-and-drop HTML5 chua duoc lam mobile-friendly, theo dung quyet dinh cua nguoi dung ("de sau, chua quyet dinh huong xu ly"):

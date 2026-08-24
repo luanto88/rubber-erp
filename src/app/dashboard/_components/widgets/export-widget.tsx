@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { FileOutput } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { supabase } from "@/lib/supabase"
 import { hasPermission } from "@/lib/auth"
@@ -97,8 +98,10 @@ export function ExportWidget({ factoryId, user }: WidgetProps) {
     <WidgetCard
       title="Xuất hàng"
       subtitle="Top khách hàng & xu hướng xuất hàng theo tháng"
+      theme="ocean"
+      icon={FileOutput}
       action={
-        <Link href="/dashboard/export" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+        <Link href="/dashboard/export" className="text-xs font-semibold text-white/90 hover:text-white">
           Xem tất cả →
         </Link>
       }

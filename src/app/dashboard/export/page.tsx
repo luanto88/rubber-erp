@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -9,6 +9,7 @@ import {
   normalizeLotCode,
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
+import { fetchAllPaginated } from "@/lib/supabase-helpers";
 import {
   FileOutput,
   Plus,
@@ -30,6 +31,8 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
@@ -437,13 +440,16 @@ export default function ExportPage() {
   );
 
   const loadLots = useCallback(async (fid: string) => {
-    const { data } = await supabase
-      .from("lots")
-      .select(
-        "id,factory_id,ma_lo,loai_csr,loai_banh,boc,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai,created_at,updated_at",
-      )
-      .eq("factory_id", fid)
-      .order("num", { ascending: false });
+    const data = await fetchAllPaginated<LotRaw>((from, to) =>
+      supabase
+        .from("lots")
+        .select(
+          "id,factory_id,ma_lo,loai_csr,loai_banh,boc,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai,created_at,updated_at",
+        )
+        .eq("factory_id", fid)
+        .order("num", { ascending: false })
+        .range(from, to),
+    );
     const filteredLots = (data || []).filter((lot) => {
       const status = normalizeLotStatus(lot.trang_thai);
       return status === "Hoàn thành" || status === "Xuất hàng";
@@ -452,12 +458,15 @@ export default function ExportPage() {
   }, []);
 
   const loadQcResults = useCallback(async (fid: string) => {
-    const { data } = await supabase
-      .from("qc_results")
-      .select("id,lot_id,ma_lo,loai_csr,trang_thai,dat_hang,grade,ngay_kn,created_at")
-      .eq("factory_id", fid)
-      .order("ngay_kn", { ascending: false })
-      .order("created_at", { ascending: false });
+    const data = await fetchAllPaginated<QcResult>((from, to) =>
+      supabase
+        .from("qc_results")
+        .select("id,lot_id,ma_lo,loai_csr,trang_thai,dat_hang,grade,ngay_kn,created_at")
+        .eq("factory_id", fid)
+        .order("ngay_kn", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    );
     setQcResults(data || []);
   }, []);
 
@@ -1531,6 +1540,7 @@ export default function ExportPage() {
   if (view === "list")
     return (
       <div>
+        <PageBackgroundMotif theme="ocean"/>
         <Toast />
         {kpiPrompt && (
           <KpiLinkPrompt
@@ -1542,26 +1552,24 @@ export default function ExportPage() {
             onDone={() => setKpiPrompt(null)}
           />
         )}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800">
-              Xuất hàng
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Quản lý đơn xuất hàng
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setForm(emptyForm());
-              setEditId(null);
-              setView("add");
-            }}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            <Plus size={16} /> Tạo đơn xuất
-          </button>
-        </div>
+        <PageHeaderBanner
+          title="Xuất hàng"
+          subtitle="Quản lý đơn xuất hàng"
+          theme="ocean"
+          icon={FileOutput}
+          action={
+            <button
+              onClick={() => {
+                setForm(emptyForm());
+                setEditId(null);
+                setView("add");
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-ocean-700 font-bold rounded-xl shadow-md transition-all"
+            >
+              <Plus size={16} /> Tạo đơn xuất
+            </button>
+          }
+        />
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3 mb-6">

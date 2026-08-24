@@ -3,9 +3,12 @@
 /* ─── Design tokens: Pastel Rừng Cao Su ──────────────────────────────────────
    Bổ sung thêm cho palette Tailwind mặc định (không xoá/đổi màu nào có sẵn).
    Xem .claude/rules/05-ui-components.md mục "Pastel Rừng Cao Su" để biết
-   phạm vi áp dụng: khung sườn (sidebar/header) + 4 module Sản lượng, Điều xe/
-   Xuất hàng, Chất lượng, EUDR. Các module khác (ISO, Bảo trì, KPI, Cài đặt...)
-   cố ý giữ nguyên màu cũ. */
+   phạm vi áp dụng đã triển khai thật: khung sườn (sidebar/header, luôn dùng
+   brand) + Dashboard chính (`src/app/dashboard/page.tsx` qua `WidgetCard`'s
+   `theme` prop) — Sản lượng dùng brand/forest, Xuất hàng + Điều xe dùng ocean,
+   Chất lượng dùng mint. Các trang module khác (ISO, Bảo trì, KPI, Cài đặt,
+   dispatch/export/quality/... của chính module đó) cố ý giữ nguyên màu cũ,
+   chưa đổi. */
 @theme {
   /* Nền trang mới — trắng ngả xanh rất nhạt, thay cho slate-50 */
   --color-app-bg: #f2f8f5;
@@ -14,6 +17,13 @@
   --color-brand: #2f5d52;
   --color-brand-deep: #1c3a32;
 
+  /* Điều xe / Xuất hàng trên Dashboard — "Ocean" xanh dương, tách biệt brand/mint */
+  --color-ocean-50: #e3f0fb;
+  --color-ocean-100: #c3ddf5;
+  --color-ocean-500: #256bad;
+  --color-ocean-600: #1b5590;
+  --color-ocean-700: #144171;
+
   /* Module Chất lượng/Kiểm nghiệm — "Mint" riêng (phương án B đã chốt),
      sáng & nhạt hơn Teal thật để không trùng với module Kiểm soát quá trình. */
   --color-mint-50: #eafbf5;
@@ -21,6 +31,14 @@
   --color-mint-500: #4bc0a6;
   --color-mint-600: #34a68d;
   --color-mint-700: #1f6a58;
+
+  /* Module EUDR/Truy xuất nguồn gốc — "Moss" (đúng giá trị đã dùng trong mockup
+     cung_cap_dl/thiet_ke_moi_pastel_rung_cao_su.html, họ theme-earth). */
+  --color-moss-50: #eef1e0;
+  --color-moss-100: #d9e0bd;
+  --color-moss-500: #71823f;
+  --color-moss-600: #596532;
+  --color-moss-700: #444d26;
 }
 
 html, body { max-width: 100%; overflow-x: hidden; }

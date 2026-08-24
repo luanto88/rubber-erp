@@ -630,11 +630,37 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   xem_xet: "xem xét",
 }
 
+const PERMISSION_CODE_LABELS: Record<string, string> = {
+  "quality.import": "tải lên phiếu KN",
+  "quality.create": "tạo phiếu KN",
+  "quality.edit": "sửa phiếu KN",
+  "quality.delete": "xóa phiếu KN",
+  "quality.print": "in phiếu KN",
+  "quality.view": "xem phiếu KN",
+  "product.mark_completed": "đánh dấu hoàn thành",
+  "product.predict_view": "xem dự đoán số lô",
+  "product.predict_manage": "quản lý dự đoán số lô",
+  "product.confirm_scan": "quét QR xác nhận",
+  "product.approve_shift": "duyệt ca sản xuất",
+  "export.delete_order": "xóa đơn xuất hàng",
+  "export.quick_add_customer": "thêm nhanh khách hàng",
+  "export.view_own": "xem đơn được cấp",
+  "settings.manage_config": "quản trị cấu hình hệ thống",
+  "settings.master_data": "quản lý danh mục",
+  "settings.maintenance_config": "cấu hình bảo trì",
+  "users.edit_permission": "sửa quyền người dùng",
+  "users.approve": "duyệt tài khoản",
+  "suffixes.quick_add": "thêm nhanh hậu tố",
+}
+
 function prettifyPermissionModule(moduleName: string) {
   return PERMISSION_MODULE_LABELS[moduleName] || moduleName.replaceAll("_", " ")
 }
 
-function prettifyPermissionAction(actionName: string) {
+function prettifyPermissionAction(actionName: string, code?: string) {
+  if (code && PERMISSION_CODE_LABELS[code]) {
+    return PERMISSION_CODE_LABELS[code]
+  }
   return PERMISSION_ACTION_LABELS[actionName] || actionName.replaceAll("_", " ")
 }
 
@@ -657,7 +683,7 @@ function labelPermission(code: string) {
     module_name: moduleName,
     action_name: actionName,
     module_label: prettifyPermissionModule(moduleName),
-    action_label: prettifyPermissionAction(actionName),
+    action_label: prettifyPermissionAction(actionName, code),
     label: `${moduleName} · ${actionName}`,
   }
 }
@@ -946,7 +972,7 @@ export default function SettingsPage() {
         module_name: item.module_name,
         action_name: item.action_name,
         module_label: prettifyPermissionModule(item.module_name),
-        action_label: prettifyPermissionAction(item.action_name),
+        action_label: prettifyPermissionAction(item.action_name, item.code),
         label: `${item.module_name} · ${item.action_name}`,
       })),
     )

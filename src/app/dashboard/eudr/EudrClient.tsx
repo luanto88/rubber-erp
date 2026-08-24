@@ -23,6 +23,8 @@ import JSZip from "jszip"
 import { saveAs } from "file-saver"
 import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
 import { EUDR_BUCKET, buildEudrStoragePath } from "@/lib/eudr-attachments"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import {
   Search, FileDown, Upload, Trash2, Map, Shield, Package,
   AlertTriangle, Check, X, FileText, Globe, Download, Loader2,
@@ -1170,6 +1172,7 @@ export default function EudrClient() {
 
   return (
     <div className="h-full">
+      <PageBackgroundMotif theme="moss"/>
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-bold ${toast.ok?"bg-emerald-600":"bg-red-600"}`}>
@@ -1178,14 +1181,12 @@ export default function EudrClient() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
-            <Shield size={22} className="text-emerald-600"/> EUDR / Truy xuất nguồn gốc
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">Tra cứu đơn hàng và xem vùng trồng liên quan</p>
-        </div>
-      </div>
+      <PageHeaderBanner
+        title="EUDR / Truy xuất nguồn gốc"
+        subtitle="Tra cứu đơn hàng và xem vùng trồng liên quan"
+        theme="moss"
+        icon={Trees}
+      />
 
       {/* Search bar */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4">

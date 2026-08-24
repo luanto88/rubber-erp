@@ -72,6 +72,8 @@ import {
   ScanLine,
   ShieldCheck,
 } from "lucide-react";
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 
 // Types
 type Lot = {
@@ -4774,6 +4776,7 @@ export default function ProductPage() {
   // ------------------------------
   return (
     <div>
+      <PageBackgroundMotif theme="forest"/>
       {saveError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
           <AlertTriangle size={16} className="shrink-0" />
@@ -4805,55 +4808,55 @@ export default function ProductPage() {
         />
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Thành phẩm</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Quản lý lô và phân tách sản lượng theo ca
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {currentUser?.role === "admin" && (
+      <PageHeaderBanner
+        title="Thành phẩm"
+        subtitle="Quản lý lô và phân tách sản lượng theo ca"
+        theme="forest"
+        icon={Package}
+        action={
+          <>
+            {currentUser?.role === "admin" && (
+              <button
+                onClick={handleSyncAllLotStatuses}
+                disabled={syncing}
+                title="Đồng bộ trạng thái lô — tính lại trạng thái tất cả lô từ đơn xuất thực tế trong DB"
+                aria-label="Đồng bộ trạng thái lô"
+                className="flex items-center justify-center w-10 h-10 shrink-0 border border-white/40 bg-white/15 text-white rounded-xl disabled:opacity-50 transition-all hover:bg-white/25"
+              >
+                <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
+              </button>
+            )}
+            {hasPermission(currentUser, "product.predict_view") && (
+              <Link
+                href="/dashboard/product/predict"
+                className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
+              >
+                <Wand2 size={15} /> Dự đoán số lô
+              </Link>
+            )}
+            {hasPermission(currentUser, "product.confirm_scan") && (
+              <Link
+                href="/dashboard/product/confirm"
+                className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
+              >
+                <ScanLine size={15} /> Quét QR xác nhận SX
+              </Link>
+            )}
             <button
-              onClick={handleSyncAllLotStatuses}
-              disabled={syncing}
-              title="Đồng bộ trạng thái lô — tính lại trạng thái tất cả lô từ đơn xuất thực tế trong DB"
-              aria-label="Đồng bộ trạng thái lô"
-              className="flex items-center justify-center w-10 h-10 shrink-0 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl border border-amber-200 disabled:opacity-50 transition-all"
+              onClick={openSk}
+              className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
             >
-              <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
+              <ArrowLeftRight size={15} /> Sang kiện/Thay bọc
             </button>
-          )}
-          {hasPermission(currentUser, "product.predict_view") && (
-            <Link
-              href="/dashboard/product/predict"
-              className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
+            <button
+              onClick={() => openCreate()}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white text-brand text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/90"
             >
-              <Wand2 size={15} /> Dự đoán số lô
-            </Link>
-          )}
-          {hasPermission(currentUser, "product.confirm_scan") && (
-            <Link
-              href="/dashboard/product/confirm"
-              className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
-            >
-              <ScanLine size={15} /> Quét QR xác nhận SX
-            </Link>
-          )}
-          <button
-            onClick={openSk}
-            className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
-          >
-            <ArrowLeftRight size={15} /> Sang kiện/Thay bọc
-          </button>
-          <button
-            onClick={() => openCreate()}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap"
-          >
-            <Plus size={15} /> Thêm lô
-          </button>
-        </div>
-      </div>
+              <Plus size={15} /> Thêm lô
+            </button>
+          </>
+        }
+      />
 
       {postSaveReadyNgans.length > 0 && (
         <div className="fixed inset-x-4 bottom-4 z-[60] md:inset-x-auto md:right-6 md:w-[34rem]">

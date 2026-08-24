@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { X } from "lucide-react"
+import { Forklift, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import WarehouseKpi from "./_components/warehouse-kpi"
 import WarehouseFloorPlan from "./_components/warehouse-floor-plan"
@@ -282,6 +284,7 @@ export default function WarehousePage() {
 
   return (
     <div className="p-4 h-full flex flex-col">
+      <PageBackgroundMotif theme="orange"/>
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl max-w-xl
@@ -292,28 +295,29 @@ export default function WarehousePage() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Kho thành phẩm</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Quản lý vị trí kiện trong kho theo sơ đồ thực tế</p>
-        </div>
-        {/* Tab chọn kho */}
-        <div className="flex gap-1">
-          {(["kho1", "kho2"] as WarehouseCode[]).map(wh => (
-            <button
-              key={wh}
-              onClick={() => { setActiveWarehouse(wh); setDragWarning(null) }}
-              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${
-                activeWarehouse === wh
-                  ? "bg-emerald-600 text-white shadow-md"
-                  : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {WAREHOUSE_LABELS[wh]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeaderBanner
+        title="Kho thành phẩm"
+        subtitle="Quản lý vị trí kiện trong kho theo sơ đồ thực tế"
+        theme="orange"
+        icon={Forklift}
+        action={
+          <div className="flex gap-1">
+            {(["kho1", "kho2"] as WarehouseCode[]).map(wh => (
+              <button
+                key={wh}
+                onClick={() => { setActiveWarehouse(wh); setDragWarning(null) }}
+                className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${
+                  activeWarehouse === wh
+                    ? "bg-white text-orange-800 shadow-sm"
+                    : "border border-white/40 bg-white/15 text-white hover:bg-white/25"
+                }`}
+              >
+                {WAREHOUSE_LABELS[wh]}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {/* KPI */}
       <WarehouseKpi placements={placements} slots={slots} />

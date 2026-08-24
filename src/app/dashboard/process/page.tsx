@@ -5,11 +5,13 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer,
 } from "recharts"
-import { Activity, ClipboardCheck, Thermometer } from "lucide-react"
+import { Activity, ClipboardCheck, Gauge, Thermometer } from "lucide-react"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { ProcessShell } from "./_components/process-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type ParamPoint = {
   ngay: string
@@ -186,6 +188,14 @@ export default function ProcessOverviewPage() {
 
   return (
     <ProcessShell>
+      <PageBackgroundMotif theme="teal"/>
+      <PageHeaderBanner
+        title="Kiểm soát quá trình"
+        subtitle="Thông số kỹ thuật sấy và đo nhanh chỉ tiêu Po/Mooney theo dây chuyền"
+        theme="teal"
+        icon={Gauge}
+      />
+
       {/* Filter bar */}
       <FilterBar activeCount={[filterDayChuyen, filterChungLoai].filter(Boolean).length}>
         <div>

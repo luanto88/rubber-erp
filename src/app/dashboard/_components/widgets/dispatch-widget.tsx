@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { Truck } from "lucide-react"
 import { hasPermission } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { toISODate } from "@/lib/dispatch-entry-rows"
 import { buildDispatchAnalytics, type DispatchAnalyticsEntry } from "@/lib/dispatch-analytics"
 import type { DiemGN } from "@/lib/dispatch-master"
 import { formatCompact } from "@/lib/chart-theme"
-import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, type WidgetProps } from "./widget-shared"
+import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, TILE_PATTERN_OCEAN, type WidgetProps } from "./widget-shared"
 
 type Stat = { chuyen1: number; chuyenTiep: number; km: number; quyKhoTb: number; trips: number }
 
@@ -72,8 +73,10 @@ export function DispatchWidget({ factoryId, user }: WidgetProps) {
     <WidgetCard
       title="Điều xe"
       subtitle="Số chuyến, quãng đường & quy khô trung bình mỗi chuyến"
+      theme="ocean"
+      icon={Truck}
       action={
-        <Link href="/dashboard/dispatch" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+        <Link href="/dashboard/dispatch" className="text-xs font-semibold text-white/90 hover:text-white">
           Xem tất cả →
         </Link>
       }
@@ -88,7 +91,7 @@ export function DispatchWidget({ factoryId, user }: WidgetProps) {
             { label: "Tháng này", stat: thang },
             { label: "Năm nay", stat: nam },
           ].map(({ label, stat }) => (
-            <div key={label} className="rounded-xl border border-slate-100 p-4">
+            <div key={label} className={`rounded-xl border border-slate-100 p-4 ${TILE_PATTERN_OCEAN}`}>
               <div className="text-xs font-bold text-slate-500 mb-3">{label}</div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

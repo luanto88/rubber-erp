@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import {
   AlertTriangle,
   BarChart2,
@@ -394,32 +395,37 @@ export default function QualityAnalyticsPage({
     const load = async () => {
       setLoading(true)
 
-      const [qcResult, lotResult, ngansResult, customStdResult] = await Promise.allSettled([
-        supabase
-          .from("qc_results")
-          .select("id,factory_id,lot_id,ma_lo,pkn,ngay_kn,ngay_sx,chung_loai,loai_csr,loai_kn,tieu_chuan,so_mau,samples,grade,dat_hang,trang_thai")
-          .eq("factory_id", factoryId)
-          .order("ngay_kn", { ascending: false }),
-        supabase.from("lots").select("id,day_chuyen,ca,loai_banh,boc,ngan_id").eq("factory_id", factoryId),
+      const [qcDataRes, lotDataRes, ngansResult, customStdResult] = await Promise.allSettled([
+        fetchAllPaginated<QcRow>((from, to) =>
+          supabase
+            .from("qc_results")
+            .select("id,factory_id,lot_id,ma_lo,pkn,ngay_kn,ngay_sx,chung_loai,loai_csr,loai_kn,tieu_chuan,so_mau,samples,grade,dat_hang,trang_thai")
+            .eq("factory_id", factoryId)
+            .order("ngay_kn", { ascending: false })
+            .range(from, to)
+        ),
+        fetchAllPaginated<LotRow>((from, to) =>
+          supabase.from("lots").select("id,day_chuyen,ca,loai_banh,boc,ngan_id").eq("factory_id", factoryId).range(from, to)
+        ),
         supabase.from("ngans").select("id,ten_ngan").eq("factory_id", factoryId),
         supabase.from("qc_custom_std").select("id,ten_kh,limits").eq("factory_id", factoryId),
       ])
 
-      const qcPayload = qcResult.status === "fulfilled" ? qcResult.value : null
-      const lotPayload = lotResult.status === "fulfilled" ? lotResult.value : null
+      const qcData = qcDataRes.status === "fulfilled" ? qcDataRes.value : null
+      const lotRows = lotDataRes.status === "fulfilled" ? (lotDataRes.value || []) : []
       const ngansPayload = ngansResult.status === "fulfilled" ? ngansResult.value : null
       const customStdPayload = customStdResult.status === "fulfilled" ? customStdResult.value : null
 
-      if (qcResult.status === "rejected" || qcPayload?.error) {
-        console.error("load quality analytics qc_results failed", qcResult.status === "rejected" ? qcResult.reason : qcPayload?.error)
+      if (qcDataRes.status === "rejected") {
+        console.error("load quality analytics qc_results failed", qcDataRes.reason)
         setRecords([])
         setCustomStdMap(new Map())
         setLoading(false)
         return
       }
 
-      if (lotResult.status === "rejected" || lotPayload?.error) {
-        console.error("load quality analytics lots failed", lotResult.status === "rejected" ? lotResult.reason : lotPayload?.error)
+      if (lotDataRes.status === "rejected") {
+        console.error("load quality analytics lots failed", lotDataRes.reason)
       }
       if (ngansResult.status === "rejected" || ngansPayload?.error) {
         console.error("load quality analytics ngans failed", ngansResult.status === "rejected" ? ngansResult.reason : ngansPayload?.error)
@@ -428,14 +434,13 @@ export default function QualityAnalyticsPage({
         console.error("load quality analytics qc_custom_std failed", customStdResult.status === "rejected" ? customStdResult.reason : customStdPayload?.error)
       }
 
-      const lotRows = (lotPayload?.error ? [] : ((lotPayload?.data as LotRow[] | null | undefined) || []))
       const nganRows = (ngansPayload?.error ? [] : ((ngansPayload?.data as NganRow[] | null | undefined) || []))
       const customStdRows = (customStdPayload?.error ? [] : ((customStdPayload?.data as CustomStdRow[] | null | undefined) || []))
 
       const lotMap = new Map<string, LotRow>(lotRows.map((item) => [item.id, item]))
       const nganMap = new Map<string, NganRow>(nganRows.map((item) => [item.id, item]))
 
-      const nextRecords = (((qcPayload?.data as QcRow[] | null) || [])).map((row) => {
+      const nextRecords = (qcData || []).map((row) => {
         const lot = row.lot_id ? lotMap.get(row.lot_id) : null
         const ngan = lot?.ngan_id ? nganMap.get(lot.ngan_id) : null
         const metrics = {} as Partial<Record<MetricKey, MetricStats>>

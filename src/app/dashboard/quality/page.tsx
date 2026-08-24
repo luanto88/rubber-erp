@@ -8,15 +8,18 @@ import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
   RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
-  Upload, Download, CheckCircle
+  Upload, Download, CheckCircle, FlaskConical
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -598,7 +601,8 @@ export default function QualityPage() {
     setKnDateFilter(ngaySx)
   }, [searchParams])
 
-  // ── Admin / Import ───────────────────────────────────────────────────────────
+  // ── Admin / Import / Permissions ───────────────────────────────────────────────
+  const [currentUser,  setCurrentUser]  = useState<SessionUser | null>(null)
   const [userRole,     setUserRole]     = useState("")
   const [importing,    setImporting]    = useState(false)
   const [importResult, setImportResult] = useState<{
@@ -622,29 +626,42 @@ export default function QualityPage() {
   // ── Load results ─────────────────────────────────────────────────────────────
   const loadResults = useCallback(async (fid: string) => {
     setLoading(true)
-    let q = supabase.from("qc_results")
-      .select("*")
-      .eq("factory_id", fid)
-      .order("ngay_kn", { ascending: false })
-      .order("pkn",     { ascending: false })
-    if (filterLoai) q = q.eq("loai_csr",  filterLoai)
-    if (filterFrom) q = q.gte("ngay_kn",  filterFrom)
-    if (filterTo)   q = q.lte("ngay_kn",  filterTo)
-    const { data } = await q
-    setResults((data || []).map(normalizeQcResultDates))
-    setLoading(false)
+    try {
+      const data = await fetchAllPaginated<QcResult>((from, to) => {
+        let q = supabase.from("qc_results")
+          .select("*")
+          .eq("factory_id", fid)
+          .order("ngay_kn", { ascending: false })
+          .order("pkn",     { ascending: false })
+        if (filterLoai) q = q.eq("loai_csr",  filterLoai)
+        if (filterFrom) q = q.gte("ngay_kn",  filterFrom)
+        if (filterTo)   q = q.lte("ngay_kn",  filterTo)
+        return q.range(from, to)
+      })
+      setResults((data || []).map(normalizeQcResultDates))
+    } catch (err) {
+      console.error("loadResults failed", err)
+    } finally {
+      setLoading(false)
+    }
   }, [filterLoai, filterFrom, filterTo])
 
   // ── Load stats (không filter trang_thai để stats luôn phản ánh thực tế) ───────
   const loadStats = useCallback(async (fid: string) => {
-    let q = supabase.from("qc_results")
-      .select("*")
-      .eq("factory_id", fid)
-    if (filterLoai) q = q.eq("loai_csr", filterLoai)
-    if (filterFrom) q = q.gte("ngay_kn", filterFrom)
-    if (filterTo)   q = q.lte("ngay_kn", filterTo)
-    const { data } = await q
-    setStatsResults((data || []).map(normalizeQcResultDates))
+    try {
+      const data = await fetchAllPaginated<QcResult>((from, to) => {
+        let q = supabase.from("qc_results")
+          .select("*")
+          .eq("factory_id", fid)
+        if (filterLoai) q = q.eq("loai_csr", filterLoai)
+        if (filterFrom) q = q.gte("ngay_kn", filterFrom)
+        if (filterTo)   q = q.lte("ngay_kn", filterTo)
+        return q.range(from, to)
+      })
+      setStatsResults((data || []).map(normalizeQcResultDates))
+    } catch (err) {
+      console.error("loadStats failed", err)
+    }
   }, [filterLoai, filterFrom, filterTo])
 
   // ── Load custom standards ────────────────────────────────────────────────────
@@ -655,19 +672,23 @@ export default function QualityPage() {
   }, [])
 
   const backfillQcLotLinks = useCallback(async (fid: string, loaiCsr: string) => {
-    const { data: orphanQc, error: orphanError } = await supabase.from("qc_results")
-      .select("id,ma_lo")
-      .eq("factory_id", fid)
-      .eq("loai_csr", loaiCsr)
-      .is("lot_id", null)
-    if (orphanError) throw orphanError
+    const orphanQc = await fetchAllPaginated<{ id: string; ma_lo: string }>((from, to) =>
+      supabase.from("qc_results")
+        .select("id,ma_lo")
+        .eq("factory_id", fid)
+        .eq("loai_csr", loaiCsr)
+        .is("lot_id", null)
+        .range(from, to)
+    )
     if (!orphanQc?.length) return
 
-    const { data: lots, error: lotsError } = await supabase.from("lots")
-      .select("id,ma_lo,ngay_sx,ngay_ht")
-      .eq("factory_id", fid)
-      .eq("loai_csr", loaiCsr)
-    if (lotsError) throw lotsError
+    const lots = await fetchAllPaginated<{ id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }>((from, to) =>
+      supabase.from("lots")
+        .select("id,ma_lo,ngay_sx,ngay_ht")
+        .eq("factory_id", fid)
+        .eq("loai_csr", loaiCsr)
+        .range(from, to)
+    )
 
     const lotByExact = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number }>()
     const lotByBase = new Map<string, { id: string; ma_lo: string; ngay_sx: string; ngay_ht?: string | null; trang_thai?: string; tong_banh?: number } | null>()
@@ -713,11 +734,13 @@ export default function QualityPage() {
 
       if (createForm.loai_kn === "kl_rot_hang") {
         // Fetch failed qc_results
-        const { data: failed, error: failedError } = await supabase.from("qc_results")
-          .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-          .ilike("dat_hang", "%RH")
-          .order("created_at", { ascending: false })
-        if (failedError) throw failedError
+        const failed = await fetchAllPaginated<QcResult>((from, to) =>
+          supabase.from("qc_results")
+            .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .ilike("dat_hang", "%RH")
+            .order("created_at", { ascending: false })
+            .range(from, to)
+        )
 
         // Dedup failed: group by lot_id (UUID) hoặc ma_lo (fallback khi lot_id null)
         const latestByLotId = new Map<string,QcResult>()
@@ -733,10 +756,12 @@ export default function QualityPage() {
         })
 
         // Fetch ALL results để cross-check "vẫn còn rớt hạng"
-        const { data: allRes, error: allResError } = await supabase.from("qc_results")
-          .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-          .order("created_at", { ascending: false })
-        if (allResError) throw allResError
+        const allRes = await fetchAllPaginated<QcResult>((from, to) =>
+          supabase.from("qc_results")
+            .select("*").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .order("created_at", { ascending: false })
+            .range(from, to)
+        )
 
         const latestAllById   = new Map<string,QcResult>()
         const latestAllByMaLo = new Map<string,QcResult>()
@@ -824,18 +849,22 @@ export default function QualityPage() {
 
       } else if (createForm.loai_kn === "kl_6thang") {
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6)
-        const { data: lots, error: lotsError } = await supabase.from("lots")
-          .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
-          .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-          .neq("trang_thai","Xuất hàng")
-          .order("ngay_sx", { ascending: true })
-        if (lotsError) throw lotsError
+        const lots = await fetchAllPaginated<{ id: string; factory_id: string; ma_lo: string; loai_csr: string; ngay_sx: string; ngay_ht?: string | null; trang_thai: string; tong_banh: number }>((from, to) =>
+          supabase.from("lots")
+            .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+            .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .neq("trang_thai","Xuất hàng")
+            .order("ngay_sx", { ascending: true })
+            .range(from, to)
+        )
 
         // Attach latest qc_result if exists
-        const { data: qcAll, error: qcAllError } = await supabase.from("qc_results")
-          .select("*").eq("factory_id",factoryId).eq("loai_csr",loaiCsr)
-          .order("created_at",{ascending:false})
-        if (qcAllError) throw qcAllError
+        const qcAll = await fetchAllPaginated<QcResult>((from, to) =>
+          supabase.from("qc_results")
+            .select("*").eq("factory_id",factoryId).eq("loai_csr",loaiCsr)
+            .order("created_at",{ascending:false})
+            .range(from, to)
+        )
 
         const latestQCById = new Map<string,QcResult>()
         const latestQCByMaLo = new Map<string,QcResult>()
@@ -865,26 +894,32 @@ export default function QualityPage() {
           if (reqId === eligibleLotsReqRef.current) setEligibleLots([])
           return
         }
-        const { data: existingQC, error: existingQcError } = await supabase.from("qc_results")
-          .select("lot_id,ma_lo").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-        if (existingQcError) throw existingQcError
+        const existingQC = await fetchAllPaginated<{ lot_id: string | null; ma_lo: string | null }>((from, to) =>
+          supabase.from("qc_results")
+            .select("lot_id,ma_lo").eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .range(from, to)
+        )
 
         const excludeIds = new Set((existingQC||[]).map(r=>r.lot_id).filter(Boolean))
         const excludeRows = (existingQC || []).filter(r => r.ma_lo)
 
-        const { data: lots, error: lotsError } = await supabase.from("lots")
-          .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
-          .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
-          .eq("trang_thai","Hoàn thành")
-          .order("num", {ascending:true})
-        if (lotsError) throw lotsError
-        let sourceLots = lots || []
-        if (sourceLots.length === 0) {
-          const { data: fallbackLots, error: fallbackLotsError } = await supabase.from("lots")
+        const lots = await fetchAllPaginated<{ id: string; factory_id: string; ma_lo: string; loai_csr: string; ngay_sx: string; ngay_ht?: string | null; trang_thai: string; tong_banh: number }>((from, to) =>
+          supabase.from("lots")
             .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
             .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+            .eq("trang_thai","Hoàn thành")
             .order("num", {ascending:true})
-          if (fallbackLotsError) throw fallbackLotsError
+            .range(from, to)
+        )
+        let sourceLots = lots || []
+        if (sourceLots.length === 0) {
+          const fallbackLots = await fetchAllPaginated<{ id: string; factory_id: string; ma_lo: string; loai_csr: string; ngay_sx: string; ngay_ht?: string | null; trang_thai: string; tong_banh: number }>((from, to) =>
+            supabase.from("lots")
+              .select("id,factory_id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+              .eq("factory_id", factoryId).eq("loai_csr", loaiCsr)
+              .order("num", {ascending:true})
+              .range(from, to)
+          )
           sourceLots = (fallbackLots || []).filter(l =>
             ["Hoàn thành", "Xuất hàng"].includes(normalizeLotStatus(l.trang_thai))
           )
@@ -951,8 +986,8 @@ export default function QualityPage() {
     loadResults(fid)
     loadStats(fid)
     loadCustomStds(fid)
-    const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
-    setUserRole(u.role || "")
+    setCurrentUser(cachedUser)
+    setUserRole(cachedUser?.role || "")
     supabase.from("factories").select("*").eq("id",fid).limit(1)
       .then(({data}) => {
         const f = data?.[0]
@@ -1326,6 +1361,10 @@ export default function QualityPage() {
   // ── Import Excel/CSV ─────────────────────────────────────────────────────────
   const handleImport = async (file: File) => {
     if (!factoryId) return
+    if (!hasPermission(currentUser, "quality.import")) {
+      showToast("Bạn không có quyền tải lên / nhập file kiểm nghiệm", false)
+      return
+    }
     setImporting(true)
     setImportResult(null)
 
@@ -1641,15 +1680,37 @@ export default function QualityPage() {
 
   const getEffectiveQc = useCallback((r: QcResult): QcResult => {
     if (r.loai_kn === "kl_rot_hang") return r
-    if (r.id && retestMap.byParent.has(r.id)) return retestMap.byParent.get(r.id)!
-    const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
-    if (k && retestMap.byLotKey.has(k)) {
-      const retest = retestMap.byLotKey.get(k)!
-      if (new Date(retest.created_at || 0) >= new Date(r.created_at || 0)) {
-        return retest
+
+    let curr = r
+    const visited = new Set<string>()
+    if (curr.id) visited.add(curr.id)
+
+    // Traverse parent_id chain iteratively
+    while (curr.id && retestMap.byParent.has(curr.id)) {
+      const next = retestMap.byParent.get(curr.id)!
+      if (visited.has(next.id)) break
+      visited.add(next.id)
+      curr = next
+    }
+
+    // Fallback to lot key lookup if parent_id chain did not advance
+    if (curr.id === r.id) {
+      const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
+      if (k && retestMap.byLotKey.has(k)) {
+        const retest = retestMap.byLotKey.get(k)!
+        if (new Date(retest.created_at || 0) >= new Date(r.created_at || 0)) {
+          curr = retest
+          while (curr.id && retestMap.byParent.has(curr.id)) {
+            const next = retestMap.byParent.get(curr.id)!
+            if (visited.has(next.id)) break
+            visited.add(next.id)
+            curr = next
+          }
+        }
       }
     }
-    return r
+
+    return curr
   }, [retestMap])
 
   // Ẩn phiếu kl_rot_hang khỏi danh sách chính (chỉ hiện trong Giám sát KN) & Lọc theo kết quả hiệu lực
@@ -2064,38 +2125,41 @@ export default function QualityPage() {
       {/* ── LIST / GIÁM SÁT VIEW ─────────────────────────────────────────── */}
       {view === "list" && (
         <div>
+          <PageBackgroundMotif theme="mint"/>
           {/* Hidden file input for import */}
           <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={e => { const f=e.target.files?.[0]; if (f) handleImport(f) }}/>
 
           {/* Page header */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-5">
-            <div>
-              <h1 className="text-2xl font-extrabold text-slate-800">Kiểm nghiệm</h1>
-              <p className="text-sm text-slate-500 mt-0.5">Kết quả kiểm nghiệm — TCCS / TCVN / TCKH</p>
-            </div>
-            {mainTab !== "thong_ke" && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {userRole === "admin" && (
+          <PageHeaderBanner
+            title="Kiểm nghiệm"
+            subtitle="Kết quả kiểm nghiệm — TCCS / TCVN / TCKH"
+            theme="mint"
+            icon={FlaskConical}
+            action={mainTab !== "thong_ke" && (
+              <>
+                {hasPermission(currentUser, "quality.import") && (
                   <>
                     <button onClick={handleDownloadTemplate}
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all border border-slate-200">
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-white border border-white/40 bg-white/15 hover:bg-white/25 rounded-xl transition-all">
                       <Download size={14}/> Tải mẫu
                     </button>
                     <button onClick={()=>importFileRef.current?.click()} disabled={importing}
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 rounded-xl transition-all border border-blue-200 disabled:opacity-40">
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-white border border-white/40 bg-white/15 hover:bg-white/25 rounded-xl transition-all disabled:opacity-40">
                       {importing ? <RefreshCw size={14} className="animate-spin"/> : <Upload size={14}/>}
                       {importing ? "Đang nhập..." : "Nhập KN"}
                     </button>
                   </>
                 )}
-                <button onClick={()=>openCreate()}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all btn-press">
-                  <Plus size={16}/> Tạo phiếu KN
-                </button>
-              </div>
+                {hasPermission(currentUser, "quality.create") && (
+                  <button onClick={()=>openCreate()}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-mint-700 font-bold rounded-xl shadow-md transition-all btn-press">
+                    <Plus size={16}/> Tạo phiếu KN
+                  </button>
+                )}
+              </>
             )}
-          </div>
+          />
 
           {/* Tab nav */}
           <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">
@@ -2222,18 +2286,24 @@ export default function QualityPage() {
                               </>
                             ) : (
                               <>
-                                <button onClick={e=>{e.stopPropagation();openCreate(date)}}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors">
-                                  <Plus size={11}/> Thêm
-                                </button>
-                                <button onClick={e=>{e.stopPropagation();setEditDateModal(date);setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors">
-                                  <Edit2 size={11}/> Sửa
-                                </button>
-                                <button onClick={e=>{e.stopPropagation();setDeleteMode(date);setSelectedDeleteIds(new Set());setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors">
-                                  <Trash2 size={11}/> Xóa
-                                </button>
+                                {hasPermission(currentUser, "quality.create") && (
+                                  <button onClick={e=>{e.stopPropagation();openCreate(date)}}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors">
+                                    <Plus size={11}/> Thêm
+                                  </button>
+                                )}
+                                {hasPermission(currentUser, "quality.edit") && (
+                                  <button onClick={e=>{e.stopPropagation();setEditDateModal(date);setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors">
+                                    <Edit2 size={11}/> Sửa
+                                  </button>
+                                )}
+                                {hasPermission(currentUser, "quality.delete") && (
+                                  <button onClick={e=>{e.stopPropagation();setDeleteMode(date);setSelectedDeleteIds(new Set());setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors">
+                                    <Trash2 size={11}/> Xóa
+                                  </button>
+                                )}
                                 <button onClick={async e=>{e.stopPropagation();
                                   // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)
                                   const parentIds = dateResults.map(r=>r.id)
@@ -2567,16 +2637,18 @@ export default function QualityPage() {
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                     {r.dat_hang}
                   </span>
-                  {r.trang_thai!=="dat" || true ? (
+                  {hasPermission(currentUser, "quality.edit") && (
                     <button onClick={()=>openEditResult(r)}
                       className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100">
                       <Edit2 size={11}/> Sửa
                     </button>
-                  ) : null}
-                  <button onClick={()=>setDelConfirm(r.id)}
-                    className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors">
-                    <Trash2 size={13}/>
-                  </button>
+                  )}
+                  {hasPermission(currentUser, "quality.delete") && (
+                    <button onClick={()=>setDelConfirm(r.id)}
+                      className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors">
+                      <Trash2 size={13}/>
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

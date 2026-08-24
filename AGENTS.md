@@ -45,3 +45,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - Trong React JSX, mảng các bản sao `extraSigBoxes` phải dùng `<Fragment key={box.id}>` (không dùng wrapper `<div>`) và component kéo-thả `ExtraDraggableBox` phải đặt ở top-level scope ngoài Modal, chỉ dùng handler `onStop` (không dùng `onDrag` cập nhật state) để tránh `bounds="parent"` bị lỗi reset tọa độ `y = 0` hoặc nổ lỗi `findDOMNode` trên React 19.
   - Phía backend (`generate-pdf`, `documents/sign`, `iso/forms/finalize`), đối với mọi loại file PDF (cả file chính và file phụ), đều tiếp nhận mảng `extraPlacements` để đóng dấu đầy đủ toàn bộ các bản sao chữ ký & tên lên file PDF kết quả.
 
+## Quy ước Phân quyền (Permissions) & Việt hóa nhãn
+
+- Khi tạo hoặc khai báo 1 điều kiện / mã phân quyền mới (`permission_code`), BẮT BUỘC phải dịch nhãn sang tiếng Việt rõ nghĩa và ngắn gọn trong hệ thống (ví dụ: `quality.import` dịch thành `tải lên phiếu KN`, `quality.create` dịch thành `tạo phiếu KN`, không dùng tên tiếng Anh thô hay nhãn không rõ nghĩa trong giao diện Cài đặt phân quyền người dùng).
+- Việc kiểm tra phân quyền trên giao diện người dùng phải sử dụng hàm chuẩn `hasPermission(currentUser, "module.action")` thay vì hardcode so sánh vai trò `userRole === "admin"`, để đảm bảo các tài khoản không phải admin được cấp quyền tương ứng vẫn thao tác được bình thường.
+
+
