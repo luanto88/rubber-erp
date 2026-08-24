@@ -150,19 +150,30 @@ const STRINGS = {
     commitGrowthTitle: "Phát triển",
     commitGrowthSubtitle: "Bền vững",
 
-    // Modal "Quên mật khẩu?" (/login)
+    // Modal "Quên mật khẩu?" (/login) — luồng 2 bước: xác nhận Tên đăng nhập trước (Bước 1,
+    // tiết lộ có tồn tại hay không + gợi ý email che bớt ký tự), rồi mới nhập Email đầy đủ
+    // (Bước 2) để thực sự gửi mật khẩu mới — quyết định đổi hướng bảo mật có chủ đích, xem
+    // Context trong plan/rule liên quan.
     forgotPasswordModalTitle: "Quên mật khẩu?",
-    forgotPasswordDescription:
-      "Nhập đúng Tên đăng nhập và Email đã đăng ký — nếu khớp, hệ thống sẽ gửi mật khẩu mới tới email đó.",
+    forgotStep1Description: "Nhập Tên đăng nhập để bắt đầu.",
     forgotUsernamePlaceholder: "Tên đăng nhập",
+    forgotCheckButton: "Kiểm tra",
+    forgotChecking: "Đang kiểm tra...",
+    forgotUsernameNotFound: "Không tìm thấy tài khoản này hoặc tài khoản không còn hoạt động.",
+    forgotNoEmailConfigured: "Tài khoản này chưa cấu hình email cá nhân. Vui lòng liên hệ quản trị viên.",
+    forgotAccountLabel: "Tài khoản",
+    forgotEmailHintLabel: "Gợi ý email đã đăng ký",
+    forgotStep2Description: "Nhập đầy đủ email đã đăng ký cho tài khoản trên.",
     forgotEmailPlaceholder: "Email đã đăng ký",
     forgotSubmitButton: "Gửi yêu cầu",
     forgotSubmitting: "Đang gửi...",
-    forgotMissingFields: "Vui lòng nhập đầy đủ Tên đăng nhập và Email",
+    forgotEmailMismatch: "Email không khớp với tài khoản này.",
+    forgotBackButton: "← Đổi tài khoản khác",
+    forgotMissingFields: "Vui lòng nhập đầy đủ thông tin",
     forgotConnectionError: "Lỗi kết nối, vui lòng thử lại",
     forgotServerError: "Lỗi máy chủ, vui lòng thử lại",
-    forgotSuccessMessage:
-      "Nếu thông tin khớp với một tài khoản đang hoạt động, mật khẩu mới đã được gửi tới email đã đăng ký.",
+    forgotSuccessPrefix: "Mật khẩu mới đã được gửi đến ",
+    forgotSuccessSuffix: ". Vui lòng kiểm tra hộp thư và đăng nhập lại bằng mật khẩu mới.",
     forgotRateLimited: "Bạn đã yêu cầu quá nhiều lần. Vui lòng thử lại sau 15 phút.",
 
     // Khung dashboard (sidebar/header/thông báo) khi role="customer"
@@ -283,19 +294,29 @@ const STRINGS = {
     commitGrowthTitle: "Growth",
     commitGrowthSubtitle: "Sustainable",
 
-    // "Forgot password?" modal (/login)
+    // "Forgot password?" modal (/login) — 2-step flow: confirm Username first (Step 1, reveals
+    // whether it exists + a masked email hint), then enter the full Email (Step 2) to actually
+    // send the new password.
     forgotPasswordModalTitle: "Forgot password?",
-    forgotPasswordDescription:
-      "Enter your registered Username and Email — if they match, a new password will be sent to that email.",
+    forgotStep1Description: "Enter your Username to get started.",
     forgotUsernamePlaceholder: "Username",
+    forgotCheckButton: "Check",
+    forgotChecking: "Checking...",
+    forgotUsernameNotFound: "This account was not found, or it is no longer active.",
+    forgotNoEmailConfigured: "This account has no personal email configured. Please contact an administrator.",
+    forgotAccountLabel: "Account",
+    forgotEmailHintLabel: "Registered email hint",
+    forgotStep2Description: "Enter the full email registered for this account.",
     forgotEmailPlaceholder: "Registered email",
     forgotSubmitButton: "Send request",
     forgotSubmitting: "Sending...",
-    forgotMissingFields: "Please enter both your Username and Email",
+    forgotEmailMismatch: "This email does not match this account.",
+    forgotBackButton: "← Use a different account",
+    forgotMissingFields: "Please fill in all required fields",
     forgotConnectionError: "Connection error, please try again",
     forgotServerError: "Server error, please try again",
-    forgotSuccessMessage:
-      "If the information matches an active account, a new password has been sent to the registered email.",
+    forgotSuccessPrefix: "A new password has been sent to ",
+    forgotSuccessSuffix: ". Please check your inbox and sign in with the new password.",
     forgotRateLimited: "You've made too many requests. Please try again in 15 minutes.",
 
     // Dashboard chrome (sidebar/header/notifications) for role="customer"

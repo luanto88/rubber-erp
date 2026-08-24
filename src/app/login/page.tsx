@@ -110,14 +110,16 @@ function LoginPageContent() {
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMeState] = useState(true)
 
-  // Modal "Quên mật khẩu?" — nhập Tên đăng nhập + Email đúng → BE xác nhận khớp hồ sơ → sinh
-  // mật khẩu mới, gửi qua email. Server luôn trả cùng 1 thông điệp chung (ok hay không-khớp),
-  // không phân biệt để chống dò tài khoản — modal chỉ hiển thị nguyên văn message đó.
+  // Modal "Quên mật khẩu?" — luồng 2 bước: (1) nhập Tên đăng nhập → BE xác nhận có tồn tại
+  // không + gợi ý email che bớt ký tự; (2) nhập đầy đủ Email khớp gợi ý → sinh mật khẩu mới,
+  // gửi qua email. Quyết định đổi hướng bảo mật có chủ đích (tiết lộ username tồn tại để đổi
+  // lấy trải nghiệm rõ ràng hơn) — xem comment trong 2 route API liên quan.
   const [forgotOpen, setForgotOpen] = useState(false)
+  const [forgotStep, setForgotStep] = useState<"username" | "email" | "done">("username")
   const [forgotUsername, setForgotUsername] = useState("")
   const [forgotEmail, setForgotEmail] = useState("")
+  const [forgotMaskedEmail, setForgotMaskedEmail] = useState("")
   const [forgotLoading, setForgotLoading] = useState(false)
-  const [forgotMessage, setForgotMessage] = useState("")
   const [forgotError, setForgotError] = useState("")
   const [booting, setBooting] = useState(true)
   // Tăng số này để chủ động chạy lại effect bootstrap bên dưới (nút "Thử lại" khi tải danh
@@ -302,9 +304,10 @@ function LoginPageContent() {
   }
 
   const openForgotPassword = () => {
+    setForgotStep("username")
     setForgotUsername(username)
     setForgotEmail("")
-    setForgotMessage("")
+    setForgotMaskedEmail("")
     setForgotError("")
     setForgotOpen(true)
   }
@@ -314,11 +317,72 @@ function LoginPageContent() {
     setForgotLoading(false)
   }
 
-  const handleForgotPasswordSubmit = async () => {
+  const handleForgotBackToUsername = () => {
+    setForgotStep("username")
+    setForgotEmail("")
     setForgotError("")
-    setForgotMessage("")
+  }
 
-    if (!forgotUsername.trim() || !forgotEmail.trim()) {
+  // Dịch lỗi theo `code` trả về từ server (không phụ thuộc chuỗi tiếng Việt cố định) — dùng
+  // chung cho cả 2 bước, mỗi bước chỉ thực sự nhận một tập con các code này.
+  const forgotErrorMessage = (code: string | undefined): string => {
+    switch (code) {
+      case "RATE_LIMITED":
+        return t("forgotRateLimited")
+      case "NOT_FOUND":
+        return t("forgotUsernameNotFound")
+      case "NO_EMAIL_CONFIGURED":
+        return t("forgotNoEmailConfigured")
+      case "EMAIL_MISMATCH":
+        return t("forgotEmailMismatch")
+      case "MISSING_FIELDS":
+        return t("forgotMissingFields")
+      default:
+        return t("forgotServerError")
+    }
+  }
+
+  // Bước 1 — chỉ xác nhận Tên đăng nhập có tồn tại/còn hoạt động không, và nếu có thì lấy gợi ý
+  // email che bớt ký tự để hiển thị ở Bước 2.
+  const handleForgotCheckUsername = async () => {
+    setForgotError("")
+
+    if (!forgotUsername.trim()) {
+      setForgotError(t("forgotMissingFields"))
+      return
+    }
+
+    setForgotLoading(true)
+    try {
+      const res = await fetch("/api/account/forgot-password/check-username", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: forgotUsername }),
+      })
+      const json = await res.json()
+
+      if (!res.ok || json.code !== "OK") {
+        setForgotError(forgotErrorMessage(json.code))
+        setForgotLoading(false)
+        return
+      }
+
+      setForgotMaskedEmail(json.maskedEmail || "")
+      setForgotEmail("")
+      setForgotError("")
+      setForgotStep("email")
+    } catch {
+      setForgotError(t("forgotConnectionError"))
+    }
+    setForgotLoading(false)
+  }
+
+  // Bước 2 — chỉ khi Email nhập đầy đủ khớp đúng tài khoản (đã xác nhận tồn tại ở Bước 1) mới
+  // thực sự sinh mật khẩu mới và gửi qua email.
+  const handleForgotSubmitEmail = async () => {
+    setForgotError("")
+
+    if (!forgotEmail.trim()) {
       setForgotError(t("forgotMissingFields"))
       return
     }
@@ -332,23 +396,14 @@ function LoginPageContent() {
       })
       const json = await res.json()
 
-      if (!res.ok) {
-        // Dịch theo `code` (không phụ thuộc chuỗi tiếng Việt cố định từ server) — 429 (rate-limit)
-        // là thông tin an toàn để hiện riêng, không lộ gì về tài khoản.
-        const message =
-          json.code === "RATE_LIMITED"
-            ? t("forgotRateLimited")
-            : json.code === "MISSING_FIELDS"
-              ? t("forgotMissingFields")
-              : t("forgotServerError")
-        setForgotError(message)
+      if (!res.ok || json.code !== "OK") {
+        setForgotError(forgotErrorMessage(json.code))
         setForgotLoading(false)
         return
       }
 
-      // Luôn hiển thị thông điệp đã dịch của client — server chỉ trả `code: "OK"` (xem
-      // route.ts), không tin theo `message` tiếng Việt cố định để tránh kẹt ngôn ngữ.
-      setForgotMessage(t("forgotSuccessMessage"))
+      setForgotMaskedEmail(json.maskedEmail || forgotMaskedEmail)
+      setForgotStep("done")
     } catch {
       setForgotError(t("forgotConnectionError"))
     }
@@ -430,9 +485,12 @@ function LoginPageContent() {
 
   return (
     <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-app-bg lg:block">
-      {/* ══ Mobile/tablet (<lg): giữ nguyên hoàn toàn thiết kế cũ đã ổn định — gradient +
-          minh hoạ SVG rừng cao su, xếp chồng theo flex-col. Không đổi để tránh rủi ro hồi quy
-          trên các màn hình đã test trước đó. ══ */}
+      {/* ══ Mobile/tablet (<lg): ảnh cạo mủ thật (login-bg-forest.jpg) phủ toàn banner, giống
+          tinh thần "cao su thật" của bản desktop thay vì minh hoạ SVG cách điệu cũ. Đã dựng mockup
+          tham khảo cung_cap_dl/thiet_ke_dang_nhap_mobile.html (3 variant, chụp Playwright đối
+          chiếu), người dùng đã duyệt chọn Variant C (ảnh phủ 100% chiều cao banner, chỉ có lớp
+          scrim chéo tối góc trên-trái để giữ chữ dễ đọc, không dùng mask-fade dọc như bản trước
+          — vì mask-fade khiến ảnh quá mờ, khó nhận ra là cây cao su ở kích thước banner nhỏ). ══ */}
       <div className="relative flex shrink-0 flex-col justify-between overflow-hidden bg-gradient-to-br from-brand to-brand-deep px-8 py-8 text-white sm:px-12 sm:py-10 lg:hidden">
         <div
           aria-hidden="true"
@@ -442,21 +500,23 @@ function LoginPageContent() {
               "repeating-linear-gradient(52deg, rgba(255,255,255,0.07) 0 2px, transparent 2px 22px)",
           }}
         />
-        <svg
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] w-full opacity-[0.16]"
-          viewBox="0 0 800 320"
-          preserveAspectRatio="xMidYMax slice"
-          aria-hidden="true"
-        >
-          <g fill="none" stroke="#ffffff" strokeWidth="2.4">
-            <path d="M60 320 V220 M60 220 C10 200 10 150 60 140 C60 100 110 90 110 140 C160 150 160 200 110 220 V320" />
-            <path d="M180 320 V190 M180 190 C130 170 130 110 180 100 C180 50 240 40 240 100 C290 110 290 170 240 190 V320" />
-            <path d="M310 320 V230 M310 230 C265 214 265 168 310 158 C310 122 360 114 360 158 C405 168 405 214 360 230 V320" />
-            <path d="M450 320 V170 M450 170 C395 148 395 82 450 70 C450 14 518 4 518 70 C573 82 573 148 518 170 V320" />
-            <path d="M600 320 V220 M600 220 C555 204 555 158 600 148 C600 112 650 104 650 148 C695 158 695 204 650 220 V320" />
-            <path d="M730 320 V210 M730 210 C685 194 685 148 730 138 C730 102 780 94 780 138 C825 148 825 194 780 210 V320" />
-          </g>
-        </svg>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <Image
+            src="/login-bg-forest.jpg"
+            alt=""
+            fill
+            sizes="100vw"
+            className="object-cover"
+            style={{ objectPosition: "60% 45%" }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                "linear-gradient(160deg, rgba(28,58,50,.92) 0%, rgba(28,58,50,.6) 30%, rgba(20,46,39,.35) 55%, rgba(15,36,30,.55) 100%)",
+            }}
+          />
+        </div>
 
         <div className="relative z-10">
           <div className="mb-6 flex items-center gap-3">
@@ -854,38 +914,53 @@ function LoginPageContent() {
 
       {forgotOpen && (
         <ModalShell title={t("forgotPasswordModalTitle")} onClose={closeForgotPassword} maxWidth="sm">
-          {forgotMessage ? (
+          {forgotStep === "username" && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                {forgotMessage}
-              </div>
-              <button
-                type="button"
-                onClick={closeForgotPassword}
-                className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
-              >
-                {t("closeLabel")}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-500">{t("forgotPasswordDescription")}</p>
+              <p className="text-sm text-slate-500">{t("forgotStep1Description")}</p>
               <div className="relative">
                 <User size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   value={forgotUsername}
                   onChange={(e) => setForgotUsername(normalizeUsername(e.target.value))}
                   placeholder={t("forgotUsernamePlaceholder")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleForgotCheckUsername()
+                  }}
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:border-emerald-500"
                 />
               </div>
+              {forgotError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-600">
+                  {forgotError}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleForgotCheckUsername()}
+                disabled={forgotLoading}
+                className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {forgotLoading ? t("forgotChecking") : t("forgotCheckButton")}
+              </button>
+            </div>
+          )}
+
+          {forgotStep === "email" && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <div className="text-slate-500">{t("forgotAccountLabel")}</div>
+                <div className="font-bold text-slate-800">{forgotUsername}</div>
+                <div className="mt-2 text-slate-500">{t("forgotEmailHintLabel")}</div>
+                <div className="font-bold text-brand-deep">{forgotMaskedEmail}</div>
+              </div>
+              <p className="text-sm text-slate-500">{t("forgotStep2Description")}</p>
               <input
                 type="email"
                 value={forgotEmail}
                 onChange={(e) => setForgotEmail(e.target.value)}
                 placeholder={t("forgotEmailPlaceholder")}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleForgotPasswordSubmit()
+                  if (e.key === "Enter") void handleForgotSubmitEmail()
                 }}
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-500"
               />
@@ -896,11 +971,35 @@ function LoginPageContent() {
               )}
               <button
                 type="button"
-                onClick={() => void handleForgotPasswordSubmit()}
+                onClick={() => void handleForgotSubmitEmail()}
                 disabled={forgotLoading}
                 className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700 disabled:opacity-50"
               >
                 {forgotLoading ? t("forgotSubmitting") : t("forgotSubmitButton")}
+              </button>
+              <button
+                type="button"
+                onClick={handleForgotBackToUsername}
+                className="w-full text-center text-xs font-bold text-slate-500 hover:text-slate-700"
+              >
+                {t("forgotBackButton")}
+              </button>
+            </div>
+          )}
+
+          {forgotStep === "done" && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {t("forgotSuccessPrefix")}
+                <b>{forgotMaskedEmail}</b>
+                {t("forgotSuccessSuffix")}
+              </div>
+              <button
+                type="button"
+                onClick={closeForgotPassword}
+                className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
+              >
+                {t("closeLabel")}
               </button>
             </div>
           )}
