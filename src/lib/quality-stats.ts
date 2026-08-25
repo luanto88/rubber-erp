@@ -22,6 +22,10 @@ export type QcResultRow = {
   samples: Record<string, (string | number)[]>
   dat_hang: string
   trang_thai: string
+  parent_id?: string | null
+  lan?: number
+  loai_kn?: string
+  created_at?: string
 }
 
 export type LotWeightRow = { id: string; ma_lo: string; tong_kg: number }
@@ -263,7 +267,7 @@ export async function fetchAllQcResults(
   for (;;) {
     const { data, error } = await supabase
       .from("qc_results")
-      .select("id,factory_id,lot_id,ma_lo,ngay_kn,ngay_sx,loai_csr,chung_loai,tieu_chuan,samples,dat_hang,trang_thai")
+      .select("id,factory_id,lot_id,ma_lo,ngay_kn,ngay_sx,loai_csr,chung_loai,tieu_chuan,samples,dat_hang,trang_thai,parent_id,lan,loai_kn,created_at")
       .eq("factory_id", factoryId)
       .gte("ngay_sx", tuNgay)
       .lte("ngay_sx", denNgay)
@@ -275,6 +279,81 @@ export async function fetchAllQcResults(
     from += PAGE_SIZE
   }
   return all
+}
+
+export function normalizeLotCode(maLo: string): string {
+  return String(maLo || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/\\/g, "/")
+}
+
+/**
+ * Khử trùng lặp các phiếu kiểm nghiệm của cùng một lô sản xuất:
+ * Nếu một lô có phiếu kiểm nghiệm lại (loai_kn = 'kl_rot_hang' hoặc parent_id), chọn kết quả kiểm nghiệm
+ * hiệu lực mới nhất (theo lan / created_at) thay thế cho phiếu rớt ban đầu trong thống kê.
+ */
+export function resolveEffectiveQcResults(rows: QcResultRow[]): QcResultRow[] {
+  const byParent = new Map<string, QcResultRow>()
+  const byLotKey = new Map<string, QcResultRow>()
+
+  for (const r of rows) {
+    if (r.loai_kn === "kl_rot_hang" || r.parent_id) {
+      if (r.parent_id) {
+        const ex = byParent.get(r.parent_id)
+        if (!ex || (r.lan || 1) > (ex.lan || 1) || new Date(r.created_at || 0) > new Date(ex.created_at || 0)) {
+          byParent.set(r.parent_id, r)
+        }
+      }
+      const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
+      if (k) {
+        const ex = byLotKey.get(k)
+        if (!ex || (r.lan || 1) > (ex.lan || 1) || new Date(r.created_at || 0) > new Date(ex.created_at || 0)) {
+          byLotKey.set(k, r)
+        }
+      }
+    }
+  }
+
+  const effectiveMap = new Map<string, QcResultRow>()
+
+  for (const r of rows) {
+    let curr = r
+    const visited = new Set<string>()
+    if (curr.id) visited.add(curr.id)
+
+    while (curr.id && byParent.has(curr.id)) {
+      const next = byParent.get(curr.id)!
+      if (visited.has(next.id)) break
+      visited.add(next.id)
+      curr = next
+    }
+
+    if (curr.id === r.id) {
+      const k = r.lot_id || (r.ma_lo ? normalizeLotCode(r.ma_lo) : null)
+      if (k && byLotKey.has(k)) {
+        const retest = byLotKey.get(k)!
+        if (new Date(retest.created_at || 0) >= new Date(r.created_at || 0)) {
+          curr = retest
+          while (curr.id && byParent.has(curr.id)) {
+            const next = byParent.get(curr.id)!
+            if (visited.has(next.id)) break
+            visited.add(next.id)
+            curr = next
+          }
+        }
+      }
+    }
+
+    const lotKey = curr.lot_id || (curr.ma_lo ? normalizeLotCode(curr.ma_lo) : curr.id)
+    const existing = effectiveMap.get(lotKey)
+    if (!existing || (curr.lan || 1) > (existing.lan || 1) || new Date(curr.created_at || 0) > new Date(existing.created_at || 0)) {
+      effectiveMap.set(lotKey, curr)
+    }
+  }
+
+  return Array.from(effectiveMap.values())
 }
 
 export async function fetchLotWeights(lotIds: string[]): Promise<Map<string, LotWeightRow>> {
@@ -368,7 +447,8 @@ export async function buildMonthlyQualityReport(params: {
   const chiTieuList = Array.from(new Set([...params.chiTieuList, "tccs_tong" as ChiTieuKey]))
   const { tuThang, denThang, tuNam } = monthRange(nam, thang)
 
-  const allRows = await fetchAllQcResults(factoryId, tuNam, denThang)
+  const rawRows = await fetchAllQcResults(factoryId, tuNam, denThang)
+  const allRows = resolveEffectiveQcResults(rawRows)
   const lotIds = allRows.map((r) => r.lot_id).filter((v): v is string => !!v)
   const lotWeights = await fetchLotWeights(lotIds)
   const targetRows = await fetchQualityTargets(factoryId, nam)
@@ -604,10 +684,11 @@ export async function buildCriterionSpcReport(params: {
 }): Promise<CriterionSpcReportData> {
   const { factoryId, nam, thang, sanPham, chiTieu, tieuChuan } = params
   const { tuThang, denThang } = monthRange(nam, thang)
-  const [allRows, targetRows] = await Promise.all([
+  const [rawRows, targetRows] = await Promise.all([
     fetchAllQcResults(factoryId, tuThang, denThang),
     fetchQualityTargets(factoryId, nam),
   ])
+  const allRows = resolveEffectiveQcResults(rawRows)
   const rowsForSp = allRows.filter((r) => matchesSanPham(r.loai_csr, sanPham))
   const targetValue = buildTargetResolver(targetRows, nam)(chiTieu, sanPham)?.target_value ?? null
 

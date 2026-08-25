@@ -16,11 +16,13 @@ import {
   type VanBanTrangThai,
   type ThuTuKyStep,
 } from "./_components/documents-types"
-import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Plus, AlertTriangle, Download } from "lucide-react"
+import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Plus, AlertTriangle, Download, FileSignature } from "lucide-react"
 import Link from "next/link"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type AiSearchResult = {
   id: string
@@ -164,27 +166,30 @@ export default function DocumentsPage() {
 
   return (
     <DocumentsShell>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Văn bản nội bộ</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Quản lý đề nghị, tờ trình, báo cáo, kế hoạch, biên bản</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/dashboard/documents/new"
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            <FileText size={16} />
-            Soạn thảo mới
-          </Link>
-          <Link
-            href="/dashboard/documents/new/upload"
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-xl transition-all"
-          >
-            Upload ký tay
-          </Link>
-        </div>
-      </div>
+      <PageBackgroundMotif theme="cyan" />
+      <PageHeaderBanner
+        title="Văn bản nội bộ"
+        subtitle="Quản lý đề nghị, tờ trình, báo cáo, kế hoạch, biên bản"
+        theme="cyan"
+        icon={FileSignature}
+        action={
+          <>
+            <Link
+              href="/dashboard/documents/new"
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-cyan-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+            >
+              <FileText size={16} />
+              Soạn thảo mới
+            </Link>
+            <Link
+              href="/dashboard/documents/new/upload"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-white/15 hover:bg-white/25 border border-white/40 rounded-xl transition-all"
+            >
+              Upload ký tay
+            </Link>
+          </>
+        }
+      />
 
       {/* Tab bar */}
       <div className="flex items-center gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">

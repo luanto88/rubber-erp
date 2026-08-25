@@ -19,7 +19,7 @@
 // trên ancestor phá vỡ position:fixed của hậu duệ) — ở đây ta hoàn toàn không thêm gì
 // vào cây ancestor, chỉ chèn 1 sibling mới.
 
-import { Forklift, Gauge, StickyNote, Target } from "lucide-react"
+import { BadgeCheck, FileSignature, Forklift, Gauge, StickyNote, Target } from "lucide-react"
 import type { PageBannerTheme } from "./page-header-banner"
 
 // Literal hex — KHÔNG dùng var(--color-X) trong SVG/style inline. Bài học 2026-08-24
@@ -38,6 +38,8 @@ const MOTIF_COLOR: Record<PageBannerTheme, string> = {
   rose: "#e11d48",
   orange: "#c2410c",
   teal: "#0d9488",
+  indigo: "#4f46e5",
+  cyan: "#0891b2",
 }
 
 const TILE_SIZE: Record<PageBannerTheme, { width: number; height: number }> = {
@@ -51,6 +53,8 @@ const TILE_SIZE: Record<PageBannerTheme, { width: number; height: number }> = {
   rose: { width: 190, height: 170 },
   orange: { width: 220, height: 150 },
   teal: { width: 190, height: 190 },
+  indigo: { width: 170, height: 170 },
+  cyan: { width: 190, height: 190 },
 }
 
 export function PageBackgroundMotif({ theme }: { theme: PageBannerTheme }) {
@@ -173,6 +177,26 @@ export function PageBackgroundMotif({ theme }: { theme: PageBannerTheme }) {
                 <path d="M95 30 A60 60 0 0 1 155 90" strokeDasharray="3 8" opacity={0.6} />
                 <g transform="translate(115,115)">
                   <Gauge color={color} size={40} strokeWidth={1.3} />
+                </g>
+              </g>
+            )}
+            {/* 2 theme thêm 2026-08-25 — Quản lý ISO / Văn bản nội bộ */}
+            {theme === "indigo" && (
+              <g fill="none" stroke={color} strokeWidth={1.3}>
+                {/* Vòng cung con dấu chứng nhận mờ phía sau icon BadgeCheck */}
+                <circle cx="130" cy="45" r="22" strokeDasharray="4 5" opacity={0.5} />
+                <circle cx="130" cy="45" r="34" strokeDasharray="2 6" opacity={0.3} />
+                <g transform="translate(15,95)">
+                  <BadgeCheck color={color} size={38} strokeWidth={1.3} />
+                </g>
+              </g>
+            )}
+            {theme === "cyan" && (
+              <g fill="none" stroke={color} strokeWidth={1.2}>
+                {/* Dòng kẻ trang giấy/dòng ký duyệt mờ phía sau icon FileSignature */}
+                <path d="M0 130 H190 M0 148 H190 M0 166 H140" opacity={0.5} />
+                <g transform="translate(120,20)">
+                  <FileSignature color={color} size={38} strokeWidth={1.3} />
                 </g>
               </g>
             )}

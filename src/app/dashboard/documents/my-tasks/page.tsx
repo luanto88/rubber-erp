@@ -13,9 +13,11 @@ import {
   type VanBanDocument,
   type ThuTuKyStep,
 } from "../_components/documents-types"
-import { ClipboardList, ArrowRight } from "lucide-react"
+import { ClipboardList, ArrowRight, FileSignature } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type TaskItem = {
   doc: VanBanDocument
@@ -139,15 +141,13 @@ export default function MyTasksPage() {
 
   return (
     <DocumentsShell>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Việc của tôi</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Văn bản cần bạn xử lý
-            {userDeptCode ? ` — Phòng ban: ${userDeptCode}` : ""}
-          </p>
-        </div>
-      </div>
+      <PageBackgroundMotif theme="cyan" />
+      <PageHeaderBanner
+        title="Việc của tôi"
+        subtitle={`Văn bản cần bạn xử lý${userDeptCode ? ` — Phòng ban: ${userDeptCode}` : ""}`}
+        theme="cyan"
+        icon={FileSignature}
+      />
 
       <ResponsiveTableWrapper>
         {loading ? (

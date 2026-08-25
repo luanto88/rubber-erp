@@ -6,8 +6,10 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "./_components/iso-shell"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "./_components/iso-types"
-import { FileText, CheckCircle2, Clock, AlertTriangle, Plus } from "lucide-react"
+import { FileText, CheckCircle2, Clock, AlertTriangle, Plus, BadgeCheck } from "lucide-react"
 import Link from "next/link"
+import { PageHeaderBanner } from "../_components/page-header-banner"
+import { PageBackgroundMotif } from "../_components/page-background-motif"
 
 type KpiData = {
   total: number
@@ -73,19 +75,21 @@ export default function IsoOverviewPage() {
   return (
     <IsoShell>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800">Quản lý ISO</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Tài liệu quy trình, hướng dẫn và biểu mẫu</p>
-          </div>
-          <Link
-            href="/dashboard/iso/documents/new"
-            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
-          >
-            <Plus size={16} /> Tạo tài liệu
-          </Link>
-        </div>
+        <PageBackgroundMotif theme="indigo" />
+        <PageHeaderBanner
+          title="Quản lý ISO"
+          subtitle="Tài liệu quy trình, hướng dẫn và biểu mẫu"
+          theme="indigo"
+          icon={BadgeCheck}
+          action={
+            <Link
+              href="/dashboard/iso/documents/new"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+            >
+              <Plus size={16} /> Tạo tài liệu
+            </Link>
+          }
+        />
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

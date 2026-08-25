@@ -21,6 +21,8 @@ export type PageBannerTheme =
   | "rose"
   | "orange"
   | "teal"
+  | "indigo"
+  | "cyan"
 
 // Màu "from"/"to" ghi literal hex, KHÔNG dùng `var(--color-X)` — đã xác nhận bằng lỗi thật
 // (banner render trắng/mờ trên trình duyệt) rằng đọc custom property của Tailwind `@theme`
@@ -91,6 +93,21 @@ const PAGE_THEME_BANNER: Record<PageBannerTheme, { pattern: string; from: string
     pattern: "repeating-radial-gradient(circle at 100% 100%, rgba(255,255,255,0.18) 0 2px, transparent 2px 14px)",
     from: "#0d9488",
     to: "#134e4a",
+  },
+  // 2 theme thêm 2026-08-25 — Quản lý ISO / Văn bản nội bộ (2 module cuối cùng của nhóm
+  // "ISO & Văn bản"). Không dùng chung theme dù cùng 1 nhóm nav — 2 luồng ký duyệt khác nhau,
+  // đã chốt với người dùng dùng 2 màu riêng biệt. Hex Tailwind built-in indigo/cyan.
+  indigo: {
+    // Dấu tích lặp lại — gợi chứng nhận/phê duyệt ISO
+    pattern: "repeating-radial-gradient(circle at 0% 0%, rgba(255,255,255,0.16) 0 2px, transparent 2px 16px)",
+    from: "#4f46e5",
+    to: "#312e81",
+  },
+  cyan: {
+    // Dòng kẻ văn bản lặp lại — gợi trang giấy/ký duyệt
+    pattern: "repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 16px)",
+    from: "#0891b2",
+    to: "#164e63",
   },
 }
 

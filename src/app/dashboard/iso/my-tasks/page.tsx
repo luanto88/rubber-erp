@@ -6,13 +6,15 @@ import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "../_components/iso-types"
-import { ClipboardCheck, ClipboardList, Eye, FileText } from "lucide-react"
+import { ClipboardCheck, ClipboardList, Eye, FileText, BadgeCheck } from "lucide-react"
 import Link from "next/link"
 import {
   FORM_INSTANCE_STATUS_COLOR,
   FORM_INSTANCE_STATUS_LABEL,
   type IsoFormInstance,
 } from "../_components/iso-types"
+import { PageHeaderBanner } from "../../_components/page-header-banner"
+import { PageBackgroundMotif } from "../../_components/page-background-motif"
 
 type IsoTaskGroup = {
   doc: IsoDocument
@@ -126,10 +128,13 @@ export default function IsoMyTasksPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Việc của tôi</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Tài liệu ISO đang chờ bạn xem xét hoặc phê duyệt</p>
-        </div>
+        <PageBackgroundMotif theme="indigo" />
+        <PageHeaderBanner
+          title="Việc của tôi"
+          subtitle="Tài liệu ISO đang chờ bạn xem xét hoặc phê duyệt"
+          theme="indigo"
+          icon={BadgeCheck}
+        />
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {loading ? (

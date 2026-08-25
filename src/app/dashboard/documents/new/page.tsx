@@ -27,7 +27,10 @@ import {
   Lock,
   Shield,
   Sparkles,
+  FileSignature,
 } from "lucide-react"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 const STORAGE_BUCKET = "iso-documents"
 
@@ -552,12 +555,13 @@ export default function NewDocumentPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Soạn thảo văn bản mới</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Tạo văn bản và cấu hình vòng ký phòng ban</p>
-        </div>
-      </div>
+      <PageBackgroundMotif theme="cyan" />
+      <PageHeaderBanner
+        title="Soạn thảo văn bản mới"
+        subtitle="Tạo văn bản và cấu hình vòng ký phòng ban"
+        theme="cyan"
+        icon={FileSignature}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cột trái: thông tin văn bản */}

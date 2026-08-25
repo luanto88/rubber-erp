@@ -8,6 +8,7 @@ import { hasPermission } from "@/lib/auth"
 import {
   buildMonthlyQualityReport,
   fetchAllQcResults,
+  resolveEffectiveQcResults,
   SAN_PHAM_GROUP,
   TIEU_CHUAN_OPTIONS,
   CHI_TIEU_META,
@@ -39,7 +40,7 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
       try {
         const { nam, thang, monthStart, today } = getCurrentRanges()
 
-        const [report, qcRows] = await Promise.all([
+        const [report, rawQcRows] = await Promise.all([
           buildMonthlyQualityReport({
             factoryId,
             nam,
@@ -51,6 +52,7 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
           fetchAllQcResults(factoryId, monthStart, today),
         ])
         if (!alive) return
+        const qcRows = resolveEffectiveQcResults(rawQcRows)
 
         setTyLeToanNhaMay(report.tyLeDatToanNhaMay.thang)
 

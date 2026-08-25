@@ -1,12 +1,14 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Archive, Eye, Download, AlertTriangle } from "lucide-react"
+import { Archive, Eye, Download, AlertTriangle, BadgeCheck } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "@/app/dashboard/iso/_components/iso-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 type KhoItem = {
   recipientId: string
@@ -157,21 +159,18 @@ export default function KhoPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
-              <Archive size={22} className="text-violet-600" />
-              Kho của tôi
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Tài liệu ISO đã được phân phối đến bạn
-            </p>
-          </div>
-          <div className="text-sm text-slate-500">
-            {items.length} tài liệu
-          </div>
-        </div>
+        <PageBackgroundMotif theme="indigo" />
+        <PageHeaderBanner
+          title="Kho của tôi"
+          subtitle="Tài liệu ISO đã được phân phối đến bạn"
+          theme="indigo"
+          icon={BadgeCheck}
+          action={
+            <span className="rounded-full bg-white/15 border border-white/40 px-3 py-1 text-xs font-bold text-white">
+              {items.length} tài liệu
+            </span>
+          }
+        />
 
         {/* Cảnh báo hết hiệu lực */}
         {hetHieuLucCount > 0 && (

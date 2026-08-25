@@ -19,7 +19,9 @@ import {
   type VanBanDocumentType,
   type SignAsType,
 } from "../../_components/documents-types"
-import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2, Shield, Lock } from "lucide-react"
+import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2, Shield, Lock, FileSignature } from "lucide-react"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 const STORAGE_BUCKET = "iso-documents"
 
@@ -538,14 +540,13 @@ export default function UploadVanBanPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Upload văn bản đã ký tay</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Tải lên văn bản đã ký tay, hệ thống tự sinh số và lưu vào hồ sơ
-          </p>
-        </div>
-      </div>
+      <PageBackgroundMotif theme="cyan" />
+      <PageHeaderBanner
+        title="Upload văn bản đã ký tay"
+        subtitle="Tải lên văn bản đã ký tay, hệ thống tự sinh số và lưu vào hồ sơ"
+        theme="cyan"
+        icon={FileSignature}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cột trái: thông tin văn bản */}

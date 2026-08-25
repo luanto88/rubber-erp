@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation"
 import {
   Search, Plus, FolderOpen, AlertTriangle,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
-  Eye, Pencil, Trash2, Download,
+  Eye, Pencil, Trash2, Download, BadgeCheck,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { ModalShell } from "../../_components/modal-shell"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
+import { PageHeaderBanner } from "../../_components/page-header-banner"
+import { PageBackgroundMotif } from "../../_components/page-background-motif"
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
@@ -510,37 +512,39 @@ export default function IsoFormsPage() {
     <IsoShell>
       <div className="space-y-6">
 
-        {/* ── Header ── */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800">Thực hiện hồ sơ ISO</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Tìm biểu mẫu bằng AI, tạo bản thực hiện và gửi phê duyệt</p>
-          </div>
-          <div className="flex flex-col sm:items-end gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={handleReembed}
-                disabled={reembedding || !factoryId}
-                title="Cập nhật chỉ mục AI cho các tài liệu chưa được index"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50 rounded-xl border border-slate-200 transition-colors"
-              >
-                {reembedding ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                Cập nhật chỉ mục AI
-              </button>
-              <button
-                onClick={() => setLapHoSoOpen(true)}
-                disabled={!factoryId}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-emerald-700 border border-emerald-300 hover:bg-emerald-50 disabled:opacity-50 rounded-xl transition-colors"
-              >
-                <ClipboardList size={15} />
-                Lập hồ sơ
-              </button>
+        <PageBackgroundMotif theme="indigo" />
+        <PageHeaderBanner
+          title="Thực hiện hồ sơ ISO"
+          subtitle="Tìm biểu mẫu bằng AI, tạo bản thực hiện và gửi phê duyệt"
+          theme="indigo"
+          icon={BadgeCheck}
+          action={
+            <div className="flex flex-col sm:items-end gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleReembed}
+                  disabled={reembedding || !factoryId}
+                  title="Cập nhật chỉ mục AI cho các tài liệu chưa được index"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-white/15 hover:bg-white/25 disabled:opacity-50 rounded-xl border border-white/40 transition-colors"
+                >
+                  {reembedding ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                  Cập nhật chỉ mục AI
+                </button>
+                <button
+                  onClick={() => setLapHoSoOpen(true)}
+                  disabled={!factoryId}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-indigo-700 bg-white hover:bg-slate-50 disabled:opacity-50 rounded-xl shadow-md transition-colors"
+                >
+                  <ClipboardList size={15} />
+                  Lập hồ sơ
+                </button>
+              </div>
+              {reembedMsg && (
+                <span className="text-[11px] text-white/80">{reembedMsg}</span>
+              )}
             </div>
-            {reembedMsg && (
-              <span className="text-[11px] text-slate-500">{reembedMsg}</span>
-            )}
-          </div>
-        </div>
+          }
+        />
 
         {/* ── AI Search ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">

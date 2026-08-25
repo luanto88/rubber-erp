@@ -19,10 +19,12 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
+import { PageHeaderBanner } from "../../_components/page-header-banner"
+import { PageBackgroundMotif } from "../../_components/page-background-motif"
 
 export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -196,29 +198,31 @@ export default function IsoDocumentsPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800">Tài liệu ISO</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {canDistribute && (
-              <button
-                onClick={() => { setDistributeDocId(undefined); setShowDistributeModal(true) }}
-                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
+        <PageBackgroundMotif theme="indigo" />
+        <PageHeaderBanner
+          title="Tài liệu ISO"
+          subtitle="Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn"
+          theme="indigo"
+          icon={BadgeCheck}
+          action={
+            <>
+              {canDistribute && (
+                <button
+                  onClick={() => { setDistributeDocId(undefined); setShowDistributeModal(true) }}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl transition-all"
+                >
+                  <Share2 size={15} /> Phân phối
+                </button>
+              )}
+              <Link
+                href="/dashboard/iso/documents/new-doc"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
               >
-                <Share2 size={15} /> Phân phối
-              </button>
-            )}
-            <Link
-              href="/dashboard/iso/documents/new-doc"
-              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md transition-all"
-            >
-              <Plus size={16} /> Tạo tài liệu
-            </Link>
-          </div>
-        </div>
+                <Plus size={16} /> Tạo tài liệu
+              </Link>
+            </>
+          }
+        />
 
         {/* Bộ lọc */}
         <FilterBar activeCount={[search, filterStandard, filterLoai, filterTrangThai, filterCap, filterPhongBan].filter(Boolean).length}>
