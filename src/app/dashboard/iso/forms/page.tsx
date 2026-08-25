@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   Search, Plus, FolderOpen, AlertTriangle,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
-  Eye, Pencil, Trash2,
+  Eye, Pencil, Trash2, Download,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
@@ -678,33 +678,51 @@ export default function IsoFormsPage() {
                         <span className="text-xs text-slate-500">{inst.cap_tl}</span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            title="Xem chi tiết"
-                            onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                          >
-                            <Eye size={14} />
-                          </button>
-                          {canEditInst && (
-                            <button
-                              title="Sửa"
-                              onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
-                              className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          )}
-                          {canDeleteInst && (
-                            <button
-                              title="Xóa"
-                              onClick={() => setDelConfirm(inst.id)}
-                              className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
+                        {(() => {
+                          const downloadUrl = inst.final_pdf_url || inst.final_office_url || inst.soan_thao_signed_url || inst.draft_file_url
+                          return (
+                            <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                title="Xem chi tiết"
+                                onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                              >
+                                <Eye size={14} />
+                              </button>
+                              {downloadUrl && (
+                                <a
+                                  href={downloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  download
+                                  title="Tải xuống nhanh"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                >
+                                  <Download size={14} />
+                                </a>
+                              )}
+                              {canEditInst && (
+                                <button
+                                  title="Sửa"
+                                  onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
+                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              )}
+                              {canDeleteInst && (
+                                <button
+                                  title="Xóa"
+                                  onClick={() => setDelConfirm(inst.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                     </tr>
                   )

@@ -19,7 +19,7 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
@@ -54,7 +54,7 @@ export default function IsoDocumentsPage() {
         supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at",
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at, file_signed_pdf_url, file_signed_office_url, file_goc_url",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false }),
@@ -439,41 +439,55 @@ export default function IsoDocumentsPage() {
                       <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
                       <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
                       <td className="px-4 py-3 text-right">
-                        {(() => {
-                          const isAdmin = userRole === "admin"
-                          const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                          const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                          return (
-                            <div className="inline-flex items-center gap-1">
-                              <Link
-                                href={`/dashboard/iso/documents/${child.id}`}
-                                title="Xem chi tiết"
-                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                              >
-                                <Eye size={14} />
-                              </Link>
-                              {canEditChild && (
+                          {(() => {
+                            const isAdmin = userRole === "admin"
+                            const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                            const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                            const childDownloadUrl = child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
+                            return (
+                              <div className="inline-flex items-center gap-1">
                                 <Link
                                   href={`/dashboard/iso/documents/${child.id}`}
-                                  title="Sửa"
-                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                  title="Xem chi tiết"
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
                                 >
-                                  <Pencil size={14} />
+                                  <Eye size={14} />
                                 </Link>
-                              )}
-                              {canDeleteChild && (
-                                <button
-                                  title="Xóa"
-                                  onClick={() => setDelConfirm(child.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })()}
-                      </td>
+                                {childDownloadUrl && (
+                                  <a
+                                    href={childDownloadUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download
+                                    title="Tải xuống nhanh"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                  >
+                                    <Download size={14} />
+                                  </a>
+                                )}
+                                {canEditChild && (
+                                  <Link
+                                    href={`/dashboard/iso/documents/${child.id}`}
+                                    title="Sửa"
+                                    className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                  >
+                                    <Pencil size={14} />
+                                  </Link>
+                                )}
+                                {canDeleteChild && (
+                                  <button
+                                    title="Xóa"
+                                    onClick={() => setDelConfirm(child.id)}
+                                    className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </td>
                     </tr>
                   ))}
                   </Fragment>

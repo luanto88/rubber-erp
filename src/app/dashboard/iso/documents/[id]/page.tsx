@@ -87,7 +87,7 @@ function ExtraDraggableBox({
       onDrag={onDrag}
       onStop={onStop}
       bounds="parent"
-      cancel=".react-resizable-handle,button"
+      cancel=".react-resizable-handle,button,button *,a,.no-drag"
     >
       <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
         {children}
@@ -4517,7 +4517,7 @@ export default function IsoDocumentDetailPage() {
                     onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
                     bounds="parent"
-                    cancel=".react-resizable-handle,button"
+                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
                   >
                     <div ref={draggableNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
                       <Resizable
@@ -4563,21 +4563,25 @@ export default function IsoDocumentDetailPage() {
                             Không đặt ra ngoài ô chứa
                           </span>
                         )}
-                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setPlacementModal((p) => p ? { ...p, showSignature: !p.showSignature } : null)}
-                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? { ...p, showSignature: !p.showSignature } : null) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={placementModal.showSignature ? "Ẩn chữ ký" : "Hiện chữ ký"}
                           >
-                            {placementModal.showSignature ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {placementModal.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           {placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
                             <button
                               type="button"
                               onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setPlacementModal((p) => p ? {
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
                                 ...p,
                                 extraSigBoxes: [...p.extraSigBoxes, {
                                   id: Date.now() + Math.random(),
@@ -4592,11 +4596,11 @@ export default function IsoDocumentDetailPage() {
                                   showSignature: p.showSignature,
                                   showSignerName: p.showSignerName,
                                 }],
-                              } : null)}
-                              className="w-5 h-5 bg-violet-600 border border-violet-700 text-white rounded-full shadow flex items-center justify-center hover:bg-violet-700 font-bold"
+                              } : null) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-violet-600 border border-violet-700 text-white rounded-full shadow flex items-center justify-center hover:bg-violet-700 font-bold active:scale-95 transition-transform"
                               title="Nhân bản chữ ký và tên (+)"
                             >
-                              <Plus size={10} />
+                              <Plus size={12} />
                             </button>
                           )}
                         </div>
@@ -4611,7 +4615,7 @@ export default function IsoDocumentDetailPage() {
                     onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
                     bounds="parent"
-                    cancel=".react-resizable-handle,button"
+                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
                   >
                     <div ref={qrNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
                       <Resizable
@@ -4655,7 +4659,7 @@ export default function IsoDocumentDetailPage() {
                     onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
                     bounds="parent"
-                    cancel=".react-resizable-handle,button"
+                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
                   >
                     <div
                       ref={nameNodeRef}
@@ -4700,21 +4704,25 @@ export default function IsoDocumentDetailPage() {
                         ) : (
                           <span style={{ fontSize: 10, color: "#94a3b8", pointerEvents: "none" }}>Ẩn tên</span>
                         )}
-                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                           <button
                             type="button"
                             onMouseDown={(event) => event.stopPropagation()}
-                            onClick={() => setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)}
-                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={placementModal.showSignerName ? "Ẩn tên" : "Hiện tên"}
                           >
-                            {placementModal.showSignerName ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {placementModal.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           {placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
                             <button
                               type="button"
                               onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setPlacementModal((p) => p ? {
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
                                 ...p,
                                 extraSigBoxes: [...p.extraSigBoxes, {
                                   id: Date.now() + Math.random(),
@@ -4729,11 +4737,11 @@ export default function IsoDocumentDetailPage() {
                                   showSignature: p.showSignature,
                                   showSignerName: p.showSignerName,
                                 }],
-                              } : null)}
-                              className="w-5 h-5 bg-purple-600 border border-purple-700 text-white rounded-full shadow flex items-center justify-center hover:bg-purple-700 font-bold"
+                              } : null) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-purple-600 border border-purple-700 text-white rounded-full shadow flex items-center justify-center hover:bg-purple-700 font-bold active:scale-95 transition-transform"
                               title="Nhân bản chữ ký và tên (+)"
                             >
-                              <Plus size={10} />
+                              <Plus size={12} />
                             </button>
                           )}
                         </div>
@@ -4766,7 +4774,7 @@ export default function IsoDocumentDetailPage() {
                     onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
                     onStop={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
                     bounds="parent"
-                    cancel=".react-resizable-handle,button"
+                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
                   >
                     <div ref={prefixNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}>
                       <Resizable
@@ -4824,27 +4832,31 @@ export default function IsoDocumentDetailPage() {
                           style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: box.showSignature ? "block" : "none" }}
                           draggable={false}
                         />
-                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setPlacementModal((p) => p ? {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
                               ...p,
                               extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b),
-                            } : null)}
-                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            } : null) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
                           >
-                            {box.showSignature ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {box.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setPlacementModal((p) => p ? {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
                               ...p,
                               extraSigBoxes: p.extraSigBoxes.filter((b) => b.id !== box.id),
-                            } : null)}
-                            className="w-5 h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold"
+                            } : null) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold active:scale-95 transition-transform"
                             title="Tắt / Xóa bản sao này"
                           >
                             ×
@@ -4909,15 +4921,17 @@ export default function IsoDocumentDetailPage() {
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setPlacementModal((p) => p ? {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
                               ...p,
                               extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b),
-                            } : null)}
-                            className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            } : null) }}
+                            className="absolute -top-3 -right-3 w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             style={{ zIndex: 20 }}
                             title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
                           >
-                            {box.showSignerName ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {box.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           <span style={{
                             position: "absolute",

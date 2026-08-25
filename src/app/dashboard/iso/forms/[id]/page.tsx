@@ -184,7 +184,7 @@ function ExtraDraggableBox({
       onDrag={onDrag}
       onStop={onStop}
       bounds="parent"
-      cancel=".react-resizable-handle,button"
+      cancel=".react-resizable-handle,button,button *,a,.no-drag"
     >
       <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
         {children}
@@ -525,6 +525,32 @@ function SignPlacementModal({
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {showCanvas && (
+            <button
+              onClick={() => {
+                const offset = 30 * (extraSigBoxes.length + 1)
+                setExtraSigBoxes((prev) => [
+                  ...prev,
+                  {
+                    id: Date.now() + Math.random(),
+                    sigX: sigState.x + offset,
+                    sigY: sigState.y + offset,
+                    sigW: sigState.w,
+                    sigH: sigState.h,
+                    nameX: nameState.x + offset,
+                    nameY: nameState.y + offset,
+                    nameW: nameState.w,
+                    nameH: nameState.h,
+                    showSignature: true,
+                    showSignerName: true,
+                  },
+                ])
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-all font-bold text-xs flex items-center gap-1"
+            >
+              <Plus size={14} /> Nhân bản chữ ký
+            </button>
+          )}
           {showCanvas && numPages > 1 && (
             <div className="flex items-center gap-2">
               <button
@@ -608,6 +634,7 @@ function SignPlacementModal({
                   position={{ x: sigState.x, y: sigState.y }}
                   onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
                   bounds="parent"
+                  cancel=".react-resizable-handle,button,button *,a,.no-drag"
                 >
                   <div
                     ref={sigNodeRef}
@@ -635,20 +662,25 @@ function SignPlacementModal({
                             <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
                           </div>
                         )}
-                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setShowSig((v) => !v)}
-                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setShowSig((v) => !v) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
                           >
-                            {showSig ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {showSig ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
                               const offset = 30 * (extraSigBoxes.length + 1)
                               setExtraSigBoxes((prev) => [
                                 ...prev,
@@ -667,10 +699,10 @@ function SignPlacementModal({
                                 },
                               ])
                             }}
-                            className="w-5 h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold"
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
                             title="Nhân bản chữ ký và tên (+)"
                           >
-                            <Plus size={10} />
+                            <Plus size={12} />
                           </button>
                         </div>
                       </div>
@@ -684,6 +716,7 @@ function SignPlacementModal({
                   position={{ x: nameState.x, y: nameState.y }}
                   onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
                   bounds="parent"
+                  cancel=".react-resizable-handle,button,button *,a,.no-drag"
                 >
                   <div
                     ref={nameNodeRef}
@@ -703,20 +736,25 @@ function SignPlacementModal({
                         ) : (
                           <span className="text-[10px] text-slate-400">Ẩn tên</span>
                         )}
-                        <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setShowName((v) => !v)}
-                            className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setShowName((v) => !v) }}
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={showName ? "Ẩn tên" : "Hiện tên"}
                           >
-                            {showName ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {showName ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => {
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
                               const offset = 30 * (extraSigBoxes.length + 1)
                               setExtraSigBoxes((prev) => [
                                 ...prev,
@@ -735,10 +773,10 @@ function SignPlacementModal({
                                 },
                               ])
                             }}
-                            className="w-5 h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold"
+                            className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
                             title="Nhân bản chữ ký và tên (+)"
                           >
-                            <Plus size={10} />
+                            <Plus size={12} />
                           </button>
                         </div>
                       </div>
@@ -753,6 +791,7 @@ function SignPlacementModal({
                     position={{ x: prefixState.x, y: prefixState.y }}
                     onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
                     bounds="parent"
+                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
                   >
                     <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                       <Resizable
@@ -798,21 +837,25 @@ function SignPlacementModal({
                               <span className="text-[10px] text-slate-400">Ẩn chữ ký bản sao</span>
                             </div>
                           )}
-                          <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1" style={{ zIndex: 20 }}>
+                          <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
                             <button
                               type="button"
                               onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b))}
-                              className="w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b)) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                               title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
                             >
-                              {box.showSignature ? <EyeOff size={10} /> : <Eye size={10} />}
+                              {box.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
                             </button>
                             <button
                               type="button"
                               onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setExtraSigBoxes((prev) => prev.filter((b) => b.id !== box.id))}
-                              className="w-5 h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold"
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.filter((b) => b.id !== box.id)) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold active:scale-95 transition-transform"
                               title="Tắt / Xóa bản sao này"
                             >
                               ×
@@ -842,12 +885,14 @@ function SignPlacementModal({
                           <button
                             type="button"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b))}
-                            className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600"
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b)) }}
+                            className="absolute -top-3 -right-3 w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             style={{ zIndex: 20 }}
                             title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
                           >
-                            {box.showSignerName ? <EyeOff size={10} /> : <Eye size={10} />}
+                            {box.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                         </div>
                       </Resizable>

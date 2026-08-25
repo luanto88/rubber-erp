@@ -16,7 +16,7 @@ import {
   type VanBanTrangThai,
   type ThuTuKyStep,
 } from "./_components/documents-types"
-import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Plus, AlertTriangle } from "lucide-react"
+import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Plus, AlertTriangle, Download } from "lucide-react"
 import Link from "next/link"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -90,7 +90,7 @@ export default function DocumentsPage() {
       const { data } = await supabase
         .from("van_ban_documents")
         .select(
-          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, nguoi_soan_thao_display, soan_thao_user_id, created_at, updated_at",
+          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, file_signed_office_url, file_goc_url, nguoi_soan_thao_display, soan_thao_user_id, created_at, updated_at",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false })
@@ -453,34 +453,53 @@ export default function DocumentsPage() {
                       {doc.ngay_phe_duyet ? fmtDate(doc.ngay_phe_duyet) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/dashboard/documents/${doc.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
-                        >
-                          <Eye size={12} />
-                          Xem
-                        </Link>
-                        {canEditDoc(doc) && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); void openEdit(doc.id) }}
-                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-all"
-                          >
-                            <Pencil size={12} />
-                            Sửa
-                          </button>
-                        )}
-                        {canDeleteDoc(doc) && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setDelConfirmId(doc.id) }}
-                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-all"
-                          >
-                            <Trash2 size={12} />
-                            Xóa
-                          </button>
-                        )}
-                      </div>
+                      {(() => {
+                        const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+                        return (
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/dashboard/documents/${doc.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                            >
+                              <Eye size={12} />
+                              Xem
+                            </Link>
+                            {downloadUrl && (
+                              <a
+                                href={downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-all"
+                                title="Tải xuống văn bản"
+                              >
+                                <Download size={12} />
+                                Tải
+                              </a>
+                            )}
+                            {canEditDoc(doc) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); void openEdit(doc.id) }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-all"
+                              >
+                                <Pencil size={12} />
+                                Sửa
+                              </button>
+                            )}
+                            {canDeleteDoc(doc) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDelConfirmId(doc.id) }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-all"
+                              >
+                                <Trash2 size={12} />
+                                Xóa
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                   </tr>
                 ))}
