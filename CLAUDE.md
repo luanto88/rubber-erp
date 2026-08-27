@@ -1433,3 +1433,115 @@ nhận thay đổi của phiên này chỉ +6 dòng ở file đó). Không chạ
   KHÔNG nằm trong 4 mục được yêu cầu lần này; nếu muốn vá luôn, cần xác nhận riêng vì đây là thay
   đổi hành vi (chặn thêm 1 trường hợp) ngoài đúng 4 mục đã chốt.
 
+## Cập nhật (tiếp 2) — Giai đoạn 0 mục 1-4 đã deploy + verify sống, mục 6 (bản chuẩn) đã xong
+
+### Deploy + verify mục 1-4 (cùng phiên, sau khi người dùng chạy migration)
+
+- Người dùng tự chạy migration `20260901_doc_approval_log_hardening.sql` trên Supabase SQL
+  Editor. Đã verify bằng script tạm (service role): insert 1 dòng test vào `doc_approval_log`,
+  thử `UPDATE`/`DELETE` trực tiếp → cả hai bị trigger chặn đúng thông báo; dòng test không xoá
+  được (đúng thiết kế) nên còn tồn tại vĩnh viễn trong bảng, `doc_type='trigger_test'`, không
+  gắn tài liệu thật, vô hại — **nhớ điều này nếu sau này audit thấy 1 dòng lạ trong log**.
+- Chạy backfill thật: `node --env-file=.env.local scripts/backfill-doc-approval-hash.mjs --apply`
+  → 72 ISO + 37 Văn bản = 109/109 thành công, 0 lỗi. Re-run dry-run xác nhận idempotent (0 dòng
+  còn thiếu).
+- Commit `54193df` (chỉ stage đúng 8 file liên quan bảo mật ký số + CLAUDE.md, **không** đụng các
+  thay đổi/xoá file `cung_cap_dl/`/`previews/` đã tồn tại từ trước trong working tree — không rõ
+  nguồn gốc, không phải việc của phiên này) → `git push origin main` → Vercel tự deploy.
+- **Verify sống trên production sau deploy**: người dùng test PIN sai 5 lần → khoá đúng 15 phút.
+  Người dùng báo "dòng doc_approval_log mới không có content_hash" kèm ảnh — đã điều tra và xác
+  nhận đây **không phải bug**: mỗi lượt ký ISO luôn sinh **2 dòng log cách nhau ~10s** — dòng
+  metadata (`action` = tên bước workflow như `gui_xem_xet`, ghi từ client TRƯỚC khi tạo PDF,
+  không có file nên `content_hash` luôn NULL theo thiết kế) và dòng `generate_pdf` (ghi SAU khi
+  PDF đã stamp xong, có `content_hash`). Người dùng đang xem đúng dòng đầu. Query lại xác nhận
+  dòng `generate_pdf` cùng lượt có hash đầy đủ → code đã chạy đúng trên production.
+- **Kết luận: Giai đoạn 0 mục 1-4 hoàn tất và đã verify bằng dữ liệu thật trên production**, không
+  chỉ code sạch cục bộ.
+
+### Mục 6 — Chụp bản chuẩn (đã xong, lưu NGOÀI repo)
+
+Đã hỏi người dùng chọn giữa "dùng tài liệu đã ký sẵn (an toàn, chỉ đọc)" vs "tự ký thử tài liệu
+mới qua UI thật" — người dùng chọn phương án an toàn. **Không tạo bất kỳ hành động ký/chuyển
+trạng thái nào trên dữ liệu thật** — chỉ tải file đã ký sẵn (`file_signed_pdf_url`/
+`file_signed_office_url`) của 11 tài liệu thật đa dạng loại (7 ISO: QT cha Cấp1, QT cha Cấp2, F
+con Cấp1, F con Cấp2/docx, PL con, HD cha, CS cha; 4 Văn bản: ĐN/CV/TTr/TB, Nội bộ công ty lẫn
+đơn vị) — chọn dựa theo khảo sát thật toàn DB (không đoán), phát hiện DB hiện **không có** Văn
+bản Cấp 2/Mật/Office nào đã ký, không có file phụ soát xét ISO nào đã ký — baseline phản ánh đúng
+những gì THẬT SỰ tồn tại, không bịa thêm loại không có.
+
+- Lưu tại **`C:\Users\Software\rubber-erp-ky-so-baseline\`** (sibling ngoài repo, không commit) —
+  `files/` (11 file gốc + sha256), `png/` (39 trang PNG render từ 10 PDF, docx không render
+  được), `manifest.json`, `README.md` (giải thích đầy đủ nguồn gốc + kỹ thuật + giới hạn).
+- **Kỹ thuật render PNG** — lệch hẳn khỏi kế hoạch gốc (`pdftoppm`/ImageMagick `compare`) vì máy
+  này **không có poppler lẫn ImageMagick**. Đã thử `pdfjs-dist` + `@napi-rs/canvas` (rasterize
+  thuần Node) nhưng gặp lỗi thật: `ctx.fill(path)` bị native binding từ chối vì `Path2D` mà
+  `pdfjs-dist` dùng nội bộ không cùng instance với `Path2D` tự import (dù ép dùng chung
+  `createRequire`, `instanceof` vẫn khác) — chưa rõ nguyên nhân gốc, đã bỏ hướng này. Giải pháp
+  thực tế: Playwright **Chromium có đầu** (`headless: false` — headless mặc định coi PDF là
+  download thay vì mở viewer) mở `file://...#page=N&toolbar=0&navpanes=0`, screenshot từng
+  trang. Đã verify bằng mắt nhiều ảnh — sắc nét, đúng nội dung, đủ chữ ký/QR/con dấu thật.
+  Chi tiết đầy đủ (kèm hướng đi tiếp nếu Giai đoạn 1 cần so pixel tự động) đã ghi trong
+  `README.md` của baseline — **không lặp lại ở đây**, đọc file đó khi bắt đầu Giai đoạn 1.
+- **Giới hạn quan trọng cho Giai đoạn 1**: baseline chỉ lưu file **ĐÃ KÝ XONG CUỐI CÙNG**, không
+  lưu input trung gian (file gốc trước ký + placement JSON từng bước) — vì tài liệu đã ở trạng
+  thái cuối, không "ký lại" qua workflow thật được nữa. Giai đoạn 1 muốn so pixel true phải tự
+  gọi hàm `stampPdf`-tương-đương (đã refactor) với input tái tạo từ `file_goc_url` +
+  `soan_thao_placement`/`xem_xet_placement`/`phe_duyet_placement` lưu trong DB, không phải so
+  trực tiếp với baseline này qua workflow ký thật.
+- Không cài thêm dependency nào vào repo chính (`package.json` không đổi) — mọi công cụ
+  (`playwright`, `pdfjs-dist`, `@napi-rs/canvas`) cài trong 1 thư mục scratch tạm ngoài repo
+  (`npm init` riêng), không ảnh hưởng project.
+
+### Còn lại theo đúng kế hoạch (chưa làm, đúng phạm vi)
+
+Giai đoạn 0 mục 5 (6 bảng mới), mục 7 (gap 3 loại chức vụ), mục 8 (dựng HTML nháp SignScreen) vẫn
+CHƯA làm — đúng như đã chốt trước đó, cần hỏi lại trước khi đụng mục 7 (tên cột/cách migrate chưa
+chốt). Sẵn sàng bắt đầu Giai đoạn 1 (refactor `src/lib/signing/`) sau khi có baseline — nhưng nên
+cân nhắc thêm mục 8 (SignScreen nháp) trước, theo đúng thứ tự "Bước tiếp theo" đã ghi ở trên.
+
+### Prompt gợi ý để mở đầu session tiếp theo (mục 5 → 7 → 8 → Giai đoạn 1)
+
+```
+Đọc mục "Kế hoạch phiên sau (2026-08-27) — Hệ thống ký số dùng chung" và 2 mục "Cập nhật (tiếp)"/
+"Cập nhật (tiếp 2)" ngay sau nó trong CLAUDE.md để nắm đầy đủ những gì đã xong (Giai đoạn 0 mục
+1-4 đã deploy + verify sống trên production; mục 6 — bản chuẩn 11 tài liệu — đã lưu ở
+C:\Users\Software\rubber-erp-ky-so-baseline\, đọc README.md trong đó trước khi cần so pixel).
+Đọc lại cung_cap_dl/du_an_ky_so_dung_chung - new.docx (mục 5, 6.1, 9 "Giai đoạn 0") và
+cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html (mockup "vị trí ký" đã duyệt trước đó — dùng làm
+tham chiếu phong cách/kỹ thuật cho mockup mới ở mục 8, không phải làm lại).
+
+Làm tuần tự, dừng đúng chỗ cần hỏi:
+
+1. Giai đoạn 0 mục 5 — Migration TẠO MỚI 6 bảng theo đúng schema mục 5 của docx (yeu_cau_ky,
+   nguoi_ky, truong_ky, mau_vi_tri, nhat_ky_ky, cau_hinh_tai_lieu). CHỈ tạo bảng — chưa module
+   nào dùng tới, không đổi hành vi hệ thống đang chạy. Không cần hỏi trước, cứ làm.
+
+2. DỪNG LẠI VÀ HỎI trước khi làm Giai đoạn 0 mục 7 — gap "3 loại chức vụ" (chức vụ chính quyền /
+   kiêm nhiệm / đoàn thể, mô tả chi tiết trong mục "phát sinh thêm khi dựng mockup" #4 của kế
+   hoạch phiên 2026-08-27 gốc). Tên cột cụ thể và có tách bảng riêng hay không CHƯA CHỐT — hỏi
+   người dùng trước khi viết bất kỳ migration nào cho việc này.
+
+3. Giai đoạn 0 mục 8 — dựng 1 file HTML nháp mới trong cung_cap_dl/ cho "SignScreen" (màn hình
+   người KÝ thao tác — khác hẳn mockup "vị trí ký" đã có, đó là màn hình người SOẠN THẢO đặt
+   khung). Bám đúng mục 4.8 "Trải nghiệm người ký" của docx: nút Bắt đầu → Tiếp theo tự nhảy tới
+   khung chưa ký kế tiếp (tự cuộn qua nhiều trang); nút Hoàn tất chỉ sáng khi hết khung bắt buộc;
+   không ép đọc/cuộn hết tài liệu; chữ ký lấy sẵn từ hồ sơ, chỉ xác nhận (không có bảng vẽ tay);
+   ngày ký/họ tên/chức danh tự điền, không sửa được; panel phụ hiện tiến trình ký (ai đã ký lúc
+   nào, ai đang chờ), trên mobile thu gọn 1 dòng bấm mở rộng. Duyệt bằng cách chụp screenshot qua
+   `npx --yes playwright screenshot` (cần `npx playwright install chromium` nếu chưa có cache) —
+   dựng file `file://` cục bộ, KHÔNG cần chạy `npm run dev`. Chỉ sau khi người dùng duyệt bản
+   nháp này mới được đưa bất kỳ phần nào vào code thật.
+
+4. Sau khi mục 8 được duyệt mới bắt đầu Giai đoạn 1 (refactor `src/lib/signing/` từ chính 3 route
+   đang chạy thật — `api/sign/generate-pdf/route.ts`, `api/sign/generate-office/route.ts`,
+   `api/documents/sign/route.ts`, `api/iso/forms/[id]/finalize/route.ts`). Nguyên tắc bắt buộc:
+   KHÔNG đổi schema, KHÔNG đổi hành vi/response của các route này — chỉ trích phần logic dùng
+   chung ra thư viện rồi gọi lại. Đối chiếu bằng bản chuẩn đã chụp (đọc kỹ phần "Cách dùng cho
+   Giai đoạn 1" trong README.md của baseline — file gốc trước ký + placement JSON cần tái tạo từ
+   DB, KHÔNG ký lại được tài liệu thật đã hoàn tất qua workflow).
+
+Không có gì trong 4 bước trên yêu cầu chạy `npm run build` — chỉ dùng `npx tsc --noEmit` +
+`npx eslint` để tự kiểm tra, theo đúng quy tắc đã rút ra ở mục "Fix bug 2026-08-24" trong lịch sử
+CLAUDE.md (build có thể đụng `.next/` của dev server đang chạy song song).
+```
+
