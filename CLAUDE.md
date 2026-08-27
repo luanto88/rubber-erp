@@ -1184,3 +1184,252 @@ rồi mới duyệt.
   ảnh mờ dần ở đáy sidebar hiển thị đúng, không che khuất menu, không giảm độ tương phản chữ khi
   cuộn danh sách dài, và responsive mobile (drawer trượt) vẫn hoạt động bình thường.
 
+## Kế hoạch phiên sau (2026-08-27) — Hệ thống ký số dùng chung: kế hoạch đã chốt, mockup ISO đã duyệt qua nhiều vòng, sẵn sàng bắt đầu code Giai đoạn 0
+
+**CHƯA CODE GÌ Ở PHIÊN NÀY** — toàn bộ phiên chỉ điều tra code thật, đánh giá/góp ý 1 bản kế
+hoạch do người dùng soạn, và dựng 1 file HTML mockup tương tác để duyệt thiết kế trước khi đụng
+code thật (đúng quy trình chuẩn của dự án — xem `.claude/rules/05-ui-components.md`).
+
+### File tham chiếu bắt buộc đọc trước khi bắt đầu code (theo đúng thứ tự)
+
+1. `cung_cap_dl/du_an_ky_so_dung_chung - new.docx` — bản kế hoạch kiến trúc đầy đủ, đã qua 1
+   vòng Claude đọc code thật để kiểm chứng + góp ý 5 điểm (xem mục dưới). Đây là **nguồn thiết
+   kế chính thức**, không phải bản nháp ban đầu trong lịch sử chat.
+2. `cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html` — mockup HTML tương tác thật (mở thẳng bằng
+   trình duyệt, không cần server) cho màn **"Soạn thảo vị trí ký"** (người soạn thảo vẽ khung 1
+   lần/loại tài liệu ISO cha, lưu thành `mau_vi_tri`, áp dụng tự động cho các hồ sơ sau). Đã qua
+   nhiều vòng: dựng → người dùng test tay → sửa lỗi thật (kéo/resize giật do
+   `renderBoxes()`/`selectRole()` phá huỷ DOM giữa chừng — đã fix và verify bằng Playwright kéo
+   chuột thật, không phải `page.evaluate()`) → sửa lại phạm vi đúng nghiệp vụ ISO (bỏ
+   "ghi chú"/"ký song song" vì không khớp luồng ISO thật, các tính năng đó để dành cho mockup
+   Văn bản nội bộ sau này) → sửa đúng quy ước công ty thật (khối ký ở TRANG 1, không phải trang
+   cuối) → đổi đúng ý "khung lưới" (gridline hỗ trợ căn chỉnh, không phải ẩn/hiện khung ký) →
+   thêm cơ chế chọn hiển thị 1-trong-3 loại chức vụ.
+   **Không tự suy diễn lại UI từ mô tả text — mở file này lên xem/thao tác thử trước khi build
+   `SignScreen`/công cụ đặt khung thật, vì rất nhiều chi tiết hành vi (snap-to-grid, cách
+   "Nhân bản khung" hoạt động, cách preview chữ ký mẫu...) chỉ được quyết định qua tương tác,
+   không có mô tả đầy đủ bằng lời ở đâu khác.**
+
+### Tóm tắt phát hiện quan trọng từ điều tra code thật (đã làm ở phiên này, không cần điều tra lại)
+
+- PIN chữ ký (`sign_pins`) **đã** hash bcrypt cost 12, verify bằng `bcrypt.compare()`
+  (`src/app/api/sign/verify/route.ts:36`) — rủi ro thật KHÔNG phải "PIN lưu dạng đọc được".
+  Rủi ro thật: (1) route `sign/verify` **không** gọi `assertNotRateLimited`/
+  `recordFailedVerifyAttempt` dù 2 hàm này đã có sẵn ở
+  `src/app/api/account/_lib/security.ts:100-121` (đang dùng cho luồng đổi PIN) — chỉ cần import
+  và gọi thêm, không viết mới; (2) không ghi log lần nhập PIN sai khi ký; (3) không lưu SHA-256
+  của PDF sau khi ký; (4) `doc_approval_log` RLS là `FOR ALL`, insert-only chỉ là quy ước code.
+- "Bộ render tự phát tọa độ trường ký" chỉ đúng 3/6 module nghiệp vụ dự kiến mở rộng ký số:
+  Điều xe/Sản lượng/Kho dùng `jsPDF` thật (có tọa độ point). Chất lượng/Xuất hàng/Bảo trì hiện
+  chỉ là HTML + `window.print()` — không có file PDF thật, không có tọa độ nào cả. **Quyết định
+  đã chốt**: chuyển cả 3 sang `jsPDF` (mirror `src/lib/dispatch-pdf.ts`/`output-pdf.ts`/
+  `storage-pdf.ts`) TRƯỚC khi gắn ký số cho 3 module này (Giai đoạn 2 riêng, chưa đụng workflow
+  ký).
+- ISO + Văn bản đã có ký số chạy thật (`pdf-lib` tự xây, không phụ thuộc dịch vụ ngoài/Adobe),
+  nhưng logic bị copy-paste gần như y hệt 3 lần (`getSigImage()`, `stampPdf()`, modal đặt vị trí,
+  notify 3-kênh) — route `/api/sign/generate-pdf` dù đặt tên như dùng chung nhưng thực chất
+  hard-code `iso_documents`, module Văn bản có route riêng hoàn toàn (`api/documents/sign/route.ts`).
+  **Quyết định đã chốt**: Giai đoạn 1 = tách lõi thành `src/lib/signing/` bằng cách REFACTOR
+  chính ISO/Văn bản (rủi ro thấp vì logic đã chạy thật), KHÔNG đổi schema DB của 2 module này,
+  KHÔNG chọn module mới (Bảo trì) làm thí điểm như đề xuất ban đầu — Bảo trì hoá ra là module ít
+  sẵn sàng nhất (chưa PDF thật, chưa PIN, chưa ảnh chữ ký nào).
+
+### Quyết định kiến trúc đã chốt trong bản docx (đã Claude xác nhận hợp lý qua đọc code, không cần bàn lại)
+
+| # | Nội dung | Quyết định |
+|---|---|---|
+| 1 | 3 module chỉ có HTML print (Chất lượng/Xuất hàng/Bảo trì) | Chuyển sang `jsPDF` trước, chưa gắn ký số ngay |
+| 2 | Module thí điểm Giai đoạn 1 | Tách dịch vụ dùng chung từ chính ISO/Văn bản (refactor, không xây mới) |
+| 3 | Cấp độ ký của Bảo trì | Mỗi mẫu in (F13/F10/F15...) là 1 `yeu_cau_ky` độc lập; UI gộp 1 lần PIN cho cả lô cùng lượt phê duyệt |
+| 4 | Cấu trúc `dinh_tuyen` | Theo mỗi loại tài liệu/phiếu (`cau_hinh_tai_lieu` có 1 dòng/loại) |
+| 5 | Vị trí trường ký | Người soạn thảo vẽ khung màu — không dùng tag ẩn trong file |
+| 6 | Mẫu vị trí | Vẽ 1 lần cho mỗi loại tài liệu, lưu `mau_vi_tri`, lần sau tự áp dụng |
+| 7 | Ép đọc tài liệu | Không ép — chỉ bắt buộc ký hết mọi khung bắt buộc |
+| 8 | Truy cập | Deep link `/ky/:id` + Supabase Auth + RLS theo `auth.uid()` — bỏ hẳn magic link |
+| 9 | Xác thực ký | Phân tầng theo loại tài liệu: `pin` / `pin_otp` / `smartca` |
+| 10 | Kênh OTP | Telegram bot (tin nhắn riêng, không phải nhóm) — email dự phòng — không SMS |
+| 11 | SmartCA | Chỉ lãnh đạo, bắt buộc ở vòng cuối, gửi cả file cho VNPT ký (không tự dựng ByteRange) |
+| 12 | Lưu trữ file trung gian | Giữ bản gốc + bản cuối vĩnh viễn; bản trung gian giữ 7 ngày rồi xoá; hash lưu vĩnh viễn |
+| 13 | Engine render | Giữ `jsPDF`, không dùng headless browser (ràng buộc Vercel) |
+
+### Góp ý của Claude đã đưa vào docx — nhớ khi code, đừng bỏ sót
+
+1. SmartCA là 1 dự án con có mốc thời gian phụ thuộc VNPT (ngoài tầm kiểm soát team) — tách
+   khỏi cam kết "6-8 tuần" tổng, có gate go/no-go riêng.
+2. Sau khi SmartCA ký (PAdES), `file_hien_tai` tuyệt đối không được đụng lại bởi bất kỳ tính
+   năng nào khác (kể cả vô hại như tạo thumbnail) — cần cột `da_ky_smartca boolean` chặn ghi đè.
+3. "Giữ 7 ngày rồi tự xoá" (mục lưu trữ) cần cơ chế **dọn cơ hội** (opportunistic — dọn file cũ
+   ngay khi có bản ký mới ghi đè) thay vì cron, vì dự án **không có hạ tầng lịch chạy nền**
+   (đã chốt nguyên tắc này ở module KPI, `.claude/rules/27-kpi-module.md`).
+4. `yeu_cau_ky` nên **snapshot** `muc_xac_thuc`/`yeu_cau_chu_ky_so` từ `cau_hinh_tai_lieu` ngay
+   lúc tạo — không join sống — để admin đổi cấu hình giữa chừng không ảnh hưởng hồ sơ đang
+   luân chuyển dở.
+5. Ánh xạ vai trò → người ký thật trong `dinh_tuyen`: tái dùng cơ chế đã có sẵn và chạy thật
+   `/api/documents/dept-leader` (tự nhận diện lãnh đạo phòng ban qua khớp `chuc_vu`) thay vì
+   gán cứng `user_id` — tránh cấu hình "chết" khi nhân sự đổi.
+
+### Quyết định phát sinh thêm khi dựng mockup — CHƯA có trong docx, cần đưa vào khi code thật
+
+1. **Quy ước công ty thật (khác giả định ban đầu)**: khối ký Soạn thảo→Xem xét→Phê duyệt của
+   tài liệu ISO Cấp 1 **luôn nằm ở TRANG 1** (gần như trang bìa/trang duyệt), không phải trang
+   cuối như giả định lúc đầu. `mau_vi_tri` mặc định neo `đầu, trang 1` cho 3 vai trò này khi tạo
+   mẫu cho loại tài liệu ISO cha — đây là quy ước xác nhận cho ISO Cấp 1, **chưa xác nhận** có
+   áp dụng y hệt cho ISO Cấp 2 hay Văn bản nội bộ hay không, phải hỏi lại khi làm tới.
+2. **Chức năng "Nhân bản khung"** (1 người ký ở ≥2 vị trí trên cùng 1 tài liệu, ví dụ Phê duyệt
+   vừa ký cuối văn bản vừa ký nháy phụ lục riêng) — hoàn toàn tương thích với schema `truong_ky`
+   đã thiết kế sẵn (1 `nguoi_ky_id` → nhiều dòng `truong_ky`, không có ràng buộc unique nào cản
+   trở) — chỉ thiếu UI, không cần đổi schema. Mockup đã demo đầy đủ: nút "Nhân bản" tạo bản sao
+   độc lập neo `đầu` + trang tự chọn (cho phép chuyển trang tự do trong lúc đang đặt), preview
+   hiện đúng tên/chữ ký của người gốc qua liên kết `clonedFrom`.
+3. **Lưới căn chỉnh (gridline ngang/dọc, bước 5%) + snap-to-grid** khi kéo/resize khung — tính
+   năng hỗ trợ người soạn thảo đặt khung chính xác, chưa có trong docx gốc, cần đưa vào thiết kế
+   `SignScreen`/công cụ đặt khung thật ở Giai đoạn 1. Bật lưới thì kéo/resize tự làm tròn về
+   đúng vạch (không chỉ hiển thị để nhìn).
+4. **Gap schema thật quan trọng, cần bàn kỹ trước khi viết migration**: bảng nhân sự hiện chỉ
+   có 2 cột chức vụ (`maintenance_staff.chuc_vu`, `chuc_vu_chinh_quyen`), nhưng thực tế công ty
+   có **3 loại chức vụ độc lập, có thể cùng tồn tại trên 1 người** (không phải 1 người 1 chức
+   vụ):
+   1. **Chức vụ chính quyền** — ví dụ "Tổng Giám đốc".
+   2. **Chức vụ kiêm nhiệm** — ví dụ "Trưởng ban ISO".
+   3. **Chức vụ đoàn thể** — ví dụ "Chủ tịch công đoàn".
+
+   Mỗi loại có-thì-điền, không-thì-để-rỗng. Vấn đề thật đang gặp: hiện soạn thảo phải tự gõ tay
+   nên **hay quên/chọn sai loại** tuỳ ngữ cảnh tài liệu (ví dụ 1 người vừa là Trưởng phòng QLCL
+   (chính quyền) vừa là Trưởng ban ISO (kiêm nhiệm) — tài liệu ISO nên ưu tiên hiện chức vụ kiêm
+   nhiệm, không phải chính quyền, dù cùng 1 người). Cần thêm cột `chuc_vu_kiem_nhiem`,
+   `chuc_vu_doan_the` (tên cột cụ thể/có tách bảng riêng hay không **chưa quyết**, cần bàn ở
+   phiên code) — mockup đã demo hướng xử lý: dropdown liệt kê rõ NHÃN LOẠI + GIÁ TRỊ THẬT, chỉ
+   hiện loại nào có dữ liệu, mặc định ưu tiên chính quyền → kiêm nhiệm → đoàn thể nhưng cho đổi.
+5. **"Hiện tên & chức vụ" (showName) + "chọn loại chức vụ hiển thị" (chucVuKey) là cấu hình
+   KHOÁ THEO MẪU** (`mau_vi_tri`), đặt 1 lần bởi người soạn thảo/admin lúc vẽ mẫu — **KHÔNG**
+   phải người ký tự bật/tắt mỗi lần đến lượt ký như hệ thống hiện tại đang làm (`showSignature`/
+   `showSignerName` trong `SignPlacement` hiện do chính người ký tự chỉnh trong modal đặt vị trí
+   mỗi lần ký — đây chính là kiểu thao tác lặp lại mà cả dự án này sinh ra để loại bỏ, xem
+   `.claude/rules/16-iso-vanban-module.md`). Quy tắc nghiệp vụ "tài liệu cha chỉ ẩn được tên,
+   không ẩn được chữ ký; hồ sơ con ẩn được cả hai" **giữ nguyên không đổi** — chỉ đổi CHỖ cấu
+   hình (từ mỗi-lần-ký sang một-lần-lúc-soạn-mẫu). Đây là quyết định người dùng đã tự chốt qua
+   mô tả vấn đề thật (không phải Claude tự suy diễn).
+
+### Bước tiếp theo — Giai đoạn 0 (bắt đầu ở session khác)
+
+Thứ tự làm, độc lập rủi ro thấp, nên gộp mục 1-4 thành 1 PR nhỏ deploy trong ngày (vá lỗ hổng
+đang tồn tại thật trên production, không phải tính năng mới):
+
+1. Vá `src/app/api/sign/verify/route.ts` — thêm `assertNotRateLimited`/`recordFailedVerifyAttempt`
+   (import từ `src/app/api/account/_lib/security.ts`, chỉ 2 lời gọi hàm).
+2. Thêm `computeIntegrityHash()` (SHA-256, hoàn toàn mới) — gọi ngay sau khi ký ở cả
+   `generate-pdf/route.ts` và `documents/sign/route.ts`, trước khi upload Storage, lưu vào cột
+   mới `content_hash` của `doc_approval_log`.
+3. Trigger bất biến `chan_sua_nhat_ky()` áp cho `doc_approval_log` (`BEFORE UPDATE OR DELETE`) —
+   **bắt buộc dùng trigger, không chỉ RLS insert-only**, vì API route chạy bằng service role vốn
+   bypass toàn bộ RLS nhưng KHÔNG bypass được trigger.
+4. Backfill hash cho PDF đã ký sẵn có trong Storage (ghi kèm `hash_backfilled_at` — nói rõ với
+   đánh giá viên đây là mốc từ ngày backfill, không phải bằng chứng hồi tố).
+5. Migration tạo 6 bảng mới theo đúng schema mục 5 của docx (`yeu_cau_ky`, `nguoi_ky`,
+   `truong_ky`, `mau_vi_tri`, `nhat_ky_ky`, `cau_hinh_tai_lieu`) — chỉ tạo bảng, chưa module nào
+   dùng, không ảnh hưởng hệ thống đang chạy.
+6. Chụp **bản chuẩn**: ký thử ~10 tài liệu ISO/Văn bản thật đủ loại trên `npm run dev`, lưu file
+   PDF + ảnh render ra thư mục **ngoài repo** — làm baseline đối chiếu pixel
+   (`pdftoppm -r 100 -png` + ImageMagick `compare -metric AE`) cho Giai đoạn 1. Không có bước
+   này thì Giai đoạn 1 (refactor lõi ký ISO/Văn bản) là refactor mù.
+7. Bàn cụ thể cột/cách migrate cho gap "3 loại chức vụ" (mục "phát sinh thêm" #4 ở trên) trước
+   khi viết migration — chưa chốt tên cột/có tách bảng riêng hay không.
+
+Chỉ sau khi hoàn tất Giai đoạn 0 mới bắt đầu Giai đoạn 1 (refactor lõi ký thành
+`src/lib/signing/` từ chính ISO/Văn bản — không đổi schema/hành vi 2 module đang chạy thật), rồi
+mới tới việc dựng `SignScreen`/công cụ đặt khung THẬT dựa trên mockup đã duyệt.
+
+### Prompt gợi ý để mở đầu session mới
+
+```
+Đọc mục "Kế hoạch phiên sau (2026-08-27) — Hệ thống ký số dùng chung" trong CLAUDE.md, đọc file
+cung_cap_dl/du_an_ky_so_dung_chung - new.docx và mở thử cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html
+bằng trình duyệt. Sau khi nắm đủ bối cảnh, bắt đầu Giai đoạn 0 mục 1-4 (vá bảo mật PIN + hash +
+trigger bất biến cho doc_approval_log) — gộp thành 1 PR nhỏ. Hỏi lại tôi trước khi đụng tới mục
+7 (gap 3 loại chức vụ) vì tên cột/cách migrate chưa chốt.
+```
+
+## Cập nhật (tiếp) — Giai đoạn 0 mục 1-4 đã code xong, CHƯA chạy migration/backfill/deploy
+
+Đã đọc `cung_cap_dl/du_an_ky_so_dung_chung - new.docx` (trích xuất text từ XML nội bộ, không mở
+được trực tiếp bằng Read) và `cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html` (đọc source, không
+mở được trình duyệt thật trong phiên non-interactive này — đã nắm đủ hành vi qua code JS: 6 vai
+trò cố định, neo `đầu/cuối/mọi_trang`, nhân bản khung, lưới snap 5%, 3 loại chức vụ). Chỉ code
+đúng mục 1-4, KHÔNG đụng mục 5 (6 bảng mới), mục 6 (chụp bản chuẩn), mục 7 (gap 3 loại chức vụ —
+đúng như đã hẹn, chưa hỏi vì chưa cần).
+
+### Quyết định khi code (không tự suy diễn, ghi lại để không hỏi lại)
+
+- CLAUDE.md's "Bước tiếp theo" mục 2 ghi rõ "gọi ngay sau khi ký ở cả `generate-pdf/route.ts` và
+  `documents/sign/route.ts`" — đã xác nhận qua code: `documents/sign/route.ts` (Văn bản nội bộ)
+  **trước đây hoàn toàn không ghi gì vào `doc_approval_log`** (chỉ update `van_ban_documents`),
+  dù cột `doc_type` của bảng này đã hỗ trợ sẵn `'van_ban'` từ lúc tạo bảng
+  (`20260522_iso_vanban_module.sql`) — tức bảng được thiết kế dùng chung nhưng Văn bản chưa từng
+  dùng tới. Đã làm đúng theo chỉ dẫn: Văn bản giờ **lần đầu tiên có audit log + hash**, ghi vào
+  cùng bảng `doc_approval_log` với `doc_type='van_ban'`. `generate-office/route.ts` (Office ISO)
+  cũng được thêm hash dù không được nêu tên tường minh — vì đây là 1 trong 2 route ghi
+  `doc_approval_log` cho ISO (cùng cặp với `generate-pdf/route.ts`), bỏ sót sẽ để lại nửa lỗ hổng.
+- `computeIntegrityHash()` đặt tại `src/lib/signing/hash.ts` (SHA-256 hex, dùng `crypto` built-in
+  của Node) — tạo trước thư mục `src/lib/signing/` dù việc tách thư viện dùng chung đầy đủ là
+  Giai đoạn 1 (chưa làm) — đây là hàm hoàn toàn mới, không refactor code cũ, nên an toàn để đặt
+  đúng vị trí đích ngay từ đầu thay vì đặt tạm rồi phải move sau.
+- `action` của dòng log Văn bản suy từ `stepKey` sẵn có trong `performFileStamp()`
+  (`stepKey === "phe_duyet"` → action `"phe_duyet"`, còn lại → `"ky_buoc"` kèm `buoc_ky` là số
+  bước) — không thêm tham số mới cho hàm, tận dụng dữ liệu đã có.
+
+### File đã sửa/tạo
+
+| File | Thay đổi |
+|---|---|
+| `src/app/api/sign/verify/route.ts` | Thêm `assertNotRateLimited(userId)` trước khi so PIN; `recordFailedVerifyAttempt(userId)` khi PIN sai (2 lời gọi, đúng như CLAUDE.md ghi) — dùng chung cửa sổ 5 lần/15 phút đã có sẵn ở `_lib/security.ts` |
+| `src/lib/signing/hash.ts` | Mới — `computeIntegrityHash(bytes)` |
+| `src/app/api/sign/generate-pdf/route.ts` | Hash `signedPdfBytes` trước upload, thêm `content_hash` vào insert `doc_approval_log` (action `generate_pdf`) |
+| `src/app/api/sign/generate-office/route.ts` | Hash `result.buffer` trước upload, thêm `content_hash` vào insert `doc_approval_log` (action `generate_office_{fileKind}`) |
+| `src/app/api/documents/sign/route.ts` | `performFileStamp()`: hash `stampedBytes` trước upload; sau khi update `van_ban_documents` thành công, **lần đầu tiên** insert vào `doc_approval_log` (`doc_type='van_ban'`, action `ky_buoc`/`phe_duyet`, kèm `content_hash`) |
+| `supabase/migrations/20260901_doc_approval_log_hardening.sql` | Mới, **CHƯA CHẠY** — thêm cột `content_hash`/`hash_backfilled_at`; trigger `nhat_ky_bat_bien` (`BEFORE UPDATE OR DELETE`) áp cho mọi role kể cả service role; xoá policy `FOR ALL` cũ, thay bằng `doc_approval_log_select` (SELECT theo factory) + `doc_approval_log_insert` (INSERT theo factory, có `WITH CHECK`) — không có policy UPDATE/DELETE nào (mặc định deny) |
+| `scripts/backfill-doc-approval-hash.mjs` | Mới, **CHƯA CHẠY** — backfill hash cho PDF đã ký sẵn có (`iso_documents` + `van_ban_documents`, cả 2 vì cùng lý do ở trên), insert-only (idempotent qua kiểm tra `action='backfill_hash'` đã tồn tại chưa), dry-run mặc định, cần `--apply` để ghi thật |
+
+Đã xác nhận bằng `grep` toàn repo: không có bất kỳ `.update()`/`.delete()` nào nhắm vào
+`doc_approval_log` ở bất kỳ đâu trong code hiện tại (chỉ có 4 chỗ `.insert()`, đã liệt kê ở trên
+cộng 1 chỗ ghi log hành động không kèm file tại `iso/documents/[id]/page.tsx:1680`) — nên trigger
+bất biến không phá vỡ luồng nào đang chạy.
+
+`npx tsc --noEmit` sạch; `npx eslint` trên toàn bộ file đã sửa sạch (2 warning còn lại trong
+`generate-pdf/route.ts` là warning cũ, không liên quan — đã đối chiếu bằng `git diff --stat` xác
+nhận thay đổi của phiên này chỉ +6 dòng ở file đó). Không chạy `npm run build`.
+
+### BẮT BUỘC làm trước khi coi Giai đoạn 0 mục 1-4 là hoàn tất
+
+1. Chạy `supabase/migrations/20260901_doc_approval_log_hardening.sql` trên Supabase SQL Editor
+   (dự án không có Supabase CLI, migration luôn chạy tay theo quy ước có sẵn).
+2. Sau khi migration chạy xong, chạy backfill (dry-run trước, đọc kỹ output rồi mới `--apply`):
+   ```bash
+   node --env-file=.env.local scripts/backfill-doc-approval-hash.mjs
+   node --env-file=.env.local scripts/backfill-doc-approval-hash.mjs --apply
+   ```
+   Script tự tải từng file PDF đã ký từ Storage (qua `file_signed_pdf_url` public) để tính hash —
+   có thể mất vài phút tùy số lượng tài liệu, và một số dòng có thể lỗi tải file (file đã bị xoá
+   khỏi Storage) — script in danh sách lỗi riêng, không chặn phần còn lại.
+3. Kiểm chứng theo đúng mục 10 của docx (chưa làm ở phiên này — cần Supabase SQL Editor + tài
+   khoản ISO thật):
+   - Nhập sai PIN 6 lần liên tiếp trên 1 tài liệu ISO thật → xác nhận bị khoá đúng thông báo
+     "...thử lại sau 15 phút" (không phải lỗi PIN sai thông thường).
+   - Ký thử 1 tài liệu ISO (PDF) và 1 văn bản (PDF) → xác nhận `doc_approval_log` có dòng mới với
+     `content_hash` không rỗng.
+   - Thử `UPDATE doc_approval_log SET action='x' WHERE id=...` và
+     `DELETE FROM doc_approval_log WHERE id=...` trực tiếp trong SQL Editor (chạy bằng quyền
+     service role/postgres, KHÔNG phải qua RLS user thường) → phải bị trigger chặn với đúng
+     thông báo "Nhật ký ký số là bất biến...".
+4. Deploy (commit + push) — theo đúng tinh thần "vá lỗ hổng đang tồn tại thật trên production,
+   nên gộp 1 PR nhỏ và deploy trong ngày" của docx. Chưa commit/push ở phiên này — chỉ code local.
+
+### Cố ý CHƯA làm (đúng phạm vi đã xin phép, không tự ý mở rộng)
+
+- Chưa đụng mục 5 (migration tạo 6 bảng mới: `yeu_cau_ky`, `nguoi_ky`, `truong_ky`, `mau_vi_tri`,
+  `nhat_ky_ky`, `cau_hinh_tai_lieu`), mục 6 (chụp bản chuẩn ~10 tài liệu để đối chiếu pixel cho
+  Giai đoạn 1), và mục 7 (gap "3 loại chức vụ" — theo đúng yêu cầu, sẽ hỏi trước khi đụng).
+- Chưa thêm `assertAccountActive()` vào `sign/verify/route.ts` dù route đó hiện chưa check
+  `profiles.status` — đây là audit đã áp dụng cho các route `account/*` khác (2026-08-07) nhưng
+  KHÔNG nằm trong 4 mục được yêu cầu lần này; nếu muốn vá luôn, cần xác nhận riêng vì đây là thay
+  đổi hành vi (chặn thêm 1 trường hợp) ngoài đúng 4 mục đã chốt.
+

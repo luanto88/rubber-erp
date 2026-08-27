@@ -6,6 +6,7 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
+import { computeIntegrityHash } from "@/lib/signing/hash"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -1824,6 +1825,10 @@ export async function POST(req: NextRequest) {
     copiedOriginalPages.forEach((copiedPage) => finalDoc.addPage(copiedPage))
 
     const signedPdfBytes = await finalDoc.save()
+    // Vá bảo mật 2026-08-27 (Giai đoạn 0 mục 2): hash tính NGAY sau khi ký, TRƯỚC khi upload —
+    // chứng minh nội dung file lúc lưu vào doc_approval_log khớp đúng file thật đã ký, không
+    // phải file có thể bị thay đổi giữa lúc ký và lúc audit.
+    const signedContentHash = computeIntegrityHash(signedPdfBytes)
     const namePrefix = sanitizeOutputName(`${maTl} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
     const outputPath = `${factoryId}/iso/signed/${namePrefix}_${signFileKind}_signed_${Date.now()}.pdf`
     const { error: uploadErr } = await supabaseAdmin.storage
@@ -1865,6 +1870,7 @@ export async function POST(req: NextRequest) {
       doc_type: docType,
       user_id: userId,
       action: "generate_pdf",
+      content_hash: signedContentHash,
       ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
       user_agent: req.headers.get("user-agent") || "",
     })

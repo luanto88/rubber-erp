@@ -4,6 +4,7 @@ import { jwtVerify } from "jose"
 import QRCode from "qrcode"
 import JSZip from "jszip"
 import ExcelJS from "exceljs"
+import { computeIntegrityHash } from "@/lib/signing/hash"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -985,6 +986,8 @@ export async function POST(req: NextRequest) {
       ? await renderDocx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, shouldApplyFooterStatusText, allowedTags)
       : await renderXlsx(bytes, values, imageByTag, requiredTags, defaultQrWhenMissing, statusText, shouldApplyFooterStatusText, allowedTags)
 
+    // Vá bảo mật 2026-08-27 (Giai đoạn 0 mục 2): hash tính ngay sau khi stamp, trước khi upload.
+    const signedContentHash = computeIntegrityHash(result.buffer)
     const namePrefix = sanitizeOutputName(`${String(doc.ma_tai_lieu || "ISO")} ${String(doc.ten_tai_lieu || "tai_lieu")}`)
     const outputPath = `${factoryId}/iso/office-signed/${namePrefix}_${Date.now()}.${ext}`
     const { error: uploadErr } = await supabaseAdmin.storage
@@ -1011,6 +1014,7 @@ export async function POST(req: NextRequest) {
       doc_type: docType,
       user_id: userId,
       action: `generate_office_${fileKind}`,
+      content_hash: signedContentHash,
       ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
       user_agent: req.headers.get("user-agent") || "",
     })

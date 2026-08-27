@@ -8,6 +8,7 @@ import JSZip from "jszip"
 import QRCode from "qrcode"
 import fs from "fs"
 import path from "path"
+import { computeIntegrityHash } from "@/lib/signing/hash"
 
 const BUCKET = "iso-documents"
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
@@ -560,6 +561,11 @@ async function performFileStamp(
     return
   }
 
+  // Vá bảo mật 2026-08-27 (Giai đoạn 0 mục 2): hash tính ngay sau khi stamp, trước khi upload.
+  // Văn bản trước đây KHÔNG có bất kỳ audit log/hash nào — doc_approval_log tuy đã tồn tại từ
+  // module ISO (doc_type hỗ trợ sẵn 'van_ban') nhưng route này chưa từng ghi vào đó.
+  const signedContentHash = computeIntegrityHash(stampedBytes)
+
   const storagePath = `${factoryId}/vanban/signed/${d.id}/${stepKey}.${ext}`
   const mimeMap: Record<string, string> = {
     pdf: "application/pdf",
@@ -585,6 +591,16 @@ async function performFileStamp(
     dbPatch.file_signed_office_type = ext
   }
   await supabaseAdmin.from("van_ban_documents").update(dbPatch).eq("id", d.id)
+
+  await supabaseAdmin.from("doc_approval_log").insert({
+    factory_id: factoryId,
+    doc_id: d.id,
+    doc_type: "van_ban",
+    user_id: userId,
+    action: stepKey === "phe_duyet" ? "phe_duyet" : "ky_buoc",
+    buoc_ky: stepKey === "phe_duyet" ? null : parseInt(stepKey, 10),
+    content_hash: signedContentHash,
+  })
 }
 
 // ── Notify helpers ────────────────────────────────────────────────────────────
