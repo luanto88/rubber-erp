@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mô Phỏng Hệ Thống Ký Số Dùng Chung — Module Bảo Trì (Rubber ERP)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tinos:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+    .font-serif-doc { font-family: 'Tinos', 'Times New Roman', serif; }
+    .pdf-page {
+      background: white; color: #0f172a; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+      width: 100%; max-width: 720px; min-height: 940px; margin: 0 auto; position: relative;
+    }
+    .sig-box {
+      border: 2px dashed #0284c7; background-color: rgba(224, 242, 254, 0.85);
+      position: absolute; cursor: move; user-select: none; transition: border-color 0.2s;
+    }
+    .sig-box.active { border-color: #16a34a; background-color: rgba(220, 252, 231, 0.9); }
+    .sig-box-copy { border: 2px dashed #d97706; background-color: rgba(254, 243, 199, 0.85); }
+    .mobile-frame {
+      width: 390px; height: 812px; border: 12px solid #334155; border-radius: 40px;
+      overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); position: relative; background: #f8fafc; color: #0f172a;
+    }
+  </style>
+</head>
+<body class="p-4 md:p-8">
+
+  <!-- Header Controls Top Bar -->
+  <header class="max-w-7xl mx-auto mb-6 bg-slate-800 border border-slate-700 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+    <div>
+      <div class="flex items-center gap-2">
+        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">MÔ PHỎNG PROTOTYPE</span>
+        <h1 class="text-xl font-bold text-white">Hệ Thống Ký Số Dùng Chung — Module Bảo Trì</h1>
+      </div>
+      <p class="text-xs text-slate-400 mt-1">Biên bản bảo dưỡng dây chuyền 21 thiết bị · Mã hồ sơ: <span class="font-mono text-emerald-400 font-bold">DX-110826/001</span></p>
+    </div>
+
+    <!-- Mode & Device Toggles -->
+    <div class="flex items-center gap-3">
+      <!-- Device View Toggle -->
+      <div class="bg-slate-900 p-1 rounded-xl border border-slate-700 flex items-center gap-1">
+        <button id="btnViewDesktop" onclick="setDeviceView('desktop')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-emerald-600 text-white">
+          💻 Desktop View (Văn phòng)
+        </button>
+        <button id="btnViewMobile" onclick="setDeviceView('mobile')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white">
+          📱 Mobile View (Ban Giám đốc)
+        </button>
+      </div>
+
+      <!-- Reset Simulation Button -->
+      <button onclick="resetSimulation()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl transition-all">
+        🔄 Reset Mô Phỏng
+      </button>
+    </div>
+  </header>
+
+  <!-- Decision Summary Panel (Q1 to Q4) -->
+  <div class="max-w-7xl mx-auto mb-6 bg-slate-800/80 border border-slate-700 rounded-xl p-4 text-xs text-slate-300 grid grid-cols-1 md:grid-cols-4 gap-3">
+    <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+      <span class="text-amber-400 font-bold">Q1. Ưu tiên Email Cá Nhân:</span>
+      <p class="mt-0.5 text-slate-400">Gửi OTP về Email cá nhân <code class="text-emerald-400">chaukim***@phuochoa.com.vn</code> (có nút Telegram dự phòng).</p>
+    </div>
+    <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+      <span class="text-amber-400 font-bold">Q2. Giá trị Pháp lý:</span>
+      <p class="mt-0.5 text-slate-400">Chữ ký ảnh + PIN/OTP Email + SHA-256 Hash + Nhật ký Audit Log bảo mật.</p>
+    </div>
+    <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+      <span class="text-amber-400 font-bold">Q3. Mobile cho BGĐ:</span>
+      <p class="mt-0.5 text-slate-400">Giao diện Mobile-first, nút Tiếp theo cố định chân màn hình tự cuộn đến ô ký.</p>
+    </div>
+    <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+      <span class="text-amber-400 font-bold">Q4. Ký nháy / Giáp lai:</span>
+      <p class="mt-0.5 text-slate-400">Hỗ trợ nút "Nhân bản phạm vi trang" ký nháy lề phải từ Trang 1 đến Trang N.</p>
+    </div>
+  </div>
+
+  <!-- MAIN WORKSPACE CONTAINER -->
+  <main class="max-w-7xl mx-auto">
+
+    <!-- DESKTOP CONTAINER -->
+    <div id="desktopContainer" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- LEFT SIDEBAR: Document Control & Form Code Progress -->
+      <div class="lg:col-span-4 space-y-4">
+        
+        <!-- Document Card Info & Dirty State Check -->
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-lg">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-wide">Trạng thái Soạn thảo</span>
+            <span id="dirtyBadge" class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-slate-700 text-slate-300">Đã lưu hoàn tất</span>
+          </div>
+
+          <h2 class="text-base font-bold text-white">Bảo dưỡng định kỳ 21 thiết bị</h2>
+          <p class="text-xs text-slate-400 mt-1">Bộ phận: <strong class="text-white">Đội xe & Nhà máy</strong> · Ngày: <strong class="text-white">08/08/2026</strong></p>
+
+          <!-- Edit inputs simulation -->
+          <div class="mt-4 pt-3 border-t border-slate-700/60 space-y-3 text-xs">
+            <div>
+              <label class="text-slate-400 font-medium">Ghi chú chỉnh sửa biên bản:</label>
+              <input type="text" id="inputGhiChu" oninput="onGhiChuChange()" value="Kiểm tra thay nhớt & bảo dưỡng định kỳ 21 xe/máy" 
+                class="mt-1 w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-emerald-500">
+            </div>
+
+            <!-- Action Buttons: Save & Send -->
+            <div class="flex items-center gap-2 pt-1">
+              <button id="btnSave" onclick="handleSave()" disabled class="flex-1 py-2.5 bg-slate-700 text-slate-400 font-bold rounded-xl text-xs transition-all cursor-not-allowed">
+                💾 Lưu (Đã lưu)
+              </button>
+              <button id="btnSendSign" onclick="startSigningFlow()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-900/40 transition-all flex items-center justify-center gap-1">
+                🚀 Gửi ký phụ trách
+              </button>
+            </div>
+            <p id="saveWarningMsg" class="text-[11px] text-amber-400 hidden">⚠️ Bạn có thay đổi chưa lưu! Hãy bấm Lưu trước khi Gửi ký.</p>
+          </div>
+        </div>
+
+        <!-- Form Codes Package Stepper -->
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-lg">
+          <h3 class="text-sm font-bold text-white mb-3 flex items-center justify-between">
+            <span>Bộ Mã Biểu Mẫu Hồ Sơ</span>
+            <span class="text-xs text-slate-400 font-normal">Ký nối tiếp từng mã</span>
+          </h3>
+
+          <div class="space-y-2.5 text-xs">
+            <!-- Form F03 -->
+            <div id="stepF03" onclick="selectFormCode('F03')" class="p-3 rounded-xl border border-emerald-500/50 bg-emerald-950/20 cursor-pointer transition-all flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono font-bold text-emerald-400">Mã F03</span>
+                  <span class="text-slate-300 font-medium">Giấy đề nghị bảo trì</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Phạm vi: Trang 1 đến 3 · Chân ký ở Trang 3</div>
+              </div>
+              <span id="badgeF03" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Chờ ký</span>
+            </div>
+
+            <!-- Form F15 -->
+            <div id="stepF15" onclick="selectFormCode('F15')" class="p-3 rounded-xl border border-slate-700 bg-slate-900/40 cursor-pointer hover:border-slate-600 transition-all flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono font-bold text-blue-400">Mã F15</span>
+                  <span class="text-slate-300 font-medium">Biên bản nghiệm thu</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Phạm vi: Trang 4 đến 6 · Chân ký ở Trang 6</div>
+              </div>
+              <span id="badgeF15" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-700 text-slate-400">Chờ mã F03</span>
+            </div>
+
+            <!-- Form F06 -->
+            <div id="stepF06" onclick="selectFormCode('F06')" class="p-3 rounded-xl border border-slate-700 bg-slate-900/40 cursor-pointer hover:border-slate-600 transition-all flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono font-bold text-purple-400">Mã F06</span>
+                  <span class="text-slate-300 font-medium">Phiếu hoàn thành</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Phạm vi: Trang 7 đến 8 · Chân ký ở Trang 8</div>
+              </div>
+              <span id="badgeF06" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-700 text-slate-400">Chờ mã F15</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Non-Account Signers Metadata Info -->
+        <div class="bg-slate-800/60 border border-slate-700/80 rounded-2xl p-4 text-xs space-y-2">
+          <div class="font-bold text-slate-300 uppercase tracking-wide text-[11px] flex items-center gap-1">
+            <span>👥 Nhân sự không có tài khoản ERP (Text Metadata)</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-slate-400 pt-1">
+            <div>• Tài xế: <strong class="text-slate-200">Nguyễn Văn Lái</strong></div>
+            <div>• Tổ trưởng bảo trì: <strong class="text-slate-200">Trần Văn Sửa</strong></div>
+            <div>• Tổ trưởng cơ khí: <strong class="text-slate-200">Lê Văn Máy</strong></div>
+            <div>• Ghi chú: <span class="italic text-emerald-400">In tên text tự động</span></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT MAIN: PDF DOCUMENT CANVAS & SIGNATURE CONTROLS -->
+      <div class="lg:col-span-8 space-y-4">
+        
+        <!-- Viewer Top Control Header -->
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-3">
+            <span id="currentFormTitle" class="font-bold text-white text-sm">Đang xem: Mã F03 — Giấy đề nghị bảo trì</span>
+            <span id="pageIndicator" class="px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-slate-300 font-mono">
+              Trang 3/8 (Trang ký của F03)
+            </span>
+          </div>
+
+          <!-- Page Switcher -->
+          <div class="flex items-center gap-2">
+            <button onclick="prevPage()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">◀ Trang trước</button>
+            <button onclick="nextPage()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">Trang sau ▶</button>
+          </div>
+        </div>
+
+        <!-- Simulated PDF Document Canvas -->
+        <div class="bg-slate-950 p-6 rounded-2xl border border-slate-800 overflow-y-auto max-h-[700px]">
+          
+          <!-- PDF Document Page Box -->
+          <div id="pdfDocumentPage" class="pdf-page font-serif-doc p-10 flex flex-col justify-between">
+            
+            <!-- Page Header -->
+            <div>
+              <div class="flex items-center justify-between text-xs text-slate-500 pb-4 border-b border-slate-200">
+                <div>CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM</div>
+                <div class="font-bold text-slate-700">Mẫu: <span id="docHeaderCode">KHXD-QT02-F03</span></div>
+              </div>
+
+              <div class="text-center my-6">
+                <h1 id="docMainTitle" class="text-xl font-bold text-slate-900 uppercase">GIẤY ĐỀ NGHỊ BẢO TRÌ - SỬA CHỮA</h1>
+                <p class="text-xs text-slate-500 italic mt-1">(Bảo dưỡng định kỳ 21 thiết bị đội xe & nhà máy)</p>
+                <p class="text-xs text-slate-600 font-bold mt-1">Số: MT-080826/001</p>
+              </div>
+
+              <!-- Table Data of 21 items summary -->
+              <div class="text-xs text-slate-800 space-y-2">
+                <p><strong>Bộ phận đề nghị:</strong> Đội xe & Xưởng cơ điện nhà máy</p>
+                <p><strong>Nội dung bảo dưỡng:</strong> Thay nhớt động cơ, kiểm tra hệ thống phanh, bảo dưỡng xích tải & động cơ bơm mủ tạp cho 21 thiết bị.</p>
+                
+                <!-- Table of Equipment -->
+                <table class="w-full border-collapse border border-slate-300 text-[11px] mt-4">
+                  <thead>
+                    <tr class="bg-slate-100 font-bold">
+                      <th class="border border-slate-300 p-1.5 text-center">STT</th>
+                      <th class="border border-slate-300 p-1.5 text-left">Mã thiết bị</th>
+                      <th class="border border-slate-300 p-1.5 text-left">Tên thiết bị</th>
+                      <th class="border border-slate-300 p-1.5 text-left">Nội dung thực hiện</th>
+                      <th class="border border-slate-300 p-1.5 text-left">Tài xế / Phụ trách</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="border border-slate-300 p-1.5 text-center">01</td>
+                      <td class="border border-slate-300 p-1.5 font-mono font-bold">DX-01</td>
+                      <td class="border border-slate-300 p-1.5">Xe tải ben 5 tấn</td>
+                      <td class="border border-slate-300 p-1.5">Thay nhớt máy & lọc dầu</td>
+                      <td class="border border-slate-300 p-1.5">Nguyễn Văn Lái</td>
+                    </tr>
+                    <tr>
+                      <td class="border border-slate-300 p-1.5 text-center">02</td>
+                      <td class="border border-slate-300 p-1.5 font-mono font-bold">MT-04</td>
+                      <td class="border border-slate-300 p-1.5">Máy băm mủ tạp #2</td>
+                      <td class="border border-slate-300 p-1.5">Bảo dưỡng bạc đạn & dây curoa</td>
+                      <td class="border border-slate-300 p-1.5">Trần Văn Sửa</td>
+                    </tr>
+                    <tr>
+                      <td class="border border-slate-300 p-1.5 text-center">...</td>
+                      <td class="border border-slate-300 p-1.5 text-slate-400" colspan="4">... (danh sách 21 thiết bị kéo dài từ Trang 1 đến Trang 3)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Page Footer Signature Area (Trang 3 của F03) -->
+            <div id="signatureSection" class="pt-8 border-t border-slate-200 mt-8">
+              <div class="text-right text-xs italic text-slate-600 mb-6">
+                Kampong Thom, ngày 08 tháng 08 năm 2026
+              </div>
+
+              <!-- Signature Columns Grid -->
+              <div class="grid grid-cols-3 text-center text-xs relative h-44">
+                
+                <!-- Col 1: Director -->
+                <div class="space-y-1 relative">
+                  <div class="font-bold text-slate-800">GIÁM ĐỐC</div>
+                  <div class="text-[10px] text-slate-400 italic">(Ký, họ tên & đóng dấu)</div>
+                  
+                  <!-- Placed Signature Box (Director) -->
+                  <div id="sigDirector" class="hidden absolute top-8 left-4 right-4 p-2 bg-emerald-50 border border-emerald-400 rounded-lg text-emerald-900 shadow-sm text-center">
+                    <span class="text-[10px] font-bold block text-emerald-700">ĐÃ KÝ SỐ ONL</span>
+                    <img src="https://api.dicebear.com/7.x/bottts/svg?seed=giamdoc" class="h-10 mx-auto my-1 opacity-80" alt="Chữ ký Giám đốc">
+                    <span class="font-bold text-xs block">Tô Thành Luân</span>
+                  </div>
+                </div>
+
+                <!-- Col 2: Vice Director -->
+                <div class="space-y-1 relative">
+                  <div id="lblBgdTitle" class="font-bold text-slate-800">BGĐ PHỤ TRÁCH</div>
+                  <div class="text-[10px] text-slate-400 italic">(Ký & họ tên)</div>
+
+                  <!-- Placed Signature Box (BGĐ) -->
+                  <div id="sigBgd" class="hidden absolute top-8 left-4 right-4 p-2 bg-blue-50 border border-blue-400 rounded-lg text-blue-900 shadow-sm text-center">
+                    <span id="tagBgdProxy" class="text-[10px] font-bold block text-blue-700">KT. BGĐ PHỤ TRÁCH</span>
+                    <img src="https://api.dicebear.com/7.x/bottts/svg?seed=bgd" class="h-10 mx-auto my-1 opacity-80" alt="Chữ ký BGĐ">
+                    <span class="font-bold text-xs block">Chau Chók</span>
+                  </div>
+                </div>
+
+                <!-- Col 3: Staff In Charge -->
+                <div class="space-y-1 relative">
+                  <div class="font-bold text-slate-800">NHÂN VIÊN PHỤ TRÁCH</div>
+                  <div class="text-[10px] text-slate-400 italic">(Ký & họ tên)</div>
+
+                  <!-- Placed Signature Box (Staff) -->
+                  <div id="sigStaff" class="absolute top-8 left-4 right-4 p-2 sig-box active rounded-lg text-slate-900 shadow-md text-center">
+                    <!-- Control Bar on Box: + Duplicate, 👁 Toggle, × Delete -->
+                    <div class="absolute -top-3 right-1 flex items-center gap-1 bg-slate-900 text-white rounded-md px-1.5 py-0.5 text-[10px] shadow">
+                      <button onclick="duplicateSigBox()" title="Sao chép chữ ký (+)" class="hover:text-emerald-400 font-bold text-xs px-1">+</button>
+                      <button onclick="toggleSigVisibility()" title="Ẩn/Hiện (👁)" class="hover:text-amber-400 text-xs px-1">👁</button>
+                    </div>
+
+                    <div id="sigStaffContent">
+                      <span id="tagStaffProxy" class="text-[10px] font-bold block text-emerald-700">KÝ PHỤ TRÁCH</span>
+                      <img src="https://api.dicebear.com/7.x/bottts/svg?seed=staff" class="h-10 mx-auto my-1 opacity-90" alt="Chữ ký Nhân viên">
+                      <span class="font-bold text-xs block">Chau Kim Sêne</span>
+                    </div>
+                  </div>
+
+                  <!-- Extra Duplicate Box (+) simulation -->
+                  <div id="sigExtraBox" class="hidden absolute top-28 left-2 right-2 p-2 sig-box-copy rounded-lg text-slate-900 shadow-md text-center">
+                    <div class="absolute -top-3 right-1 flex items-center gap-1 bg-slate-900 text-white rounded-md px-1.5 py-0.5 text-[10px] shadow">
+                      <button onclick="toggleExtraVisibility()" title="Ẩn/Hiện (👁)" class="hover:text-amber-400 text-xs px-1">👁</button>
+                      <button onclick="removeExtraBox()" title="Xóa (×)" class="hover:text-red-400 text-xs px-1 font-bold">×</button>
+                    </div>
+                    <div id="sigExtraContent">
+                      <span class="text-[9px] font-bold block text-amber-700">BẢN SAO XÁC NHẬN</span>
+                      <img src="https://api.dicebear.com/7.x/bottts/svg?seed=staff" class="h-8 mx-auto my-0.5 opacity-80" alt="Chữ ký phụ">
+                      <span class="font-bold text-[11px] block">Chau Kim Sêne</span>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
+
+            <!-- Footer Document Code Tag -->
+            <div class="text-[10px] text-slate-400 text-right pt-4 border-t border-slate-100">
+              Mã ISO: <span id="docFooterCode">KHXD-QT02-F03 (01-15/05/2026)</span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- MOBILE SIMULATION FRAME (Hidden by default, toggled via Desktop/Mobile View) -->
+    <div id="mobileContainer" class="hidden flex justify-center py-6">
+      <div class="mobile-frame flex flex-col justify-between">
+        
+        <!-- Mobile Top Header -->
+        <div class="bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
+          <div>
+            <span class="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full border border-emerald-500/30">Dành cho Ban Giám Đốc</span>
+            <h2 class="text-xs font-bold mt-0.5">Phê duyệt: DX-110826/001</h2>
+          </div>
+          <span class="text-[11px] font-mono bg-slate-800 px-2 py-1 rounded text-slate-300">Trang 3/6</span>
+        </div>
+
+        <!-- Mobile Content Scroll Area -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-100">
+          <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-2 text-xs">
+            <div class="font-bold text-slate-800">Mã F03 — Giấy đề nghị bảo trì</div>
+            <p class="text-slate-600 text-[11px]">Bảo dưỡng 21 thiết bị Đội xe & Nhà máy Phước Hòa Kampong Thom.</p>
+            <div class="p-2 bg-slate-50 rounded border border-slate-200 text-[11px] text-slate-700">
+              • Chi phí ước tính: <strong>1,450.00 USD</strong><br>
+              • Nhân viên phụ trách: Châu Kim Sêne (Đã ký)
+            </div>
+          </div>
+
+          <!-- Mobile Simulated Signature Page Card -->
+          <div class="bg-white p-4 rounded-xl shadow-sm border border-emerald-300 space-y-3 text-xs">
+            <div class="font-bold text-emerald-800 flex items-center justify-between">
+              <span>Vị trí đặt chữ ký của bạn</span>
+              <span class="text-[10px] text-emerald-600">Trang 3/3 (F03)</span>
+            </div>
+
+            <!-- Proxy Prefix Picker on Mobile -->
+            <div>
+              <label class="text-[11px] font-bold text-slate-600">Chọn chức danh ký thay:</label>
+              <select id="mobileProxySelect" onchange="onProxyChange(this.value)" class="mt-1 w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-800 text-xs">
+                <option value="none">Ký trực tiếp (BGĐ PHỤ TRÁCH)</option>
+                <option value="KT." selected>KT. BGĐ PHỤ TRÁCH (Ký thay)</option>
+                <option value="TUQ.">TUQ. BGĐ PHỤ TRÁCH (Thừa ủy quyền)</option>
+                <option value="TM.">TM. BGĐ PHỤ TRÁCH (Thay mặt)</option>
+                <option value="TL.">TL. BGĐ PHỤ TRÁCH (Thừa lệnh)</option>
+              </select>
+            </div>
+
+            <!-- Signature Box Preview Card -->
+            <div class="p-3 bg-emerald-50 border-2 dashed border-emerald-500 rounded-xl text-center">
+              <span id="mobileSigLabel" class="text-[10px] font-bold text-emerald-700 block">KT. BGĐ PHỤ TRÁCH</span>
+              <img src="https://api.dicebear.com/7.x/bottts/svg?seed=bgd" class="h-12 mx-auto my-1" alt="Signature preview">
+              <span class="font-bold text-slate-800 text-xs">Chau Chók</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile Fixed Bottom Action Bar (Q3: Touch target 44px+) -->
+        <div class="bg-white border-t border-slate-200 p-3 flex items-center justify-between gap-2 shadow-lg">
+          <div class="text-[11px] font-medium text-slate-500">
+            Tiến trình: <strong class="text-emerald-600 font-bold">1/2 mã biểu mẫu</strong>
+          </div>
+          <button onclick="openOtpModal()" class="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-transform">
+            <span>Tiếp theo: Ký Mã F15</span> ➔
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MODAL 1: EMAIL OTP VERIFICATION (Q1: Prioritize Personal Email) -->
+  <div id="otpModal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 text-white">
+      
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl">✉️</span>
+          <div>
+            <h3 class="text-base font-bold">Xác Thực Mã OTP Email</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Ưu tiên gửi về Email cá nhân (Q1)</p>
+          </div>
+        </div>
+        <button onclick="closeOtpModal()" class="text-slate-400 hover:text-white font-bold text-lg">×</button>
+      </div>
+
+      <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700 text-xs text-slate-300">
+        Mã OTP 6 số đã được gửi đến email cá nhân:<br>
+        <strong class="text-emerald-400 text-sm font-mono block mt-1">chaukim***@phuochoa.com.vn</strong>
+      </div>
+
+      <!-- OTP 6 Inputs -->
+      <div class="flex justify-between gap-2">
+        <input type="text" maxlength="1" value="8" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+        <input type="text" maxlength="1" value="2" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+        <input type="text" maxlength="1" value="5" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+        <input type="text" maxlength="1" value="9" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+        <input type="text" maxlength="1" value="1" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+        <input type="text" maxlength="1" value="4" class="w-11 h-12 text-center text-xl font-bold bg-slate-800 border border-emerald-500 rounded-xl focus:outline-none text-emerald-400">
+      </div>
+
+      <div class="flex items-center justify-between text-xs text-slate-400">
+        <span>Hiệu lực OTP: <strong id="otpTimer" class="text-amber-400 font-mono">00:54</strong></span>
+        <button onclick="alert('Đã gửi lại OTP đến email cá nhân!')" class="text-emerald-400 font-bold hover:underline">Gửi lại OTP Email</button>
+      </div>
+
+      <!-- Telegram Fallback Option -->
+      <div class="pt-2 border-t border-slate-800 text-center">
+        <button onclick="alert('Đã chuyển sang gửi mã OTP qua Telegram Bot ISO Phước Hòa!')" class="text-xs text-slate-400 hover:text-slate-200 underline">
+          📲 Không nhận được mail? Bấm để nhận OTP qua Telegram
+        </button>
+      </div>
+
+      <!-- Submit Button -->
+      <button onclick="confirmOtpAndSign()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-bold text-sm rounded-xl shadow-lg shadow-emerald-900/40 transition-all">
+        ✅ Xác Nhận OTP & Tiến Hành Ký Nối Tiếp
+      </button>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT SIMULATION CONTROLS -->
+  <script>
+    let isDirty = false;
+    let currentForm = 'F03';
+    let currentPages = { 'F03': 3, 'F15': 6, 'F06': 8 };
+    let activePage = 3;
+
+    function setDeviceView(mode) {
+      const btnDesk = document.getElementById('btnViewDesktop');
+      const btnMob = document.getElementById('btnViewMobile');
+      const desk = document.getElementById('desktopContainer');
+      const mob = document.getElementById('mobileContainer');
+
+      if (mode === 'desktop') {
+        desk.classList.remove('hidden');
+        mob.classList.add('hidden');
+        btnDesk.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-emerald-600 text-white";
+        btnMob.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white";
+      } else {
+        desk.classList.add('hidden');
+        mob.classList.remove('hidden');
+        btnMob.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-emerald-600 text-white";
+        btnDesk.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white";
+      }
+    }
+
+    function onGhiChuChange() {
+      isDirty = true;
+      document.getElementById('dirtyBadge').className = "px-2 py-0.5 text-[11px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30";
+      document.getElementById('dirtyBadge').innerText = "Có thay đổi chưa lưu!";
+      
+      const btnSave = document.getElementById('btnSave');
+      btnSave.disabled = false;
+      btnSave.className = "flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-amber-900/40 transition-all";
+      btnSave.innerText = "💾 Lưu thay đổi";
+
+      const btnSend = document.getElementById('btnSendSign');
+      btnSend.disabled = true;
+      btnSend.className = "flex-1 py-2.5 bg-slate-700 text-slate-500 font-bold rounded-xl text-xs opacity-60 cursor-not-allowed";
+
+      document.getElementById('saveWarningMsg').classList.remove('hidden');
+    }
+
+    function handleSave() {
+      isDirty = false;
+      document.getElementById('dirtyBadge').className = "px-2 py-0.5 text-[11px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+      document.getElementById('dirtyBadge').innerText = "Đã lưu hoàn tất";
+
+      const btnSave = document.getElementById('btnSave');
+      btnSave.disabled = true;
+      btnSave.className = "flex-1 py-2.5 bg-slate-700 text-slate-400 font-bold rounded-xl text-xs cursor-not-allowed";
+      btnSave.innerText = "💾 Lưu (Đã lưu)";
+
+      const btnSend = document.getElementById('btnSendSign');
+      btnSend.disabled = false;
+      btnSend.className = "flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-emerald-900/40 transition-all flex items-center justify-center gap-1";
+
+      document.getElementById('saveWarningMsg').classList.add('hidden');
+      alert("Đã lưu biên bản thành công!");
+    }
+
+    function startSigningFlow() {
+      if (isDirty) {
+        alert("Vui lòng bấm 'Lưu' trước khi gửi ký!");
+        return;
+      }
+      openOtpModal();
+    }
+
+    function openOtpModal() {
+      document.getElementById('otpModal').classList.remove('hidden');
+    }
+
+    function closeOtpModal() {
+      document.getElementById('otpModal').classList.add('hidden');
+    }
+
+    function confirmOtpAndSign() {
+      closeOtpModal();
+      alert("Xác thực OTP Email thành công! Tiến hành ký nối tiếp mã biểu mẫu F03.");
+      
+      // Mark F03 as signed
+      document.getElementById('badgeF03').className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+      document.getElementById('badgeF03').innerText = "🟢 Đã ký";
+
+      // Unlock F15
+      document.getElementById('badgeF15').className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer";
+      document.getElementById('badgeF15').innerText = "Sẵn sàng ký";
+
+      // Select F15 next
+      selectFormCode('F15');
+    }
+
+    function selectFormCode(code) {
+      currentForm = code;
+      activePage = currentPages[code];
+      
+      const titles = {
+        'F03': 'Mã F03 — Giấy đề nghị bảo trì',
+        'F15': 'Mã F15 — Biên bản nghiệm thu bảo trì',
+        'F06': 'Mã F06 — Phiếu hoàn thành công việc'
+      };
+
+      const headers = {
+        'F03': 'KHXD-QT02-F03',
+        'F15': 'KHXD-QT02-F15',
+        'F06': 'KHXD-QT02-F06'
+      };
+
+      const mainTitles = {
+        'F03': 'GIẤY ĐỀ NGHỊ BẢO TRÌ - SỬA CHỮA',
+        'F15': 'BIÊN BẢN NGHIỆM THU BẢO TRÌ',
+        'F06': 'PHIẾU HOÀN THÀNH CÔNG VIỆC'
+      };
+
+      document.getElementById('currentFormTitle').innerText = `Đang xem: ${titles[code]}`;
+      document.getElementById('docHeaderCode').innerText = headers[code];
+      document.getElementById('docFooterCode').innerText = `${headers[code]} (01-15/05/2026)`;
+      document.getElementById('docMainTitle').innerText = mainTitles[code];
+      document.getElementById('pageIndicator').innerText = `Trang ${activePage}/8 (Trang ký của ${code})`;
+
+      // Show director/bgd signatures for simulation
+      if (code === 'F15') {
+        document.getElementById('sigBgd').classList.remove('hidden');
+      } else if (code === 'F06') {
+        document.getElementById('sigDirector').classList.remove('hidden');
+      }
+    }
+
+    function duplicateSigBox() {
+      const extra = document.getElementById('sigExtraBox');
+      extra.classList.remove('hidden');
+    }
+
+    function removeExtraBox() {
+      document.getElementById('sigExtraBox').classList.add('hidden');
+    }
+
+    function toggleSigVisibility() {
+      const content = document.getElementById('sigStaffContent');
+      content.classList.toggle('opacity-20');
+    }
+
+    function toggleExtraVisibility() {
+      const content = document.getElementById('sigExtraContent');
+      content.classList.toggle('opacity-20');
+    }
+
+    function onProxyChange(val) {
+      const lbl = document.getElementById('mobileSigLabel');
+      const tagBgd = document.getElementById('tagBgdProxy');
+
+      const textMap = {
+        'none': 'BGĐ PHỤ TRÁCH',
+        'KT.': 'KT. BGĐ PHỤ TRÁCH',
+        'TUQ.': 'TUQ. BGĐ PHỤ TRÁCH',
+        'TM.': 'TM. BGĐ PHỤ TRÁCH',
+        'TL.': 'TL. BGĐ PHỤ TRÁCH'
+      };
+
+      lbl.innerText = textMap[val] || val;
+      if (tagBgd) tagBgd.innerText = textMap[val] || val;
+    }
+
+    function resetSimulation() {
+      isDirty = false;
+      currentForm = 'F03';
+      activePage = 3;
+      document.getElementById('inputGhiChu').value = "Kiểm tra thay nhớt & bảo dưỡng định kỳ 21 xe/máy";
+      
+      handleSave();
+      selectFormCode('F03');
+
+      document.getElementById('badgeF03').className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30";
+      document.getElementById('badgeF03').innerText = "Chờ ký";
+
+      document.getElementById('badgeF15').className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-700 text-slate-400";
+      document.getElementById('badgeF15').innerText = "Chờ mã F03";
+
+      document.getElementById('sigBgd').classList.add('hidden');
+      document.getElementById('sigDirector').classList.add('hidden');
+      document.getElementById('sigExtraBox').classList.add('hidden');
+
+      alert("Đã reset trạng thái mô phỏng!");
+    }
+
+    function prevPage() {
+      if (activePage > 1) {
+        activePage--;
+        document.getElementById('pageIndicator').innerText = `Trang ${activePage}/8`;
+      }
+    }
+
+    function nextPage() {
+      if (activePage < 8) {
+        activePage++;
+        document.getElementById('pageIndicator').innerText = `Trang ${activePage}/8`;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -382,20 +382,42 @@ export default function IsoDocumentsPage() {
                         const isAdmin = userRole === "admin"
                         const canEditDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
                         const canDeleteDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
+                        const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
                         return (
                           <div className="inline-flex items-center gap-1">
                             <Link
                               href={`/dashboard/iso/documents/${doc.id}`}
                               title="Xem chi tiết"
-                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
                             >
                               <Eye size={14} />
                             </Link>
+                            {downloadUrl ? (
+                              <a
+                                href={downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download
+                                title="Tải xuống"
+                                onClick={(e) => e.stopPropagation()}
+                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                              >
+                                <Download size={14} />
+                              </a>
+                            ) : (
+                              <Link
+                                href={`/dashboard/iso/documents/${doc.id}`}
+                                title="Tải xuống"
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                              >
+                                <Download size={14} />
+                              </Link>
+                            )}
                             {canDistribute && doc.trang_thai === "co_hieu_luc" && (
                               <button
                                 title="Phân phối tài liệu này"
                                 onClick={() => { setDistributeDocId(doc.id); setShowDistributeModal(true) }}
-                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
                               >
                                 <Share2 size={14} />
                               </button>
@@ -443,55 +465,63 @@ export default function IsoDocumentsPage() {
                       <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
                       <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
                       <td className="px-4 py-3 text-right">
-                          {(() => {
-                            const isAdmin = userRole === "admin"
-                            const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                            const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                            const childDownloadUrl = child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
-                            return (
-                              <div className="inline-flex items-center gap-1">
+                        {(() => {
+                          const isAdmin = userRole === "admin"
+                          const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          const childDownloadUrl = child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
+                          return (
+                            <div className="inline-flex items-center gap-1">
+                              <Link
+                                href={`/dashboard/iso/documents/${child.id}`}
+                                title="Xem chi tiết"
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                              >
+                                <Eye size={14} />
+                              </Link>
+                              {childDownloadUrl ? (
+                                <a
+                                  href={childDownloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  download
+                                  title="Tải xuống"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                >
+                                  <Download size={14} />
+                                </a>
+                              ) : (
                                 <Link
                                   href={`/dashboard/iso/documents/${child.id}`}
-                                  title="Xem chi tiết"
-                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                                  title="Tải xuống"
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition-colors"
                                 >
-                                  <Eye size={14} />
+                                  <Download size={14} />
                                 </Link>
-                                {childDownloadUrl && (
-                                  <a
-                                    href={childDownloadUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    download
-                                    title="Tải xuống nhanh"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
-                                  >
-                                    <Download size={14} />
-                                  </a>
-                                )}
-                                {canEditChild && (
-                                  <Link
-                                    href={`/dashboard/iso/documents/${child.id}`}
-                                    title="Sửa"
-                                    className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
-                                  >
-                                    <Pencil size={14} />
-                                  </Link>
-                                )}
-                                {canDeleteChild && (
-                                  <button
-                                    title="Xóa"
-                                    onClick={() => setDelConfirm(child.id)}
-                                    className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                )}
-                              </div>
-                            )
-                          })()}
-                        </td>
+                              )}
+                              {canEditChild && (
+                                <Link
+                                  href={`/dashboard/iso/documents/${child.id}`}
+                                  title="Sửa"
+                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </Link>
+                              )}
+                              {canDeleteChild && (
+                                <button
+                                  title="Xóa"
+                                  onClick={() => setDelConfirm(child.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })()}
+                      </td>
                     </tr>
                   ))}
                   </Fragment>
