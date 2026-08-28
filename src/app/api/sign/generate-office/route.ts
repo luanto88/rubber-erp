@@ -5,6 +5,7 @@ import QRCode from "qrcode"
 import JSZip from "jszip"
 import ExcelJS from "exceljs"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { getSignatureImage } from "@/lib/signing/signature-image"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -198,10 +199,9 @@ async function downloadStorageFile(fileUrl: string | null): Promise<ArrayBuffer>
 }
 
 async function getSigImage(factoryId: string, userId: string): Promise<Buffer> {
-  const storagePath = `signatures/${factoryId}/${userId}/chu_ky.png`
-  const { data, error } = await supabaseAdmin.storage.from("iso-documents").download(storagePath)
-  if (error || !data) throw new Error("Người ký chưa có ảnh chữ ký. Vào Cài đặt -> Chữ ký cá nhân để upload.")
-  return Buffer.from(await data.arrayBuffer())
+  const sig = await getSignatureImage(factoryId, userId)
+  if (!sig) throw new Error("Người ký chưa có ảnh chữ ký. Vào Cài đặt -> Chữ ký cá nhân để upload.")
+  return sig
 }
 
 function getStep(doc: Record<string, unknown>, userId: string): SignStep | null {

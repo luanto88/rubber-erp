@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin, verifyCurrentPin } from "@/app/api/account/_lib/security"
 import { resolveUserDeptCode } from "@/lib/documents-dept"
 import { SIGN_AS_OPTIONS, type ThuTuKyStep, type SignAsType } from "@/app/dashboard/documents/_components/documents-types"
-import { PDFDocument, rgb } from "pdf-lib"
+import { PDFDocument } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
 import QRCode from "qrcode"
-import fs from "fs"
-import path from "path"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { getSignatureImage } from "@/lib/signing/signature-image"
+import {
+  loadSignerNameFont,
+  drawSignatureImage,
+  drawSignerName,
+  drawSignPrefix,
+  drawExtraPlacements,
+  VAN_BAN_SIGNER_NAME_STYLE,
+} from "@/lib/signing/stamp-pdf"
 
 const BUCKET = "iso-documents"
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
@@ -197,11 +204,7 @@ async function downloadStorageFile(fileUrl: string): Promise<Buffer | null> {
 
 async function getSigImage(factoryId: string, userId: string): Promise<Buffer | null> {
   try {
-    const { data, error } = await supabaseAdmin.storage
-      .from(BUCKET)
-      .download(`signatures/${factoryId}/${userId}/chu_ky.png`)
-    if (error || !data) return null
-    return Buffer.from(await data.arrayBuffer())
+    return await getSignatureImage(factoryId, userId)
   } catch {
     return null
   }
@@ -368,15 +371,6 @@ async function stampOffice(
 
 // Vị trí tên người ký: dùng box riêng (nameX/nameY/nameWidth/nameHeight) nếu
 // SignPlacementModal đã đặt, fallback về căn giữa ngay dưới chữ ký như trước.
-// Mirror buildSignerNamePlacement() của ISO forms finalize route.
-function buildSignerNamePlacement(p: SignPlacement) {
-  return {
-    xCenter: typeof p.nameX === "number" ? p.nameX + (p.nameWidth ?? p.width) / 2 : p.x + p.width / 2,
-    y: typeof p.nameY === "number" ? p.nameY : Math.max(p.y - 14, 4),
-    maxWidth: Math.max(typeof p.nameWidth === "number" ? p.nameWidth : p.width + 20, 60),
-  }
-}
-
 async function stampPdfStep(
   fileBytes: Buffer,
   sigBuf: Buffer | null,
@@ -392,8 +386,8 @@ async function stampPdfStep(
 
   let signerFont: ReturnType<typeof pdfDoc.embedFont> extends Promise<infer T> ? T : never
   try {
-    const fontBytes = fs.readFileSync(path.join(process.cwd(), "public/fonts/TimesNewRoman.ttf"))
-    signerFont = await pdfDoc.embedFont(fontBytes)
+    const fontBytes = loadSignerNameFont()
+    signerFont = fontBytes ? await pdfDoc.embedFont(fontBytes) : (null as never)
   } catch {
     signerFont = null as never
   }
@@ -407,84 +401,24 @@ async function stampPdfStep(
   const y = placement?.y ?? 50
   const w = placement?.width ?? 120
   const h = placement?.height ?? 60
-
-  if (sigBuf && placement?.showSignature !== false) {
-    try {
-      const embedded = await pdfDoc.embedPng(sigBuf).catch(() => pdfDoc.embedJpg(sigBuf))
-      page.drawImage(embedded, { x, y, width: w, height: h, opacity: 0.92 })
-    } catch { /* skip */ }
+  // Khung "hiệu lực" dùng cho cả vẽ chữ ký lẫn vẽ tên — khi chưa có placement thật
+  // (văn bản chưa từng đặt vị trí), dùng tọa độ mặc định x/y/w/h vừa tính ở trên,
+  // showSignature/showSignerName/name* đều undefined nên các hàm dùng chung coi
+  // như "hiện" (mirror đúng `placement?.xxx !== false` của bản gốc).
+  const effectiveBox = {
+    x, y, width: w, height: h,
+    showSignature: placement?.showSignature,
+    showSignerName: placement?.showSignerName,
+    nameX: placement?.nameX,
+    nameY: placement?.nameY,
+    nameWidth: placement?.nameWidth,
+    nameHeight: placement?.nameHeight,
   }
 
-  if (signerName && signerFont && placement?.showSignerName !== false) {
-    try {
-      const slot = buildSignerNamePlacement(placement ?? { page: 1, x, y, width: w, height: h })
-      let size = 10
-      while (size > 7 && signerFont.widthOfTextAtSize(signerName, size) > slot.maxWidth) size -= 0.5
-      const tw = signerFont.widthOfTextAtSize(signerName, size)
-      page.drawText(signerName, {
-        x: slot.xCenter - tw / 2,
-        y: slot.y,
-        size,
-        font: signerFont,
-        color: rgb(0, 0, 0),
-      })
-    } catch { /* skip */ }
-  }
-
-  // Tiền tố ký thay (KT./TM./TL./TUQ.) — hộp riêng, chỉ vẽ khi có tọa độ thật do
-  // SignPlacementModal đặt. Không có fallback vị trí mặc định như chữ ký/tên vì
-  // đây là tính năng tùy chọn (không phải mọi lượt ký đều chọn ký thay).
-  if (
-    prefixText &&
-    signerFont &&
-    placement?.showPrefix &&
-    typeof placement.prefixX === "number" &&
-    typeof placement.prefixY === "number"
-  ) {
-    try {
-      page.drawText(prefixText, {
-        x: placement.prefixX,
-        y: placement.prefixY,
-        size: 10,
-        font: signerFont,
-        color: rgb(0, 0, 0),
-      })
-    } catch { /* skip */ }
-  }
-
-  // Draw extra duplicate signatures & names if provided
-  if (placement?.extraPlacements?.length) {
-    for (const extraP of placement.extraPlacements) {
-      const extraPageIndex = (extraP.page ?? 1) - 1
-      if (extraPageIndex < 0 || extraPageIndex >= pdfDoc.getPageCount()) continue
-      const targetPage = pdfDoc.getPage(extraPageIndex)
-      try {
-        if (sigBuf && extraP.showSignature !== false) {
-          const embedded = await pdfDoc.embedPng(sigBuf).catch(() => pdfDoc.embedJpg(sigBuf))
-          targetPage.drawImage(embedded, {
-            x: extraP.x,
-            y: extraP.y,
-            width: extraP.width,
-            height: extraP.height,
-            opacity: 0.92,
-          })
-        }
-        if (signerName && signerFont && extraP.showSignerName !== false) {
-          const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
-          let size = 10
-          while (size > 7 && signerFont.widthOfTextAtSize(signerName, size) > extraSlot.maxWidth) size -= 0.5
-          const tw = signerFont.widthOfTextAtSize(signerName, size)
-          targetPage.drawText(signerName, {
-            x: extraSlot.xCenter - tw / 2,
-            y: extraSlot.y,
-            size,
-            font: signerFont,
-            color: rgb(0, 0, 0),
-          })
-        }
-      } catch { /* skip */ }
-    }
-  }
+  if (sigBuf) await drawSignatureImage(pdfDoc, page, sigBuf, effectiveBox)
+  drawSignerName(page, signerName, effectiveBox, signerFont, VAN_BAN_SIGNER_NAME_STYLE)
+  drawSignPrefix(page, prefixText, placement ?? {}, signerFont)
+  await drawExtraPlacements(pdfDoc, placement?.extraPlacements, sigBuf, signerName, signerFont, VAN_BAN_SIGNER_NAME_STYLE)
 
   // QR trỏ về trang chi tiết văn bản — vẽ trên TẤT CẢ trang. Ưu tiên vị trí người
   // ký đã kéo-thả chọn ở lượt ký đầu tiên (qrBox, đã "chốt" trong placement_ky.qr —

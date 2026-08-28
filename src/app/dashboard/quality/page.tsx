@@ -9,6 +9,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { downloadQualityKqknPdf } from "@/lib/quality-pdf"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -330,176 +331,7 @@ function emptyTabSamples(soMau: number): Samples {
   return Object.fromEntries(ALL_FIELDS.map(f => [f.key, Array(soMau).fill("")]))
 }
 
-// Build one page of the print HTML for a single batch
-function buildBatchPage(batchResults: QcResult[], factoryName: string, fCode: string, isFirst: boolean): string {
-  const sorted = [...batchResults].sort((a,b)=>(a.lo_kn||0)-(b.lo_kn||0))
-  const r0 = sorted[0]
-  const pknCode = formatPKN(r0.pkn, r0.ngay_kn, fCode)
-  const ngaySXStr = formatDateDisplay(r0.ngay_sx) || r0.ngay_sx || "--"
-  const ngayKnParts = getDateParts(r0.ngay_kn)
-  const ngayInStr = ngayKnParts
-    ? `ngay ${ngayKnParts.dayNumber} thang ${ngayKnParts.monthNumber} nam ${ngayKnParts.yearNumber}`
-    : (r0.ngay_kn || "--")
-
-  // Stats helpers
-  const nums = (arr: (string|number)[]|undefined) => (arr||[]).map(Number).filter(v=>!isNaN(v)&&v>0)
-  const avg  = (a: number[]) => a.length ? a.reduce((s,v)=>s+v,0)/a.length : null
-  const sd3  = (a: number[]) => { if(!a.length) return null; const m=avg(a)!; return 3*Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length) }
-  const mx   = (a: number[]) => a.length ? Math.max(...a) : null
-  const mn   = (a: number[]) => a.length ? Math.min(...a) : null
-  const fmt  = (v: number|null, d=3) => v===null ? "—" : v.toFixed(d)
-
-  // For Tạp chất/Tro: X | 3SD | X+3SD
-  const statA = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—","—"]
-    const m = avg(a)!, s3 = sd3(a)!
-    return [fmt(m), fmt(s3), fmt(m+s3)]
-  }
-  // For Bay hơi: X̄ | Xmax (2 cột, không DR)
-  const statBH = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—"]
-    return [fmt(avg(a)!), fmt(mx(a)!)]
-  }
-  // For Nitơ/Màu: X̄ | Xmin | Xmax
-  const statNi = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—","—"]
-    return [fmt(avg(a)!), fmt(mn(a)!), fmt(mx(a)!)]
-  }
-  // For Po/PRI: X̄ | Xmin | Xmax (1 decimal)
-  const statC = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—","—"]
-    return [fmt(avg(a)!,1), fmt(mn(a)!,1), fmt(mx(a)!,1)]
-  }
-  // For Mooney: X̄ | Xmin | Xmax
-  const statD = (vals: (string|number)[]|undefined) => {
-    const a = nums(vals); if (!a.length) return ["—","—","—"]
-    return [fmt(avg(a),1), fmt(mn(a),1), fmt(mx(a),1)]
-  }
-
-  const rows = sorted.map(r => {
-    const s = r.samples || {}
-    const g = r.grade   || {}
-    const resOk = !r.dat_hang?.endsWith("RH")
-    const resCl = resOk ? "#065f46" : "#dc2626"
-    const [tc1,tc2,tc3] = statA(s.tap_chat)
-    const [tr1,tr2,tr3] = statA(s.tro)
-    const [bh1,bh2]     = statBH(s.bay_hoi)
-    const [ni1,ni2,ni3] = statNi(s.nito)
-    const [po1,po2,po3] = statC(s.po)
-    const [pr1,pr2,pr3] = statC(s.pri)
-    const [ma1,ma2,ma3] = statNi(s.mau_sac)
-    const [ml1,ml2,ml3] = statD(s.mooney)
-    const nmLo = stripYear(r.ma_lo)
-
-    const c = (ok: boolean|undefined, v: string) =>
-      ok===undefined ? `<td style="text-align:center;color:#94a3b8">${v}</td>`
-      : ok ? `<td style="text-align:center;color:#065f46">${v}</td>`
-           : `<td style="text-align:center;color:#dc2626;font-weight:700">${v}</td>`
-
-    return `<tr>
-      <td style="text-align:center">${r.lo_kn||"—"}</td>
-      <td style="text-align:center;font-weight:600">${nmLo}</td>
-      <td style="text-align:center">${r.loai_csr}</td>
-      ${c(g.tap_chat?.dat,tc1)}${c(undefined,tc2)}${c(g.tap_chat?.dat,tc3)}
-      ${c(g.tro?.dat,tr1)}${c(undefined,tr2)}${c(g.tro?.dat,tr3)}
-      ${c(g.bay_hoi?.dat,bh1)}${c(g.bay_hoi?.dat,bh2)}
-      ${c(g.nito?.dat,ni1)}${c(undefined,ni2)}${c(g.nito?.dat,ni3)}
-      ${c(g.po?.dat,po1)}${c(undefined,po2)}${c(g.po?.dat,po3)}
-      ${c(g.pri?.dat,pr1)}${c(undefined,pr2)}${c(g.pri?.dat,pr3)}
-      <td style="text-align:center">${ma1}</td><td style="text-align:center">${ma2}</td><td style="text-align:center">${ma3}</td>
-      <td style="text-align:center">${ml1}</td><td style="text-align:center">${ml2}</td><td style="text-align:center">${ml3}</td>
-      <td style="text-align:center;font-weight:700;color:${resCl}">${r.dat_hang}</td>
-    </tr>`
-  }).join("")
-
-  const pageBreak = isFirst ? "" : '<div style="page-break-before:always"></div>'
-  return `${pageBreak}
-  <div style="text-align:center;font-weight:bold;font-size:13px;margin-bottom:6px">BẢNG KẾT QUẢ KIỂM NGHIỆM CAO SU CSR</div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:4px;font-size:9px">
-    <tr>
-      <td style="width:40%"><b>Mã phiếu:</b> <span style="color:#6d28d9;font-weight:bold">${pknCode}</span></td>
-      <td style="width:35%;text-align:center"><b>NGÀY SẢN XUẤT:</b> ${ngaySXStr}</td>
-      <td style="width:25%;text-align:right"><b>NHÀ MÁY:</b> ${fCode}</td>
-    </tr>
-  </table>
-  <table style="width:100%;border-collapse:collapse;font-size:8px">
-    <thead>
-      <tr style="background:#f1f5f9">
-        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center;font-size:8px">LÔ<br>PKN</th>
-        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">LÔ<br>NM</th>
-        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">HẠNG<br>DK</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TẠP CHẤT</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">TRO</th>
-        <th colspan="2" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">BAY HƠI</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">NITƠ</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">Po</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">PRI</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">MÀU</th>
-        <th colspan="3" style="border:1px solid #cbd5e1;padding:2px 4px;text-align:center">ML(1'+4')100°C</th>
-        <th rowspan="2" style="border:1px solid #cbd5e1;padding:3px 4px;text-align:center">ĐẠT<br>HẠNG</th>
-      </tr>
-      <tr style="background:#f8fafc">
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">3SD</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄+3SD</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">3SD</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄+3SD</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">X̄</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmin</th>
-        <th style="border:1px solid #cbd5e1;padding:2px 3px;text-align:center">Xmax</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div style="margin-top:6px;font-size:9px"><b>TỔNG SỐ LÔ KIỂM NGHIỆM:</b> ${sorted.length}</div>
-  <div style="text-align:right;margin-top:4px;font-size:9px">Kampong Thom, ${ngayInStr}</div>
-  <div style="display:flex;justify-content:space-between;margin-top:32px;font-size:9px;padding:0 40px">
-    <div style="text-align:center"><p style="margin-bottom:36px"><b>LẬP BIỂU</b></p><p>________________________</p></div>
-    <div style="text-align:center"><p style="margin-bottom:36px"><b>TRƯỞNG PHÒNG QLCL</b></p><p>________________________</p></div>
-  </div>
-  <div style="margin-top:8px;font-size:8px;color:#94a3b8">QLCL-QT21-F08 (01-10/01/2025)</div>`
-}
-
-function buildPrintHTML(
-  dateResults: QcResult[], factoryName: string, date: string, fCode: string
-): string {
-  // Group by batch_id (or pkn as fallback), print each as a separate page
-  const batchMap = new Map<string, QcResult[]>()
-  dateResults.forEach(r => {
-    const key = r.batch_id || String(r.pkn)
-    if (!batchMap.has(key)) batchMap.set(key, [])
-    batchMap.get(key)!.push(r)
-  })
-  const batches = Array.from(batchMap.values()).sort((a,b)=>(a[0].pkn||0)-(b[0].pkn||0))
-
-  const pages = batches.map((b, i) => buildBatchPage(b, factoryName, fCode, i===0)).join("")
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-  <title>Phiếu KQKN - ${new Date(date).toLocaleDateString("vi-VN")}</title>
-  <style>
-    body{font-family:"Times New Roman",serif;font-size:9px;margin:15px 20px}
-    table td,table th{border:1px solid #cbd5e1;padding:2px 3px}
-    @media print{@page{size:A4 landscape;margin:10mm} body{margin:0}}
-  </style></head><body>
-  ${pages}
-  <script>window.onload=()=>{ window.print() }</script>
-  </body></html>`
-}
+// Đã chuyển sang PDF thật — xem downloadQualityKqknPdf() trong src/lib/quality-pdf.ts
 
 const padSamples = (arr: (string|number)[]|undefined, n: number): string[] =>
   (arr||[]).map(String).concat(Array(Math.max(0, n-(arr?.length||0))).fill(""))
@@ -510,7 +342,6 @@ export default function QualityPage() {
   // ── Core state ──────────────────────────────────────────────────────────────
   const [factoryId,   setFactoryId]   = useState<string|null>(null)
   const [factoryCode, setFactoryCode] = useState("NM")
-  const [factoryName, setFactoryName] = useState("")
   const [results,      setResults]      = useState<QcResult[]>([])
   const [statsResults, setStatsResults] = useState<QcResult[]>([])
   const [customStds,  setCustomStds]  = useState<CustomStd[]>([])
@@ -996,7 +827,6 @@ export default function QualityPage() {
         const code = allVals.includes("phuoc")||allVals.includes("kampong") ? "PHK"
           : allVals.includes("cua")||allVals.includes("paris") ? "CP" : "NM"
         setFactoryCode(code)
-        setFactoryName(f.ten_nha_may || f.name || f.slug || "Nhà máy")
       })
     }
     void bootstrap()
@@ -2318,8 +2148,11 @@ export default function QualityPage() {
                                     const rt = retestMap.get(r.id)
                                     return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
                                   })
-                                  const w=window.open("","_blank","width=960,height=680")
-                                  if(w){w.document.write(buildPrintHTML(resolved,factoryName,date,factoryCode));w.document.close()}}}
+                                  try {
+                                    await downloadQualityKqknPdf(resolved, date, factoryCode)
+                                  } catch {
+                                    showToast("Không tạo được PDF phiếu KQKN.", false)
+                                  }}}
                                   className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-colors">
                                   <Printer size={11}/> PDF
                                 </button>
@@ -2541,12 +2374,15 @@ export default function QualityPage() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                             {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
                           </span>
-                          <button onClick={()=>{
+                          <button onClick={async ()=>{
                             const batchLots = results.filter(r2=>
                               r.batch_id ? r2.batch_id===r.batch_id : (r2.pkn===r.pkn&&r2.ngay_kn===r.ngay_kn&&!!r2.parent_id)
                             )
-                            const w=window.open("","_blank","width=960,height=680")
-                            if(w){w.document.write(buildPrintHTML(batchLots.length?batchLots:[r],factoryName,r.ngay_kn,factoryCode));w.document.close()}
+                            try {
+                              await downloadQualityKqknPdf(batchLots.length?batchLots:[r], r.ngay_kn, factoryCode)
+                            } catch {
+                              showToast("Không tạo được PDF phiếu KQKN.", false)
+                            }
                           }} className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg border border-slate-200 transition-colors">
                             <Printer size={11}/> PDF
                           </button>

@@ -7,6 +7,8 @@ import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { getSignatureImage } from "@/lib/signing/signature-image"
+import { loadSignerNameFont, computeNameSlot, ISO_SIGNER_NAME_STYLE } from "@/lib/signing/stamp-pdf"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -254,13 +256,6 @@ function isConDoc(loaiTaiLieu: string | null, phanLoaiTl: string | null): boolea
   return false
 }
 
-async function getSigImage(factoryId: string, userId: string): Promise<ArrayBuffer | null> {
-  const storagePath = `signatures/${factoryId}/${userId}/chu_ky.png`
-  const { data, error } = await supabaseAdmin.storage.from("iso-documents").download(storagePath)
-  if (error || !data) return null
-  return await data.arrayBuffer()
-}
-
 async function getProfile(userId: string | null): Promise<SignerProfile | null> {
   if (!userId) return null
   const { data } = await supabaseAdmin
@@ -281,14 +276,6 @@ function fmtDate(iso: string | null | undefined): string {
 function loadViFont(): Buffer | null {
   try {
     return fs.readFileSync(path.join(process.cwd(), "public/fonts/NotoSans-Regular.ttf"))
-  } catch {
-    return null
-  }
-}
-
-function loadSignerNameFont(): Buffer | null {
-  try {
-    return fs.readFileSync(path.join(process.cwd(), "public/fonts/TimesNewRoman.ttf"))
   } catch {
     return null
   }
@@ -463,21 +450,6 @@ async function drawDefaultChildQr(pdfDoc: PDFDocument, page: PDFPage, qrBuffer: 
     width: qrSize,
     height: qrSize,
   })
-}
-
-function buildSignerNamePlacement(placement: SignPlacement) {
-  return {
-    xCenter: typeof placement.nameX === "number"
-      ? placement.nameX + (placement.nameWidth ?? placement.width) / 2
-      : placement.x + placement.width / 2,
-    y: typeof placement.nameY === "number"
-      ? placement.nameY
-      : Math.max(placement.y - 18, 8),
-    maxWidth: Math.max(
-      typeof placement.nameWidth === "number" ? placement.nameWidth : placement.width + 24,
-      110,
-    ),
-  }
 }
 
 function extractHeaderValueFromPageItems(items: PdfTextItem[], anchor: PdfTextItem): string {
@@ -1519,7 +1491,7 @@ export async function POST(req: NextRequest) {
               const pageIndex = placement.page - 1
               if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) continue
 
-              const sigImg = await getSigImage(factoryId, signerUserId)
+              const sigImg = await getSignatureImage(factoryId, signerUserId)
               if (!sigImg) {
                 sigImgNullFor.push(signerUserId)
                 continue
@@ -1540,7 +1512,7 @@ export async function POST(req: NextRequest) {
                 const signerName = signerNames.get(signerUserId)?.trim()
                 if (signerName && placement.showSignerName !== false) {
                   const pageLines = linesByPage[pageIndex] ?? []
-                  const signerSlot = buildSignerNamePlacement(placement)
+                  const signerSlot = computeNameSlot(placement, ISO_SIGNER_NAME_STYLE)
                   const hasExistingName = findNearbyText(pageLines, signerSlot.xCenter, signerSlot.y)
                   if (!hasExistingName) {
                     const maxNameWidth = signerSlot.maxWidth
@@ -1575,7 +1547,7 @@ export async function POST(req: NextRequest) {
 
             // Nhúng các bản sao chữ ký (clone) nếu có
             if (signaturePlacement?.extraPlacements?.length) {
-              const extraSigImg = await getSigImage(factoryId, userId)
+              const extraSigImg = await getSignatureImage(factoryId, userId)
               const extraSignerName = signerNames.get(userId)?.trim()
               for (const extraP of signaturePlacement.extraPlacements) {
                 const extraPageIndex = extraP.page - 1
@@ -1592,7 +1564,7 @@ export async function POST(req: NextRequest) {
                     })
                   }
                   if (extraSignerName && extraP.showSignerName !== false) {
-                    const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+                    const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
                     let nameFontSize = 13
                     while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
                       nameFontSize -= 0.5
@@ -1707,7 +1679,7 @@ export async function POST(req: NextRequest) {
         const pageIndex = placement.page - 1
         if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) continue
 
-        const sigImg = await getSigImage(factoryId, signerUserId)
+        const sigImg = await getSignatureImage(factoryId, signerUserId)
         if (!sigImg) {
           sigImgNullFor.push(signerUserId)
           continue
@@ -1728,7 +1700,7 @@ export async function POST(req: NextRequest) {
           const signerName = signerNames.get(signerUserId)?.trim()
           if (signerName && placement.showSignerName !== false) {
             const pageLines = linesByPage[pageIndex] ?? []
-            const signerSlot = buildSignerNamePlacement(placement)
+            const signerSlot = computeNameSlot(placement, ISO_SIGNER_NAME_STYLE)
             const hasExistingName = findNearbyText(pageLines, signerSlot.xCenter, signerSlot.y)
             if (!hasExistingName) {
               const maxNameWidth = signerSlot.maxWidth
@@ -1774,7 +1746,7 @@ export async function POST(req: NextRequest) {
                   })
                 }
                 if (extraSignerName && extraP.showSignerName !== false) {
-                  const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
+                  const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
                   let nameFontSize = 13
                   while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
                     nameFontSize -= 0.5

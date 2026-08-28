@@ -2008,7 +2008,7 @@ export default function ExportPage() {
                                 target="_blank"
                                 className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-bold mt-1"
                               >
-                                <Printer size={11} /> In Biên bản
+                                <Printer size={11} /> Tải PDF biên bản
                               </a>
                               {currentUser?.role === "admin" && (
                                 <button

@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { jwtVerify } from "jose"
-import { PDFDocument, rgb } from "pdf-lib"
+import { PDFDocument } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import QRCode from "qrcode"
 import JSZip from "jszip"
-import fs from "fs"
-import path from "path"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
 import { SIGN_AS_OPTIONS, type SignAsType } from "@/app/dashboard/iso/_components/iso-types"
+import { getSignatureImage } from "@/lib/signing/signature-image"
+import {
+  loadSignerNameFont,
+  drawSignatureImage,
+  drawSignerName,
+  drawSignPrefix,
+  drawExtraPlacements,
+  ISO_SIGNER_NAME_STYLE,
+} from "@/lib/signing/stamp-pdf"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,21 +65,6 @@ function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
   return typeof v === "string" && (SIGN_AS_OPTIONS as string[]).includes(v)
 }
 
-function loadSignerNameFont(): Buffer | null {
-  try {
-    return fs.readFileSync(path.join(process.cwd(), "public/fonts/TimesNewRoman.ttf"))
-  } catch {
-    return null
-  }
-}
-
-async function getSigImage(factoryId: string, userId: string): Promise<ArrayBuffer | null> {
-  const storagePath = `signatures/${factoryId}/${userId}/chu_ky.png`
-  const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(storagePath)
-  if (error || !data) return null
-  return await data.arrayBuffer()
-}
-
 function getStorageRelPath(fileUrl: string): string | null {
   const cleanUrl = fileUrl.split("?")[0]
   const marker = `/storage/v1/object/public/${BUCKET}/`
@@ -80,14 +72,6 @@ function getStorageRelPath(fileUrl: string): string | null {
   if (idx >= 0) return decodeURIComponent(cleanUrl.slice(idx + marker.length))
   if (!/^https?:\/\//i.test(cleanUrl)) return cleanUrl
   return null
-}
-
-function buildSignerNamePlacement(p: SignPlacement) {
-  return {
-    xCenter: typeof p.nameX === "number" ? p.nameX + (p.nameWidth ?? p.width) / 2 : p.x + p.width / 2,
-    y: typeof p.nameY === "number" ? p.nameY : Math.max(p.y - 18, 8),
-    maxWidth: Math.max(typeof p.nameWidth === "number" ? p.nameWidth : p.width + 24, 110),
-  }
 }
 
 async function downloadFile(fileUrl: string): Promise<ArrayBuffer> {
@@ -154,93 +138,15 @@ async function stampPdf(
     const pageIndex = placement.page - 1
     if (pageIndex < 0 || pageIndex >= pdfDoc.getPageCount()) continue
 
-    const sigImg = await getSigImage(factoryId, userId)
+    const sigImg = await getSignatureImage(factoryId, userId)
     if (!sigImg) continue
 
     const page = pdfDoc.getPage(pageIndex)
 
-    if (placement.showSignature !== false) {
-      try {
-        const embedded = await pdfDoc.embedPng(sigImg).catch(() => pdfDoc.embedJpg(sigImg))
-        page.drawImage(embedded, {
-          x: placement.x,
-          y: placement.y,
-          width: placement.width,
-          height: placement.height,
-          opacity: 0.92,
-        })
-      } catch { /* bỏ qua nếu embed thất bại */ }
-    }
-
-    if (signerName && placement.showSignerName !== false) {
-      try {
-        const slot = buildSignerNamePlacement(placement)
-        let nameFontSize = 13
-        while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(signerName, nameFontSize) > slot.maxWidth) {
-          nameFontSize -= 0.5
-        }
-        const nameWidth = signerNameFont.widthOfTextAtSize(signerName, nameFontSize)
-        page.drawText(signerName, {
-          x: slot.xCenter - nameWidth / 2,
-          y: slot.y,
-          size: nameFontSize,
-          font: signerNameFont,
-          color: rgb(0, 0, 0),
-        })
-      } catch { /* bỏ qua nếu vẽ tên thất bại */ }
-    }
-
-    if (
-      prefixText &&
-      placement.showPrefix &&
-      typeof placement.prefixX === "number" &&
-      typeof placement.prefixY === "number"
-    ) {
-      try {
-        page.drawText(prefixText, {
-          x: placement.prefixX,
-          y: placement.prefixY,
-          size: 10,
-          font: signerNameFont,
-          color: rgb(0, 0, 0),
-        })
-      } catch { /* bỏ qua nếu vẽ tiền tố thất bại */ }
-    }
-
-    if (placement?.extraPlacements?.length) {
-      for (const extraP of placement.extraPlacements) {
-        const extraPageIndex = (extraP.page ?? 1) - 1
-        if (extraPageIndex < 0 || extraPageIndex >= pdfDoc.getPageCount()) continue
-        const targetPage = pdfDoc.getPage(extraPageIndex)
-        try {
-          if (sigImg && extraP.showSignature !== false) {
-            const embedded = await pdfDoc.embedPng(sigImg).catch(() => pdfDoc.embedJpg(sigImg))
-            targetPage.drawImage(embedded, {
-              x: extraP.x,
-              y: extraP.y,
-              width: extraP.width,
-              height: extraP.height,
-              opacity: 0.92,
-            })
-          }
-          if (signerName && extraP.showSignerName !== false) {
-            const extraSlot = buildSignerNamePlacement(extraP as SignPlacement)
-            let nameFontSize = 13
-            while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(signerName, nameFontSize) > extraSlot.maxWidth) {
-              nameFontSize -= 0.5
-            }
-            const nameWidth = signerNameFont.widthOfTextAtSize(signerName, nameFontSize)
-            targetPage.drawText(signerName, {
-              x: extraSlot.xCenter - nameWidth / 2,
-              y: extraSlot.y,
-              size: nameFontSize,
-              font: signerNameFont,
-              color: rgb(0, 0, 0),
-            })
-          }
-        } catch { /* bỏ qua lỗi embed bản sao */ }
-      }
-    }
+    await drawSignatureImage(pdfDoc, page, sigImg, placement)
+    drawSignerName(page, signerName, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
+    drawSignPrefix(page, prefixText, placement, signerNameFont)
+    await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE)
   }
 
   return await pdfDoc.save()
@@ -253,7 +159,7 @@ async function replaceFormTags(
   opts: {
     step: "soan_thao" | "xem_xet" | "phe_duyet"
     signerName: string
-    sigImgBuf: ArrayBuffer | null
+    sigImgBuf: ArrayBuffer | Uint8Array | null
     qrUrl: string | null
   },
 ): Promise<Uint8Array> {
@@ -522,7 +428,7 @@ export async function POST(
         )
       } else {
         // Office (DOCX/XLSX): luôn thay tag — bất kể auto_convert_pdf
-        const sigImgBuf = await getSigImage(factoryId, userId)
+        const sigImgBuf = await getSignatureImage(factoryId, userId)
         signedBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "soan_thao",
           signerName,
@@ -589,7 +495,7 @@ export async function POST(
         signedExt = "pdf"
       } else {
         // Office (DOCX/XLSX): luôn thay tag — bất kể auto_convert_pdf
-        const sigImgBuf = await getSigImage(factoryId, userId)
+        const sigImgBuf = await getSignatureImage(factoryId, userId)
         signedBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "xem_xet",
           signerName,
@@ -682,7 +588,7 @@ export async function POST(
         finalExt = "pdf"
       } else {
         // Office: thay tag bước phê duyệt
-        const sigImgBuf = await getSigImage(factoryId, userId)
+        const sigImgBuf = await getSignatureImage(factoryId, userId)
         finalBytes = await replaceFormTags(fileBytes, draftExt, {
           step: "phe_duyet",
           signerName,

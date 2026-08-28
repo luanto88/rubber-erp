@@ -1,0 +1,1710 @@
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
+import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
+import { convertCurrency } from "@/lib/currency"
+
+// ─── Types (mirror DB shape dùng bởi maintenance/print/page.tsx) ────────────
+
+export type MaterialRow = {
+  nguon: "trong_kho" | "ben_ngoai"
+  ten_vat_tu: string
+  dvt: string | null
+  so_luong: number
+  don_gia: number | null
+  loai_tien: string | null
+  thanh_tien: number | null
+}
+
+export type LineData = {
+  id: string
+  ten_tb: string
+  ma_tb: string
+  ten_tai_xe: string | null
+  noi_dung: string | null
+  nguyen_nhan: string | null
+  cac_khac_phuc: string | null
+  loai_sua_chua: "lon" | "nho" | null
+  chi_phi_dk: number
+  loai_tien: string
+  cong_tho: number
+  nhien_lieu_su_dung: string | null
+  dvt_do: string | null
+  so_luong_do: number | null
+  km_dong_ho: number | null
+  chat_luong: string | null
+  dispatch_vehicle_id: string | null
+  image_urls: string[]
+  materials: MaterialRow[]
+}
+
+export type RecordData = {
+  id: string
+  factory_id: string
+  ma_bb: string | null
+  hang_muc: string
+  ngay: string
+  tu_gio: string | null
+  den_gio: string | null
+  bo_phan: string
+  nguoi_tao: string | null
+  nguoi_thuc_hien: string[]
+  nv_phu_trach: string | null
+  phu_trach_bao_tri: string | null
+  bgd_phu_trach: string | null
+  giam_doc: string | null
+  trang_thai: string
+  nguoi_duyet: string | null
+  ngay_duyet: string | null
+  ghi_chu: string | null
+  noi_dung_chung: string | null
+  nguyen_nhan_chung: string | null
+  cac_khac_phuc_chung: string | null
+  image_urls_chung: string[] | null
+  lines: LineData[]
+}
+
+export type HistoryRow = {
+  ngay: string
+  ma_bb: string | null
+  hang_muc: string
+  ten_tb: string
+  ma_tb: string
+  noi_dung: string | null
+  cac_khac_phuc: string | null
+  chi_phi_dk: number
+  loai_tien: string
+  cong_tho: number
+  nguoi_thuc_hien: string[]
+  nv_phu_trach: string | null
+  phu_trach_bao_tri: string | null
+}
+
+export type AssetInfo = {
+  ma_tb: string
+  ten_tb: string
+  bo_phan: string
+  loai: "may_moc" | "xe"
+  nam_sd: string | null
+  bien_so: string | null
+  mo_ta: string | null
+}
+
+export type VehicleInfo = {
+  id: string
+  code: string
+  name: string
+  vehicle_type: string | null
+  plate_number: string | null
+  factory_id: string
+}
+
+export type DriverAssignmentRow = {
+  driver_name: string
+  driver_code: string | null
+  effective_from: string | null
+  effective_to: string | null
+  note: string | null
+}
+
+export type VehicleHistoryRow = {
+  ngay: string
+  ma_bb: string | null
+  hang_muc: string
+  km_dong_ho: number | null
+  noi_dung: string | null
+  cac_khac_phuc: string | null
+  chi_phi_dk: number
+  loai_tien: string
+  cong_tho: number
+  nguoi_thuc_hien: string[]
+  nv_phu_trach: string | null
+}
+
+export type BaoCaoKyRow = {
+  ma_bb: string | null
+  ma_tb: string
+  km_dong_ho: number | null
+  ngay: string
+  noi_dung: string
+  gia_tri: number
+  loai_tien: string
+  hang_muc: string
+}
+
+export type BaoCaoKySection = { bo_phan: string; rows: BaoCaoKyRow[] }
+
+// ─── Constants ────────────────────────────────────────────────────────────
+
+type RGB = [number, number, number]
+type PdfWithTable = jsPDF & { lastAutoTable?: { finalY: number } }
+
+const PAGE_W = 210
+const PAGE_H = 297
+const MARGIN = 15
+const CONTENT_W = PAGE_W - MARGIN * 2
+const BODY_SIZE = 9.5
+const LINE_H = 5
+const QR_SIZE = 22
+
+const INK: RGB = [15, 23, 42]
+const GRAY: RGB = [100, 116, 139]
+const BORDER: RGB = [203, 213, 225]
+const HEADER_BAR_BG: RGB = [241, 245, 249]
+
+// ─── Helpers: ngày giờ / tiền tệ ─────────────────────────────────────────
+
+function fmtDateVN(d: string | null): string {
+  if (!d) return "......"
+  const dt = new Date(d)
+  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`
+}
+
+function fmtDatePartsVN(d: string | null): { dd: string; mm: string; yyyy: string } {
+  if (!d) return { dd: "......", mm: "......", yyyy: "........." }
+  const dt = new Date(d)
+  return {
+    dd: String(dt.getDate()).padStart(2, "0"),
+    mm: String(dt.getMonth() + 1).padStart(2, "0"),
+    yyyy: String(dt.getFullYear()),
+  }
+}
+
+function fmtTimeVN(t: string | null): string {
+  if (!t) return "......"
+  return t.slice(0, 5)
+}
+
+// Không dùng ký hiệu tiền tệ Unicode (៛/₫) — rủi ro thiếu glyph trong font NotoSans
+// nhúng cho PDF (chỉ hỗ trợ Latin). Dùng mã tiền tệ ASCII-safe thay thế.
+function pdfMoney(amount: number, loaiTien: string): string {
+  return loaiTien === "USD" ? `$${amount.toLocaleString()}` : `${amount.toLocaleString()} ${loaiTien}`
+}
+
+// ─── Helpers: layout cơ bản ───────────────────────────────────────────────
+
+function ensureSpace(doc: jsPDF, y: number, needed: number, bottom = MARGIN): number {
+  if (y + needed > PAGE_H - bottom) {
+    doc.addPage()
+    return MARGIN
+  }
+  return y
+}
+
+function drawCompanyHeader(doc: jsPDF, y: number, boPhan?: string | null): number {
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(10.5)
+  doc.setTextColor(...INK)
+  doc.text("Nhà máy chế biến Phước Hòa Kampong Thom", MARGIN, y)
+  y += 4.6
+  if (boPhan) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(9)
+    doc.text(`Bộ phận: ${boPhan}`, MARGIN, y)
+    y += 4.6
+  }
+  return y
+}
+
+async function drawQrBlock(doc: jsPDF, qrUrl: string, maBb: string | null, topY: number): Promise<number> {
+  if (!qrUrl) return topY
+  const x = PAGE_W - MARGIN - QR_SIZE
+  await addQrImage(doc, qrUrl, x, topY, QR_SIZE)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(7)
+  doc.setTextColor(...GRAY)
+  doc.text(maBb || "", x + QR_SIZE / 2, topY + QR_SIZE + 3, { align: "center" })
+  doc.setTextColor(...INK)
+  return topY + QR_SIZE + 6
+}
+
+function drawCenteredTitleBlock(
+  doc: jsPDF,
+  y: number,
+  regionX: number,
+  regionW: number,
+  opts: { title: string; subtitle?: string; soLabel?: string },
+): number {
+  const cx = regionX + regionW / 2
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(13)
+  doc.setTextColor(...INK)
+  const titleLines = doc.splitTextToSize(opts.title.toUpperCase(), regionW)
+  titleLines.forEach((line: string) => {
+    doc.text(line, cx, y, { align: "center" })
+    y += 5.6
+  })
+  if (opts.subtitle) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(8.5)
+    doc.setTextColor(...GRAY)
+    const subLines = doc.splitTextToSize(opts.subtitle, regionW)
+    subLines.forEach((line: string) => {
+      doc.text(line, cx, y, { align: "center" })
+      y += 4
+    })
+  }
+  if (opts.soLabel) {
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.setFontSize(9.5)
+    doc.setTextColor(...GRAY)
+    doc.text(opts.soLabel, cx, y, { align: "center" })
+    y += 5
+  }
+  doc.setTextColor(...INK)
+  return y
+}
+
+// Mẫu "QR bên cạnh tiêu đề" (F13/F15/F15BaoDuong/F15SmallVehicle)
+async function drawTitleWithQr(
+  doc: jsPDF,
+  y: number,
+  opts: { title: string; subtitle?: string; soLabel?: string; qrUrl: string; maBb: string | null },
+): Promise<number> {
+  const qrPresent = !!opts.qrUrl
+  const regionW = qrPresent ? CONTENT_W - QR_SIZE - 6 : CONTENT_W
+  const titleBottom = drawCenteredTitleBlock(doc, y, MARGIN, regionW, opts)
+  let qrBottom = y
+  if (qrPresent) qrBottom = await drawQrBlock(doc, opts.qrUrl, opts.maBb, y)
+  return Math.max(titleBottom, qrBottom) + 2
+}
+
+// Mẫu "QR đứng riêng phía trên, rồi tới dòng ngày căn phải, rồi mới tới tiêu đề" (F10/F03/F06/F08NB)
+async function drawQrThenDateThenTitle(
+  doc: jsPDF,
+  y: number,
+  opts: { qrUrl: string; maBb: string | null; dateParts: { dd: string; mm: string; yyyy: string }; title: string; subtitle?: string; soLabel?: string },
+): Promise<number> {
+  if (opts.qrUrl) y = await drawQrBlock(doc, opts.qrUrl, opts.maBb, y)
+  y += 2
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text(
+    `Kampong Thom, ngày ${opts.dateParts.dd} tháng ${opts.dateParts.mm} năm ${opts.dateParts.yyyy}`,
+    PAGE_W - MARGIN,
+    y,
+    { align: "right" },
+  )
+  y += 6
+  y = drawCenteredTitleBlock(doc, y, MARGIN, CONTENT_W, opts)
+  return y
+}
+
+function drawSectionHeader(doc: jsPDF, y: number, label: string): number {
+  y = ensureSpace(doc, y, 6)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(9)
+  doc.setTextColor(...INK)
+  doc.text(label.toUpperCase(), MARGIN, y)
+  return y + 5
+}
+
+function drawGroupHeaderBar(doc: jsPDF, y: number, label: string): number {
+  y = ensureSpace(doc, y, 7)
+  doc.setFillColor(...HEADER_BAR_BG)
+  doc.rect(MARGIN, y - 4, CONTENT_W, 6, "F")
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(8.5)
+  doc.setTextColor(...INK)
+  doc.text(label.toUpperCase(), MARGIN + 2, y)
+  return y + 4
+}
+
+function drawBlankLines(doc: jsPDF, x: number, y: number, width: number, count: number): number {
+  for (let i = 0; i < count; i++) {
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setDrawColor(...BORDER)
+    doc.setLineWidth(0.15)
+    doc.line(x, y, x + width, y)
+    y += LINE_H
+  }
+  return y
+}
+
+// Workhorse dùng cho hầu hết các dòng "Nhãn: nội dung" trong tài liệu — nếu nội dung
+// rỗng và có blankCount thì vẽ các dòng kẻ trống để ký tay; có nội dung thì thử vẽ
+// liền dòng với nhãn (in đậm), nếu không đủ chỗ thì xuống dòng và wrap.
+function drawLabelContent(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  width: number,
+  label: string,
+  content: string | null | undefined,
+  opts?: { blankCount?: number; fontSize?: number },
+): number {
+  const fontSize = opts?.fontSize ?? BODY_SIZE
+  const blankCount = opts?.blankCount ?? 0
+  doc.setFontSize(fontSize)
+  const trimmed = (content || "").trim()
+  if (!trimmed) {
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.setTextColor(...INK)
+    doc.text(label, x, y)
+    y += LINE_H
+    if (blankCount > 0) y = drawBlankLines(doc, x, y, width, blankCount)
+    return y
+  }
+  doc.setFont(PDF_FONT_NAME, "bold")
+  const labelW = doc.getTextWidth(label)
+  const paragraphs = trimmed.split("\n")
+  const fitsInline =
+    paragraphs.length === 1 &&
+    doc.splitTextToSize(paragraphs[0], width).length <= 1 &&
+    labelW + doc.getTextWidth(paragraphs[0]) <= width
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setTextColor(...INK)
+  doc.text(label, x, y)
+  if (fitsInline) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.text(paragraphs[0], x + labelW, y)
+    return y + LINE_H
+  }
+  y += LINE_H
+  doc.setFont(PDF_FONT_NAME, "normal")
+  for (const para of paragraphs) {
+    const lines = para ? doc.splitTextToSize(para, width) : [""]
+    for (const line of lines) {
+      y = ensureSpace(doc, y, LINE_H)
+      doc.text(line, x, y)
+      y += LINE_H
+    }
+  }
+  return y
+}
+
+function drawBoldPrefixLine(doc: jsPDF, text: string, x: number, y: number) {
+  const idx = text.indexOf(": ")
+  if (idx === -1) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.text(text, x, y)
+    return
+  }
+  const label = text.slice(0, idx + 2)
+  const rest = text.slice(idx + 2)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.text(label, x, y)
+  const w = doc.getTextWidth(label)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.text(rest, x + w, y)
+}
+
+function drawFactLines(doc: jsPDF, y: number, lines: string[]): number {
+  const rowH = 5
+  doc.setFontSize(8.5)
+  doc.setTextColor(...INK)
+  for (let i = 0; i < lines.length; i += 2) {
+    y = ensureSpace(doc, y, rowH)
+    drawBoldPrefixLine(doc, lines[i], MARGIN, y)
+    if (lines[i + 1]) drawBoldPrefixLine(doc, lines[i + 1], MARGIN + CONTENT_W / 2, y)
+    y += rowH
+  }
+  return y
+}
+
+function drawInlineLabelPairs(doc: jsPDF, y: number, pairs: [string, string][], gap = 8): number {
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  let x = MARGIN
+  pairs.forEach(([label, value]) => {
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.text(`${label}: `, x, y)
+    x += doc.getTextWidth(`${label}: `)
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.text(value, x, y)
+    x += doc.getTextWidth(value) + gap
+  })
+  return y + LINE_H
+}
+
+function drawTwoColRow(doc: jsPDF, y: number, left: string, right: string): number {
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  drawBoldPrefixLine(doc, left, MARGIN, y)
+  drawBoldPrefixLine(doc, right, MARGIN + CONTENT_W / 2, y)
+  return y + LINE_H
+}
+
+function drawSignatureRow(doc: jsPDF, y: number, cols: { role: string; name?: string | null }[]): number {
+  y = ensureSpace(doc, y, 34)
+  y += 6
+  const colW = CONTENT_W / cols.length
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(9)
+  doc.setTextColor(...INK)
+  cols.forEach((c, i) => {
+    const cx = MARGIN + colW * i + colW / 2
+    doc.text(c.role, cx, y, { align: "center", maxWidth: colW - 4 })
+  })
+  const nameY = y + 18
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(8.5)
+  doc.setTextColor(...INK)
+  cols.forEach((c, i) => {
+    const cx = MARGIN + colW * i + colW / 2
+    if (c.name) doc.text(c.name, cx, nameY, { align: "center", maxWidth: colW - 4 })
+  })
+  doc.setFontSize(7)
+  doc.setTextColor(...GRAY)
+  cols.forEach((c, i) => {
+    const cx = MARGIN + colW * i + colW / 2
+    doc.text("(Ký và ghi rõ họ tên)", cx, nameY + 4, { align: "center" })
+  })
+  doc.setTextColor(...INK)
+  return nameY + 8
+}
+
+function drawDocumentFooter(doc: jsPDF, y: number, code: string): number {
+  y = ensureSpace(doc, y, 10)
+  y += 4
+  doc.setDrawColor(...BORDER)
+  doc.setLineWidth(0.2)
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y)
+  y += 4
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(7)
+  doc.setTextColor(...GRAY)
+  doc.text(`${code} (01-15/05/2026)`, MARGIN, y)
+  doc.setTextColor(...INK)
+  return y + 4
+}
+
+function drawChatLuongCheckbox(doc: jsPDF, y: number, isDat: boolean, isKhongDat: boolean): number {
+  y = ensureSpace(doc, y, LINE_H + 2)
+  doc.setFontSize(BODY_SIZE)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setTextColor(...INK)
+  doc.text("Chất lượng:", MARGIN, y)
+  let x = MARGIN + doc.getTextWidth("Chất lượng:") + 4
+  const box = 3.2
+  doc.setDrawColor(...INK)
+  doc.rect(x, y - 2.6, box, box)
+  if (isDat) doc.text("X", x + 0.6, y - 0.2)
+  x += box + 1.5
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.text("Đạt yêu cầu", x, y)
+  x += doc.getTextWidth("Đạt yêu cầu") + 6
+  doc.rect(x, y - 2.6, box, box)
+  if (isKhongDat) {
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.text("X", x + 0.6, y - 0.2)
+  }
+  x += box + 1.5
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.text("Không đạt", x, y)
+  return y + LINE_H + 2
+}
+
+function drawKetLuanBlank(doc: jsPDF, y: number): number {
+  y = ensureSpace(doc, y, 14)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Kết luận:", MARGIN, y)
+  y += 3
+  for (let i = 0; i < 2; i++) {
+    y = ensureSpace(doc, y, 8)
+    doc.setDrawColor(...BORDER)
+    doc.line(MARGIN, y + 7, PAGE_W - MARGIN, y + 7)
+    y += 8
+  }
+  return y + 2
+}
+
+function drawGiaTriSuaChua(doc: jsPDF, y: number, lines: LineData[], label: string): number {
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFontSize(BODY_SIZE)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setTextColor(...INK)
+  doc.text(label, MARGIN, y)
+  let x = MARGIN + doc.getTextWidth(label)
+  const multi = lines.length > 1
+  lines.forEach((line, idx) => {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    if (multi) {
+      const prefix = `${line.ten_tb}: `
+      doc.text(prefix, x, y)
+      x += doc.getTextWidth(prefix)
+    }
+    doc.setFont(PDF_FONT_NAME, "bold")
+    const val = pdfMoney(line.chi_phi_dk, line.loai_tien)
+    doc.text(val, x, y)
+    x += doc.getTextWidth(val)
+    if (idx < lines.length - 1) {
+      doc.setFont(PDF_FONT_NAME, "normal")
+      doc.text(", ", x, y)
+      x += doc.getTextWidth(", ")
+    }
+  })
+  return y + LINE_H
+}
+
+// ─── Bảng vật tư (autoTable) ──────────────────────────────────────────────
+
+function drawMaterialsTable(doc: jsPDF, startY: number, materials: MaterialRow[]): number {
+  if (materials.length === 0) return startY
+  const head = ["STT", "Tên vật tư / phụ tùng", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Nguồn"]
+  const body = materials.map((m, i) => [
+    String(i + 1),
+    m.ten_vat_tu,
+    m.dvt || "—",
+    String(m.so_luong),
+    m.don_gia ? pdfMoney(m.don_gia, m.loai_tien || "USD") : "—",
+    m.thanh_tien ? pdfMoney(m.thanh_tien, m.loai_tien || "USD") : "—",
+    m.nguon === "trong_kho" ? "Kho" : "Mua ngoài",
+  ])
+  autoTable(doc, {
+    startY,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [head],
+    body,
+    styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.2, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+    headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+    theme: "grid",
+  })
+  return (doc as PdfWithTable).lastAutoTable?.finalY ?? startY
+}
+
+// ─── Ảnh hiện trường ───────────────────────────────────────────────────────
+
+type RemoteImage = { dataUrl: string; format: "PNG" | "JPEG" | "WEBP"; width: number; height: number }
+
+async function fetchRemoteImage(url: string): Promise<RemoteImage | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    const format: RemoteImage["format"] = blob.type.includes("png")
+      ? "PNG"
+      : blob.type.includes("webp")
+        ? "WEBP"
+        : "JPEG"
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(blob)
+    })
+    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve({ width: img.naturalWidth || 1, height: img.naturalHeight || 1 })
+      img.onerror = () => reject(new Error("Không đọc được kích thước ảnh."))
+      img.src = dataUrl
+    })
+    return { dataUrl, format, width, height }
+  } catch {
+    return null
+  }
+}
+
+function drawImageContain(doc: jsPDF, img: RemoteImage, boxX: number, boxY: number, boxW: number, boxH: number) {
+  const boxRatio = boxW / boxH
+  const imgRatio = img.width / img.height
+  let drawW = boxW
+  let drawH = boxH
+  if (imgRatio > boxRatio) {
+    drawW = boxW
+    drawH = boxW / imgRatio
+  } else {
+    drawH = boxH
+    drawW = boxH * imgRatio
+  }
+  const dx = boxX + (boxW - drawW) / 2
+  const dy = boxY + (boxH - drawH) / 2
+  doc.addImage(img.dataUrl, img.format, dx, dy, drawW, drawH)
+}
+
+async function collectAndFetchImages(urls: string[]): Promise<Map<string, RemoteImage | null>> {
+  const unique = Array.from(new Set(urls.filter(Boolean)))
+  const entries = await Promise.all(unique.map(async (u) => [u, await fetchRemoteImage(u)] as const))
+  return new Map(entries)
+}
+
+async function drawPhotoSection(
+  doc: jsPDF,
+  y: number,
+  groupLabel: string | null,
+  imgUrls: string[],
+  photoMap: Map<string, RemoteImage | null>,
+): Promise<number> {
+  if (imgUrls.length === 0) return y
+  if (groupLabel) y = drawGroupHeaderBar(doc, y + 2, groupLabel)
+  const gap = 3
+  const cols = 2
+  const cellW = (CONTENT_W - gap * (cols - 1)) / cols
+  const cellH = (cellW * 3) / 4
+  for (let i = 0; i < imgUrls.length; i += cols) {
+    y = ensureSpace(doc, y, cellH + 2)
+    for (let c = 0; c < cols; c++) {
+      const idx = i + c
+      if (idx >= imgUrls.length) break
+      const url = imgUrls[idx]
+      const x = MARGIN + c * (cellW + gap)
+      doc.setDrawColor(...BORDER)
+      doc.rect(x, y, cellW, cellH)
+      const img = photoMap.get(url)
+      if (img) {
+        drawImageContain(doc, img, x, y, cellW, cellH)
+      } else {
+        doc.setFont(PDF_FONT_NAME, "normal")
+        doc.setFontSize(7)
+        doc.setTextColor(...GRAY)
+        doc.text("Không tải được ảnh", x + cellW / 2, y + cellH / 2, { align: "center" })
+      }
+    }
+    y += cellH + gap
+  }
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(7)
+  doc.setTextColor(...GRAY)
+  doc.text(`${imgUrls.length} hình ảnh`, PAGE_W - MARGIN, y + 3, { align: "right" })
+  doc.setTextColor(...INK)
+  return y + 6
+}
+
+async function drawPhotoPage(doc: jsPDF, record: RecordData): Promise<void> {
+  const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
+  if (linesWithImages.length === 0) return
+  const allUrls = linesWithImages.flatMap((l) => (l.image_urls || []).filter(Boolean))
+  const photoMap = await collectAndFetchImages(allUrls)
+  let y = drawCompanyHeader(doc, MARGIN, record.bo_phan)
+  y = drawCenteredTitleBlock(doc, y + 2, MARGIN, CONTENT_W, {
+    title: "Hình ảnh biên bản",
+    subtitle: `Số: ${record.ma_bb || "..."}`,
+  })
+  y += 2
+  const multiDevice = linesWithImages.length > 1
+  for (const line of linesWithImages) {
+    const imgs = (line.image_urls || []).filter(Boolean)
+    y = await drawPhotoSection(doc, y, multiDevice ? `${line.ten_tb} (${line.ma_tb})` : null, imgs, photoMap)
+  }
+}
+
+async function drawPhotoPageWithCommon(doc: jsPDF, record: RecordData): Promise<void> {
+  const commonImgs = (record.image_urls_chung || []).filter(Boolean)
+  const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
+  if (commonImgs.length === 0 && linesWithImages.length === 0) return
+  const allUrls = [...commonImgs, ...linesWithImages.flatMap((l) => (l.image_urls || []).filter(Boolean))]
+  const photoMap = await collectAndFetchImages(allUrls)
+  let y = drawCompanyHeader(doc, MARGIN, record.bo_phan)
+  y = drawCenteredTitleBlock(doc, y + 2, MARGIN, CONTENT_W, {
+    title: "Hình ảnh bảo dưỡng",
+    subtitle: `Số: ${record.ma_bb || "..."}`,
+  })
+  y += 2
+  const multiDevice = linesWithImages.length > 1
+  if (commonImgs.length > 0) y = await drawPhotoSection(doc, y, "Ảnh chung", commonImgs, photoMap)
+  for (const line of linesWithImages) {
+    const imgs = (line.image_urls || []).filter(Boolean)
+    const label = multiDevice || commonImgs.length > 0 ? `${line.ten_tb} (${line.ma_tb})` : null
+    y = await drawPhotoSection(doc, y, label, imgs, photoMap)
+  }
+}
+
+function hasLineImages(record: RecordData): boolean {
+  return record.lines.some((l) => (l.image_urls || []).some(Boolean))
+}
+
+function hasAnyImages(record: RecordData): boolean {
+  return hasLineImages(record) || (record.image_urls_chung || []).some(Boolean)
+}
+
+// ─── "Tổ trưởng cơ điện/cơ khí" + merge nội dung ──────────────────────────
+
+function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>, groupKeyword = "cơ điện"): string[] {
+  return nguoiThucHien.filter((name) => {
+    const role = staffMap.get(name)?.toLowerCase() || ""
+    return role.includes("tổ trưởng") && role.includes(groupKeyword)
+  })
+}
+
+function mergeNoidung(common: string | null | undefined, own: string | null | undefined): string {
+  return [common, own].filter(Boolean).join("\n")
+}
+
+type Participant = { name: string; role: string }
+
+function drawParticipantsNumbered(doc: jsPDF, y: number, participants: Participant[]): number {
+  doc.setFontSize(BODY_SIZE)
+  participants.forEach((p, i) => {
+    y = ensureSpace(doc, y, LINE_H)
+    const prefix = `${i + 1}- `
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setTextColor(...INK)
+    doc.text(prefix, MARGIN, y)
+    const prefixW = doc.getTextWidth(prefix)
+    doc.setFont(PDF_FONT_NAME, "bold")
+    const nameText = p.name || "................................."
+    doc.text(nameText, MARGIN + prefixW, y)
+    const nameW = doc.getTextWidth(nameText)
+    if (p.role) {
+      doc.setFont(PDF_FONT_NAME, "normal")
+      doc.text(` – ${p.role}`, MARGIN + prefixW + nameW, y)
+    }
+    y += LINE_H
+  })
+  return y
+}
+
+function drawParticipantsOng(doc: jsPDF, y: number, participants: Participant[]): number {
+  doc.setFontSize(BODY_SIZE)
+  participants.forEach((p) => {
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setTextColor(...INK)
+    doc.text("Ông: ", MARGIN, y)
+    const w0 = doc.getTextWidth("Ông: ")
+    doc.setFont(PDF_FONT_NAME, "bold")
+    const nameText = p.name || "................................."
+    doc.text(nameText, MARGIN + w0, y)
+    const w1 = doc.getTextWidth(nameText)
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.text(` – ${p.role}`, MARGIN + w0 + w1, y)
+    y += LINE_H
+  })
+  return y
+}
+
+function buildF13Participants(record: RecordData, staffMap: Map<string, string>): Participant[] {
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const toGroupKeyword = isBoDoi ? "cơ khí" : "cơ điện"
+  const toRoleLabel = isBoDoi ? "Tổ trưởng tổ cơ khí" : "Tổ trưởng cơ điện"
+  const toTruong = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, toGroupKeyword)
+  const list: Participant[] = []
+  if (record.giam_doc) list.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc nhà máy" })
+  if (record.bgd_phu_trach) list.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) list.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach)
+    list.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+  for (const name of toTruong) list.push({ name, role: staffMap.get(name) || toRoleLabel })
+  if (!record.nv_phu_trach && !record.phu_trach_bao_tri && toTruong.length === 0) list.push({ name: "", role: toRoleLabel })
+  return list
+}
+
+function buildF15Participants(record: RecordData, staffMap: Map<string, string>): Participant[] {
+  const list: Participant[] = []
+  if (record.giam_doc) list.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc Nhà máy" })
+  if (record.bgd_phu_trach) list.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) list.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach)
+    list.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Phụ trách bảo trì" })
+  if (!record.nv_phu_trach && !record.phu_trach_bao_tri) list.push({ name: "", role: "Tổ trưởng cơ điện" })
+  return list
+}
+
+function buildF15BaoDuongParticipants(
+  record: RecordData,
+  staffMap: Map<string, string>,
+  isBoDoi: boolean,
+  firstTaiXe: string | null,
+): Participant[] {
+  const list: Participant[] = []
+  if (record.giam_doc) list.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc Nhà máy" })
+  if (record.bgd_phu_trach) list.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) list.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (isBoDoi && firstTaiXe) list.push({ name: firstTaiXe, role: "Lái xe" })
+  if (!isBoDoi && !record.nv_phu_trach && !record.phu_trach_bao_tri) list.push({ name: "", role: "Tổ trưởng cơ điện" })
+  return list
+}
+
+function buildF15SmallVehicleParticipants(record: RecordData, staffMap: Map<string, string>): Participant[] {
+  const list: Participant[] = []
+  if (record.giam_doc) list.push({ name: record.giam_doc, role: staffMap.get(record.giam_doc) || "Giám đốc Nhà máy" })
+  if (record.bgd_phu_trach) list.push({ name: record.bgd_phu_trach, role: staffMap.get(record.bgd_phu_trach) || "BGĐ phụ trách" })
+  if (record.nv_phu_trach) list.push({ name: record.nv_phu_trach, role: staffMap.get(record.nv_phu_trach) || "Nhân viên phụ trách" })
+  if (record.phu_trach_bao_tri && record.phu_trach_bao_tri !== record.nv_phu_trach)
+    list.push({ name: record.phu_trach_bao_tri, role: staffMap.get(record.phu_trach_bao_tri) || "Đội trưởng đội xe" })
+  if (record.lines[0]?.ten_tai_xe) list.push({ name: record.lines[0].ten_tai_xe, role: "Lái xe" })
+  return list
+}
+
+// ─── F13: Biên bản kiểm tra sự cố ─────────────────────────────────────────
+
+async function drawF13(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay)
+  const isBoDoi = record.bo_phan === "Đội xe"
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawTitleWithQr(doc, y, {
+    title: "Biên bản kiểm tra sự cố",
+    subtitle: `(Áp dụng cho ${isBoDoi ? "phương tiện vận tải" : "thiết bị sơ chế cao su"})`,
+    soLabel: `Số: ${record.ma_bb || "..."}`,
+    qrUrl,
+    maBb: record.ma_bb,
+  })
+
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thời gian: ", `Hôm nay vào lúc ${fmtTimeVN(record.tu_gio)} giờ, ngày ${dd} tháng ${mm} năm ${yyyy}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Tại: ", record.bo_phan)
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Chúng tôi gồm:", MARGIN, y)
+  y += LINE_H
+  y = drawParticipantsNumbered(doc, y, buildF13Participants(record, staffMap))
+
+  record.lines.forEach((line, idx) => {
+    y += 1
+    if (record.lines.length > 1) y = drawGroupHeaderBar(doc, y, `${idx + 1}. ${line.ten_tb} (${line.ma_tb})`)
+    const intro =
+      `Tiến hành kiểm tra ${record.hang_muc === "Sửa chữa" ? "sự cố" : "bảo dưỡng"} máy ${line.ten_tb}, ` +
+      `Số hiệu nhận dạng ${line.ma_tb}` +
+      (isBoDoi && line.ten_tai_xe ? `, Lái xe: ${line.ten_tai_xe}` : "")
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "", intro)
+    y = drawLabelContent(
+      doc, MARGIN, y, CONTENT_W,
+      `Tình trạng ${record.hang_muc === "Sửa chữa" ? "sự cố" : "thiết bị"}: `,
+      line.noi_dung, { blankCount: 2 },
+    )
+    if (record.hang_muc === "Sửa chữa") {
+      y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Nguyên nhân sự cố: ", line.nguyen_nhan, { blankCount: 2 })
+    }
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Cách khắc phục xử lý: ", line.cac_khac_phuc, { blankCount: 2 })
+
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.setFontSize(BODY_SIZE)
+    doc.setTextColor(...INK)
+    doc.text("Vật tư sử dụng: ", MARGIN, y)
+    if (line.materials.length === 0) {
+      doc.setFont(PDF_FONT_NAME, "normal")
+      doc.text("Không có", MARGIN + doc.getTextWidth("Vật tư sử dụng: "), y)
+      y += LINE_H
+    } else {
+      y += LINE_H
+      y = drawMaterialsTable(doc, y, line.materials) + 3
+    }
+  })
+
+  y += 1
+  y = drawLabelContent(
+    doc, MARGIN, y, CONTENT_W,
+    "Kết luận và những kiến nghị lên Giám đốc nhà máy (đối với những trường hợp không khắc phục ngay được): ",
+    record.ghi_chu, { blankCount: 3 },
+  )
+
+  const isBoDoiRole = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
+  const toTruong = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, isBoDoi ? "cơ khí" : "cơ điện")
+  y = drawSignatureRow(doc, y, [
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+    { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
+    { role: isBoDoiRole, name: toTruong[0] || "" },
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F13")
+}
+
+// ─── F10: Giấy đề nghị sửa chữa ────────────────────────────────────────────
+
+async function drawF10(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+  const dateParts = fmtDatePartsVN(record.ngay)
+  const allMaterials = record.lines.flatMap((l) => l.materials)
+  const machineNames = record.lines.map((l) => `${l.ten_tb} (${l.ma_tb})`).join(", ")
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawQrThenDateThenTitle(doc, y, {
+    qrUrl, maBb: record.ma_bb, dateParts,
+    title: "Giấy đề nghị sửa chữa",
+    subtitle: "(Áp dụng cho sửa chữa thiết bị sơ chế cao su)",
+    soLabel: `Số: ${record.ma_bb || "..."}`,
+  })
+
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Kính gửi: ", "Giám đốc Nhà máy chế biến Phước Hòa Kampong Thom")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Đề nghị Ban Giám đốc Nhà máy chế biến cho sửa chữa: ", machineNames)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Đính kèm biên bản số: ", record.ma_bb || "...")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thời gian tiến hành, từ ngày: ", `${fmtDateVN(record.ngay)} đến ngày ${fmtDateVN(record.ngay)}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thực hiện sửa chữa: ", record.nguoi_thuc_hien.join(", ") || "...")
+
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Nội dung cụ thể cần thay thế sửa chữa:", MARGIN, y)
+  y += LINE_H
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) {
+      y = ensureSpace(doc, y, LINE_H)
+      doc.setFont(PDF_FONT_NAME, "bold")
+      doc.text(`${idx + 1}. ${line.ten_tb} (${line.ma_tb})`, MARGIN, y)
+      y += LINE_H
+    }
+    if (line.noi_dung) y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "• Nội dung: ", line.noi_dung)
+    if (line.nguyen_nhan) y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "• Nguyên nhân: ", line.nguyen_nhan)
+  })
+
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.text("Vật tư thay thế: ", MARGIN, y)
+  if (allMaterials.length === 0) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.text("Không có", MARGIN + doc.getTextWidth("Vật tư thay thế: "), y)
+    y += LINE_H
+  } else {
+    y += LINE_H
+    y = drawMaterialsTable(doc, y, allMaterials) + 3
+  }
+
+  record.lines.forEach((line) => {
+    const prefix = record.lines.length > 1 ? `${line.ten_tb}: ` : ""
+    const suffix = line.loai_sua_chua ? ` (${line.loai_sua_chua === "lon" ? "Sửa chữa lớn >200$" : "Sửa chữa nhỏ ≤200$"})` : ""
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, `${prefix}Chi phí ước tính: `, `${pdfMoney(line.chi_phi_dk, line.loai_tien)}${suffix}`)
+  })
+
+  y = drawSignatureRow(doc, y, [
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+    { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F10")
+}
+
+// ─── F15: Biên bản nghiệm thu (chuẩn, dùng cho bundle su_co_nho) ──────────
+
+async function drawF15(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
+  const isChatLuongDat = record.lines.every((l) => l.chat_luong !== "Không đạt")
+  const isChatLuongKhongDat = record.lines.some((l) => l.chat_luong === "Không đạt")
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawTitleWithQr(doc, y, {
+    title: "Biên bản nghiệm thu",
+    subtitle: "(Áp dụng cho sửa chữa nhỏ, thường xuyên)",
+    soLabel: `Căn cứ biên bản số: ${record.ma_bb || "..."}`,
+    qrUrl,
+    maBb: record.ma_bb,
+  })
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) y = drawGroupHeaderBar(doc, y, `${idx + 1}. ${line.ten_tb} (${line.ma_tb})`)
+    y = drawTwoColRow(doc, y, `Xe/máy/thiết bị: ${line.ten_tb}`, `Biển số/số hiệu: ${line.ma_tb}`)
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Lái xe / người phụ trách: ", line.ten_tai_xe || record.nv_phu_trach || "...")
+  })
+
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Đơn vị quản lý, sử dụng: ", "Nhà máy chế biến Phước Hòa Kampong Thom")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Căn cứ: ", `Giấy đề nghị sửa chữa số ${record.ma_bb || "..."}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Căn cứ: ", `Biên bản kiểm tra sự cố số ${record.ma_bb || "..."}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thời gian: ", `Hôm nay, ngày ${dd} tháng ${mm} năm ${yyyy}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Tại: ", record.bo_phan)
+
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Chúng tôi gồm:", MARGIN, y)
+  y += LINE_H
+  y = drawParticipantsOng(doc, y, buildF15Participants(record, staffMap))
+
+  y += 1
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "", "Cùng tiến hành kiểm tra chất lượng sửa chữa. Kết quả như sau:")
+
+  record.lines.forEach((line, idx) => {
+    const content = line.cac_khac_phuc || line.noi_dung || ".............................."
+    const label = record.lines.length > 1 ? `${idx + 1}. ${line.ten_tb} — Khối lượng đã sửa chữa, thay thế phụ tùng: ` : "Khối lượng đã sửa chữa, thay thế phụ tùng: "
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, label, content)
+    if (line.materials.length > 0) y = drawMaterialsTable(doc, y, line.materials) + 3
+  })
+
+  y = drawChatLuongCheckbox(doc, y, isChatLuongDat, isChatLuongKhongDat)
+  y = drawGiaTriSuaChua(doc, y, record.lines, "Giá trị sửa chữa: ")
+  y = drawKetLuanBlank(doc, y)
+
+  y = drawSignatureRow(doc, y, [
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+}
+
+// ─── Phase 1: orchestrator "su_co_nho" (F13 + F10 + F15 + Ảnh) ────────────
+
+export async function downloadMaintenanceSuCoNhoPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  await drawF13(doc, record, qrUrl, staffMap)
+  doc.addPage()
+  await drawF10(doc, record, qrUrl)
+  doc.addPage()
+  await drawF15(doc, record, qrUrl, staffMap)
+  if (hasLineImages(record)) {
+    doc.addPage()
+    await drawPhotoPage(doc, record)
+  }
+  doc.save(`bien-ban-su-co-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+// ─── F03: Giấy đề nghị bảo trì - sửa chữa ──────────────────────────────────
+
+async function drawF03(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const dateParts = fmtDatePartsVN(record.ngay)
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const toGroupKeyword = isBoDoi ? "cơ khí" : "cơ điện"
+  const toRoleLabel = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
+  const toTruong = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, toGroupKeyword)
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawQrThenDateThenTitle(doc, y, {
+    qrUrl, maBb: record.ma_bb, dateParts,
+    title: "Giấy đề nghị bảo trì - sửa chữa",
+    soLabel: `Số: ${record.ma_bb || "..."}`,
+  })
+
+  record.lines.forEach((line) => {
+    y = drawInlineLabelPairs(doc, y, [["Mã thiết bị", line.ma_tb], ["Tên thiết bị", line.ten_tb]])
+  })
+
+  y += 1
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Kính gửi: ", "Giám đốc nhà máy chế biến.")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "", "Kính đề nghị giám đốc nhà máy cho bảo dưỡng xe, máy móc, thiết bị như sau:")
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) {
+      y = ensureSpace(doc, y, LINE_H)
+      doc.setFont(PDF_FONT_NAME, "bold")
+      doc.setFontSize(BODY_SIZE)
+      doc.setTextColor(...INK)
+      doc.text(`${idx + 1}. ${line.ten_tb} (${line.ma_tb})`, MARGIN, y)
+      y += LINE_H
+    }
+    y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "1/ Nội dung bảo dưỡng: ", mergeNoidung(record.noi_dung_chung, line.noi_dung), { blankCount: 3 })
+    y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "2/ Lý do bảo dưỡng: ", mergeNoidung(record.nguyen_nhan_chung, line.nguyen_nhan), { blankCount: 3 })
+  })
+
+  y = drawSignatureRow(doc, y, [
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+    { role: toRoleLabel, name: toTruong[0] || "" },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F03")
+}
+
+// ─── F15BaoDuong: biến thể Biên bản nghiệm thu cho Bảo dưỡng ──────────────
+
+async function drawF15BaoDuong(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const firstTaiXe = isBoDoi ? record.lines[0]?.ten_tai_xe || null : null
+  const isChatLuongDat = record.lines.every((l) => l.chat_luong !== "Không đạt")
+  const isChatLuongKhongDat = record.lines.some((l) => l.chat_luong === "Không đạt")
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawTitleWithQr(doc, y, {
+    title: "Biên bản nghiệm thu",
+    subtitle: "(Áp dụng cho bảo dưỡng định kỳ)",
+    soLabel: `Căn cứ biên bản số: ${record.ma_bb || "..."}`,
+    qrUrl,
+    maBb: record.ma_bb,
+  })
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) y = drawGroupHeaderBar(doc, y, `${idx + 1}. ${line.ten_tb} (${line.ma_tb})`)
+    y = drawTwoColRow(doc, y, `Xe/máy/thiết bị: ${line.ten_tb}`, `Biển số/số hiệu: ${line.ma_tb}`)
+    if (isBoDoi) y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Lái xe: ", line.ten_tai_xe || "...")
+  })
+
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Đơn vị quản lý, sử dụng: ", "Nhà máy chế biến Phước Hòa Kampong Thom")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Căn cứ: ", `Giấy đề nghị bảo trì số ${record.ma_bb || "..."}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thời gian: ", `Hôm nay, ngày ${dd} tháng ${mm} năm ${yyyy}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Tại: ", record.bo_phan)
+
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Chúng tôi gồm:", MARGIN, y)
+  y += LINE_H
+  y = drawParticipantsOng(doc, y, buildF15BaoDuongParticipants(record, staffMap, isBoDoi, firstTaiXe))
+
+  y += 1
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "", "Cùng tiến hành kiểm tra chất lượng bảo dưỡng. Kết quả như sau:")
+
+  record.lines.forEach((line, idx) => {
+    const content =
+      mergeNoidung(record.cac_khac_phuc_chung, line.cac_khac_phuc) ||
+      mergeNoidung(record.noi_dung_chung, line.noi_dung) ||
+      ".............................."
+    const label = record.lines.length > 1 ? `${idx + 1}. ${line.ten_tb} — Khối lượng đã bảo dưỡng, thay thế phụ tùng: ` : "Khối lượng đã bảo dưỡng, thay thế phụ tùng: "
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, label, content)
+    if (line.materials.length > 0) y = drawMaterialsTable(doc, y, line.materials) + 3
+  })
+
+  y = drawChatLuongCheckbox(doc, y, isChatLuongDat, isChatLuongKhongDat)
+  y = drawKetLuanBlank(doc, y)
+
+  y = drawSignatureRow(
+    doc, y,
+    isBoDoi
+      ? [
+          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+          { role: "Tài xế", name: firstTaiXe },
+          { role: "Giám đốc nhà máy", name: record.giam_doc },
+        ]
+      : [
+          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+          { role: "Giám đốc nhà máy", name: record.giam_doc },
+        ],
+  )
+  drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+}
+
+// ─── F06: Phiếu hoàn thành công việc bảo trì (xe) ──────────────────────────
+
+type F06Row = { stt: number; hang_muc: string; dvt: string; so_luong: string | number; thanh_tien: string; ghi_chu: string }
+
+function buildF06Rows(line: LineData): { rows: F06Row[]; grandTotal: number } {
+  const rows: F06Row[] = []
+  let rowIdx = 1
+  rows.push({
+    stt: rowIdx++,
+    hang_muc: line.nhien_lieu_su_dung ? `Nhiên liệu bảo dưỡng: ${line.nhien_lieu_su_dung}` : "Nhiên liệu bảo dưỡng",
+    dvt: line.dvt_do || "",
+    so_luong: line.so_luong_do ?? "",
+    thanh_tien: "",
+    ghi_chu: "",
+  })
+  for (const mat of line.materials) {
+    rows.push({
+      stt: rowIdx++,
+      hang_muc: mat.ten_vat_tu,
+      dvt: mat.dvt || "",
+      so_luong: mat.so_luong,
+      thanh_tien: mat.thanh_tien ? pdfMoney(mat.thanh_tien, mat.loai_tien || "USD") : "",
+      ghi_chu: mat.nguon === "ben_ngoai" ? "Mua ngoài" : "Kho",
+    })
+  }
+  rows.push({
+    stt: rowIdx++,
+    hang_muc: "Công thợ",
+    dvt: "",
+    so_luong: "",
+    thanh_tien: line.cong_tho > 0 ? pdfMoney(line.cong_tho, line.loai_tien) : "",
+    ghi_chu: "",
+  })
+  const matTotal = line.materials.reduce((s, m) => s + (m.thanh_tien || 0), 0)
+  return { rows, grandTotal: matTotal + (line.cong_tho || 0) }
+}
+
+async function drawF06(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+  const dateParts = fmtDatePartsVN(record.ngay)
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawQrThenDateThenTitle(doc, y, {
+    qrUrl, maBb: record.ma_bb, dateParts,
+    title: "Phiếu hoàn thành công việc bảo trì",
+    subtitle: "(Áp dụng cho xe ôtô vận chuyển mủ)",
+    soLabel: `Số: ${record.ma_bb || "..."}`,
+  })
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) y = drawGroupHeaderBar(doc, y, `${idx + 1}. ${line.ten_tb} (${line.ma_tb})`)
+    y = drawTwoColRow(doc, y, `Biển số: ${line.ma_tb}`, `Tên lái xe: ${line.ten_tai_xe || "..."}`)
+    y = drawLabelContent(
+      doc, MARGIN, y, CONTENT_W, "Căn cứ: ",
+      `Giấy đề nghị bảo trì số ${record.ma_bb || "..."}, ngày ${dateParts.dd} tháng ${dateParts.mm} năm ${dateParts.yyyy}`,
+    )
+    y += 1
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setFont(PDF_FONT_NAME, "bold")
+    doc.setFontSize(BODY_SIZE)
+    doc.setTextColor(...INK)
+    doc.text("Kết quả bảo dưỡng bao gồm:", MARGIN, y)
+    y += LINE_H
+
+    const { rows, grandTotal } = buildF06Rows(line)
+    const head = ["STT", "Hạng mục công việc đã thực hiện", "ĐVT", "Số lượng", "Thành tiền", "Ghi chú"]
+    const body = rows.map((r) => [String(r.stt), r.hang_muc, r.dvt, String(r.so_luong), r.thanh_tien, r.ghi_chu])
+    body.push(["", "Cộng:", "", "", grandTotal > 0 ? pdfMoney(grandTotal, line.loai_tien) : "", ""])
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [head],
+      body,
+      styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.2, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+      headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+      theme: "grid",
+      didParseCell: (data) => {
+        if (data.section === "body" && data.row.index === body.length - 1) {
+          data.cell.styles.fontStyle = "bold"
+          data.cell.styles.fillColor = HEADER_BAR_BG
+        }
+      },
+    })
+    y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? y) + 4
+  })
+
+  y = drawSignatureRow(doc, y, [
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F06")
+}
+
+// ─── Phase 2: orchestrators "bao_duong" / "bao_duong_xe" ──────────────────
+
+export async function downloadMaintenanceBaoDuongPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  await drawF03(doc, record, qrUrl, staffMap)
+  doc.addPage()
+  await drawF15BaoDuong(doc, record, qrUrl, staffMap)
+  if (hasAnyImages(record)) {
+    doc.addPage()
+    await drawPhotoPageWithCommon(doc, record)
+  }
+  doc.save(`bao-duong-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+export async function downloadMaintenanceBaoDuongXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  await drawF03(doc, record, qrUrl, staffMap)
+  doc.addPage()
+  await drawF15BaoDuong(doc, record, qrUrl, staffMap)
+  doc.addPage()
+  await drawF06(doc, record, qrUrl)
+  if (hasAnyImages(record)) {
+    doc.addPage()
+    await drawPhotoPageWithCommon(doc, record)
+  }
+  doc.save(`bao-duong-xe-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+// ─── F08NB: Giấy đề nghị sửa chữa nhỏ thường xuyên ────────────────────────
+
+async function drawF08NB(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+  const dateParts = fmtDatePartsVN(record.ngay)
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawQrThenDateThenTitle(doc, y, {
+    qrUrl, maBb: record.ma_bb, dateParts,
+    title: "Giấy đề nghị sửa chữa nhỏ thường xuyên",
+    subtitle: "(Áp dụng cho sửa chữa nhỏ, thường xuyên)",
+    soLabel: `Số: ${record.ma_bb || "..."}`,
+  })
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) {
+      y = ensureSpace(doc, y, LINE_H)
+      doc.setFont(PDF_FONT_NAME, "bold")
+      doc.setFontSize(BODY_SIZE)
+      doc.setTextColor(...INK)
+      doc.text(`${idx + 1}. ${line.ten_tb} (${line.ma_tb})`, MARGIN, y)
+      y += LINE_H
+    }
+    y = drawInlineLabelPairs(doc, y, [
+      ["Xe/thiết bị", line.ten_tb],
+      ["Biển số/Số hiệu", line.ma_tb],
+    ])
+    y = drawInlineLabelPairs(doc, y, [
+      ["Chỉ số đồng hồ Km/giờ", line.km_dong_ho != null ? line.km_dong_ho.toLocaleString() : "......"],
+      ["Họ tên lái xe", line.ten_tai_xe || "......"],
+    ])
+    y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "1/ Mức độ hư hỏng: ", line.noi_dung, { blankCount: 2 })
+    y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "2/ Lý do hư hỏng: ", line.nguyen_nhan, { blankCount: 2 })
+    y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "3/ Hướng sửa chữa + tạm tính: ", line.cac_khac_phuc, { blankCount: 2 })
+  })
+
+  y = drawSignatureRow(doc, y, [
+    { role: "Giám đốc NM", name: record.giam_doc },
+    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
+    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F08")
+}
+
+// ─── F15SmallVehicle: biến thể Biên bản nghiệm thu cho Sửa chữa nhỏ xe ────
+
+async function drawF15SmallVehicle(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, record.bo_phan)
+  y += 2
+  y = await drawTitleWithQr(doc, y, {
+    title: "Biên bản nghiệm thu",
+    subtitle: "(Áp dụng cho sửa chữa nhỏ, thường xuyên)",
+    soLabel: `Căn cứ biên bản số: ${record.ma_bb || "..."}`,
+    qrUrl,
+    maBb: record.ma_bb,
+  })
+
+  record.lines.forEach((line, idx) => {
+    if (record.lines.length > 1) y = drawGroupHeaderBar(doc, y, `${idx + 1}. ${line.ten_tb} (${line.ma_tb})`)
+    y = drawTwoColRow(doc, y, `Xe/máy/thiết bị: ${line.ten_tb}`, `Biển số/số hiệu: ${line.ma_tb}`)
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Tài xế: ", line.ten_tai_xe || "...")
+  })
+
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Đơn vị quản lý, sử dụng: ", "Nhà máy chế biến Phước Hòa Kampong Thom")
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Căn cứ: ", `Giấy đề nghị sửa chữa số ${record.ma_bb || "..."}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Thời gian: ", `Hôm nay, ngày ${dd} tháng ${mm} năm ${yyyy}`)
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "Tại: ", record.bo_phan)
+
+  y += 1
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Chúng tôi gồm:", MARGIN, y)
+  y += LINE_H
+  y = drawParticipantsOng(doc, y, buildF15SmallVehicleParticipants(record, staffMap))
+
+  y += 1
+  y = drawLabelContent(doc, MARGIN, y, CONTENT_W, "", "Cùng tiến hành nghiệm thu kết quả sửa chữa. Kết quả như sau:")
+
+  record.lines.forEach((line, idx) => {
+    const content = line.cac_khac_phuc || line.noi_dung || ".............................."
+    const label = record.lines.length > 1 ? `${idx + 1}. ${line.ten_tb} — Khối lượng đã sửa chữa, thay thế phụ tùng: ` : "Khối lượng đã sửa chữa, thay thế phụ tùng: "
+    y = drawLabelContent(doc, MARGIN, y, CONTENT_W, label, content)
+    if (line.materials.length > 0) y = drawMaterialsTable(doc, y, line.materials) + 3
+  })
+
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(BODY_SIZE)
+  doc.setTextColor(...INK)
+  doc.text("Chất lượng: ", MARGIN, y)
+  let cx = MARGIN + doc.getTextWidth("Chất lượng: ")
+  doc.setFont(PDF_FONT_NAME, "normal")
+  record.lines.forEach((line, idx) => {
+    const seg = `${record.lines.length > 1 ? `${line.ten_tb}: ` : ""}${line.chat_luong || "......"}${idx < record.lines.length - 1 ? " / " : ""}`
+    doc.text(seg, cx, y)
+    cx += doc.getTextWidth(seg)
+  })
+  y += LINE_H
+
+  y = drawGiaTriSuaChua(doc, y, record.lines, "Giá trị sửa chữa: ")
+  y = drawKetLuanBlank(doc, y)
+
+  y = drawSignatureRow(doc, y, [
+    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+    { role: "NV phụ trách", name: record.nv_phu_trach },
+    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
+    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+}
+
+// ─── Phase 3: orchestrator "sua_chua_nho_xe" (F08 + F15SmallVehicle + F06 + Ảnh) ─
+
+export async function downloadMaintenanceSuaChuaNhoXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  await drawF08NB(doc, record, qrUrl)
+  doc.addPage()
+  await drawF15SmallVehicle(doc, record, qrUrl, staffMap)
+  doc.addPage()
+  await drawF06(doc, record, qrUrl)
+  if (hasLineImages(record)) {
+    doc.addPage()
+    await drawPhotoPage(doc, record)
+  }
+  doc.save(`sua-chua-nho-xe-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+// ─── F01: Lý lịch máy móc / thiết bị ───────────────────────────────────────
+
+function drawHistoryTable(doc: jsPDF, startY: number, rows: HistoryRow[]): number {
+  const head = ["STT", "Thời gian", "Nội dung sửa chữa, thay thế phụ tùng", "Giá trị", "Người thực hiện", "Người theo dõi"]
+  const body = rows.map((r, i) => {
+    const value = r.chi_phi_dk > 0 ? pdfMoney(r.chi_phi_dk, r.loai_tien) : r.cong_tho > 0 ? pdfMoney(r.cong_tho, r.loai_tien) : "—"
+    const noiDungParts = [r.noi_dung || r.hang_muc || "—"]
+    if (r.cac_khac_phuc) noiDungParts.push(r.cac_khac_phuc)
+    if (r.ma_bb) noiDungParts.push(`BB: ${r.ma_bb}`)
+    const nguoiTheoDoi = [r.nv_phu_trach, r.phu_trach_bao_tri].filter(Boolean).join(", ") || "—"
+    return [String(i + 1), fmtDateVN(r.ngay), noiDungParts.join("\n"), value, r.nguoi_thuc_hien.join(", ") || "—", nguoiTheoDoi]
+  })
+  if (body.length === 0) body.push(["", "", "Chưa có dữ liệu bảo trì", "", "", ""])
+  autoTable(doc, {
+    startY,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [head],
+    body,
+    styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+    headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 8 },
+      1: { halign: "center", cellWidth: 18 },
+      3: { halign: "right", cellWidth: 20 },
+      4: { halign: "center", cellWidth: 26 },
+      5: { halign: "center", cellWidth: 26 },
+    },
+    theme: "grid",
+  })
+  return (doc as PdfWithTable).lastAutoTable?.finalY ?? startY
+}
+
+function drawF01(doc: jsPDF, rows: HistoryRow[], asset: AssetInfo | null, filterFrom: string, filterTo: string): void {
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, asset?.bo_phan)
+  y += 2
+  y = drawCenteredTitleBlock(doc, y, MARGIN, CONTENT_W, {
+    title: `Lý lịch ${asset?.loai === "xe" ? "xe" : "máy móc / thiết bị"}`,
+    subtitle: "(KHXD-QT02-F01)",
+  })
+  y += 2
+
+  if (asset) {
+    y = drawSectionHeader(doc, y, "I. Thông tin thiết bị")
+    const lines: string[] = [`Tên thiết bị: ${asset.ten_tb}`, `Mã thiết bị: ${asset.ma_tb}`, `Bộ phận: ${asset.bo_phan}`]
+    if (asset.loai === "xe" && asset.bien_so) lines.push(`Biển số: ${asset.bien_so}`)
+    if (asset.nam_sd) lines.push(`Năm sử dụng: ${asset.nam_sd}`)
+    if (asset.mo_ta) lines.push(`Mô tả: ${asset.mo_ta}`)
+    if (filterFrom || filterTo) lines.push(`Kỳ báo cáo: ${filterFrom ? fmtDateVN(filterFrom) : "Từ đầu"} – ${filterTo ? fmtDateVN(filterTo) : "nay"}`)
+    y = drawFactLines(doc, y, lines) + 4
+  }
+
+  y = drawSectionHeader(doc, y, "II. Bảo trì, sửa chữa, thay thế phụ tùng")
+  y = drawHistoryTable(doc, y, rows) + 3
+
+  const sua = rows.filter((r) => r.hang_muc === "Sửa chữa").length
+  const bd = rows.filter((r) => r.hang_muc === "Bảo dưỡng").length
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(8)
+  doc.setTextColor(...GRAY)
+  doc.text(`Tổng: ${rows.length} lần bảo trì · Sửa chữa: ${sua} · Bảo dưỡng: ${bd}`, MARGIN, y)
+  doc.setTextColor(...INK)
+  y += LINE_H
+
+  y = drawSignatureRow(doc, y, [
+    { role: "Người lập" },
+    { role: "Tổ cơ điện" },
+    { role: "BGĐ phụ trách" },
+    { role: "Giám đốc nhà máy" },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F01")
+}
+
+export async function downloadMaintenanceLyLichPdf(
+  items: { info: AssetInfo; rows: HistoryRow[] }[],
+  filterFrom: string,
+  filterTo: string,
+): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  items.forEach((item, idx) => {
+    if (idx > 0) doc.addPage()
+    drawF01(doc, item.rows, item.info, filterFrom, filterTo)
+  })
+  const today = new Date().toISOString().slice(0, 10)
+  const label = items.length === 1 ? items[0].info.ma_tb : today
+  doc.save(`ly-lich-thiet-bi-${safeName(label)}.pdf`)
+}
+
+// ─── F02: Lý lịch xe máy (3 section) ────────────────────────────────────────
+
+function drawVehicleHistoryTable(doc: jsPDF, startY: number, rows: VehicleHistoryRow[]): number {
+  const head = ["Ngày", "Km/giờ", "Nội dung", "Giá trị", "Người thực hiện", "Người theo dõi"]
+  const body = rows.map((r) => {
+    const noiDungParts = [r.noi_dung || "—"]
+    if (r.cac_khac_phuc) noiDungParts.push(r.cac_khac_phuc)
+    if (r.ma_bb) noiDungParts.push(`BB: ${r.ma_bb}`)
+    return [
+      fmtDateVN(r.ngay),
+      r.km_dong_ho != null ? r.km_dong_ho.toLocaleString() : "—",
+      noiDungParts.join("\n"),
+      r.chi_phi_dk > 0 ? pdfMoney(r.chi_phi_dk, r.loai_tien) : "—",
+      r.nguoi_thuc_hien.join(", ") || "—",
+      r.nv_phu_trach || "—",
+    ]
+  })
+  if (body.length === 0) body.push(["", "", "Chưa có dữ liệu", "", "", ""])
+  autoTable(doc, {
+    startY,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [head],
+    body,
+    styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+    headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 18 },
+      1: { halign: "center", cellWidth: 16 },
+      3: { halign: "right", cellWidth: 18 },
+      4: { halign: "center", cellWidth: 26 },
+      5: { halign: "center", cellWidth: 22 },
+    },
+    theme: "grid",
+  })
+  return (doc as PdfWithTable).lastAutoTable?.finalY ?? startY
+}
+
+function drawF02(
+  doc: jsPDF,
+  vehicle: VehicleInfo,
+  drivers: DriverAssignmentRow[],
+  maintRows: VehicleHistoryRow[],
+  repairRows: VehicleHistoryRow[],
+  filterFrom: string,
+  filterTo: string,
+): void {
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, "Đội xe")
+  y += 2
+  y = drawCenteredTitleBlock(doc, y, MARGIN, CONTENT_W, { title: "Lý lịch xe máy", subtitle: "(KHXD-QT02-F02)" })
+  y += 2
+
+  y = drawSectionHeader(doc, y, "Thông tin xe")
+  const infoLines: string[] = [`Mã xe: ${vehicle.code}`, `Tên xe: ${vehicle.name}`]
+  if (vehicle.vehicle_type) infoLines.push(`Nhóm xe: ${vehicle.vehicle_type}`)
+  if (vehicle.plate_number) infoLines.push(`Biển số: ${vehicle.plate_number}`)
+  if (filterFrom || filterTo) infoLines.push(`Kỳ báo cáo: ${filterFrom ? fmtDateVN(filterFrom) : "Từ đầu"} – ${filterTo ? fmtDateVN(filterTo) : "nay"}`)
+  y = drawFactLines(doc, y, infoLines) + 4
+
+  y = drawSectionHeader(doc, y, "I. Lịch sử người vận hành")
+  const driverHead = ["STT", "Họ tên", "Từ ngày", "Đến ngày", "Ghi chú"]
+  const driverBody = drivers.map((d, i) => [
+    String(i + 1),
+    `${d.driver_name}${d.driver_code ? ` (${d.driver_code})` : ""}`,
+    d.effective_from ? fmtDateVN(d.effective_from) : "—",
+    d.effective_to ? fmtDateVN(d.effective_to) : "Hiện tại",
+    d.note || "—",
+  ])
+  if (driverBody.length === 0) driverBody.push(["", "Chưa có dữ liệu", "", "", ""])
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [driverHead],
+    body: driverBody,
+    styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+    headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+    columnStyles: { 0: { halign: "center", cellWidth: 8 }, 2: { halign: "center", cellWidth: 22 }, 3: { halign: "center", cellWidth: 22 } },
+    theme: "grid",
+  })
+  y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? y) + 5
+
+  y = drawSectionHeader(doc, y, "II. Bảo trì - Bảo dưỡng")
+  y = drawVehicleHistoryTable(doc, y, maintRows) + 5
+
+  y = drawSectionHeader(doc, y, "III. Sửa chữa")
+  y = drawVehicleHistoryTable(doc, y, repairRows) + 3
+
+  y = drawSignatureRow(doc, y, [
+    { role: "Người lập" },
+    { role: "Tài xế" },
+    { role: "BGĐ phụ trách" },
+    { role: "Giám đốc nhà máy" },
+  ])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F02")
+}
+
+export async function downloadMaintenanceLyLichXePdf(
+  items: { vehicle: VehicleInfo; drivers: DriverAssignmentRow[]; maintRows: VehicleHistoryRow[]; repairRows: VehicleHistoryRow[] }[],
+  filterFrom: string,
+  filterTo: string,
+): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  items.forEach((item, idx) => {
+    if (idx > 0) doc.addPage()
+    drawF02(doc, item.vehicle, item.drivers, item.maintRows, item.repairRows, filterFrom, filterTo)
+  })
+  const today = new Date().toISOString().slice(0, 10)
+  const label = items.length === 1 ? items[0].vehicle.code : today
+  doc.save(`ly-lich-xe-${safeName(label)}.pdf`)
+}
+
+// ─── F07: Báo cáo công tác bảo trì theo kỳ ────────────────────────────────
+
+function drawF07(
+  doc: jsPDF,
+  section: BaoCaoKySection,
+  from: string,
+  to: string,
+  rateVnd: number,
+  rateKhr: number,
+  lapBieuName: string,
+): void {
+  const totalUsd = section.rows.reduce((sum, r) => sum + convertCurrency(r.gia_tri, r.loai_tien, "USD"), 0)
+  let y = MARGIN
+  y = drawCompanyHeader(doc, y, section.bo_phan)
+  y += 2
+  y = drawCenteredTitleBlock(doc, y, MARGIN, CONTENT_W, { title: "Báo cáo công tác bảo trì", subtitle: "(KHXD-QT02-F07)" })
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(8.5)
+  doc.setTextColor(...INK)
+  doc.text(`Kỳ: Từ ${fmtDateVN(from)} – Đến ${fmtDateVN(to)}`, PAGE_W / 2, y, { align: "center" })
+  y += 6
+
+  const head = ["STT", "Số biên bản", "Số xe/Mã TB", "Số Km/giờ hoạt động", "Ngày thực hiện", "Nội dung sửa chữa/bảo dưỡng", "Tổng giá trị", "Hạng mục"]
+  const body = section.rows.map((r, i) => [
+    String(i + 1),
+    r.ma_bb || "—",
+    r.ma_tb,
+    r.km_dong_ho ?? "—",
+    fmtDateVN(r.ngay),
+    r.noi_dung,
+    pdfMoney(r.gia_tri, r.loai_tien),
+    r.hang_muc,
+  ])
+  if (body.length === 0) body.push(["", "", "", "", "", "Không có dữ liệu bảo trì", "", ""])
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [head],
+    body,
+    styles: { font: PDF_FONT_NAME, fontSize: 7, cellPadding: 1.2, textColor: INK, lineColor: BORDER, lineWidth: 0.1 },
+    headStyles: { fillColor: HEADER_BAR_BG, textColor: [15, 23, 42], fontStyle: "bold" },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 8 },
+      1: { halign: "center", cellWidth: 22 },
+      2: { halign: "center", cellWidth: 20 },
+      3: { halign: "center", cellWidth: 18 },
+      4: { halign: "center", cellWidth: 18 },
+      6: { halign: "right", cellWidth: 20 },
+      7: { halign: "center", cellWidth: 16 },
+    },
+    theme: "grid",
+  })
+  y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? y) + 4
+
+  y = ensureSpace(doc, y, LINE_H)
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(8)
+  doc.setTextColor(...INK)
+  doc.text(
+    `Quy đổi sang đơn giá USD 1USD=${rateVnd.toLocaleString()}VND; 1USD=${rateKhr.toLocaleString()} Riel: ${totalUsd.toFixed(2)} USD`,
+    MARGIN, y,
+  )
+  y += LINE_H
+
+  y = drawSignatureRow(doc, y, [{ role: "LÃNH ĐẠO ĐƠN VỊ" }, { role: "LẬP BIỂU", name: lapBieuName }])
+  drawDocumentFooter(doc, y, "KHXD-QT02-F07")
+}
+
+export async function downloadMaintenanceBaoCaoKyPdf(
+  sections: BaoCaoKySection[],
+  from: string,
+  to: string,
+  rateVnd: number,
+  rateKhr: number,
+  lapBieuName: string,
+): Promise<void> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+  await ensurePdfFont(doc)
+  sections.forEach((sec, idx) => {
+    if (idx > 0) doc.addPage()
+    drawF07(doc, sec, from, to, rateVnd, rateKhr, lapBieuName)
+  })
+  doc.save(`bao-cao-bao-tri-${safeName(from)}-${safeName(to)}.pdf`)
+}

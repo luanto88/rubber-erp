@@ -1545,3 +1545,633 @@ Không có gì trong 4 bước trên yêu cầu chạy `npm run build` — chỉ
 CLAUDE.md (build có thể đụng `.next/` của dev server đang chạy song song).
 ```
 
+## Cập nhật (tiếp 3) — Giai đoạn 0 mục 5 xong (6 bảng mới), mục 8 mockup SignScreen xong và
+đã tự verify bằng Playwright — ĐANG CHỜ NGƯỜI DÙNG DUYỆT trước khi đụng Giai đoạn 1
+
+### Mục 5 — Migration tạo mới 6 bảng lõi (CHƯA CHẠY trên Supabase)
+
+File mới: `supabase/migrations/20260902_signing_core_tables.sql` — tạo `yeu_cau_ky`,
+`nguoi_ky`, `truong_ky`, `mau_vi_tri`, `nhat_ky_ky`, `cau_hinh_tai_lieu` đúng theo mục 5
+"Lược đồ dữ liệu" của `cung_cap_dl/du_an_ky_so_dung_chung - new.docx` (đã trích xuất text từ
+XML nội bộ để đọc, không mở được trực tiếp bằng Read — giống cách phiên trước đã làm).
+**Chỉ tạo bảng — chưa module nào dùng, không đổi hành vi bảng nào đang chạy thật.**
+
+Điểm cần nhớ khi dùng lại 6 bảng này ở Giai đoạn 1/8 sau này:
+
+- **RLS chỉ có SELECT, cố ý KHÔNG có INSERT/UPDATE/DELETE cho client** ở bất kỳ bảng nào —
+  toàn bộ ghi dữ liệu phải qua service role (route hiện tại đã dùng service role sẵn) hoặc
+  RPC `SECURITY DEFINER` mà Giai đoạn 1 sẽ xây, để đảm bảo các ràng buộc nghiệp vụ (hash toàn
+  vẹn, ký không lặp, nhật ký bất biến, ánh xạ vai trò→người qua `dinh_tuyen`) không bị bỏ qua
+  bởi ghi trực tiếp từ client trước khi RPC chuẩn tồn tại. Khi Giai đoạn 1/8 chốt xong mô hình
+  quyền cụ thể, cần 1 migration riêng bổ sung policy ghi — đừng tưởng nhầm là quên.
+- Đã tạo sẵn 2 ràng buộc DB cứng theo đúng mục 6 của docx: trigger `chan_sua_nhat_ky()` gắn
+  cho cả `nhat_ky_ky` (tái dùng đúng hàm đã tạo cho `doc_approval_log` ở
+  `20260901_doc_approval_log_hardening.sql`), và trigger 2 chiều
+  `signing_check_smartca_last()` trên `nguoi_ky` (chặn cả insert dòng SmartCA không phải bước
+  cuối lẫn insert dòng thường sau khi đã có bước SmartCA). Unique constraint
+  `mot_lan_ky_moi_nguoi` (yeu_cau_id, user_id) đặt tên khớp nguyên văn docx.
+- `modun`/`loai_tai_lieu`/`truong_ky.loai` cố ý để TEXT tự do, không CHECK cứng danh sách —
+  mirror đúng cách `kpi_tasks.module_code` đang làm, tránh phải sửa migration mỗi khi thêm
+  module/loại tài liệu mới.
+- `ban_ghi_id` (yeu_cau_ky) là tham chiếu đa hình (không FK) tới bản ghi nghiệp vụ gốc của
+  đúng `modun` đó (`lots`, `dispatch_entries`, `maintenance_records`, `iso_documents`...).
+- 2 helper `SECURITY DEFINER` (`signing_is_yeu_cau_owner`, `signing_is_participant`) tránh
+  "infinite recursion detected in policy" do `yeu_cau_ky`↔`nguoi_ky` tham chiếu chéo RLS —
+  mirror đúng kỹ thuật đã dùng ở `operation_notes`/`operation_note_shares` và
+  `kpi_tasks`/`kpi_task_members`.
+
+**BẮT BUỘC chạy `supabase/migrations/20260902_signing_core_tables.sql` trên Supabase SQL
+Editor trước khi Giai đoạn 1 cần đọc/ghi các bảng này** — hiện tại chưa module nào phụ thuộc
+nên chưa chạy cũng không ảnh hưởng hệ thống đang chạy.
+
+### Mục 7 (gap 3 loại chức vụ) — CHƯA ĐỤNG, đúng như đã hẹn
+
+Không tự ý làm, đúng yêu cầu đã chốt từ đầu phiên — tên cột cụ thể/có tách bảng riêng hay
+không vẫn chưa chốt, cần hỏi người dùng trước khi viết bất kỳ migration nào cho việc này.
+
+### Mục 8 — Mockup HTML "SignScreen" — ĐÃ DỰNG, ĐÃ TỰ VERIFY BẰNG PLAYWRIGHT, CHƯA CÓ DUYỆT
+CỦA NGƯỜI DÙNG
+
+File mới: `cung_cap_dl/thiet_ke_man_hinh_ky.html` — mockup HTML/CSS/JS thuần (không dependency
+ngoài, mở trực tiếp bằng `file://`), tái dùng đúng bảng màu/token đã duyệt ở mockup "vị trí
+ký" (`cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html` — brand xanh rừng `#2f5d52`, 6 màu vai
+trò `ky_nhay/soan_thao/xem_xet/phe_duyet/qr/ngay_ky`). Đây là màn hình của **người KÝ** thao
+tác — khác hẳn mockup "vị trí ký" (màn hình người SOẠN THẢO đặt khung).
+
+Đã bám sát đúng mục 4.8 "Trải nghiệm người ký" của docx, verify từng điểm bằng Playwright
+(script tạm dùng bản `playwright` cache trong `_npx`, vì repo không có `playwright` làm
+dependency — không thêm vào `package.json`):
+
+1. Nút "Bắt đầu" → "Tiếp theo": nhảy tới khung CHƯA KÝ kế tiếp của đúng người đang đăng nhập
+   (không phải khung của người khác), tự cuộn mượt dù khung tiếp theo ở trang khác — đã verify
+   bằng screenshot cho cả 2 lần nhảy trang (trang 1→2, trang 2→3).
+2. "Hoàn tất" mờ (`.muted`, KHÔNG dùng thuộc tính `disabled` — xem bug đã fix bên dưới) khi
+   chưa ký đủ khung bắt buộc; bấm sớm thì cuộn tới đúng khung còn thiếu kèm hiệu ứng pulse đỏ
+   2 lần, không phải toast lỗi chung chung đứng yên. Sau khi ký đủ, nút chuyển xanh + nhãn đổi
+   thành "Hoàn tất" thật.
+3. Không khóa trang, không ép cuộn hết — mọi trang luôn cuộn tự do được, kể cả trước khi bấm
+   "Bắt đầu".
+4. Sheet xác nhận ký: chữ ký lấy sẵn (SVG path tĩnh, không phải canvas vẽ tay), Họ tên/Chức
+   danh/Ngày ký hiển thị dạng ô read-only (nền xám, không phải `<input>` sửa được).
+5. Panel phụ "Luồng ký hồ sơ" — desktop hiện cột phải cố định; mobile/tablet (<861px) thu gọn
+   thành 1 dòng dưới cùng ("3 người tham gia · Bạn đang ký"), bấm mở ra bottom sheet đầy đủ.
+
+**Bug đã tự phát hiện và fix qua Playwright (không phải suy đoán)**: bản đầu bottom sheet
+"Luồng ký" mobile đóng bằng cách bấm lại đúng thanh tóm tắt đã mở ra nó — nhưng sheet
+`position:fixed` che khuất chính thanh đó khi đang mở, nên tap lại luôn trúng sheet chứ không
+trúng thanh, sheet không đóng được (Playwright báo `intercepts pointer events` khi cố click
+lại `#mobileFlowBar`). Đã fix bằng thêm nút "Đóng" tường minh bên trong sheet + click ra ngoài
+(scrim dùng chung với sheet ký) đều đóng được, verify lại bằng Playwright xác nhận cả 2 đường
+đóng đều hoạt động. Đây đúng loại bug chỉ lộ ra khi thao tác chuột/tap thật qua Playwright,
+không phải nhìn ảnh chụp tĩnh mà phát hiện được — khớp đúng lý do CLAUDE.md yêu cầu duyệt bằng
+`npx playwright screenshot`/thao tác thật thay vì chỉ mô tả bằng lời.
+
+**Quyết định thiết kế phát sinh khi dựng** (chưa có trong docx, cần người dùng xác nhận nếu
+muốn đổi): nút "Hoàn tất" khi chưa đủ điều kiện dùng class CSS mờ (`.muted`) thay vì thuộc
+tính HTML `disabled` — vì phần tử có `disabled=true` không nhận sự kiện click trong trình
+duyệt, sẽ làm hành vi "bấm khi chưa xong thì cuộn tới khung còn thiếu" (yêu cầu tường minh của
+docx mục 4.8) không thể xảy ra được. Nút chỉ thực sự khoá (`disabled=true` + class `.sent`)
+SAU KHI đã bấm Hoàn tất thành công, lúc đó không còn hành động nào cần làm nữa.
+
+**Chưa làm/chưa quyết định trong mockup này** (giữ tối giản đúng phạm vi mục 4.8, không tự mở
+rộng): chưa có nhánh SmartCA (đếm ngược/poll `tranId`/deeplink app — thuộc mục 4.6, một luồng
+UI hoàn toàn khác, mockup này chỉ demo `loai_chu_ky = 'anh'`); chưa demo trường hợp OTP
+(`muc_xac_thuc = 'pin_otp'`) hay nhập PIN trước khi xác nhận ký (mockup giản lược bước xác
+thực để tập trung đúng vào trải nghiệm "nhảy khung + panel luồng ký" mà mục 4.8 mô tả — PIN
+modal thật đã có sẵn design từ `SignPlacementModal` hiện tại trong `iso/forms/[id]/page.tsx`,
+không cần vẽ lại ở đây).
+
+**BƯỚC TIẾP THEO BẮT BUỘC**: người dùng cần tự mở
+`cung_cap_dl/thiet_ke_man_hinh_ky.html` bằng trình duyệt thật (double-click hoặc kéo vào tab
+mới — không cần server) để duyệt trực quan/tương tác thật (không chỉ dựa vào ảnh chụp), rồi
+xác nhận đồng ý (hoặc yêu cầu sửa) trước khi bất kỳ phần nào trong đó được đưa vào code thật.
+**Giai đoạn 1 (refactor `src/lib/signing/`) CHƯA được bắt đầu** — đúng nguyên tắc đã ghi ở
+phiên trước: "Chỉ sau khi người dùng duyệt bản nháp này mới được đưa bất kỳ phần nào vào code
+thật."
+
+### Prompt gợi ý cho session tiếp theo (sau khi người dùng đã duyệt/góp ý mockup mục 8)
+
+```
+Đọc mục "Cập nhật (tiếp 3)" trong CLAUDE.md để nắm mục 5 (migration 6 bảng, CHƯA CHẠY trên
+Supabase — chạy trước khi cần) và mục 8 (mockup cung_cap_dl/thiet_ke_man_hinh_ky.html) đã
+xong tới đâu. Nếu tôi (người dùng) đã góp ý sửa mockup, áp dụng đúng góp ý đó trước, verify
+lại bằng npx playwright screenshot, rồi mới hỏi lại xác nhận lần cuối.
+
+Sau khi mockup được duyệt, bắt đầu Giai đoạn 1 — refactor src/lib/signing/ từ 3 route đang
+chạy thật (api/sign/generate-pdf/route.ts, api/sign/generate-office/route.ts,
+api/documents/sign/route.ts) và finalize route của Thực hiện hồ sơ ISO
+(api/iso/forms/[id]/finalize/route.ts). Nguyên tắc bắt buộc: KHÔNG đổi schema, KHÔNG đổi
+hành vi/response của các route này — chỉ trích phần logic dùng chung ra thư viện rồi gọi lại.
+Đối chiếu bằng bản chuẩn đã chụp trước đó (đọc kỹ README.md trong
+C:\Users\Software\rubber-erp-ky-so-baseline\ trước khi refactor — file gốc trước ký +
+placement JSON cần tái tạo từ DB, KHÔNG ký lại được tài liệu thật đã hoàn tất qua workflow).
+
+Không có gì trong việc này yêu cầu chạy `npm run build` — chỉ dùng `npx tsc --noEmit` +
+`npx eslint` để tự kiểm tra, theo đúng quy tắc đã rút ra ở mục "Fix bug 2026-08-24".
+```
+
+## Cập nhật (tiếp 4) — Giai đoạn 1 đã xong: tách `src/lib/signing/` từ 4 route ký thật,
+verify bằng test byte-identical (không chỉ so bằng mắt)
+
+Người dùng đã chạy migration mục 5 và duyệt mockup mục 8 (`thiet_ke_man_hinh_ky.html`) ở
+phiên trước, yêu cầu tiếp tục ngay Giai đoạn 1. **Không đợi thêm — đã làm luôn trong phiên
+này**, theo đúng nguyên tắc "Refactor, không đổi hành vi, không đổi schema, không đổi
+request/response của route" của docx mục 9.
+
+### 2 file mới trong `src/lib/signing/`
+
+- **`signature-image.ts`** — `getSignatureImage(factoryId, userId)`. Hợp nhất **4** bản
+  `getSigImage()` copy-paste giống hệt nhau (không phải 3 như docx liệt kê ban đầu — đã phát
+  hiện thêm bản thứ 4 ở `generate-office/route.ts` khi rà code thật): tất cả cùng tải
+  `signatures/{factoryId}/{userId}/chu_ky.png` từ bucket `iso-documents` qua
+  `getSupabaseAdmin()` (dùng singleton có sẵn ở `src/lib/supabase-admin.ts` thay vì tự
+  `createClient()` riêng — an toàn vì service role không phụ thuộc session). Trả về
+  `Buffer | null`, KHÔNG throw. `generate-office/route.ts` (route duy nhất throw khi thiếu
+  ảnh) giữ nguyên hành vi throw bằng 1 wrapper cục bộ 3 dòng gọi hàm dùng chung —
+  `documents/sign/route.ts` cũng giữ wrapper cục bộ tương tự (try/catch trả null) để không
+  phải sửa tên gọi ở các call site khác trong file.
+- **`stamp-pdf.ts`** — 5 hàm nguyên tử: `loadSignerNameFont()`, `drawSignatureImage()`,
+  `drawSignerName()`, `drawSignPrefix()`, `drawExtraPlacements()`, cộng `computeNameSlot()`
+  (dùng riêng khi cần custom vòng lặp) và 2 hằng số style `ISO_SIGNER_NAME_STYLE`
+  (`maxFontSize:13, minFontSize:9, belowOffset:18, minY:8, extraWidth:24, minMaxWidth:110`)
+  / `VAN_BAN_SIGNER_NAME_STYLE` (`10/7/14/4/20/60`).
+
+### Phát hiện quan trọng khi đối chiếu code thật — ISO và Văn bản KHÔNG dùng chung 1 hằng số
+
+`iso/forms/[id]/finalize/route.ts`'s `stampPdf` và `api/sign/generate-pdf/route.ts`'s 2 vòng
+lặp vẽ placement nội bộ dùng **đúng 1 bộ constant** (13→9/18/8/24/110) — xác nhận đây thực sự
+là 1 đoạn logic bị copy-paste y hệt như docx mô tả. Nhưng `documents/sign/route.ts`'s
+`stampPdfStep` dùng bộ constant **khác hẳn** (10→7/14/4/20/60, khung chữ ký Văn bản nhỏ hơn
+ISO có chủ đích). Nếu gộp ép về 1 bộ chung sẽ **đổi giao diện chữ ký đã ký thật** của 1 trong 2
+module — vi phạm thẳng "không đổi hành vi". Xử lý: giữ 2 hằng số riêng, mỗi route tự truyền
+đúng hằng số lịch sử của mình vào các hàm dùng chung — đạt đúng nghĩa "hợp nhất" (1 bộ hàm vẽ
+duy nhất) mà không đổi 1 pixel nào của bên nào.
+
+### Phần CỐ Ý không gộp — QR và vòng lặp nhiều-bước/nhiều-người
+
+QR generation + vẽ QR **không đưa vào `stamp-pdf.ts`** — đã đối chiếu và xác nhận 3 route có
+hành vi QR thật sự khác nhau (không chỉ trùng code): ISO tự sinh QR PNG từ `qrUrl` bên trong
+(`width:100,margin:1`), vẽ đè mọi trang nếu có override vị trí, ngược lại **chỉ vẽ trang đầu**;
+Văn bản nhận sẵn buffer QR đã render bên ngoài (`width:160`), **luôn vẽ mọi trang** kể cả không
+có override (tự tính góc theo từng trang). Gộp ép sẽ đổi hành vi thật của 1 bên. Tương tự,
+2 vòng lặp nội bộ của `generate-pdf/route.ts` (vẽ theo `allPlacements`, chạy 2 lần — nhánh
+chính và nhánh fallback khi đọc metadata lỗi) vẫn giữ nguyên cấu trúc, chỉ đổi 2 điểm: gọi
+`getSignatureImage()` dùng chung, và gọi `computeNameSlot(placement, ISO_SIGNER_NAME_STYLE)`
+thay vì hàm `buildSignerNamePlacement` cục bộ đã xóa — **không đụng** logic
+`hasExistingName`/`findNearbyText` (kiểm tra tránh đè lên chữ có sẵn) là nghiệp vụ riêng của
+ISO, không có ở 2 route kia, nên không đưa vào `stamp-pdf.ts`.
+
+### Verify — byte-identical, không chỉ so bằng mắt
+
+Baseline pixel-diff (mục 6, `C:\Users\Software\rubber-erp-ky-so-baseline\`) không dùng được
+trực tiếp ở đây vì đó là ảnh của tài liệu ĐÃ ký xong (không tái tạo lại được input trung gian
+đầy đủ — đúng giới hạn đã ghi trong `README.md` của baseline). Thay vào đó dùng đúng phương án
+2 mà `README.md` gợi ý: viết script gọi thẳng hàm đã refactor với input tự tạo, so kết quả với
+bản dựng lại y hệt logic CŨ (chép tay từ code đọc trực tiếp trước khi sửa, không phải suy diễn
+lại từ trí nhớ).
+
+Kỹ thuật: `node --experimental-strip-types` (Node 24, có sẵn trên máy) chạy thẳng
+`src/lib/signing/stamp-pdf.ts` — import trực tiếp qua `file://` path tuyệt đối, không cần
+`tsx`/`ts-node` (không có trong repo). Script test dựng trong scratchpad (không phải file của
+repo), 4 kịch bản:
+
+1. ISO — placement chính đầy đủ (chữ ký + tên + tiền tố "TM.") + `extraPlacements` (nhân bản
+   khung sang trang 2).
+2. Văn bản — `placement = null`, dùng nhánh fallback `defaultX/y=50/w=120/h=60`.
+3. ISO — tên rất dài (buộc vòng lặp thu nhỏ cỡ chữ 13→9 chạy thật, không chỉ dùng cỡ mặc
+   định), `showSignature=false`, `nameX/nameY/nameWidth` đặt tay (bỏ qua công thức fallback),
+   `extraPlacements`.
+4. Văn bản — placement thật (không fallback) + `extraPlacements` + **thiếu ảnh chữ ký**
+   (`sigBuf=null`, tên vẫn phải vẽ) + tên dài (buộc vòng lặp 10→7 chạy thật).
+
+Cả 4 kịch bản: **PDF xuất ra từ code CŨ và code MỚI byte-identical tuyệt đối**
+(`Buffer.compare(...) === 0`) — không phải "nhìn giống nhau", mà đúng nghĩa đen từng byte một,
+kể cả 2 kích thước file khớp chính xác (`1351161`/`676190` bytes). Đây là bằng chứng mạnh hơn
+hẳn so pixel (pixel-diff vẫn có sai số nén ảnh/anti-aliasing; byte-diff thì không).
+
+### Kiểm tra khác
+
+`npx tsc --noEmit` sạch cho toàn repo; `npx eslint` trên cả 6 file đã sửa/thêm sạch (chỉ còn
+đúng 3 warning `no-unused-vars` **đã tồn tại từ trước phiên này**, xác nhận bằng cách nhớ đúng
+vị trí dòng không liên quan gì tới các hàm đã sửa). Không chạy `npm run build` — đúng quy tắc
+đã rút ra ở mục "Fix bug 2026-08-24" (build có thể đụng `.next/` của dev server đang chạy song
+song, và không cần thiết vì `tsc`/`eslint` đã đủ tin cậy cho refactor nội bộ không đổi route
+API).
+
+Tổng cộng: **-188 dòng** trùng lặp trên 4 route (`documents/sign/route.ts` -124,
+`iso/forms/[id]/finalize/route.ts` -132, `generate-pdf/route.ts` -46, `generate-office/route.ts`
+-8, cộng +61 dòng do import/wrapper mới), đổi lấy 2 file dùng chung mới (~220 dòng, có JSDoc/
+comment giải thích rõ ranh giới cố ý không gộp).
+
+### CHƯA làm trong Giai đoạn 1 (đúng phạm vi docx, không tự mở rộng)
+
+- `notifySigners(...)` (hợp nhất `iso/notify` + `iso/forms/notify` + `documents/notify`) —
+  docx liệt kê nhưng 3 route notify này có payload/kênh (Telegram bot khác nhau: ISO dùng
+  `ISO_TELEGRAM_BOT_TOKEN`, ghi chú CLAUDE.md khác) đủ khác biệt để cần 1 lượt đối chiếu riêng
+  như đã làm với `stampPdf` — chưa làm trong phiên này, để dành phiên sau nếu cần.
+- `signWithSmartCA(...)` — đúng kế hoạch, để rỗng tới khi có hợp đồng VNPT.
+- `applyPositionTemplate(...)` (áp `mau_vi_tri`) — chưa có UI "vẽ mẫu" thật (chỉ có mockup mục
+  8), chưa cần hàm này.
+- `replaceDocxImageTag`/`replaceFormTags`/`stampOffice` (logic thay tag DOCX/XLSX) — 3 bản
+  này KHÁC NHAU thật sự về tên tag/quy ước từng module, rủi ro gộp cao hơn giá trị, và docx
+  mục 7 không liệt kê các hàm này — cố ý bỏ ngoài phạm vi Giai đoạn 1.
+- QR generation/drawing — xem lý do ở mục "Phần CỐ Ý không gộp" phía trên.
+- 2 vòng lặp `allPlacements` trong `generate-pdf/route.ts` vẫn còn trùng lặp NỘI BỘ với nhau
+  (chính nó lặp 2 lần trong cùng file, nhánh chính + nhánh fallback) — chưa gộp 2 nhánh đó lại
+  thành 1 hàm dùng chung trong phiên này (rủi ro cao hơn giá trị do 2 nhánh đọc biến ngữ cảnh
+  hơi khác nhau — `signerNames` map vs `userId` đơn — cần refactor riêng, không phải phạm vi
+  "tách sang `src/lib/signing/`").
+
+### Đã test tay qua UI thật (2026-08-28) — Giai đoạn 1 hoàn tất, đã verify sống
+
+Test bằng cách tự tạo 3 tài khoản test tạm (`role=admin`, factory `phuochoa_kt`, đặt PIN
+`246813` qua `/api/sign/set-pin`) rồi ký thật qua trình duyệt (Playwright, không phải gọi API
+trực tiếp) — đúng theo lựa chọn "Tôi tự tạo tài khoản test tạm" của người dùng. Không đụng bất
+kỳ tài liệu/dữ liệu thật nào — mọi tài liệu test đều tự tạo mới (`NMCB-QT97`/`NMCB-QT97-F01`
+cho ISO, `01/CV-QLCL "Văn bản test Giai đoạn 1 - E2E"` cho Văn bản), và đã dọn sạch sau khi
+xong (xem mục "Dọn dẹp" bên dưới).
+
+1. **ISO PDF (`api/sign/generate-pdf/route.ts`)** — PASS. Ký đủ 3 bước (soạn thảo → xem xét →
+   phê duyệt) tài liệu cha `NMCB-QT97` qua `/dashboard/iso/documents/[id]`. PDF sau ký hiển thị
+   đúng cả 3 chữ ký/tên/QR qua nhiều lần stamp chồng lên nhau, không lỗi.
+2. **ISO Form (`api/iso/forms/[id]/finalize/route.ts`)** — PASS. Tạo hồ sơ con `NMCB-QT97-F01`
+   qua `/dashboard/iso/forms/new` (phải né 1 template PDF-only ban đầu vì thiếu file Office —
+   đã tạo lại đúng field "Biểu mẫu test Giai đoạn 1" có file PDF), ký đủ 3 bước qua
+   `/dashboard/iso/forms/[id]`. PDF cuối đúng.
+3. **Văn bản (`api/documents/sign/route.ts`)** — PASS, **verify kỹ nhất** vì đây là route có
+   thay đổi lớn nhất (`stampPdfStep()` viết lại hoàn toàn, -124 dòng). Tạo văn bản
+   `01/CV-QLCL` qua `/dashboard/documents/new` (Loại CV, phòng ban QLCL, 1 bước ký_phòng_ban
+   KTNN, người phê duyệt cuối), ký đủ Soạn thảo → Ký phòng ban → Phê duyệt qua
+   `/dashboard/documents/[id]`, tới `trang_thai: "da_phe_duyet"`. Tải PDF `phe_duyet.pdf`
+   cuối cùng và render bằng Chromium có đầu (`file://...#page=N`) để xem trực tiếp: trang 1 có
+   đủ 2 khung tên+QR (mỗi bước 1 khung, tại 2 vị trí khác nhau do UI tự tránh chồng lấp), trang
+   2 có QR góc trên-phải trên MỌI trang đúng như thiết kế ("Văn bản luôn vẽ QR trên mọi trang
+   kể cả không override"). Vì 2 tài khoản test chưa từng upload ảnh chữ ký, `sigBuf` luôn
+   `null` → nhánh `if (sigBuf) await drawSignatureImage(...)` đúng theo đúng thiết kế: bỏ qua
+   vẽ ảnh, chỉ vẽ tên qua `drawSignerName` — xác nhận nhánh "không có ảnh chữ ký" hoạt động
+   đúng.
+4. **ISO Office (`api/sign/generate-office/route.ts`)** — PASS qua kiểm chứng gián tiếp, **không
+   ký live qua UI** (dựng 1 file DOCX có tag ISO hợp lệ tốn công không tương xứng giá trị, vì
+   thay đổi ở route này chỉ là 1 wrapper cơ học 8 dòng, không đụng logic thay tag DOCX/XLSX).
+   Đã xác nhận bằng cách gọi trực tiếp đúng lệnh download Storage y hệt `getSignatureImage()`
+   dùng (bucket `iso-documents`, path `signatures/{factory}/{user}/chu_ky.png`) với 1 **chữ ký
+   thật của nhân viên thật** (id `1f8c52f3-...`, chỉ đọc, không sửa) — trả về đúng 21.221 byte,
+   xác nhận là JPEG thật (`ffd8ff...`) dù đuôi file là `.png` → chứng minh nhánh
+   `embedPng(...).catch(() => embedJpg(...))` trong `stamp-pdf.ts`'s `drawSignatureImage()` là
+   **bắt buộc phải có** (không phải code thừa) vì dữ liệu thật luôn là JPEG trá hình PNG. Gọi
+   lại với `user_id` không tồn tại → trả về `null` đúng hợp đồng hàm. Đây là phép thử duy nhất
+   trong cả 4 route thực sự exercise nhánh "có ảnh chữ ký thật" (3 test ở trên chỉ test được
+   nhánh `null`).
+
+**Kết luận: Giai đoạn 1 (tách `src/lib/signing/`) đã hoàn tất và verify đầy đủ** — cả byte-
+identical test lẫn ký thật qua UI cho 3/4 route, route thứ 4 verify qua đúng phần thay đổi
+thực sự của nó (wrapper `getSignatureImage`) với dữ liệu chữ ký thật.
+
+### Dọn dẹp sau test (2026-08-28)
+
+Đã xóa sạch: 9 file Storage (draft/signed PDF của cả 3 tài liệu test), `iso_documents` (2
+dòng), `iso_form_instances` + `iso_form_instance_logs`, `van_ban_documents` (1 dòng),
+`sign_pins` (3 dòng), `profiles` (3 dòng, xóa rồi tạo lại — xem dưới), `notifications` phát
+sinh cho 3 user test.
+
+**Không xóa được**: `doc_approval_log` — đúng theo thiết kế, trigger `nhat_ky_bat_bien`
+(Giai đoạn 0 mục 3) chặn cứng `DELETE` kể cả bằng service-role key, đúng ý đồ "bất biến".
+Vì các dòng log này còn FK tới `auth.users`, **3 tài khoản Auth test cũng không xóa được**
+(`auth.admin.deleteUser` báo lỗi "Database error deleting user"). Đây là hệ quả đúng đắn của
+tính năng bất biến vừa xây ở Giai đoạn 0 — không phải bug, không cố gắng bypass. Đã xử lý bằng
+cách tạo lại đúng 3 dòng `profiles` (đã lỡ xóa trước khi phát hiện vướng FK) với
+`status="disabled"` và `full_name` gắn hậu tố `"(TEST - đã disable)"` để không ai nhầm là nhân
+viên thật nếu thấy trong danh sách user — 3 tài khoản username `e2e_signing_verify` /
+`e2e_signing_reviewer` / `e2e_signing_approver` sẽ tồn tại vĩnh viễn ở trạng thái `disabled`,
+không đăng nhập được, không có quyền gì. Đây là bằng chứng sống rằng audit log của Giai đoạn 0
+hoạt động đúng thiết kế ngay cả khi có người cố tình dọn dẹp bằng service-role key.
+
+### Người dùng đã chốt (2026-08-28, cuối phiên) — bắt đầu Giai đoạn 2 ở session khác
+
+Giai đoạn 1 coi như xong hẳn. Người dùng đã xác nhận muốn làm tiếp Giai đoạn 2 nhưng ở 1
+session mới — dưới đây là kết quả rà nhanh (`grep "window.print()"` toàn `src/app/dashboard`)
+để session sau không phải dò lại từ đầu:
+
+| Module | File có `window.print()` | Ghi chú phạm vi |
+|---|---|---|
+| Chất lượng | `quality/page.tsx` (hàm build chuỗi HTML "Phiếu KQKN", mở `window.open` + in) | Ứng viên chuyển đổi — đây là chứng từ kết quả kiểm nghiệm thật, sau này cần gắn ký số |
+| Chất lượng | `quality/reports/print/page.tsx` | **KHÔNG đụng** — đây là báo cáo thống kê có biểu đồ Recharts (SVG), `.claude/rules/25-quality-targets-reports-module.md` đã ghi rõ cố ý dùng HTML-print, không convert sang jsPDF |
+| Xuất hàng | `export/print/page.tsx` | Ứng viên chuyển đổi — chưa đọc nội dung chi tiết, cần khảo sát khi bắt tay vào |
+| Bảo trì | `maintenance/print/page.tsx` | Ứng viên chuyển đổi — file lớn, ≥9 mẫu in (F13/F10/F15/F03/F06/F01/F02/F08/F07), xem đầy đủ ở `.claude/rules/14-maintenance-module.md` |
+
+3 file khác có `window.print()` (`inventory/print*`, `process/print`, `documents/print`) **ngoài
+phạm vi Giai đoạn 2** — không đụng.
+
+### Prompt gợi ý cho session tiếp theo
+
+```
+Đọc mục "Cập nhật (tiếp 4)", "Đã test tay qua UI thật (2026-08-28)" và "Người dùng đã chốt
+(2026-08-28, cuối phiên)" trong CLAUDE.md. Giai đoạn 1 (tách src/lib/signing/) đã CODE XONG và
+ĐÃ TEST ĐẦY ĐỦ — không cần test lại trừ khi nghi ngờ có regression mới.
+
+Bắt đầu Giai đoạn 2: chuyển 3 luồng in HTML+window.print() sau đây sang xuất PDF thật bằng
+jsPDF, mirror đúng pattern đã có ở src/lib/dispatch-pdf.ts / output-pdf.ts / storage-pdf.ts
+(không phải viết lại pattern mới):
+  1. Chất lượng — hàm build "Phiếu KQKN" trong quality/page.tsx (chứng từ kết quả kiểm nghiệm).
+  2. Xuất hàng — export/print/page.tsx.
+  3. Bảo trì — maintenance/print/page.tsx (nhiều mẫu F13/F10/F15/F03/F06/F01/F02/F08/F07, xem
+     .claude/rules/14-maintenance-module.md để nắm đủ cấu trúc trước khi sửa).
+
+Mục đích của Giai đoạn 2 CHỈ là có file PDF thật (bytes thật, có trang/tọa độ) để Giai đoạn 3+
+sau này gắn được ký số — KHÔNG đụng gì tới workflow ký, KHÔNG đổi schema DB trong giai đoạn
+này trừ khi thực sự cần cột lưu URL PDF mới (nếu cần, hỏi lại trước khi viết migration).
+
+KHÔNG đụng quality/reports/print/page.tsx (báo cáo thống kê có Recharts — cố ý giữ HTML-print
+theo .claude/rules/25-quality-targets-reports-module.md) và 3 file print khác ngoài phạm vi
+(inventory/print*, process/print, documents/print).
+
+Trước khi code: đọc kỹ nội dung thật của cả 3 file trên (đặc biệt export/print/page.tsx —
+chưa khảo sát chi tiết ở phiên trước), liệt kê rõ từng mẫu in cần chuyển, rồi hỏi lại người
+dùng xác nhận phạm vi/thứ tự làm trước khi bắt đầu — đúng quy trình đã dùng xuyên suốt dự án
+(không tự ý suy diễn phạm vi cho thay đổi nhiều file).
+
+Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm tra — không chạy `npm run build` khi
+không chắc dev server người dùng có đang chạy song song hay không (bài học đã ghi ở mục
+"Fix bug 2026-08-24" trong lịch sử CLAUDE.md).
+```
+
+## Cập nhật (tiếp 5) — Giai đoạn 2 (một phần): Chất lượng + Xuất hàng đã chuyển sang PDF
+thật; Bảo trì cố ý CHƯA làm, tách thành phase riêng
+
+Trước khi code đã khảo sát đủ 3 file đích và xin xác nhận phạm vi qua `AskUserQuestion` (đúng
+quy trình bắt buộc) — người dùng chốt: (1) **tách Bảo trì thành phase riêng**, phiên này chỉ
+làm Chất lượng + Xuất hàng; (2) độ trung thực chỉ cần **giống nội dung/cấu trúc**, không cần
+khớp pixel-perfect với bản HTML/`window.print()` cũ; (3) hành vi nút bấm đổi thành **tải file
+PDF trực tiếp** (`doc.save(...)`), bỏ hẳn `window.open` + auto `window.print()`.
+
+### Lý do tách Bảo trì
+
+`maintenance/print/page.tsx` có **18 hàm render phủ 9 mẫu nghiệp vụ** (F13/F10/F15+biến thể
+Bảo dưỡng/F03/F06/F01/F02/F08/F07), riêng file này (2334 dòng) đã lớn hơn Chất lượng + Xuất
+hàng cộng lại — chuyển hết trong 1 phiên rủi ro cao, không kiểm thử kỹ được từng mẫu. Chưa
+đụng file này ở phiên này; xem "Bước tiếp theo" cuối mục để biết cách bắt đầu phiên sau.
+
+### Chất lượng — `src/lib/quality-pdf.ts` (mới)
+
+- `downloadQualityKqknPdf(dateResults, date, fCode)` — mirror đúng `buildBatchPage`/
+  `buildPrintHTML` cũ (đã xóa khỏi `quality/page.tsx`, ~168 dòng) bằng `jsPDF` + `jspdf-autotable`
+  (`theme:"grid"`, header 2 tầng dùng `rowSpan`/`colSpan` — 3 cột đầu + cột "Đạt hạng" rowSpan
+  xuyên 2 tầng, 8 nhóm chỉ tiêu colSpan phía trên). Tô màu từng ô (xanh=đạt/đỏ đậm=không đạt/
+  xám=cột phụ) qua `didParseCell`, dùng đúng bảng màu gốc (`#065f46`/`#dc2626`/`#94a3b8`).
+  Landscape A4, nhiều batch (đợt kiểm nghiệm) → nhiều trang (`doc.addPage()` giữa các batch),
+  có đánh số "Trang X/Y" cuối mỗi trang (mirror convention `output-pdf.ts`).
+- **Quyết định kỹ thuật quan trọng**: bỏ ký tự "X̄" (X + dấu gạch ngang kết hợp Unicode
+  U+0304), thay bằng **"TB"** (Trung bình) trong tiêu đề cột thống kê. jsPDF không có bộ máy
+  text-shaping (không như trình duyệt render HTML cũ) — ký tự kết hợp (combining mark) qua
+  font nhúng có rủi ro không xếp chồng đúng lên ký tự gốc, và không có cách nào trong phiên
+  này để kiểm chứng trực quan kết quả render (không chạy `npm run build`/mở trình duyệt xem
+  PDF thật). "TB" an toàn tuyệt đối, giữ đúng nghĩa, đã xác nhận phù hợp với mức độ trung thực
+  "nội dung/cấu trúc" đã chốt. Nếu người dùng test tay thấy cần đổi lại "X̄", đây là chỗ duy
+  nhất cần sửa (`HEAD_ROW_2` trong `quality-pdf.ts`).
+- 2 call site (`quality/page.tsx`, nút "PDF" ở danh sách theo ngày + ở tab Giám sát) đổi từ
+  `window.open("","_blank",...); w.document.write(buildPrintHTML(...))` sang
+  `await downloadQualityKqknPdf(...)` trong `try/catch`, báo lỗi qua `showToast` có sẵn nếu
+  tạo PDF thất bại.
+- **Dọn dẹp phát sinh**: `factoryName` (state + `setFactoryName(...)` trong bootstrap) trở
+  thành dead code sau khi xóa `buildPrintHTML` (tham số này vốn đã KHÔNG được dùng trong bản
+  gốc — `buildPrintHTML` nhận `factoryName` nhưng chưa từng render nó) — đã xóa hẳn thay vì để
+  lại state chết, theo đúng nguyên tắc "không giữ lại code không dùng".
+
+### Xuất hàng — `src/lib/export-order-pdf.ts` (mới)
+
+- `downloadExportOrderPdf(order, factoryName?)` — mirror đúng `export/print/page.tsx` cũ:
+  header (logo `/logo-phk-moi.png` + tên công ty + QR trỏ `{origin}/dashboard/eudr?order=...`
+  — đổi từ domain hard-code `qlsxkpt.vercel.app` sang `window.location.origin` động, khớp
+  đúng convention `buildStorageLookupUrl`/`buildProductLabelLookupUrl` đã dùng nơi khác, chạy
+  đúng cả khi test trên `localhost`), bảng thông tin đơn (khách hàng/mã đơn/số hóa đơn-hợp
+  đồng/số thông báo/chủng loại+tổng lượng/loại bọc-pallet), khối từng xe (biển số/loại xe/số
+  lô đã gán/danh sách mã lô) kèm tối đa 3 ảnh hiện trường, khối chữ ký 3 cột cuối trang. A4
+  portrait, tự `doc.addPage()` khi 1 khối xe hoặc khối chữ ký không đủ chỗ còn lại trên trang
+  (`ensureSpace()`).
+- **Ảnh hiện trường tải từ Supabase Storage (cross-origin, khác hẳn ảnh logo tĩnh cùng
+  origin)**: `fetchRemoteImage(url)` fetch → đọc `Blob` → `FileReader.readAsDataURL` → decode
+  kích thước thật qua `new Image()` để vẽ đúng tỷ lệ khung hình (contain, không méo, khác
+  `object-cover` cắt ảnh của bản CSS cũ — chấp nhận được vì đã chốt không cần pixel-perfect).
+  **Lỗi mềm bắt buộc**: 1 ảnh tải lỗi (mạng, CORS, file đã xóa...) chỉ in dòng "Không tải được
+  ảnh" đúng ô đó, không được làm hỏng toàn bộ PDF — chưa xác nhận được Supabase Storage bucket
+  public có luôn trả `Access-Control-Allow-Origin` cho `fetch()` đọc bytes hay không (khác
+  hẳn `<img src>` vốn không cần CORS để hiển thị), đây là rủi ro cần xác nhận khi test tay.
+- `export/print/page.tsx` giữ nguyên guard quyền/query cũ (`hydrateActiveSession` +
+  `hasPermission(user,"export.view")` + lọc `factory_id`, redirect `/dashboard` nếu chặn) —
+  chỉ đổi phần hiển thị: sau khi tải xong dữ liệu đơn, tự động gọi `downloadExportOrderPdf()`
+  qua `useEffect`, hiện 1 card nhỏ với 3 trạng thái (đang tạo / đã tải xong + nút "Tải lại" /
+  lỗi + nút "Thử lại"). Route/query param `?id=...` và cách mở (`target="_blank"` từ
+  `export/page.tsx`) giữ nguyên không đổi.
+- `export/page.tsx`: đổi nhãn nút "In Biên bản" → "Tải PDF biên bản" cho khớp hành vi mới
+  (không còn mở dialog in, mà tải file .pdf về máy ngay).
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` trên toàn bộ 5 file đã sửa/thêm
+(`quality-pdf.ts`, `export-order-pdf.ts`, `quality/page.tsx`, `export/print/page.tsx`,
+`export/page.tsx`) — **0 lỗi/cảnh báo mới**, đối chiếu `git diff --stat` xác nhận các lỗi
+`no-explicit-any`/`no-unused-vars` còn lại trong `quality/page.tsx` đều là pre-existing (nằm ở
+các dòng tôi không chạm tới). Không chạy `npm run build`.
+
+### CHƯA test tay trên trình duyệt thật — bắt buộc trước khi coi 2 module này là xong
+
+1. Chất lượng: bấm nút "PDF" ở 1 dòng ngày trong danh sách kiểm nghiệm (nhiều đợt/nhiều lô
+   cùng ngày) → xác nhận file `.pdf` tải về đúng, mở ra đọc được, header 2 tầng + màu đạt/
+   không đạt đúng, nhiều batch ra nhiều trang; bấm nút "PDF" ở 1 card trong tab Giám sát → xác
+   nhận tương tự. Xác nhận chữ "TB" thay "X̄" chấp nhận được về mặt chuyên môn (nếu không, sửa
+   `HEAD_ROW_2` trong `quality-pdf.ts`).
+2. Xuất hàng: mở 1 đơn xuất có ≥2 xe, ít nhất 1 xe có đủ 3 ảnh và 1 xe không có ảnh nào, bấm
+   "Tải PDF biên bản" → xác nhận tab mới hiện đúng trạng thái "Đang tạo PDF..." rồi "Đã tải
+   file PDF về máy", file tải về đúng nội dung, ảnh hiện đúng (đặc biệt xác nhận ảnh Storage
+   KHÔNG bị lỗi CORS khi fetch — nếu bị lỗi, mọi ảnh sẽ hiện "Không tải được ảnh" thay vì ảnh
+   thật, cần điều tra CORS config của bucket `order-files`/bucket ảnh xe nếu gặp); test 1 đơn
+   có nhiều xe đủ dài để buộc sang trang 2, xác nhận không bị cắt ngang khối xe.
+3. Xác nhận tài khoản không có `export.view` vẫn bị redirect `/dashboard` đúng như cũ.
+
+### Bước tiếp theo — Giai đoạn 2b (Bảo trì, chưa bắt đầu)
+
+`maintenance/print/page.tsx` (18 hàm render, 9 mẫu F13/F10/F15/F15BaoDuong/F03/F06/F01/F02/
+F08/F07) cần đọc kỹ `.claude/rules/14-maintenance-module.md` (đã mô tả đủ chi tiết từng mẫu)
+trước khi bắt đầu — nhiều bảng merge cột, danh sách người ký động qua `staffMap`, các trang
+tổng hợp nhiều thiết bị/nhiều xe trong 1 lần in (`asset_ids`/`vehicle_ids` query param). Nên
+tách thêm thành các phase nhỏ hơn theo nhóm mẫu (ví dụ: F13/F10/F15 sự cố trước, rồi F03/F06/
+F15BaoDuong bảo dưỡng, rồi F01/F02 lý lịch, rồi F08 + F07 sau) thay vì làm cả 18 hàm cùng lúc —
+hỏi lại người dùng thứ tự ưu tiên trước khi code, theo đúng quy trình đã áp dụng ở phiên này.
+
+### Prompt gợi ý để mở đầu session tiếp theo (Giai đoạn 2b — Bảo trì)
+
+```
+Đọc mục "Cập nhật (tiếp 5) — Giai đoạn 2 (một phần)" trong CLAUDE.md — Chất lượng và Xuất
+hàng đã chuyển xong sang PDF thật (src/lib/quality-pdf.ts, src/lib/export-order-pdf.ts),
+CHƯA test tay (xem checklist "CHƯA test tay trên trình duyệt thật" trong đúng mục đó — nếu
+tôi đã test và có phản hồi, ưu tiên phản hồi của tôi hơn checklist cũ).
+
+Tiếp tục Giai đoạn 2b: chuyển maintenance/print/page.tsx (18 hàm render, 9 mẫu F13/F10/F15/
+F15BaoDuong/F03/F06/F01/F02/F08/F07 — xem đủ cấu trúc trong .claude/rules/14-maintenance-
+module.md) từ HTML + window.print() sang PDF thật bằng jsPDF, mirror đúng pattern đã dùng ở
+src/lib/quality-pdf.ts / src/lib/export-order-pdf.ts / src/lib/dispatch-pdf.ts (KHÔNG viết
+lại pattern mới). Mục đích CHỈ là có file PDF thật (bytes thật, có trang/tọa độ) để giai đoạn
+ký số sau này gắn vào — KHÔNG gắn ký số ở bước này, KHÔNG đổi schema DB trừ khi thực sự cần
+cột lưu URL PDF mới (nếu cần, hỏi lại trước khi viết migration).
+
+File này lớn hơn hẳn 2 module đã làm (2334 dòng, 18 hàm render) — đọc kỹ toàn bộ file trước,
+liệt kê rõ từng mẫu, rồi đề xuất chia nhỏ thành nhiều phase con (ví dụ theo nhóm nghiệp vụ:
+sự cố F13/F10/F15 trước, rồi bảo dưỡng F03/F06/F15BaoDuong, rồi lý lịch F01/F02, rồi F08+F07
+sau) và hỏi lại tôi xác nhận thứ tự/phạm vi trước khi bắt đầu code — đúng quy trình đã áp
+dụng ở phiên trước (không tự ý suy diễn phạm vi cho thay đổi nhiều file).
+
+Độ trung thực đã chốt từ phiên trước: giống về nội dung/cấu trúc (bảng đúng, chữ ký đúng vị
+trí tương đối, QR đúng chỗ), không cần khớp pixel-perfect font-size/màu với bản HTML cũ. Hành
+vi nút bấm: tải file PDF trực tiếp (doc.save), không mở tab rồi window.print() tự động.
+
+Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm tra — không chạy `npm run build` khi
+không chắc dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (tiếp 6) — Giai đoạn 2b (Bảo trì) đã code xong cả 4 phase, chưa test tay
+
+Đã hỏi xác nhận qua `AskUserQuestion` trước khi code (2 câu): (1) làm liên tục cả 4 phase trong
+1 phiên thay vì dừng sau Phase 1 — người dùng chọn làm liên tục; (2) nhúng ảnh hiện trường thật
+vào PDF (mirror `export-order-pdf.ts`) thay vì chỉ ghi số lượng — người dùng chọn nhúng ảnh
+thật. Đã đọc toàn bộ 2334 dòng `maintenance/print/page.tsx` trước khi code, xác nhận qua grep
+rằng 2 loại `su_co`/`de_nghi` không còn nút bấm nào trỏ tới nữa (chỉ tồn tại lồng bên trong
+bundle `su_co_nho`) — chỉ **7 URL `type`** còn thực sự được gọi: `su_co_nho`, `bao_duong`,
+`bao_duong_xe`, `sua_chua_nho_xe`, `ly_lich`, `ly_lich_xe`, `bao_cao_ky`.
+
+### Quyết định kiến trúc quan trọng — KHÔNG đụng 3 file gọi (`records/[id]`, `history`,
+`records`)
+
+Khác với Chất lượng/Xuất hàng (mỗi cái chỉ có 1 loại chứng từ), Bảo trì có 7 URL `type` với
+data-loading phức tạp khác nhau (multi-asset, multi-vehicle, multi bộ phận + quy đổi tiền tệ)
+đã chạy đúng từ trước trong chính `maintenance/print/page.tsx`. Thay vì sửa 3 file gọi
+(`records/[id]/page.tsx`, `history/page.tsx`, `records/page.tsx`) để tự tải dữ liệu + gọi PDF,
+đã **giữ nguyên 100% route `/dashboard/maintenance/print` và mọi `<Link target="_blank">` hiện
+có** — chỉ viết lại nội dung file: giữ nguyên tuyệt đối toàn bộ `useEffect` tải dữ liệu (bootstrap
+guard quyền + query Supabase theo từng `type`, ~400 dòng không đổi 1 ký tự logic), chỉ thay khối
+JSX render 18 hàm + `window.print()` bằng gọi hàm `jsPDF` mới + `doc.save()` + card trạng thái
+nhỏ (mirror đúng `export/print/page.tsx`: "Đang tạo PDF..." → "Đã tải file PDF về máy" + nút "Tải
+lại" / "Không tạo được PDF, thử lại?" + nút "Thử lại", nút "Đóng trang" thay cho "Quay lại" cũ).
+Cách này an toàn hơn hẳn — không rủi ro gì tới 3 file gọi, tận dụng đúng logic query đã chạy ổn
+định, người dùng bấm nút y hệt như trước (mở tab mới), chỉ khác là tab đó tải PDF về thay vì mở
+hộp thoại in.
+
+### `src/lib/maintenance-pdf.ts` (mới, ~1710 dòng) — toàn bộ 4 phase trong 1 file
+
+Theo đúng convention 1-file-1-domain đã có (`quality-pdf.ts`, `export-order-pdf.ts`,
+`dispatch-pdf.ts`...), không tách nhiều file nhỏ. Vẽ bằng kết hợp text thủ công (mirror
+`export-order-pdf.ts`) + `jspdf-autotable` cho bảng dữ liệu thật (vật tư, F01/F02/F06/F07).
+
+- **Workhorse dùng khắp file**: `drawLabelContent(doc,x,y,width,label,content,{blankCount})` —
+  1 hàm xử lý MỌI kiểu "Nhãn: nội dung" trong toàn bộ 9 mẫu (nội dung rỗng + có `blankCount` →
+  vẽ dòng kẻ trống để ký tay; có nội dung → thử vẽ liền dòng với nhãn, không đủ chỗ thì tự xuống
+  dòng + wrap qua `splitTextToSize`, hỗ trợ cả nội dung nhiều đoạn nối `\n` như `mergeNoidung`).
+  Thay thế hoàn toàn ~15 chỗ JSX gốc dùng pattern `{content ? <span>{content}</span> :
+  <BlankLine count={N}/>}` khác nhau.
+- **2 mẫu layout tiêu đề+QR** tái dùng cho đúng nhóm mẫu: `drawTitleWithQr` (QR nằm ngay cạnh
+  tiêu đề cùng hàng — F13/F15/F15BaoDuong/F15SmallVehicle) và `drawQrThenDateThenTitle` (QR đứng
+  riêng phía trên, rồi dòng ngày căn phải, rồi mới tới tiêu đề — F10/F03/F06/F08NB) — khớp đúng
+  2 kiểu bố cục khác nhau đã xác nhận khi đọc kỹ JSX gốc, không gộp nhầm thành 1 kiểu.
+- **Không dùng font "italic"** — `ensurePdfFont()` (`pdf-qr-shared.ts`) chỉ đăng ký 2 style
+  `normal`/`bold` cho NotoSans, không có italic; mọi chữ nghiêng trong bản HTML gốc (ghi chú phụ,
+  "(Ký và ghi rõ họ tên)"...) chuyển sang chữ thường màu xám thay vì nghiêng.
+- **Không dùng ký hiệu tiền tệ Unicode ៛/₫** — rủi ro thiếu glyph Khmer/mở rộng trong font
+  NotoSans-Regular.ttf (chỉ hỗ trợ Latin). Hàm `pdfMoney()` mới dùng `$` cho USD (an toàn, có
+  trong Latin cơ bản), còn lại in thẳng mã tiền tệ ASCII sau số (`"25.000 VND"`, `"100 KHR"`)
+  thay vì ký hiệu — khác cách hiển thị HTML cũ (`currencySymbol()`) nhưng giữ đúng nội dung,
+  không có tiền lệ nào trong repo từng render 2 ký hiệu này qua jsPDF nên không có gì để đối
+  chiếu độ an toàn, chọn phương án chắc chắn không lỗi thay vì thử.
+- **Ảnh hiện trường**: `fetchRemoteImage`/`drawImageContain`/`collectAndFetchImages` — copy từ
+  `export-order-pdf.ts` (không refactor thành helper dùng chung 2 file, giữ đúng nguyên tắc mỗi
+  file PDF tự chứa đã có trong repo). `drawPhotoSection()` vẽ lưới 2 cột tỉ lệ 4:3, tự phân
+  trang; `drawPhotoPage()` (không có "Ảnh chung", dùng cho `su_co_nho`/`sua_chua_nho_xe`) và
+  `drawPhotoPageWithCommon()` (có khối "Ảnh chung" trước, dùng cho `bao_duong`/`bao_duong_xe`) —
+  khớp đúng 2 biến thể `PrintImages`/`PrintImagesPage` gốc. 1 ảnh tải lỗi chỉ in "Không tải được
+  ảnh" đúng ô đó, không hỏng cả PDF (giữ đúng nguyên tắc lỗi mềm đã có ở `export-order-pdf.ts`).
+- **9 hàm vẽ mẫu** (`drawF13`, `drawF10`, `drawF15`, `drawF03`, `drawF15BaoDuong`, `drawF06`,
+  `drawF08NB`, `drawF15SmallVehicle`, `drawF01`, `drawF02`, `drawF07`) — mỗi hàm port 1:1 logic
+  nghiệp vụ từ đúng component JSX gốc, kể cả các nhánh rẽ tinh vi: 4 biến thể danh sách "Chúng
+  tôi gồm:" khác nhau giữa F13 (đánh số, có "Tổ trưởng cơ điện/cơ khí" tự nhận diện qua
+  `findToTruongCoDien` + placeholder khi thiếu)/F15 (giữ nguyên placeholder)/F15BaoDuong (thêm
+  tài xế nếu Đội xe)/F15SmallVehicle (không placeholder, luôn thêm tài xế dòng đầu); checkbox
+  "Chất lượng: Đạt/Không đạt" vẽ bằng ô vuông + "X" (không dùng ký tự ✓ Unicode, cùng lý do rủi
+  ro glyph như tiền tệ); `mergeNoidung()` cho nội dung chung cấp biên bản + riêng từng dòng thiết
+  bị (Bảo dưỡng nhiều thiết bị); `buildF06Rows()` port đúng thứ tự dòng (nhiên liệu → từng vật tư
+  → công thợ → tổng cộng in đậm).
+- **7 hàm `downloadMaintenanceXxxPdf()` export** — mỗi hàm là 1 orchestrator ghép các `drawFxx`
+  bằng `doc.addPage()` giữa các mẫu (mirror đúng `print:page-break-before-always` gốc), chỉ thêm
+  trang ảnh khi thực sự có ảnh (`hasLineImages`/`hasAnyImages`), rồi `doc.save()` với tên file
+  tiếng Việt không dấu qua `safeName()`.
+
+### `maintenance/print/page.tsx` (viết lại, 2334 → 573 dòng)
+
+- Xóa toàn bộ 18 hàm component JSX (`PrintSuCo`, `PrintF10`, ... `PrintBaoCaoKy`) + các type
+  cục bộ (`RecordData`, `LineData`, `MaterialRow`, `HistoryRow`, `AssetInfo`, `VehicleInfo`,
+  `DriverAssignmentRow`, `VehicleHistoryRow`, `BaoCaoKyRow`, `BaoCaoKySection`) — nay import
+  thẳng từ `@/lib/maintenance-pdf` (1 nguồn duy nhất, không còn 2 bản định nghĩa trùng).
+- Giữ nguyên tuyệt đối: guard quyền (`maintenance.print`), toàn bộ khối `useEffect` tải dữ liệu
+  theo từng `printType` (kể cả 2 helper lồng bên trong `fetchRowsForAsset`/`loadOneVehicle`/
+  `fetchVehicleHistory`), và `qrUrl` useMemo.
+- Thay effect `window.print()` bằng `generatePdf()` (useCallback, switch theo `printType` gọi
+  đúng 1 trong 7 hàm `downloadMaintenanceXxxPdf`) + effect tự trigger khi `loading/error` xong +
+  `pdfState==="idle"`. `bao_cao_ky` có thêm nhánh `pdfState==="empty"` (không phải lỗi) khi kỳ
+  không có biên bản đã duyệt nào khớp — khớp đúng thông báo gốc "Không có dữ liệu bảo trì đã
+  duyệt trong kỳ đã chọn." thay vì hiện lỗi chung chung.
+- UI: card trạng thái + nút "Đóng trang" (`window.close()`) thay cho "Quay lại" (Link) cũ —
+  nhất quán với `export/print/page.tsx`, hợp lý hơn vì trang này luôn mở trong tab mới chỉ để
+  tải file rồi đóng, không có nhu cầu điều hướng tiếp trong tab đó.
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` (toàn repo) và `npx eslint src/app/dashboard/maintenance/print/page.tsx
+src/lib/maintenance-pdf.ts` đều sạch tuyệt đối — 0 lỗi, 0 cảnh báo. Không chạy `npm run build`
+(đúng quy tắc "Fix bug 2026-08-24"). Đã grep xác nhận không file nào khác import trực tiếp
+`maintenance/print/page.tsx` (chỉ điều hướng qua URL) nên không có tác dụng phụ ngoài phạm vi
+2 file đã sửa.
+
+### CHƯA test tay trên trình duyệt thật — bắt buộc trước khi coi Giai đoạn 2b là xong
+
+Cần mở `npm run dev`, đăng nhập, và với **mỗi trong 7 loại** bấm đúng nút gốc rồi xác nhận tab
+mới hiện "Đang tạo PDF..." → "Đã tải file PDF về máy", mở file tải về kiểm tra đúng nội dung:
+
+1. **`su_co_nho`** (`records/[id]` nút "In biên bản", Sửa chữa ngoài Đội xe nhỏ) — biên bản có
+   nhiều thiết bị + có vật tư + có ảnh → xác nhận đủ 4 phần (F13, F10, F15, trang ảnh), danh
+   sách "Chúng tôi gồm:" đúng người, bảng vật tư đúng số liệu.
+2. **`bao_duong`** / **`bao_duong_xe`** — biên bản Bảo dưỡng nhiều thiết bị dùng "Nội dung
+   chung" cấp biên bản (xem `.claude/rules/14-maintenance-module.md`) → xác nhận `mergeNoidung`
+   hiển thị đúng cả nội dung chung lẫn riêng; `bao_duong_xe` xác nhận có thêm trang F06 đúng
+   bảng nhiên liệu/vật tư/công thợ/tổng cộng.
+3. **`sua_chua_nho_xe`** (nút "Sửa chữa nhỏ", Đội xe ≤200$) — xác nhận F08+F15SmallVehicle+F06
+   đúng, "Chất lượng" hiển thị đúng text (không phải checkbox, khác F15/F15BaoDuong).
+4. **`ly_lich`** (`history` — chọn nhiều thiết bị) — xác nhận mỗi thiết bị đúng 1 "trang" cách
+   nhau (addPage), bảng lịch sử đúng dữ liệu, tên file hợp lý khi chọn 1 vs nhiều thiết bị.
+5. **`ly_lich_xe`** (`history` — chọn nhiều xe) — xác nhận đủ 3 section (người vận hành/bảo trì/
+   sửa chữa) đúng dữ liệu từng xe.
+6. **`bao_cao_ky`** (`records` — "In Báo cáo theo kỳ") — xác nhận nhiều bộ phận ra nhiều "trang"
+   riêng, dòng quy đổi USD đúng số theo tỷ giá cấu hình, và test case rỗng (kỳ không có biên bản
+   đã duyệt) ra đúng thông báo "Không có dữ liệu..." thay vì tải file rỗng/lỗi.
+7. Xác nhận nút "Tải lại"/"Thử lại" hoạt động đúng (bấm lại `generatePdf()` không lỗi state).
+8. Xác nhận nút "Đóng trang" đóng được tab (một số trình duyệt chặn `window.close()` nếu tab
+   không phải do script mở — nhưng ở đây luôn mở qua `target="_blank"` từ click nên thường được
+   phép; nếu trình duyệt cụ thể chặn, chỉ là hạn chế UX nhỏ không phải bug).
+9. Đối chiếu nhanh bằng mắt vài chỗ dễ lệch: ký hiệu tiền tệ (giờ là "$"/"VND"/"KHR" thay vì
+   "$"/"₫"/"៛"), chữ nghiêng cũ giờ thành chữ thường — xác nhận người dùng chấp nhận được (đã
+   chốt "không cần pixel-perfect" nhưng đổi ký hiệu tiền tệ là thay đổi nội dung hiển thị, nên
+   cần xác nhận rõ ràng, không chỉ suy diễn từ "không cần pixel-perfect").
+
+### Prompt gợi ý để mở đầu session tiếp theo (sau khi test tay Giai đoạn 2b)
+
+```
+Đọc mục "Cập nhật (tiếp 6) — Giai đoạn 2b (Bảo trì) đã code xong cả 4 phase" trong CLAUDE.md.
+Nếu tôi đã test tay và báo lỗi cụ thể ở 1 trong 7 loại PDF (su_co_nho/bao_duong/bao_duong_xe/
+sua_chua_nho_xe/ly_lich/ly_lich_xe/bao_cao_ky), sửa đúng hàm vẽ tương ứng trong
+src/lib/maintenance-pdf.ts (mỗi mẫu có 1 hàm drawFxx riêng, dễ định vị theo tên mã tài liệu).
+
+Nếu Giai đoạn 2b đã test xong và ổn, Giai đoạn 2 (chuyển in HTML sang PDF thật) coi như hoàn tất
+toàn bộ 3 module đã lên kế hoạch (Chất lượng, Xuất hàng, Bảo trì). Hỏi tôi xem có muốn tiếp tục
+sang Giai đoạn 3 (gắn ký số vào các PDF này, dựa trên src/lib/signing/ đã tách ở Giai đoạn 1)
+hay không — đây là bước tiếp theo hợp lý nhưng CHƯA được tôi xác nhận, không tự ý bắt đầu.
+
+Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm tra — không chạy `npm run build` khi
+không chắc dev server của tôi có đang chạy song song hay không.
+```
+
