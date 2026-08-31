@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import { normalizeDateInput } from "@/lib/date-utils"
+import { getLoaiBanhConfig } from "@/lib/product-lot-config"
 
 export type StorageNgan = {
   id: string
@@ -590,6 +591,10 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
       ngan_id,
       ca,
       ngay_nhap,
+      kien_a,
+      kien_b,
+      kien_c,
+      kien_d,
       so_banh,
       so_kg,
       created_at,
@@ -603,7 +608,9 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
         kien_a,
         kien_b,
         kien_c,
-        kien_d
+        kien_d,
+        tong_banh,
+        tong_kg
       )
     `)
     .eq("ngan_id", nganId)
@@ -615,6 +622,10 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
     ngan_id: string
     ca: string
     ngay_nhap: string
+    kien_a?: number | null
+    kien_b?: number | null
+    kien_c?: number | null
+    kien_d?: number | null
     so_banh: number
     so_kg: number
     created_at?: string | null
@@ -632,23 +643,32 @@ export async function loadStorageLots(factoryId: string, nganId: string, client:
     } | null
   }>)
     .filter((tx) => Boolean(tx.lots))
-    .map((tx) => ({
-      id: tx.id,
-      lot_id: tx.lots?.id,
-      ma_lo: tx.lots?.ma_lo || "",
-      ngay_sx: tx.ngay_nhap,
-      ca: tx.ca,
-      loai_csr: tx.lots?.loai_csr || "",
-      loai_banh: Number(tx.lots?.loai_banh || 0),
-      boc: tx.lots?.boc || "",
-      tong_banh: Number(tx.so_banh || 0),
-      tong_kg: Number(tx.so_kg || 0),
-      trang_thai: tx.lots?.trang_thai || "",
-      kien_a: Number(tx.lots?.kien_a || 0),
-      kien_b: Number(tx.lots?.kien_b || 0),
-      kien_c: Number(tx.lots?.kien_c || 0),
-      kien_d: Number(tx.lots?.kien_d || 0),
-    }))
+    .map((tx) => {
+      const kA = Number(tx.kien_a ?? 0)
+      const kB = Number(tx.kien_b ?? 0)
+      const kC = Number(tx.kien_c ?? 0)
+      const kD = Number(tx.kien_d ?? 0)
+      const calculatedBanh = kA + kB + kC + kD
+      const tongBanh = Number(tx.so_banh || (calculatedBanh > 0 ? calculatedBanh : 0))
+
+      return {
+        id: tx.id,
+        lot_id: tx.lots?.id,
+        ma_lo: tx.lots?.ma_lo || "",
+        ngay_sx: tx.ngay_nhap,
+        ca: tx.ca,
+        loai_csr: tx.lots?.loai_csr || "",
+        loai_banh: Number(tx.lots?.loai_banh || 0),
+        boc: tx.lots?.boc || "",
+        tong_banh: tongBanh,
+        tong_kg: Number(tx.so_kg || 0),
+        trang_thai: tx.lots?.trang_thai || "",
+        kien_a: kA,
+        kien_b: kB,
+        kien_c: kC,
+        kien_d: kD,
+      }
+    })
 
   // Fallback: một số lô cũ (vd lô bị ghi trực tiếp vào `lots` ngoài luồng app — xem
   // ".claude/rules/06-module-production.md" mục "Invariant bắt buộc... lot_transactions
@@ -811,47 +831,137 @@ export async function loadStorageDetailByLookup(params: {
   return json as StorageDetailData
 }
 
-// `lots` truyền vào đây là danh sách theo TỪNG DÒNG `lot_transactions` (1 lô có thể có nhiều
-// dòng nếu được quét QR theo từng kiện riêng lẻ — xem `.claude/rules/06-module-production.md`
-// mục "Quét theo lượt"). Đếm `lots.length` trực tiếp sẽ đếm theo số lượt quét chứ không phải
-// số lô thật — phải dedupe theo lô trước khi đếm. `thanhPhamKg` không bị ảnh hưởng vì tổng kg
-// vẫn đúng khi cộng dồn qua mọi dòng, không cần dedupe.
+export type AggregatedStorageLot = {
+  lot_id: string
+  ma_lo: string
+  loai_csr: string
+  loai_banh: number
+  boc: string
+  kien_a: number
+  kien_b: number
+  kien_c: number
+  kien_d: number
+  tong_banh: number
+  tong_kg: number
+  isTronLo: boolean
+  isDoDang: boolean
+  txCount: number
+}
+
 function storageLotDedupeKey(lot: StorageProducedLot) {
   return lot.lot_id || lot.ma_lo || ""
 }
 
+// `lots` truyền vào đây là danh sách theo TỪNG DÒNG `lot_transactions` (1 lô có thể có nhiều
+// dòng nếu được quét QR theo từng kiện riêng lẻ hoặc nhiều ca).
+// Hàm này tổng hợp lại theo từng mã lô của riêng ngăn này để xác định đúng sản lượng, số kiện
+// phát sinh từ ngăn đó, và phân loại chính xác Lô tròn hay Lô dở dang theo từng ngăn.
+export function aggregateStorageLotsByLot(lots: StorageProducedLot[]): AggregatedStorageLot[] {
+  const map = new Map<string, {
+    lot_id: string
+    ma_lo: string
+    loai_csr: string
+    loai_banh: number
+    boc: string
+    kien_a: number
+    kien_b: number
+    kien_c: number
+    kien_d: number
+    tong_banh: number
+    tong_kg: number
+    trang_thai: string
+    txCount: number
+  }>()
+
+  for (const item of lots) {
+    const key = storageLotDedupeKey(item)
+    if (!key) continue
+    const existing = map.get(key)
+    if (!existing) {
+      map.set(key, {
+        lot_id: item.lot_id || item.id || key,
+        ma_lo: item.ma_lo || "",
+        loai_csr: item.loai_csr || "",
+        loai_banh: item.loai_banh || 0,
+        boc: item.boc || "",
+        kien_a: item.kien_a || 0,
+        kien_b: item.kien_b || 0,
+        kien_c: item.kien_c || 0,
+        kien_d: item.kien_d || 0,
+        tong_banh: item.tong_banh || 0,
+        tong_kg: item.tong_kg || 0,
+        trang_thai: item.trang_thai || "",
+        txCount: 1,
+      })
+    } else {
+      existing.kien_a += item.kien_a || 0
+      existing.kien_b += item.kien_b || 0
+      existing.kien_c += item.kien_c || 0
+      existing.kien_d += item.kien_d || 0
+      existing.tong_banh += item.tong_banh || 0
+      existing.tong_kg += item.tong_kg || 0
+      existing.txCount += 1
+      if (item.loai_csr && !existing.loai_csr) existing.loai_csr = item.loai_csr
+      if (item.loai_banh && !existing.loai_banh) existing.loai_banh = item.loai_banh
+      if (item.boc && !existing.boc) existing.boc = item.boc
+      if (item.trang_thai === "Dở dang") existing.trang_thai = "Dở dang"
+    }
+  }
+
+  return Array.from(map.values()).map((agg) => {
+    const cfg = getLoaiBanhConfig(agg.loai_csr || "", agg.loai_banh || 35)
+    const loTronBanh = cfg.lo_tron || 144
+    // 1 lô được coi là tròn lô trong ngăn này nếu tổng số bành sản xuất từ ngăn này đạt đủ tiêu chuẩn lô tròn (vd 144 bành)
+    // và không bị đánh dấu dở dang.
+    const isTronLo = agg.tong_banh >= loTronBanh && agg.trang_thai !== "Dở dang"
+    const isDoDang = !isTronLo
+
+    return {
+      lot_id: agg.lot_id,
+      ma_lo: agg.ma_lo,
+      loai_csr: agg.loai_csr,
+      loai_banh: agg.loai_banh,
+      boc: agg.boc,
+      kien_a: agg.kien_a,
+      kien_b: agg.kien_b,
+      kien_c: agg.kien_c,
+      kien_d: agg.kien_d,
+      tong_banh: agg.tong_banh,
+      tong_kg: agg.tong_kg,
+      isTronLo,
+      isDoDang,
+      txCount: agg.txCount,
+    }
+  })
+}
+
 export function summarizeStorageLots(lots: StorageProducedLot[]) {
   const thanhPhamKg = lots.reduce((sum, lot) => sum + (lot.tong_kg || 0), 0)
-  const distinctLotKeys = new Set(lots.map(storageLotDedupeKey).filter(Boolean))
-  const dodangLotKeys = new Set(
-    lots.filter((lot) => lot.trang_thai === "Dở dang").map(storageLotDedupeKey).filter(Boolean),
-  )
+  const aggregatedLots = aggregateStorageLotsByLot(lots)
+  const tronLoCount = aggregatedLots.filter((lot) => lot.isTronLo).length
+  const doDangCount = aggregatedLots.filter((lot) => lot.isDoDang).length
+
   return {
-    totalLots: distinctLotKeys.size,
-    doDangCount: dodangLotKeys.size,
+    totalLots: aggregatedLots.length,
+    tronLoCount,
+    doDangCount,
     thanhPhamKg,
+    aggregatedLots,
   }
 }
 
 // Dùng cho cột "Số lô chi tiết" của Báo cáo cân đối ngăn lưu theo kỳ — mỗi lô chỉ liệt kê
-// đúng 1 lần (dedupe theo cùng khóa với `summarizeStorageLots`), lô đang "Dở dang" hiển thị
-// thêm breakdown số bành theo từng kiện (A/B/C/D) đã có, lấy trực tiếp từ `lots.kien_a-d` —
-// giá trị này luôn là tổng hợp hiện tại đã đồng bộ của lô đó (qua RPC `sync_lot_master_snapshot`),
-// giống nhau ở mọi dòng transaction cùng lô nên chọn dòng đại diện nào cũng cho kết quả đúng.
+// đúng 1 lần. Lô đang "Dở dang" trong ngăn này hiển thị thêm breakdown số bành theo từng kiện (A/B/C/D)
+// thực tế đã sản xuất từ nguyên liệu của ngăn đó (ví dụ: `1258cs/26 (D=36)`).
 export function buildStorageLotDetailLines(lots: StorageProducedLot[]): string[] {
-  const seen = new Map<string, StorageProducedLot>()
-  for (const lot of lots) {
-    const key = storageLotDedupeKey(lot)
-    if (!key || seen.has(key)) continue
-    seen.set(key, lot)
-  }
+  const aggregatedLots = aggregateStorageLotsByLot(lots)
 
-  return Array.from(seen.values())
+  return aggregatedLots
     .sort((a, b) => a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }))
     .map((lot) => {
       const maLo = lot.ma_lo || ""
       if (!maLo) return ""
-      if (lot.trang_thai !== "Dở dang") return maLo
+      if (lot.isTronLo) return maLo
 
       const parts: string[] = []
       if (lot.kien_a > 0) parts.push(`A=${lot.kien_a}`)

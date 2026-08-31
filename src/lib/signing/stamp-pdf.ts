@@ -152,6 +152,39 @@ export function drawSignPrefix(
   } catch { /* bỏ qua nếu vẽ tiền tố thất bại */ }
 }
 
+/**
+ * Vẽ text canh giữa, tự thu nhỏ cỡ chữ, TRỰC TIẾP vào 1 khung `(x,y,w,h)` — khác
+ * `drawSignerName()` (tính vị trí LỆCH so với 1 khung chữ ký khác theo `NameStyle`).
+ * Dùng cho hệ thống ký số dùng chung (bảng `truong_ky`, mỗi dòng là 1 khung độc lập
+ * với `loai` riêng như 'ten'/'ngay_ky' — không có khái niệm "khung cha" để lệch theo).
+ */
+export function drawTextFit(
+  page: PDFPage,
+  text: string | undefined,
+  box: { x: number; y: number; width: number; height: number },
+  font: PDFFont | null,
+  opts?: { maxFontSize?: number; minFontSize?: number; fontStep?: number },
+): void {
+  if (!text || !font) return
+  const maxFontSize = opts?.maxFontSize ?? 11
+  const minFontSize = opts?.minFontSize ?? 6
+  const fontStep = opts?.fontStep ?? 0.5
+  try {
+    let fontSize = maxFontSize
+    while (fontSize > minFontSize && font.widthOfTextAtSize(text, fontSize) > box.width) {
+      fontSize -= fontStep
+    }
+    const textWidth = font.widthOfTextAtSize(text, fontSize)
+    page.drawText(text, {
+      x: box.x + (box.width - textWidth) / 2,
+      y: box.y + Math.max(0, (box.height - fontSize) / 2),
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0),
+    })
+  } catch { /* bỏ qua nếu vẽ text thất bại */ }
+}
+
 /** Nhân bản chữ ký/tên sang các trang/vị trí khác — tính năng "Nhân bản khung". */
 export async function drawExtraPlacements(
   pdfDoc: PDFDocument,

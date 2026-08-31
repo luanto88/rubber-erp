@@ -1413,7 +1413,7 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
     const rowBoc = row.boc || lotInfo?.boc || "";
     const rowPalletArr = row.pallet && row.pallet.length > 0 ? row.pallet : lotInfo?.pallet || [];
     const rowPallet = rowPalletArr.length > 0 ? rowPalletArr.join(", ") : "";
-    const key = `${row.ca}||${maLo}||${rowBoc}||${rowPallet}`;
+    const key = `${row.ca}||${maLo}||${rowBoc}||${rowPallet}||${row.ngan_id || ""}`;
     const entry = byGroupKey.get(key) || {
       ca: row.ca,
       maLo,

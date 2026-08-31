@@ -298,7 +298,7 @@ export async function writeBackToDispatch(
 
       const { error } = await supabase
         .from("dispatch_entries")
-        .update({ rows: nextRows })
+        .update({ rows: nextRows, updated_at: new Date().toISOString() })
         .eq("id", entry.id)
 
       if (error) throw new Error(error.message)

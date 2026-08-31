@@ -920,6 +920,7 @@ export default function StoragePage() {
             ngan,
             thanhPhamKg: summary.thanhPhamKg,
             totalLots: summary.totalLots,
+            tronLoCount: summary.tronLoCount,
             doDangCount: summary.doDangCount,
             ratioPct: ngan.tong_kho > 0 ? (summary.thanhPhamKg / ngan.tong_kho) * 100 : null,
             lotDetailsText,

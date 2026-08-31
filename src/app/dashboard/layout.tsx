@@ -550,12 +550,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  // Print pages, trang xác nhận quét QR, và trang bắt buộc đổi mật khẩu (full-screen, không
-  // sidebar) bypass layout entirely
+  // Print pages, trang xác nhận quét QR, trang bắt buộc đổi mật khẩu, và màn hình ký
+  // số dùng chung (SignScreen — full-screen, tự có topbar riêng theo đúng mockup đã
+  // duyệt cung_cap_dl/thiet_ke_man_hinh_ky.html) bypass sidebar hoàn toàn. Vẫn đi qua
+  // guard `loading || !user` ở trên — chỉ bypass layout, KHÔNG bypass yêu cầu đăng nhập.
   if (
     pathname.includes("/print") ||
     pathname.startsWith("/dashboard/product/confirm") ||
-    pathname.startsWith("/dashboard/force-change-password")
+    pathname.startsWith("/dashboard/force-change-password") ||
+    pathname.startsWith("/dashboard/ky/")
   ) {
     return <>{children}</>
   }

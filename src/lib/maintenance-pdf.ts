@@ -429,10 +429,22 @@ function drawTwoColRow(doc: jsPDF, y: number, left: string, right: string): numb
   return y + LINE_H
 }
 
-function drawSignatureRow(doc: jsPDF, y: number, cols: { role: string; name?: string | null }[]): number {
+// Khung ký (mm, gốc trên-trái) dùng cho luồng "Ký duyệt" (buildMaintenanceSuCoNhoPdfForSigning)
+// — nằm trong khoảng trắng giữa nhãn vai trò và dòng "(Ký và ghi rõ họ tên)" đã vẽ, KHÔNG vẽ
+// thêm gì mới, chỉ mô tả lại toạ độ có sẵn. `roleId` do caller tự gán (không suy từ label vì
+// label hiển thị khác nhau giữa F13/F10/F15 dù cùng 1 người, vd "Nhân viên kỹ thuật" vs "Nhân
+// viên phụ trách" đều là `nv_phu_trach`). Luồng "Xuất PDF"/in thường (downloadMaintenanceXxxPdf)
+// không đọc `.boxes`, không đổi hành vi/hình ảnh.
+export type SignatureRoleBoxMm = { x: number; y: number; w: number; h: number }
+export type SignatureRoleBoxes = { roleId: string; page: number; chuKyBox: SignatureRoleBoxMm; tenBox: SignatureRoleBoxMm }
+
+function drawSignatureRowCapture(
+  doc: jsPDF, y: number, cols: { role: string; name?: string | null; roleId?: string }[],
+): { y: number; boxes: SignatureRoleBoxes[] } {
   y = ensureSpace(doc, y, 34)
   y += 6
   const colW = CONTENT_W / cols.length
+  const page = doc.getCurrentPageInfo().pageNumber
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(9)
   doc.setTextColor(...INK)
@@ -455,22 +467,44 @@ function drawSignatureRow(doc: jsPDF, y: number, cols: { role: string; name?: st
     doc.text("(Ký và ghi rõ họ tên)", cx, nameY + 4, { align: "center" })
   })
   doc.setTextColor(...INK)
-  return nameY + 8
+
+  const boxes: SignatureRoleBoxes[] = cols
+    .map((c, i): SignatureRoleBoxes | null => {
+      if (!c.roleId) return null
+      const boxX = MARGIN + colW * i + 6
+      const boxW = colW - 12
+      return {
+        roleId: c.roleId,
+        page,
+        chuKyBox: { x: boxX, y: y + 1, w: boxW, h: 15 },
+        tenBox: { x: boxX, y: nameY - 3, w: boxW, h: 5 },
+      }
+    })
+    .filter((b): b is SignatureRoleBoxes => b !== null)
+
+  return { y: nameY + 8, boxes }
 }
 
-function drawDocumentFooter(doc: jsPDF, y: number, code: string): number {
-  y = ensureSpace(doc, y, 10)
-  y += 4
+function drawSignatureRow(doc: jsPDF, y: number, cols: { role: string; name?: string | null }[]): number {
+  return drawSignatureRowCapture(doc, y, cols).y
+}
+
+// Neo cố định ở góc trái, sát mép dưới trang — không phụ thuộc độ dài nội dung phía trên (trước
+// đây vẽ ngay sau khối chữ ký nên trồi lên thấp/cao tùy nội dung; nay luôn đúng 1 vị trí trên
+// mọi trang/mọi mẫu, đúng quy ước "page footer" chuẩn). Tham số `y` giữ lại chỉ để không phải
+// sửa 11 call site đang truyền vào, không còn dùng trong thân hàm.
+function drawDocumentFooter(doc: jsPDF, _y: number, code: string): number {
+  const lineY = PAGE_H - MARGIN
+  const textY = lineY + 5
   doc.setDrawColor(...BORDER)
   doc.setLineWidth(0.2)
-  doc.line(MARGIN, y, PAGE_W - MARGIN, y)
-  y += 4
+  doc.line(MARGIN, lineY, PAGE_W - MARGIN, lineY)
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.setFontSize(7)
   doc.setTextColor(...GRAY)
-  doc.text(`${code} (01-15/05/2026)`, MARGIN, y)
+  doc.text(`${code} (01-15/05/2026)`, MARGIN, textY)
   doc.setTextColor(...INK)
-  return y + 4
+  return textY + 4
 }
 
 function drawChatLuongCheckbox(doc: jsPDF, y: number, isDat: boolean, isKhongDat: boolean): number {
@@ -715,11 +749,88 @@ function hasAnyImages(record: RecordData): boolean {
 
 // ─── "Tổ trưởng cơ điện/cơ khí" + merge nội dung ──────────────────────────
 
-function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>, groupKeyword = "cơ điện"): string[] {
+export function findToTruongCoDien(nguoiThucHien: string[], staffMap: Map<string, string>, groupKeyword = "cơ điện"): string[] {
   return nguoiThucHien.filter((name) => {
     const role = staffMap.get(name)?.toLowerCase() || ""
     return role.includes("tổ trưởng") && role.includes(groupKeyword)
   })
+}
+
+// ─── Vai trò ký số cho bundle "su_co_nho" (F13+F10+F15+Ảnh) — Giai đoạn 5 ─────────
+// 4 người ký thật xuất hiện xuyên suốt bundle (không đụng "Tài xế" — theo quyết định
+// đã chốt, vai trò này bị bỏ qua khỏi ký số điện tử vì dispatch_drivers không có tài
+// khoản đăng nhập). Tách riêng khỏi drawF13 để dùng ở tầng API resolve người ký mà
+// không cần dựng cả RecordData đầy đủ.
+//
+// Cập nhật 2026-09: "Tổ trưởng cơ điện"/"Tổ trưởng cơ khí" (roleId `to_co_dien`) HIỆN TẠI
+// cũng không có tài khoản đăng nhập — không còn tìm người thật qua `nguoi_thuc_hien` (đã
+// bỏ `findToTruongCoDien` khỏi hàm này), luôn gán "Nhân viên phụ trách" ký thay ở vị trí
+// đó (cùng người, cùng tài khoản với roleId `nv_phu_trach`) — khớp đúng đoạn code tương ứng
+// đã sửa trong `drawF13`. `MaintenanceSignModal` đã có sẵn cơ chế gộp theo userId nên tự
+// động xử lý đúng khi 2 roleId trỏ về cùng 1 người, không cần sửa gì thêm ở đó.
+
+export type MaintenanceSignRoleId = "bgd_phu_trach" | "nv_phu_trach" | "to_co_dien" | "tai_xe" | "giam_doc"
+export type MaintenanceSigningRole = { roleId: MaintenanceSignRoleId; roleLabel: string; name: string | null }
+export type MaintenanceSignBundle = "su_co_nho" | "bao_duong" | "bao_duong_xe" | "sua_chua_nho_xe"
+
+// Alias giữ tên cũ — su-co-nho-signers/route.ts và maintenance-sign-modal.tsx vẫn import theo
+// tên này; giá trị thực chất đã tổng quát hóa để dùng chung cho cả 4 bundle (Giai đoạn 5 phần 2).
+export type SuCoNhoRoleId = MaintenanceSignRoleId
+export type SuCoNhoSigningRole = MaintenanceSigningRole
+export type SuCoNhoSigningRoleInput = Pick<RecordData, "bo_phan" | "bgd_phu_trach" | "nv_phu_trach" | "giam_doc" | "nguoi_thuc_hien">
+
+// Thứ tự trả về khớp đúng thứ tự KÝ ĐIỆN TỬ thật (đính chính 2026-09): Nhân viên phụ trách →
+// Tổ trưởng cơ điện/cơ khí (ký thay, cùng người) → BGĐ phụ trách → Giám đốc nhà máy. KHÔNG
+// theo thứ tự cột in trên F13 (BGĐ|NV|Tổ cơ điện|GĐ) — thứ tự cột in giữ nguyên theo mẫu
+// KHXD-QT02-F13, không liên quan tới thứ tự ký.
+export function buildSuCoNhoSigningRoles(record: SuCoNhoSigningRoleInput): SuCoNhoSigningRole[] {
+  const isBoDoi = record.bo_phan === "Đội xe"
+  const toRoleLabel = isBoDoi ? "Tổ trưởng cơ khí" : "Tổ trưởng cơ điện"
+  return [
+    { roleId: "nv_phu_trach", roleLabel: "Nhân viên phụ trách", name: record.nv_phu_trach || null },
+    { roleId: "to_co_dien", roleLabel: `${toRoleLabel} (ký thay bởi Nhân viên phụ trách)`, name: record.nv_phu_trach || null },
+    { roleId: "bgd_phu_trach", roleLabel: "BGĐ phụ trách", name: record.bgd_phu_trach || null },
+    { roleId: "giam_doc", roleLabel: "Giám đốc nhà máy", name: record.giam_doc || null },
+  ]
+}
+
+export type BaoDuongSigningRoleInput = Pick<RecordData, "bgd_phu_trach" | "nv_phu_trach" | "giam_doc">
+
+// bao_duong (Bảo dưỡng ngoài Đội xe, F03+F15+Ảnh): 3 người ký thật — Nhân viên phụ trách (gộp
+// luôn vị trí "Tổ trưởng cơ điện" trên F03 — cùng lý do "không có tài khoản" như su_co_nho) →
+// BGĐ phụ trách → Giám đốc nhà máy (phê duyệt cuối).
+export function buildBaoDuongSigningRoles(record: BaoDuongSigningRoleInput): MaintenanceSigningRole[] {
+  return [
+    { roleId: "nv_phu_trach", roleLabel: "Nhân viên phụ trách", name: record.nv_phu_trach || null },
+    { roleId: "to_co_dien", roleLabel: "Tổ trưởng cơ điện (ký thay bởi Nhân viên phụ trách)", name: record.nv_phu_trach || null },
+    { roleId: "bgd_phu_trach", roleLabel: "BGĐ phụ trách", name: record.bgd_phu_trach || null },
+    { roleId: "giam_doc", roleLabel: "Giám đốc nhà máy", name: record.giam_doc || null },
+  ]
+}
+
+// bao_duong_xe (Bảo dưỡng Đội xe, F03+F15+F06+Ảnh): 3 người ký thật — Nhân viên phụ trách (gộp
+// "Tổ trưởng cơ khí" trên F03 VÀ "Tài xế" trên F15BaoDuong/F06 — dispatch_drivers không có tài
+// khoản đăng nhập, cùng cơ chế ký thay) → BGĐ phụ trách → Giám đốc nhà máy.
+export function buildBaoDuongXeSigningRoles(record: BaoDuongSigningRoleInput): MaintenanceSigningRole[] {
+  return [
+    { roleId: "nv_phu_trach", roleLabel: "Nhân viên phụ trách", name: record.nv_phu_trach || null },
+    { roleId: "to_co_dien", roleLabel: "Tổ trưởng cơ khí (ký thay bởi Nhân viên phụ trách)", name: record.nv_phu_trach || null },
+    { roleId: "tai_xe", roleLabel: "Tài xế (ký thay bởi Nhân viên phụ trách)", name: record.nv_phu_trach || null },
+    { roleId: "bgd_phu_trach", roleLabel: "BGĐ phụ trách", name: record.bgd_phu_trach || null },
+    { roleId: "giam_doc", roleLabel: "Giám đốc nhà máy", name: record.giam_doc || null },
+  ]
+}
+
+// sua_chua_nho_xe (Sửa chữa nhỏ Đội xe, F08+F15SmallVehicle+F06): 3 người ký thật — Nhân viên
+// phụ trách (gộp "Tài xế") → BGĐ phụ trách → Giám đốc nhà máy. Bundle này không có cột "Tổ
+// trưởng cơ điện/cơ khí" ở bất kỳ mẫu nào (F08/F15SmallVehicle/F06 không có vai trò đó).
+export function buildSuaChuaNhoXeSigningRoles(record: BaoDuongSigningRoleInput): MaintenanceSigningRole[] {
+  return [
+    { roleId: "nv_phu_trach", roleLabel: "Nhân viên phụ trách", name: record.nv_phu_trach || null },
+    { roleId: "tai_xe", roleLabel: "Tài xế (ký thay bởi Nhân viên phụ trách)", name: record.nv_phu_trach || null },
+    { roleId: "bgd_phu_trach", roleLabel: "BGĐ phụ trách", name: record.bgd_phu_trach || null },
+    { roleId: "giam_doc", roleLabel: "Giám đốc nhà máy", name: record.giam_doc || null },
+  ]
 }
 
 function mergeNoidung(common: string | null | undefined, own: string | null | undefined): string {
@@ -824,7 +935,9 @@ function buildF15SmallVehicleParticipants(record: RecordData, staffMap: Map<stri
 
 // ─── F13: Biên bản kiểm tra sự cố ─────────────────────────────────────────
 
-async function drawF13(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function drawF13(
+  doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<SignatureRoleBoxes[]> {
   const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
   let y = MARGIN
@@ -890,19 +1003,29 @@ async function drawF13(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: 
   )
 
   const isBoDoiRole = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
-  const toTruong = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, isBoDoi ? "cơ khí" : "cơ điện")
-  y = drawSignatureRow(doc, y, [
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-    { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
-    { role: isBoDoiRole, name: toTruong[0] || "" },
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  // Tổ trưởng cơ điện/cơ khí hiện không có tài khoản đăng nhập trong hệ thống (quyết định
+  // 2026-09 — xem CLAUDE.md mục Giai đoạn 5) — không tìm người thật qua nguoi_thuc_hien nữa,
+  // Nhân viên phụ trách ký thay ở cả 2 vị trí (cột riêng trên form vẫn giữ nguyên tên "Tổ cơ
+  // điện"/"Tổ cơ khí" theo đúng mẫu KHXD-QT02-F13, chỉ đổi NGƯỜI điền/ký vào đó).
+  //
+  // `forSigning=true` (luồng Ký duyệt): KHÔNG in sẵn tên snapshot — tên sẽ được đóng dấu điện
+  // tử đúng vào ô này lúc ký thật (drawTextFit trong signField()), in sẵn + đóng dấu chồng lên
+  // nhau tại đúng 1 vị trí sẽ ra chữ lệch nét/mờ (bug đã báo — xem CLAUDE.md). `forSigning=false`
+  // (luồng "Xuất PDF" thường) vẫn in tên như cũ để phục vụ ký tay trên giấy.
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+    { role: "Nhân viên kỹ thuật", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: isBoDoiRole, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien" },
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
+  y = sig.y
   drawDocumentFooter(doc, y, "KHXD-QT02-F13")
+  return sig.boxes
 }
 
 // ─── F10: Giấy đề nghị sửa chữa ────────────────────────────────────────────
 
-async function drawF10(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+async function drawF10(doc: jsPDF, record: RecordData, qrUrl: string, forSigning: boolean): Promise<SignatureRoleBoxes[]> {
   const dateParts = fmtDatePartsVN(record.ngay)
   const allMaterials = record.lines.flatMap((l) => l.materials)
   const machineNames = record.lines.map((l) => `${l.ten_tb} (${l.ma_tb})`).join(", ")
@@ -960,17 +1083,21 @@ async function drawF10(doc: jsPDF, record: RecordData, qrUrl: string): Promise<v
     y = drawLabelContent(doc, MARGIN, y, CONTENT_W, `${prefix}Chi phí ước tính: `, `${pdfMoney(line.chi_phi_dk, line.loai_tien)}${suffix}`)
   })
 
-  y = drawSignatureRow(doc, y, [
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
-    { role: "Nhân viên kỹ thuật", name: record.nv_phu_trach },
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
+    { role: "Nhân viên kỹ thuật", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
   ])
+  y = sig.y
   drawDocumentFooter(doc, y, "KHXD-QT02-F10")
+  return sig.boxes
 }
 
 // ─── F15: Biên bản nghiệm thu (chuẩn, dùng cho bundle su_co_nho) ──────────
 
-async function drawF15(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function drawF15(
+  doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<SignatureRoleBoxes[]> {
   const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
   const isChatLuongDat = record.lines.every((l) => l.chat_luong !== "Không đạt")
   const isChatLuongKhongDat = record.lines.some((l) => l.chat_luong === "Không đạt")
@@ -1020,39 +1147,85 @@ async function drawF15(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: 
   y = drawGiaTriSuaChua(doc, y, record.lines, "Giá trị sửa chữa: ")
   y = drawKetLuanBlank(doc, y)
 
-  y = drawSignatureRow(doc, y, [
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+    { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
+  y = sig.y
   drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+  return sig.boxes
 }
 
 // ─── Phase 1: orchestrator "su_co_nho" (F13 + F10 + F15 + Ảnh) ────────────
 
-export async function downloadMaintenanceSuCoNhoPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+/**
+ * Lõi dựng file dùng chung cho cả 2 luồng — "Xuất PDF" (không cần khung ký) và "Ký duyệt"
+ * (cần toạ độ khung ký từng vai trò) — mirror pattern `buildQualityKqknDoc` trong
+ * quality-pdf.ts. Vẽ giống hệt nhau ở cả 2 luồng, chỉ khác caller có đọc `.boxes` hay không.
+ */
+async function buildMaintenanceSuCoNhoDoc(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<{ doc: jsPDF; boxes: SignatureRoleBoxes[] }> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await drawF13(doc, record, qrUrl, staffMap)
+  const f13Boxes = await drawF13(doc, record, qrUrl, staffMap, forSigning)
   doc.addPage()
-  await drawF10(doc, record, qrUrl)
+  const f10Boxes = await drawF10(doc, record, qrUrl, forSigning)
   doc.addPage()
-  await drawF15(doc, record, qrUrl, staffMap)
+  const f15Boxes = await drawF15(doc, record, qrUrl, staffMap, forSigning)
   if (hasLineImages(record)) {
     doc.addPage()
     await drawPhotoPage(doc, record)
   }
+  return { doc, boxes: [...f13Boxes, ...f10Boxes, ...f15Boxes] }
+}
+
+export async function downloadMaintenanceSuCoNhoPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { doc } = await buildMaintenanceSuCoNhoDoc(record, qrUrl, staffMap, false)
   doc.save(`bien-ban-su-co-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+export type MaintenanceSigningResult = {
+  bytes: Uint8Array
+  pageHeightMm: number
+  boxesByRole: Partial<Record<MaintenanceSignRoleId, SignatureRoleBoxes[]>>
+}
+
+// Alias giữ tên cũ — dùng chung cho cả 4 bundle từ Giai đoạn 5 phần 2.
+export type MaintenanceSuCoNhoSigningResult = MaintenanceSigningResult
+
+// Gộp danh sách box theo roleId — dùng chung cho cả 4 hàm "buildXxxPdfForSigning" bên dưới,
+// tránh lặp lại y hệt vòng lặp này 4 lần.
+function finalizeSigningResult(doc: jsPDF, boxes: SignatureRoleBoxes[]): MaintenanceSigningResult {
+  const bytes = doc.output("arraybuffer") as ArrayBuffer
+  const boxesByRole: Partial<Record<MaintenanceSignRoleId, SignatureRoleBoxes[]>> = {}
+  for (const b of boxes) {
+    const roleId = b.roleId as MaintenanceSignRoleId
+    if (!boxesByRole[roleId]) boxesByRole[roleId] = []
+    boxesByRole[roleId]!.push(b)
+  }
+  return { bytes: new Uint8Array(bytes), pageHeightMm: PAGE_H, boxesByRole }
+}
+
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký theo từng vai trò (mm, gốc trên-trái) — dùng cho
+ * nút "Ký duyệt" ở trang chi tiết biên bản. Không tự tải file — caller upload lên hệ thống
+ * ký số dùng chung rồi điều hướng sang /dashboard/ky/[id].
+ */
+export async function buildMaintenanceSuCoNhoPdfForSigning(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>,
+): Promise<MaintenanceSigningResult> {
+  const { doc, boxes } = await buildMaintenanceSuCoNhoDoc(record, qrUrl, staffMap, true)
+  return finalizeSigningResult(doc, boxes)
 }
 
 // ─── F03: Giấy đề nghị bảo trì - sửa chữa ──────────────────────────────────
 
-async function drawF03(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function drawF03(doc: jsPDF, record: RecordData, qrUrl: string, forSigning: boolean): Promise<SignatureRoleBoxes[]> {
   const dateParts = fmtDatePartsVN(record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
-  const toGroupKeyword = isBoDoi ? "cơ khí" : "cơ điện"
   const toRoleLabel = isBoDoi ? "Tổ cơ khí" : "Tổ cơ điện"
-  const toTruong = findToTruongCoDien(record.nguoi_thuc_hien, staffMap, toGroupKeyword)
   let y = MARGIN
   y = drawCompanyHeader(doc, y, record.bo_phan)
   y += 2
@@ -1083,18 +1256,25 @@ async function drawF03(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: 
     y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "2/ Lý do bảo dưỡng: ", mergeNoidung(record.nguyen_nhan_chung, line.nguyen_nhan), { blankCount: 3 })
   })
 
-  y = drawSignatureRow(doc, y, [
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
-    { role: toRoleLabel, name: toTruong[0] || "" },
+  // Cột "Tổ cơ điện"/"Tổ cơ khí" dùng tên Nhân viên phụ trách ở cả 2 luồng (in thường lẫn ký
+  // duyệt) — mirror đúng quyết định đã áp dụng cho F13's cột tương tự (xem buildSuCoNhoSigningRoles
+  // phía trên): vai trò này thực chất không có tài khoản/người thật đáng tin cậy riêng, nên hiển
+  // thị đúng người sẽ thực sự ký thay ngay cả ở bản in thường, tránh lệch giữa bản in và bản ký.
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+    { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
+    { role: toRoleLabel, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien" },
   ])
-  drawDocumentFooter(doc, y, "KHXD-QT02-F03")
+  drawDocumentFooter(doc, sig.y, "KHXD-QT02-F03")
+  return sig.boxes
 }
 
 // ─── F15BaoDuong: biến thể Biên bản nghiệm thu cho Bảo dưỡng ──────────────
 
-async function drawF15BaoDuong(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function drawF15BaoDuong(
+  doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<SignatureRoleBoxes[]> {
   const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
   const isBoDoi = record.bo_phan === "Đội xe"
   const firstTaiXe = isBoDoi ? record.lines[0]?.ten_tai_xe || null : null
@@ -1147,22 +1327,27 @@ async function drawF15BaoDuong(doc: jsPDF, record: RecordData, qrUrl: string, st
   y = drawChatLuongCheckbox(doc, y, isChatLuongDat, isChatLuongKhongDat)
   y = drawKetLuanBlank(doc, y)
 
-  y = drawSignatureRow(
+  // Cột "Tài xế" (chỉ Đội xe): bản in thường vẫn hiện đúng tên tài xế thật (`firstTaiXe`) để
+  // giữ đúng thông tin nghiệp vụ trên giấy — khác cột "Tổ cơ điện" ở F03 (thường không có người
+  // thật đáng tin cậy). Khi ký duyệt (forSigning=true), bỏ trống để Nhân viên phụ trách ký thay
+  // đúng vào vị trí đó (roleId "tai_xe" vẫn được gán để nhận toạ độ khung ký).
+  const sig = drawSignatureRowCapture(
     doc, y,
     isBoDoi
       ? [
-          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-          { role: "Tài xế", name: firstTaiXe },
-          { role: "Giám đốc nhà máy", name: record.giam_doc },
+          { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+          { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+          { role: "Tài xế", name: forSigning ? undefined : firstTaiXe, roleId: "tai_xe" },
+          { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
         ]
       : [
-          { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-          { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-          { role: "Giám đốc nhà máy", name: record.giam_doc },
+          { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+          { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+          { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
         ],
   )
-  drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+  drawDocumentFooter(doc, sig.y, "KHXD-QT02-F15")
+  return sig.boxes
 }
 
 // ─── F06: Phiếu hoàn thành công việc bảo trì (xe) ──────────────────────────
@@ -1202,7 +1387,7 @@ function buildF06Rows(line: LineData): { rows: F06Row[]; grandTotal: number } {
   return { rows, grandTotal: matTotal + (line.cong_tho || 0) }
 }
 
-async function drawF06(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+async function drawF06(doc: jsPDF, record: RecordData, qrUrl: string, forSigning: boolean): Promise<SignatureRoleBoxes[]> {
   const dateParts = fmtDatePartsVN(record.ngay)
   let y = MARGIN
   y = drawCompanyHeader(doc, y, record.bo_phan)
@@ -1251,48 +1436,90 @@ async function drawF06(doc: jsPDF, record: RecordData, qrUrl: string): Promise<v
     y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? y) + 4
   })
 
-  y = drawSignatureRow(doc, y, [
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+    { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
-  drawDocumentFooter(doc, y, "KHXD-QT02-F06")
+  drawDocumentFooter(doc, sig.y, "KHXD-QT02-F06")
+  return sig.boxes
 }
 
 // ─── Phase 2: orchestrators "bao_duong" / "bao_duong_xe" ──────────────────
 
-export async function downloadMaintenanceBaoDuongPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+/**
+ * Lõi dựng file dùng chung cho "Xuất PDF" và "Ký duyệt" — mirror
+ * `buildMaintenanceSuCoNhoDoc`. F03 và F15BaoDuong đều capture box theo roleId; ảnh (nếu có)
+ * luôn ở trang cuối, không có toạ độ ký (không cần — không có vai trò nào ký trên trang ảnh).
+ */
+async function buildMaintenanceBaoDuongDoc(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<{ doc: jsPDF; boxes: SignatureRoleBoxes[] }> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await drawF03(doc, record, qrUrl, staffMap)
+  const f03Boxes = await drawF03(doc, record, qrUrl, forSigning)
   doc.addPage()
-  await drawF15BaoDuong(doc, record, qrUrl, staffMap)
+  const f15Boxes = await drawF15BaoDuong(doc, record, qrUrl, staffMap, forSigning)
   if (hasAnyImages(record)) {
     doc.addPage()
     await drawPhotoPageWithCommon(doc, record)
   }
+  return { doc, boxes: [...f03Boxes, ...f15Boxes] }
+}
+
+export async function downloadMaintenanceBaoDuongPdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { doc } = await buildMaintenanceBaoDuongDoc(record, qrUrl, staffMap, false)
   doc.save(`bao-duong-${safeName(record.ma_bb || "bien-ban")}.pdf`)
 }
 
-export async function downloadMaintenanceBaoDuongXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký theo từng vai trò — dùng cho nút "Ký duyệt" ở trang
+ * chi tiết biên bản Bảo dưỡng (ngoài Đội xe). Không tự tải file.
+ */
+export async function buildMaintenanceBaoDuongPdfForSigning(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>,
+): Promise<MaintenanceSigningResult> {
+  const { doc, boxes } = await buildMaintenanceBaoDuongDoc(record, qrUrl, staffMap, true)
+  return finalizeSigningResult(doc, boxes)
+}
+
+async function buildMaintenanceBaoDuongXeDoc(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<{ doc: jsPDF; boxes: SignatureRoleBoxes[] }> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await drawF03(doc, record, qrUrl, staffMap)
+  const f03Boxes = await drawF03(doc, record, qrUrl, forSigning)
   doc.addPage()
-  await drawF15BaoDuong(doc, record, qrUrl, staffMap)
+  const f15Boxes = await drawF15BaoDuong(doc, record, qrUrl, staffMap, forSigning)
   doc.addPage()
-  await drawF06(doc, record, qrUrl)
+  const f06Boxes = await drawF06(doc, record, qrUrl, forSigning)
   if (hasAnyImages(record)) {
     doc.addPage()
     await drawPhotoPageWithCommon(doc, record)
   }
+  return { doc, boxes: [...f03Boxes, ...f15Boxes, ...f06Boxes] }
+}
+
+export async function downloadMaintenanceBaoDuongXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { doc } = await buildMaintenanceBaoDuongXeDoc(record, qrUrl, staffMap, false)
   doc.save(`bao-duong-xe-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký theo từng vai trò — dùng cho nút "Ký duyệt" ở trang
+ * chi tiết biên bản Bảo dưỡng Đội xe. Không tự tải file.
+ */
+export async function buildMaintenanceBaoDuongXePdfForSigning(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>,
+): Promise<MaintenanceSigningResult> {
+  const { doc, boxes } = await buildMaintenanceBaoDuongXeDoc(record, qrUrl, staffMap, true)
+  return finalizeSigningResult(doc, boxes)
 }
 
 // ─── F08NB: Giấy đề nghị sửa chữa nhỏ thường xuyên ────────────────────────
 
-async function drawF08NB(doc: jsPDF, record: RecordData, qrUrl: string): Promise<void> {
+async function drawF08NB(doc: jsPDF, record: RecordData, qrUrl: string, forSigning: boolean): Promise<SignatureRoleBoxes[]> {
   const dateParts = fmtDatePartsVN(record.ngay)
   let y = MARGIN
   y = drawCompanyHeader(doc, y, record.bo_phan)
@@ -1326,17 +1553,20 @@ async function drawF08NB(doc: jsPDF, record: RecordData, qrUrl: string): Promise
     y = drawLabelContent(doc, MARGIN + 3, y, CONTENT_W - 3, "3/ Hướng sửa chữa + tạm tính: ", line.cac_khac_phuc, { blankCount: 2 })
   })
 
-  y = drawSignatureRow(doc, y, [
-    { role: "Giám đốc NM", name: record.giam_doc },
-    { role: "Nhân viên phụ trách", name: record.nv_phu_trach },
-    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "Giám đốc NM", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
+    { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
   ])
-  drawDocumentFooter(doc, y, "KHXD-QT02-F08")
+  drawDocumentFooter(doc, sig.y, "KHXD-QT02-F08")
+  return sig.boxes
 }
 
 // ─── F15SmallVehicle: biến thể Biên bản nghiệm thu cho Sửa chữa nhỏ xe ────
 
-async function drawF15SmallVehicle(doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function drawF15SmallVehicle(
+  doc: jsPDF, record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<SignatureRoleBoxes[]> {
   const { dd, mm, yyyy } = fmtDatePartsVN(record.ngay_duyet || record.ngay)
   let y = MARGIN
   y = drawCompanyHeader(doc, y, record.bo_phan)
@@ -1396,30 +1626,49 @@ async function drawF15SmallVehicle(doc: jsPDF, record: RecordData, qrUrl: string
   y = drawGiaTriSuaChua(doc, y, record.lines, "Giá trị sửa chữa: ")
   y = drawKetLuanBlank(doc, y)
 
-  y = drawSignatureRow(doc, y, [
-    { role: "BGĐ phụ trách", name: record.bgd_phu_trach },
-    { role: "NV phụ trách", name: record.nv_phu_trach },
-    { role: "Tài xế", name: record.lines[0]?.ten_tai_xe || null },
-    { role: "Giám đốc nhà máy", name: record.giam_doc },
+  const sig = drawSignatureRowCapture(doc, y, [
+    { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
+    { role: "NV phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
+    { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
-  drawDocumentFooter(doc, y, "KHXD-QT02-F15")
+  drawDocumentFooter(doc, sig.y, "KHXD-QT02-F15")
+  return sig.boxes
 }
 
 // ─── Phase 3: orchestrator "sua_chua_nho_xe" (F08 + F15SmallVehicle + F06 + Ảnh) ─
 
-export async function downloadMaintenanceSuaChuaNhoXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+async function buildMaintenanceSuaChuaNhoXeDoc(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>, forSigning: boolean,
+): Promise<{ doc: jsPDF; boxes: SignatureRoleBoxes[] }> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
-  await drawF08NB(doc, record, qrUrl)
+  const f08Boxes = await drawF08NB(doc, record, qrUrl, forSigning)
   doc.addPage()
-  await drawF15SmallVehicle(doc, record, qrUrl, staffMap)
+  const f15Boxes = await drawF15SmallVehicle(doc, record, qrUrl, staffMap, forSigning)
   doc.addPage()
-  await drawF06(doc, record, qrUrl)
+  const f06Boxes = await drawF06(doc, record, qrUrl, forSigning)
   if (hasLineImages(record)) {
     doc.addPage()
     await drawPhotoPage(doc, record)
   }
+  return { doc, boxes: [...f08Boxes, ...f15Boxes, ...f06Boxes] }
+}
+
+export async function downloadMaintenanceSuaChuaNhoXePdf(record: RecordData, qrUrl: string, staffMap: Map<string, string>): Promise<void> {
+  const { doc } = await buildMaintenanceSuaChuaNhoXeDoc(record, qrUrl, staffMap, false)
   doc.save(`sua-chua-nho-xe-${safeName(record.ma_bb || "bien-ban")}.pdf`)
+}
+
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký theo từng vai trò — dùng cho nút "Ký duyệt" ở trang
+ * chi tiết biên bản Sửa chữa nhỏ Đội xe. Không tự tải file.
+ */
+export async function buildMaintenanceSuaChuaNhoXePdfForSigning(
+  record: RecordData, qrUrl: string, staffMap: Map<string, string>,
+): Promise<MaintenanceSigningResult> {
+  const { doc, boxes } = await buildMaintenanceSuaChuaNhoXeDoc(record, qrUrl, staffMap, true)
+  return finalizeSigningResult(doc, boxes)
 }
 
 // ─── F01: Lý lịch máy móc / thiết bị ───────────────────────────────────────

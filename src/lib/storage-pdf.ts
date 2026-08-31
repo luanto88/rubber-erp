@@ -22,10 +22,11 @@ type PdfWithTable = jsPDF & {
   }
 }
 
-type StoragePeriodReportRow = {
+export type StoragePeriodReportRow = {
   ngan: StorageNgan
   thanhPhamKg: number
   totalLots: number
+  tronLoCount?: number
   doDangCount: number
   ratioPct: number | null
   lotDetailsText: string
@@ -218,7 +219,14 @@ export async function downloadStorageDetailPdf(detail: StorageDetailData) {
       ["Xé từ ngày", formatStorageDate(detail.ngan.xe_tu_ngay), "Xé đến ngày", formatStorageDate(detail.ngan.xe_den_ngay)],
       ["KL nguyên liệu tươi", formatKg(detail.ngan.tong_tuoi || 0), "KL nguyên liệu khô", formatKg(detail.ngan.tong_kho || 0)],
       ["KL thành phẩm", formatKg(lotSummary.thanhPhamKg), "Tỷ lệ TP/QK", ratioLabel(ratioPct)],
-      ["Số chuyến xe", `${detail.trips.length} chuyến`, "Số lô", `${lotSummary.totalLots} lô (${lotSummary.doDangCount} dở dang)`],
+      [
+        "Số chuyến xe",
+        `${detail.trips.length} chuyến`,
+        "Số lô",
+        lotSummary.doDangCount > 0
+          ? `${lotSummary.tronLoCount} tròn, ${lotSummary.doDangCount} dở dang`
+          : `${lotSummary.tronLoCount} tròn`,
+      ],
       ["Ghi chú", detail.ngan.ghi_chu || "—", "Trạng thái", detail.ngan.trang_thai || "—"],
     ],
   })
@@ -290,8 +298,17 @@ export async function downloadStoragePeriodReportPdf(params: {
   const totalNguyenLieu = params.rows.reduce((sum, row) => sum + (row.ngan.tong_kho || 0), 0)
   const totalThanhPham = params.rows.reduce((sum, row) => sum + row.thanhPhamKg, 0)
   const totalLots = params.rows.reduce((sum, row) => sum + row.totalLots, 0)
+  const totalTronLo = params.rows.reduce(
+    (sum, row) => sum + (row.tronLoCount ?? Math.max(0, row.totalLots - row.doDangCount)),
+    0,
+  )
   const totalDoDang = params.rows.reduce((sum, row) => sum + row.doDangCount, 0)
   const ratioPct = totalNguyenLieu > 0 ? (totalThanhPham / totalNguyenLieu) * 100 : null
+
+  const lotSummaryText =
+    totalDoDang > 0
+      ? `Số lô: ${totalTronLo} tròn, ${totalDoDang} dở dang`
+      : `Số lô: ${totalTronLo} tròn`
 
   renderHeader(
     doc,
@@ -309,7 +326,7 @@ export async function downloadStoragePeriodReportPdf(params: {
       `KL nguyên liệu khô: ${formatKg(totalNguyenLieu)}`,
       `KL thành phẩm: ${formatKg(totalThanhPham)}`,
       `Tỷ lệ TP/QK: ${ratioLabel(ratioPct)}`,
-      `Số lô: ${totalLots} (${totalDoDang} dở dang)`,
+      lotSummaryText,
     ]],
     columnStyles: {
       0: { fillColor: [236, 253, 245] },

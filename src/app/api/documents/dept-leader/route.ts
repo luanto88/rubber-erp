@@ -28,16 +28,24 @@ function matchesLeaderKeyword(text: string | null): boolean {
   return LEADER_KEYWORDS.some((kw) => lower.includes(kw))
 }
 
-// GET ?factoryId=xxx&dept=KTNN
+// GET ?factoryId=xxx&dept=KTNN&permission=documents.phe_duyet
 // Trả về danh sách người đủ điều kiện làm "lãnh đạo phòng ban" cho vòng ký Nội bộ đơn vị:
 // - thuộc phòng ban đã chọn (theo profiles.department_id / department)
 // - có chuc_vu hoặc chuc_vu_chinh_quyen trong maintenance_staff (liên kết qua profile_id) chứa
 //   từ khóa lãnh đạo (Trưởng/phó phòng, Giám đốc/phó giám đốc)
-// - được cấp quyền documents.phe_duyet (explicit user_permissions hoặc role_permissions)
+// - được cấp đúng quyền `permission` (explicit user_permissions hoặc role_permissions)
+//
+// `permission` optional, mặc định "documents.phe_duyet" — giữ nguyên hành vi gốc cho 2 nơi gọi
+// hiện có (documents/new/page.tsx, documents/new/upload/page.tsx). Route này giờ dùng CHUNG cho
+// nhiều module cần "tự nhận diện lãnh đạo 1 phòng ban cụ thể" (vd Kiểm nghiệm gọi với
+// dept=QLCL&permission=quality.phe_duyet) — dù đường dẫn còn giữ tiền tố /documents/ vì đó là
+// nơi tính năng này ra đời đầu tiên, không đổi để tránh rủi ro không cần thiết cho 2 trang Văn
+// bản đang chạy ổn định.
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const factoryId = searchParams.get("factoryId")
   const dept = searchParams.get("dept")
+  const permissionCode = searchParams.get("permission") || "documents.phe_duyet"
 
   if (!factoryId) {
     return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
@@ -109,11 +117,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([])
   }
 
-  // Lọc tiếp: chỉ giữ người có quyền documents.phe_duyet (explicit hoặc theo role)
+  // Lọc tiếp: chỉ giữ người có quyền `permissionCode` (explicit hoặc theo role)
   const { data: permRows } = await supabaseAdmin
     .from("user_permissions")
     .select("user_id")
-    .eq("permission_code", "documents.phe_duyet")
+    .eq("permission_code", permissionCode)
     .eq("granted", true)
 
   const explicitUserIds = new Set((permRows || []).map((r: { user_id: string }) => r.user_id))
@@ -121,7 +129,7 @@ export async function GET(req: NextRequest) {
   const { data: rolePermRows } = await supabaseAdmin
     .from("role_permissions")
     .select("role")
-    .eq("permission_code", "documents.phe_duyet")
+    .eq("permission_code", permissionCode)
 
   const rolesWithPerm = new Set((rolePermRows || []).map((r: { role: string }) => r.role))
 

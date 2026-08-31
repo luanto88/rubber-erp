@@ -23,7 +23,13 @@
       "Bash(git commit -m 'feat: thêm module bản đồ + GeoJSON + assets *)",
       "Bash(node -e ' *)",
       "Bash(git commit -m 'fix: chuyển lô V5T từ Đội 0 sang Đội 11 *)",
-      "Bash(git commit -m 'docs: cập nhật chuẩn UI card — gradient header, icon+label, value bold, border-dashed *)"
+      "Bash(git commit -m 'docs: cập nhật chuẩn UI card — gradient header, icon+label, value bold, border-dashed *)",
+      "Bash(npm view *)",
+      "Bash(gh api *)",
+      "WebFetch(domain:registry.npmjs.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//c/Users/Software/AppData/Local/Temp/claude/c--Users-Software-rubber-erp/9140d962-e7a4-49d1-a930-841a61378148/scratchpad/pades-poc/**)",
+      "Bash(npm ls *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Software\\rubber-erp\\public\\images"

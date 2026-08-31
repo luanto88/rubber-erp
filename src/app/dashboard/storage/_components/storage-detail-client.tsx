@@ -371,7 +371,11 @@ export function StorageDetailClient({
             <div>
               <h2 className="text-lg font-extrabold text-slate-900">Lô thành phẩm</h2>
               <p className="text-sm text-slate-400">
-                {summary?.totalLots || 0} lô, gồm {summary?.doDangCount || 0} lô dở dang
+                {summary
+                  ? summary.doDangCount > 0
+                    ? `${summary.totalLots} lô (${summary.tronLoCount} tròn, ${summary.doDangCount} dở dang)`
+                    : `${summary.totalLots} lô tròn`
+                  : "0 lô"}
               </p>
             </div>
             <div className="rounded-2xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">

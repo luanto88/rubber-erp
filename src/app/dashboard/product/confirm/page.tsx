@@ -1407,7 +1407,7 @@ function groupPendingDrafts(drafts: ConfirmDraftRow[]): PendingDraftGroup[] {
   >();
   for (const d of drafts) {
     const palletKey = [...(d.pallet || [])].sort().join(",");
-    const key = `${d.maLo}||${d.loaiCsr}||${d.loaiBanh}||${d.boc || ""}||${palletKey}`;
+    const key = `${d.maLo}||${d.loaiCsr}||${d.loaiBanh}||${d.boc || ""}||${palletKey}||${d.nganId || d.nganMa || ""}`;
     const existing = map.get(key);
     if (existing) {
       existing.draftIds.push(d.id);

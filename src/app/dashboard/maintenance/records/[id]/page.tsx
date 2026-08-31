@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, ImagePlus, Loader2, Plus,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, ExternalLink, ImagePlus, Loader2, Plus,
   Printer, QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -30,6 +30,9 @@ import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { compressImageForUpload, validateImageFile, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
+import { MaintenanceSignModal } from "../_components/maintenance-sign-modal"
+import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "../_components/maintenance-sign-status"
+import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
 type InventoryItemOption = {
   id: string
@@ -196,6 +199,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState("")
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
+
+  // Ký duyệt điện tử (Giai đoạn 5, bundle su_co_nho) — chạy song song với cho_duyet/da_duyet,
+  // không đụng luồng phê duyệt hiện có. Chỉ áp dụng cho biên bản Sửa chữa đã đủ điều kiện in
+  // "su_co_nho" (xem điều kiện IIFE ở khối nút "In biên bản" bên dưới).
+  const [signingStatus, setSigningStatus] = useState<MaintenanceSigningStatus | undefined>(undefined)
+  const [signModalOpen, setSignModalOpen] = useState(false)
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn biên bản vừa lưu vào công việc KPI đang mở. `navigateTo`
   // chỉ có ở nhánh tạo mới — điều hướng bị DELAY tới khi banner đóng (onDone), vì đổi params.id
@@ -504,6 +513,22 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     (bgdPhuTrach && userName === bgdPhuTrach)
   )
   const isAdmin = user?.role === "admin"
+  // Ký duyệt điện tử (Giai đoạn 5) — mỗi biên bản chỉ khớp đúng 1 trong 4 bundle chứng từ,
+  // khớp chính xác điều kiện render nút "In biên bản" của từng nhánh bên dưới.
+  const suaChuaNhoXeEligible = !!record && record.hang_muc === "Sửa chữa" &&
+    record.bo_phan === "Đội xe" && (lines[0]?.loai_sua_chua || "lon") === "nho"
+  const suCoNhoEligible = !!record && record.hang_muc === "Sửa chữa" && !suaChuaNhoXeEligible
+  const baoDuongEligible = !!record && record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe"
+  const baoDuongXeEligible = !!record && record.hang_muc === "Bảo dưỡng" && record.bo_phan === "Đội xe"
+  const signBundle: MaintenanceSignBundle | null = suCoNhoEligible
+    ? "su_co_nho"
+    : suaChuaNhoXeEligible
+    ? "sua_chua_nho_xe"
+    : baoDuongEligible
+    ? "bao_duong"
+    : baoDuongXeEligible
+    ? "bao_duong_xe"
+    : null
   // Admin luôn được sửa ở mọi trạng thái. Người tạo được sửa khi Chờ duyệt hoặc Từ chối;
   // Đã duyệt/Đã hủy chỉ admin mới sửa được.
   const isReadOnly =
@@ -691,6 +716,21 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     )
   }, [])
 
+  const loadSigningStatus = useCallback(async (fid: string, recordId: string) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) return
+      const res = await fetch(`/api/maintenance/signing-status?factoryId=${fid}&recordIds=${recordId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const json = (await res.json()) as MaintenanceSigningStatus[] | { error?: string }
+      setSigningStatus(Array.isArray(json) ? json[0] : undefined)
+    } catch {
+      // Badge chỉ là thông tin phụ — lỗi tải không được chặn trang chi tiết biên bản.
+    }
+  }, [])
+
   const loadRecord = useCallback(async (fid: string, recordId: string) => {
     const { data: rec } = await supabase
       .from("maintenance_records")
@@ -810,6 +850,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
     void bootstrap().finally(() => setLoading(false))
   }, [id, isNew, loadRecord])
+
+  // Tải trạng thái ký duyệt điện tử — chỉ khi biên bản khớp đúng 1 trong 4 bundle hỗ trợ ký số
+  // (khớp đúng nút "In biên bản" của từng nhánh bên dưới).
+  useEffect(() => {
+    if (!factoryId || isNew || !signBundle) { setSigningStatus(undefined); return }
+    void loadSigningStatus(factoryId, id)
+  }, [factoryId, id, isNew, signBundle, loadSigningStatus])
 
   // Close material dropdown when clicking outside
   useEffect(() => {
@@ -1586,44 +1633,144 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     // Đội xe + sửa chữa nhỏ (≤200$) vẫn giữ bộ tài liệu riêng F08+F15SmallVehicle+F06
                     if (record.bo_phan === "Đội xe" && loaiSuaChua === "nho") {
                       return (
-                        <Link
-                          href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
-                          target="_blank"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                        >
-                          <Printer size={12} /> Sửa chữa nhỏ
-                        </Link>
+                        <>
+                          {signingStatus?.fileHienTai ? (
+                            <a
+                              href={signingStatus.fileHienTai}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                              className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                            >
+                              <Eye size={12} /> Xem file đã ký
+                            </a>
+                          ) : (
+                            <Link
+                              href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
+                              target="_blank"
+                              className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                            >
+                              <Printer size={12} /> Sửa chữa nhỏ
+                            </Link>
+                          )}
+                          {user && (
+                            <MaintenanceSignStatusBadge
+                              status={signingStatus}
+                              currentUser={user}
+                              canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                              onOpenSignPrompt={() => setSignModalOpen(true)}
+                              onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
+                              showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
+                            />
+                          )}
+                        </>
                       )
                     }
                     // Còn lại (mọi bộ phận, kể cả Đội xe sửa chữa lớn >200$) gộp chung 1 file
                     // F13 + F10 + F15 (+ Ảnh) — không tách "Sự cố"/"Đề nghị" thành 2 nút nữa
                     return (
-                      <Link
-                        href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
-                        target="_blank"
-                        className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                      >
-                        <Printer size={12} /> In biên bản
-                      </Link>
+                      <>
+                        {/* Giống hệt Chất lượng/Điều xe: chưa có yêu cầu ký → render bản in
+                            (khoảng trống ký tay); đã có yêu cầu ký → mở đúng file HIỆN TẠI (có
+                            chữ ký điện tử đã đóng dấu, dù đang chờ ký tiếp hay đã hoàn tất) —
+                            không quay lại render bản in nháp nữa. */}
+                        {signingStatus?.fileHienTai ? (
+                          <a
+                            href={signingStatus.fileHienTai}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                            className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          >
+                            <Eye size={12} /> Xem file đã ký
+                          </a>
+                        ) : (
+                          <Link
+                            href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
+                            target="_blank"
+                            className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          >
+                            <Printer size={12} /> In biên bản
+                          </Link>
+                        )}
+                        {user && (
+                          <MaintenanceSignStatusBadge
+                            status={signingStatus}
+                            currentUser={user}
+                            canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                            onOpenSignPrompt={() => setSignModalOpen(true)}
+                            onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
+                            showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
+                          />
+                        )}
+                      </>
                     )
                   })()}
                   {record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe" && (
-                    <Link
-                      href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
-                      target="_blank"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                    >
-                      <Printer size={12} /> In biên bản
-                    </Link>
+                    <>
+                      {signingStatus?.fileHienTai ? (
+                        <a
+                          href={signingStatus.fileHienTai}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Eye size={12} /> Xem file đã ký
+                        </a>
+                      ) : (
+                        <Link
+                          href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
+                          target="_blank"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Printer size={12} /> In biên bản
+                        </Link>
+                      )}
+                      {user && (
+                        <MaintenanceSignStatusBadge
+                          status={signingStatus}
+                          currentUser={user}
+                          canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                          onOpenSignPrompt={() => setSignModalOpen(true)}
+                          onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
+                          showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
+                        />
+                      )}
+                    </>
                   )}
                   {record.hang_muc === "Bảo dưỡng" && record.bo_phan === "Đội xe" && (
-                    <Link
-                      href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${id}`}
-                      target="_blank"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                    >
-                      <Printer size={12} /> In biên bản
-                    </Link>
+                    <>
+                      {signingStatus?.fileHienTai ? (
+                        <a
+                          href={signingStatus.fileHienTai}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Eye size={12} /> Xem file đã ký
+                        </a>
+                      ) : (
+                        <Link
+                          href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${id}`}
+                          target="_blank"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                        >
+                          <Printer size={12} /> In biên bản
+                        </Link>
+                      )}
+                      {user && (
+                        <MaintenanceSignStatusBadge
+                          status={signingStatus}
+                          currentUser={user}
+                          canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                          onOpenSignPrompt={() => setSignModalOpen(true)}
+                          onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
+                          showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
+                        />
+                      )}
+                    </>
                   )}
                 </>
               ) : (
@@ -2864,6 +3011,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             placeholder="Nhập lý do từ chối phê duyệt..."
           />
         </ModalShell>
+      )}
+
+      {signModalOpen && factoryId && !isNew && signBundle && (
+        <MaintenanceSignModal
+          open={signModalOpen}
+          onClose={() => setSignModalOpen(false)}
+          factoryId={factoryId}
+          recordId={id}
+          maBb={record?.ma_bb ?? null}
+          bundle={signBundle}
+        />
       )}
 
       {/* Personnel section */}

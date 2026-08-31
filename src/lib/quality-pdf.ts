@@ -111,7 +111,16 @@ const HEAD_ROW_2 = [
   "TB", "Min", "Max", // ML
 ]
 
-function renderBatchPage(doc: jsPDF, batchResults: QualityKqknResult[], fCode: string) {
+export type QualitySignatureBoxMm = { x: number; y: number; w: number; h: number }
+export type QualityKqknSignerBoxes = { chuKyBox: QualitySignatureBoxMm; tenBox: QualitySignatureBoxMm }
+export type QualityKqknPageInfo = {
+  pageNumber: number
+  pageHeightMm: number
+  nguoiLap: QualityKqknSignerBoxes
+  nguoiPheDuyet: QualityKqknSignerBoxes
+}
+
+function renderBatchPage(doc: jsPDF, batchResults: QualityKqknResult[], fCode: string): QualityKqknPageInfo {
   const sorted = [...batchResults].sort((a, b) => (a.lo_kn || 0) - (b.lo_kn || 0))
   const r0 = sorted[0]
   const pknCode = formatPKN(r0.pkn, r0.ngay_kn, fCode)
@@ -202,7 +211,10 @@ function renderBatchPage(doc: jsPDF, batchResults: QualityKqknResult[], fCode: s
 
   const finalY = (doc as PdfWithTable).lastAutoTable?.finalY || 23
   let y = finalY + 6
-  if (y > pageH - 40) {
+  // pageH - 46 (thay vì -40 cũ) — chừa thêm ~6mm bên dưới khối chữ ký cho tên người
+  // ký (chỉ đổi NGƯỠNG ngắt trang, không đổi bất kỳ tọa độ vẽ nào đã có — không ảnh
+  // hưởng hình ảnh của các trang không cần ngắt).
+  if (y > pageH - 46) {
     doc.addPage()
     y = 18
   }
@@ -223,23 +235,49 @@ function renderBatchPage(doc: jsPDF, batchResults: QualityKqknResult[], fCode: s
   const col2X = margin + contentW * 0.75
 
   y += 14
+  const labelY = y
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.text("LẬP BIỂU", col1X, y, { align: "center" })
   doc.text("TRƯỞNG PHÒNG QLCL", col2X, y, { align: "center" })
 
   y += 14
+  const lineY = y
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.text("________________________", col1X, y, { align: "center" })
   doc.text("________________________", col2X, y, { align: "center" })
 
-  y += 6
-  doc.setFontSize(7)
-  doc.setTextColor(...GRAY)
-  doc.text("QLCL-QT21-F08 (01-10/01/2025)", margin, y)
-  doc.setTextColor(...INK)
+  // Khung ký (mm, gốc trên-trái) — nằm trong khoảng trắng giữa nhãn "LẬP BIỂU"/
+  // "TRƯỞNG PHÒNG QLCL" và dòng gạch chân đã vẽ ở trên (chu_ky), tên người ký in
+  // ngay dưới dòng gạch chân (ten) — KHÔNG vẽ thêm gì mới ở đây, chỉ mô tả lại toạ
+  // độ đã có sẵn để hệ thống ký số dùng chung stamp chữ ký + tên vào đúng chỗ. Dùng
+  // cho luồng "Ký duyệt" (buildQualityKqknPdfForSigning) — luồng tải PDF thường
+  // (downloadQualityKqknPdf) không đọc giá trị trả về này, không đổi hành vi/hình ảnh.
+  const boxesOf = (colX: number): QualityKqknSignerBoxes => ({
+    chuKyBox: { x: colX - 22, y: labelY + 2, w: 44, h: 10 },
+    tenBox: { x: colX - 25, y: lineY + 1, w: 50, h: 5 },
+  })
+
+  // `renderBatchPage` có thể tự addPage() ở trên nếu bảng tràn trang (dòng ~216) —
+  // đọc SỐ TRANG THẬT tại đúng thời điểm vẽ khối ký, không giả định 1 batch = 1 trang.
+  const pageNumber = doc.getCurrentPageInfo().pageNumber
+
+  return {
+    pageNumber,
+    pageHeightMm: pageH,
+    nguoiLap: boxesOf(col1X),
+    nguoiPheDuyet: boxesOf(col2X),
+  }
 }
 
-export async function downloadQualityKqknPdf(dateResults: QualityKqknResult[], date: string, fCode: string) {
+/**
+ * Lõi dựng file dùng chung cho cả 2 luồng — "Tải PDF" (không cần biết khung ký) và
+ * "Ký duyệt" (cần toạ độ khung ký từng trang). Tách riêng để không lặp lại y hệt
+ * logic gộp batch/đánh số trang ở 2 nơi.
+ */
+async function buildQualityKqknDoc(
+  dateResults: QualityKqknResult[],
+  fCode: string,
+): Promise<{ doc: jsPDF; pages: QualityKqknPageInfo[] }> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
 
@@ -251,11 +289,17 @@ export async function downloadQualityKqknPdf(dateResults: QualityKqknResult[], d
   })
   const batches = Array.from(batchMap.values()).sort((a, b) => (a[0].pkn || 0) - (b[0].pkn || 0))
 
+  const pages: QualityKqknPageInfo[] = []
   batches.forEach((batch, i) => {
     if (i > 0) doc.addPage()
-    renderBatchPage(doc, batch, fCode)
+    pages.push(renderBatchPage(doc, batch, fCode))
   })
 
+  // Mã hồ sơ — neo cố định góc trái, sát mép dưới trang, đồng hàng với "Trang X/Y" ở
+  // góc phải. Vẽ ở đây (1 lần cho MỌI trang của toàn bộ tài liệu) thay vì bên trong
+  // renderBatchPage (nơi vị trí trước đây trôi theo chiều cao nội dung phía trên và có
+  // thể thiếu hẳn trên các trang đầu của 1 batch tràn nhiều trang) — mirror đúng quy ước
+  // "page footer" cố định đã dùng ở src/lib/maintenance-pdf.ts's drawDocumentFooter().
   const pageCount = doc.getNumberOfPages()
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -264,8 +308,28 @@ export async function downloadQualityKqknPdf(dateResults: QualityKqknResult[], d
   doc.setTextColor(...GRAY)
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p)
+    doc.text("QLCL-QT21-F08 (01-10/01/2025)", 8, pageH - 5)
     doc.text(`Trang ${p}/${pageCount}`, pageW - 8, pageH - 5, { align: "right" })
   }
 
+  return { doc, pages }
+}
+
+export async function downloadQualityKqknPdf(dateResults: QualityKqknResult[], date: string, fCode: string) {
+  const { doc } = await buildQualityKqknDoc(dateResults, fCode)
   doc.save(`phieu-kqkn-${safeName(date)}.pdf`)
+}
+
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký từng trang (mm, gốc trên-trái) — dùng cho
+ * nút "Ký duyệt" (khác hẳn "Tải PDF" — không tự tải file, để caller upload lên hệ
+ * thống ký số dùng chung rồi điều hướng sang /dashboard/ky/[id]).
+ */
+export async function buildQualityKqknPdfForSigning(
+  dateResults: QualityKqknResult[],
+  fCode: string,
+): Promise<{ bytes: Uint8Array; pages: QualityKqknPageInfo[] }> {
+  const { doc, pages } = await buildQualityKqknDoc(dateResults, fCode)
+  const bytes = doc.output("arraybuffer") as ArrayBuffer
+  return { bytes: new Uint8Array(bytes), pages }
 }

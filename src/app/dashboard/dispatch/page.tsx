@@ -8,6 +8,8 @@ import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcMa
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
 import { formatDateDisplay, getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
+import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
+import { DispatchSignStatusBadge, type DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
@@ -20,7 +22,7 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -70,6 +72,7 @@ type DispatchEntry = {
   rows: DxRow[]
   created_at?: string
   ma_dx?: string
+  created_by?: string | null
 }
 
 type GeoJsonFeature = {
@@ -719,6 +722,14 @@ export default function DispatchPage() {
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
+  // Ký duyệt bảng phân xe (Giai đoạn 4 — hệ thống ký số dùng chung)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [signingStatusByEntry, setSigningStatusByEntry] = useState<Map<string, DispatchSigningStatus>>(new Map())
+  // Cờ "đã tải xong trạng thái ký lần đầu" — tránh nút Sửa/Xóa hiện ra rồi mới ẩn khi phát hiện
+  // phiếu đã "Đã ký duyệt" (race condition đã báo 2026-08-31, mirror đúng cách xử lý ở Kiểm nghiệm).
+  const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
+  const [signModalEntry, setSignModalEntry] = useState<DispatchEntry | null>(null)
+
   // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu vừa lưu vào công việc KPI đang mở hôm nay
   const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
   const vehicleOptions = vehicles
@@ -874,6 +885,7 @@ export default function DispatchPage() {
         window.location.replace("/dashboard")
         return
       }
+      setCurrentUser(cachedUser)
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
@@ -920,6 +932,32 @@ export default function DispatchPage() {
     if (!factoryId) return
     void loadData(factoryId, deliveryPoints)
   }, [deliveryPoints, factoryId, loadData])
+
+  // Ký duyệt bảng phân xe — tải trạng thái yeu_cau_ky cho các phiếu đang hiển thị. Lỗi
+  // bị nuốt êm vì badge chỉ là tiện ích hiển thị thêm, không được chặn danh sách chính.
+  const loadSigningStatus = useCallback(async (fid: string, entryIds: string[]) => {
+    if (!entryIds.length) { setSigningStatusByEntry(new Map()); setSigningStatusLoaded(true); return }
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) return
+      const res = await fetch(`/api/dispatch/signing-status?factoryId=${fid}&entryIds=${entryIds.join(",")}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!res.ok) return
+      const rows = (await res.json()) as DispatchSigningStatus[]
+      setSigningStatusByEntry(new Map(rows.map((r) => [r.entryId, r])))
+    } catch {
+      // im lặng
+    } finally {
+      setSigningStatusLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!factoryId || !entries.length) return
+    void loadSigningStatus(factoryId, entries.map((e) => e.id))
+  }, [factoryId, entries, loadSigningStatus])
   const filterRowsByActiveFilters = useCallback((rows: DxRow[] = []) => {
     return rows.filter((row) => {
       if (!matchesNoteFilterMulti(row.ghi_chu, filterGhiChu)) return false
@@ -1232,6 +1270,11 @@ export default function DispatchPage() {
   // Save (add or edit)
   const handleSave = async () => {
     if (!factoryId) return
+    if (editId && currentUser?.role !== "admin" &&
+        signingStatusByEntry.get(editId)?.trangThai === "hoan_tat") {
+      showToast("Phiếu này đã ký duyệt — chỉ admin được xóa/sửa")
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -1258,6 +1301,7 @@ export default function DispatchPage() {
             ngay: formNgay,
             chung_nhan: formCN,
             day_chuyen: formDayChuyen,
+            updated_at: new Date().toISOString(),
           })
           .eq("id", editId)
         if (error) { showToast(error.message); return }
@@ -1284,6 +1328,7 @@ export default function DispatchPage() {
             ngay: formNgay,
             chung_nhan: formCN,
             day_chuyen: formDayChuyen,
+            created_by: currentUser?.id ?? null,
           })
           .select("id")
           .single()
@@ -1322,6 +1367,10 @@ export default function DispatchPage() {
   // Delete
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    if (currentUser?.role !== "admin" && signingStatusByEntry.get(id)?.trangThai === "hoan_tat") {
+      showToast("Phiếu này đã ký duyệt — chỉ admin được xóa/sửa")
+      return
+    }
     await supabase.from("dispatch_entries").delete().eq("id", id)
     setDelConfirm(null)
     showToast("Đã xóa bảng phân xe")
@@ -1510,7 +1559,7 @@ export default function DispatchPage() {
       } else {
         const { data: inserted, error } = await supabase
           .from("dispatch_entries")
-          .insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", day_chuyen: dayChuyen })
+          .insert({ factory_id: factoryId, ngay, chung_nhan: "PEFC CS", day_chuyen: dayChuyen, created_by: currentUser?.id ?? null })
           .select("id")
           .single()
         if (error) throw error
@@ -1787,7 +1836,7 @@ export default function DispatchPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4",""].map(h => (
+                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4","K\u00fd duy\u1ec7t",""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -1797,6 +1846,15 @@ export default function DispatchPage() {
                 const entryRows = filterRowsByActiveFilters(entry.rows || [])
                 const totalKLT = entryRows.reduce((s, r) => s + getDispatchRowFresh(r), 0)
                 const totalKLK = entryRows.reduce((s, r) => s + getDispatchRowDry(r), 0)
+                // Chỉ người tạo (hoặc admin) mới được Sửa/Ký duyệt phiếu này. Phiếu CŨ không rõ
+                // created_by (NULL) KHÔNG còn được coi là "ai có quyền edit cũng thao tác được" —
+                // chỉ admin xử lý được (tighten 2026-08-31, sau khi xác nhận 100% dispatch_entries
+                // hiện tại đang NULL created_by, khiến rule cũ vô hiệu hoá hoàn toàn ownership).
+                const canOwnerEditEntry = !!currentUser &&
+                  (currentUser.role === "admin" || entry.created_by === currentUser.id)
+                // Sau khi phiếu đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa.
+                const isEntryLocked = currentUser?.role !== "admin" &&
+                  signingStatusByEntry.get(entry.id)?.trangThai === "hoan_tat"
                 return (
                   <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
                     <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500"
@@ -1831,24 +1889,48 @@ export default function DispatchPage() {
                       onClick={() => { setSelected(entry); setView("detail") }}>
                       {totalKLK.toLocaleString()} kg
                     </td>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      {currentUser && (
+                        <DispatchSignStatusBadge
+                          status={signingStatusByEntry.get(entry.id)}
+                          currentUser={currentUser}
+                          canCreate={hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry}
+                          onOpenSignPrompt={() => setSignModalEntry(entry)}
+                          onCancelled={() => { if (factoryId) void loadSigningStatus(factoryId, entries.map((e) => e.id)) }}
+                          showToast={showToast}
+                        />
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
-                          className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF ngày">
-                          <FileText size={14}/>
-                        </button>
+                        {signingStatusByEntry.get(entry.id)?.fileHienTai ? (
+                          <button onClick={(e) => { e.stopPropagation(); window.open(signingStatusByEntry.get(entry.id)!.fileHienTai!, "_blank") }}
+                            className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
+                            title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}>
+                            <Eye size={14}/>
+                          </button>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
+                            className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF (chưa ký)">
+                            <FileText size={14}/>
+                          </button>
+                        )}
                         <button onClick={(e) => { e.stopPropagation(); openClone(entry) }}
                           className="p-1.5 hover:bg-violet-50 text-violet-500 rounded-lg transition-colors" title="Nhân bản phiếu này">
                           <Copy size={14}/>
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
-                          className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
-                          <Edit2 size={14}/>
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setDelConfirm(entry.id) }}
-                          className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
-                          <Trash2 size={14}/>
-                        </button>
+                        {hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry && signingStatusLoaded && !isEntryLocked && (
+                          <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
+                            className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
+                            <Edit2 size={14}/>
+                          </button>
+                        )}
+                        {hasPermission(currentUser, "dispatch.delete") && canOwnerEditEntry && signingStatusLoaded && !isEntryLocked && (
+                          <button onClick={(e) => { e.stopPropagation(); setDelConfirm(entry.id) }}
+                            className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
+                            <Trash2 size={14}/>
+                          </button>
+                        )}
                         <button onClick={() => { setSelected(entry); setView("detail") }}
                           className="p-1.5 hover:bg-slate-100 text-slate-400 rounded-lg transition-colors" title="Xem">
                           <ChevronRight size={16}/>
@@ -1878,11 +1960,36 @@ export default function DispatchPage() {
           </div>
         </div>
       )}
+
+      {/* Ký duyệt bảng phân xe (Giai đoạn 4) */}
+      {signModalEntry && factoryId && currentUser && (
+        <DispatchSignModal
+          open
+          onClose={() => {
+            setSignModalEntry(null)
+            void loadSigningStatus(factoryId, entries.map((e) => e.id))
+          }}
+          factoryId={factoryId}
+          currentUser={currentUser}
+          entry={signModalEntry}
+          deliveryPoints={deliveryPoints}
+          factoryName={factoryName}
+        />
+      )}
     </div>
   )
 
   // Render: DETAIL
-  if (view === "detail" && selected) return (
+  if (view === "detail" && selected) {
+    // Cùng quy tắc "chỉ người tạo (hoặc admin) mới Sửa" đã áp cho danh sách — trang chi tiết
+    // trước đây có nút "Sửa" riêng, hoàn toàn không gate quyền/ownership, nên vẫn lọt qua dù
+    // đã ẩn nút ở danh sách. `created_by` NULL không còn được coi là "ai cũng sửa được" (tighten
+    // 2026-08-31); `signingStatusLoaded` tránh nút hiện tạm trong lúc chưa tải xong trạng thái ký.
+    const canEditSelected = !!currentUser && hasPermission(currentUser, "dispatch.edit") &&
+      (currentUser.role === "admin" || selected.created_by === currentUser.id) &&
+      signingStatusLoaded &&
+      !(currentUser.role !== "admin" && signingStatusByEntry.get(selected.id)?.trangThai === "hoan_tat")
+    return (
     <div>
       <ToastNotification/>
       <div className="flex items-center gap-3 mb-6">
@@ -1896,10 +2003,12 @@ export default function DispatchPage() {
             }`}>{selected.day_chuyen || "Mủ tạp"}</span>
           </p>
         </div>
-        <button onClick={() => openEdit(selected)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-sm transition-colors">
-          <Edit2 size={14}/> Sửa
-        </button>
+        {canEditSelected && (
+          <button onClick={() => openEdit(selected)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-sm transition-colors">
+            <Edit2 size={14}/> Sửa
+          </button>
+        )}
       </div>
 
       <ResponsiveTableWrapper>
@@ -1961,7 +2070,8 @@ export default function DispatchPage() {
         </table>
       </ResponsiveTableWrapper>
     </div>
-  )
+    )
+  }
 
   // Render: ADD / EDIT
   return (

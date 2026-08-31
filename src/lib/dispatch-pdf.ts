@@ -333,12 +333,11 @@ export async function downloadDispatchTripPdf(trip: DispatchFlatTrip, factoryNam
   doc.save(`phieu-dieu-xe-${safeName(trip.maDx || trip.ngay)}-${safeName(trip.so_xe || "xe")}-chuyen-${trip.chuyen || 1}.pdf`)
 }
 
-export async function downloadDispatchEntryPdf(params: {
+async function buildDispatchEntryDoc(params: {
   entry: DispatchAnalyticsEntry
   trips: DispatchFlatTrip[]
   factoryName: string
-  makerName?: string
-}) {
+}): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
   renderHeader(doc, `PHIẾU ĐIỀU XE NGÀY ${formatDateVi(params.entry.ngay)}`, `Mã ĐX: ${params.entry.ma_dx || "-"}; nhà máy: ${params.factoryName}; chứng nhận: ${params.entry.chung_nhan || "-"}`)
@@ -385,9 +384,89 @@ export async function downloadDispatchEntryPdf(params: {
     },
   })
 
-  renderSignatures(doc, params.makerName)
+  return doc
+}
+
+export type DispatchSignatureBoxMm = { x: number; y: number; w: number; h: number }
+export type DispatchSignerBoxes = { chuKyBox: DispatchSignatureBoxMm; tenBox: DispatchSignatureBoxMm }
+export type DispatchEntrySigningInfo = {
+  pageNumber: number
+  pageHeightMm: number
+  lapBang: DispatchSignerBoxes
+  giamDoc: DispatchSignerBoxes
+}
+
+/**
+ * Mirror `renderSignatures()` ở trên (vẫn dùng nguyên, không đổi, cho Trip PDF/Stats PDF)
+ * nhưng thêm tính toán tọa độ khung ký (mm, gốc trên-trái) cho "Lập bảng"/"Giám đốc nhà
+ * máy" — dùng riêng cho Phiếu điều xe ngày, tài liệu duy nhất của module này được gắn ký
+ * số dùng chung (Giai đoạn 4). Khi có `makerName` (luồng "Xuất PDF ngày" cũ), vẽ giống hệt
+ * `renderSignatures` — không đổi hình ảnh PDF tải về. Khi gọi không có `makerName` (luồng
+ * ký số), không in sẵn tên để tránh chữ đè lên đúng chỗ hệ thống ký sẽ stamp tên thật.
+ */
+function renderEntrySignatures(doc: jsPDF, makerName?: string): DispatchEntrySigningInfo {
+  const pdf = doc as PdfWithTable
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const desiredY = (pdf.lastAutoTable?.finalY || 0) + 16
+  if (desiredY > pageH - 42) {
+    doc.addPage()
+  }
+  const startY = desiredY > pageH - 42 ? 20 : desiredY
+
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(10)
+  doc.text("Giám đốc nhà máy", 24, startY)
+  doc.text("Lập bảng", pageW - 42, startY, { align: "center" })
+
+  if (makerName) {
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(9)
+    doc.text(makerName, pageW - 42, startY + 26, { align: "center" })
+  }
+
+  const colX = pageW - 42
+  return {
+    pageNumber: doc.getCurrentPageInfo().pageNumber,
+    pageHeightMm: pageH,
+    giamDoc: {
+      chuKyBox: { x: 20, y: startY + 2, w: 50, h: 18 },
+      tenBox: { x: 15, y: startY + 21, w: 60, h: 5 },
+    },
+    lapBang: {
+      chuKyBox: { x: colX - 25, y: startY + 2, w: 50, h: 18 },
+      tenBox: { x: colX - 25, y: startY + 21, w: 50, h: 5 },
+    },
+  }
+}
+
+export async function downloadDispatchEntryPdf(params: {
+  entry: DispatchAnalyticsEntry
+  trips: DispatchFlatTrip[]
+  factoryName: string
+  makerName?: string
+}) {
+  const doc = await buildDispatchEntryDoc(params)
+  renderEntrySignatures(doc, params.makerName)
   footer(doc)
   doc.save(`phieu-dieu-xe-ngay-${safeName(params.entry.ngay)}.pdf`)
+}
+
+/**
+ * Dựng PDF trả về bytes + toạ độ khung ký (mm, gốc trên-trái) — dùng cho nút "Ký duyệt"
+ * (khác "Xuất PDF ngày" — không tự tải file, để caller upload lên hệ thống ký số dùng
+ * chung rồi điều hướng sang /dashboard/ky/[id]).
+ */
+export async function buildDispatchEntryPdfForSigning(params: {
+  entry: DispatchAnalyticsEntry
+  trips: DispatchFlatTrip[]
+  factoryName: string
+}): Promise<{ bytes: Uint8Array; page: DispatchEntrySigningInfo }> {
+  const doc = await buildDispatchEntryDoc(params)
+  const page = renderEntrySignatures(doc)
+  footer(doc)
+  const bytes = doc.output("arraybuffer") as ArrayBuffer
+  return { bytes: new Uint8Array(bytes), page }
 }
 
 function buildStatsContext(params: {

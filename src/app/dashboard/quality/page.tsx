@@ -9,7 +9,9 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-utils"
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
-import { downloadQualityKqknPdf } from "@/lib/quality-pdf"
+import { downloadQualityKqknPdf, type QualityKqknResult } from "@/lib/quality-pdf"
+import { QualitySignModal } from "@/app/dashboard/quality/_components/quality-sign-modal"
+import { QualitySignStatusBadge, type QualitySigningStatus } from "@/app/dashboard/quality/_components/quality-sign-status"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -19,7 +21,7 @@ import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
-  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye,
+  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye, FileText,
   Upload, Download, CheckCircle, FlaskConical
 } from "lucide-react"
 
@@ -41,6 +43,7 @@ type QcResult = {
   dat_hang: string; trang_thai: string
   parent_id?: string | null; lan?: number; notes?: NoteEntry[]
   created_at?: string
+  created_by?: string | null
   lots?: { ma_lo: string; ngay_sx: string; ngay_ht?: string | null }
 }
 
@@ -443,6 +446,17 @@ export default function QualityPage() {
     errors: string[]
   } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
+
+  // ── Ký duyệt Phiếu KQKN (Giai đoạn 3 — Hệ thống ký số dùng chung, thí điểm) ────
+  const [signModal, setSignModal] = useState<{
+    dateResults: QualityKqknResult[]
+    maHoSo: string
+  } | null>(null)
+  const [signingStatusByDate, setSigningStatusByDate] = useState<Map<string, QualitySigningStatus>>(new Map())
+  // Cờ "đã tải xong trạng thái ký lần đầu" — dùng để tránh nút Sửa/Xóa/Thêm hiện ra rồi mới ẩn
+  // đi khi phát hiện ngày đó đã "Đã ký duyệt" (trước khi có cờ này, isDateLocked mặc định false
+  // trong lúc Map còn rỗng nên nút luôn hiện tạm thời — race condition đã báo 2026-08-31).
+  const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
 
   // ── Toast ────────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{msg:string;ok:boolean}|null>(null)
@@ -969,6 +983,14 @@ export default function QualityPage() {
   // ── Save batch ───────────────────────────────────────────────────────────────
   const handleSaveBatch = async () => {
     if (!factoryId || selectedLotIds.size === 0) return
+    if (editingResultId) {
+      const editDate = results.find(r => r.id === editingResultId)?.ngay_kn?.slice(0, 10)
+      if (editDate && currentUser?.role !== "admin" &&
+          signingStatusByDate.get(editDate)?.trangThai === "hoan_tat") {
+        showToast("Ngày này đã ký duyệt — chỉ admin được xóa/sửa", false)
+        return
+      }
+    }
     const unfilledLots = Array.from(selectedLotIds).filter(id=>!isTabFilled(id))
     if (unfilledLots.length > 0) {
       const names = unfilledLots.map(id=>eligibleLots.find(l=>l.id===id)?.ma_lo||id).join(", ")
@@ -997,6 +1019,7 @@ export default function QualityPage() {
         chung_loai: createForm.chung_loai, loai_csr: loaiCsr,
         loai_kn: createForm.loai_kn, tieu_chuan: createForm.tieu_chuan,
         so_mau: createForm.so_mau, samples, grade, dat_hang, trang_thai,
+        updated_at: new Date().toISOString(),
       }).eq("id", editingResultId)
       if (error) { showToast("Lỗi: "+error.message, false); return }
       showToast("Đã cập nhật phiếu kiểm nghiệm")
@@ -1048,7 +1071,7 @@ export default function QualityPage() {
           chung_loai:createForm.chung_loai, loai_csr:loaiCsr,
           loai_kn:createForm.loai_kn, tieu_chuan:createForm.tieu_chuan,
           so_mau:createForm.so_mau, samples, grade, dat_hang, trang_thai,
-          parent_id:parentId||null, lan, notes,
+          parent_id:parentId||null, lan, notes, created_by: user.id,
         })
         if (error) { showToast(`Lỗi lô ${lot.ma_lo}: ${error.message}`, false); return }
         nextLoKN++
@@ -1082,6 +1105,12 @@ export default function QualityPage() {
   // ── Delete ───────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!factoryId) return
+    const delDate = results.find(r => r.id === id)?.ngay_kn?.slice(0, 10)
+    if (delDate && currentUser?.role !== "admin" &&
+        signingStatusByDate.get(delDate)?.trangThai === "hoan_tat") {
+      showToast("Ngày này đã ký duyệt — chỉ admin được xóa/sửa", false)
+      return
+    }
     const { data: affectedResults, error: fetchError } = await supabase
       .from("qc_results")
       .select("lot_id")
@@ -1128,6 +1157,11 @@ export default function QualityPage() {
 
   const handleBulkDelete = async () => {
     if (!factoryId || selectedDeleteIds.size===0) return
+    if (deleteMode && currentUser?.role !== "admin" &&
+        signingStatusByDate.get(deleteMode)?.trangThai === "hoan_tat") {
+      showToast("Ngày này đã ký duyệt — chỉ admin được xóa/sửa", false)
+      return
+    }
     const count = selectedDeleteIds.size
     const ids = Array.from(selectedDeleteIds)
     const { data: affectedResults, error: fetchError } = await supabase
@@ -1261,6 +1295,15 @@ export default function QualityPage() {
 
       const ngayKN = metaDateCell("NGAY_KN")
       const ngaySX = metaDateCell("NGAY_SX")
+
+      // Ngày đã "Đã ký duyệt" (khớp đúng field dateGroups group theo — ngay_kn) thì chỉ admin
+      // được nhập thêm phiếu qua Excel — mirror đúng nguyên tắc đã áp cho nút "+ Thêm phiếu".
+      if (currentUser?.role !== "admin" && signingStatusByDate.get(ngayKN)?.trangThai === "hoan_tat") {
+        showToast(`Ngày kiểm nghiệm ${ngayKN} đã "Đã ký duyệt" — chỉ admin được nhập thêm phiếu cho ngày này.`, false)
+        setImporting(false)
+        return
+      }
+
       const rawLoai = meta["CHUNG_LOAI"] || "10"
       const cl = rawLoai.replace(/^(CSR|SVR)/i, "")
       const tieuChuan = meta["TIEU_CHUAN"] || "TCCS 112:2022"
@@ -1426,7 +1469,7 @@ export default function QualityPage() {
           chung_loai: cl, loai_csr: loaiCsr,
           loai_kn: loaiKN, tieu_chuan: tieuChuan,
           so_mau: soMau, samples, grade, dat_hang, trang_thai,
-          parent_id: null, lan: 1, notes: [],
+          parent_id: null, lan: 1, notes: [], created_by: currentUser?.id ?? null,
         })
 
         if (error) errors.push(`Lô ${sourceLot}: ${error.message}`)
@@ -1560,6 +1603,26 @@ export default function QualityPage() {
   const dateGroups = useMemo(() => Array.from(
     mainFiltered.reduce((m,r)=>{ const d=r.ngay_kn?.slice(0,10)||"?"; if(!m.has(d)) m.set(d,[]); m.get(d)!.push(r); return m }, new Map<string,QcResult[]>())
   ).sort((a,b)=>b[0].localeCompare(a[0])), [mainFiltered])
+
+  // Trạng thái ký từng ngày (yeu_cau_ky) — cho danh sách biết ngày nào đã có yêu cầu ký đang
+  // chờ/đã hoàn tất, tránh tạo trùng. Đặt SAU dateGroups vì phụ thuộc trực tiếp vào nó.
+  const loadSigningStatuses = useCallback(async () => {
+    if (!factoryId || !dateGroups.length) { setSigningStatusByDate(new Map()); setSigningStatusLoaded(true); return }
+    const { data: sessionData } = await supabase.auth.getSession()
+    const accessToken = sessionData.session?.access_token
+    if (!accessToken) { setSigningStatusLoaded(true); return }
+    try {
+      const dates = dateGroups.map(([d]) => d).join(",")
+      const res = await fetch(`/api/quality/signing-status?factoryId=${factoryId}&dates=${dates}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const list: QualitySigningStatus[] = await res.json()
+      setSigningStatusByDate(new Map((Array.isArray(list) ? list : []).map((s) => [s.date, s])))
+    } catch { /* best-effort — không chặn UI nếu lỗi mạng */ }
+    finally { setSigningStatusLoaded(true) }
+  }, [factoryId, dateGroups])
+
+  useEffect(() => { void loadSigningStatuses() }, [loadSigningStatuses])
 
   // Dropdown ngày SX cho kl_rot_hang và kl_6thang
   const eligibleDates = useMemo(() => {
@@ -2071,6 +2134,18 @@ export default function QualityPage() {
                     const inDeleteMode = deleteMode===date
                     const dateDat = dateResults.filter(r => !getEffectiveQc(r).dat_hang?.endsWith("RH")).length
                     const hasRetest = dateResults.some(r => r.parent_id || getEffectiveQc(r).id !== r.id)
+                    // Chỉ người tạo (hoặc admin) mới được Sửa/Ký duyệt "biên bản" (= cả nhóm phiếu KN
+                    // trong ngày). Dữ liệu CŨ không rõ created_by (NULL) KHÔNG còn được coi là "ai có
+                    // quyền edit cũng thao tác được" — chỉ admin xử lý được khi không xác định được
+                    // người tạo (đã tighten 2026-08-31 sau khi phát hiện gần như toàn bộ dữ liệu thật
+                    // đang NULL created_by, khiến rule cũ vô hiệu hoá hoàn toàn tính năng ownership).
+                    const canOwnerAct = currentUser
+                      ? currentUser.role === "admin" ||
+                        dateResults.some(r => r.created_by === currentUser.id)
+                      : false
+                    // Sau khi ngày đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa/Thêm phiếu.
+                    const isDateLocked = currentUser?.role !== "admin" &&
+                      signingStatusByDate.get(date)?.trangThai === "hoan_tat"
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -2116,46 +2191,86 @@ export default function QualityPage() {
                               </>
                             ) : (
                               <>
-                                {hasPermission(currentUser, "quality.create") && (
+                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !isDateLocked && (
                                   <button onClick={e=>{e.stopPropagation();openCreate(date)}}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors">
-                                    <Plus size={11}/> Thêm
+                                    title="Thêm phiếu"
+                                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors">
+                                    <Plus size={15}/>
                                   </button>
                                 )}
-                                {hasPermission(currentUser, "quality.edit") && (
+                                {hasPermission(currentUser, "quality.edit") && canOwnerAct && signingStatusLoaded && !isDateLocked && (
                                   <button onClick={e=>{e.stopPropagation();setEditDateModal(date);setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors">
-                                    <Edit2 size={11}/> Sửa
+                                    title="Sửa"
+                                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors">
+                                    <Edit2 size={15}/>
                                   </button>
                                 )}
-                                {hasPermission(currentUser, "quality.delete") && (
+                                {hasPermission(currentUser, "quality.delete") && canOwnerAct && signingStatusLoaded && !isDateLocked && (
                                   <button onClick={e=>{e.stopPropagation();setDeleteMode(date);setSelectedDeleteIds(new Set());setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition-colors">
-                                    <Trash2 size={11}/> Xóa
+                                    title="Xóa"
+                                    className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors">
+                                    <Trash2 size={15}/>
                                   </button>
                                 )}
-                                <button onClick={async e=>{e.stopPropagation();
-                                  // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)
-                                  const parentIds = dateResults.map(r=>r.id)
-                                  const { data: retests } = await supabase.from("qc_results")
-                                    .select("*")
-                                    .in("parent_id", parentIds)
-                                    .order("created_at", { ascending: false })
-                                  const retestMap = new Map<string,QcResult>()
-                                  ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
-                                  // Substitute re-test record but keep lo_kn từ bản gốc để PDF đúng số thứ tự
-                                  const resolved = dateResults.map(r=> {
-                                    const rt = retestMap.get(r.id)
-                                    return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
-                                  })
-                                  try {
-                                    await downloadQualityKqknPdf(resolved, date, factoryCode)
-                                  } catch {
-                                    showToast("Không tạo được PDF phiếu KQKN.", false)
-                                  }}}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-colors">
-                                  <Printer size={11}/> PDF
-                                </button>
+                                {/* PDF: chưa ký → render bản in nháp; đã có yêu cầu ký → mở đúng file hiện
+                                    tại (đã có chữ ký Lập biểu nếu đang chờ, đủ cả 2 chữ ký nếu hoàn tất) */}
+                                {signingStatusByDate.get(date)?.fileHienTai ? (
+                                  <a href={signingStatusByDate.get(date)!.fileHienTai!} target="_blank" rel="noreferrer"
+                                    onClick={e=>e.stopPropagation()}
+                                    title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập biểu"}
+                                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
+                                    <Eye size={15}/>
+                                  </a>
+                                ) : (
+                                  <button onClick={async e=>{e.stopPropagation();
+                                    // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)
+                                    const parentIds = dateResults.map(r=>r.id)
+                                    const { data: retests } = await supabase.from("qc_results")
+                                      .select("*")
+                                      .in("parent_id", parentIds)
+                                      .order("created_at", { ascending: false })
+                                    const retestMap = new Map<string,QcResult>()
+                                    ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
+                                    // Substitute re-test record but keep lo_kn từ bản gốc để PDF đúng số thứ tự
+                                    const resolved = dateResults.map(r=> {
+                                      const rt = retestMap.get(r.id)
+                                      return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
+                                    })
+                                    try {
+                                      await downloadQualityKqknPdf(resolved, date, factoryCode)
+                                    } catch {
+                                      showToast("Không tạo được PDF phiếu KQKN.", false)
+                                    }}}
+                                    title="Xuất PDF (chưa ký)"
+                                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
+                                    <FileText size={15}/>
+                                  </button>
+                                )}
+                                {currentUser && (
+                                  <QualitySignStatusBadge
+                                    status={signingStatusByDate.get(date)}
+                                    currentUser={currentUser}
+                                    canCreate={hasPermission(currentUser, "quality.edit") && canOwnerAct}
+                                    showToast={showToast}
+                                    onCancelled={loadSigningStatuses}
+                                    onOpenSignPrompt={async () => {
+                                      const parentIds = dateResults.map(r=>r.id)
+                                      const { data: retests } = await supabase.from("qc_results")
+                                        .select("*")
+                                        .in("parent_id", parentIds)
+                                        .order("created_at", { ascending: false })
+                                      const retestMap = new Map<string,QcResult>()
+                                      ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
+                                      const resolved = dateResults.map(r=> {
+                                        const rt = retestMap.get(r.id)
+                                        return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
+                                      })
+                                      // Khoá ổn định theo ngày (không phụ thuộc batch nào tới trước) — dùng làm
+                                      // ma_ho_so tương quan chống trùng yêu cầu ký, xem migration 20260904.
+                                      setSignModal({ dateResults: resolved, maHoSo: date })
+                                    }}
+                                  />
+                                )}
                               </>
                             )}
                           </div>
@@ -2464,7 +2579,14 @@ export default function QualityPage() {
           maxWidth="2xl"
         >
             <div className="space-y-2">
-              {(dateGroups.find(([d])=>d===editDateModal)?.[1]||[]).map(r=>(
+              {(dateGroups.find(([d])=>d===editDateModal)?.[1]||[]).map(r=>{
+                // Per-row (khác canOwnerAct ở cấp ngày) — đã tighten 2026-08-31, KHÔNG còn khớp
+                // RLS UPDATE/DELETE (migration 20260911 vẫn cho created_by IS NULL qua ở tầng DB
+                // — UI giờ chặt hơn RLS có chủ đích; siết RLS tương ứng để lại phiên sau).
+                const canOwnerRow = currentUser?.role === "admin" || r.created_by === currentUser?.id
+                const rowsDateLocked = currentUser?.role !== "admin" &&
+                  signingStatusByDate.get(editDateModal)?.trangThai === "hoan_tat"
+                return (
                 <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
                   <span className="text-xs font-bold text-violet-600">{formatPKN(r.pkn,r.ngay_kn,factoryCode)}</span>
                   <span className="text-xs text-slate-400">Lô PKN {r.lo_kn}</span>
@@ -2473,20 +2595,21 @@ export default function QualityPage() {
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                     {r.dat_hang}
                   </span>
-                  {hasPermission(currentUser, "quality.edit") && (
+                  {hasPermission(currentUser, "quality.edit") && canOwnerRow && signingStatusLoaded && !rowsDateLocked && (
                     <button onClick={()=>openEditResult(r)}
                       className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100">
                       <Edit2 size={11}/> Sửa
                     </button>
                   )}
-                  {hasPermission(currentUser, "quality.delete") && (
+                  {hasPermission(currentUser, "quality.delete") && canOwnerRow && signingStatusLoaded && !rowsDateLocked && (
                     <button onClick={()=>setDelConfirm(r.id)}
                       className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors">
                       <Trash2 size={13}/>
                     </button>
                   )}
                 </div>
-              ))}
+                )
+              })}
             </div>
         </ModalShell>
       )}
@@ -2616,6 +2739,19 @@ export default function QualityPage() {
               </div>
             </div>
         </ModalShell>
+      )}
+
+      {/* ── Ký duyệt Phiếu KQKN (Giai đoạn 3) ───────────────────────────────── */}
+      {signModal && factoryId && currentUser && (
+        <QualitySignModal
+          open
+          onClose={() => { setSignModal(null); void loadSigningStatuses() }}
+          factoryId={factoryId}
+          currentUser={currentUser}
+          dateResults={signModal.dateResults}
+          maHoSo={signModal.maHoSo}
+          factoryCode={factoryCode}
+        />
       )}
     </div>
   )

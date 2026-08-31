@@ -382,9 +382,9 @@ function groupContributionsForDisplay(
   >();
   for (const c of caContribs) {
     const palletKey = [...(c.pallet || [])].sort().join(",");
-    const key = `${c.ma_lo}||${c.loai_csr}||${c.loai_banh}||${c.boc || ""}||${palletKey}`;
     const nganLabel = resolveNganLabel(c);
-    const nganKey = `${nganLabel.main}||${nganLabel.sub || ""}`;
+    const nganKey = `${c.ngan_id || ""}||${nganLabel.main}||${nganLabel.sub || ""}`;
+    const key = `${c.ma_lo}||${c.loai_csr}||${c.loai_banh}||${c.boc || ""}||${palletKey}||${nganKey}`;
     const isRealStatus = normalizeLotStatus(c.trang_thai) !== "Dở dang";
     const existing = map.get(key);
     if (existing) {
