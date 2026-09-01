@@ -1151,6 +1151,7 @@ export default function QualityPage() {
     }
 
     setDelConfirm(null); showToast("Đã xóa phiếu kiểm nghiệm")
+    if (delDate) void autoCloseSigningRequestForDate(delDate)
     loadResults(factoryId)
     loadStats(factoryId)
   }
@@ -1204,8 +1205,10 @@ export default function QualityPage() {
       }
     }
 
-    setSelectedDeleteIds(new Set()); setDeleteMode(null)
+    setSelectedDeleteIds(new Set())
     showToast(`Đã xóa ${count} phiếu`)
+    if (deleteMode) void autoCloseSigningRequestForDate(deleteMode)
+    setDeleteMode(null)
     loadResults(factoryId)
     loadStats(factoryId)
   }
@@ -1625,6 +1628,45 @@ export default function QualityPage() {
   }, [factoryId, dateGroups])
 
   useEffect(() => { void loadSigningStatuses() }, [loadSigningStatuses])
+
+  // Tự động "đóng" yêu cầu ký cũ của 1 ngày ngay khi TOÀN BỘ phiếu kiểm nghiệm của ngày đó bị
+  // xóa — để lần "Gửi ký duyệt" tiếp theo (sau khi nhập/upload lại dữ liệu cho cùng ngày) hoạt
+  // động lại bình thường, KHÔNG cần thao tác thủ công nào thêm (bug đã báo 2026-09-01, tiếp:
+  // admin xóa + nhập lại phiếu kiểm nghiệm ngày cũ vẫn kẹt ở file/tên người ký CŨ, "Mở lại để ký
+  // lại" bị coi là thừa bước — người dùng chỉ muốn xóa xong nhập lại là ký lại được ngay).
+  // KHÔNG dựa vào `signingStatusByDate` (state client) để quyết định có gì cần đóng hay không —
+  // gọi thẳng /api/signing/close-for-key, route đó tự TRUY VẤN LẠI DB theo khóa nghiệp vụ tại
+  // chỗ. Lý do: nếu dựa vào state client, có race condition thật — xóa dữ liệu trước khi lần
+  // fetch signing-status đầu tiên của trang kịp xong thì state vẫn rỗng, tưởng "không có gì để
+  // đóng" và bỏ qua trong im lặng dù yêu cầu ký cũ vẫn còn active (bug đã xác nhận bằng dữ liệu
+  // thật 2026-09-01: gọi qua yeuCauId lấy từ state cũ không đóng được gì, không có lỗi để biết).
+  // Không cần confirm/toast thành công riêng cho bước này — âm thầm chạy cùng lúc xóa, chỉ báo
+  // lỗi nếu có.
+  const autoCloseSigningRequestForDate = useCallback(async (date: string) => {
+    if (!factoryId) return
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) return
+      const res = await fetch("/api/signing/close-for-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ factoryId, modun: "quality", loaiTaiLieu: "quality_kqkn", maHoSo: date }),
+      })
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string }
+        showToast(
+          `Đã xóa dữ liệu nhưng KHÔNG đóng được yêu cầu ký cũ (${json.error || "lỗi không xác định"}) — liên hệ quản trị viên để mở lại trước khi ký lại cho ngày này.`,
+          false,
+        )
+        return
+      }
+      void loadSigningStatuses()
+    } catch {
+      // Best-effort — lỗi mạng ở bước dọn dẹp phụ này không được chặn/ảnh hưởng việc xóa đã
+      // thành công.
+    }
+  }, [factoryId, loadSigningStatuses, showToast])
 
   // Dropdown ngày SX cho kl_rot_hang và kl_6thang
   const eligibleDates = useMemo(() => {

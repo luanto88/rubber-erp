@@ -196,11 +196,21 @@ class ForgeCmsSigner extends Signer {
 }
 
 // Đặt 1 khung chữ ký ẩn (Rect [0,0,0,0] — không hiện trên trang, vì con dấu NHÌN THẤY được đã
-// vẽ riêng bởi stamp-pdf.ts) qua PDF incremental update — không đụng byte đã có, chỉ nối thêm.
-// Luôn dùng `forIncrementalUpdate: true` kể cả cho chữ ký ĐẦU TIÊN trên 1 file — đã kiểm chứng
-// bằng POC hoạt động đúng cho cả trường hợp file hoàn toàn chưa có chữ ký nào.
-async function addSignaturePlaceholder(pdfBytes: Buffer, signerLabel: string, contactInfo: string): Promise<Buffer> {
-  const doc = await CantooPDFDocument.load(pdfBytes, { forIncrementalUpdate: true })
+// vẽ riêng bởi stamp-pdf.ts) — CHỈ MUTATE 1 instance `CantooPDFDocument` ĐÃ ĐƯỢC LOAD SẴN
+// (`forIncrementalUpdate: true`), KHÔNG tự load/save ở đây. Bắt buộc tách riêng khỏi
+// load/save kể từ bug 2026-09-01: gọi `CantooPDFDocument.load(bytes, {forIncrementalUpdate})`
+// trên 1 file ĐÃ TỪNG qua ≥1 lượt incremental-update trước đó rồi `.save()` lại làm thư viện
+// nhân đôi (không phải cộng thêm tuyến tính) dung lượng MỖI LẦN reload — đã đo bằng thực
+// nghiệm cô lập: 2 lượt reload/người ký (1 cho con dấu ở `requests.ts`, 1 cho placeholder này)
+// khiến 1 hồ sơ Bảo trì nhỏ (0.6MB) phình lên 18.21MB chỉ sau 2 người ký, và một PDF demo từ
+// 1.8KB lên 28.67MB chỉ sau 3 lượt ký giả lập. Gọi lặp `doc.commit()` trên CÙNG 1 instance
+// (không reload) cho kết quả tuyến tính bình thường (đã verify: cùng kịch bản chỉ còn 2.06MB
+// sau 3 lượt ký, ~14 lần nhỏ hơn) — đây chính là API `commit()` mà thư viện tự tài liệu hoá để
+// dùng cho "nhiều lượt cập nhật incremental không cần reload", trước đây chưa được dùng đúng
+// cách. `requests.ts`'s `signField()` giờ giữ 1 `pdfDoc` sống xuyên suốt cả bước vẽ con dấu
+// LẪN bước đặt placeholder này (gọi `commit()` 2 lần trên cùng instance), không reload giữa
+// 2 bước nữa.
+function addSignaturePlaceholderToDoc(doc: CantooPDFDocument, signerLabel: string, contactInfo: string): void {
   const acroForm = doc.catalog.getOrCreateAcroForm()
   const page = doc.getPages()[0]
 
@@ -260,22 +270,38 @@ async function addSignaturePlaceholder(pdfBytes: Buffer, signerLabel: string, co
   const fields = existingFields instanceof PDFArray ? existingFields : doc.context.obj([])
   if (fields !== existingFields) acroForm.dict.set(PDFName.of("Fields"), fields)
   fields.push(widgetDictRef)
-
-  const increment = await doc.save()
-  return Buffer.concat([pdfBytes, Buffer.from(increment)])
 }
 
 /**
- * Nhúng thêm 1 chữ ký PAdES thật vào `pdfBytes` (đã có con dấu ảnh của đúng người này) — trả về
- * bytes mới, dài hơn (chỉ NỐI THÊM, không sửa byte cũ). Ném lỗi nếu chưa cấu hình root CA — luôn
- * gọi qua `hasPadesRootCa()` kiểm tra trước, hoặc bọc try/catch ở call site để coi đây là bước
- * cộng thêm không bắt buộc (xem `signField()` trong `requests.ts`).
+ * Nhúng thêm 1 chữ ký PAdES thật vào 1 `CantooPDFDocument` ĐÃ ĐƯỢC LOAD SẴN (`forIncrementalUpdate:
+ * true`) — dùng `doc.commit()` để lấy bytes hiện tại (không tự load/save file mới), rồi ký CMS
+ * bằng byte-range fill-in (không đổi độ dài file). Gọi hàm này khi caller (`requests.ts`) đang
+ * giữ 1 `pdfDoc` sống đã vẽ xong con dấu ảnh — KHÔNG reload lại từ bytes (xem lý do ở
+ * `addSignaturePlaceholderToDoc` phía trên). Ném lỗi nếu chưa cấu hình root CA — luôn gọi qua
+ * `hasPadesRootCa()` kiểm tra trước, hoặc bọc try/catch ở call site để coi đây là bước cộng thêm
+ * không bắt buộc.
  */
-export async function applyPadesSignature(pdfBytes: Buffer, signerName: string, contactInfo: string): Promise<Buffer> {
+export async function applyPadesSignatureToDoc(
+  doc: CantooPDFDocument,
+  signerName: string,
+  contactInfo: string,
+): Promise<Buffer> {
   const root = loadRootCa()
   const label = signerName || "Nguoi ky Rubber ERP"
   const leaf = issueLeafCertificate(root, label, contactInfo)
-  const withPlaceholder = await addSignaturePlaceholder(pdfBytes, label, contactInfo)
+  addSignaturePlaceholderToDoc(doc, label, contactInfo)
+  const withPlaceholder = Buffer.from(await doc.commit())
   const signPdf = new SignPdf()
   return signPdf.sign(withPlaceholder, new ForgeCmsSigner(leaf, root))
+}
+
+/**
+ * Biến thể nhận thẳng `pdfBytes` thay vì 1 instance đã load sẵn — tự load 1 lần rồi gọi
+ * `applyPadesSignatureToDoc`. Giữ lại cho call site nào chỉ có bytes trong tay (hiện không còn
+ * dùng trong `requests.ts` — nơi đó đã giữ `pdfDoc` sống xuyên suốt để tránh đúng bug reload đã
+ * ghi ở trên), nhưng vẫn an toàn nếu cần dùng lại ở nơi khác trong tương lai.
+ */
+export async function applyPadesSignature(pdfBytes: Buffer, signerName: string, contactInfo: string): Promise<Buffer> {
+  const doc = await CantooPDFDocument.load(pdfBytes, { forIncrementalUpdate: true })
+  return applyPadesSignatureToDoc(doc, signerName, contactInfo)
 }

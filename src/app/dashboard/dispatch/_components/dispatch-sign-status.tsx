@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { computeMyTurn, hasAnySigned, type MyTurnSigner } from "@/app/dashboard/_components/signing-my-turn"
 
 export type DispatchSigningStatus = {
   entryId: string
@@ -16,6 +17,7 @@ export type DispatchSigningStatus = {
   fileHienTai: string | null
   traVeLyDo: string | null
   dataChanged: boolean
+  signers: MyTurnSigner[]
 }
 
 function CancelConfirmModal({
@@ -155,7 +157,8 @@ export function DispatchSignStatusBadge({
   const isApprover = currentUser.id === status.pheDuyetUserId
   const isCreator = currentUser.id === status.nguoiTao
   const canContinueSign = isAdmin || isApprover
-  const canCancel = isAdmin || isCreator
+  // Đã có người ký thì không cho hủy nữa (chỉ còn "Trả về") — backend cũng chặn cứng riêng.
+  const canCancel = (isAdmin || isCreator) && !hasAnySigned(status.signers)
 
   // 3a. Vừa bị Giám đốc nhà máy "Trả về" (chưa ai ký lại).
   if (status.traVeLyDo) {
@@ -197,15 +200,22 @@ export function DispatchSignStatusBadge({
     )
   }
 
+  const myTurn = computeMyTurn(status.signers, currentUser.id)
+
   return (
     <>
       <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         {canContinueSign ? (
           <Link
             href={`/dashboard/ky/${status.yeuCauId}`}
-            className="flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors"
+            className={
+              myTurn
+                ? "flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+                : "flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors"
+            }
           >
-            <Clock size={11} /> Chờ ký duyệt
+            {myTurn ? <Bell size={11} /> : <Clock size={11} />}
+            {myTurn ? "Chờ BẠN ký duyệt" : "Chờ ký duyệt"}
           </Link>
         ) : (
           <span className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-400 text-xs font-bold rounded-lg">

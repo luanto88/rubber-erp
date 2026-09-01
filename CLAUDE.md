@@ -4185,20 +4185,476 @@ dùng dán đè vào Vercel. Sau khi dán đúng + redeploy, **người dùng đ
    + 3 việc nhỏ SignScreen) — người dùng cần tự `git add/commit/push` khi sẵn sàng deploy, theo
    đúng quy tắc "chỉ commit khi được yêu cầu rõ ràng".
 
+### Xác nhận (2026-09-01, cuối phiên) — mục 1+2 ở trên đã xong
+
+Người dùng đã deploy và xác nhận test tay cả 3 việc nhỏ (dòng phụ đề tiếng Việt, đếm đúng "1
+khung", "Hiệu lực đến" đã nhảy tới 2046) đều đúng, và đã chạy migration
+`20260901_signing_pades_error_diagnostics.sql` trên Supabase. **Coi mục 1+2 ở trên là hoàn tất.**
+Mục 3 (RLS hardening / mở rộng Bảo trì) và mục 4 (chưa rõ đã commit/push hay chưa) vẫn còn treo,
+để phiên sau hỏi lại và xử lý.
+
+### Làm rõ trạng thái Bảo trì (2026-09-01, cuối phiên) — trả lời câu hỏi người dùng đặt ra
+
+Người dùng hỏi lại: "có phải Bảo trì chỉ mới làm tới `su_co_nho`, còn 3 loại chứng từ còn lại
+(`bao_duong`/`bao_duong_xe`/`sua_chua_nho_xe`) chưa làm?" — đã tra lại lịch sử CLAUDE.md (không
+đoán) để trả lời chính xác:
+
+- **`su_co_nho`**: đã code xong VÀ đã được người dùng xác nhận test tay pass (mục "Cập nhật (Giai
+  đoạn 5, phần 1 — xác nhận đã pass)").
+- **`bao_duong`/`bao_duong_xe`/`sua_chua_nho_xe`** (mục "Giai đoạn 5 phần 2"): **đã code xong**,
+  bao gồm đúng cơ chế người dùng nhắc tới — vai trò "Tài xế" ở `bao_duong_xe`/`sua_chua_nho_xe`
+  được gộp cho **Nhân viên phụ trách ký thay** (không có tài khoản đăng nhập riêng cho Tài xế) —
+  nhưng **CHƯA từng được xác nhận test tay** ở bất kỳ đâu trong lịch sử sau đó. Checklist chi
+  tiết đã có sẵn, chưa đánh dấu hoàn tất: mục "CHƯA test tay — bắt buộc trước khi coi Giai đoạn 5
+  phần 2 là xong" (7 mục, ngay phía trên mục này trong file).
+
 ### Prompt gợi ý để mở đầu session tiếp theo
 
 ```
-Đọc mục "Cập nhật (2026-09-01, tiếp) — Root cause thật của Bug 3... + 3 việc nhỏ trên SignScreen"
-trong CLAUDE.md. Cả bug PAdES-không-xác-minh-được (do dán thiếu PEM header/footer vào Vercel) lẫn
-3 việc nhỏ (Việt hóa loai_tai_lieu, sửa đếm sai "N khung", kéo dài hiệu lực leaf cert lên 20 năm)
-đều ĐÃ CODE XONG, `tsc`/`eslint` sạch — CHƯA test qua UI trình duyệt thật.
+Đọc 2 mục sau trong CLAUDE.md theo đúng thứ tự:
+1. "Giai đoạn 5 phần 2 — 3 loại chứng từ Bảo trì còn lại: bao_duong, bao_duong_xe,
+   sua_chua_nho_xe — ĐÃ CODE XONG, CHƯA TEST TAY" (kiến trúc + bảng vai trò ký từng bundle).
+2. "Cập nhật (2026-09-01, tiếp) — Root cause thật của Bug 3... + 3 việc nhỏ trên SignScreen" (đã
+   xong, đã người dùng xác nhận test tay + deploy — không cần làm lại).
 
-Nếu tôi báo đã test tay xong mục "CHƯA làm / cần làm ở phiên sau" #1 và không có lỗi, coi phần
-này hoàn tất — hỏi tôi có muốn làm tiếp #3 (RLS hardening/mở rộng Bảo trì) hay không, đừng tự ý
-làm. Cũng hỏi tôi đã commit/push code phiên trước chưa nếu cần biết trạng thái deploy hiện tại.
+**Ưu tiên phiên này**: hướng dẫn tôi test tay đầy đủ 7 mục trong checklist "CHƯA test tay — bắt
+buộc trước khi coi Giai đoạn 5 phần 2 là xong" (`bao_duong`/`bao_duong_xe`/`sua_chua_nho_xe`) —
+đây là phần DUY NHẤT trong toàn bộ hệ thống ký số dùng chung đã code xong nhưng chưa từng được
+xác nhận hoạt động đúng qua UI thật. Nếu tôi báo lỗi cụ thể ở 1 trong 3 bundle này, đọc kỹ đúng
+bảng vai trò ký + đoạn code liên quan trong `src/lib/maintenance-pdf.ts`
+(`buildBaoDuongSigningRoles`/`buildBaoDuongXeSigningRoles`/`buildSuaChuaNhoXeSigningRoles`) và
+`maintenance-sign-modal.tsx` trước khi sửa, đừng đoán.
 
-Nếu tôi báo lỗi MỚI khi test tay, đọc kỹ đúng đoạn code đã liệt kê trong mục "3 việc nhỏ trên
-SignScreen" trước khi sửa, đừng đoán.
+Sau khi Giai đoạn 5 phần 2 test xong, hỏi tôi có muốn tiếp tục 1 trong 2 hướng còn treo hay
+không (đừng tự ý làm): (a) siết RLS tầng database cho `qc_results`/`dispatch_entries`
+UPDATE/DELETE (hiện chỉ chặn ở tầng UI); (b) mở rộng khoá Xóa/Sửa sau ký duyệt (Việc 1+2, hiện
+chỉ có ở Kiểm nghiệm + Điều xe) sang Bảo trì.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-01, tiếp — phiên mới) — Fix bug 74.8MB (root cause thật), inline icon danh
+sách Bảo trì, badge "Chờ BẠN ký duyệt", label ký-thay trên SignScreen, tự động mở khóa ký lại
+cho Kiểm nghiệm sau khi xóa+nhập lại dữ liệu — TẤT CẢ ĐÃ TEST TAY VÀ PASS (trừ 1 mục)
+
+Phiên này **không đọc trước** phần lịch sử ngay phía trên (Giai đoạn 5 phần 2 Bảo trì) — bắt đầu
+từ 2 bug người dùng báo bằng ảnh chụp: (1) ký Giám đốc vẫn báo "File sau khi ký đã đạt 74.8MB,
+vượt giới hạn 20MB"; (2) danh sách biên bản Bảo trì (`/dashboard/maintenance/records`) không có
+icon hành động inline như Chất lượng/Điều xe. Đã điều tra sâu và mở rộng làm thêm 3 việc UX theo
+phản hồi thêm của người dùng trong lúc test. **Mục Giai đoạn 5 phần 2 (test tay
+`bao_duong`/`bao_duong_xe`/`sua_chua_nho_xe`) ở mục lịch sử ngay phía trên VẪN CÒN TREO, chưa
+đụng tới trong phiên này** — xem "Việc còn treo" cuối mục này.
+
+### 1. Bug 74.8MB — ĐÃ TÌM RA NGUYÊN NHÂN THẬT (khác hẳn giả thuyết ban đầu), ĐÃ FIX, ĐÃ TEST PASS
+
+Ban đầu nghi ngờ do font `TimesNewRoman.ttf` không subset cộng dồn qua nhiều lượt ký (~1-1.5MB/
+người) — **sai**. Đo bằng thực nghiệm cô lập (script Node gọi thẳng `@cantoo/pdf-lib`, không qua
+DB) phát hiện: **mỗi lần RELOAD 1 file PDF đã từng qua ≥1 lượt incremental-update trước đó rồi
+tiếp tục incremental-save lần nữa khiến `@cantoo/pdf-lib` NHÂN ĐÔI dung lượng** (không phải cộng
+thêm tuyến tính) — xác nhận bằng đối chứng: gọi `doc.commit()` lặp lại trên 1 instance SỐNG (không
+reload) → tăng tuyến tính bình thường; reload từ bytes mỗi lần → tăng cấp số nhân (PDF demo từ
+1.8KB → 28.67MB chỉ sau 3 lượt ký giả lập).
+
+Nguyên nhân cụ thể: `signField()` (`src/lib/signing/requests.ts`) trước đây làm **2 lượt
+reload-rồi-save tách rời** cho MỖI người ký — 1 lượt `pdfDoc.save()` vẽ con dấu ảnh, rồi
+`applyPadesSignature()` (`pades.ts`) tự `CantooPDFDocument.load()` LẠI TỪ ĐẦU để đặt placeholder
+PAdES. Với 1 hồ sơ Bảo trì thật (`su_co_nho`, factory `phuochoa_kt`): 0.60MB → 18.21MB chỉ sau 2
+người ký (NV+BGĐ), và người ký thứ 3 (GĐ) mới ra đúng 74.8MB như ảnh báo lỗi.
+
+**Fix**: gộp 2 bước (vẽ con dấu + đặt placeholder PAdES) vào **CÙNG 1 `pdfDoc` sống**, gọi
+`.commit()` 2 lần liên tiếp thay vì `.save()` rồi để `pades.ts` reload — đúng API `commit()` mà
+`@cantoo/pdf-lib` tự tài liệu hoá cho "nhiều lượt cập nhật incremental không cần reload", trước
+đây chưa dùng đúng cách. Đã tách `addSignaturePlaceholder()` cũ (tự load/save) thành
+`addSignaturePlaceholderToDoc()` (chỉ mutate 1 doc đã load sẵn, không tự load/save) +
+`applyPadesSignatureToDoc()` (nhận thẳng `pdfDoc`, gọi `.commit()`) — giữ lại
+`applyPadesSignature(bytes,...)` cũ làm wrapper tương thích ngược (tự load rồi gọi bản mới) phòng
+khi có call site khác trong tương lai.
+
+**Verify**: test THẬT bằng `createSigningRequest()`+`signField()` (không qua HTTP, dùng 3 tài
+khoản test tạm `e2e_signing_verify`/`reviewer`/`approver` có sẵn từ trước) — 3 lượt ký thật ra
+673KB → 1344KB → 2015KB (tuyến tính, ~670KB/người do vẫn phải nhúng lại font mỗi lượt — không
+tránh được, nhưng không còn nhân đôi). Cả 3 chữ ký PAdES verify `valid:true` trên file cuối. Đã
+dọn Storage test, giữ nguyên `yeu_cau_ky`/`nguoi_ky` test theo đúng thiết kế bất biến (không xóa
+được). **Người dùng xác nhận trên `npm run dev` thật: Giám đốc ký được, không còn bị chặn.**
+
+File sửa: `src/lib/signing/requests.ts`, `src/lib/signing/pades.ts`.
+
+### 2. Icon hành động inline ở danh sách Bảo trì — ĐÃ LÀM, ĐÃ XÁC NHẬN
+
+`src/app/dashboard/maintenance/records/page.tsx` trước đây mỗi dòng chỉ có link chữ "Chi tiết" —
+đã thêm cột "Ký duyệt" với icon Eye (xem file đã ký)/FileText (in bản chưa ký) +
+`MaintenanceSignStatusBadge`, bulk-load qua `/api/maintenance/signing-status?recordIds=...`
+(route đã có sẵn, không cần sửa backend) — mirror đúng pattern Chất lượng/Điều xe. Thêm
+`resolveSignBundle()` (suy bundle ký từ `hang_muc`/`bo_phan`/`loai_sua_chua` của dòng đầu tiên
+trong `maintenance_record_lines`, mirror logic `[id]/page.tsx`). **Người dùng xác nhận: "inline
+đã có các icon như modun Điều xe/Chất lượng".**
+
+File sửa: `src/app/dashboard/maintenance/records/page.tsx`.
+
+### 3. Badge "Chờ BẠN ký duyệt" — phân biệt rõ lượt của mình — ĐÃ LÀM, ĐÃ XÁC NHẬN CHO KIỂM NGHIỆM
+
+Trước đây badge "Chờ ký duyệt (N/M)" giống hệt nhau bất kể người xem có phải tới lượt ký hay
+không — phải hover mới biết. Thêm helper dùng chung
+`src/app/dashboard/_components/signing-my-turn.ts` (`computeMyTurn()`, mirror ĐÚNG công thức đã
+đúng sẵn ở SignScreen: tới lượt khi TẤT CẢ người `thu_tu` nhỏ hơn đã ký xong). Áp dụng cho cả 3
+badge (`quality-sign-status.tsx`/`dispatch-sign-status.tsx`/`maintenance-sign-status.tsx`): khi
+đúng lượt → nhãn đậm nổi bật **"🔔 Chờ BẠN ký duyệt"** (nền vàng đặc `bg-amber-500`, chữ trắng),
+khi chưa tới lượt → **"Đang chờ người ký trước"** (nhạt hơn). Quality/Dispatch's API
+signing-status đã mở rộng thêm `signers[]` (trước chỉ có `pheDuyetUserId` đơn, không đủ để tính
+`thu_tu`-based turn).
+
+**Người dùng xác nhận cho Kiểm nghiệm: "banner Chờ bạn ký duyệt đã hiện rõ ràng".** **CHƯA xác
+nhận cho Điều xe/Bảo trì** — logic giống hệt nhau (dùng chung `computeMyTurn()`), rủi ro thấp
+nhưng chưa test tay trực tiếp trên 2 module đó.
+
+File sửa: `src/app/dashboard/_components/signing-my-turn.ts` (mới),
+`src/app/api/quality/signing-status/route.ts`, `src/app/api/dispatch/signing-status/route.ts`,
+3 file `*-sign-status.tsx`.
+
+### 4. Label "(ký thay bởi...)" hiện cố định trên SignScreen — ĐÃ LÀM, CHƯA TEST TAY
+
+Text "(ký thay bởi Nhân viên phụ trách)" (bake sẵn trong `truong_ky.nhan` lúc tạo yêu cầu ký,
+cho CẢ vai trò "Tổ trưởng cơ điện/cơ khí" LẪN "Tài xế" ký thay — không chỉ riêng Tài xế) trước
+đây chỉ hiện qua tooltip hover hoặc bị ảnh chữ ký thật che mất sau khi ký. Đã sửa
+`src/app/dashboard/ky/[id]/page.tsx`: thêm `distinctRoleLabelsOf()` lấy TẤT CẢ nhãn vai trò khác
+nhau của 1 người (không chỉ field đầu tiên — quan trọng khi 1 người gộp ký thay ≥2 vai trò cùng
+lúc), áp dụng cho `roleLabelForMe` (ô "Vai trò" trong sheet xác nhận ký, luôn hiện cố định không
+phải tooltip) và `FlowList` (panel "Luồng ký hồ sơ", mỗi vai trò 1 dòng riêng thay vì nhãn chung
+chung "Ký"/"Phê duyệt").
+
+**CHƯA test tay** — cần mở SignScreen của 1 hồ sơ `su_co_nho` (hoặc `bao_duong_xe`/
+`sua_chua_nho_xe`) có vai trò ký thay, xác nhận thấy rõ "(ký thay bởi...)" cả trước/sau khi ký,
+cả khung của chính mình lẫn khi người KHÁC xem panel Luồng ký hồ sơ.
+
+### 5. Tự động mở khóa ký lại cho Kiểm nghiệm sau khi xóa+nhập lại dữ liệu — ĐÃ LÀM, ĐÃ XÁC NHẬN
+PASS (qua 2 vòng sửa)
+
+**Bối cảnh**: khi 1 ngày Kiểm nghiệm đã ký `hoan_tat`, rồi admin xóa hết `qc_results` ngày đó
++nhập/upload lại → trước đây là NGÕ CỤT thật: badge tự chuyển "Đã ký — dữ liệu đã đổi" nhưng
+không có cách nào ký lại (không tạo được yêu cầu ký mới do unique index chặn trùng, không hủy
+được yêu cầu cũ vì đã `hoan_tat`).
+
+**Vòng 1** (đã bị người dùng bác bỏ): thêm nút thủ công "Mở lại để ký lại" (admin-only) trong
+badge — người dùng phản hồi: "Action Mở lại để ký lại để làm gì? người dùng chỉ cần admin xóa
+phiếu sau đó upload lại và lập lại các bước ký bình thường" — tức muốn HOÀN TOÀN TỰ ĐỘNG, không
+thao tác thủ công nào. Đã **bỏ hẳn** nút + modal "Mở lại để ký lại" khỏi cả 3 badge
+(`quality-sign-status.tsx`/`dispatch-sign-status.tsx`/`maintenance-sign-status.tsx`) — nhưng
+GIỮ LẠI hàm backend `reopenSigningRequest()` + route `/api/signing/reopen-request` (dùng nội bộ
+ở vòng 2).
+
+**Vòng 2** (tự động hóa, lỗi race condition đầu tiên): móc vào `handleDelete`/`handleBulkDelete`
+(`quality/page.tsx`) — sau khi xóa `qc_results` thành công, tự gọi đóng yêu cầu ký cũ. **Lỗi**:
+dựa vào `signingStatusByDate` (state React cache, tải bất đồng bộ) để biết có gì cần đóng —
+nếu xóa dữ liệu TRƯỚC KHI lần fetch signing-status đầu tiên của trang kịp xong, state rỗng, code
+tưởng "không có gì để đóng" và bỏ qua trong im lặng. Đã xác nhận đúng root cause này bằng cách
+gọi TRỰC TIẾP `reopenSigningRequest()` (không qua UI) trên đúng bản ghi bị kẹt thật
+(`yeu_cau_ky.id = 3737177f-7d46-458a-84e3-380c946100c6`, ngày 27/08/2026, factory
+`phuochoa_kt`) — chạy đúng 100% (`hoan_tat` → `huy`), chứng minh backend không có vấn đề, chỉ có
+vấn đề ở tầng client dựa vào state cache.
+
+**Fix triệt để**: thêm hàm mới `closeActiveSigningRequestForKey()`
+(`src/lib/signing/requests.ts`) — **KHÔNG nhận `yeuCauId` từ client**, tự TRUY VẤN LẠI TRỰC TIẾP
+từ DB theo khóa nghiệp vụ `(factory_id, modun, loai_tai_lieu, ma_ho_so)` ngay tại thời điểm gọi,
+loại bỏ hẳn phụ thuộc vào state client → không còn race condition có thể xảy ra. Route mới
+`/api/signing/close-for-key`. `quality/page.tsx`'s `autoCloseSigningRequestForDate()` đổi sang
+gọi route này (kèm `factoryId`/`modun:"quality"`/`loaiTaiLieu:"quality_kqkn"`/`maHoSo:<ngày>`),
+gọi tự động ngay sau `handleDelete`/`handleBulkDelete` xóa thành công — hoàn toàn im lặng, chỉ
+báo lỗi qua toast nếu đóng thất bại (vd không đủ quyền).
+
+**Người dùng xác nhận PASS**: "Xóa, upload lại kí 2 bước thành công."
+
+**Phạm vi cố ý CHỈ áp dụng cho Kiểm nghiệm** — Điều xe/Bảo trì KHÔNG có cơ chế tương đương, vì
+`ma_ho_so` của 2 module đó là ID bản ghi cố định (UUID sinh ra khi tạo, không tái sử dụng được
+qua xóa-rồi-tạo-lại), khác Kiểm nghiệm dùng NGÀY (chuỗi ổn định, con người chọn lại được) làm
+`ma_ho_so`. Nếu Điều xe/Bảo trì phát sinh tình huống tương tự (sửa dữ liệu sau khi đã ký xong),
+cần thiết kế điểm móc nối riêng (khả năng cao là vào hành động "Sửa"/"Lưu" chứ không phải "Xóa").
+
+File sửa: `src/lib/signing/requests.ts` (`closeActiveSigningRequestForKey`, giữ nguyên
+`reopenSigningRequest`/`cancelSigningRequest` không đổi), `src/app/api/signing/close-for-key/
+route.ts` (mới), `src/app/api/signing/reopen-request/route.ts` (mới, không còn gọi từ UI nhưng
+giữ lại), `src/app/dashboard/quality/page.tsx`, 3 file `*-sign-status.tsx` (bỏ nút/modal
+"Mở lại để ký lại").
+
+### Rủi ro đã biết, CHƯA fix (nằm ngoài phạm vi báo cáo lần này, chỉ ghi lại để không quên)
+
+**Guard quyền xóa phiếu Kiểm nghiệm đã ký (`hoan_tat`) vẫn còn CÙNG LOẠI race condition** —
+`handleDelete`/`handleBulkDelete`'s điều kiện chặn non-admin xóa
+(`currentUser?.role !== "admin" && signingStatusByDate.get(delDate)?.trangThai === "hoan_tat"`)
+vẫn đọc từ `signingStatusByDate` (state client cache) y hệt bug vừa fix ở mục 5 — nếu 1 user
+KHÔNG PHẢI admin xóa dữ liệu đủ nhanh (trước khi signing-status kịp tải), về mặt lý thuyết có
+thể lách qua được điều kiện chặn này (dù `closeActiveSigningRequestForKey()` sau đó sẽ ĐÚNG ĐẮN
+từ chối đóng yêu cầu ký cũ vì họ không phải admin — nhưng qc_results đã bị xóa mất trước đó rồi,
+không hoàn tác được). Chưa fix vì ngoài phạm vi báo cáo của người dùng lần này (họ chỉ báo bug
+"không đóng được yêu cầu ký cũ", không phải bug bảo mật xóa trái phép) — cần hỏi lại trước khi
+đụng vào, vì sửa đúng cách cần 1 route riêng "kiểm tra quyền xóa fresh từ DB" tương tự
+`closeActiveSigningRequestForKey()`, không đơn giản.
+
+### Việc còn treo (chưa đụng trong phiên này, mang từ các phiên trước sang)
+
+1. **Giai đoạn 5 phần 2 Bảo trì** (`bao_duong`/`bao_duong_xe`/`sua_chua_nho_xe`) — đã code xong
+   từ trước, **VẪN CHƯA từng được test tay** (xem mục lịch sử "Giai đoạn 5 phần 2..." phía trên
+   trong file này, còn nguyên checklist 7 mục).
+2. Badge "Chờ BẠN ký duyệt" (mục 3 ở trên) — chưa test tay cho Điều xe/Bảo trì, chỉ Kiểm nghiệm.
+3. Label "(ký thay bởi...)" trên SignScreen (mục 4 ở trên) — hoàn toàn chưa test tay.
+4. RLS hardening tầng database cho `qc_results`/`dispatch_entries` UPDATE/DELETE (nhắc từ nhiều
+   phiên trước, vẫn chưa làm).
+5. Mở rộng khóa Xóa/Sửa sau ký duyệt (Việc 1+2 lịch sử cũ) sang Bảo trì.
+6. Rủi ro race condition ở guard xóa phiếu Kiểm nghiệm đã ký (mục ngay phía trên) — cần hỏi
+   trước khi sửa.
+7. **Toàn bộ code phiên này (mục 1-5) chưa commit/push** — làm việc trực tiếp trên working tree,
+   người dùng cần tự `git add/commit/push` khi sẵn sàng deploy.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01, tiếp — phiên mới) — Fix bug 74.8MB..." trong CLAUDE.md (ngay phía
+trên, mục dài nhất ở cuối file) để nắm đầy đủ 5 việc đã làm trong phiên trước — bug 74.8MB (đã
+tìm ra root cause thật: reload nhiều lần 1 file PDF đã qua incremental-update làm @cantoo/pdf-lib
+nhân đôi dung lượng, đã fix bằng commit() thay vì save()+reload), icon inline danh sách Bảo trì,
+badge "Chờ BẠN ký duyệt", label ký-thay trên SignScreen, tự động mở khóa ký lại cho Kiểm nghiệm
+sau khi xóa+nhập lại dữ liệu (closeActiveSigningRequestForKey, race-free). Mục 1, 2, 5 ĐÃ ĐƯỢC
+NGƯỜI DÙNG XÁC NHẬN PASS qua test tay — không cần test lại trừ khi tôi báo lỗi mới.
+
+Việc cần làm theo đúng thứ tự ưu tiên:
+
+1. Hướng dẫn tôi test tay 2 việc mục 3+4 CHƯA được xác nhận: (a) badge "Chờ BẠN ký duyệt" cho
+   Điều xe + Bảo trì (Kiểm nghiệm đã pass, logic dùng chung computeMyTurn() nên rủi ro thấp
+   nhưng chưa test trực tiếp); (b) label "(ký thay bởi...)" hiện cố định trên SignScreen — mở 1
+   hồ sơ Bảo trì bundle su_co_nho/bao_duong_xe/sua_chua_nho_xe có vai trò ký thay, xác nhận thấy
+   rõ text này cả trước/sau khi ký, cả khung của mình lẫn khi người khác xem panel "Luồng ký hồ
+   sơ".
+
+2. Nếu tôi xác nhận cả 2 việc trên pass, hỏi tôi có muốn tiếp tục việc CŨ còn treo từ trước
+   (chưa đụng gì trong phiên vừa rồi) hay không — KHÔNG tự ý làm: test tay Giai đoạn 5 phần 2
+   Bảo trì (bao_duong/bao_duong_xe/sua_chua_nho_xe — xem checklist 7 mục ở mục lịch sử "Giai
+   đoạn 5 phần 2" trong CLAUDE.md), RLS hardening database, mở rộng khóa Xóa/Sửa sang Bảo trì,
+   hoặc rủi ro race condition ở guard xóa phiếu Kiểm nghiệm đã ký (mục "Rủi ro đã biết, CHƯA
+   fix" ngay trên phần này).
+
+3. Nhắc tôi: toàn bộ code của phiên trước (mục 1-5) vẫn CHƯA commit/push — nếu tôi muốn deploy,
+   cần tự xác nhận trước khi Claude chạy git commit (theo đúng quy tắc "chỉ commit khi được yêu
+   cầu rõ ràng").
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-01, tiếp — phiên mới 2) — 3 phản hồi sau test tay biên bản Đội xe: label
+ký-thay trên PDF in thật, khóa "Hủy yêu cầu" sau khi đã ký, điều tra badge "Chờ bạn ký duyệt"
+
+Người dùng test biên bản `DX-170826/002` (bundle `sua_chua_nho_xe`, chưa xác nhận PASS/FAIL 2
+mục treo ở trên — đây là phản hồi MỚI, độc lập) và báo 3 việc:
+
+### 1. Đã fix — "(ký thay bởi Nhân viên phụ trách)" thiếu trên chính file PDF đã ký
+
+Phiên trước chỉ thêm label này vào SignScreen (`truong_ky.nhan`, hiện trong panel "Luồng ký hồ
+sơ") — **file PDF in ra/đã ký thật KHÔNG có label này**, cột "Tài xế" chỉ hiện tên người ký thay
+("Chau Nho") không kèm chú thích, dễ hiểu lầm là chính tài xế đó tự ký.
+
+- `drawSignatureRowCapture()` (`src/lib/maintenance-pdf.ts`) thêm field `note?: string` vào type
+  cột — vẽ 1 dòng chữ nghiêng nhỏ ngay dưới "(Ký và ghi rõ họ tên)" khi có, và **tăng thêm chiều
+  cao trả về** (`nameY + 14` thay vì `+8`) khi có bất kỳ cột nào có `note` — tránh khối nội dung
+  kế tiếp đè lên dòng ghi chú mới. Không đổi hành vi khi không có cột nào có `note` (giữ nguyên
+  `+8` cũ).
+- Cả 4 điểm gọi có cột "Tài xế" (F15BaoDuong `isBoDoi`, F06, F08NB, F15SmallVehicle — tương ứng
+  3 bundle `bao_duong_xe`/`sua_chua_nho_xe`) đều thêm `note: forSigning ? "(NV phụ trách ký
+  thay)" : undefined` — chỉ hiện khi đang tạo bản để KÝ ĐIỆN TỬ (`forSigning=true`), bản in
+  thường (`forSigning=false`, vẫn hiện tên tài xế thật để ký tay) không đổi gì.
+- Dùng text ngắn **"(NV phụ trách ký thay)"** (khác câu đầy đủ "(ký thay bởi Nhân viên phụ
+  trách)" dùng trên SignScreen) — cột PDF hẹp (`colW - 4`, có thể chỉ ~120pt ở layout 4 cột),
+  câu dài dễ tự xuống dòng qua `maxWidth` của jsPDF và đè lên vùng chữ ký/tên bên dưới (khoảng
+  cách cố định `nameY = y + 18`, không co giãn theo số dòng heading). Không sửa cột "Tổ trưởng
+  cơ điện/cơ khí" (F13, bundle `su_co_nho`) — cột đó ĐÃ hiện tên NV phụ trách trực tiếp mà không
+  có label ký-thay theo thiết kế cũ, ngoài phạm vi báo cáo lần này (chỉ báo cáo cột Tài xế).
+- `npx tsc --noEmit`/`npx eslint src/lib/maintenance-pdf.ts` sạch. **Chưa test tay** — cần in
+  thử 1 biên bản `bao_duong_xe`/`sua_chua_nho_xe` qua luồng Ký duyệt, xác nhận dòng "(NV phụ
+  trách ký thay)" hiện đúng dưới cột Tài xế, không đè/tràn ra ngoài khung, không ảnh hưởng layout
+  các cột khác.
+
+### 3. Đã fix — chặn "Hủy yêu cầu" sau khi đã có người ký (cả tầng backend lẫn UI)
+
+- `cancelSigningRequest()` (`src/lib/signing/requests.ts`) thêm kiểm tra: đếm `nguoi_ky` có
+  `trang_thai='da_ky'` cho đúng `yeu_cau_id` — nếu ≥1, throw lỗi tiếng Việt hướng dẫn dùng "Trả
+  về" thay thế. Đặt SAU 2 check hiện có (`trang_thai !== 'dang_luan_chuyen'`, quyền
+  admin/nguoi_tao), TRƯỚC khi update `trang_thai='huy'`.
+- Thêm helper dùng chung mới `hasAnySigned(signers: MyTurnSigner[])` trong
+  `src/app/dashboard/_components/signing-my-turn.ts` (cạnh `computeMyTurn` đã có) — cả 3 badge
+  component (`quality-sign-status.tsx`, `dispatch-sign-status.tsx`,
+  `maintenance-sign-status.tsx`) đổi `canCancel` từ `isAdmin || isCreator` sang
+  `(isAdmin || isCreator) && !hasAnySigned(status.signers)` — ẩn hẳn nút "Hủy yêu cầu" ở UI ngay
+  khi có bất kỳ ai đã ký, kể cả với admin (đồng nhất với backend — admin cũng bị chặn, chỉ có
+  "Trả về" mới sửa được sau khi đã ký).
+- **Đã xác nhận không ảnh hưởng nhánh "Trả về" (`status.traVeLyDo`)**: cả 3 component dùng
+  chung 1 biến `canCancel` cho cả nhánh bình thường lẫn nhánh đã-trả-về — nhưng sau khi "Trả về"
+  chạy, TẤT CẢ người ký trước đó bị reset về `trang_thai='cho'` (đúng thiết kế
+  `returnSigningRequest()` có sẵn từ trước), nên `hasAnySigned()` tự nhiên trả `false` trong
+  tình huống này — nút "Hủy yêu cầu" vẫn hiện đúng cho người tạo/admin sau khi hồ sơ bị trả về,
+  không bị chặn nhầm.
+- `npx tsc --noEmit`/`npx eslint` sạch trên cả 5 file. **Chưa test tay** — cần: ký ít nhất 1
+  người trong 1 yêu cầu (Kiểm nghiệm/Điều xe/Bảo trì bất kỳ) → xác nhận nút "Hủy yêu cầu" biến
+  mất khỏi UI cho cả người tạo lẫn admin; thử gọi thẳng API `cancel-request` (không qua UI) sau
+  khi đã ký → xác nhận bị chặn đúng thông báo lỗi mới.
+
+### 2. Đã điều tra bằng dữ liệu thật — KHÔNG phải bug, chỉ đơn giản hoá 1 câu chữ
+
+Người dùng nghi ngờ badge "Chờ bạn ký duyệt" hiện sai cho "người tạo" (Chau Nho) ở đúng biên bản
+`DX-170826/002`. Đã tra trực tiếp DB (script tạm, đã xoá) thay vì đoán:
+
+- `maintenance_records.nguoi_tao` (cột TEXT, tên người tạo/nhập biên bản) = **"Chau Nho"** —
+  nhưng đây KHÁC hẳn `yeu_cau_ky.nguoi_tao` (UUID, người thực sự bấm nút "Ký duyệt" để tạo yêu
+  cầu ký) = `21d59cc2-...` — **không phải Chau Nho** (Chau Nho's user id thật là
+  `0de43ef7-...`). Hai khái niệm "người tạo" này độc lập nhau: 1 người (có thể là admin/văn
+  phòng) nhập liệu + tạo yêu cầu ký, nhưng chỉ định NGƯỜI KHÁC (Chau Nho) làm "Nhân viên phụ
+  trách" — người phải thực sự ký trước tiên.
+- Tra `nguoi_ky`: Chau Nho (`0de43ef7-...`) là dòng `thu_tu=10, vai_tro='ky'` — **đã ký xong**
+  (`trang_thai='da_ky'`, `ky_luc` có giá trị). Với dữ liệu này, `computeMyTurn()` (có guard `if
+  (mine.trangThai === "da_ky") return false`) đúng ra phải trả `false` cho Chau Nho SAU KHI họ
+  đã ký — tức là badge "Chờ BẠN ký duyệt" mà người dùng thấy hẳn đã hiện ĐÚNG lúc TRƯỚC khi Chau
+  Nho ký (đúng vì Chau Nho thật sự là người cần ký đầu tiên), không phải hiện sai sau khi họ đã
+  ký xong. Không tìm thấy bằng chứng nào cho thấy có bug trong `computeMyTurn`/badge cho tình
+  huống cụ thể này.
+- **Kết luận**: KHÔNG sửa logic `canContinueSign`/`myTurn` (rủi ro cao nếu đoán sai — có thể vô
+  tình chặn mất khả năng ký của người tạo/participant hợp lệ). Chỉ áp dụng đúng phần rõ ràng,
+  không tranh cãi trong phản hồi: đổi `"Đang chờ người ký trước (N/M)"` → `"Đang chờ ký duyệt
+  (N/M)"` ở `maintenance-sign-status.tsx` (Quality/Dispatch đã dùng đúng "Chờ ký duyệt" từ
+  trước, không cần sửa) — theo đúng ý "câu 'đang chờ người ký trước' vô nghĩa, cứ hiện 'Đang chờ
+  ký duyệt'". Dòng tương tự trong SignScreen (`ky/[id]/page.tsx:803`, "Chưa tới lượt bạn — đang
+  chờ người ký trước hoàn tất.") **không đổi** — ngữ cảnh đó là thông báo trực tiếp cho 1 người
+  đang thực sự bị chặn ký, câu chữ vẫn có nghĩa ở đó, khác badge danh sách chung chung.
+- **Nếu người dùng vẫn cho rằng có bug thật sau khi đọc giải thích này**, cần cung cấp thêm chi
+  tiết cụ thể hơn (đăng nhập bằng tài khoản nào khi thấy badge sai, thời điểm chính xác) để điều
+  tra tiếp — hiện tại dữ liệu DB của đúng bản ghi được nêu tên không cho thấy sai lệch.
+
+### File đã sửa trong phiên này
+
+| File | Thay đổi |
+|---|---|
+| `src/lib/maintenance-pdf.ts` | `drawSignatureRowCapture` thêm `note?`; 4 cột "Tài xế" thêm `note: "(NV phụ trách ký thay)"` khi `forSigning` |
+| `src/lib/signing/requests.ts` | `cancelSigningRequest()` chặn khi đã có người ký |
+| `src/app/dashboard/_components/signing-my-turn.ts` | Thêm `hasAnySigned()` |
+| `src/app/dashboard/quality/_components/quality-sign-status.tsx` | `canCancel` thêm `&& !hasAnySigned(...)` |
+| `src/app/dashboard/dispatch/_components/dispatch-sign-status.tsx` | `canCancel` thêm `&& !hasAnySigned(...)` |
+| `src/app/dashboard/maintenance/records/_components/maintenance-sign-status.tsx` | `canCancel` thêm `&& !hasAnySigned(...)`; đổi nhãn "Đang chờ người ký trước" → "Đang chờ ký duyệt" |
+
+Không có migration nào — chỉ đổi code ứng dụng. **Chưa commit/push** (cộng dồn với phiên trước
+vẫn chưa commit).
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01, tiếp — phiên mới 2)" trong CLAUDE.md (ngay phía trên) — đã fix
+label "(NV phụ trách ký thay)" trên chính file PDF (không chỉ SignScreen), chặn "Hủy yêu cầu"
+sau khi đã có người ký (cả backend lẫn UI), và đơn giản hoá nhãn "Đang chờ ký duyệt" ở Bảo trì.
+Mục "badge Chờ bạn ký duyệt cho người tạo" đã điều tra bằng dữ liệu DB thật của đúng biên bản
+DX-170826/002 và KHÔNG tìm thấy bug — người "nguoi_tao" trên record (text field) khác với người
+thực sự tạo yêu cầu ký (UUID); Chau Nho đã ký đúng vai trò của họ. Đã giải thích cho người dùng,
+chưa sửa code phần này.
+
+CHƯA test tay bất kỳ mục nào trong phiên này (label ký-thay trên PDF, chặn Hủy yêu cầu) — cũng
+còn 2 mục treo từ phiên trước đó nữa (badge "Chờ BẠN ký duyệt" cho Điều xe/Bảo trì, label ký-thay
+trên SignScreen). Hỏi tôi đã test xong mục nào, và nếu tôi báo lỗi mới (đặc biệt nếu tôi vẫn cho
+rằng badge "Chờ bạn ký duyệt" hiện sai), hỏi thêm chi tiết cụ thể (tài khoản nào, đăng nhập lúc
+nào) trước khi sửa lại — đừng đoán, đã có 1 lần điều tra kỹ bằng DB thật không tìm thấy bug.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-01, tiếp — phiên mới 3) — 3 fix sau khi xem ảnh chụp thật: bug font-fallback
+làm sai chính tả, mở rộng note sang cột "Tổ trưởng cơ điện/cơ khí", thay hẳn cột Trạng thái bằng
+Ký duyệt ở cả 2 nơi
+
+Người dùng gửi ảnh chụp khung ký "Tài xế" trên SignScreen thật (không phải PDF tĩnh — đây là ảnh
+trang PDF render qua canvas + overlay HTML của `/dashboard/ky/[id]`), cho thấy dòng ghi chú hiện
+ra là **"(NV phả trách ký thay)"** — sai chính tả "phụ" → "phả".
+
+### Root cause thật — đúng landmine đã ghi sẵn trong lịch sử file này, tự giẫm lại
+
+`drawSignatureRowCapture()` (fix ở mục "phiên mới 2" ngay trên) dùng
+`doc.setFont(PDF_FONT_NAME, "italic")` để vẽ dòng note — nhưng font đăng ký qua `ensurePdfFont()`
+(`pdf-qr-shared.ts`) **chỉ có 2 style `normal`/`bold`**, không có `italic`. jsPDF khi xin 1 style
+chưa đăng ký sẽ âm thầm fallback sang font khác (không đủ glyph tiếng Việt), làm ký tự có dấu bị
+mangled — chữ "phụ" (dấu nặng) render sai thành "phả" (dấu hỏi). Đây **chính xác là landmine đã
+ghi từ trước** trong lịch sử file này (mục lịch sử `maintenance-pdf.ts`: "Không dùng font
+'italic'... mọi chữ nghiêng trong bản HTML gốc... chuyển sang chữ thường màu xám thay vì
+nghiêng") — mục "phiên mới 2" đã vi phạm đúng quy tắc này khi thêm code mới, không kiểm tra lại
+lịch sử trước khi dùng `"italic"`.
+
+**Đã fix**: bỏ hẳn `doc.setFont(PDF_FONT_NAME, "italic")`, giữ `"normal"` (đã đăng ký đúng, đủ
+glyph tiếng Việt), chỉ giảm cỡ chữ xuống `6.5` để phân biệt trực quan với "(Ký và ghi rõ họ
+tên)" — đúng đúng convention "chữ thường + màu xám thay vì nghiêng" đã có sẵn trong file.
+
+### Mở rộng thêm cột "Tổ trưởng cơ điện/cơ khí" (F13, F03) — trước đây cố ý bỏ qua
+
+Người dùng xác nhận: note "(NV phụ trách ký thay)" phải áp dụng luôn cho cột **"Tổ trưởng cơ
+điện/cơ khí"** (không chỉ "Tài xế") — đã thêm `note: forSigning ? "(NV phụ trách ký thay)" :
+undefined` vào:
+- `drawF13()` (bundle `su_co_nho`) — cột `isBoDoiRole` (`roleId: "to_co_dien"`).
+- `drawF03()` (bundle `bao_duong`/`bao_duong_xe`) — cột `toRoleLabel` (`roleId: "to_co_dien"`,
+  đặt cuối mảng 4 cột). Lưu ý: cột này ĐÃ hiện tên NV phụ trách ở **cả 2 luồng** (in thường lẫn
+  ký duyệt, theo comment sẵn có dòng ~1308-1311) — note vẫn chỉ thêm khi `forSigning=true`, giữ
+  đồng nhất với mọi cột khác, không đổi hành vi bản in thường.
+
+Vị trí/canh giữa của note **không cần sửa** — đã đúng từ mục "phiên mới 2" (`align: "center"`,
+`cx` tính giống mọi dòng khác trong cùng cột, nằm ngay dưới "(Ký và ghi rõ họ tên)") — bug chỉ
+nằm ở font/chính tả, không phải layout.
+
+### Thay hẳn cột "Trạng thái" bằng "Ký duyệt" — ở CẢ 2 nơi (danh sách + Tổng quan)
+
+Người dùng chốt: KHÔNG giữ song song 2 cột (Trạng thái + Ký duyệt) — **thay thế hẳn**.
+
+- `src/app/dashboard/maintenance/records/page.tsx` (danh sách biên bản): xóa `<th>`"Trạng thái"
+  + `<td>{statusBadge(...)}</td>`, xóa hẳn hàm `statusBadge()` (dead code sau khi bỏ cột) và bỏ
+  import `trangThaiLabel` (chỉ dùng trong hàm đó) khỏi `maintenance-data`. Filter dropdown "Tất
+  cả trạng thái/Chờ duyệt/Đã duyệt/..." **giữ nguyên không đổi** — đây là filter riêng
+  (`filterTrangThai`), không phải cột hiển thị, dùng option label hard-code không phụ thuộc
+  `trangThaiLabel`.
+- `src/app/dashboard/maintenance/page.tsx` (trang Tổng quan, bảng "Biên bản gần đây" — **phát
+  hiện thêm khi rà theo đúng nghĩa "inline Bảo trì/Tổng quan-Biên bản"** trong yêu cầu, trang
+  này trước đó CHƯA có Ký duyệt gì cả, chỉ có Trạng thái badge tĩnh): đã port đầy đủ cơ chế Ký
+  duyệt từ `records/page.tsx` sang — thêm `user`/`signingStatusByRecord`/`signingStatusLoaded`/
+  `toast` state, `loadSigningStatuses()` (mirror y hệt), `resolveSignBundle()` (mirror y hệt,
+  cần mở rộng câu query `recentRes` thêm `maintenance_record_lines(loai_sua_chua)` để tính được
+  bundle), `canCreate`/`canPrint`, cột "Ký duyệt" với icon Eye/FileText + `MaintenanceSignStatusBadge`
+  + toast nổi góc trên (mirror pattern `records/page.tsx`). Xóa hẳn `statusBadge()` cũ của trang
+  này (không còn dùng ở đâu).
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` sạch trên mọi file đã sửa (`maintenance-pdf.ts`,
+`records/page.tsx`, `maintenance/page.tsx`) — chỉ còn đúng 1 warning pre-existing đã xác nhận từ
+trước (`currencySymbol` unused trong `maintenance/page.tsx`, không liên quan phiên này, xem
+`git show HEAD:...` xác nhận tồn tại trước khi sửa).
+
+### File đã sửa thêm trong phiên này
+
+| File | Thay đổi |
+|---|---|
+| `src/lib/maintenance-pdf.ts` | Bỏ `setFont(...,"italic")` → dùng `normal` cỡ 6.5; thêm `note` cho cột `to_co_dien` ở F13 + F03 |
+| `src/app/dashboard/maintenance/records/page.tsx` | Xóa cột "Trạng thái" + `statusBadge()` + import `trangThaiLabel` thừa |
+| `src/app/dashboard/maintenance/page.tsx` | Port toàn bộ cơ chế "Ký duyệt" (badge/icon/toast) thay cho cột Trạng thái tĩnh cũ |
+
+**Chưa test tay** — cần: in/ký thử 1 biên bản `su_co_nho` (F13) và 1 biên bản `bao_duong`/
+`bao_duong_xe` (F03) qua luồng Ký duyệt, xác nhận note "(NV phụ trách ký thay)" hiện đúng chính
+tả dưới CẢ 2 cột "Tài xế" lẫn "Tổ trưởng cơ điện/cơ khí", không lệch/tràn; mở
+`/dashboard/maintenance` (Tổng quan) xác nhận bảng "Biên bản gần đây" hiện đúng cột "Ký duyệt"
+với icon/badge hoạt động y hệt trang danh sách (bấm "Gửi ký duyệt"/xem file/hủy yêu cầu), toast
+hiện đúng; xác nhận trang danh sách (`records/page.tsx`) không còn cột "Trạng thái" nhưng filter
+"Trạng thái" vẫn lọc đúng như cũ.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01, tiếp — phiên mới 3)" trong CLAUDE.md (ngay phía trên) — đã fix
+bug font-fallback làm sai chính tả "(NV phụ trách ký thay)" (do dùng style "italic" chưa đăng
+ký — đúng landmine đã ghi sẵn trong lịch sử file, lần sau nhớ tra lịch sử maintenance-pdf.ts
+trước khi setFont style mới), mở rộng note ký-thay sang cột "Tổ trưởng cơ điện/cơ khí" (F13,
+F03), và thay hẳn cột "Trạng thái" bằng "Ký duyệt" ở cả trang danh sách lẫn trang Tổng quan
+Bảo trì (trang Tổng quan trước đó hoàn toàn chưa có cơ chế Ký duyệt, đã port đầy đủ sang).
+
+CHƯA test tay bất kỳ mục nào trong 3 phiên gần nhất (font fix, cột to_co_dien note, cột Ký
+duyệt ở Tổng quan, myTurn badge Điều xe/Bảo trì, label ký-thay trên SignScreen, chặn Hủy yêu
+cầu sau khi đã ký). Hỏi tôi đã test xong mục nào trước khi làm tiếp — nếu tôi báo lỗi mới, đọc
+kỹ đúng đoạn code liên quan trước khi sửa, đừng đoán.
 
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.

@@ -23,6 +23,7 @@ type Row = {
   fileHienTai: string | null
   traVeLyDo: string | null
   signers: SignerStatus[]
+  dataChanged: boolean
 }
 
 export async function GET(req: NextRequest) {
@@ -102,7 +103,28 @@ export async function GET(req: NextRequest) {
       fileHienTai: (r.file_hien_tai as string | null) ?? null,
       traVeLyDo: (r.tra_ve_ly_do as string | null) ?? null,
       signers: signersByYeuCau.get(r.id as string) || [],
+      dataChanged: false,
     }))
+
+    // Phát hiện lệch dữ liệu: so updated_at mới nhất của maintenance_records với
+    // yeu_cau_ky.tao_luc (thời điểm nội dung biên bản được chốt để ký) — mirror
+    // src/app/api/quality/signing-status/route.ts. Chỉ cần cho hồ sơ đã hoan_tat.
+    const hoanTatRows = result.filter((r) => r.trangThai === "hoan_tat")
+    if (hoanTatRows.length) {
+      const { data: recordRows } = await supabaseAdmin
+        .from("maintenance_records")
+        .select("id, updated_at")
+        .in("id", hoanTatRows.map((r) => r.recordId))
+      const updatedAtByRecord = new Map(
+        ((recordRows || []) as { id: string; updated_at: string | null }[]).map((rec) => [rec.id, rec.updated_at]),
+      )
+      for (const row of hoanTatRows) {
+        const yc = seenYeuCau.get(row.recordId)
+        const taoLuc = new Date((yc?.tao_luc as string) || 0).getTime()
+        const updatedAt = new Date(updatedAtByRecord.get(row.recordId) || 0).getTime()
+        row.dataChanged = updatedAt > taoLuc
+      }
+    }
 
     return NextResponse.json(result)
   } catch (err) {

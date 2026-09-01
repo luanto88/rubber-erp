@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic"
 // ma_ho_so) cho danh sách Điều xe. RLS gốc của yeu_cau_ky chỉ cho owner/participant/admin
 // đọc — không đủ cho mọi người xem danh sách Điều xe thấy badge "Chờ ký duyệt"/"Đã ký
 // duyệt". Dùng route service-role riêng, mirror src/app/api/quality/signing-status/route.ts.
+type SignerRow = { userId: string; thuTu: number; trangThai: string }
 type Row = {
   entryId: string
   yeuCauId: string
@@ -16,6 +17,7 @@ type Row = {
   fileHienTai: string | null
   traVeLyDo: string | null
   dataChanged: boolean
+  signers: SignerRow[]
 }
 
 export async function GET(req: NextRequest) {
@@ -54,14 +56,22 @@ export async function GET(req: NextRequest) {
     if (!yeuCauRows?.length) return NextResponse.json([])
 
     const yeuCauIds = yeuCauRows.map((r) => r.id as string)
-    const { data: pheDuyetRows } = await supabaseAdmin
+    const { data: allSignerRows } = await supabaseAdmin
       .from("nguoi_ky")
-      .select("yeu_cau_id, user_id")
+      .select("yeu_cau_id, user_id, vai_tro, thu_tu, trang_thai")
       .in("yeu_cau_id", yeuCauIds)
-      .eq("vai_tro", "phe_duyet")
+    type NguoiKyRow = { yeu_cau_id: string; user_id: string; vai_tro: string; thu_tu: number; trang_thai: string }
     const pheDuyetByYeuCau = new Map(
-      (pheDuyetRows || []).map((r: { yeu_cau_id: string; user_id: string }) => [r.yeu_cau_id, r.user_id]),
+      ((allSignerRows || []) as NguoiKyRow[])
+        .filter((r) => r.vai_tro === "phe_duyet")
+        .map((r) => [r.yeu_cau_id, r.user_id]),
     )
+    const signersByYeuCau = new Map<string, SignerRow[]>()
+    for (const r of (allSignerRows || []) as NguoiKyRow[]) {
+      const list = signersByYeuCau.get(r.yeu_cau_id) ?? []
+      list.push({ userId: r.user_id, thuTu: r.thu_tu, trangThai: r.trang_thai })
+      signersByYeuCau.set(r.yeu_cau_id, list)
+    }
 
     // Đã order tao_luc desc — dòng đầu tiên gặp mỗi "ma_ho_so" là mới nhất, giữ lại. Từ
     // migration 20260904, unique index `uniq_yeu_cau_ky_active_business_key` đã chặn
@@ -81,6 +91,7 @@ export async function GET(req: NextRequest) {
         fileHienTai: r.file_hien_tai as string | null,
         traVeLyDo: (r.tra_ve_ly_do as string | null) ?? null,
         dataChanged: false,
+        signers: signersByYeuCau.get(r.id as string) ?? [],
       })
     }
 

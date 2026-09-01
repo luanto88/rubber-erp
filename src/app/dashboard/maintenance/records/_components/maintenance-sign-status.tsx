@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { computeMyTurn, hasAnySigned } from "@/app/dashboard/_components/signing-my-turn"
 
 export type MaintenanceSignerStatus = { userId: string; thuTu: number; vaiTro: string; trangThai: string; hoTen: string }
 export type MaintenanceSigningStatus = {
@@ -16,6 +17,7 @@ export type MaintenanceSigningStatus = {
   fileHienTai: string | null
   traVeLyDo: string | null
   signers: MaintenanceSignerStatus[]
+  dataChanged: boolean
 }
 
 function CancelConfirmModal({
@@ -119,7 +121,7 @@ export function MaintenanceSignStatusBadge({
         onClick={onOpenSignPrompt}
         className="flex items-center gap-1 px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-colors"
       >
-        <PenTool size={12} /> Ký duyệt
+        <PenTool size={12} /> Gửi ký duyệt
       </button>
     )
   }
@@ -129,6 +131,16 @@ export function MaintenanceSignStatusBadge({
 
   // 2. Đã hoàn tất.
   if (status.trangThai === "hoan_tat") {
+    if (status.dataChanged) {
+      return (
+        <span
+          className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-100 text-amber-800 text-xs font-bold rounded-lg"
+          title="Biên bản đã được sửa SAU khi ký duyệt xong — file đã ký không còn khớp dữ liệu hiện tại."
+        >
+          <AlertTriangle size={12} /> Đã ký — dữ liệu đã đổi
+        </span>
+      )
+    }
     return (
       <span className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-lg">
         <CheckCircle2 size={12} /> Đã ký duyệt ({signedCount}/{totalCount})
@@ -141,7 +153,8 @@ export function MaintenanceSignStatusBadge({
   const isCreator = currentUser.id === status.nguoiTao
   const isParticipant = status.signers.some((s) => s.userId === currentUser.id)
   const canContinueSign = isAdmin || isParticipant
-  const canCancel = isAdmin || isCreator
+  // Đã có người ký thì không cho hủy nữa (chỉ còn "Trả về") — backend cũng chặn cứng riêng.
+  const canCancel = (isAdmin || isCreator) && !hasAnySigned(status.signers)
 
   // 3a. Vừa bị 1 người ký trước "Trả về" (chưa ai ký lại).
   if (status.traVeLyDo) {
@@ -182,18 +195,25 @@ export function MaintenanceSignStatusBadge({
     )
   }
 
+  const myTurn = computeMyTurn(status.signers, currentUser.id)
+
   return (
     <>
       <span className="flex items-center gap-1.5">
         {canContinueSign ? (
           <Link
             href={`/dashboard/ky/${status.yeuCauId}`}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors"
+            className={
+              myTurn
+                ? "flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+                : "flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-500 text-xs font-bold rounded-lg transition-colors"
+            }
           >
-            <Clock size={12} /> Chờ ký duyệt ({signedCount}/{totalCount})
+            {myTurn ? <Bell size={12} /> : <Clock size={12} />}
+            {myTurn ? `Chờ BẠN ký duyệt (${signedCount}/${totalCount})` : `Đang chờ ký duyệt (${signedCount}/${totalCount})`}
           </Link>
         ) : (
-          <span className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 text-xs font-bold rounded-lg">
+          <span className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-500 text-xs font-bold rounded-lg">
             <Clock size={12} /> Chờ ký duyệt ({signedCount}/{totalCount})
           </span>
         )}

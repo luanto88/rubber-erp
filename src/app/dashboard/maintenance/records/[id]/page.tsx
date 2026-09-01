@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, ExternalLink, ImagePlus, Loader2, Plus,
-  Printer, QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, ExternalLink, FileText, ImagePlus, Loader2, Plus,
+  QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -193,11 +193,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [notifying, setNotifying] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
-  const [showRejectModal, setShowRejectModal] = useState(false)
-  const [rejectReason, setRejectReason] = useState("")
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
 
   // Ký duyệt điện tử (Giai đoạn 5, bundle su_co_nho) — chạy song song với cho_duyet/da_duyet,
@@ -210,6 +207,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // chỉ có ở nhánh tạo mới — điều hướng bị DELAY tới khi banner đóng (onDone), vì đổi params.id
   // ngay lập tức sẽ remount route con và làm mất state kpiPrompt giữa chừng.
   const [kpiPrompt, setKpiPrompt] = useState<{ recordId: string; recordLabel: string; navigateTo?: string } | null>(null)
+  // Vì điều hướng URL bị delay (xem comment trên), `id`/`isNew` vẫn giữ nguyên "new" ngay sau
+  // khi tạo biên bản mới — chặn badge "Gửi ký duyệt" hiện ra cho tới khi người dùng đóng banner
+  // KPI (bug đã báo). State này cho biết "đã lưu xong bản ghi thật, có ID rồi" ĐỘC LẬP với URL.
+  const [savedRecordId, setSavedRecordId] = useState<string | null>(null)
 
   // Image slot upload
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null)
@@ -506,12 +507,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     record?.nguoi_tao != null &&
     (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
   )
-  // Người dùng hiện tại có phải Giám đốc hoặc BGĐ phụ trách được chọn trong form không
-  const userName = user?.full_name || user?.username || ""
-  const isGdOrBgd = !!userName && !isCreator && (
-    (giamDoc && userName === giamDoc) ||
-    (bgdPhuTrach && userName === bgdPhuTrach)
-  )
   const isAdmin = user?.role === "admin"
   // Ký duyệt điện tử (Giai đoạn 5) — mỗi biên bản chỉ khớp đúng 1 trong 4 bundle chứng từ,
   // khớp chính xác điều kiện render nút "In biên bản" của từng nhánh bên dưới.
@@ -529,38 +524,22 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     : baoDuongXeEligible
     ? "bao_duong_xe"
     : null
+  // Đang có yêu cầu ký đang luân chuyển (NV đã ký, chờ BGĐ/GĐ...) — khác "Phê duyệt" cũ (1
+  // click atomic), luồng ký nhiều bước có thể kéo dài qua nhiều ngày; sửa nội dung biên bản
+  // giữa lúc đó sẽ làm các chữ ký đã đóng dấu không còn khớp dữ liệu. Mirror khóa sửa/xóa đã
+  // áp dụng cho Kiểm nghiệm/Điều xe.
+  const isSigningInProgress = signingStatus?.trangThai === "dang_luan_chuyen"
   // Admin luôn được sửa ở mọi trạng thái. Người tạo được sửa khi Chờ duyệt hoặc Từ chối;
-  // Đã duyệt/Đã hủy chỉ admin mới sửa được.
+  // Đã duyệt/Đã hủy/đang luân chuyển ký chỉ admin mới sửa được.
   const isReadOnly =
     !isAdmin &&
     (record?.trang_thai === "huy" ||
       record?.trang_thai === "da_duyet" ||
+      isSigningInProgress ||
       (!isNew && !isCreator))
-  // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt; admin xóa được mọi trạng thái.
-  const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet")
-
-  const handleNotify = async () => {
-    if (!id || !factoryId) return
-    setNotifying(true)
-    try {
-      const res = await fetch("/api/maintenance/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recordId: id, factoryId }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Lỗi gửi thông báo")
-      if (data.errors?.length > 0) {
-        setSaveError(`Thông báo gửi một phần: ${(data.errors as string[]).join("; ")}`)
-      } else {
-        setSaveSuccess("Đã gửi thông báo thành công")
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Lỗi gửi thông báo")
-    } finally {
-      setNotifying(false)
-    }
-  }
+  // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt và không đang luân chuyển ký; admin xóa
+  // được mọi trạng thái.
+  const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet" && !isSigningInProgress)
 
   // Staff categories
   // So khớp CHÍNH XÁC (không phải chuỗi con) để tách rõ Giám đốc / Phó giám đốc, tự động loại
@@ -854,9 +833,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Tải trạng thái ký duyệt điện tử — chỉ khi biên bản khớp đúng 1 trong 4 bundle hỗ trợ ký số
   // (khớp đúng nút "In biên bản" của từng nhánh bên dưới).
   useEffect(() => {
-    if (!factoryId || isNew || !signBundle) { setSigningStatus(undefined); return }
-    void loadSigningStatus(factoryId, id)
-  }, [factoryId, id, isNew, signBundle, loadSigningStatus])
+    if (!factoryId || (isNew && !savedRecordId) || !signBundle) { setSigningStatus(undefined); return }
+    void loadSigningStatus(factoryId, savedRecordId ?? id)
+  }, [factoryId, id, isNew, savedRecordId, signBundle, loadSigningStatus])
 
   // Close material dropdown when clicking outside
   useEffect(() => {
@@ -941,63 +920,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleUnApprove = async () => {
+  // "Hủy sau khi hoàn tất" — gọi API server-side mới (đảo ngược xuất kho + đưa biên bản về
+  // chờ ký + đánh dấu yêu cầu ký cũ là 'huy'), thay thế handleUnApprove cũ (từng tự thao tác
+  // trực tiếp bằng client). Xem src/app/api/maintenance/reverse-approval/route.ts.
+  const handleReverseApproval = async () => {
     if (!factoryId || !id || id === "new") return
-    if (!window.confirm("Hủy phê duyệt? Biên bản sẽ về trạng thái Chờ duyệt và phiếu xuất kho sẽ bị hủy (vật tư hoàn về kho).")) return
+    if (!window.confirm("Hủy sau khi hoàn tất ký duyệt? Biên bản sẽ về trạng thái Chờ ký, phiếu xuất kho sẽ bị hủy (vật tư hoàn về kho), và có thể \"Gửi ký duyệt\" lại từ đầu.")) return
     setSaving(true); setSaveError(null)
     try {
       const session = await getFreshAuthSession()
       if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
-
-      // Hủy toàn bộ phiếu xuất kho qua RPC để hoàn tồn kho đúng cách
-      for (const documentId of issueDocIds) {
-        const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
-          p_factory_id: factoryId,
-          p_document_id: documentId,
-          p_cancelled_by: session.user.id,
-          p_cancel_reason: `Hủy phê duyệt biên bản ${record?.ma_bb || ""}`,
-        })
-        if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
-      }
-
-      const { error } = await supabase
-        .from("maintenance_records")
-        .update({
-          trang_thai: "cho_duyet",
-          nguoi_duyet: null,
-          ngay_duyet: null,
-          inventory_issue_doc_id: null,
-          inventory_issue_doc_ids: null,
-        })
-        .eq("id", id)
-        .eq("factory_id", factoryId)
-      if (error) { setSaveError(error.message); return }
-      setSaveSuccess(`Đã hủy phê duyệt. Biên bản ${record?.ma_bb || ""} về trạng thái Chờ duyệt. Tồn kho đã được hoàn nguyên.`)
-      void loadRecord(factoryId, id)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleReject = async () => {
-    if (!rejectReason.trim()) { setSaveError("Vui lòng nhập lý do từ chối"); return }
-    if (!factoryId || !id || id === "new") return
-    setSaving(true); setSaveError(null)
-    try {
-      const { error } = await supabase
-        .from("maintenance_records")
-        .update({ trang_thai: "tu_choi", ly_do_tu_choi: rejectReason.trim() })
-        .eq("id", id)
-        .eq("factory_id", factoryId)
-      if (error) { setSaveError(error.message); return }
-      void fetch("/api/maintenance/notify-reject", {
+      const res = await fetch("/api/maintenance/reverse-approval", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recordId: id, factoryId, reason: rejectReason.trim() }),
-      }).catch(() => {})
-      setShowRejectModal(false); setRejectReason("")
-      setSaveSuccess(`Đã từ chối phê duyệt biên bản ${record?.ma_bb || ""}.`)
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ recordId: id, factoryId }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setSaveError(data.error || "Lỗi hủy sau khi hoàn tất"); return }
+      setSaveSuccess(`Đã hủy sau khi hoàn tất. Biên bản ${record?.ma_bb || ""} về trạng thái Chờ ký. Tồn kho đã được hoàn nguyên.`)
       void loadRecord(factoryId, id)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi hủy sau khi hoàn tất")
     } finally {
       setSaving(false)
     }
@@ -1149,6 +1092,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         nguyen_nhan_chung: nguyenNhanChung.trim() || null,
         cac_khac_phuc_chung: cacKhacPhucChung.trim() || null,
         image_urls_chung: imageUrlsChung.filter(Boolean).length > 0 ? imageUrlsChung.filter(Boolean) : null,
+        // Tường minh — không giả định có trigger auto-update, cùng bài học đã rút ra ở
+        // qc_results/dispatch_entries (cần để phát hiện "dữ liệu đã đổi sau khi ký").
+        updated_at: new Date().toISOString(),
         trang_thai: record?.trang_thai || "cho_duyet",
       }
 
@@ -1274,6 +1220,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       const kpiLabel = maBB || record?.ma_bb || "Biên bản bảo trì"
       if (isNew) {
+        // Nạp lại bản ghi thật + đánh dấu "đã lưu xong" NGAY (độc lập với URL) để badge "Gửi ký
+        // duyệt" hiện ra ngay, không cần đợi router.push (vẫn delay tới khi đóng banner KPI).
+        await loadRecord(factoryId, recordId)
+        setSavedRecordId(recordId)
         // KHÔNG router.push ngay — điều hướng bị delay tới khi KpiLinkPrompt đóng (onDone).
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel, navigateTo: `/dashboard/maintenance/records/${recordId}` })
       } else {
@@ -1281,245 +1231,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         void loadRecord(factoryId, id)
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel })
       }
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Lỗi không xác định")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleApprove = async () => {
-    if (!factoryId || !id || id === "new") return
-    setSaving(true); setSaveError(null)
-    try {
-      const session = await getFreshAuthSession()
-      if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
-      const approverName = user?.full_name || user?.username || null
-
-      // Chỉ lấy vật tư trong_kho có item id
-      const inStockMats = lines.flatMap((l) => l.materials.filter((m) => m.nguon === "trong_kho" && m.inventory_item_id))
-      const issueGroups = new Map<string, Array<{ mat: DraftMaterial; item: InventoryItemOption }>>()
-
-      // Validate tồn kho trước khi duyệt — refresh số tồn tươi ngay trước khi so sánh
-      const approveStockItemIds = Array.from(new Set(inStockMats.map((m) => m.inventory_item_id)))
-      const freshItemsForApprove = approveStockItemIds.length > 0 ? await refreshMaterialStock(factoryId, approveStockItemIds) : inventoryItems
-      for (const mat of inStockMats) {
-        const item = freshItemsForApprove.find((i) => i.id === mat.inventory_item_id)
-        if (!item) {
-          setSaveError(`Không tìm thấy vật tư "${mat.ten_vat_tu || "—"}" trong danh mục kho.`)
-          return
-        }
-        if (item.manages_lot) {
-          setSaveError(`Vật tư "${item.name}" đang quản lý theo lô nên chưa thể xuất tự động từ biên bản bảo trì.`)
-          return
-        }
-        const sourceWarehouseId = item.primaryWarehouseId
-        if (!sourceWarehouseId) {
-          setSaveError(`Vật tư "${item.name}" chưa được gán kho mặc định trong danh mục inventory.`)
-          return
-        }
-        const group = issueGroups.get(sourceWarehouseId) || []
-        group.push({ mat, item })
-        issueGroups.set(sourceWarehouseId, group)
-        if (parseFloat(mat.so_luong) > item.currentStock) {
-          setSaveError(`Vật tư "${item.name}" không đủ tồn (cần ${mat.so_luong} ${item.unit}, còn ${item.currentStock} ${item.unit})`)
-          return
-        }
-      }
-
-      let issueDocId: string | null = null
-      const issueDocIdsCreated: string[] = []
-
-      if (inStockMats.length > 0) {
-        const maBB = record?.ma_bb || id
-        const baseDocCode = `X-BT-${maBB}`
-        const sourceWarehouseIds = Array.from(issueGroups.keys())
-
-        const { data: sourceWarehouses, error: warehouseErr } = await supabase
-          .from("inventory_warehouses")
-          .select("id, code, name")
-          .eq("factory_id", factoryId)
-          .in("id", sourceWarehouseIds)
-        if (warehouseErr) { setSaveError(`Không tải được kho nguồn: ${warehouseErr.message}`); return }
-        const warehouseMap = new Map<string, { id: string; code: string; name: string }>()
-        for (const warehouse of (sourceWarehouses || []) as { id: string; code: string; name: string }[]) {
-          warehouseMap.set(warehouse.id, warehouse)
-        }
-        for (const warehouseId of sourceWarehouseIds) {
-          if (!warehouseMap.has(warehouseId)) {
-            setSaveError("Không tìm thấy một trong các kho nguồn mặc định của vật tư trong danh mục inventory.")
-            return
-          }
-        }
-
-        const groupCount = sourceWarehouseIds.length
-        const desiredDocCodes = new Set(
-          sourceWarehouseIds.map((warehouseId) => {
-            const warehouse = warehouseMap.get(warehouseId)!
-            return groupCount === 1 ? baseDocCode : `${baseDocCode}-${warehouse.code}`
-          }),
-        )
-
-        const { data: existingDocs, error: existingDocsErr } = await supabase
-          .from("inventory_documents")
-          .select("id, status, document_code")
-          .eq("factory_id", factoryId)
-          .like("document_code", `${baseDocCode}%`)
-        if (existingDocsErr) { setSaveError(`Không tải được phiếu xuất kho cũ: ${existingDocsErr.message}`); return }
-
-        const existingDocMap = new Map<string, { id: string; status: string | null; document_code: string }>()
-        for (const doc of (existingDocs || []) as { id: string; status: string | null; document_code: string }[]) {
-          existingDocMap.set(doc.document_code, doc)
-        }
-
-        for (const doc of (existingDocs || []) as { id: string; status: string | null; document_code: string }[]) {
-          if (desiredDocCodes.has(doc.document_code)) continue
-          if (doc.status === "posted") {
-            const { error: cancelExtraErr } = await supabase.rpc("inventory_cancel_document", {
-              p_factory_id: factoryId,
-              p_document_id: doc.id,
-              p_cancelled_by: session.user.id,
-              p_cancel_reason: `Làm mới phiếu xuất của biên bản ${maBB}`,
-            })
-            if (cancelExtraErr) { setSaveError(`Lỗi dọn phiếu xuất kho cũ: ${cancelExtraErr.message}`); return }
-          }
-        }
-
-        for (const warehouseId of sourceWarehouseIds) {
-          const sourceWarehouse = warehouseMap.get(warehouseId)!
-          const issueLineDrafts = issueGroups.get(warehouseId) || []
-          const requestedQtyByItem = new Map<string, number>()
-          for (const entry of issueLineDrafts) {
-            requestedQtyByItem.set(
-              entry.item.id,
-              (requestedQtyByItem.get(entry.item.id) || 0) + (parseFloat(entry.mat.so_luong) || 0),
-            )
-          }
-
-          const { data: warehouseBalances, error: balanceErr } = await supabase
-            .from("inventory_stock_balances")
-            .select("item_id, on_hand")
-            .eq("factory_id", factoryId)
-            .eq("warehouse_id", sourceWarehouse.id)
-            .in("item_id", Array.from(requestedQtyByItem.keys()))
-          if (balanceErr) { setSaveError(`Không kiểm tra được tồn kho nguồn: ${balanceErr.message}`); return }
-
-          const warehouseStockMap = new Map<string, number>()
-          for (const row of (warehouseBalances || []) as { item_id: string; on_hand: number | null }[]) {
-            warehouseStockMap.set(row.item_id, row.on_hand || 0)
-          }
-
-          for (const [itemId, requestedQty] of requestedQtyByItem.entries()) {
-            const item = issueLineDrafts.find((entry) => entry.item.id === itemId)?.item
-            const stockInWarehouse = warehouseStockMap.get(itemId) || 0
-            if (item && requestedQty > stockInWarehouse) {
-              setSaveError(`Vật tư "${item.name}" không đủ tồn tại kho ${sourceWarehouse.code} (cần ${requestedQty} ${item.unit}, còn ${stockInWarehouse} ${item.unit}).`)
-              return
-            }
-          }
-
-          const docCode = groupCount === 1 ? baseDocCode : `${baseDocCode}-${sourceWarehouse.code}`
-          const existingDoc = existingDocMap.get(docCode)
-
-          if (existingDoc?.status === "posted") {
-            const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
-              p_factory_id: factoryId,
-              p_document_id: existingDoc.id,
-              p_cancelled_by: session.user.id,
-              p_cancel_reason: `Làm mới phiếu xuất của biên bản ${maBB}`,
-            })
-            if (cancelErr) { setSaveError(`Lỗi hoàn tác phiếu xuất cũ: ${cancelErr.message}`); return }
-          }
-
-          let currentIssueDocId: string
-          if (existingDoc) {
-            const { error: deleteLinesErr } = await supabase.from("inventory_document_lines").delete().eq("document_id", existingDoc.id)
-            if (deleteLinesErr) { setSaveError(`Lỗi xóa dòng phiếu xuất cũ: ${deleteLinesErr.message}`); return }
-
-            const { error: resetDocErr } = await supabase
-              .from("inventory_documents")
-              .update({
-                document_date: ngay,
-                source_warehouse_id: sourceWarehouse.id,
-                target_warehouse_id: null,
-                source_name: sourceWarehouse.name,
-                recipient_name: null,
-                requester_name: approverName,
-                created_by: session.user.id,
-                status: "draft",
-                notes: `Xuất kho cho biên bản sửa chữa/bảo trì số: ${maBB}`,
-              })
-              .eq("id", existingDoc.id)
-            if (resetDocErr) { setSaveError(`Lỗi cập nhật phiếu xuất kho: ${resetDocErr.message}`); return }
-            currentIssueDocId = existingDoc.id
-          } else {
-            const { data: issueDoc, error: issueErr } = await supabase
-              .from("inventory_documents")
-              .insert({
-                factory_id: factoryId,
-                document_type: "export",
-                document_code: docCode,
-                document_date: ngay,
-                source_warehouse_id: sourceWarehouse.id,
-                target_warehouse_id: null,
-                source_name: sourceWarehouse.name,
-                recipient_name: null,
-                status: "draft",
-                notes: `Xuất kho cho biên bản sửa chữa/bảo trì số: ${maBB}`,
-                requester_name: approverName,
-                created_by: session.user.id,
-              })
-              .select("id")
-              .single()
-            if (issueErr || !issueDoc?.id) { setSaveError(`Lỗi tạo phiếu xuất kho: ${issueErr?.message || "Không tạo được phiếu xuất"}`); return }
-            currentIssueDocId = issueDoc.id
-          }
-
-          const issueLines = issueLineDrafts.map(({ mat, item }) => ({
-            document_id: currentIssueDocId,
-            factory_id: factoryId,
-            item_id: item.id,
-            item_code: item.code,
-            item_name: item.name,
-            unit: item.unit,
-            specification: item.specification || null,
-            quantity: parseFloat(mat.so_luong) || 0,
-            lot_no: null,
-            expiry_date: null,
-            location_code: sourceWarehouse.code,
-            line_notes: mat.ten_vat_tu || item.name,
-            image_urls: [],
-          }))
-          const { error: lineErr } = await supabase.from("inventory_document_lines").insert(issueLines)
-          if (lineErr) { setSaveError(`Lỗi thêm dòng phiếu xuất: ${lineErr.message}`); return }
-
-          const { error: postErr } = await supabase.rpc("inventory_post_export_document", {
-            p_factory_id: factoryId,
-            p_document_id: currentIssueDocId,
-            p_posted_by: session.user.id,
-          })
-          if (postErr) { setSaveError(`Lỗi ghi sổ phiếu xuất: ${postErr.message}`); return }
-
-          issueDocIdsCreated.push(currentIssueDocId)
-          if (!issueDocId) issueDocId = currentIssueDocId
-        }
-      }
-
-      const { error: appErr } = await supabase
-        .from("maintenance_records")
-        .update({
-          trang_thai: "da_duyet",
-          nguoi_duyet: approverName,
-          ngay_duyet: new Date().toISOString(),
-          inventory_issue_doc_id: issueDocId,
-          inventory_issue_doc_ids: issueDocIdsCreated.length > 0 ? issueDocIdsCreated : null,
-        })
-        .eq("id", id)
-        .eq("factory_id", factoryId)
-
-      if (appErr) { setSaveError(appErr.message); return }
-      setSaveSuccess(`Đã phê duyệt biên bản ${record?.ma_bb || ""}. Người duyệt: ${approverName || "—"}.`)
-      void loadRecord(factoryId, id)
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Lỗi không xác định")
     } finally {
@@ -1624,11 +1335,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <Loader2 size={12} className="animate-spin" /> Đang tải ảnh lên — vui lòng đợi trước khi lưu...
             </span>
           )}
-          {!isNew && record && (
+          {(!isNew || savedRecordId) && record && (
             <>
-              {record.trang_thai === "da_duyet" ? (
-                <>
-                  {record.hang_muc === "Sửa chữa" && (() => {
+              {record.hang_muc === "Sửa chữa" && (() => {
                     const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
                     // Đội xe + sửa chữa nhỏ (≤200$) vẫn giữ bộ tài liệu riêng F08+F15SmallVehicle+F06
                     if (record.bo_phan === "Đội xe" && loaiSuaChua === "nho") {
@@ -1640,17 +1349,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               target="_blank"
                               rel="noreferrer"
                               title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                              className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                             >
-                              <Eye size={12} /> Xem file đã ký
+                              <Eye size={16} />
                             </a>
                           ) : (
                             <Link
                               href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
                               target="_blank"
-                              className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                              title="Sửa chữa nhỏ (chưa ký)"
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                             >
-                              <Printer size={12} /> Sửa chữa nhỏ
+                              <FileText size={16} />
                             </Link>
                           )}
                           {user && (
@@ -1680,17 +1390,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             target="_blank"
                             rel="noreferrer"
                             title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                            className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                           >
-                            <Eye size={12} /> Xem file đã ký
+                            <Eye size={16} />
                           </a>
                         ) : (
                           <Link
                             href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
                             target="_blank"
-                            className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                            title="In biên bản (chưa ký)"
+                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                           >
-                            <Printer size={12} /> In biên bản
+                            <FileText size={16} />
                           </Link>
                         )}
                         {user && (
@@ -1714,17 +1425,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           target="_blank"
                           rel="noreferrer"
                           title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                         >
-                          <Eye size={12} /> Xem file đã ký
+                          <Eye size={16} />
                         </a>
                       ) : (
                         <Link
                           href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
                           target="_blank"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          title="In biên bản (chưa ký)"
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                         >
-                          <Printer size={12} /> In biên bản
+                          <FileText size={16} />
                         </Link>
                       )}
                       {user && (
@@ -1747,17 +1459,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           target="_blank"
                           rel="noreferrer"
                           title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                         >
-                          <Eye size={12} /> Xem file đã ký
+                          <Eye size={16} />
                         </a>
                       ) : (
                         <Link
                           href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${id}`}
                           target="_blank"
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                          title="In biên bản (chưa ký)"
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
                         >
-                          <Printer size={12} /> In biên bản
+                          <FileText size={16} />
                         </Link>
                       )}
                       {user && (
@@ -1773,45 +1486,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     </>
                   )}
                 </>
-              ) : (
-                <>
-                  {record.hang_muc === "Sửa chữa" && record.bo_phan === "Đội xe" && lines[0]?.loai_sua_chua === "nho" ? (
-                    <span
-                      title="Chỉ in được sau khi biên bản được phê duyệt"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                    >
-                      <Printer size={12} /> Sửa chữa nhỏ
-                    </span>
-                  ) : (
-                    <span
-                      title="Chỉ in được sau khi biên bản được phê duyệt"
-                      className="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-300 text-xs font-bold rounded-lg cursor-not-allowed select-none"
-                    >
-                      <Printer size={12} /> In biên bản
-                    </span>
-                  )}
-                </>
               )}
-            </>
-          )}
-          {/* GỬI PHÊ DUYỆT — creator khi cho_duyet (thông báo Telegram + Email cho GĐ/BGĐ) */}
-          {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
-            <button
-              onClick={handleNotify}
-              disabled={notifying || isUploadingAnyImage}
-              className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
-            >
-              <Send size={12} /> {notifying ? "Đang gửi..." : "Gửi phê duyệt"}
-            </button>
-          )}
-          {/* GỬI DUYỆT LẠI — creator khi tu_choi, quay về cho_duyet */}
+          {/* Gửi ký duyệt — inline cùng hàng với "In biên bản"/nút ký, khớp Chất lượng/Điều xe.
+              Thay thế hoàn toàn nút "Phê duyệt" thủ công cũ (đã bỏ, xem MaintenanceSignStatusBadge
+              — nút "Gửi ký duyệt" tự hiện ngay khi biên bản vừa lưu xong, không cần trang_thai
+              === "da_duyet" nữa; trang_thai giờ do signField() tự chuyển khi ký hoàn tất). */}
+          {/* GỬI DUYỆT LẠI — creator khi tu_choi (dữ liệu lịch sử từ trước khi bỏ nút "Từ chối"), quay về cho_duyet */}
           {!isNew && record?.trang_thai === "tu_choi" && isCreator && (
             <button
               onClick={handleResubmit}
               disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-all disabled:opacity-50"
+              title={saving ? "Đang gửi..." : "Gửi duyệt lại"}
+              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-50"
             >
-              <Send size={12} /> {saving ? "Đang gửi..." : "Gửi duyệt lại"}
+              <Send size={16} />
             </button>
           )}
           {/* HỦY BIÊN BẢN — creator khi cho_duyet; admin được hủy cả biên bản đã duyệt */}
@@ -1819,18 +1507,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleCancel}
               disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50"
+              title="Hủy biên bản"
+              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
             >
-              <X size={12} /> Hủy biên bản
+              <X size={16} />
             </button>
           )}
           {!isNew && record?.trang_thai === "da_duyet" && isAdmin && (
             <button
               onClick={handleCancel}
               disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50"
+              title="Hủy biên bản"
+              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
             >
-              <X size={12} /> Hủy biên bản
+              <X size={16} />
             </button>
           )}
           {/* XÓA BIÊN BẢN — creator khi cho_duyet; admin xóa được mọi trạng thái */}
@@ -1838,39 +1528,23 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               onClick={handleDeleteRecord}
               disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
+              title="Xóa biên bản"
+              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
             >
-              <Trash2 size={12} /> Xóa biên bản
+              <Trash2 size={16} />
             </button>
           )}
-          {/* PHÊ DUYỆT — chỉ GĐ/BGĐ khi cho_duyet */}
-          {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
+          {/* HỦY SAU KHI HOÀN TẤT — admin-only, khi da_duyet (đã ký xong + đã xuất kho tự động).
+              Thay thế "Hủy phê duyệt" cũ — đảo ngược xuất kho + đưa biên bản về chờ ký + đánh
+              dấu yêu cầu ký cũ là 'huy' (giữ làm lịch sử) để tạo yêu cầu ký mới được. */}
+          {!isNew && record?.trang_thai === "da_duyet" && isAdmin && (
             <button
-              onClick={handleApprove}
+              onClick={handleReverseApproval}
               disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
+              title={saving ? "Đang xử lý..." : "Hủy sau khi hoàn tất"}
+              className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50"
             >
-              <CheckCircle2 size={13} /> {saving ? "Đang xử lý..." : "Phê duyệt"}
-            </button>
-          )}
-          {/* TỪ CHỐI — chỉ GĐ/BGĐ khi cho_duyet, mở modal nhập lý do */}
-          {!isNew && record?.trang_thai === "cho_duyet" && isGdOrBgd && (
-            <button
-              onClick={() => setShowRejectModal(true)}
-              disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg border border-rose-200 transition-all disabled:opacity-50"
-            >
-              <X size={12} /> Từ chối
-            </button>
-          )}
-          {/* HỦY PHÊ DUYỆT — chỉ GĐ/BGĐ khi da_duyet, trả về cho_duyet */}
-          {!isNew && record?.trang_thai === "da_duyet" && isGdOrBgd && (
-            <button
-              onClick={handleUnApprove}
-              disabled={saving || isUploadingAnyImage}
-              className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg border border-amber-200 transition-all disabled:opacity-50"
-            >
-              <RotateCcw size={12} /> {saving ? "Đang xử lý..." : "Hủy phê duyệt"}
+              <RotateCcw size={16} />
             </button>
           )}
           {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới */}
@@ -2985,31 +2659,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
             </div>
-        </ModalShell>
-      )}
-
-      {showRejectModal && (
-        <ModalShell
-          title="Từ chối phê duyệt"
-          onClose={() => setShowRejectModal(false)}
-          maxWidth="md"
-          footer={
-            <div className="flex justify-end gap-2 w-full">
-              <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={handleReject} disabled={saving} className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
-                {saving ? "Đang xử lý..." : "Xác nhận từ chối"}
-              </button>
-            </div>
-          }
-        >
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do từ chối *</label>
-          <textarea
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            rows={4}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-rose-500 resize-none"
-            placeholder="Nhập lý do từ chối phê duyệt..."
-          />
         </ModalShell>
       )}
 

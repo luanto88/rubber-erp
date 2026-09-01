@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { jwtVerify } from "jose"
-import { signField } from "@/lib/signing/requests"
+import { signField, type SigningPlacementOverride } from "@/lib/signing/requests"
 
 export const dynamic = "force-dynamic"
 
@@ -13,7 +13,11 @@ const JWT_SECRET = new TextEncoder().encode(
 
 export async function POST(req: NextRequest) {
   try {
-    const { token, yeuCauId } = (await req.json()) as { token: string; yeuCauId: string }
+    const { token, yeuCauId, placementOverrides } = (await req.json()) as {
+      token: string
+      yeuCauId: string
+      placementOverrides?: SigningPlacementOverride[]
+    }
     if (!token || !yeuCauId) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
@@ -34,7 +38,7 @@ export async function POST(req: NextRequest) {
     const thietBi = req.headers.get("user-agent") || ""
     const appOrigin = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin
 
-    const result = await signField({ yeuCauId, userId: payload.userId, ip, thietBi, appOrigin })
+    const result = await signField({ yeuCauId, userId: payload.userId, ip, thietBi, appOrigin, placementOverrides })
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })

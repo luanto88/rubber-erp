@@ -439,7 +439,7 @@ export type SignatureRoleBoxMm = { x: number; y: number; w: number; h: number }
 export type SignatureRoleBoxes = { roleId: string; page: number; chuKyBox: SignatureRoleBoxMm; tenBox: SignatureRoleBoxMm }
 
 function drawSignatureRowCapture(
-  doc: jsPDF, y: number, cols: { role: string; name?: string | null; roleId?: string }[],
+  doc: jsPDF, y: number, cols: { role: string; name?: string | null; roleId?: string; note?: string }[],
 ): { y: number; boxes: SignatureRoleBoxes[] } {
   y = ensureSpace(doc, y, 34)
   y += 6
@@ -466,6 +466,24 @@ function drawSignatureRowCapture(
     const cx = MARGIN + colW * i + colW / 2
     doc.text("(Ký và ghi rõ họ tên)", cx, nameY + 4, { align: "center" })
   })
+  // Ghi chú nhỏ "ký thay" (vd Nhân viên phụ trách ký thay Tài xế) — chỉ vài cột có, đặt ngay
+  // dưới dòng "(Ký và ghi rõ họ tên)". Có ít nhất 1 cột có note thì tăng thêm chiều cao trả về
+  // để khối nội dung tiếp theo không đè lên dòng ghi chú này.
+  const hasNote = cols.some((c) => c.note)
+  if (hasNote) {
+    // Không dùng style "italic" — font đăng ký qua ensurePdfFont() chỉ có normal/bold, xin style
+    // khác sẽ bị jsPDF âm thầm fallback sang font khác không đủ glyph tiếng Việt, làm chữ có dấu
+    // bị mangled (vd "phụ" ra "phả"). Dùng chữ thường + màu xám để phân biệt, giống các dòng phụ
+    // khác trong file này (vd "(Ký và ghi rõ họ tên)").
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(6.5)
+    cols.forEach((c, i) => {
+      if (!c.note) return
+      const cx = MARGIN + colW * i + colW / 2
+      doc.text(c.note, cx, nameY + 10, { align: "center", maxWidth: colW - 4 })
+    })
+    doc.setFontSize(7)
+  }
   doc.setTextColor(...INK)
 
   const boxes: SignatureRoleBoxes[] = cols
@@ -482,7 +500,7 @@ function drawSignatureRowCapture(
     })
     .filter((b): b is SignatureRoleBoxes => b !== null)
 
-  return { y: nameY + 8, boxes }
+  return { y: nameY + (hasNote ? 14 : 8), boxes }
 }
 
 function drawSignatureRow(doc: jsPDF, y: number, cols: { role: string; name?: string | null }[]): number {
@@ -607,7 +625,17 @@ function drawMaterialsTable(doc: jsPDF, startY: number, materials: MaterialRow[]
 
 type RemoteImage = { dataUrl: string; format: "PNG" | "JPEG" | "WEBP"; width: number; height: number }
 
-async function fetchRemoteImage(url: string): Promise<RemoteImage | null> {
+// Chỉ áp dụng khi forSigning=true (PDF dùng để ký số, nhúng thẳng vào file
+// signing-documents giới hạn 20MB) — bản "In biên bản" thường giữ nguyên ảnh gốc đầy đủ
+// chi tiết, không đụng tới. Ảnh hiện trường tải thẳng từ điện thoại (chưa từng qua bước
+// nén nào) là nguồn chính gây phình file — đo thật xác nhận 1 hồ sơ chưa ai ký đã sẵn
+// >20MB, trong khi ảnh chữ ký chỉ 47-99KB (không đáng kể). Nén bằng <canvas> trình duyệt
+// (fetchRemoteImage chạy client-side, dùng chung logic build PDF của "In biên bản") —
+// không cần thư viện ảnh server-side nào.
+const SIGNING_IMAGE_MAX_DIM = 1200
+const SIGNING_IMAGE_JPEG_QUALITY = 0.72
+
+async function fetchRemoteImage(url: string, forSigning = false): Promise<RemoteImage | null> {
   try {
     const res = await fetch(url)
     if (!res.ok) return null
@@ -623,13 +651,34 @@ async function fetchRemoteImage(url: string): Promise<RemoteImage | null> {
       reader.onerror = () => reject(reader.error)
       reader.readAsDataURL(blob)
     })
-    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve({ width: img.naturalWidth || 1, height: img.naturalHeight || 1 })
-      img.onerror = () => reject(new Error("Không đọc được kích thước ảnh."))
-      img.src = dataUrl
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error("Không đọc được kích thước ảnh."))
+      el.src = dataUrl
     })
-    return { dataUrl, format, width, height }
+    const naturalW = img.naturalWidth || 1
+    const naturalH = img.naturalHeight || 1
+
+    if (forSigning && Math.max(naturalW, naturalH) > SIGNING_IMAGE_MAX_DIM) {
+      const scale = SIGNING_IMAGE_MAX_DIM / Math.max(naturalW, naturalH)
+      const targetW = Math.max(1, Math.round(naturalW * scale))
+      const targetH = Math.max(1, Math.round(naturalH * scale))
+      const canvas = document.createElement("canvas")
+      canvas.width = targetW
+      canvas.height = targetH
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, targetW, targetH)
+        return {
+          dataUrl: canvas.toDataURL("image/jpeg", SIGNING_IMAGE_JPEG_QUALITY),
+          format: "JPEG",
+          width: targetW,
+          height: targetH,
+        }
+      }
+    }
+    return { dataUrl, format, width: naturalW, height: naturalH }
   } catch {
     return null
   }
@@ -652,9 +701,9 @@ function drawImageContain(doc: jsPDF, img: RemoteImage, boxX: number, boxY: numb
   doc.addImage(img.dataUrl, img.format, dx, dy, drawW, drawH)
 }
 
-async function collectAndFetchImages(urls: string[]): Promise<Map<string, RemoteImage | null>> {
+async function collectAndFetchImages(urls: string[], forSigning = false): Promise<Map<string, RemoteImage | null>> {
   const unique = Array.from(new Set(urls.filter(Boolean)))
-  const entries = await Promise.all(unique.map(async (u) => [u, await fetchRemoteImage(u)] as const))
+  const entries = await Promise.all(unique.map(async (u) => [u, await fetchRemoteImage(u, forSigning)] as const))
   return new Map(entries)
 }
 
@@ -700,11 +749,11 @@ async function drawPhotoSection(
   return y + 6
 }
 
-async function drawPhotoPage(doc: jsPDF, record: RecordData): Promise<void> {
+async function drawPhotoPage(doc: jsPDF, record: RecordData, forSigning = false): Promise<void> {
   const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
   if (linesWithImages.length === 0) return
   const allUrls = linesWithImages.flatMap((l) => (l.image_urls || []).filter(Boolean))
-  const photoMap = await collectAndFetchImages(allUrls)
+  const photoMap = await collectAndFetchImages(allUrls, forSigning)
   let y = drawCompanyHeader(doc, MARGIN, record.bo_phan)
   y = drawCenteredTitleBlock(doc, y + 2, MARGIN, CONTENT_W, {
     title: "Hình ảnh biên bản",
@@ -718,12 +767,12 @@ async function drawPhotoPage(doc: jsPDF, record: RecordData): Promise<void> {
   }
 }
 
-async function drawPhotoPageWithCommon(doc: jsPDF, record: RecordData): Promise<void> {
+async function drawPhotoPageWithCommon(doc: jsPDF, record: RecordData, forSigning = false): Promise<void> {
   const commonImgs = (record.image_urls_chung || []).filter(Boolean)
   const linesWithImages = record.lines.filter((l) => (l.image_urls || []).some(Boolean))
   if (commonImgs.length === 0 && linesWithImages.length === 0) return
   const allUrls = [...commonImgs, ...linesWithImages.flatMap((l) => (l.image_urls || []).filter(Boolean))]
-  const photoMap = await collectAndFetchImages(allUrls)
+  const photoMap = await collectAndFetchImages(allUrls, forSigning)
   let y = drawCompanyHeader(doc, MARGIN, record.bo_phan)
   y = drawCenteredTitleBlock(doc, y + 2, MARGIN, CONTENT_W, {
     title: "Hình ảnh bảo dưỡng",
@@ -1015,7 +1064,7 @@ async function drawF13(
   const sig = drawSignatureRowCapture(doc, y, [
     { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
     { role: "Nhân viên kỹ thuật", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
-    { role: isBoDoiRole, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien" },
+    { role: isBoDoiRole, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
     { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
   y = sig.y
@@ -1176,7 +1225,7 @@ async function buildMaintenanceSuCoNhoDoc(
   const f15Boxes = await drawF15(doc, record, qrUrl, staffMap, forSigning)
   if (hasLineImages(record)) {
     doc.addPage()
-    await drawPhotoPage(doc, record)
+    await drawPhotoPage(doc, record, forSigning)
   }
   return { doc, boxes: [...f13Boxes, ...f10Boxes, ...f15Boxes] }
 }
@@ -1264,7 +1313,7 @@ async function drawF03(doc: jsPDF, record: RecordData, qrUrl: string, forSigning
     { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
     { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
     { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
-    { role: toRoleLabel, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien" },
+    { role: toRoleLabel, name: forSigning ? undefined : record.nv_phu_trach, roleId: "to_co_dien", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
   ])
   drawDocumentFooter(doc, sig.y, "KHXD-QT02-F03")
   return sig.boxes
@@ -1337,7 +1386,7 @@ async function drawF15BaoDuong(
       ? [
           { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
           { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
-          { role: "Tài xế", name: forSigning ? undefined : firstTaiXe, roleId: "tai_xe" },
+          { role: "Tài xế", name: forSigning ? undefined : firstTaiXe, roleId: "tai_xe", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
           { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
         ]
       : [
@@ -1439,7 +1488,7 @@ async function drawF06(doc: jsPDF, record: RecordData, qrUrl: string, forSigning
   const sig = drawSignatureRowCapture(doc, y, [
     { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
     { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
-    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
     { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
   drawDocumentFooter(doc, sig.y, "KHXD-QT02-F06")
@@ -1463,7 +1512,7 @@ async function buildMaintenanceBaoDuongDoc(
   const f15Boxes = await drawF15BaoDuong(doc, record, qrUrl, staffMap, forSigning)
   if (hasAnyImages(record)) {
     doc.addPage()
-    await drawPhotoPageWithCommon(doc, record)
+    await drawPhotoPageWithCommon(doc, record, forSigning)
   }
   return { doc, boxes: [...f03Boxes, ...f15Boxes] }
 }
@@ -1496,7 +1545,7 @@ async function buildMaintenanceBaoDuongXeDoc(
   const f06Boxes = await drawF06(doc, record, qrUrl, forSigning)
   if (hasAnyImages(record)) {
     doc.addPage()
-    await drawPhotoPageWithCommon(doc, record)
+    await drawPhotoPageWithCommon(doc, record, forSigning)
   }
   return { doc, boxes: [...f03Boxes, ...f15Boxes, ...f06Boxes] }
 }
@@ -1556,7 +1605,7 @@ async function drawF08NB(doc: jsPDF, record: RecordData, qrUrl: string, forSigni
   const sig = drawSignatureRowCapture(doc, y, [
     { role: "Giám đốc NM", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
     { role: "Nhân viên phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
-    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
   ])
   drawDocumentFooter(doc, sig.y, "KHXD-QT02-F08")
   return sig.boxes
@@ -1629,7 +1678,7 @@ async function drawF15SmallVehicle(
   const sig = drawSignatureRowCapture(doc, y, [
     { role: "BGĐ phụ trách", name: forSigning ? undefined : record.bgd_phu_trach, roleId: "bgd_phu_trach" },
     { role: "NV phụ trách", name: forSigning ? undefined : record.nv_phu_trach, roleId: "nv_phu_trach" },
-    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe" },
+    { role: "Tài xế", name: forSigning ? undefined : (record.lines[0]?.ten_tai_xe || null), roleId: "tai_xe", note: forSigning ? "(NV phụ trách ký thay)" : undefined },
     { role: "Giám đốc nhà máy", name: forSigning ? undefined : record.giam_doc, roleId: "giam_doc" },
   ])
   drawDocumentFooter(doc, sig.y, "KHXD-QT02-F15")
@@ -1650,7 +1699,7 @@ async function buildMaintenanceSuaChuaNhoXeDoc(
   const f06Boxes = await drawF06(doc, record, qrUrl, forSigning)
   if (hasLineImages(record)) {
     doc.addPage()
-    await drawPhotoPage(doc, record)
+    await drawPhotoPage(doc, record, forSigning)
   }
   return { doc, boxes: [...f08Boxes, ...f15Boxes, ...f06Boxes] }
 }

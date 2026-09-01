@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Calendar, ChevronDown, Filter, Plus, Printer, Search, Wrench, X } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Calendar, ChevronDown, Eye, FileText, Filter, Loader2, Plus, Printer, Search, Wrench, X } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { getFirstDayOfMonthISO, getTodayISODate } from "@/lib/date-utils"
 import { MaintenanceShell } from "../_components/maintenance-shell"
-import { BO_PHAN_LIST, HANG_MUC_LIST, trangThaiLabel } from "../_components/maintenance-data"
+import { BO_PHAN_LIST, HANG_MUC_LIST } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./_components/maintenance-sign-status"
+import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
 type RecordRow = {
   id: string
@@ -23,7 +26,23 @@ type RecordRow = {
   trang_thai: string
   nguoi_tao: string | null
   created_at: string
-  maintenance_record_lines: { ma_tb: string | null }[]
+  maintenance_record_lines: { ma_tb: string | null; loai_sua_chua: string | null }[]
+}
+
+// Suy ra bundle ký số (nếu có) từ hạng mục/bộ phận/loại sửa chữa — mirror đúng logic
+// suCoNhoEligible/suaChuaNhoXeEligible/baoDuongEligible/baoDuongXeEligible ở trang chi tiết
+// ([id]/page.tsx dòng ~513-518). Trả null nếu biên bản không thuộc bundle ký số nào (vd hạng
+// mục khác Sửa chữa/Bảo dưỡng, hoặc dữ liệu chưa đủ).
+function resolveSignBundle(r: RecordRow): MaintenanceSignBundle | null {
+  if (r.hang_muc === "Sửa chữa") {
+    const loaiSuaChua = r.maintenance_record_lines[0]?.loai_sua_chua || "lon"
+    const isXeNho = r.bo_phan === "Đội xe" && loaiSuaChua === "nho"
+    return isXeNho ? "sua_chua_nho_xe" : "su_co_nho"
+  }
+  if (r.hang_muc === "Bảo dưỡng") {
+    return r.bo_phan === "Đội xe" ? "bao_duong_xe" : "bao_duong"
+  }
+  return null
 }
 
 type AssetOption = { id: string; ma_tb: string; ten_tb: string; bo_phan: string; loai: string }
@@ -31,10 +50,20 @@ type DispatchVehicleOption = { id: string; code: string; name: string; vehicle_t
 type PickerItem = { id: string; kind: "asset" | "vehicle"; primary: string; secondary: string; sub: string }
 
 export default function MaintenanceRecordsPage() {
+  const router = useRouter()
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [records, setRecords] = useState<RecordRow[]>([])
+  const [signingStatusByRecord, setSigningStatusByRecord] = useState<Map<string, MaintenanceSigningStatus>>(new Map())
+  const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3500)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const [filterHangMuc, setFilterHangMuc] = useState<string[]>([])
   const [filterBoPhan, setFilterBoPhan] = useState<string[]>([])
@@ -146,7 +175,7 @@ export default function MaintenanceRecordsPage() {
 
       let q = supabase
         .from("maintenance_records")
-        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_at, maintenance_record_lines(ma_tb)")
+        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_at, maintenance_record_lines(ma_tb, loai_sua_chua)")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
         .order("created_at", { ascending: false })
@@ -164,6 +193,40 @@ export default function MaintenanceRecordsPage() {
       setLoading(false)
     }
   }, [filterHangMuc, filterBoPhan, filterTrangThai, filterFrom, filterTo, selectedAssetIds, selectedVehicleIds])
+
+  // Bulk-load trạng thái ký cho toàn bộ danh sách đang hiển thị — 1 lần gọi API cho cả trang,
+  // mirror đúng cách Điều xe làm ở `dispatch/page.tsx` (`loadSigningStatus`/`/api/dispatch/
+  // signing-status?...&entryIds=...`). Chỉ gửi id của các biên bản CÓ bundle ký số (loại trừ
+  // hạng mục khác Sửa chữa/Bảo dưỡng — không có luồng ký).
+  const loadSigningStatuses = useCallback(async (fid: string, recs: RecordRow[]) => {
+    const ids = recs.filter((r) => resolveSignBundle(r)).map((r) => r.id)
+    if (ids.length === 0) {
+      setSigningStatusByRecord(new Map())
+      setSigningStatusLoaded(true)
+      return
+    }
+    setSigningStatusLoaded(false)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) { setSigningStatusLoaded(true); return }
+      const res = await fetch(`/api/maintenance/signing-status?factoryId=${fid}&recordIds=${ids.join(",")}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const json = (await res.json()) as MaintenanceSigningStatus[] | { error?: string }
+      const map = new Map<string, MaintenanceSigningStatus>()
+      if (Array.isArray(json)) for (const s of json) map.set(s.recordId, s)
+      setSigningStatusByRecord(map)
+    } catch {
+      // Badge chỉ là thông tin phụ — lỗi tải không được chặn danh sách biên bản.
+    } finally {
+      setSigningStatusLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (factoryId) void loadSigningStatuses(factoryId, records)
+  }, [factoryId, records, loadSigningStatuses])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -199,13 +262,6 @@ export default function MaintenanceRecordsPage() {
     return (r.ma_bb || "").toLowerCase().includes(q) || r.bo_phan.toLowerCase().includes(q)
   })
 
-  const statusBadge = (s: string) => {
-    if (s === "da_duyet") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">{trangThaiLabel(s)}</span>
-    if (s === "huy") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-600">{trangThaiLabel(s)}</span>
-    if (s === "tu_choi") return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">{trangThaiLabel(s)}</span>
-    return <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">{trangThaiLabel(s)}</span>
-  }
-
   const hangMucBadge = (h: string) =>
     h === "Sửa chữa"
       ? <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600">{h}</span>
@@ -224,6 +280,15 @@ export default function MaintenanceRecordsPage() {
 
   return (
     <MaintenanceShell>
+      {toast && (
+        <div
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl shadow-2xl text-sm font-bold text-white ${
+            toast.ok ? "bg-emerald-600" : "bg-red-600"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-2">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Biên bản bảo trì</h1>
@@ -448,7 +513,7 @@ export default function MaintenanceRecordsPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Mã biên bản", "Hạng mục", "Mã thiết bị", "Bộ phận", "Ngày", "Người tạo", "Trạng thái", ""].map((h) => (
+                {["Mã biên bản", "Hạng mục", "Mã thiết bị", "Bộ phận", "Ngày", "Người tạo", "Ký duyệt", ""].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -473,7 +538,48 @@ export default function MaintenanceRecordsPage() {
                   <td className="px-4 py-3 text-slate-600">{r.bo_phan}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{r.nguoi_tao || "—"}</td>
-                  <td className="px-4 py-3">{statusBadge(r.trang_thai)}</td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const bundle = resolveSignBundle(r)
+                      if (!bundle) return <span className="text-xs text-slate-300">—</span>
+                      if (!signingStatusLoaded) return <Loader2 size={14} className="animate-spin text-slate-300" />
+                      const status = signingStatusByRecord.get(r.id)
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          {status?.fileHienTai ? (
+                            <a
+                              href={status.fileHienTai}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={status.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                            >
+                              <Eye size={15} />
+                            </a>
+                          ) : canPrint ? (
+                            <Link
+                              href={`/dashboard/maintenance/print?type=${bundle}&record_id=${r.id}`}
+                              target="_blank"
+                              title="In biên bản (chưa ký)"
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                            >
+                              <FileText size={15} />
+                            </Link>
+                          ) : null}
+                          {user && (
+                            <MaintenanceSignStatusBadge
+                              status={status}
+                              currentUser={user}
+                              canCreate={canCreate}
+                              onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
+                              onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
+                              showToast={(msg, ok = true) => setToast({ msg, ok })}
+                            />
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/maintenance/records/${r.id}`} className="text-xs font-bold text-blue-600 hover:underline">Chi tiết</Link>
                   </td>

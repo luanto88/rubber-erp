@@ -8,7 +8,8 @@ import { getSignatureImage } from "./signature-image"
 import { computeIntegrityHash } from "./hash"
 import { drawSignatureImage, drawTextFit, loadSignerNameFont } from "./stamp-pdf"
 import { getTodayISODate, formatDateDisplay } from "@/lib/date-utils"
-import { hasPadesRootCa, applyPadesSignature } from "./pades"
+import { hasPadesRootCa, applyPadesSignatureToDoc } from "./pades"
+import { issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
 
 // Lớp điều phối "tạo yêu cầu ký" + "ký 1 người" dùng chung cho MỌI module (6 module
 // theo cung_cap_dl/du_an_ky_so_dung_chung - new.docx). Đọc/ghi 6 bảng lõi
@@ -169,6 +170,10 @@ export type SignFieldResult = {
   trangThaiYeuCau: string
   fileHienTai: string
   alreadySigned: boolean
+  // Chỉ có giá trị khi modun='maintenance' và allDone=true nhưng bước tự động xuất kho (thay
+  // thế nút "Phê duyệt" thủ công cũ) gặp lỗi — chữ ký vẫn được ghi nhận bình thường (sự thật
+  // đã ký không thể đổi lại), chỉ báo cho người ký/admin biết cần vào Bảo trì xử lý tay.
+  maintenanceIssueError?: string | null
 }
 
 /**
@@ -176,12 +181,21 @@ export type SignFieldResult = {
  * đúng mục 6.3 của docx: nếu `nguoi_ky.trang_thai` đã là 'da_ky' (bấm 2 lần / rớt
  * mạng bấm lại), KHÔNG stamp lại — trả về trạng thái hiện tại luôn.
  */
+export type SigningPlacementOverride = { truongKyId: string; xPt: number; yPt: number; wPt: number; hPt: number }
+
 export async function signField(params: {
   yeuCauId: string
   userId: string
   ip: string
   thietBi: string
   appOrigin: string
+  // Điều chỉnh vị trí/kích thước (Giai đoạn preview & kéo-chỉnh trên SignScreen) — người ký tự
+  // kéo/resize khung chữ ký (và khung tên đi kèm) NGAY TRÊN nền vị trí mặc định đã tính sẵn
+  // trong code (không thay cơ chế tính mặc định). Chỉ áp dụng cho field thuộc CHÍNH người đang
+  // ký (`fields` bên dưới đã filter theo `nguoi_ky_id = nguoiKy.id`) — override cho field của
+  // người khác đơn giản không khớp bất kỳ `f.id` nào trong vòng lặp nên bị bỏ qua an toàn,
+  // không cần validate quyền sở hữu riêng.
+  placementOverrides?: SigningPlacementOverride[]
 }): Promise<SignFieldResult> {
   const supabase = getSupabaseAdmin()
 
@@ -244,6 +258,16 @@ export async function signField(params: {
   // lại toàn bộ file, xoá mất đoạn incremental-update mà applyPadesSignature() đã nối
   // thêm ở lượt ký trước. Đổi hẳn sang @cantoo/pdf-lib cho bước vẽ con dấu này để đồng bộ
   // 1 loại thư viện xuyên suốt — mỗi lượt ký giờ chỉ NỐI THÊM bytes, không đụng byte cũ.
+  //
+  // QUAN TRỌNG (bug 2026-09-01, đã fix): `pdfDoc` này PHẢI được giữ SỐNG xuyên suốt cả bước
+  // vẽ con dấu (dưới đây) LẪN bước đặt placeholder PAdES (`applyPadesSignatureToDoc`) — dùng
+  // `pdfDoc.commit()` 2 lần trên CÙNG instance thay vì `.save()` rồi để `pades.ts` tự
+  // `PDFDocument.load()` lại từ bytes. Đã đo bằng thực nghiệm: reload 1 file ĐÃ TỪNG qua
+  // incremental-update trước đó khiến `@cantoo/pdf-lib` NHÂN ĐÔI dung lượng mỗi lần reload
+  // (không phải cộng thêm tuyến tính) — với 2 lượt reload/người ký (con dấu + PAdES) như cách
+  // làm cũ, 1 hồ sơ Bảo trì 0.6MB phình lên 18.21MB chỉ sau 2 người ký, và có thể vượt xa
+  // giới hạn 20MB của bucket ngay ở người ký thứ 3. Gọi `commit()` lặp lại trên 1 instance sống
+  // (đúng cách thư viện tự tài liệu hoá để dùng) cho tăng trưởng tuyến tính bình thường.
   const pdfDoc = await PDFDocument.load(currentBytes, { forIncrementalUpdate: true })
   pdfDoc.registerFontkit(fontkit)
   const sigBytes = await getSignatureImage(yeuCau.factory_id as string, params.userId)
@@ -261,14 +285,29 @@ export async function signField(params: {
   // cho ISO/Văn bản (chưa đổi thư viện) — @cantoo là fork API tương thích, ép kiểu tại
   // đúng điểm gọi này, KHÔNG đổi type khai báo của stamp-pdf.ts để tránh ảnh hưởng 3 route
   // khác đang chạy thật (generate-pdf/generate-office/documents/sign).
+  // KHÔNG dùng { subset: true } — đã thử (nhằm giảm dung lượng font TimesNewRoman.ttf 1.18MB
+  // nhúng lại mỗi lượt ký) nhưng phát hiện bug tương thích thật giữa @cantoo/pdf-lib@2.9.1 và
+  // @pdf-lib/fontkit@1.1.1: CustomFontSubsetEmbedder.serializeFont() gọi subset.encode() KHÔNG
+  // truyền stream, trong khi fontkit's TTFSubset.prototype.encode bắt buộc nhận stream — gây
+  // "Cannot read properties of undefined (reading 'pos')" ngay tại embedFont()+save(), 100% mọi
+  // lượt ký ở cả 6 module dùng chung signField() (đã tái hiện + verify bằng script Node độc lập
+  // trước khi rollback). Nguồn phình file 20MB CHÍNH đã fix riêng ở maintenance-pdf.ts (nén ảnh
+  // hiện trường khi forSigning=true, không liên quan gì tới dòng này) — rollback về mặc định
+  // (nhúng toàn bộ font, không subset) là đủ an toàn, đổi lại đúng hành vi đã chạy ổn định
+  // trước đó.
   const font = fontBytes ? ((await pdfDoc.embedFont(fontBytes)) as unknown as PdfLibFont) : null
   const todayLabel = formatDateDisplay(getTodayISODate())
+
+  const overridesByFieldId = new Map((params.placementOverrides || []).map((o) => [o.truongKyId, o]))
 
   for (const f of fields as Array<Record<string, unknown>>) {
     const pageIndex = (f.trang as number) - 1
     if (pageIndex < 0 || pageIndex >= pdfDoc.getPageCount()) continue
     const page = pdfDoc.getPage(pageIndex)
-    const box = { x: Number(f.x_pt), y: Number(f.y_pt), width: Number(f.w_pt), height: Number(f.h_pt) }
+    const override = overridesByFieldId.get(f.id as string)
+    const box = override
+      ? { x: override.xPt, y: override.yPt, width: override.wPt, height: override.hPt }
+      : { x: Number(f.x_pt), y: Number(f.y_pt), width: Number(f.w_pt), height: Number(f.h_pt) }
     if (f.loai === "chu_ky") {
       if (sigBytes) {
         await drawSignatureImage(
@@ -281,7 +320,7 @@ export async function signField(params: {
       // Link annotation phủ đúng ô con dấu — bấm vào (Acrobat/Chrome/bất kỳ trình xem PDF nào
       // hỗ trợ link annotation) mở trang xác thực trạng thái chữ ký PAdES. Vẽ trong CÙNG lượt
       // incremental-update này (không tạo thêm lượt .save() riêng), mirror đúng kỹ thuật
-      // append-annotation-vào-Annots mà addSignaturePlaceholder() trong pades.ts đã dùng.
+      // append-annotation-vào-Annots mà addSignaturePlaceholderToDoc() trong pades.ts đã dùng.
       try {
         const rect = PDFArray.withContext(pdfDoc.context)
         ;[box.x, box.y, box.x + box.width, box.y + box.height].forEach((c) => rect.push(PDFNumber.of(c)))
@@ -316,11 +355,11 @@ export async function signField(params: {
     }
   }
 
-  // `forIncrementalUpdate: true` lúc load → `.save()` chỉ trả về ĐOẠN BYTES MỚI cần nối
-  // thêm (không phải toàn bộ file) — bắt buộc tự nối vào `currentBytes`, mirror đúng cách
-  // `addSignaturePlaceholder()` trong `pades.ts` đang làm.
-  const increment = await pdfDoc.save()
-  let newBytes: Buffer = Buffer.concat([currentBytes, Buffer.from(increment)])
+  // `pdfDoc.commit()` (không phải `.save()`) — trả thẳng TOÀN BỘ bytes hiện tại (gốc + mọi
+  // increment đã commit), đồng thời cập nhật lại snapshot nội bộ của `pdfDoc` để có thể gọi
+  // `commit()` tiếp lần nữa (bước PAdES bên dưới) mà KHÔNG cần reload từ bytes — xem lý do bắt
+  // buộc ở comment tại chỗ load `pdfDoc` phía trên (bug 2026-09-01).
+  let newBytes: Buffer = Buffer.from(await pdfDoc.commit())
 
   // Lớp ký số mật mã thật (PAdES) — CỘNG THÊM lên trên con dấu ảnh vừa vẽ, không thay thế.
   // Best-effort: nếu chưa cấu hình root CA (`hasPadesRootCa()` false) hoặc bước nhúng chữ ký
@@ -337,7 +376,10 @@ export async function signField(params: {
         .select("id", { count: "exact", head: true })
         .eq("yeu_cau_id", params.yeuCauId)
         .not("pades_sig_index", "is", null)
-      newBytes = await applyPadesSignature(newBytes, signerName, signerContact)
+      // Dùng CÙNG `pdfDoc` sống (không reload từ `newBytes`) — xem comment bug 2026-09-01 ở
+      // chỗ load `pdfDoc` phía trên. `applyPadesSignatureToDoc` tự gọi `pdfDoc.commit()` lần
+      // nữa nội bộ và trả về bytes đầy đủ mới nhất.
+      newBytes = await applyPadesSignatureToDoc(pdfDoc, signerName, signerContact)
       padesSigIndex = priorPadesCount ?? 0
     } catch (err) {
       padesError = err instanceof Error ? err.message : String(err)
@@ -360,7 +402,15 @@ export async function signField(params: {
   const { error: upErr } = await supabase.storage
     .from(SIGNING_BUCKET)
     .upload(newPath, newBytes, { contentType: "application/pdf", upsert: true })
-  if (upErr) throw new Error(`Không tải được file đã ký: ${upErr.message}`)
+  if (upErr) {
+    if (upErr.message.includes("exceeded the maximum allowed size")) {
+      const mb = (newBytes.length / 1024 / 1024).toFixed(1)
+      throw new Error(
+        `File sau khi ký đã đạt ${mb}MB, vượt giới hạn 20MB của hệ thống ký số — thường do ảnh hiện trường (nếu là biên bản Bảo trì) chưa được nén. Vui lòng liên hệ quản trị viên để xử lý ảnh trong biên bản này rồi thử ký lại.`,
+      )
+    }
+    throw new Error(`Không tải được file đã ký: ${upErr.message}`)
+  }
 
   const { data: newUrlData } = supabase.storage.from(SIGNING_BUCKET).getPublicUrl(newPath)
   const newUrl = newUrlData.publicUrl
@@ -411,6 +461,45 @@ export async function signField(params: {
   }
   await supabase.from("yeu_cau_ky").update(yeuCauUpdate).eq("id", params.yeuCauId)
 
+  // Side-effect riêng của module Bảo trì: khi hồ sơ ký hoàn tất (người ký cuối luôn là
+  // vai_tro='phe_duyet', chính là params.userId/signerName ở đây), tự động xuất kho vật tư
+  // "trong_kho" — thay thế hoàn toàn nút "Phê duyệt" thủ công cũ (xem
+  // src/lib/maintenance-stock-issuance.ts, tách nguyên vẹn từ handleApprove() cũ). Lỗi ở bước
+  // này KHÔNG được chặn việc xác nhận đã ký xong — chữ ký là sự thật không thể đổi lại — chỉ
+  // ghi lại lỗi để trả về cho client cảnh báo admin xử lý tay.
+  let maintenanceIssueError: string | null = null
+  if (allDone && yeuCau.modun === "maintenance" && yeuCau.ban_ghi_id) {
+    try {
+      const { data: recordRow } = await supabase
+        .from("maintenance_records")
+        .select("ma_bb, ngay")
+        .eq("id", yeuCau.ban_ghi_id)
+        .single()
+      const { issueDocIds } = await issueMaintenanceStock({
+        recordId: yeuCau.ban_ghi_id as string,
+        factoryId: yeuCau.factory_id as string,
+        approverUserId: params.userId,
+        approverName: signerName,
+        maBb: (recordRow?.ma_bb as string) || (yeuCau.ma_ho_so as string) || "",
+        ngay: (recordRow?.ngay as string) || todayLabel,
+      })
+      const { error: recordUpdateErr } = await supabase
+        .from("maintenance_records")
+        .update({
+          trang_thai: "da_duyet",
+          nguoi_duyet: signerName,
+          ngay_duyet: signedAt,
+          inventory_issue_doc_id: issueDocIds[0] || null,
+          inventory_issue_doc_ids: issueDocIds.length > 0 ? issueDocIds : null,
+        })
+        .eq("id", yeuCau.ban_ghi_id)
+      if (recordUpdateErr) maintenanceIssueError = recordUpdateErr.message
+    } catch (err) {
+      maintenanceIssueError = err instanceof Error ? err.message : String(err)
+      console.error("[signing/maintenance] Lỗi tự động xuất kho khi ký hoàn tất:", maintenanceIssueError)
+    }
+  }
+
   await supabase.from("nhat_ky_ky").insert({
     factory_id: yeuCau.factory_id,
     yeu_cau_id: params.yeuCauId,
@@ -419,10 +508,20 @@ export async function signField(params: {
     ip: params.ip,
     thiet_bi: params.thietBi,
     hash_sau_thao_tac: newHash,
-    chi_tiet: { nguoi_ky_id: nguoiKy.id, vai_tro: nguoiKy.vai_tro, so_truong: fields.length },
+    chi_tiet: {
+      nguoi_ky_id: nguoiKy.id,
+      vai_tro: nguoiKy.vai_tro,
+      so_truong: fields.length,
+      ...(maintenanceIssueError ? { maintenance_issue_error: maintenanceIssueError } : {}),
+    },
   })
 
-  return { trangThaiYeuCau: allDone ? "hoan_tat" : (yeuCau.trang_thai as string), fileHienTai: newUrl, alreadySigned: false }
+  return {
+    trangThaiYeuCau: allDone ? "hoan_tat" : (yeuCau.trang_thai as string),
+    fileHienTai: newUrl,
+    alreadySigned: false,
+    maintenanceIssueError,
+  }
 }
 
 /**
@@ -452,6 +551,16 @@ export async function cancelSigningRequest(params: {
   }
   if (!params.isAdmin && yeuCau.nguoi_tao !== params.userId) {
     throw new Error("Bạn không có quyền hủy yêu cầu ký này")
+  }
+
+  const { count: signedCount, error: signedErr } = await supabase
+    .from("nguoi_ky")
+    .select("id", { count: "exact", head: true })
+    .eq("yeu_cau_id", params.yeuCauId)
+    .eq("trang_thai", "da_ky")
+  if (signedErr) throw new Error(`Không kiểm tra được tiến độ ký: ${signedErr.message}`)
+  if ((signedCount ?? 0) > 0) {
+    throw new Error("Đã có người ký — không thể hủy yêu cầu. Dùng \"Trả về\" nếu cần sửa lại.")
   }
 
   const { error: updateErr } = await supabase
@@ -563,4 +672,138 @@ export async function returnSigningRequest(params: {
   })
 
   return { resetUserIds: predecessors.map((p) => p.user_id) }
+}
+
+/**
+ * "Mở lại để ký lại": dành cho hồ sơ ĐÃ `hoan_tat` nhưng dữ liệu nguồn đã bị sửa SAU khi ký
+ * (`dataChanged=true` — xem `/api/quality/signing-status` v.v.) — trước đây đây là NGÕ CỤT
+ * thật trong thiết kế: không tạo được `yeu_cau_ky` mới (bị `uniq_yeu_cau_ky_active_business_key`
+ * chặn trùng `(factory_id, modun, loai_tai_lieu, ma_ho_so)` khi bản cũ còn `hoan_tat`), cũng
+ * không `cancelSigningRequest()` được (chỉ hủy khi `dang_luan_chuyen`). Hàm này KHÔNG xóa/sửa
+ * `file_hien_tai`/`file_goc`/`nguoi_ky`/`truong_ky` của hồ sơ cũ — giữ nguyên vẹn làm bằng
+ * chứng lịch sử bất biến (đúng tinh thần "1 lần đã ký không xóa được") — chỉ đổi `trang_thai`
+ * ra khỏi `('dang_luan_chuyen','hoan_tat')` để unique index tự cho phép tạo `yeu_cau_ky` MỚI
+ * cho cùng khóa nghiệp vụ ở lần "Gửi ký duyệt" tiếp theo. ADMIN-ONLY — `isAdmin` phải được xác
+ * thực thật ở route gọi (đọc `profiles.role`), không tin tham số client tự khai.
+ */
+export async function reopenSigningRequest(params: {
+  yeuCauId: string
+  userId: string
+  ip?: string
+  thietBi?: string
+}): Promise<{ trangThai: string }> {
+  const supabase = getSupabaseAdmin()
+
+  const { data: yeuCau, error: ycErr } = await supabase
+    .from("yeu_cau_ky")
+    .select("*")
+    .eq("id", params.yeuCauId)
+    .single()
+  if (ycErr || !yeuCau) throw new Error("Không tìm thấy yêu cầu ký")
+
+  if (yeuCau.trang_thai !== "hoan_tat") {
+    throw new Error(
+      "Chỉ mở lại được yêu cầu ký ĐÃ hoàn tất — yêu cầu đang luân chuyển thì dùng \"Hủy yêu cầu\".",
+    )
+  }
+
+  const { error: updateErr } = await supabase
+    .from("yeu_cau_ky")
+    .update({ trang_thai: "huy" })
+    .eq("id", params.yeuCauId)
+  if (updateErr) throw new Error(`Không mở lại được yêu cầu ký: ${updateErr.message}`)
+
+  await supabase.from("nhat_ky_ky").insert({
+    factory_id: yeuCau.factory_id,
+    yeu_cau_id: params.yeuCauId,
+    hanh_dong: "mo_lai",
+    user_id: params.userId,
+    ip: params.ip,
+    thiet_bi: params.thietBi,
+    hash_sau_thao_tac: yeuCau.hash_hien_tai,
+    chi_tiet: {
+      trang_thai_truoc: "hoan_tat",
+      ly_do: "Dữ liệu nguồn đã thay đổi sau khi ký, mở lại để cho phép tạo yêu cầu ký mới",
+    },
+  })
+
+  return { trangThai: "huy" }
+}
+
+/**
+ * Tự động "đóng" (nếu có) yêu cầu ký ĐANG HOẠT ĐỘNG cho đúng 1 khóa nghiệp vụ
+ * `(factory_id, modun, loai_tai_lieu, ma_ho_so)` — dùng làm bước dọn dẹp tự động ngay khi dữ
+ * liệu nguồn bị XÓA (vd admin xóa hết phiếu kiểm nghiệm của 1 ngày để nhập lại), để lần "Gửi ký
+ * duyệt" tiếp theo cho cùng khóa đó tạo được `yeu_cau_ky` MỚI ngay, không kẹt ở "ngõ cụt"
+ * (xem `reopenSigningRequest()`).
+ *
+ * QUAN TRỌNG — khác `reopenSigningRequest()`/`cancelSigningRequest()`: hàm này KHÔNG nhận
+ * `yeuCauId` từ client — tự TRUY VẤN LẠI TRỰC TIẾP từ DB theo khóa nghiệp vụ ngay tại thời điểm
+ * gọi. Lý do: nếu dựa vào `yeuCauId`/trạng thái đã cache sẵn ở client (vd state React tải từ
+ * lần fetch signing-status trước đó), có nguy cơ race condition — nếu người dùng xóa dữ liệu
+ * TRƯỚC KHI lần fetch signing-status đầu tiên của trang kịp hoàn tất, state client vẫn là rỗng/
+ * cũ, hàm sẽ tưởng "không có gì để đóng" và bỏ qua trong im lặng dù thực ra vẫn còn 1 yêu cầu ký
+ * đang hoạt động (bug đã báo 2026-09-01, tiếp: gọi qua `yeuCauId` lấy từ state client cũ hoàn
+ * toàn không đóng được yêu cầu, không có lỗi rõ ràng để chẩn đoán). Truy vấn lại tại chỗ loại bỏ
+ * hẳn lớp phụ thuộc vào state client này.
+ *
+ * Không throw nếu không tìm thấy gì để đóng — đây là hành vi BÌNH THƯỜNG (ngày/hồ sơ đó chưa
+ * từng được ký). Chỉ throw nếu tìm thấy nhưng người gọi không đủ quyền đóng (mirror đúng rule
+ * quyền của `cancelSigningRequest`/`reopenSigningRequest`).
+ */
+export async function closeActiveSigningRequestForKey(params: {
+  factoryId: string
+  modun: string
+  loaiTaiLieu: string
+  maHoSo: string
+  userId: string
+  isAdmin: boolean
+  ip?: string
+  thietBi?: string
+}): Promise<{ closed: boolean; trangThaiTruoc?: string }> {
+  const supabase = getSupabaseAdmin()
+
+  const { data: yeuCau, error: ycErr } = await supabase
+    .from("yeu_cau_ky")
+    .select("*")
+    .eq("factory_id", params.factoryId)
+    .eq("modun", params.modun)
+    .eq("loai_tai_lieu", params.loaiTaiLieu)
+    .eq("ma_ho_so", params.maHoSo)
+    .in("trang_thai", ["dang_luan_chuyen", "hoan_tat"])
+    .order("tao_luc", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (ycErr) throw new Error(ycErr.message)
+  if (!yeuCau) return { closed: false }
+
+  const trangThaiTruoc = yeuCau.trang_thai as string
+  if (trangThaiTruoc === "hoan_tat" && !params.isAdmin) {
+    throw new Error("Chỉ admin mới được đóng yêu cầu ký đã hoàn tất để tạo lại từ đầu")
+  }
+  if (trangThaiTruoc === "dang_luan_chuyen" && !params.isAdmin && yeuCau.nguoi_tao !== params.userId) {
+    throw new Error("Bạn không có quyền đóng yêu cầu ký này")
+  }
+
+  const { error: updateErr } = await supabase
+    .from("yeu_cau_ky")
+    .update({ trang_thai: "huy" })
+    .eq("id", yeuCau.id)
+  if (updateErr) throw new Error(`Không đóng được yêu cầu ký cũ: ${updateErr.message}`)
+
+  await supabase.from("nhat_ky_ky").insert({
+    factory_id: params.factoryId,
+    yeu_cau_id: yeuCau.id,
+    hanh_dong: "dong_tu_dong_do_du_lieu_xoa",
+    user_id: params.userId,
+    ip: params.ip,
+    thiet_bi: params.thietBi,
+    hash_sau_thao_tac: yeuCau.hash_hien_tai,
+    chi_tiet: {
+      trang_thai_truoc: trangThaiTruoc,
+      ly_do: "Dữ liệu nguồn đã bị xóa — tự động đóng để cho phép tạo yêu cầu ký mới khi nhập lại",
+    },
+  })
+
+  return { closed: true, trangThaiTruoc }
 }

@@ -78,6 +78,22 @@ function roleLabelOf(vaiTro: NguoiKy["vai_tro"]): string {
   return "Ký"
 }
 
+// Nhãn vai trò ĐẦY ĐỦ (bao gồm "(ký thay bởi...)" nếu có — bake sẵn trong truong_ky.nhan lúc
+// tạo yêu cầu ký, xem buildXxxSigningRoles() trong src/lib/maintenance-pdf.ts) cho 1 người ký —
+// LẤY TẤT CẢ nhãn khác nhau trong số các khung 'chu_ky' của họ, không chỉ khung đầu tiên. Cần
+// thiết vì 1 người có thể gộp ký thay NHIỀU vai trò cùng lúc (vd Nhân viên phụ trách vừa ký vai
+// trò chính vừa ký thay "Tổ trưởng cơ điện") — chỉ lấy field đầu tiên sẽ làm mất label của vai
+// trò ký thay thứ 2 (bug đã báo 2026-09-01: text ký thay chỉ có ở modal tạo yêu cầu ký, không
+// hiện ở SignScreen — nơi người ký thật sự nhìn thấy).
+function distinctRoleLabelsOf(fields: TruongKy[], nguoiKyId: string, fallback: string): string[] {
+  const labels = fields
+    .filter((f) => f.nguoi_ky_id === nguoiKyId && f.loai === "chu_ky")
+    .map((f) => f.nhan?.trim())
+    .filter((v): v is string => !!v)
+  const unique = Array.from(new Set(labels))
+  return unique.length ? unique : [fallback]
+}
+
 function fmtDateTime(iso: string | null): string {
   if (!iso) return ""
   const d = new Date(iso)
@@ -109,6 +125,16 @@ export default function SignScreenPage() {
   const pageWrapRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
   const [previewPage, setPreviewPage] = useState(-1)
+
+  // Giai đoạn "xem trước & điều chỉnh chữ ký ngay trên trang" — vị trí MẶC ĐỊNH của khung
+  // chu_ky vẫn tính sẵn trong code sinh PDF (không đổi), state này chỉ giữ phần NGƯỜI KÝ tự
+  // kéo/resize thêm trên nền đó trước khi xác nhận ký. Key = truong_ky.id (chỉ khung
+  // loai='chu_ky'), value = box tuyệt đối theo % trang. Rỗng nếu người ký không chỉnh gì.
+  type PctBox = { leftPct: number; topPct: number; widthPct: number; heightPct: number }
+  const [adjust, setAdjust] = useState<Record<string, PctBox>>({})
+  const dragStateRef = useRef<{ id: string; startX: number; startY: number; startLeft: number; startTop: number; rectW: number; rectH: number } | null>(null)
+  const resizeStateRef = useRef<{ id: string; startX: number; startY: number; startW: number; startH: number; left: number; top: number; rectW: number; rectH: number } | null>(null)
+
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
@@ -218,7 +244,9 @@ export default function SignScreenPage() {
     [nguoiKyList],
   )
   const iAlreadySigned = myNguoiKy?.trang_thai === "da_ky"
-  const roleLabelForMe = myFields[0]?.nhan || (myNguoiKy ? roleLabelOf(myNguoiKy.vai_tro) : "")
+  const roleLabelForMe = myNguoiKy
+    ? distinctRoleLabelsOf(truongKyList, myNguoiKy.id, roleLabelOf(myNguoiKy.vai_tro)).join(", ")
+    : ""
   // Chỉ tới lượt tôi khi TẤT CẢ người có thu_tu nhỏ hơn đã ký xong — mirror đúng chặn cứng
   // phía server trong signField() (src/lib/signing/requests.ts). Không có gate này, sau khi
   // mình vừa "Trả về" (predecessor bị reset về 'cho'), UI vẫn hiện nút "Ký xác nhận" cho
@@ -317,6 +345,73 @@ export default function SignScreenPage() {
     }
   }
 
+  // Bản số (không phải chuỗi "%") của cùng công thức pxBoxFor — dùng làm điểm khởi đầu cho
+  // kéo/resize và làm mốc so sánh "đã chỉnh hay chưa" (dxPct/dyPct = 0 nghĩa là chưa đụng).
+  const numBoxFromDefault = (f: TruongKy, dim: { w: number; h: number }): PctBox => ({
+    leftPct: (f.x_pt / dim.w) * 100,
+    topPct: ((dim.h - f.y_pt - f.h_pt) / dim.h) * 100,
+    widthPct: (f.w_pt / dim.w) * 100,
+    heightPct: (f.h_pt / dim.h) * 100,
+  })
+
+  // Chiều ngược lại — quy đổi 1 box % (đã điều chỉnh) về point theo đúng gốc toạ độ pdf-lib
+  // (dưới-trái), khớp công thức trong pxBoxFor nhưng đảo chiều.
+  const boxNumToPt = (box: PctBox, dim: { w: number; h: number }) => {
+    const w_pt = (box.widthPct / 100) * dim.w
+    const h_pt = (box.heightPct / 100) * dim.h
+    const x_pt = (box.leftPct / 100) * dim.w
+    const y_pt = dim.h - (box.topPct / 100) * dim.h - h_pt
+    return { x_pt, y_pt, w_pt, h_pt }
+  }
+
+  const MIN_SIG_SIZE_PCT = 3
+
+  const handleSigDragStart = (e: React.PointerEvent<HTMLDivElement>, f: TruongKy, box: PctBox) => {
+    if (iAlreadySigned) return
+    const wrap = pageWrapRefs.current[f.trang]
+    if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+    dragStateRef.current = {
+      id: f.id, startX: e.clientX, startY: e.clientY,
+      startLeft: box.leftPct, startTop: box.topPct, rectW: rect.width, rectH: rect.height,
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const handleSigDragMove = (e: React.PointerEvent<HTMLDivElement>, f: TruongKy, box: PctBox) => {
+    const st = dragStateRef.current
+    if (!st || st.id !== f.id) return
+    const dxPct = ((e.clientX - st.startX) / st.rectW) * 100
+    const dyPct = ((e.clientY - st.startY) / st.rectH) * 100
+    const leftPct = Math.min(Math.max(st.startLeft + dxPct, 0), 100 - box.widthPct)
+    const topPct = Math.min(Math.max(st.startTop + dyPct, 0), 100 - box.heightPct)
+    setAdjust((prev) => ({ ...prev, [f.id]: { leftPct, topPct, widthPct: box.widthPct, heightPct: box.heightPct } }))
+  }
+  const handleSigDragEnd = () => { dragStateRef.current = null }
+
+  const handleSigResizeStart = (e: React.PointerEvent<HTMLDivElement>, f: TruongKy, box: PctBox) => {
+    if (iAlreadySigned) return
+    e.stopPropagation()
+    const wrap = pageWrapRefs.current[f.trang]
+    if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+    resizeStateRef.current = {
+      id: f.id, startX: e.clientX, startY: e.clientY,
+      startW: box.widthPct, startH: box.heightPct, left: box.leftPct, top: box.topPct,
+      rectW: rect.width, rectH: rect.height,
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const handleSigResizeMove = (e: React.PointerEvent<HTMLDivElement>, f: TruongKy) => {
+    const st = resizeStateRef.current
+    if (!st || st.id !== f.id) return
+    const dwPct = ((e.clientX - st.startX) / st.rectW) * 100
+    const dhPct = ((e.clientY - st.startY) / st.rectH) * 100
+    const widthPct = Math.min(Math.max(st.startW + dwPct, MIN_SIG_SIZE_PCT), 100 - st.left)
+    const heightPct = Math.min(Math.max(st.startH + dhPct, MIN_SIG_SIZE_PCT), 100 - st.top)
+    setAdjust((prev) => ({ ...prev, [f.id]: { leftPct: st.left, topPct: st.top, widthPct, heightPct } }))
+  }
+  const handleSigResizeEnd = () => { resizeStateRef.current = null }
+
   const scrollToPage = (p: number) => {
     pageWrapRefs.current[p]?.scrollIntoView({ behavior: "smooth", block: "center" })
   }
@@ -366,19 +461,63 @@ export default function SignScreenPage() {
         return
       }
 
+      // Gửi kèm vị trí đã kéo/resize (nếu có) — chỉ cho khung chu_ky người dùng thực sự đụng
+      // tới, cộng khung "ten" đi kèm (cùng nguoi_ky_id + cùng trang) dịch cùng độ lệch để tên
+      // vẫn nằm ngay dưới chữ ký như layout mẫu in gốc. Không gửi gì nếu không chỉnh gì cả —
+      // signField() sẽ dùng nguyên toạ độ mặc định trong DB như trước.
+      const placementOverrides: Array<{ truongKyId: string; xPt: number; yPt: number; wPt: number; hPt: number }> = []
+      for (const [fieldId, box] of Object.entries(adjust)) {
+        const f = myFields.find((x) => x.id === fieldId)
+        const dim = f ? pageDims[f.trang] : undefined
+        if (!f || !dim) continue
+        const pt = boxNumToPt(box, dim)
+        placementOverrides.push({ truongKyId: f.id, xPt: pt.x_pt, yPt: pt.y_pt, wPt: pt.w_pt, hPt: pt.h_pt })
+
+        const defaultBox = numBoxFromDefault(f, dim)
+        const dxPct = box.leftPct - defaultBox.leftPct
+        const dyPct = box.topPct - defaultBox.topPct
+        if (dxPct === 0 && dyPct === 0) continue
+        const tenField = myFields.find((x) => x.loai === "ten" && x.nguoi_ky_id === f.nguoi_ky_id && x.trang === f.trang)
+        const tenDim = tenField ? pageDims[tenField.trang] : undefined
+        if (!tenField || !tenDim) continue
+        const tenDefaultBox = numBoxFromDefault(tenField, tenDim)
+        const tenBox: PctBox = {
+          leftPct: tenDefaultBox.leftPct + dxPct,
+          topPct: tenDefaultBox.topPct + dyPct,
+          widthPct: tenDefaultBox.widthPct,
+          heightPct: tenDefaultBox.heightPct,
+        }
+        const tenPt = boxNumToPt(tenBox, tenDim)
+        placementOverrides.push({ truongKyId: tenField.id, xPt: tenPt.x_pt, yPt: tenPt.y_pt, wPt: tenPt.w_pt, hPt: tenPt.h_pt })
+      }
+
       const signRes = await fetch("/api/signing/sign-field", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: verifyJson.token, yeuCauId: yeuCau.id }),
+        body: JSON.stringify({
+          token: verifyJson.token,
+          yeuCauId: yeuCau.id,
+          ...(placementOverrides.length ? { placementOverrides } : {}),
+        }),
       })
-      const signJson = (await signRes.json()) as { error?: string; trangThaiYeuCau?: string }
+      const signJson = (await signRes.json()) as {
+        error?: string
+        trangThaiYeuCau?: string
+        maintenanceIssueError?: string | null
+      }
       if (!signRes.ok) {
         setPinError(signJson.error || "Ký thất bại, vui lòng thử lại")
         return
       }
 
       setConfirmOpen(false)
-      showToast("Đã ký thành công.")
+      // Chữ ký đã ghi nhận thành công dù bước tự động xuất kho (Bảo trì) có lỗi hay không —
+      // chỉ cảnh báo thêm, không phải lỗi ký.
+      showToast(
+        signJson.maintenanceIssueError
+          ? `Đã ký thành công, nhưng tự động xuất kho vật tư lỗi: ${signJson.maintenanceIssueError} — cần admin xử lý tay trong Bảo trì.`
+          : "Đã ký thành công.",
+      )
       await loadData(me.id)
     } catch {
       setPinError("Không thể kết nối máy chủ, vui lòng thử lại")
@@ -553,40 +692,90 @@ export default function SignScreenPage() {
                   )
                 })}
                 {myFields.filter((f) => f.trang === p).map((f) => {
-                  const box = pxBoxFor(f)
-                  if (!box) return null
+                  const dim = pageDims[f.trang]
+                  if (!dim) return null
+
+                  // ten/ngay_ky/qr — giữ nguyên hành vi cũ: không hiển thị nội dung gì (chỉ giữ
+                  // vùng toạ độ để không lệch layout), không tương tác. Vị trí cuối của "ten" đi
+                  // kèm 1 chữ ký đã kéo/resize được tính lại ở handleConfirmSign, không cần hiện
+                  // ở đây.
+                  if (f.loai !== "chu_ky") {
+                    const box = pxBoxFor(f)
+                    if (!box) return null
+                    return (
+                      <div
+                        key={f.id}
+                        className="absolute"
+                        style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                      />
+                    )
+                  }
+
                   const isActivePreview = previewPage === p
+
                   // Sau khi đã ký, ảnh trang đã được tải lại từ file MỚI (đã có chữ ký thật
-                  // stamp sẵn) — không được vẽ khối nền đặc màu đè lên, chỉ viền mảnh + 1
-                  // badge nhỏ góc trên-phải để không che chữ ký thật (bug đã báo 2026-09-08:
-                  // trước đây "✓ Đã ký" phủ kín cả khung, người ký không thấy chữ ký thật).
+                  // stamp sẵn) — không được vẽ khối nền đặc màu đè lên, chỉ viền mảnh + 1 badge
+                  // nhỏ góc trên-phải để không che chữ ký thật (bug đã báo 2026-09-08).
+                  if (iAlreadySigned) {
+                    const box = pxBoxFor(f)
+                    if (!box) return null
+                    return (
+                      <div
+                        key={f.id}
+                        title={f.nhan || f.loai}
+                        className="absolute rounded-md border-[1.5px] border-emerald-400"
+                        style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                      >
+                        <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-bold text-white shadow">
+                          ✓
+                        </span>
+                      </div>
+                    )
+                  }
+
+                  // Chưa ký: hiện NGAY chữ ký thật của người đang xem tại đúng khung, cho phép
+                  // kéo/resize trước khi xác nhận (thay vì chỉ thấy kết quả sau khi đã ký).
+                  const box = adjust[f.id] ?? numBoxFromDefault(f, dim)
+                  const sigUrl = me && yeuCau
+                    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/iso-documents/signatures/${yeuCau.factory_id}/${me.id}/chu_ky.png`
+                    : ""
                   return (
                     <div
                       key={f.id}
                       title={f.nhan || f.loai}
-                      className={`absolute cursor-pointer rounded-md transition-shadow ${
-                        f.loai !== "chu_ky"
-                          ? ""
-                          : iAlreadySigned
-                            ? "border-[1.5px] border-emerald-400"
-                            : isActivePreview
-                              ? "overflow-hidden border-[1.5px] border-emerald-600 bg-emerald-100/80 shadow-[0_0_0_3px_rgba(16,185,129,0.3)]"
-                              : "overflow-hidden border-[1.5px] border-dashed border-sky-400 bg-sky-50/80"
+                      className={`absolute touch-none select-none rounded-md border-[1.5px] transition-shadow ${
+                        isActivePreview
+                          ? "cursor-move border-emerald-600 bg-emerald-50/70 shadow-[0_0_0_3px_rgba(16,185,129,0.3)]"
+                          : "cursor-move border-dashed border-sky-400 bg-sky-50/70"
                       }`}
-                      style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                      style={{ left: `${box.leftPct}%`, top: `${box.topPct}%`, width: `${box.widthPct}%`, height: `${box.heightPct}%` }}
+                      onPointerDown={(e) => handleSigDragStart(e, f, box)}
+                      onPointerMove={(e) => handleSigDragMove(e, f, box)}
+                      onPointerUp={handleSigDragEnd}
+                      onPointerCancel={handleSigDragEnd}
                       onClick={() => { setPreviewPage(p); scrollToPage(p) }}
                     >
-                      {f.loai === "chu_ky" && (
-                        iAlreadySigned ? (
-                          <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-bold text-white shadow">
-                            ✓
-                          </span>
-                        ) : (
-                          <span className="block truncate px-1 text-center text-[9px] font-bold leading-tight text-sky-700">
-                            {f.nhan || f.loai}
-                          </span>
-                        )
+                      {sigUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={sigUrl}
+                          alt="Chữ ký"
+                          className="pointer-events-none h-full w-full object-contain"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+                        />
+                      ) : (
+                        <span className="block truncate px-1 text-center text-[9px] font-bold leading-tight text-sky-700">
+                          {f.nhan || f.loai}
+                        </span>
                       )}
+                      <div
+                        title="Kéo để đổi kích thước"
+                        className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-sm border border-white bg-emerald-600 shadow"
+                        onPointerDown={(e) => handleSigResizeStart(e, f, box)}
+                        onPointerMove={(e) => handleSigResizeMove(e, f)}
+                        onPointerUp={handleSigResizeEnd}
+                        onPointerCancel={handleSigResizeEnd}
+                      />
                     </div>
                   )
                 })}
@@ -600,7 +789,7 @@ export default function SignScreenPage() {
 
         {/* Side panel desktop */}
         <div className="hidden w-64 shrink-0 overflow-y-auto border-l border-slate-200 bg-white p-4 pb-32 lg:block">
-          <FlowList nguoiKyList={nguoiKyList} profiles={profiles} me={me} />
+          <FlowList nguoiKyList={nguoiKyList} truongKyList={truongKyList} profiles={profiles} me={me} />
         </div>
 
         {/* Action bar */}
@@ -673,7 +862,7 @@ export default function SignScreenPage() {
               Đóng
             </button>
           </div>
-          <FlowList nguoiKyList={nguoiKyList} profiles={profiles} me={me} />
+          <FlowList nguoiKyList={nguoiKyList} truongKyList={truongKyList} profiles={profiles} me={me} />
         </div>
       )}
 
@@ -690,19 +879,9 @@ export default function SignScreenPage() {
             </button>
           </div>
           <p className="mb-4 text-xs text-slate-500">
-            Chữ ký lấy từ hồ sơ của bạn — chỉ cần nhập PIN để xác nhận, không vẽ tay.
+            Chữ ký lấy từ hồ sơ của bạn — đã xem trực tiếp trên trang, chỉ cần nhập PIN để xác
+            nhận, không vẽ tay.
           </p>
-          <div className="mb-3.5 flex h-[74px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-3">
-            {me && yeuCau && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/iso-documents/signatures/${yeuCau.factory_id}/${me.id}/chu_ky.png`}
-                alt="Chữ ký"
-                className="max-h-full max-w-full object-contain"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
-              />
-            )}
-          </div>
           <div className="mb-4 grid grid-cols-2 gap-2.5">
             <ReadonlyField label="Họ tên" value={me?.full_name || me?.username || ""} />
             <ReadonlyField label="Vai trò" value={roleLabelForMe} />
@@ -815,10 +994,12 @@ function ReadonlyField({ label, value, full }: { label: string; value: string; f
 
 function FlowList({
   nguoiKyList,
+  truongKyList,
   profiles,
   me,
 }: {
   nguoiKyList: NguoiKy[]
+  truongKyList: TruongKy[]
   profiles: Record<string, ProfileLite>
   me: SessionUser | null
 }) {
@@ -834,15 +1015,20 @@ function FlowList({
             : isMe
               ? "bg-sky-100 text-sky-600"
               : "bg-slate-100 text-slate-400"
+        // Tất cả vai trò của người này (có thể >1 nếu họ ký thay thêm vai trò khác) — mỗi vai
+        // trò 1 dòng, giữ nguyên đầy đủ "(ký thay bởi...)" nếu có trong nhãn gốc.
+        const roleLabels = distinctRoleLabelsOf(truongKyList, n.id, roleLabelOf(n.vai_tro))
         return (
           <div key={n.id} className="flex gap-2.5 border-b border-dashed border-slate-200 py-2.5 last:border-none">
             <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-extrabold ${dotClass}`}>
               {n.trang_thai === "da_ky" ? "✓" : "·"}
             </div>
             <div>
-              <div className="text-[12.5px] font-bold text-slate-800">
-                {roleLabelOf(n.vai_tro)}
-              </div>
+              {roleLabels.map((label, i) => (
+                <div key={i} className="text-[12.5px] font-bold text-slate-800">
+                  {label}
+                </div>
+              ))}
               <div className="mt-0.5 text-xs text-slate-600">{name}{isMe ? " (bạn)" : ""}</div>
               <div className="mt-0.5 text-[11px] text-slate-400">
                 {n.trang_thai === "da_ky" ? `Đã ký · ${fmtDateTime(n.ky_luc)}` : "Đang chờ"}

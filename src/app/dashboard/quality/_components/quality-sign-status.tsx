@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, Clock, Loader2, PenTool, RotateCcw, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { computeMyTurn, hasAnySigned, type MyTurnSigner } from "@/app/dashboard/_components/signing-my-turn"
 
 export type QualitySigningStatus = {
   date: string
@@ -16,6 +17,7 @@ export type QualitySigningStatus = {
   fileHienTai: string | null
   traVeLyDo: string | null
   dataChanged: boolean
+  signers: MyTurnSigner[]
 }
 
 function CancelConfirmModal({
@@ -138,10 +140,15 @@ export function QualitySignStatusBadge({
   // icon Eye đã có sẵn ngay cạnh trong hàng action của ngày, không lặp lại link ở đây).
   if (status.trangThai === "hoan_tat") {
     if (status.dataChanged) {
+      // Không có nút thao tác riêng ở đây nữa — xóa hết phiếu kiểm nghiệm của ngày này rồi
+      // nhập/upload lại sẽ TỰ ĐỘNG đóng yêu cầu ký cũ (xem autoCloseSigningRequestForDate() ở
+      // quality/page.tsx), "Gửi ký duyệt" tự xuất hiện lại bình thường, không cần thao tác thủ
+      // công nào khác (bug đã báo 2026-09-01, tiếp: nút "Mở lại để ký lại" trước đây bị coi là
+      // thừa bước — người dùng chỉ muốn xóa xong nhập lại là ký lại được ngay).
       return (
         <span
           className="flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-lg"
-          title="Có phiếu kiểm nghiệm đã được thêm/sửa cho ngày này SAU khi đã ký duyệt — file đã ký không còn khớp dữ liệu hiện tại."
+          title="Có phiếu kiểm nghiệm đã được thêm/sửa cho ngày này SAU khi đã ký duyệt — file đã ký không còn khớp dữ liệu hiện tại. Xóa hết phiếu ngày này rồi nhập lại để ký lại từ đầu."
         >
           <AlertTriangle size={11} /> Đã ký — dữ liệu đã đổi
         </span>
@@ -159,7 +166,8 @@ export function QualitySignStatusBadge({
   const isApprover = currentUser.id === status.pheDuyetUserId
   const isCreator = currentUser.id === status.nguoiTao
   const canContinueSign = isAdmin || isApprover
-  const canCancel = isAdmin || isCreator
+  // Đã có người ký thì không cho hủy nữa (chỉ còn "Trả về") — backend cũng chặn cứng riêng.
+  const canCancel = (isAdmin || isCreator) && !hasAnySigned(status.signers)
 
   // 3a. Vừa bị Trưởng phòng QLCL "Trả về" (chưa ai ký lại) — người tạo/admin cần sửa & ký
   // lại trên đúng yêu cầu này (khung của họ đã được reset về chưa ký trong SignScreen).
@@ -208,15 +216,25 @@ export function QualitySignStatusBadge({
     )
   }
 
+  // "Tới lượt tôi" — dùng công thức chung (myTurn = tất cả người thu_tu nhỏ hơn đã ký xong).
+  // Chỉ dùng để TÔ ĐẬM/đổi nhãn, KHÔNG thay cho `canContinueSign` (vẫn quyết định Link vs span
+  // tĩnh — admin có thể bypass ký hộ dù không phải lượt của họ).
+  const myTurn = computeMyTurn(status.signers, currentUser.id)
+
   return (
     <>
       <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         {canContinueSign ? (
           <Link
             href={`/dashboard/ky/${status.yeuCauId}`}
-            className="flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors"
+            className={
+              myTurn
+                ? "flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+                : "flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors"
+            }
           >
-            <Clock size={11} /> Chờ ký duyệt
+            {myTurn ? <Bell size={11} /> : <Clock size={11} />}
+            {myTurn ? "Chờ BẠN ký duyệt" : "Chờ ký duyệt"}
           </Link>
         ) : (
           <span className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-400 text-xs font-bold rounded-lg">
