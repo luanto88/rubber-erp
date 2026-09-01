@@ -4781,3 +4781,129 @@ Làm theo đúng thứ tự mục "Việc cần làm" trong CLAUDE.md:
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.
 ```
+
+## Cập nhật (2026-09-02) — Fix bug nghiêm trọng: Lưu lần 2 sau khi tạo mới tạo biên bản trùng
+lặp; "Gửi ký duyệt" không phản hồi; dirty-tracking cho nút Lưu; fix N+1 query làm chậm luồng ký
+duyệt Bảo trì (đã commit + push `133333f`)
+
+Người dùng báo (từ `/dashboard/maintenance/records/[id]/page.tsx`, ngay sau khi tạo và Lưu biên
+bản lần đầu, CHƯA thoát ra load lại):
+1. Action PDF hoạt động bình thường.
+2. Action "Gửi phê duyệt" bấm vào không phản hồi gì.
+3. Nút "Lưu" vẫn sáng dù không sửa gì — nếu bấm sẽ tạo thêm 1 biên bản y hệt.
+4. Mong muốn: nút Lưu chỉ sáng khi có thay đổi thật; bấm Lưu luôn lưu đè, không tạo bản ghi mới.
+5. Khắc phục các action luồng ký duyệt load hiển thị rất chậm.
+
+### Root cause (đã xác nhận bằng đọc code, không đoán)
+
+`const isNew = id === "new"` lấy TRỰC TIẾP từ URL param (`params.id` của route Next.js
+`[id]`) — nhưng theo đúng thiết kế có chủ đích đã ghi sẵn trong code (comment dòng ~207-213):
+sau lần Lưu đầu tiên, điều hướng sang URL bản ghi thật (`router.push`) bị **delay có chủ đích**
+cho tới khi người dùng đóng banner "Gắn bản ghi vào công việc KPI" (`KpiLinkPrompt`) — lý do:
+đổi `params.id` ngay lập tức sẽ remount route con, làm mất state banner KPI giữa chừng.
+
+Hệ quả: trong "cửa sổ giao thời" này (đã lưu xong, bản ghi thật đã tồn tại trong DB, nhưng URL
+vẫn còn `/new`), `isNew` **vẫn đọc `true`**. Đã có sẵn 1 state `savedRecordId` để đánh dấu "đã
+lưu xong, có ID thật rồi" độc lập với URL, nhưng chỉ được áp dụng ở **2/12 chỗ** cần nó
+(`(!isNew || savedRecordId)` ở điều kiện hiện khối badge ký duyệt, và
+`loadSigningStatus(factoryId, savedRecordId ?? id)`) — **10 chỗ còn lại vẫn dùng `isNew`/`id`
+thô**, trong đó có đúng 2 chỗ gây ra bug người dùng báo:
+
+- **`handleSave()`'s `if (isNew) { ...INSERT... } else { ...UPDATE... }`** — bấm Lưu lần 2 trong
+  cửa sổ giao thời vẫn đi vào nhánh INSERT → tạo hẳn 1 bản ghi `maintenance_records` mới (kèm
+  `ma_bb` mới, dòng thiết bị mới, vật tư mới) — **bug 3 (tạo biên bản trùng lặp)**.
+- **`{signModalOpen && factoryId && !isNew && signBundle && (<MaintenanceSignModal .../>)}`** —
+  đây là điều kiện RENDER MODAL, tách biệt với điều kiện hiện NÚT (đã đúng). Bấm "Gửi ký duyệt"
+  gọi `setSignModalOpen(true)` thành công (nút hiện đúng nhờ `savedRecordId`), nhưng modal không
+  bao giờ mount vì `!isNew` vẫn `false` → **bug 2 (bấm không phản hồi gì, không lỗi, không log,
+  vì về mặt React không có gì xảy ra cả)**.
+
+4 link "In biên bản (chưa ký)" và 5 nút hành động (Gửi duyệt lại/Hủy biên bản/Xóa/Hủy sau khi
+hoàn tất) trong cùng khối UI đó cũng dùng `id`/`isNew` thô — cùng loại lỗi, dù chưa được người
+dùng báo cáo trực tiếp (khả năng do "PDF hoạt động bình thường" là họ test nhánh khác, hoặc chưa
+kịp thử các nút này trong đúng cửa sổ giao thời).
+
+### Đã fix
+
+- Thêm `effectiveIsNew = isNew && !savedRecordId`, `effectiveId = savedRecordId ?? id` — thay
+  toàn bộ `isNew`/`id` có Ý NGHĨA "đã lưu hay chưa"/"ID bản ghi thật" bằng 2 biến này ở **tất cả**
+  12 chỗ liên quan: `isCreator`, `isReadOnly`, `handleSave()` (cả nhánh INSERT/UPDATE lẫn khối
+  hoàn tất), điều kiện render modal ký + prop `recordId`, 4 link in PDF, 5 nút hành động, tiêu đề
+  trang. Giữ nguyên `isNew`/`id` thô ở các chỗ CHỈ mang tính hiển thị/lazy-init không ảnh hưởng
+  logic lưu (2 lazy initializer của `tuGio`/`denGio`, hiệu ứng gợi ý nhân sự mặc định, bootstrap
+  effect gọi `loadRecord` lần đầu — các chỗ này tương đương `isNew`/`effectiveIsNew` tại đúng
+  thời điểm chúng chạy nên không cần đổi).
+
+- **Dirty-tracking cho nút "Lưu"**: snapshot JSON toàn bộ nội dung form (loại bỏ `id`/`expanded`
+  client-only của từng dòng thiết bị và `id` của từng vật tư) chụp lại NGAY SAU khi
+  `loadRecord()` nạp xong hoàn chỉnh (dùng biến đếm `loadVersion` tăng ở cuối `loadRecord()` làm
+  tín hiệu "đã nạp XONG" — không thể đọc state ngay sau khi gọi `loadRecord()` vì hàm này có
+  `await` ở giữa, các `setState` không commit đồng thời). Baseline cũng được chụp cho form trống
+  mặc định khi mới vào `/records/new` (trước khi lưu lần đầu) — nút "Lưu" bắt đầu ở trạng thái
+  tắt cho tới khi người dùng thêm ít nhất 1 thiết bị/sửa gì đó. Nút Lưu: `disabled={saving ||
+  isUploadingAnyImage || !isDirty}`.
+
+- **Fix hiệu năng N+1 query** trong `MaintenanceSignModal`'s `loadRecordForSigning()` (chạy MỖI
+  LẦN bấm "Tạo yêu cầu ký", chặn UI cho tới khi xong): trước đây query `maintenance_materials`
+  **RIÊNG CHO TỪNG DÒNG thiết bị, tuần tự trong vòng lặp `for...await`** — biên bản có N dòng
+  thiết bị = N round-trip mạng nối tiếp cộng dồn độ trễ (đúng nguyên nhân khớp với "luồng ký
+  duyệt load hiển thị rất chậm" — càng nhiều thiết bị càng chậm rõ rệt). Đã gộp: `record`/
+  `rawLines`/`staffData` chạy song song (`Promise.all`), rồi **1 query duy nhất** lấy vật tư của
+  TẤT CẢ dòng cùng lúc (`line_id IN (...)`) và tự gom nhóm ở client — mirror đúng pattern
+  `matsMap` đã dùng ổn định từ trước ở `loadRecord()` của chính trang chi tiết.
+
+- Đã kiểm tra thêm `/api/maintenance/su-co-nho-signers` (route resolve người ký, fetch ngay khi
+  modal mở) — không có N+1 pattern, chỉ 4-5 round-trip nhỏ đã hợp lý (2 trong số đó đã chạy song
+  song qua `Promise.all`), không phải nguồn chậm đáng kể — không sửa.
+
+### Việc CỐ Ý không đụng — cần thêm dữ liệu/kiểm chứng nếu người dùng vẫn thấy chậm sau fix trên
+
+Chưa đào sâu hiệu năng của `/dashboard/ky/[id]` (SignScreen) — trang render PDF qua pdfjs canvas
+theo vòng lặp tuần tự từng trang (`for (let p=1; p<=pdf.numPages; p++)`). Đây là công việc RENDER
+(giải mã/rasterize từng trang), không phải N+1 query mạng — parallelize không chắc an toàn/đúng
+với pdfjs mà không kiểm thử kỹ, nên **chưa động vào**. Nếu sau khi fix N+1 query ở trên mà người
+dùng vẫn thấy "load hiển thị rất chậm" cụ thể ở BƯỚC XEM/KÝ (không phải bước "Tạo yêu cầu ký"),
+cần điều tra riêng phần SignScreen này — đừng giả định đã xong.
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` trên cả 2 file sạch (0 lỗi/warning mới — 5
+warning còn lại ở `records/[id]/page.tsx` đều pre-existing, không liên quan thay đổi này, xác
+nhận qua `git diff` không có dòng `<img>`/import nào trong diff).
+
+### Chưa test tay — bắt buộc trước khi coi xong
+
+1. Tạo 1 biên bản mới, Lưu lần đầu — xác nhận nút "Lưu" tắt ngay sau khi lưu xong (không sáng
+   lại cho tới khi sửa gì đó); bấm "Gửi ký duyệt" (CHƯA đóng banner KPI/CHƯA reload) — xác nhận
+   modal `MaintenanceSignModal` mở ra bình thường, không còn "bấm không phản hồi".
+2. Trong đúng cửa sổ đó, sửa 1 trường bất kỳ (vd nội dung mô tả) — xác nhận nút "Lưu" sáng lại;
+   bấm Lưu — xác nhận CHỈ CẬP NHẬT bản ghi vừa tạo (kiểm tra DB/danh sách biên bản — không có
+   bản ghi trùng lặp mới nào xuất hiện).
+3. Test cả 4 nút hành động khác (Gửi duyệt lại/Hủy biên bản/Xóa/Hủy sau khi hoàn tất) và 4 link
+   "In biên bản" trong đúng cửa sổ giao thời này (biên bản vừa lưu, chưa đóng banner KPI) — xác
+   nhận đều trỏ đúng bản ghi thật, không còn `record_id=new`.
+4. Đóng banner KPI (điều hướng thật xảy ra) — xác nhận trang chuyển sang URL thật, mọi thứ vẫn
+   hoạt động bình thường như trước (không có regression cho luồng đã hoạt động đúng).
+5. Test biên bản có NHIỀU thiết bị (≥3-5 dòng) — bấm "Ký duyệt" → "Tạo yêu cầu ký" — xác nhận độ
+   trễ giảm rõ rệt so với trước (khó đo chính xác qua lời kể, nhưng nên cảm nhận nhanh hơn đáng
+   kể, đặc biệt với biên bản nhiều dòng — trước đây mỗi dòng thêm ~1 round-trip nối tiếp).
+6. Test luồng SỬA 1 biên bản đã tồn tại từ trước (không phải tạo mới) — xác nhận dirty-tracking
+   hoạt động đúng tương tự: mở lên nút Lưu tắt, sửa gì đó thì sáng, lưu xong tắt lại.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+```
+Đọc mục "Cập nhật (2026-09-02)" trong CLAUDE.md (ngay phía trên) — đã fix 2 bug nghiêm trọng
+(Lưu lần 2 sau khi tạo mới tạo biên bản trùng lặp; "Gửi ký duyệt" không phản hồi trong cửa sổ
+giao thời trước khi banner KPI đóng), thêm dirty-tracking cho nút Lưu, và fix 1 bug N+1 query
+làm chậm bước "Tạo yêu cầu ký" của luồng ký duyệt Bảo trì. Đã commit + push (133333f).
+
+CHƯA test tay bất kỳ mục nào — đọc kỹ checklist "Chưa test tay" trong đúng mục đó (6 bước, đặc
+biệt bước 1-2: tạo biên bản mới, Lưu lần đầu, bấm "Gửi ký duyệt" NGAY khi banner KPI còn mở,
+xác nhận modal mở đúng và không tạo bản ghi trùng khi Lưu lại).
+
+Nếu tôi báo vẫn còn chậm sau khi test, đọc mục "Việc CỐ Ý không đụng" — SignScreen
+(/dashboard/ky/[id]/page.tsx) render PDF qua pdfjs canvas theo vòng lặp tuần tự từng trang CHƯA
+được điều tra kỹ, có thể là nguồn chậm còn lại nếu vấn đề nằm ở bước XEM/KÝ chứ không phải bước
+"Tạo yêu cầu ký" đã fix.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
