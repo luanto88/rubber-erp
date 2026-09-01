@@ -3979,3 +3979,139 @@ ký) — đọc kỹ lại đúng đoạn code đã liệt kê trong mục này 
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.
 ```
+
+## Cập nhật (2026-09-01) — 3 bug phát hiện khi test tay Việc 1+2+3, đã fix 2/3, còn 1 việc là
+CẤU HÌNH VERCEL (không phải code) — CHƯA test tay lại
+
+Người dùng test tay theo checklist phiên trước, báo 3 vấn đề mới:
+
+### Bug 1 — Icon vẫn "ẩn rồi hiện" dù đã thêm `signingStatusLoaded` ở phiên trước
+
+**Nguyên nhân**: phiên trước chỉ gate `signingStatusLoaded` cho nút Sửa/Xóa — **quên** gate 2 chỗ
+khác cũng đọc `signingStatusByDate`/`signingStatusByEntry` trước khi tải xong: (a) icon
+`FileText`/`Eye` (chưa ký/đã ký), (b) chính `QualitySignStatusBadge`/`DispatchSignStatusBadge`
+(khi `status` còn `undefined` do Map rỗng, badge tưởng "chưa có yêu cầu ký" và hiện nhầm nút
+"Gửi ký duyệt" cho tới khi fetch xong mới đổi đúng).
+
+**Fix**: cả `quality/page.tsx` và `dispatch/page.tsx` — bọc cụm icon+badge bằng
+`{!signingStatusLoaded ? <Loader2 className="animate-spin"/> : (<>...icon+badge thật...</>)}`
+thay vì để chúng tự render với dữ liệu rỗng. Thêm import `Loader2` ở cả 2 file.
+
+### Bug 2 — Trưởng phòng QLCL (chỉ là người PHÊ DUYỆT) vẫn "+Thêm phiếu" được vào ngày đã gửi ký
+duyệt nhưng CHƯA hoàn tất
+
+**Nguyên nhân**: phiên trước chỉ khoá nút "+Thêm phiếu" (Quality) + luồng Nhập Excel khi
+`trangThai === "hoan_tat"` — **không khoá khi `dang_luan_chuyen`** (đã gửi, đang chờ duyệt). Nút
+"+" vốn không kiểm tra ownership (chủ đích, nhiều nhân viên có thể cùng nhập KN cho 1 ngày), nên
+Trưởng phòng QLCL — người có quyền `quality.create` nhưng KHÔNG phải chủ phiếu — vẫn thêm được
+phiếu mới vào chính ngày đang chờ HỌ duyệt.
+
+**Fix**: thêm biến mới `isAddBlocked = currentUser?.role !== "admin" && !!signingStatusByDate.get(date)`
+(khoá ngay khi có BẤT KỲ yêu cầu ký nào đang hoạt động — `dang_luan_chuyen` HOẶC `hoan_tat`, API
+`signing-status` chỉ trả 2 trạng thái này nên "tồn tại record" = "đang hoạt động") — áp cho nút
+"+Thêm phiếu" và điều kiện chặn Nhập Excel. **Chỉ áp dụng cho Quality** — Điều xe không có nút
+tương đương độc lập (mọi sửa đổi phải qua "Sửa", vốn đã khoá đúng theo ownership từ phiên trước,
+không cần mở rộng thêm). Nút Sửa/Xóa (không phải "+") của CẢ 2 module vẫn giữ nguyên chỉ khoá ở
+`hoan_tat` — quyết định cũ "cho phép chủ sở hữu sửa trong lúc chờ duyệt" không đổi.
+
+### Bug 3 — Ký trên mobile báo "Không xác minh được — chỉ có con dấu hình ảnh" — ĐÃ XÁC ĐỊNH
+NGUYÊN NHÂN: thiếu biến môi trường trên Vercel, KHÔNG PHẢI bug code
+
+Điều tra qua DB thật (đọc trực tiếp `yeu_cau_ky`/`nguoi_ky`, không đoán): phiếu Kiểm nghiệm ngày
+01/9/26 (record `43cac88c-...`) có **CẢ 2** người ký (Administrator lẫn Trương Tấn Phước) đều
+`pades_sig_index = NULL`. Đã hỏi lại người dùng và xác nhận: **ký qua trang production đã deploy
+(qlsxkpt.vercel.app), không phải `npm run dev`**. Đã kiểm tra `.env.local` trên máy dev hiện tại —
+**vẫn có đủ** `SIGN_PADES_ROOT_CA_CERT_PEM`/`SIGN_PADES_ROOT_CA_KEY_PEM` — khớp đúng giả thuyết đã
+ghi từ phiên tạo tính năng PAdES (2026-08-30/31): **2 biến này CHƯA từng được thêm vào Vercel
+Environment Variables**, nên `hasPadesRootCa()` trả `false` trên production → toàn bộ lớp PAdES bị
+bỏ qua ÂM THẦM cho MỌI chữ ký ký trên production (con dấu ảnh vẫn ra bình thường, chỉ thiếu lớp mật
+mã) — không phải lỗi trong `applyPadesSignature()`/incremental-update, không phải lỗi riêng mobile
+(mobile chỉ là cách người dùng truy cập production).
+
+Giải thích luôn case đã gây nhầm lẫn ban đầu ("Lập biểu ký thành công, Trưởng phòng QLCL không
+xác minh được" — record `5d593fe5-...`): signer 1 (Nguyễn Hữu Thọ) ký lúc 03:40 UTC 31/8 —
+`pades_sig_index=0` (thành công, khả năng cao ký qua `npm run dev` lúc đó); signer 2 (Trương Tấn
+Phước) ký MUỘN HƠN HẲN, lúc 23:27 UTC cùng ngày — `pades_sig_index=null` (khả năng cao đã ký qua
+production sau khi deploy) — khớp hoàn toàn với giả thuyết "production thiếu biến môi trường",
+không phải bug "chữ ký thứ 2 luôn hỏng".
+
+**KHÔNG PHẢI VIỆC CỦA CLAUDE CODE** — tôi không có quyền truy cập Vercel dashboard. Người dùng cần
+tự làm:
+1. Mở Vercel → Project Settings → Environment Variables.
+2. Thêm `SIGN_PADES_ROOT_CA_CERT_PEM` và `SIGN_PADES_ROOT_CA_KEY_PEM`, copy đúng giá trị hiện có
+   trong `.env.local` (2 dòng cuối file, đã có sẵn từ khi chạy
+   `node scripts/generate-signing-root-ca.mjs --write-env`).
+3. Deploy lại (redeploy) để biến mới có hiệu lực.
+4. Các chữ ký ĐÃ ký trên production trước khi thêm biến (`pades_sig_index` đang NULL) **không tự
+   khắc phục được** — PAdES không thể gắn hồi tố vào 1 yêu cầu ký đã `hoan_tat`; chỉ chữ ký MỚI
+   sau khi thêm biến mới có lớp PAdES.
+
+### Cải tiến chẩn đoán đi kèm (để lần sau không cần đoán/hỏi lại)
+
+- Migration mới `supabase/migrations/20260901_signing_pades_error_diagnostics.sql` — thêm cột
+  `nguoi_ky.pades_error TEXT` (NULL nếu PAdES thành công hoặc chưa từng thử). **CHƯA CHẠY.**
+- `src/lib/signing/requests.ts`'s `signField()`: ghi rõ lý do vào biến `padesError` ở CẢ 2 nhánh
+  — `!hasPadesRootCa()` (lý do cố định: "Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM/...") và
+  nhánh `catch` (lý do là `err.message` thật). Ghi `pades_error` bằng UPDATE riêng cùng đợt với
+  `pades_sig_index` (fallback về chỉ update `pades_sig_index` nếu cột `pades_error` chưa tồn tại
+  — migration chưa chạy vẫn không hỏng luồng ký chính, đúng nguyên tắc phòng vệ đã áp dụng cho
+  `pades_sig_index` trước đó).
+- `src/app/api/signing/verify/[nguoiKyId]/route.ts`: SELECT thêm `pades_error` với **fallback an
+  toàn** (thử SELECT có cột này trước, lỗi thì SELECT lại không có — tránh sập cả route nếu
+  migration chưa chạy, vì SELECT nhiều cột mà 1 cột không tồn tại bị Postgres từ chối toàn bộ câu
+  lệnh, khác UPDATE cũng vậy nhưng đã xử lý riêng). Khi `pades_sig_index IS NULL`, nối thêm
+  `pades_error` (nếu có) vào `reason` trả về — từ nay `/sign-verify/[id]` tự hiển thị lý do kỹ
+  thuật ngay trên trang, không cần vào DB/log server để tra.
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` (toàn repo) và `npx eslint` trên 4 file đã sửa
+(`quality/page.tsx`, `dispatch/page.tsx`, `signing/requests.ts`,
+`api/signing/verify/[nguoiKyId]/route.ts`) đều sạch — các lỗi/warning còn lại đã đối chiếu là
+pre-existing (không đổi số lượng, chỉ lệch số dòng do thêm code). Không chạy `npm run build`.
+
+### CHƯA làm / cần làm ở phiên sau
+
+1. **Chạy `supabase/migrations/20260901_signing_pades_error_diagnostics.sql`** trên Supabase SQL
+   Editor.
+2. **Thêm 2 biến môi trường vào Vercel** (xem hướng dẫn 4 bước ở trên) rồi redeploy — đây là việc
+   BẮT BUỘC phải làm để tính năng PAdES hoạt động thật trên production, KHÔNG cần sửa code gì cả.
+3. Sau khi làm xong #2, ký thử 1 tài liệu MỚI trên chính production, bấm vào con dấu chữ ký →
+   xác nhận `/sign-verify/[id]` báo "Chữ ký hợp lệ" (không còn "chưa được ký số điện tử").
+4. Test tay lại 2 bug UI đã fix (chưa test qua trình duyệt thật trong phiên này):
+   - Load lại danh sách Kiểm nghiệm/Điều xe vài lần, quan sát kỹ vùng icon PDF/Eye + badge —
+     phải thấy 1 vòng xoay nhỏ (`Loader2`) rất ngắn rồi chuyển thẳng sang icon/badge ĐÚNG, không
+     còn hiện sai rồi đổi.
+   - Đăng nhập Trưởng phòng QLCL (hoặc bất kỳ ai không phải chủ phiếu) → mở 1 ngày Kiểm nghiệm
+     ĐÃ gửi ký duyệt nhưng CHƯA hoàn tất (`dang_luan_chuyen`) → xác nhận nút "+Thêm phiếu" đã ẩn;
+     thử Nhập Excel cho đúng ngày đó → bị chặn với thông báo "đã gửi ký duyệt — chỉ admin...".
+   - Đăng nhập admin → xác nhận "+Thêm phiếu" và Nhập Excel vẫn hoạt động bình thường bất kể
+     trạng thái ký.
+5. Việc đã ghi nhận từ phiên trước, vẫn chưa làm, chưa đổi ưu tiên: RLS hardening cho
+   `qc_results`/`dispatch_entries` UPDATE/DELETE; mở rộng Việc 1+2 sang Bảo trì.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01) — 3 bug phát hiện khi test tay Việc 1+2+3" trong CLAUDE.md.
+
+Việc BẮT BUỘC trước tiên: hỏi tôi đã (a) chạy migration
+supabase/migrations/20260901_signing_pades_error_diagnostics.sql và (b) thêm
+SIGN_PADES_ROOT_CA_CERT_PEM/SIGN_PADES_ROOT_CA_KEY_PEM vào Vercel Environment Variables + redeploy
+hay chưa — đây là điều kiện để coi Bug 3 (PAdES không hoạt động trên production) là xong, KHÔNG
+cần sửa code gì thêm cho việc này.
+
+Nếu tôi báo đã test tay xong mục "CHƯA làm / cần làm ở phiên sau" #3-#4 và không có lỗi mới, coi
+3 bug này là hoàn tất — hỏi tôi có muốn làm tiếp RLS hardening hoặc mở rộng Bảo trì hay không,
+đừng tự ý làm.
+
+Nếu tôi báo lỗi MỚI khi test tay, đọc kỹ đúng đoạn code đã liệt kê trong mục "Cập nhật
+(2026-09-01)" trước khi sửa, đừng đoán — đặc biệt nếu vẫn còn chữ ký "không xác minh được" SAU
+KHI đã redeploy với biến môi trường đúng, đó mới là lúc cần điều tra code thật (có thể là bug
+trong `addSignaturePlaceholder()`/`applyPadesSignature()` khi ký người thứ 2 trở đi trên PDF đã
+có 1 lớp PAdES — xem cột `pades_error` mới (nếu migration đã chạy) để biết lý do thật thay vì
+đoán).
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```

@@ -22,7 +22,7 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2 } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -1890,7 +1890,9 @@ export default function DispatchPage() {
                       {totalKLK.toLocaleString()} kg
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      {currentUser && (
+                      {!signingStatusLoaded ? (
+                        <Loader2 size={14} className="animate-spin text-slate-300"/>
+                      ) : currentUser && (
                         <DispatchSignStatusBadge
                           status={signingStatusByEntry.get(entry.id)}
                           currentUser={currentUser}
@@ -1903,7 +1905,9 @@ export default function DispatchPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        {signingStatusByEntry.get(entry.id)?.fileHienTai ? (
+                        {!signingStatusLoaded ? (
+                          <span className="p-1.5 text-slate-300"><Loader2 size={14} className="animate-spin"/></span>
+                        ) : signingStatusByEntry.get(entry.id)?.fileHienTai ? (
                           <button onClick={(e) => { e.stopPropagation(); window.open(signingStatusByEntry.get(entry.id)!.fileHienTai!, "_blank") }}
                             className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
                             title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}>

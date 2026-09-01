@@ -21,7 +21,7 @@ import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background
 import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
-  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye, FileText,
+  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye, FileText, Loader2,
   Upload, Download, CheckCircle, FlaskConical
 } from "lucide-react"
 
@@ -1296,10 +1296,12 @@ export default function QualityPage() {
       const ngayKN = metaDateCell("NGAY_KN")
       const ngaySX = metaDateCell("NGAY_SX")
 
-      // Ngày đã "Đã ký duyệt" (khớp đúng field dateGroups group theo — ngay_kn) thì chỉ admin
-      // được nhập thêm phiếu qua Excel — mirror đúng nguyên tắc đã áp cho nút "+ Thêm phiếu".
-      if (currentUser?.role !== "admin" && signingStatusByDate.get(ngayKN)?.trangThai === "hoan_tat") {
-        showToast(`Ngày kiểm nghiệm ${ngayKN} đã "Đã ký duyệt" — chỉ admin được nhập thêm phiếu cho ngày này.`, false)
+      // Ngày đã có yêu cầu ký đang hoạt động (đang chờ HOẶC đã xong — khớp đúng field
+      // dateGroups group theo ngay_kn) thì chỉ admin được nhập thêm phiếu qua Excel — mirror
+      // đúng nguyên tắc đã áp cho nút "+ Thêm phiếu" (khoá SỚM HƠN Sửa/Xóa, ngay từ lúc gửi ký
+      // duyệt chứ không đợi tới lúc hoàn tất — bug đã báo 2026-09-01).
+      if (currentUser?.role !== "admin" && signingStatusByDate.get(ngayKN)) {
+        showToast(`Ngày kiểm nghiệm ${ngayKN} đã gửi ký duyệt — chỉ admin được nhập thêm phiếu cho ngày này.`, false)
         setImporting(false)
         return
       }
@@ -2143,9 +2145,14 @@ export default function QualityPage() {
                       ? currentUser.role === "admin" ||
                         dateResults.some(r => r.created_by === currentUser.id)
                       : false
-                    // Sau khi ngày đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa/Thêm phiếu.
+                    // Sau khi ngày đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa.
                     const isDateLocked = currentUser?.role !== "admin" &&
                       signingStatusByDate.get(date)?.trangThai === "hoan_tat"
+                    // "Thêm phiếu" (+ Nhập Excel) khoá SỚM HƠN Sửa/Xóa — ngay khi ngày đã "gửi ký
+                    // duyệt" (dang_luan_chuyen), không chờ tới "hoan_tat". Bug đã báo 2026-09-01:
+                    // Trưởng phòng QLCL (chỉ là người PHÊ DUYỆT, không phải chủ phiếu) vẫn thêm được
+                    // phiếu mới vào ngày đang chờ chính họ duyệt vì "+" trước đây chỉ khoá ở hoan_tat.
+                    const isAddBlocked = currentUser?.role !== "admin" && !!signingStatusByDate.get(date)
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -2191,7 +2198,7 @@ export default function QualityPage() {
                               </>
                             ) : (
                               <>
-                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !isDateLocked && (
+                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !isAddBlocked && (
                                   <button onClick={e=>{e.stopPropagation();openCreate(date)}}
                                     title="Thêm phiếu"
                                     className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors">
@@ -2212,6 +2219,14 @@ export default function QualityPage() {
                                     <Trash2 size={15}/>
                                   </button>
                                 )}
+                                {!signingStatusLoaded ? (
+                                  // Chưa biết trạng thái ký thật — hiện skeleton trung tính thay vì icon/badge
+                                  // "chưa ký" tạm thời rồi đổi ngay sau đó (bug "icon ẩn/hiện" đã báo 2026-09-01).
+                                  <span className="p-1.5 rounded-lg text-slate-300">
+                                    <Loader2 size={15} className="animate-spin"/>
+                                  </span>
+                                ) : (
+                                <>
                                 {/* PDF: chưa ký → render bản in nháp; đã có yêu cầu ký → mở đúng file hiện
                                     tại (đã có chữ ký Lập biểu nếu đang chờ, đủ cả 2 chữ ký nếu hoàn tất) */}
                                 {signingStatusByDate.get(date)?.fileHienTai ? (
@@ -2270,6 +2285,8 @@ export default function QualityPage() {
                                       setSignModal({ dateResults: resolved, maHoSo: date })
                                     }}
                                   />
+                                )}
+                                </>
                                 )}
                               </>
                             )}

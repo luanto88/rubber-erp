@@ -15,12 +15,31 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ ngu
     const { nguoiKyId } = await params
     const supabase = getSupabaseAdmin()
 
-    const { data: nguoiKy, error: nkErr } = await supabase
+    // `pades_error` (migration 20260901) là cột chẩn đoán MỚI — SELECT nhiều cột mà 1 cột
+    // chưa tồn tại sẽ bị Postgres từ chối TOÀN BỘ câu lệnh, không phải chỉ thiếu field đó.
+    // Thử full trước, fallback về bộ cột cũ (chắc chắn đã có) nếu migration chưa chạy — để
+    // route này không bị sập hoàn toàn chỉ vì 1 cột chẩn đoán còn thiếu.
+    type NguoiKyRow = {
+      id: string; user_id: string; yeu_cau_id: string; thu_tu: number; vai_tro: string
+      trang_thai: string; ky_luc: string | null; pades_sig_index: number | null; pades_error?: string | null
+    }
+    let nguoiKy: NguoiKyRow | null = null
+    const full = await supabase
       .from("nguoi_ky")
-      .select("id, user_id, yeu_cau_id, thu_tu, vai_tro, trang_thai, ky_luc, pades_sig_index")
+      .select("id, user_id, yeu_cau_id, thu_tu, vai_tro, trang_thai, ky_luc, pades_sig_index, pades_error")
       .eq("id", nguoiKyId)
       .maybeSingle()
-    if (nkErr || !nguoiKy) {
+    if (!full.error) {
+      nguoiKy = full.data as NguoiKyRow | null
+    } else {
+      const base = await supabase
+        .from("nguoi_ky")
+        .select("id, user_id, yeu_cau_id, thu_tu, vai_tro, trang_thai, ky_luc, pades_sig_index")
+        .eq("id", nguoiKyId)
+        .maybeSingle()
+      nguoiKy = base.data as NguoiKyRow | null
+    }
+    if (!nguoiKy) {
       return NextResponse.json({ error: "Không tìm thấy chữ ký này" }, { status: 404 })
     }
 
@@ -47,7 +66,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ ngu
         vaiTro: nguoiKy.vai_tro,
         kyLuc: nguoiKy.ky_luc,
         valid: false,
-        reason: "Chữ ký này chưa được ký số điện tử (chỉ có con dấu hình ảnh)",
+        reason: nguoiKy.pades_error
+          ? `Chữ ký này chưa được ký số điện tử (chỉ có con dấu hình ảnh) — ${nguoiKy.pades_error}`
+          : "Chữ ký này chưa được ký số điện tử (chỉ có con dấu hình ảnh)",
       })
     }
 

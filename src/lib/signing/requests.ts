@@ -327,6 +327,7 @@ export async function signField(params: {
   // lỗi vì bất kỳ lý do gì, bỏ qua và giữ nguyên `newBytes` chỉ có con dấu ảnh — không được để
   // lỗi ở lớp cộng thêm này chặn đứng luồng ký chính đang chạy thật cho 3 module production.
   let padesSigIndex: number | null = null
+  let padesError: string | null = null
   if (hasPadesRootCa()) {
     try {
       // Đếm số chữ ký PAdES đã có của đúng yêu cầu này để biết vị trí (0-based) của chữ ký
@@ -339,8 +340,15 @@ export async function signField(params: {
       newBytes = await applyPadesSignature(newBytes, signerName, signerContact)
       padesSigIndex = priorPadesCount ?? 0
     } catch (err) {
-      console.error("[signing/pades] Bỏ qua chữ ký PAdES do lỗi:", err instanceof Error ? err.message : err)
+      padesError = err instanceof Error ? err.message : String(err)
+      console.error("[signing/pades] Bỏ qua chữ ký PAdES do lỗi:", padesError)
     }
+  } else {
+    // Ghi rõ lý do "chưa cấu hình" — khác hẳn lỗi runtime ở nhánh trên, để không phải đoán
+    // giữa "thiếu SIGN_PADES_ROOT_CA_*" và "applyPadesSignature() thật sự lỗi" khi chẩn đoán
+    // (bug đã báo 2026-09-01: 1 lượt ký trên phiếu Kiểm nghiệm có CẢ 2 người ký cùng không
+    // có pades_sig_index, cần phân biệt được nguyên nhân mà không cần xem log server).
+    padesError = "Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM/SIGN_PADES_ROOT_CA_KEY_PEM ở môi trường này"
   }
 
   const newHash = computeIntegrityHash(newBytes)
@@ -363,12 +371,20 @@ export async function signField(params: {
     .update({ trang_thai: "da_ky", ky_luc: signedAt, ip: params.ip, thiet_bi: params.thietBi })
     .eq("id", nguoiKy.id)
 
-  // Ghi `pades_sig_index` bằng câu UPDATE RIÊNG (không gộp chung với update cốt lõi ở trên) —
-  // nếu cột này chưa tồn tại (migration 20260831_signing_pades_sig_index.sql chưa chạy) thì
-  // CHỈ mất tính năng "click con dấu xem xác thực", không làm hỏng luồng ký chính (UPDATE
-  // nhiều cột cùng lúc mà 1 cột không tồn tại sẽ làm Postgres từ chối TOÀN BỘ câu lệnh).
-  if (padesSigIndex !== null) {
-    await supabase.from("nguoi_ky").update({ pades_sig_index: padesSigIndex }).eq("id", nguoiKy.id)
+  // Ghi `pades_sig_index`/`pades_error` bằng câu UPDATE RIÊNG (không gộp chung với update cốt
+  // lõi ở trên) — nếu 2 cột này chưa tồn tại (migration 20260831/20260901 chưa chạy) thì CHỈ
+  // mất tính năng chẩn đoán/"click con dấu xem xác thực", không làm hỏng luồng ký chính (UPDATE
+  // nhiều cột cùng lúc mà 1 cột không tồn tại sẽ làm Postgres từ chối TOÀN BỘ câu lệnh). Thử cả
+  // 2 cột trước; nếu Postgres từ chối (cột pades_error chưa tồn tại), thử lại chỉ với
+  // pades_sig_index (cột cũ, chắc chắn đã có từ 2026-08-31) để không mất hẳn tính năng xác thực.
+  if (padesSigIndex !== null || padesError !== null) {
+    const { error: padesUpdateErr } = await supabase
+      .from("nguoi_ky")
+      .update({ pades_sig_index: padesSigIndex, pades_error: padesError })
+      .eq("id", nguoiKy.id)
+    if (padesUpdateErr && padesSigIndex !== null) {
+      await supabase.from("nguoi_ky").update({ pades_sig_index: padesSigIndex }).eq("id", nguoiKy.id)
+    }
   }
 
   const { data: allSigners } = await supabase
