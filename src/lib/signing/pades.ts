@@ -44,11 +44,82 @@ function loadRootCa(): { cert: forge.pki.Certificate; privateKey: forge.pki.rsa.
   if (!certPem || !keyPem) {
     throw new Error("Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM/SIGN_PADES_ROOT_CA_KEY_PEM")
   }
-  cachedRootCa = {
-    cert: forge.pki.certificateFromPem(certPem),
-    privateKey: forge.pki.privateKeyFromPem(keyPem) as forge.pki.rsa.PrivateKey,
+  // Parse tách riêng cert/key để biết CHÍNH XÁC biến nào sai định dạng — trước đây gộp chung
+  // 1 object literal, lỗi "Invalid PEM formatted message." không cho biết là CERT hay KEY
+  // (bug đã báo 2026-09-01: người dùng tự sửa 1 trong 2 biến trên Vercel nhưng vẫn lỗi, không
+  // có cách nào biết biến nào còn sai mà không phải hỏi lại/đoán).
+  let cert: forge.pki.Certificate
+  try {
+    cert = forge.pki.certificateFromPem(certPem)
+  } catch (err) {
+    throw new Error(
+      `SIGN_PADES_ROOT_CA_CERT_PEM sai định dạng PEM (thiếu dòng -----BEGIN CERTIFICATE-----/`
+      + `-----END CERTIFICATE-----? thừa/thiếu khoảng trắng?): ${err instanceof Error ? err.message : err}`,
+    )
   }
+  let privateKey: forge.pki.rsa.PrivateKey
+  try {
+    privateKey = forge.pki.privateKeyFromPem(keyPem) as forge.pki.rsa.PrivateKey
+  } catch (err) {
+    throw new Error(
+      `SIGN_PADES_ROOT_CA_KEY_PEM sai định dạng PEM (thiếu dòng -----BEGIN RSA PRIVATE KEY-----/`
+      + `-----END RSA PRIVATE KEY-----? thừa/thiếu khoảng trắng?): ${err instanceof Error ? err.message : err}`,
+    )
+  }
+  cachedRootCa = { cert, privateKey }
   return cachedRootCa
+}
+
+/**
+ * Chẩn đoán CẤU TRÚC 2 biến môi trường root CA — KHÔNG lộ nội dung khoá/chứng thư, chỉ trả
+ * độ dài + có parse được không + lỗi cụ thể nếu có. Dùng để tự kiểm tra sau khi sửa biến môi
+ * trường trên Vercel mà không cần ký thử 1 tài liệu thật mới biết đúng/sai (bug 2026-09-01 —
+ * người dùng phải đoán biến nào còn sai định dạng qua nhiều vòng redeploy).
+ */
+export function diagnosePadesEnv(): {
+  certPresent: boolean
+  keyPresent: boolean
+  certLength: number
+  keyLength: number
+  certStartsWithBegin: boolean
+  certEndsWithEnd: boolean
+  keyStartsWithBegin: boolean
+  keyEndsWithEnd: boolean
+  certParseOk: boolean
+  certParseError: string | null
+  keyParseOk: boolean
+  keyParseError: string | null
+} {
+  const certPem = process.env.SIGN_PADES_ROOT_CA_CERT_PEM || ""
+  const keyPem = process.env.SIGN_PADES_ROOT_CA_KEY_PEM || ""
+  let certParseOk = false
+  let certParseError: string | null = null
+  try {
+    if (certPem) { forge.pki.certificateFromPem(certPem); certParseOk = true }
+  } catch (err) {
+    certParseError = err instanceof Error ? err.message : String(err)
+  }
+  let keyParseOk = false
+  let keyParseError: string | null = null
+  try {
+    if (keyPem) { forge.pki.privateKeyFromPem(keyPem); keyParseOk = true }
+  } catch (err) {
+    keyParseError = err instanceof Error ? err.message : String(err)
+  }
+  return {
+    certPresent: !!certPem,
+    keyPresent: !!keyPem,
+    certLength: certPem.length,
+    keyLength: keyPem.length,
+    certStartsWithBegin: certPem.trimStart().startsWith("-----BEGIN"),
+    certEndsWithEnd: certPem.trimEnd().endsWith("-----END CERTIFICATE-----"),
+    keyStartsWithBegin: keyPem.trimStart().startsWith("-----BEGIN"),
+    keyEndsWithEnd: keyPem.trimEnd().endsWith("-----END RSA PRIVATE KEY-----"),
+    certParseOk,
+    certParseError,
+    keyParseOk,
+    keyParseError,
+  }
 }
 
 type RootCa = ReturnType<typeof loadRootCa>
@@ -61,7 +132,13 @@ function issueLeafCertificate(root: RootCa, commonName: string, email: string): 
   cert.serialNumber = Date.now().toString(16) + Math.floor(Math.random() * 1e6).toString(16)
   cert.validity.notBefore = new Date()
   cert.validity.notAfter = new Date()
-  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1)
+  // 20 năm (khớp thời hạn root CA hiện tại) — trước đây chỉ 1 năm, nhưng verifyPadesSignature()
+  // không hề kiểm tra hạn chứng thư so với thời điểm xem lại (chỉ kiểm tra toán học chữ ký +
+  // fingerprint root CA), nên chữ ký vẫn luôn báo "hợp lệ" sau khi hết hạn 1 năm — gây hiển thị
+  // "Hiệu lực đến" sai lệch với thực tế trên trang /sign-verify. Kéo dài để khớp đúng mục đích
+  // lưu trữ hồ sơ ISO dài hạn thay vì để hành vi này là 1 lỗ hổng ngẫu nhiên (đã chốt với người
+  // dùng 2026-09-01 — không thêm logic kiểm tra hạn theo thời điểm ký, chỉ kéo dài hiệu lực).
+  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 20)
   // valueTagClass ep cung UTF8 (ma ASN.1 Type.UTF8 = 12) — bat buoc voi ten co dau tieng
   // Viet. Khong ep, forge tu doan sai sang PrintableString cho chuoi chua byte UTF-8 da
   // ky tu, lam TBSCertificate luc ky va luc serialize lai lech byte nhau — chung ky ra vao

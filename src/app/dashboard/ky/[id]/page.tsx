@@ -60,6 +60,18 @@ const MODUN_LABEL: Record<string, string> = {
   storage: "Kho nguyên liệu",
 }
 
+// Nhãn tiếng Việt cho yeu_cau_ky.loai_tai_lieu — trước đây in thẳng mã snake_case nội bộ
+// (vd "dispatch_bang_phan_xe") ra màn hình (bug đã báo 2026-09-01). Danh sách đủ 6 giá trị
+// đang tồn tại trong hệ thống (grep toàn bộ nơi gọi createSigningRequest với loaiTaiLieu:).
+const LOAI_TAI_LIEU_LABEL: Record<string, string> = {
+  dispatch_bang_phan_xe: "Bảng phân xe",
+  quality_kqkn: "Phiếu KQKN",
+  su_co_nho: "Biên bản sự cố",
+  bao_duong: "Biên bản bảo dưỡng",
+  bao_duong_xe: "Biên bản bảo dưỡng xe",
+  sua_chua_nho_xe: "Biên bản sửa chữa nhỏ xe",
+}
+
 function roleLabelOf(vaiTro: NguoiKy["vai_tro"]): string {
   if (vaiTro === "phe_duyet") return "Phê duyệt"
   if (vaiTro === "nhan_ban_sao") return "Nhận bản sao"
@@ -188,6 +200,11 @@ export default function SignScreenPage() {
     () => (myNguoiKy ? truongKyList.filter((f) => f.nguoi_ky_id === myNguoiKy.id) : []),
     [truongKyList, myNguoiKy],
   )
+  // Mỗi VỊ TRÍ KÝ thật trên PDF gồm 2 dòng truong_ky riêng biệt (loai='chu_ky' + loai='ten' đi
+  // kèm, không phải khung riêng) — myFields.length đếm gộp cả 2 nên gấp đôi số vị trí ký thật.
+  // Dùng biến này ở MỌI chỗ hiển thị "N khung" cho người dùng (bug đã báo 2026-09-01: modal xác
+  // nhận ký hiện "2 khung" dù chỉ có đúng 1 khối preview chữ ký).
+  const mySignaturePositions = useMemo(() => myFields.filter((f) => f.loai === "chu_ky"), [myFields])
   const otherFields = useMemo(
     () => (myNguoiKy ? truongKyList.filter((f) => f.nguoi_ky_id !== myNguoiKy.id) : truongKyList),
     [truongKyList, myNguoiKy],
@@ -450,7 +467,7 @@ export default function SignScreenPage() {
             Hệ thống ký số dùng chung · {MODUN_LABEL[yeuCau.modun] || yeuCau.modun}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-base font-bold">
-            {yeuCau.loai_tai_lieu}
+            {LOAI_TAI_LIEU_LABEL[yeuCau.loai_tai_lieu] || yeuCau.loai_tai_lieu}
             {yeuCau.ma_ho_so && (
               <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
                 {yeuCau.ma_ho_so}
@@ -592,10 +609,10 @@ export default function SignScreenPage() {
             {!myNguoiKy
               ? "Bạn không có phần ký trên hồ sơ này — chỉ xem."
               : iAlreadySigned
-                ? <>Bạn đã ký đủ <b className="text-slate-800">{myFields.length}</b> khung trên hồ sơ này.</>
+                ? <>Bạn đã ký đủ <b className="text-slate-800">{mySignaturePositions.length}</b> khung trên hồ sơ này.</>
                 : !myTurn
                   ? "Chưa tới lượt bạn — đang chờ người ký trước hoàn tất."
-                  : <>Có <b className="text-slate-800">{myFields.length}</b> khung cần ký — không cần đọc hết tài liệu.</>}
+                  : <>Có <b className="text-slate-800">{mySignaturePositions.length}</b> khung cần ký — không cần đọc hết tài liệu.</>}
           </div>
           {myNguoiKy && !iAlreadySigned && myTurn && (
             <div className="flex gap-2.5">
@@ -666,7 +683,7 @@ export default function SignScreenPage() {
           <div className="mx-auto mb-3.5 h-1 w-10 rounded-full bg-slate-200" />
           <div className="mb-1 flex items-start justify-between">
             <h4 className="text-[15px] font-extrabold text-slate-800">
-              Xác nhận ký {myFields.length} khung
+              Xác nhận ký {mySignaturePositions.length} khung
             </h4>
             <button onClick={() => !signing && setConfirmOpen(false)} className="text-slate-400 hover:text-slate-600">
               <X size={18} />

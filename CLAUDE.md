@@ -4115,3 +4115,91 @@ có 1 lớp PAdES — xem cột `pades_error` mới (nếu migration đã chạy
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.
 ```
+
+## Cập nhật (2026-09-01, tiếp) — Root cause thật của Bug 3 (PAdES "không xác minh được") + 3
+việc nhỏ trên SignScreen — ĐÃ XONG, ĐÃ XÁC NHẬN HOẠT ĐỘNG TRÊN PRODUCTION
+
+### Bug 3 (mục trên) — nguyên nhân thật: giá trị dán vào Vercel thiếu PEM header/footer
+
+Người dùng làm theo hướng dẫn thêm 2 biến môi trường vào Vercel nhưng **dán thiếu phần
+`-----BEGIN.../-----END-----`** (chỉ dán phần thân base64) — đã xác nhận bằng cách so SHA-256 nội
+dung người dùng dán với nội dung thật trong `.env.local` (khớp 100%, không phải lỗi copy sai nội
+dung, chỉ thiếu 4 dòng header/footer bắt buộc để `node-forge` parse được PEM). Đã đưa lại đúng 2
+khối hoàn chỉnh (copy nguyên văn từ `.env.local`, có đủ `-----BEGIN CERTIFICATE-----`/`-----END
+CERTIFICATE-----` và `-----BEGIN RSA PRIVATE KEY-----`/`-----END RSA PRIVATE KEY-----`) để người
+dùng dán đè vào Vercel. Sau khi dán đúng + redeploy, **người dùng đã xác nhận chữ ký PAdES hoạt
+động đúng trên production** (ảnh chụp modal ký + trang `/sign-verify` hiện đầy đủ thông tin).
+
+**Công cụ chẩn đoán mới đã thêm trong lúc tìm bug này** (giữ lại, hữu ích lâu dài):
+- `src/lib/signing/pades.ts`'s `loadRootCa()` — tách riêng try/catch cho CERT và KEY, báo rõ
+  đúng biến nào sai định dạng thay vì gộp chung 1 lỗi "Invalid PEM formatted message." mơ hồ.
+- `diagnosePadesEnv()` (cùng file, export mới) — trả về metadata cấu trúc (độ dài, có bắt đầu
+  bằng `-----BEGIN` không, parse được không, lỗi cụ thể) cho CẢ 2 biến, **không bao giờ trả nội
+  dung khoá/chứng thư thật**.
+- `GET /api/signing/diagnose-pades-env` (mới, chỉ admin) — gọi `diagnosePadesEnv()`, dùng để tự
+  kiểm tra cấu hình môi trường bất cứ lúc nào mà không cần ký thử 1 tài liệu thật.
+
+### 3 việc nhỏ trên SignScreen — ĐÃ SỬA (3 chỗ, đều đã kiểm tra `tsc`/`eslint` sạch)
+
+1. **Việt hóa `loai_tai_lieu`**: `src/app/dashboard/ky/[id]/page.tsx` trước đây in thẳng mã
+   snake_case (`dispatch_bang_phan_xe`) — đã thêm map `LOAI_TAI_LIEU_LABEL` (6 giá trị: Bảng phân
+   xe/Phiếu KQKN/4 loại biên bản Bảo trì), fallback về mã gốc nếu có giá trị mới chưa kịp thêm.
+2. **Modal "Xác nhận ký N khung" đếm sai gấp đôi**: mỗi vị trí ký thật gồm 2 dòng `truong_ky`
+   (`loai='chu_ky'` + `loai='ten'` đi kèm) — `myFields.length` đếm gộp cả 2. Đã thêm biến
+   `mySignaturePositions = myFields.filter(f => f.loai === "chu_ky")`, dùng `.length` của biến
+   này ở cả 3 chỗ hiển thị số đếm (tiêu đề modal PIN + 2 dòng action bar). `myFields` gốc giữ
+   nguyên cho các mục đích khác (render toạ độ trên PDF, boolean-check còn tồn tại khung hay
+   không) — đã rà lại toàn bộ usages còn lại, xác nhận không có chỗ nào khác dựa vào con số sai.
+3. **Chứng thư leaf chỉ hiệu lực 1 năm nhưng verify không kiểm tra hạn**: xác nhận qua đọc code
+   `verifyPadesSignature()` — hoàn toàn không so `leafCert.validity` với `new Date()`, chữ ký sẽ
+   mãi mãi báo "hợp lệ" bất kể đã qua "Hiệu lực đến" bao lâu (do CHƯA viết check, không phải cố
+   ý). Đã hỏi và người dùng chọn: **kéo dài hiệu lực leaf lên 20 năm** (khớp thời hạn root CA) —
+   không thêm logic kiểm tra ngày mới, giữ đúng ý đồ "hồ sơ ISO lưu trữ dài hạn không tự hết hạn".
+   `issueLeafCertificate()` trong `pades.ts` đổi `+ 1` năm → `+ 20` năm. Chữ ký ĐÃ ký trước khi
+   sửa vẫn giữ nguyên leaf cert 1 năm cũ (không hồi tố — leaf cert luôn tạo mới mỗi lần ký, không
+   lưu trữ lại).
+
+### File đã sửa trong cả 2 phần trên
+
+| File | Thay đổi |
+|---|---|
+| `src/lib/signing/pades.ts` | Tách lỗi CERT/KEY trong `loadRootCa()`; thêm `diagnosePadesEnv()`; đổi `+1` → `+20` năm hiệu lực leaf cert |
+| `src/app/api/signing/diagnose-pades-env/route.ts` | Mới — chẩn đoán cấu trúc env vars, chỉ admin |
+| `src/app/dashboard/ky/[id]/page.tsx` | Thêm `LOAI_TAI_LIEU_LABEL`; thêm `mySignaturePositions`; sửa 3 chỗ hiển thị "N khung" |
+
+### CHƯA làm / cần làm ở phiên sau
+
+1. **Test tay 3 việc nhỏ vừa sửa** (chưa test qua UI, chỉ mới qua `tsc`/`eslint`):
+   - Mở trang ký 1 yêu cầu bất kỳ → xác nhận dòng phụ đề hiện đúng tiếng Việt thay vì mã nội bộ.
+   - Mở modal "Xác nhận ký" → xác nhận tiêu đề đúng số khung khớp với số khối preview thật đang
+     hiện (thường là 1, trừ trường hợp thật sự có nhiều vị trí ký khác nhau).
+   - Ký 1 tài liệu MỚI (sau khi deploy bản sửa này) → `/sign-verify/[id]` → "Hiệu lực đến" phải
+     xa hơn nhiều (2046 thay vì 2027).
+2. **Xác nhận migration `20260901_signing_pades_error_diagnostics.sql` đã chạy chưa** — vẫn còn
+   treo từ mục "Cập nhật (2026-09-01)" phía trên, chưa được người dùng xác nhận riêng (khác với
+   việc thêm biến môi trường Vercel — 2 việc độc lập nhau).
+3. Việc đã ghi nhận từ các phiên trước, vẫn chưa đổi ưu tiên: RLS hardening cho
+   `qc_results`/`dispatch_entries` UPDATE/DELETE; mở rộng khoá Xóa/Sửa sau ký duyệt (Việc 1+2)
+   sang module Bảo trì.
+4. **Chưa commit/push code của toàn bộ phiên 2026-09-01** (cả 2 phần: 6 bug UI + bug 3 root-cause
+   + 3 việc nhỏ SignScreen) — người dùng cần tự `git add/commit/push` khi sẵn sàng deploy, theo
+   đúng quy tắc "chỉ commit khi được yêu cầu rõ ràng".
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01, tiếp) — Root cause thật của Bug 3... + 3 việc nhỏ trên SignScreen"
+trong CLAUDE.md. Cả bug PAdES-không-xác-minh-được (do dán thiếu PEM header/footer vào Vercel) lẫn
+3 việc nhỏ (Việt hóa loai_tai_lieu, sửa đếm sai "N khung", kéo dài hiệu lực leaf cert lên 20 năm)
+đều ĐÃ CODE XONG, `tsc`/`eslint` sạch — CHƯA test qua UI trình duyệt thật.
+
+Nếu tôi báo đã test tay xong mục "CHƯA làm / cần làm ở phiên sau" #1 và không có lỗi, coi phần
+này hoàn tất — hỏi tôi có muốn làm tiếp #3 (RLS hardening/mở rộng Bảo trì) hay không, đừng tự ý
+làm. Cũng hỏi tôi đã commit/push code phiên trước chưa nếu cần biết trạng thái deploy hiện tại.
+
+Nếu tôi báo lỗi MỚI khi test tay, đọc kỹ đúng đoạn code đã liệt kê trong mục "3 việc nhỏ trên
+SignScreen" trước khi sửa, đừng đoán.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
