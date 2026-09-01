@@ -4907,3 +4907,92 @@ Nếu tôi báo vẫn còn chậm sau khi test, đọc mục "Việc CỐ Ý kh�
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.
 ```
+
+## Cập nhật (2026-09-02, tiếp) — Người dùng test trên `npm run dev`, báo module Bảo trì "kẹt ở
+Rendering .." — nghi ngờ artifact dev-mode (Fast Refresh), CHƯA XÁC NHẬN đã hết
+
+Sau khi fix 2 bug nghiêm trọng + dirty-tracking + N+1 query ở mục "Cập nhật (2026-09-02)" ngay
+phía trên (đã commit `133333f`, tài liệu `7fb4692`), người dùng chạy `npm run dev` để test tay
+theo checklist, gửi ảnh chụp trang Tổng quan Bảo trì (`/dashboard/maintenance`) — nội dung bảng
+"Biên bản gần đây" hiển thị ĐÚNG (badge "Đã ký duyệt (3/3)"/"Gửi ký duyệt" đúng theo từng dòng,
+khớp đúng cột Ký duyệt vừa thay cho Trạng thái) — nhưng có 1 chỉ báo "Rendering .." (chip nhỏ góc
+trái dưới màn hình) treo mãi, không thao tác được gì trên trang.
+
+### Đã điều tra qua 2 câu hỏi làm rõ + 1 ảnh chụp Console — chưa kết luận chắc chắn, đang chờ
+người dùng thử bước khắc phục đơn giản trước
+
+- Chỉ báo này nằm TRONG chính tab trình duyệt đang test thật (không phải overlay VSCode).
+- Console (F12) **không có bất kỳ dòng lỗi đỏ nào** — chỉ có gợi ý cài React DevTools, dòng
+  `[HMR] connected` (xác nhận Fast Refresh đang kết nối bình thường), và 1 warning màu vàng
+  không liên quan (ảnh `sidebar-bg-forest.jpg` cần `loading="eager"` cho LCP — pre-existing, đã
+  biết từ trước, không phải nguyên nhân).
+- **Chỉ module Bảo trì bị kẹt** — Sản lượng/Kho/Chất lượng trên cùng phiên `npm run dev` đó vẫn
+  bình thường.
+- Đã grep xác nhận chuỗi `"Rendering"` **không tồn tại ở bất kỳ đâu trong `src/`** — không phải
+  text do chính app tự vẽ ra.
+- Dự án dùng Next.js `16.2.3` — bản này có sẵn 1 badge "Dev Tools" nổi góc trái-dưới trong dev
+  mode, có thể hiện trạng thái kiểu "Rendering..." trong lúc compile/Fast-Refresh rồi tự biến
+  mất — đây khả năng cao là NGUỒN GỐC của chip đang thấy, không phải do code app.
+
+### Giả thuyết đang nghiêng về: artifact Fast Refresh bị stale, không phải bug logic thật
+
+Kết hợp: (a) không có lỗi JS nào trong console (loại trừ crash/exception, kể cả kiểu "Maximum
+update depth exceeded" của vòng lặp setState-trong-render — lỗi đó LUÔN hiện đỏ trong console
+nếu có), (b) nội dung trang vẫn render ĐÚNG dữ liệu thật (không phải màn hình trắng/spinner treo
+vô hạn), (c) đúng module vừa bị sửa RẤT NHIỀU LẦN liên tiếp trong phiên này trong khi
+`npm run dev` khả năng cao đang chạy song song (nhiều file lưu dồn dập: `records/[id]/page.tsx`,
+`maintenance-sign-modal.tsx`, `maintenance-pdf.ts`, `maintenance/page.tsx`, `records/page.tsx`,
+`maintenance-sign-status.tsx`) — **dự án này đã từng gặp đúng loại lỗi này trước đây** (xem mục
+lịch sử "Fix bug 2026-08-24 — banner render trắng/mờ": nguyên nhân là dev server bị stale do
+nhiều thao tác dồn dập, khắc phục chỉ bằng restart `npm run dev` + hard-refresh trình duyệt,
+KHÔNG cần sửa code) — nên khả năng cao đây là CÙNG LOẠI hiện tượng, không phải bug logic mới.
+
+**Đã hướng dẫn người dùng thử theo thứ tự, CHƯA CÓ PHẢN HỒI KẾT QUẢ**:
+1. Hard refresh tab (Ctrl+Shift+R / Ctrl+F5).
+2. Nếu vẫn kẹt: dừng hẳn `npm run dev`, chạy lại từ đầu, rồi hard refresh lại lần nữa.
+
+### Việc cần làm cho session sau
+
+- **Hỏi lại NGAY đầu phiên**: 2 bước trên đã giải quyết được chưa? Đây là câu hỏi ưu tiên số 1,
+  quyết định hướng đi tiếp theo:
+  - Nếu ĐÃ HẾT sau restart+hard-refresh → xác nhận đây đúng là artifact dev-mode, không phải bug
+    code, đóng mục này, không cần điều tra thêm.
+  - Nếu VẪN KẸT sau cả 2 bước → đây LÀ bug thật, cần điều tra sâu, KHÔNG được giả định lại là dev
+    artifact nữa. Hướng điều tra gợi ý (chưa làm, vì thời điểm ghi chú này lý do vẫn chỉ là giả
+    thuyết): kiểm tra kỹ các `useEffect` mới thêm ở `records/[id]/page.tsx` phiên trước
+    (`loadVersion`, snapshot dirty-tracking) và ở `maintenance/page.tsx` (`loadSigningStatuses`,
+    `resolveSignBundle`) xem có vòng lặp re-render/re-fetch nào bị bỏ sót trong lúc rà bằng mắt
+    (dù `tsc`/`eslint` đều sạch, các công cụ đó không bắt được lỗi runtime kiểu vòng lặp
+    setState-effect); test thử trên bản build production thật (`npm run build` + `npm start`,
+    chỉ khi CHẮC CHẮN không có `npm run dev` nào đang chạy song song) để loại trừ hẳn khả năng
+    Fast Refresh; kiểm tra Network tab xem có request nào bị treo (pending mãi không resolve, vd
+    do 1 trong các route API mới sửa/thêm — `/api/maintenance/su-co-nho-signers`,
+    `/api/maintenance/signing-status`) gây UI chờ vô hạn.
+- Đồng thời vẫn còn nguyên checklist "Chưa test tay" (6 bước) của mục "Cập nhật (2026-09-02)"
+  ngay phía trên — CHƯA có bước nào được xác nhận, cần làm sau khi mục "Rendering .." này được
+  giải quyết dứt điểm (không test các bug fix chính trong lúc trang còn kẹt không thao tác được).
+
+### Prompt gợi ý để mở đầu session tiếp theo
+```
+Đọc mục "Cập nhật (2026-09-02, tiếp) — ... kẹt ở Rendering .." trong CLAUDE.md (ngay phía trên)
+và mục "Cập nhật (2026-09-02)" trước đó — đã fix 2 bug nghiêm trọng (Lưu lần 2 tạo biên bản
+trùng lặp; "Gửi ký duyệt" không phản hồi), dirty-tracking cho nút Lưu, và 1 bug N+1 query, đã
+commit + push (133333f). Sau đó, người dùng test bằng npm run dev và báo module Bảo trì "kẹt ở
+Rendering ..", không thao tác được — đã điều tra qua console (KHÔNG có lỗi đỏ nào) và nghi ngờ
+đây là artifact Fast Refresh bị stale (dự án từng gặp đúng loại này trước — xem lịch sử "Fix bug
+2026-08-24"), đã hướng dẫn người dùng thử hard-refresh + restart npm run dev, CHƯA CÓ KẾT QUẢ.
+
+Việc ĐẦU TIÊN bắt buộc: hỏi tôi ngay đầu phiên — 2 bước (hard refresh + restart dev server) đã
+hết kẹt chưa?
+- Nếu ĐÃ HẾT: xác nhận đây chỉ là artifact dev-mode, đóng mục này, chuyển sang test tay 6 bước
+  của mục "Cập nhật (2026-09-02)" (chưa bước nào được xác nhận).
+- Nếu VẪN KẸT: đây là bug thật, KHÔNG được giả định lại là dev-artifact — điều tra theo hướng đã
+  gợi ý trong CLAUDE.md (rà kỹ các useEffect mới thêm ở records/[id]/page.tsx và
+  maintenance/page.tsx, thử build production thật để loại trừ Fast Refresh, kiểm tra Network tab
+  xem có request treo vô hạn).
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không (trừ khi đang CHỦ ĐỘNG dùng build production
+để loại trừ nguyên nhân Fast Refresh như gợi ý ở trên — khi đó phải hỏi và xác nhận chắc chắn
+không có npm run dev nào chạy song song trước).
+```
