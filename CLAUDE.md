@@ -4659,3 +4659,125 @@ kỹ đúng đoạn code liên quan trước khi sửa, đừng đoán.
 Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
 dev server của tôi có đang chạy song song hay không.
 ```
+
+## Cập nhật (2026-09-01, tiếp — phiên mới 4) — Bug "hiện Gửi ký duyệt vô điều kiện" (Bảo trì) đã
+fix ở tầng UI; phát hiện gap SÂU HƠN ở tầng server — CHƯA SỬA, ưu tiên cho session sau
+
+### Đã fix (đã commit + push `63876ed`)
+
+Người dùng test trên `main` vừa deploy, gửi ảnh chụp bảng "Biên bản gần đây" (Tổng quan Bảo
+trì): mọi dòng đều hiện nút tím "Gửi ký duyệt" bất kể ai đăng nhập — báo đúng là bug.
+
+**Root cause**: `canCreate` truyền vào `MaintenanceSignStatusBadge` ở **cả 2 trang danh sách**
+(`src/app/dashboard/maintenance/records/page.tsx`, `src/app/dashboard/maintenance/page.tsx`)
+chỉ check quyền chung `hasPermission(user, "maintenance.create")` — thiếu điều kiện "phải là
+người tạo chính biên bản đó (hoặc admin)" mà trang chi tiết (`records/[id]/page.tsx`, biến
+`isCreator` dòng ~506-509: `nguoi_tao === user.full_name || nguoi_tao === user.username`) đã có
+từ trước. Đối chiếu Quality/Dispatch xác nhận 2 module đó đã đúng (`canOwnerAct`/
+`canOwnerEditEntry` tính per-row) — chỉ riêng Bảo trì thiếu.
+
+**Đã fix**: thêm `canOwnerAct(r)` per-row ở cả 2 trang (mirror đúng công thức `isCreator` gốc),
+chỉ áp dụng cho badge Ký duyệt, không đụng `canCreate` dùng cho nút "+ Tạo biên bản" (đúng,
+không cần sở hữu). `maintenance/page.tsx` cần thêm `nguoi_tao` vào câu query `recentRes`.
+
+### Phát hiện SÂU HƠN khi điều tra — CHƯA SỬA, đây là việc ưu tiên cho session sau
+
+Trong lúc điều tra, đã kiểm tra tầng server và xác nhận: **`/api/signing/create-request`
+(`src/app/api/signing/create-request/route.ts`, gọi `createSigningRequest()` trong
+`src/lib/signing/requests.ts`) HOÀN TOÀN KHÔNG kiểm tra quyền sở hữu** — chỉ check token hợp lệ
+(`requireAuthUser`) + đúng `factory_id` (dòng 31-38 của route). Không check `maintenance.create`/
+`quality.edit`/`dispatch.edit`, không check `banGhiId`/`maHoSo` có thuộc về người gọi hay không.
+
+**Đã xác nhận qua grep — đúng 3 module thực sự gọi route này** (không phải 6 module như tài liệu
+kế hoạch gốc `du_an_ky_so_dung_chung` liệt kê — ISO/Văn bản/Thực hiện hồ sơ ISO vẫn dùng hệ ký
+RIÊNG của chúng, không qua `yeu_cau_ky`/`create-request`):
+- `src/app/dashboard/maintenance/records/_components/maintenance-sign-modal.tsx`
+- `src/app/dashboard/dispatch/_components/dispatch-sign-modal.tsx`
+- `src/app/dashboard/quality/_components/quality-sign-modal.tsx`
+
+**Hệ quả thật**: 1 user bất kỳ cùng nhà máy (kể cả KHÔNG có `maintenance.create`/`quality.edit`/
+`dispatch.edit`) có thể gọi thẳng `/api/signing/create-request` (vd qua devtools/fetch, không
+qua UI) để tạo yêu cầu ký cho BẤT KỲ biên bản/ngày KN/phiếu điều xe nào trong nhà máy của họ —
+bypass hoàn toàn gate UI vừa fix ở trên. Đây **cùng loại gap** đã ghi nhận trước đó trong lịch sử
+file này cho các hành động khác ("chỉ chặn ở UI, chưa chặn ở DB/server") — không phải phát hiện
+hoàn toàn mới về BẢN CHẤT, nhưng đây là lần đầu áp dụng đúng cho hành động "tạo yêu cầu ký".
+
+### Dữ liệu đã xác nhận sẵn cho session sau — không cần re-derive từ đầu
+
+**Công thức ownership CHÍNH XÁC đang dùng ở client, phải mirror đúng khi viết server-side**:
+
+- **Bảo trì** (`maintenance_records`): KHÔNG có cột `created_by` UUID, chỉ có
+  `nguoi_tao TEXT` (migration `20260511_maintenance_module.sql` dòng 54). Ownership check là
+  string-match: `record.nguoi_tao === user.full_name || record.nguoi_tao === user.username`
+  (xem `records/[id]/page.tsx` dòng ~506-509). Đây là kiểu so sánh MỎNG MANH hơn UUID (rủi ro
+  nếu user đổi tên hiển thị, hoặc 2 user trùng tên) — đã chấp nhận rủi ro này ở client từ trước,
+  session sau cần quyết định có mirror y hệt ở server hay nhân dịp thêm cột `created_by UUID`
+  cho `maintenance_records` (đúng kiểu Dispatch/Quality đã làm) — xem mục "Việc cần làm" bên
+  dưới, đây là 1 quyết định phạm vi cần cân nhắc, không tự ý chọn.
+- **Điều xe** (`dispatch_entries.created_by UUID`): `canOwnerEditEntry = isAdmin ||
+  entry.created_by === currentUser.id` (`dispatch/page.tsx` dòng ~1853-1854). **Quan trọng**:
+  đã "tighten" ngày 2026-08-31 — bản ghi cũ `created_by IS NULL` giờ CHỈ admin thao tác được
+  (không còn grandfather clause cho phép ai cũng sửa) — session sau PHẢI mirror đúng rule NGHIÊM
+  NÀY ở server, không tự ý quay lại rule cũ lỏng hơn.
+- **Chất lượng** (`qc_results.created_by UUID`, đơn vị sở hữu là "ngày", không phải 1 dòng):
+  `canOwnerAct = isAdmin || dateResults.some(r => r.created_by === currentUser.id)` (nghĩa là
+  chỉ cần user đã tạo ÍT NHẤT 1 phiếu trong ngày đó) (`quality/page.tsx` dòng ~2186-2189). Cùng
+  đã "tighten" 2026-08-31, cùng rule nghiêm (NULL → chỉ admin).
+
+**Hướng kiến trúc đề xuất** (chưa quyết định cuối, session sau cân nhắc): KHÔNG nhét logic
+per-module vào `src/lib/signing/requests.ts` (file này chủ đích generic, dùng chung mọi module,
+đã có comment đầu file khẳng định điều này) — nên thêm bước kiểm tra sở hữu NGAY TRONG
+`route.ts` (tầng HTTP, được phép biết về từng module cụ thể), theo dạng 1 map/switch nhỏ theo
+`body.modun`, mỗi nhánh tự query đúng bảng nguồn (`maintenance_records`/`dispatch_entries`/
+`qc_results`) bằng `body.banGhiId`/`body.maHoSo` rồi so đúng công thức đã liệt kê ở trên. Cần
+đọc lại chính xác `body.banGhiId`/`body.maHoSo` mapping từng module trong 3 file modal đã liệt
+kê ở trên trước khi viết — **không suy đoán field nào ứng với gì**.
+
+### Việc cần làm (ưu tiên theo thứ tự) — CHƯA CODE GÌ, chỉ điều tra + lên kế hoạch ở phiên này
+
+1. Đọc kỹ 3 file modal (`maintenance-sign-modal.tsx`, `dispatch-sign-modal.tsx`,
+   `quality-sign-modal.tsx`) để xác nhận chính xác `banGhiId`/`maHoSo` gửi lên là gì cho từng
+   module (đã có gợi ý ở trên nhưng cần đọc lại code thật, không suy đoán).
+2. Hỏi người dùng qua `AskUserQuestion` trước khi code: có muốn thêm cột `created_by UUID` cho
+   `maintenance_records` (đồng bộ kiểu với Dispatch/Quality, chắc chắn hơn) hay chấp nhận
+   string-match `nguoi_tao` ở cả server (nhanh hơn, không cần migration, nhưng giữ nguyên rủi ro
+   trùng tên/đổi tên đã biết)?
+3. Viết bước kiểm tra sở hữu trong `src/app/api/signing/create-request/route.ts` theo đúng
+   hướng kiến trúc ở trên (switch theo `body.modun`, mirror chính xác 3 công thức đã liệt kê,
+   đặc biệt rule "NULL/không khớp → chỉ admin" đã tighten 2026-08-31 — không nới lỏng lại).
+   Trả lỗi 403 rõ ràng tiếng Việt nếu không đủ điều kiện.
+4. Kiểm tra xem `cancel-request`/`sign-field`/`return-request` (các route ký khác dùng chung)
+   có cùng loại gap không — CHƯA điều tra trong phiên này, chỉ mới xác nhận `create-request`.
+5. Test tay: dùng 1 tài khoản KHÔNG sở hữu bất kỳ dữ liệu nào của module, thử gọi API trực tiếp
+   (không qua UI, vd `fetch()` trong devtools) cho cả 3 module → xác nhận bị chặn đúng 403; tài
+   khoản chủ sở hữu/admin vẫn tạo được bình thường qua UI như cũ.
+6. Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm tra — không chạy `npm run build` khi
+   không chắc dev server người dùng có đang chạy song song hay không.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-01, tiếp — phiên mới 4)" trong CLAUDE.md (ngay phía trên) — bug
+"Gửi ký duyệt hiện vô điều kiện" ở tầng UI Bảo trì ĐÃ FIX VÀ ĐÃ PUSH (63876ed). Việc ưu tiên số
+1 của phiên này là gap SÂU HƠN: /api/signing/create-request (route dùng chung cho Bảo trì/Điều
+xe/Chất lượng) hoàn toàn không kiểm tra quyền sở hữu ở tầng server — bất kỳ user cùng nhà máy
+nào cũng có thể gọi thẳng API tạo yêu cầu ký cho biên bản/ngày/phiếu không phải của họ, bypass
+hết gate UI.
+
+Làm theo đúng thứ tự mục "Việc cần làm" trong CLAUDE.md:
+1. Đọc lại 3 file modal (maintenance-sign-modal.tsx/dispatch-sign-modal.tsx/
+   quality-sign-modal.tsx) xác nhận chính xác banGhiId/maHoSo gửi lên cho từng module.
+2. BẮT BUỘC hỏi tôi qua AskUserQuestion trước khi code: có thêm cột created_by UUID cho
+   maintenance_records (đồng bộ Dispatch/Quality) hay chấp nhận string-match nguoi_tao ở
+   server luôn (không cần migration)?
+3. Viết bước kiểm tra sở hữu trong route.ts theo switch(modun), mirror ĐÚNG 3 công thức đã ghi
+   sẵn trong CLAUDE.md (đặc biệt rule "NULL/không khớp created_by → chỉ admin" đã tighten
+   2026-08-31 — không được nới lỏng lại thành grandfather clause cũ).
+4. Kiểm tra thêm cancel-request/sign-field/return-request có cùng loại gap không (chưa điều
+   tra trong phiên trước).
+5. Test tay bằng tài khoản không sở hữu dữ liệu, gọi thẳng API (không qua UI) xác nhận bị chặn
+   403 cho cả 3 module; tài khoản hợp lệ vẫn hoạt động bình thường qua UI.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
