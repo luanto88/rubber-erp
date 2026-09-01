@@ -60,37 +60,40 @@ function bytesToBase64(bytes: Uint8Array): string {
 // Tải lại toàn bộ dữ liệu biên bản trực tiếp từ DB (không dùng state form đang sửa của trang
 // chi tiết — form đó dùng shape DraftLine/DraftMaterial khác hẳn RecordData/LineData của
 // maintenance-pdf.ts) — mirror đúng cách maintenance/print/page.tsx tải dữ liệu cho su_co_nho.
+//
+// Hiệu năng: bản gốc query `maintenance_materials` RIÊNG CHO TỪNG DÒNG thiết bị, tuần tự (await
+// trong vòng lặp) — N dòng thiết bị = N round-trip nối tiếp, cộng dồn độ trễ mạng rất rõ (đúng
+// nguyên nhân "luồng ký duyệt chậm" đã báo — hàm này chạy ngay khi bấm "Tạo yêu cầu ký", chặn
+// UI cho tới khi xong). Đã gộp lại: `record`/`rawLines`/`staffData` chạy song song
+// (Promise.all), rồi 1 query DUY NHẤT lấy vật tư của TẤT CẢ dòng cùng lúc (`line_id IN (...)`)
+// và tự gom nhóm ở client — mirror đúng pattern `matsMap` đã dùng ở `loadRecord()` trong
+// `records/[id]/page.tsx`.
 async function loadRecordForSigning(recordId: string, factoryId: string): Promise<{ record: RecordData; staffMap: Map<string, string> } | null> {
-  const { data: rec } = await supabase
-    .from("maintenance_records")
-    .select("*")
-    .eq("id", recordId)
-    .eq("factory_id", factoryId)
-    .single()
+  const [{ data: rec }, { data: rawLines }, { data: staffData }] = await Promise.all([
+    supabase.from("maintenance_records").select("*").eq("id", recordId).eq("factory_id", factoryId).single(),
+    supabase.from("maintenance_record_lines").select("*").eq("record_id", recordId).order("sort_order"),
+    supabase.from("maintenance_staff").select("ten, chuc_vu").eq("factory_id", factoryId).eq("active", true),
+  ])
   if (!rec) return null
 
-  const { data: rawLines } = await supabase
-    .from("maintenance_record_lines")
-    .select("*")
-    .eq("record_id", recordId)
-    .order("sort_order")
+  const lineIds = (rawLines || []).map((ln) => ln.id as string)
+  const { data: matsData } = lineIds.length > 0
+    ? await supabase.from("maintenance_materials").select("*").in("line_id", lineIds).order("sort_order")
+    : { data: [] as { line_id: string }[] }
 
-  const lines: LineData[] = []
-  for (const ln of rawLines || []) {
-    const { data: mats } = await supabase
-      .from("maintenance_materials")
-      .select("*")
-      .eq("line_id", ln.id)
-      .order("sort_order")
-    lines.push({ ...(ln as Omit<LineData, "materials">), materials: (mats || []) as MaterialRow[] })
+  const matsMap = new Map<string, MaterialRow[]>()
+  for (const m of (matsData || []) as (MaterialRow & { line_id: string })[]) {
+    const arr = matsMap.get(m.line_id) || []
+    arr.push(m)
+    matsMap.set(m.line_id, arr)
   }
+
+  const lines: LineData[] = (rawLines || []).map((ln) => ({
+    ...(ln as Omit<LineData, "materials">),
+    materials: matsMap.get(ln.id as string) || [],
+  }))
   const record = { ...(rec as Omit<RecordData, "lines">), lines }
 
-  const { data: staffData } = await supabase
-    .from("maintenance_staff")
-    .select("ten, chuc_vu")
-    .eq("factory_id", factoryId)
-    .eq("active", true)
   const staffMap = new Map<string, string>()
   for (const s of (staffData || []) as { ten: string; chuc_vu: string | null }[]) {
     if (s.ten && s.chuc_vu) staffMap.set(s.ten, s.chuc_vu)

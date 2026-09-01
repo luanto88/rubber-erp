@@ -271,6 +271,42 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const commonSlotInputRef = useRef<HTMLInputElement | null>(null)
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
 
+  // Dirty-tracking cho nút "Lưu" (bug đã báo: nút luôn sáng dù không sửa gì, bấm nhầm sau lần
+  // lưu đầu tạo bản ghi trùng lặp). `savedSnapshot` là snapshot JSON của nội dung form NGAY LÚC
+  // vừa nạp/lưu xong; so với snapshot hiện tại để biết có thay đổi thật hay không. `loadVersion`
+  // tăng ở cuối loadRecord() — dùng làm tín hiệu "state đã nạp XONG HOÀN CHỈNH" (loadRecord có
+  // await ở giữa nên setLines() luôn chạy ở tick SAU setRecord()/setHangMuc()..., không thể đọc
+  // state ngay sau khi gọi loadRecord() mà chắc chắn đã có giá trị mới nhất).
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
+  const [loadVersion, setLoadVersion] = useState(0)
+
+  // Chỉ tính các trường THỰC SỰ được lưu vào DB — bỏ `id`/`expanded` của từng dòng (id tạm phía
+  // client, đổi mỗi lần loadRecord() dựng lại mảng) và `id` của từng vật tư, để không báo "có
+  // thay đổi" giả chỉ vì mở/đóng 1 dòng hoặc vì id tạm khác nhau giữa 2 lần load.
+  const buildFormSnapshot = () => JSON.stringify({
+    hangMuc, ngay, tuGio, denGio, boPhan, ghiChu,
+    noiDungChung, nguyenNhanChung, cacKhacPhucChung, imageUrlsChung,
+    selectedStaff, nvPhuTrach, bgdPhuTrach, giamDoc,
+    lines: lines.map((l) => ({
+      asset_id: l.asset_id, dispatch_vehicle_id: l.dispatch_vehicle_id || "",
+      ten_tb: l.ten_tb, ma_tb: l.ma_tb, ten_tai_xe: l.ten_tai_xe,
+      noi_dung: l.noi_dung, nguyen_nhan: l.nguyen_nhan, cac_khac_phuc: l.cac_khac_phuc,
+      loai_sua_chua: l.loai_sua_chua, chi_phi_dk: l.chi_phi_dk, loai_tien: l.loai_tien,
+      cong_tho: l.cong_tho, nhien_lieu_su_dung: l.nhien_lieu_su_dung, dvt_do: l.dvt_do,
+      so_luong_do: l.so_luong_do, km_dong_ho: l.km_dong_ho, chat_luong: l.chat_luong,
+      image_urls: l.image_urls,
+      materials: l.materials.map((m) => ({
+        nguon: m.nguon, inventory_item_id: m.inventory_item_id, ten_vat_tu: m.ten_vat_tu,
+        dvt: m.dvt, so_luong: m.so_luong, don_gia: m.don_gia, loai_tien: m.loai_tien,
+      })),
+    })),
+  })
+
+  // true khi nội dung hiện tại khác baseline đã lưu — cổng chính cho nút "Lưu". `savedSnapshot`
+  // null nghĩa là baseline CHƯA kịp chụp (khoảnh khắc rất ngắn lúc mount) — coi như "có thể lưu"
+  // để không lỡ khóa nhầm người dùng do race, giữ đúng hành vi cũ (luôn bật) cho tới lúc đó.
+  const isDirty = savedSnapshot === null || buildFormSnapshot() !== savedSnapshot
+
   // dispatch_vehicles (Đội xe mode)
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([])
@@ -503,7 +539,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // trong lúc này để không mất ảnh (ảnh chỉ được gộp vào state SAU khi upload xong hoàn toàn).
   const isUploadingAnyImage = uploadingSlot !== null || uploadingChungSlot
 
-  const isCreator = isNew || (
+  // Sau lần Lưu đầu tiên, URL vẫn giữ nguyên "new" cho tới khi banner KPI đóng (điều hướng bị
+  // delay có chủ đích — xem comment ở savedRecordId phía trên) — nhưng bản ghi THẬT đã tồn tại
+  // trong DB. Mọi logic quyết định "đây có phải bản ghi CHƯA TỪNG lưu" phải dùng
+  // effectiveIsNew/effectiveId (không phải isNew/id thô) — nếu không: (1) Lưu lần 2 sẽ tạo bản
+  // ghi trùng lặp thay vì cập nhật (bug đã báo), (2) badge/modal ký duyệt không nhận ra bản ghi
+  // đã tồn tại nên bấm "Gửi ký duyệt" không phản hồi gì (bug đã báo).
+  const effectiveIsNew = isNew && !savedRecordId
+  const effectiveId = savedRecordId ?? id
+
+  const isCreator = effectiveIsNew || (
     record?.nguoi_tao != null &&
     (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
   )
@@ -536,7 +581,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     (record?.trang_thai === "huy" ||
       record?.trang_thai === "da_duyet" ||
       isSigningInProgress ||
-      (!isNew && !isCreator))
+      (!effectiveIsNew && !isCreator))
   // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt và không đang luân chuyển ký; admin xóa
   // được mọi trạng thái.
   const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet" && !isSigningInProgress)
@@ -798,6 +843,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setLines(draftLines)
     setSelectedAssetIds(draftLines.filter((l) => l.asset_id).map((l) => l.asset_id))
     setSelectedVehicleIds(draftLines.filter((l) => l.dispatch_vehicle_id).map((l) => l.dispatch_vehicle_id!))
+    // Đánh dấu "vừa nạp xong hoàn chỉnh" — effect riêng bên dưới sẽ chụp snapshot làm baseline
+    // cho dirty-tracking (không chụp trực tiếp ở đây vì các setState phía trên chưa commit).
+    setLoadVersion((v) => v + 1)
   }, [])
 
   useEffect(() => {
@@ -825,17 +873,28 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setExtMaterials(e)
       await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
 
-      if (!isNew) await loadRecord(fid, id)
+      if (!isNew) {
+        await loadRecord(fid, id)
+      } else {
+        // Form trống, mặc định (Sửa chữa/ngày hôm nay/giờ hiện tại...) — chụp baseline ngay để
+        // nút "Lưu" bắt đầu ở trạng thái tắt cho tới khi người dùng thực sự thay đổi gì đó.
+        setLoadVersion((v) => v + 1)
+      }
     }
     void bootstrap().finally(() => setLoading(false))
   }, [id, isNew, loadRecord])
 
+  // Chụp snapshot NGAY SAU khi loadRecord() (hoặc nhánh form trống ở trên) đã nạp xong hoàn
+  // chỉnh — làm baseline cho dirty-tracking của nút "Lưu".
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setSavedSnapshot(buildFormSnapshot()) }, [loadVersion])
+
   // Tải trạng thái ký duyệt điện tử — chỉ khi biên bản khớp đúng 1 trong 4 bundle hỗ trợ ký số
   // (khớp đúng nút "In biên bản" của từng nhánh bên dưới).
   useEffect(() => {
-    if (!factoryId || (isNew && !savedRecordId) || !signBundle) { setSigningStatus(undefined); return }
-    void loadSigningStatus(factoryId, savedRecordId ?? id)
-  }, [factoryId, id, isNew, savedRecordId, signBundle, loadSigningStatus])
+    if (!factoryId || effectiveIsNew || !signBundle) { setSigningStatus(undefined); return }
+    void loadSigningStatus(factoryId, effectiveId)
+  }, [factoryId, effectiveId, effectiveIsNew, signBundle, loadSigningStatus])
 
   // Close material dropdown when clicking outside
   useEffect(() => {
@@ -1069,8 +1128,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
     setSaving(true); setSaveError(null)
     try {
-      const maBB = isNew ? await generateMaBB(factoryId, ngay, boPhan) : (record?.ma_bb || null)
-      const nguoiTao = isNew ? (user?.full_name || user?.username || null) : record?.nguoi_tao
+      const maBB = effectiveIsNew ? await generateMaBB(factoryId, ngay, boPhan) : (record?.ma_bb || null)
+      const nguoiTao = effectiveIsNew ? (user?.full_name || user?.username || null) : record?.nguoi_tao
 
       const headerPayload = {
         factory_id: factoryId,
@@ -1098,9 +1157,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         trang_thai: record?.trang_thai || "cho_duyet",
       }
 
-      let recordId = id !== "new" ? id : null
+      let recordId = effectiveIsNew ? null : effectiveId
 
-      if (isNew) {
+      if (effectiveIsNew) {
         // Retry khi trùng ma_bb (23505) — hiếm gặp, chỉ xảy ra nếu 2 người bấm Lưu gần
         // như đồng thời cho cùng bộ phận + cùng ngày. generateMaBB() giờ đã lấy số lớn
         // nhất + 1 nên lần thử lại sẽ tự nhảy qua số vừa bị chiếm. Lỗi khác 23505 báo
@@ -1129,7 +1188,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         const { error: updErr } = await supabase
           .from("maintenance_records")
           .update(headerPayload)
-          .eq("id", id)
+          .eq("id", effectiveId)
           .eq("factory_id", factoryId)
         if (updErr) { setSaveError(updErr.message); return }
       }
@@ -1137,7 +1196,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       if (!recordId) { setSaveError("Không tạo được biên bản"); return }
 
       // Delete old lines & materials when editing
-      if (!isNew) {
+      if (!effectiveIsNew) {
         await supabase.from("maintenance_materials").delete().eq("record_id", recordId)
         await supabase.from("maintenance_record_lines").delete().eq("record_id", recordId)
       }
@@ -1219,16 +1278,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       }
 
       const kpiLabel = maBB || record?.ma_bb || "Biên bản bảo trì"
-      if (isNew) {
+      if (effectiveIsNew) {
         // Nạp lại bản ghi thật + đánh dấu "đã lưu xong" NGAY (độc lập với URL) để badge "Gửi ký
         // duyệt" hiện ra ngay, không cần đợi router.push (vẫn delay tới khi đóng banner KPI).
+        // Chỉ chạy ĐÚNG 1 LẦN cho lần Lưu đầu tiên — từ lần Lưu thứ 2 trở đi (kể cả khi vẫn
+        // đang ở URL "new", chưa điều hướng), effectiveIsNew đã false nên rơi vào nhánh else.
         await loadRecord(factoryId, recordId)
         setSavedRecordId(recordId)
         // KHÔNG router.push ngay — điều hướng bị delay tới khi KpiLinkPrompt đóng (onDone).
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel, navigateTo: `/dashboard/maintenance/records/${recordId}` })
       } else {
         setSaveSuccess(`Đã lưu biên bản ${record?.ma_bb || ""}. Trạng thái: ${trangThaiLabel(record?.trang_thai)}.`)
-        void loadRecord(factoryId, id)
+        void loadRecord(factoryId, effectiveId)
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel })
       }
     } catch (e) {
@@ -1310,7 +1371,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
               <Wrench size={20} className="text-orange-500" />
-              {isNew ? "Tạo biên bản mới" : (record?.ma_bb || "Biên bản bảo trì")}
+              {effectiveIsNew ? "Tạo biên bản mới" : (record?.ma_bb || "Biên bản bảo trì")}
             </h1>
             {record && <div className="mt-1">{statusBadge}</div>}
           </div>
@@ -1335,7 +1396,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <Loader2 size={12} className="animate-spin" /> Đang tải ảnh lên — vui lòng đợi trước khi lưu...
             </span>
           )}
-          {(!isNew || savedRecordId) && record && (
+          {!effectiveIsNew && record && (
             <>
               {record.hang_muc === "Sửa chữa" && (() => {
                     const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
@@ -1355,7 +1416,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             </a>
                           ) : (
                             <Link
-                              href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${id}`}
+                              href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${effectiveId}`}
                               target="_blank"
                               title="Sửa chữa nhỏ (chưa ký)"
                               className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
@@ -1396,7 +1457,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           </a>
                         ) : (
                           <Link
-                            href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${id}`}
+                            href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${effectiveId}`}
                             target="_blank"
                             title="In biên bản (chưa ký)"
                             className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
@@ -1431,7 +1492,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         </a>
                       ) : (
                         <Link
-                          href={`/dashboard/maintenance/print?type=bao_duong&record_id=${id}`}
+                          href={`/dashboard/maintenance/print?type=bao_duong&record_id=${effectiveId}`}
                           target="_blank"
                           title="In biên bản (chưa ký)"
                           className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
@@ -1465,7 +1526,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         </a>
                       ) : (
                         <Link
-                          href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${id}`}
+                          href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${effectiveId}`}
                           target="_blank"
                           title="In biên bản (chưa ký)"
                           className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
@@ -1492,7 +1553,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               — nút "Gửi ký duyệt" tự hiện ngay khi biên bản vừa lưu xong, không cần trang_thai
               === "da_duyet" nữa; trang_thai giờ do signField() tự chuyển khi ký hoàn tất). */}
           {/* GỬI DUYỆT LẠI — creator khi tu_choi (dữ liệu lịch sử từ trước khi bỏ nút "Từ chối"), quay về cho_duyet */}
-          {!isNew && record?.trang_thai === "tu_choi" && isCreator && (
+          {!effectiveIsNew && record?.trang_thai === "tu_choi" && isCreator && (
             <button
               onClick={handleResubmit}
               disabled={saving || isUploadingAnyImage}
@@ -1503,7 +1564,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             </button>
           )}
           {/* HỦY BIÊN BẢN — creator khi cho_duyet; admin được hủy cả biên bản đã duyệt */}
-          {!isNew && record?.trang_thai === "cho_duyet" && isCreator && (
+          {!effectiveIsNew && record?.trang_thai === "cho_duyet" && isCreator && (
             <button
               onClick={handleCancel}
               disabled={saving || isUploadingAnyImage}
@@ -1513,7 +1574,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <X size={16} />
             </button>
           )}
-          {!isNew && record?.trang_thai === "da_duyet" && isAdmin && (
+          {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
             <button
               onClick={handleCancel}
               disabled={saving || isUploadingAnyImage}
@@ -1524,7 +1585,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             </button>
           )}
           {/* XÓA BIÊN BẢN — creator khi cho_duyet; admin xóa được mọi trạng thái */}
-          {!isNew && canDelete && (
+          {!effectiveIsNew && canDelete && (
             <button
               onClick={handleDeleteRecord}
               disabled={saving || isUploadingAnyImage}
@@ -1537,7 +1598,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {/* HỦY SAU KHI HOÀN TẤT — admin-only, khi da_duyet (đã ký xong + đã xuất kho tự động).
               Thay thế "Hủy phê duyệt" cũ — đảo ngược xuất kho + đưa biên bản về chờ ký + đánh
               dấu yêu cầu ký cũ là 'huy' (giữ làm lịch sử) để tạo yêu cầu ký mới được. */}
-          {!isNew && record?.trang_thai === "da_duyet" && isAdmin && (
+          {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
             <button
               onClick={handleReverseApproval}
               disabled={saving || isUploadingAnyImage}
@@ -1547,11 +1608,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <RotateCcw size={16} />
             </button>
           )}
-          {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới */}
+          {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới. Chỉ sáng khi có thay đổi
+              thật (bug đã báo: nút luôn sáng dù không sửa gì → bấm nhầm sau lần lưu đầu tạo bản
+              ghi trùng lặp). Dù `!isDirty` không còn chặn được duplicate nữa (đã fix ở
+              handleSave qua effectiveIsNew — bấm lại giờ chỉ lưu đè, không tạo mới), vẫn giữ gate
+              này để đúng mong muốn UX đã yêu cầu. */}
           {!isReadOnly && (
             <button
               onClick={handleSave}
-              disabled={saving || isUploadingAnyImage}
+              disabled={saving || isUploadingAnyImage || !isDirty}
+              title={saving ? "Đang lưu..." : !isDirty ? "Chưa có thay đổi nào để lưu" : undefined}
               className="flex items-center gap-1 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
             >
               <Save size={13} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
@@ -2662,12 +2728,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </ModalShell>
       )}
 
-      {signModalOpen && factoryId && !isNew && signBundle && (
+      {signModalOpen && factoryId && !effectiveIsNew && signBundle && (
         <MaintenanceSignModal
           open={signModalOpen}
           onClose={() => setSignModalOpen(false)}
           factoryId={factoryId}
-          recordId={id}
+          recordId={effectiveId}
           maBb={record?.ma_bb ?? null}
           bundle={signBundle}
         />
