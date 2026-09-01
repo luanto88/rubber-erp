@@ -28,6 +28,7 @@ type RecentRecord = {
   bo_phan: string
   ngay: string
   trang_thai: string
+  nguoi_tao: string | null
   lines_count: number
   maintenance_record_lines: { loai_sua_chua: string | null }[]
 }
@@ -104,7 +105,7 @@ export default function MaintenanceDashboardPage() {
           .gte("ngay", firstOfMonth),
         supabase
           .from("maintenance_records")
-          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, maintenance_record_lines(loai_sua_chua)")
+          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, nguoi_tao, maintenance_record_lines(loai_sua_chua)")
           .eq("factory_id", fid)
           .order("created_at", { ascending: false })
           .limit(8),
@@ -150,6 +151,12 @@ export default function MaintenanceDashboardPage() {
 
   const canCreate = hasPermission(user, "maintenance.create")
   const canPrint = hasPermission(user, "maintenance.print")
+  const isAdmin = user?.role === "admin"
+  // "Gửi ký duyệt" chỉ dành cho người tạo chính biên bản đó (hoặc admin) — mirror ĐÚNG công
+  // thức isCreator ở records/[id]/page.tsx và canOwnerAct ở records/page.tsx. canCreate ở trên
+  // chỉ là quyền chung, KHÔNG được dùng trực tiếp cho badge Ký duyệt per-row.
+  const canOwnerAct = (r: RecentRecord) =>
+    isAdmin || (r.nguoi_tao != null && (r.nguoi_tao === user?.full_name || r.nguoi_tao === user?.username))
 
   return (
     <MaintenanceShell>
@@ -278,7 +285,7 @@ export default function MaintenanceDashboardPage() {
                             <MaintenanceSignStatusBadge
                               status={status}
                               currentUser={user}
-                              canCreate={canCreate}
+                              canCreate={canCreate && canOwnerAct(r)}
                               onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
                               onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
                               showToast={(msg, ok = true) => setToast({ msg, ok })}

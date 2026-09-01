@@ -255,6 +255,13 @@ export default function MaintenanceRecordsPage() {
 
   const canCreate = hasPermission(user, "maintenance.create")
   const canPrint = hasPermission(user, "maintenance.print")
+  const isAdmin = user?.role === "admin"
+  // "Gửi ký duyệt" chỉ dành cho người tạo chính biên bản đó (hoặc admin) — mirror ĐÚNG công
+  // thức isCreator ở records/[id]/page.tsx (dòng ~506-509). canCreate ở trên chỉ là quyền chung
+  // (dùng đúng cho nút "+ Tạo biên bản"), KHÔNG được dùng trực tiếp cho badge Ký duyệt per-row —
+  // đây là bug đã báo (nút hiện cho mọi người bất kể ai tạo biên bản).
+  const canOwnerAct = (r: RecordRow) =>
+    isAdmin || (r.nguoi_tao != null && (r.nguoi_tao === user?.full_name || r.nguoi_tao === user?.username))
 
   const filtered = records.filter((r) => {
     if (!filterSearch) return true
@@ -570,7 +577,7 @@ export default function MaintenanceRecordsPage() {
                             <MaintenanceSignStatusBadge
                               status={status}
                               currentUser={user}
-                              canCreate={canCreate}
+                              canCreate={canCreate && canOwnerAct(r)}
                               onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
                               onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
                               showToast={(msg, ok = true) => setToast({ msg, ok })}
