@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ClipboardCheck, Package, RotateCcw, Warehouse } from "lucide-react"
+import { AlertTriangle, ClipboardCheck, ExternalLink, Package, RotateCcw, ShieldCheck, Warehouse } from "lucide-react"
 import { buildNganLookupPath, fetchProductLabelLookupPublic, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
-import { loadStoredLang, storeLang, t, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n"
+import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n"
 
 type ProductLabelClientProps = {
   factoryId: string
@@ -14,12 +14,44 @@ type ProductLabelClientProps = {
   kien: KienLetter
 }
 
-// "produced"/"partial_kien" đều hiển thị badge riêng — "partial_kien" (2026-07-16) là kiện đã có
-// MỘT PHẦN bành, khác hẳn "produced" (đã đủ) — xem resolveProductLabelLookupTarget để biết công
-// thức tính đúng (SUM tất cả giao dịch so với max_per_kien, không còn kiểm tra tồn-tại đơn thuần).
+function formatStorageTime(value?: string | null) {
+  if (!value) return null
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return null
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function formatPalletDisplay(pallet: string[] | string | null | undefined, lang: Lang): string {
+  if (!pallet) return "—"
+  if (Array.isArray(pallet)) {
+    const list = pallet.filter(Boolean).map((p) => palletLabel(lang, String(p)))
+    return list.length > 0 ? list.join(", ") : "—"
+  }
+  if (typeof pallet === "string") {
+    const trimmed = pallet.trim()
+    if (!trimmed) return "—"
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          const list = parsed.filter(Boolean).map((p) => palletLabel(lang, String(p)))
+          return list.length > 0 ? list.join(", ") : "—"
+        }
+      } catch {
+        // fallback
+      }
+    }
+    return palletLabel(lang, trimmed)
+  }
+  return "—"
+}
+
+// "produced"/"partial_kien"/"exported" đều hiển thị badge riêng
 const STATUS_STYLE: Record<ProductLabelLookupResult["status"], string> = {
   predicted: "bg-amber-100 text-amber-700",
   produced: "bg-emerald-100 text-emerald-700",
+  exported: "bg-blue-100 text-blue-700",
   partial: "bg-slate-100 text-slate-600",
   partial_kien: "bg-amber-100 text-amber-700",
   not_found: "bg-red-100 text-red-600",
@@ -82,6 +114,7 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
   const statusLabelKey: Record<ProductLabelLookupResult["status"], string> = {
     predicted: "plStatusPredicted",
     produced: "plStatusProduced",
+    exported: "plStatusExported",
     partial: "plStatusPartial",
     partial_kien: "plStatusPartialKien",
     not_found: "plStatusNotFound",
@@ -156,13 +189,35 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
                 <div className="text-xs font-bold text-slate-500">{tt("ngaySanXuat")}</div>
                 <div
                   className={`font-semibold ${
-                    (data.status === "produced" || data.status === "partial_kien") && data.ngaySx
+                    (data.status === "produced" || data.status === "partial_kien" || data.status === "exported") && data.ngaySx
                       ? "text-slate-800"
                       : "text-amber-600"
                   }`}
                 >
-                  {(data.status === "produced" || data.status === "partial_kien") && data.ngaySx
+                  {(data.status === "produced" || data.status === "partial_kien" || data.status === "exported") && data.ngaySx
                     ? formatStorageDate(data.ngaySx)
+                    : tt("plChoNhapLieu")}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-500">{tt("loaiPallet")}</div>
+                <div className="font-semibold text-slate-800">
+                  {formatPalletDisplay(data.pallet, lang)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-500">{tt("gioSanXuat")}</div>
+                <div
+                  className={`font-semibold ${
+                    (data.status === "produced" || data.status === "partial_kien" || data.status === "exported") &&
+                    formatStorageTime(data.gioSx)
+                      ? "text-slate-800"
+                      : "text-amber-600"
+                  }`}
+                >
+                  {(data.status === "produced" || data.status === "partial_kien" || data.status === "exported") &&
+                  formatStorageTime(data.gioSx)
+                    ? formatStorageTime(data.gioSx)
                     : tt("plChoNhapLieu")}
                 </div>
               </div>
@@ -170,10 +225,12 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
                 <div className="text-xs font-bold text-slate-500">{tt("caSanXuat")}</div>
                 <div
                   className={`font-semibold ${
-                    data.status === "produced" || data.status === "partial_kien" ? "text-slate-800" : "text-amber-600"
+                    data.status === "produced" || data.status === "partial_kien" || data.status === "exported"
+                      ? "text-slate-800"
+                      : "text-amber-600"
                   }`}
                 >
-                  {data.status === "produced" || data.status === "partial_kien"
+                  {data.status === "produced" || data.status === "partial_kien" || data.status === "exported"
                     ? data.ca
                       ? `${tt("caSanXuat")} ${data.ca}`
                       : "—"
@@ -201,6 +258,21 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
               <ClipboardCheck size={18} />
               {tt("plXacNhanSanXuat")}
             </Link>
+          )}
+
+          {data.eudrOrderUrl && (
+            <a
+              href={data.eudrOrderUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={18} />
+                <span>{tt("plTruyXuatEudr", { maDon: data.eudrOrderCode || "" })}</span>
+              </div>
+              <ExternalLink size={16} />
+            </a>
           )}
 
           {data.nganId && (

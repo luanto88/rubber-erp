@@ -107,6 +107,7 @@ export type MaintenanceRecord = {
   den_gio: string | null
   bo_phan: string
   nguoi_tao: string | null
+  created_by: string | null
   nguoi_thuc_hien: string[]
   nv_phu_trach: string | null
   phu_trach_bao_tri: string | null

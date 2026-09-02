@@ -548,9 +548,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const effectiveIsNew = isNew && !savedRecordId
   const effectiveId = savedRecordId ?? id
 
+  // Chỉ người tạo (created_by, hoặc admin) mới được Sửa/Ký duyệt biên bản này.
+  // Biên bản CŨ (trước migration 20260902, created_by NULL) chỉ admin xử lý được —
+  // không fallback về so khớp nguoi_tao (TEXT) như trước, đồng bộ với rule đã
+  // tighten ở Điều xe/Chất lượng (2026-08-31).
   const isCreator = effectiveIsNew || (
-    record?.nguoi_tao != null &&
-    (record.nguoi_tao === user?.full_name || record.nguoi_tao === user?.username)
+    record?.created_by != null && record.created_by === user?.id
   )
   const isAdmin = user?.role === "admin"
   // Ký duyệt điện tử (Giai đoạn 5) — mỗi biên bản chỉ khớp đúng 1 trong 4 bundle chứng từ,
@@ -1130,6 +1133,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     try {
       const maBB = effectiveIsNew ? await generateMaBB(factoryId, ngay, boPhan) : (record?.ma_bb || null)
       const nguoiTao = effectiveIsNew ? (user?.full_name || user?.username || null) : record?.nguoi_tao
+      const createdBy = effectiveIsNew ? (user?.id ?? null) : (record?.created_by ?? null)
 
       const headerPayload = {
         factory_id: factoryId,
@@ -1140,6 +1144,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         den_gio: denGio || null,
         bo_phan: boPhan,
         nguoi_tao: nguoiTao,
+        created_by: createdBy,
         nguoi_thuc_hien: selectedStaff,
         nv_phu_trach: nvPhuTrach || null,
         // Đồng bộ cùng giá trị "Nhân viên phụ trách" vào cột cũ để không phá vỡ dữ liệu/mẫu in cũ

@@ -30,11 +30,60 @@ export async function POST(req: NextRequest) {
 
     const { data: profile, error: profileErr } = await supabaseAdmin
       .from("profiles")
-      .select("factory_id")
+      .select("factory_id, role")
       .eq("id", authUser.id)
       .single()
     if (profileErr || !profile || profile.factory_id !== body.factoryId) {
       return NextResponse.json({ error: "Không có quyền tạo yêu cầu ký cho nhà máy này" }, { status: 403 })
+    }
+    const isAdmin = profile.role === "admin"
+
+    // Kiểm tra sở hữu bản ghi nghiệp vụ — trước đây chỉ check factory_id ở trên,
+    // bất kỳ ai cùng nhà máy cũng tạo được yêu cầu ký cho bản ghi của người khác.
+    if (!isAdmin) {
+      if (body.modun === "dispatch") {
+        if (!body.banGhiId) {
+          return NextResponse.json({ error: "Thiếu bản ghi phiếu điều xe" }, { status: 403 })
+        }
+        const { data: entry } = await supabaseAdmin
+          .from("dispatch_entries")
+          .select("created_by")
+          .eq("id", body.banGhiId)
+          .eq("factory_id", body.factoryId)
+          .maybeSingle()
+        if (!entry || entry.created_by !== authUser.id) {
+          return NextResponse.json({ error: "Bạn không có quyền gửi ký duyệt phiếu điều xe này" }, { status: 403 })
+        }
+      } else if (body.modun === "quality") {
+        if (!body.maHoSo) {
+          return NextResponse.json({ error: "Thiếu ngày kiểm nghiệm" }, { status: 403 })
+        }
+        const { data: rows } = await supabaseAdmin
+          .from("qc_results")
+          .select("id")
+          .eq("factory_id", body.factoryId)
+          .eq("ngay_kn", body.maHoSo)
+          .eq("created_by", authUser.id)
+          .limit(1)
+        if (!rows || rows.length === 0) {
+          return NextResponse.json({ error: "Bạn không có quyền gửi ký duyệt phiếu kiểm nghiệm ngày này" }, { status: 403 })
+        }
+      } else if (body.modun === "maintenance") {
+        if (!body.banGhiId) {
+          return NextResponse.json({ error: "Thiếu bản ghi biên bản bảo trì" }, { status: 403 })
+        }
+        const { data: rec } = await supabaseAdmin
+          .from("maintenance_records")
+          .select("created_by")
+          .eq("id", body.banGhiId)
+          .eq("factory_id", body.factoryId)
+          .maybeSingle()
+        if (!rec || rec.created_by !== authUser.id) {
+          return NextResponse.json({ error: "Bạn không có quyền gửi ký duyệt biên bản này" }, { status: 403 })
+        }
+      } else {
+        return NextResponse.json({ error: "Module không được hỗ trợ để tạo yêu cầu ký" }, { status: 400 })
+      }
     }
 
     const fileBytes = Buffer.from(body.fileBase64, "base64")

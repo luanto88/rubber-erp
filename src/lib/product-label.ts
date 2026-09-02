@@ -3,6 +3,8 @@ import { supabase } from "@/lib/supabase"
 import { buildStorageLookupPath } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
 
+import { normalizeLotStatus } from "@/app/dashboard/product/shared"
+
 export type KienLetter = "A" | "B" | "C" | "D"
 
 export const KIEN_LETTERS: KienLetter[] = ["A", "B", "C", "D"]
@@ -28,7 +30,8 @@ export function buildProductLabelLookupUrl(factoryId: string, maLo: string, kien
 // "partial_kien" (2026-07-16): kiện đã có MỘT PHẦN bành (đã bắt đầu sản xuất nhưng chưa đủ
 // max_per_kien) — trước đây bị gộp nhầm vào "produced" chỉ vì có >=1 giao dịch >0 (bug đã fix,
 // xem resolveProductLabelLookupTarget). Khác "partial" thuần túy (kiện CHƯA có giao dịch nào).
-export type ProductLabelStatus = "predicted" | "produced" | "partial" | "partial_kien" | "not_found"
+// "exported" (2026-09-02): lô thành phẩm đã chuyển trạng thái "Xuất hàng" hoặc nằm trong đơn xuất hàng.
+export type ProductLabelStatus = "predicted" | "produced" | "partial" | "partial_kien" | "exported" | "not_found"
 
 export type ProductLabelLookupResult = {
   status: ProductLabelStatus
@@ -37,12 +40,15 @@ export type ProductLabelLookupResult = {
   loaiCsr: string | null
   loaiBanh: number | null
   boc: string | null
+  pallet: string[] | string | null
   nganId: string | null
   nganMa: string | null
   nganTen: string | null
   ngaySx: string | null
+  // Giờ sản xuất thực tế (lấy thời điểm gửi kiện từ lot_transactions.created_at)
+  gioSx: string | null
   // Ca sản xuất thực tế (A/B/C) của giao dịch ĐÓNG GÓP GẦN NHẤT cho kiện này — có giá trị khi
-  // status = "produced" hoặc "partial_kien". Với "predicted"/"partial" luôn là null (kiện chưa
+  // status = "produced" hoặc "partial_kien" hoặc "exported". Với "predicted"/"partial" luôn là null (kiện chưa
   // được nhập liệu thật, UI hiển thị "Chờ nhập liệu" thay vì suy đoán).
   ca: string | null
   realLotId: string | null
@@ -51,9 +57,11 @@ export type ProductLabelLookupResult = {
   datHang: string | null
   // Tổng số bành đã ghi nhận cho ĐÚNG kiện này (SUM toàn bộ lot_transactions, không phải chỉ 1
   // giao dịch) và số bành tối đa cho phép của kiện — chỉ có giá trị khi status = "produced" hoặc
-  // "partial_kien". Dùng để hiển thị "Đã sản xuất N bành" và tính số còn thiếu ở UI.
+  // "partial_kien" hoặc "exported". Dùng để hiển thị "Đã sản xuất N bành" và tính số còn thiếu ở UI.
   existingBanh: number
   maxPerKien: number | null
+  eudrOrderCode: string | null
+  eudrOrderUrl: string | null
 }
 
 const KIEN_LOWER: Record<KienLetter, string> = { A: "a", B: "b", C: "c", D: "d" }
@@ -96,45 +104,61 @@ export async function resolveProductLabelLookupTarget(
       loaiCsr: null,
       loaiBanh: null,
       boc: null,
+      pallet: null,
       nganId: null,
       nganMa: null,
       nganTen: null,
       ngaySx: null,
+      gioSx: null,
       ca: null,
       realLotId: null,
       datHang: null,
       existingBanh: 0,
       maxPerKien: null,
+      eudrOrderCode: null,
+      eudrOrderUrl: null,
     }
   }
 
   // Case 1 — lô thật (ưu tiên cao nhất, áp dụng cho mọi lô bất kể có qua dự đoán hay không)
   const { data: lot } = await client
     .from("lots")
-    .select("id,ma_lo,loai_csr,loai_banh,boc,ngan_id")
+    .select("id,ma_lo,loai_csr,loai_banh,boc,pallet,trang_thai,ngan_id,created_at")
     .eq("factory_id", normalizedFactoryId)
     .eq("ma_lo", normalizedMaLo)
     .maybeSingle()
 
   if (lot) {
-    const { data: txRows } = await client
-      .from("lot_transactions")
-      .select("ngan_id,ngay_nhap,ca,kien_a,kien_b,kien_c,kien_d")
-      .eq("lot_id", lot.id)
-      .order("ngay_nhap", { ascending: false })
+    const [{ data: txRows }, { data: exportOrders }] = await Promise.all([
+      client
+        .from("lot_transactions")
+        .select("id,ngan_id,ngay_nhap,ca,kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
+        .eq("lot_id", lot.id)
+        .order("ngay_nhap", { ascending: false })
+        .order("created_at", { ascending: false }),
+      client
+        .from("export_orders")
+        .select("id,ma_don,public_token,assignments")
+        .eq("factory_id", normalizedFactoryId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ])
 
     const kienField = `kien_${kienKey}`
-    const rows = (txRows || []) as Array<{ ngan_id: string; ngay_nhap: string; ca: string | null }>
-    // Bug đã fix (2026-07-16): trước đây chỉ kiểm tra "có tồn tại giao dịch nào > 0" (dùng
-    // .find()), coi bất kỳ kiện nào đã bắt đầu (dù mới 1 bành) là "đã sản xuất xong" — SAI, phải
-    // SUM toàn bộ giao dịch của đúng kiện rồi so với max_per_kien, mirror đúng công thức đã dùng
-    // ở resolveKienForConfirm (confirm/actions.ts).
+    const rows = (txRows || []) as Array<{
+      id: string
+      ngan_id: string
+      ngay_nhap: string
+      ca: string | null
+      boc: string | null
+      pallet: string[] | string | null
+      created_at?: string | null
+    }>
+
     const existingBanh = rows.reduce(
       (sum, row) => sum + Number((row as unknown as Record<string, unknown>)[kienField] || 0),
       0,
     )
-    // rows đã order theo ngay_nhap desc — phần tử ĐẦU TIÊN có đóng góp cho kiện này là giao dịch
-    // gần nhất, dùng để hiển thị ngày/ca/ngăn.
     const lastKienTx = rows.find(
       (row) => Number((row as unknown as Record<string, unknown>)[kienField] || 0) > 0,
     )
@@ -144,72 +168,111 @@ export async function resolveProductLabelLookupTarget(
 
     const datHang = await fetchLatestDatHang(lot.id, client)
 
-    if (lastKienTx && existingBanh >= maxPerKien) {
+    // Tra cứu đơn xuất hàng liên quan
+    const matchedOrder = (exportOrders || []).find((ord) => {
+      const assigns = (ord.assignments || []) as Array<{ lot_id?: string; ma_lo?: string }>
+      return assigns.some((a) => a.lot_id === lot.id || a.ma_lo === normalizedMaLo)
+    })
+
+    let eudrOrderCode: string | null = null
+    let eudrOrderUrl: string | null = null
+    if (matchedOrder) {
+      eudrOrderCode = matchedOrder.ma_don
+      if (matchedOrder.public_token) {
+        eudrOrderUrl = `/eudr-order?token=${encodeURIComponent(matchedOrder.public_token)}`
+      } else {
+        eudrOrderUrl = `/dashboard/eudr/lookup?order=${encodeURIComponent(matchedOrder.ma_don)}`
+      }
+    }
+
+    const isLotExported = normalizeLotStatus(lot.trang_thai) === "Xuất hàng" || Boolean(matchedOrder)
+
+    const finalNganId = lastKienTx?.ngan_id || lot.ngan_id || null
+    let nganMa: string | null = null
+    let nganTen: string | null = null
+    if (finalNganId) {
       const { data: ngan } = await client
         .from("ngans")
         .select("id,ma_ngan,ten_ngan")
-        .eq("id", lastKienTx.ngan_id)
+        .eq("id", finalNganId)
         .maybeSingle()
+      nganMa = ngan?.ma_ngan || null
+      nganTen = ngan?.ten_ngan || null
+    }
+
+    const resolvedPallet = lastKienTx?.pallet || lot.pallet || null
+    const resolvedGioSx = lastKienTx?.created_at || (lot as { created_at?: string | null }).created_at || null
+
+    if (isLotExported) {
+      return {
+        status: "exported",
+        maLo: normalizedMaLo,
+        kien,
+        loaiCsr: lot.loai_csr,
+        loaiBanh: lot.loai_banh,
+        boc: lastKienTx?.boc || lot.boc || null,
+        pallet: resolvedPallet,
+        nganId: finalNganId,
+        nganMa,
+        nganTen,
+        ngaySx: lastKienTx?.ngay_nhap || null,
+        gioSx: resolvedGioSx,
+        ca: lastKienTx?.ca || null,
+        realLotId: lot.id,
+        datHang,
+        existingBanh,
+        maxPerKien: config?.max_per_kien ?? null,
+        eudrOrderCode,
+        eudrOrderUrl,
+      }
+    }
+
+    if (lastKienTx && existingBanh >= maxPerKien) {
       return {
         status: "produced",
         maLo: normalizedMaLo,
         kien,
         loaiCsr: lot.loai_csr,
         loaiBanh: lot.loai_banh,
-        boc: lot.boc,
-        nganId: lastKienTx.ngan_id,
-        nganMa: ngan?.ma_ngan || null,
-        nganTen: ngan?.ten_ngan || null,
+        boc: lastKienTx.boc || lot.boc || null,
+        pallet: resolvedPallet,
+        nganId: finalNganId,
+        nganMa,
+        nganTen,
         ngaySx: lastKienTx.ngay_nhap,
+        gioSx: resolvedGioSx,
         ca: lastKienTx.ca || null,
         realLotId: lot.id,
         datHang,
         existingBanh,
         maxPerKien: config?.max_per_kien ?? null,
+        eudrOrderCode,
+        eudrOrderUrl,
       }
     }
 
     if (lastKienTx && existingBanh > 0) {
-      // Kiện đã có MỘT PHẦN bành nhưng chưa đủ — khác "produced" (chưa xong) và khác "partial"
-      // thuần túy (không phải "chưa có gì") — vẫn phải cho phép xác nhận sản xuất tiếp.
-      const { data: ngan } = await client
-        .from("ngans")
-        .select("id,ma_ngan,ten_ngan")
-        .eq("id", lastKienTx.ngan_id)
-        .maybeSingle()
       return {
         status: "partial_kien",
         maLo: normalizedMaLo,
         kien,
         loaiCsr: lot.loai_csr,
         loaiBanh: lot.loai_banh,
-        boc: lot.boc,
-        nganId: lastKienTx.ngan_id,
-        nganMa: ngan?.ma_ngan || null,
-        nganTen: ngan?.ten_ngan || null,
+        boc: lastKienTx.boc || lot.boc || null,
+        pallet: resolvedPallet,
+        nganId: finalNganId,
+        nganMa,
+        nganTen,
         ngaySx: lastKienTx.ngay_nhap,
+        gioSx: resolvedGioSx,
         ca: lastKienTx.ca || null,
         realLotId: lot.id,
         datHang,
         existingBanh,
         maxPerKien: config?.max_per_kien ?? null,
+        eudrOrderCode,
+        eudrOrderUrl,
       }
-    }
-
-    // Kiện này chưa có giao dịch thật, nhưng lô đã tồn tại (do kiện khác đã được xác nhận trước
-    // đó) — vẫn phải tra ngăn nguồn theo lot.ngan_id, KHÔNG được hardcode null, nếu không kiện
-    // đầu tiên (đi qua nhánh "predicted" bên dưới) hiển thị đúng số ngăn còn các kiện sau của
-    // cùng lô lại hiện "-" dù đã có ngăn hợp lệ (bug đã xác nhận 2026-07-13).
-    let partialNganMa: string | null = null
-    let partialNganTen: string | null = null
-    if (lot.ngan_id) {
-      const { data: ngan } = await client
-        .from("ngans")
-        .select("ma_ngan,ten_ngan")
-        .eq("id", lot.ngan_id)
-        .maybeSingle()
-      partialNganMa = ngan?.ma_ngan || null
-      partialNganTen = ngan?.ten_ngan || null
     }
 
     return {
@@ -219,15 +282,19 @@ export async function resolveProductLabelLookupTarget(
       loaiCsr: lot.loai_csr,
       loaiBanh: lot.loai_banh,
       boc: lot.boc,
-      nganId: lot.ngan_id,
-      nganMa: partialNganMa,
-      nganTen: partialNganTen,
+      pallet: resolvedPallet,
+      nganId: finalNganId,
+      nganMa,
+      nganTen,
       ngaySx: null,
+      gioSx: null,
       ca: null,
       realLotId: lot.id,
       datHang,
       existingBanh: 0,
       maxPerKien: config?.max_per_kien ?? null,
+      eudrOrderCode,
+      eudrOrderUrl,
     }
   }
 
@@ -263,15 +330,19 @@ export async function resolveProductLabelLookupTarget(
       loaiCsr: predicted.loai_csr,
       loaiBanh: predicted.loai_banh,
       boc: predicted.boc,
+      pallet: null,
       nganId,
       nganMa,
       nganTen,
       ngaySx: null,
+      gioSx: null,
       ca: null,
       realLotId: null,
       datHang: null,
       existingBanh: 0,
       maxPerKien: config?.max_per_kien ?? null,
+      eudrOrderCode: null,
+      eudrOrderUrl: null,
     }
   }
 
@@ -282,15 +353,19 @@ export async function resolveProductLabelLookupTarget(
     loaiCsr: null,
     loaiBanh: null,
     boc: null,
+    pallet: null,
     nganId: null,
     nganMa: null,
     nganTen: null,
     ngaySx: null,
+    gioSx: null,
     ca: null,
     realLotId: null,
     datHang: null,
     existingBanh: 0,
     maxPerKien: null,
+    eudrOrderCode: null,
+    eudrOrderUrl: null,
   }
 }
 

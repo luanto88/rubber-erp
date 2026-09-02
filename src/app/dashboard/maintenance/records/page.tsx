@@ -25,6 +25,7 @@ type RecordRow = {
   den_gio: string | null
   trang_thai: string
   nguoi_tao: string | null
+  created_by: string | null
   created_at: string
   maintenance_record_lines: { ma_tb: string | null; loai_sua_chua: string | null }[]
 }
@@ -175,7 +176,7 @@ export default function MaintenanceRecordsPage() {
 
       let q = supabase
         .from("maintenance_records")
-        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_at, maintenance_record_lines(ma_tb, loai_sua_chua)")
+        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_by, created_at, maintenance_record_lines(ma_tb, loai_sua_chua)")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
         .order("created_at", { ascending: false })
@@ -256,12 +257,13 @@ export default function MaintenanceRecordsPage() {
   const canCreate = hasPermission(user, "maintenance.create")
   const canPrint = hasPermission(user, "maintenance.print")
   const isAdmin = user?.role === "admin"
-  // "Gửi ký duyệt" chỉ dành cho người tạo chính biên bản đó (hoặc admin) — mirror ĐÚNG công
-  // thức isCreator ở records/[id]/page.tsx (dòng ~506-509). canCreate ở trên chỉ là quyền chung
-  // (dùng đúng cho nút "+ Tạo biên bản"), KHÔNG được dùng trực tiếp cho badge Ký duyệt per-row —
-  // đây là bug đã báo (nút hiện cho mọi người bất kể ai tạo biên bản).
+  // "Gửi ký duyệt" chỉ dành cho người tạo chính biên bản đó (created_by, hoặc admin) —
+  // mirror ĐÚNG công thức isCreator ở records/[id]/page.tsx. canCreate ở trên chỉ là quyền
+  // chung (dùng đúng cho nút "+ Tạo biên bản"), KHÔNG được dùng trực tiếp cho badge Ký
+  // duyệt per-row. Biên bản CŨ (created_by NULL) chỉ admin xử lý được — không fallback
+  // về so khớp nguoi_tao (TEXT) như trước, đồng bộ rule đã tighten 2026-08-31.
   const canOwnerAct = (r: RecordRow) =>
-    isAdmin || (r.nguoi_tao != null && (r.nguoi_tao === user?.full_name || r.nguoi_tao === user?.username))
+    isAdmin || (r.created_by != null && r.created_by === user?.id)
 
   const filtered = records.filter((r) => {
     if (!filterSearch) return true
