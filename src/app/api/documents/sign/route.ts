@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin, verifyCurrentPin } from "@/app/api/account/_lib/security"
 import { resolveUserDeptCode } from "@/lib/documents-dept"
 import { SIGN_AS_OPTIONS, type ThuTuKyStep, type SignAsType } from "@/app/dashboard/documents/_components/documents-types"
-import { PDFDocument } from "pdf-lib"
+// @cantoo/pdf-lib (fork của pdf-lib, API tương thích) là thư viện DUY NHẤT hỗ trợ
+// `forIncrementalUpdate` + `commit()` — bắt buộc để chữ ký PAdES của người ký trước không bị
+// xoá khi người sau đóng dấu tiếp. Type của các helper vẽ dùng chung (`stamp-pdf.ts`,
+// `apply-template.ts`) vẫn khai theo `pdf-lib` gốc vì còn dùng chung với ISO → ép kiểu tại chỗ
+// gọi, đúng cách `src/lib/signing/requests.ts` đang làm cho hệ ký dùng chung.
+import { PDFDocument, PDFArray, PDFName, PDFNumber, PDFString } from "@cantoo/pdf-lib"
+import type { PDFDocument as PdfLibDocument } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
 import QRCode from "qrcode"
+import { randomUUID } from "crypto"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { hasPadesRootCa, applyPadesSignatureToDoc } from "@/lib/signing/pades"
 import { formatFactoryDateTimeVN, formatFactoryDateVN, getFactoryTodayISO } from "@/lib/date-utils"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import {
@@ -32,6 +40,7 @@ import {
   applyQrLayoutToEntry,
   applySignerLayoutToEntry,
   qrLayoutAlreadySet,
+  resolveAnchorPages,
   resolveEffectiveQrRect,
 } from "@/lib/signing/template-layout"
 
@@ -429,8 +438,11 @@ async function stampOffice(
 
 // Vị trí tên người ký: dùng box riêng (nameX/nameY/nameWidth/nameHeight) nếu
 // SignPlacementModal đã đặt, fallback về căn giữa ngay dưới chữ ký như trước.
+// Nhận `pdfDoc` đã load sẵn (không tự load/save) — xem lý do ở JSDoc của
+// `stampPdfWithTemplate` trong apply-template.ts: `save()` ghi lại toàn bộ file và xoá mất
+// chữ ký PAdES của các lượt ký trước.
 async function stampPdfStep(
-  fileBytes: Buffer,
+  pdfDoc: PdfLibDocument,
   sigBuf: Buffer | null,
   signerName: string,
   prefixText: string | null,
@@ -438,8 +450,7 @@ async function stampPdfStep(
   defaultX: number,
   qrBuf: Buffer | null,
   qrBox: QrBox | null,
-): Promise<Buffer> {
-  const pdfDoc = await PDFDocument.load(fileBytes)
+): Promise<void> {
   pdfDoc.registerFontkit(fontkit)
 
   let signerFont: ReturnType<typeof pdfDoc.embedFont> extends Promise<infer T> ? T : never
@@ -452,7 +463,7 @@ async function stampPdfStep(
 
   const pageIdx = Math.max(0, (placement?.page ?? 1) - 1)
   const pages = pdfDoc.getPages()
-  if (pageIdx >= pages.length) return fileBytes
+  if (pageIdx >= pages.length) return
 
   const page = pages[pageIdx]
   const x = placement?.x ?? defaultX
@@ -499,8 +510,86 @@ async function stampPdfStep(
       }
     } catch { /* skip */ }
   }
+}
 
-  return Buffer.from(await pdfDoc.save())
+/** Rect khung chữ ký (point, gốc dưới-trái) + trang chứa nó — nơi phủ link "xem bằng chứng". */
+type VerifyLinkTarget = { pageIndex: number; x: number; y: number; width: number; height: number }
+
+/**
+ * Quyết định lượt ký này có nhúng chữ ký PAdES hay không.
+ *
+ * Phạm vi đã chốt: CHỈ văn bản mới. Văn bản đang luân chuyển dở khi tính năng lên production đã
+ * có vài bước ký KHÔNG kèm chữ ký số — nếu nhúng từ giữa chừng, file cuối sẽ nửa có nửa không,
+ * người xác thực dễ hiểu nhầm là "bước kia bị giả mạo". Nên chỉ bật khi:
+ *   - đây là lượt đóng dấu ĐẦU TIÊN của văn bản (chưa có dòng nhật ký nào), hoặc
+ *   - các lượt trước đó đã có chữ ký số (văn bản sinh ra sau khi tính năng chạy).
+ *
+ * `nextIndex` = số chữ ký PAdES đã nhúng trong file = chỉ số (0-based) của chữ ký sắp thêm.
+ * Không tin bytes file mà đếm từ nhật ký bất biến — nguồn dữ liệu chính xác và rẻ hơn.
+ */
+async function resolvePadesEligibility(
+  docId: string,
+): Promise<{ eligible: true; nextIndex: number } | { eligible: false; reason: string }> {
+  const { data, error } = await supabaseAdmin
+    .from("doc_approval_log")
+    .select("id, pades_sig_index")
+    .eq("doc_id", docId)
+    .eq("doc_type", "van_ban")
+
+  // Cột chưa tồn tại (migration 20260905 chưa chạy) → PostgREST từ chối cả câu select. Không
+  // được chặn luồng ký chính: bỏ qua lớp PAdES, ghi rõ lý do để trang xác thực chẩn đoán được.
+  if (error) {
+    return {
+      eligible: false,
+      reason: `Không đọc được nhật ký ký số (nhiều khả năng migration 20260905_doc_approval_log_pades_index.sql chưa chạy): ${error.message}`,
+    }
+  }
+
+  const rows = (data ?? []) as { pades_sig_index: number | null }[]
+  if (rows.length === 0) return { eligible: true, nextIndex: 0 }
+
+  const withPades = rows.filter((r) => r.pades_sig_index !== null && r.pades_sig_index !== undefined).length
+  if (withPades === 0) {
+    return {
+      eligible: false,
+      reason:
+        "Văn bản bắt đầu luân chuyển trước khi hệ thống có chữ ký số — các bước sau giữ nguyên như cũ để file không nửa có nửa không chữ ký.",
+    }
+  }
+  return { eligible: true, nextIndex: withPades }
+}
+
+/**
+ * Phủ link annotation lên đúng ô con dấu — bấm vào (Acrobat/Chrome/mọi trình xem hỗ trợ link)
+ * mở trang xác thực chữ ký PAdES của chính bước đó. Vẽ trong CÙNG lượt incremental-update với
+ * con dấu, mirror kỹ thuật append-vào-Annots của `addSignaturePlaceholderToDoc` (pades.ts).
+ */
+function addVerifyLinkAnnotations(pdfDoc: PDFDocument, targets: VerifyLinkTarget[], url: string): void {
+  const pages = pdfDoc.getPages()
+  for (const t of targets) {
+    const page = pages[t.pageIndex]
+    if (!page) continue
+    try {
+      const rect = PDFArray.withContext(pdfDoc.context)
+      ;[t.x, t.y, t.x + t.width, t.y + t.height].forEach((c) => rect.push(PDFNumber.of(c)))
+      const linkDict = pdfDoc.context.obj({
+        Type: "Annot",
+        Subtype: "Link",
+        Rect: rect,
+        Border: [0, 0, 0],
+        A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+      })
+      const linkRef = pdfDoc.context.register(linkDict)
+      let annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray)
+      if (typeof annots === "undefined") {
+        annots = pdfDoc.context.obj([])
+        page.node.set(PDFName.of("Annots"), annots)
+      }
+      annots.push(linkRef)
+    } catch {
+      /* thêm link thất bại không được chặn luồng ký chính */
+    }
+  }
 }
 
 async function performFileStamp(
@@ -543,10 +632,28 @@ async function performFileStamp(
   const today = formatFactoryDateVN(signedAt)
   const { textTags, imageTagName } = buildStepTags(stepKey, signerName, chucVu, today, d.ghi_chu || "")
 
+  // Sinh id dòng nhật ký TRƯỚC khi đóng dấu: link "xem bằng chứng xác minh" phủ trên con dấu
+  // phải trỏ đúng URL trang xác thực, mà annotation đó lại phải nằm trong phần nội dung được
+  // PAdES ký — nên không thể chờ insert xong mới biết id.
+  const logId = randomUUID()
+  let padesSigIndex: number | null = null
+  let padesError: string | null = null
+
   let stampedBytes: Buffer
   if (ext === "docx" || ext === "xlsx") {
+    // Office dùng cơ chế tag {{...}} chứ không có toạ độ/byte-range để nhúng PAdES.
+    padesError = "Chữ ký số PAdES chỉ áp dụng cho file PDF"
     stampedBytes = await stampOffice(fileBytes, ext, textTags, imageTagName, sigBuf, stepKey, qrBuf)
   } else if (ext === "pdf") {
+    // MỘT instance sống duy nhất cho cả vẽ con dấu lẫn nhúng PAdES, `commit()` nhiều lần —
+    // tuyệt đối không `save()` rồi reload (bug 74.8MB + mất chữ ký của người ký trước).
+    const pdfDoc = await PDFDocument.load(fileBytes, { forIncrementalUpdate: true })
+    pdfDoc.registerFontkit(fontkit)
+    const asPdfLib = pdfDoc as unknown as PdfLibDocument
+    const pageCount = pdfDoc.getPageCount()
+    /** Khung chữ ký của ĐÚNG bước này — nơi phủ link tới trang xác thực. */
+    const linkTargets: VerifyLinkTarget[] = []
+
     const templateEntry = getTemplateStepPlacement(d.placement_ky, stepKey)
     if (templateEntry) {
       // ── Chế độ "vị trí CỨNG" theo mẫu (mau_vi_tri) ──
@@ -560,8 +667,8 @@ async function performFileStamp(
       const ghiChuEntry = isPheDuyetStep ? getTemplateNotePlacement(d.placement_ky) : null
       const ngayKyEntry = isPheDuyetStep ? getTemplateBoxesPlacement(d.placement_ky, "ngay_ky") : null
       const ghiChuText = (d.ghi_chu_phe_duyet || "").trim()
-      stampedBytes = await stampPdfWithTemplate({
-        fileBytes,
+      await stampPdfWithTemplate({
+        pdfDoc: asPdfLib,
         entry: templateEntry,
         sigBuf,
         signerName,
@@ -579,6 +686,13 @@ async function performFileStamp(
           ? { entry: ngayKyEntry, text: `Văn bản được ký ${formatFactoryDateTimeVN(signedAt)}` }
           : null,
       })
+      // Khung ký của bước này (kể cả khung nhân bản/neo "mọi trang") — phủ link xác thực lên
+      // đúng chỗ người xem sẽ bấm vào con dấu.
+      for (const box of templateEntry.boxes) {
+        for (const pageNo of resolveAnchorPages(box, pageCount)) {
+          linkTargets.push({ pageIndex: pageNo - 1, x: box.x, y: box.y, width: box.width, height: box.height })
+        }
+      }
     } else {
       // Luồng cũ (văn bản gửi ký trước khi có mẫu, hoặc mẫu thiếu khung cho đúng bước này) —
       // giữ nguyên tuyệt đối, người ký tự kéo-thả như trước.
@@ -593,7 +707,63 @@ async function performFileStamp(
         : ((d.placement_ky?.qr as QrBox | undefined) ?? null)
       const defaultX =
         stepKey === "phe_duyet" ? 460 : (parseInt(stepKey) - 1) * 120 + 30
-      stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX, qrBuf, qrBox)
+      await stampPdfStep(asPdfLib, sigBuf, signerName, prefixText, placement, defaultX, qrBuf, qrBox)
+      // Cùng công thức khung "hiệu lực" mà stampPdfStep dùng để vẽ (placement hoặc mặc định).
+      const linkPageIdx = Math.max(0, (placement?.page ?? 1) - 1)
+      if (linkPageIdx < pageCount) {
+        linkTargets.push({
+          pageIndex: linkPageIdx,
+          x: placement?.x ?? defaultX,
+          y: placement?.y ?? 50,
+          width: placement?.width ?? 120,
+          height: placement?.height ?? 60,
+        })
+      }
+      for (const extra of placement?.extraPlacements ?? []) {
+        const idx = Math.max(0, (extra.page ?? 1) - 1)
+        if (idx < pageCount) {
+          linkTargets.push({ pageIndex: idx, x: extra.x, y: extra.y, width: extra.width, height: extra.height })
+        }
+      }
+    }
+
+    // ── Lớp ký số mật mã thật (PAdES) — CỘNG THÊM lên con dấu ảnh, không thay thế ──
+    // Best-effort tuyệt đối: mọi lỗi ở đây chỉ làm mất lớp chữ ký số, KHÔNG được chặn luồng ký
+    // nghiệp vụ đang chạy production. Lý do lỗi ghi vào `pades_error` để trang xác thực nói rõ
+    // với người xem thay vì im lặng hiện "không có chữ ký".
+    const padesDecision = await resolvePadesEligibility(d.id)
+    if (!padesDecision.eligible) {
+      padesError = padesDecision.reason
+      stampedBytes = Buffer.from(await pdfDoc.commit())
+    } else if (!hasPadesRootCa()) {
+      padesError =
+        "Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM / SIGN_PADES_ROOT_CA_KEY_PEM trên môi trường này"
+      stampedBytes = Buffer.from(await pdfDoc.commit())
+    } else {
+      // Link phải nằm TRONG phần nội dung được ký → thêm trước khi nhúng chữ ký.
+      addVerifyLinkAnnotations(pdfDoc, linkTargets, `${APP_URL}/van-ban-verify/${logId}`)
+      try {
+        // Thông tin liên hệ trong chứng thư: dùng ĐÚNG email nội bộ như hệ ký dùng chung
+        // (`requests.ts`) — luôn dạng `username@auth...` nên chắc chắn ASCII, hợp chuẩn
+        // IA5String của attribute `emailAddress`. Không đưa mã/tên văn bản (có dấu tiếng Việt)
+        // vào đây: xem cảnh báo trong `issueLeafCertificate` của pades.ts.
+        const { data: signerProfile } = await supabaseAdmin
+          .from("profiles")
+          .select("auth_email")
+          .eq("id", userId)
+          .maybeSingle()
+        // `applyPadesSignatureToDoc` tự `commit()` bên trong rồi ký byte-range fill-in.
+        stampedBytes = await applyPadesSignatureToDoc(
+          pdfDoc,
+          signerName,
+          (signerProfile?.auth_email as string) || "",
+        )
+        padesSigIndex = padesDecision.nextIndex
+      } catch (err) {
+        padesSigIndex = null
+        padesError = err instanceof Error ? err.message : "Lỗi không xác định khi nhúng chữ ký số"
+        stampedBytes = Buffer.from(await pdfDoc.commit())
+      }
     }
   } else {
     return
@@ -630,7 +800,11 @@ async function performFileStamp(
   }
   await supabaseAdmin.from("van_ban_documents").update(dbPatch).eq("id", d.id)
 
-  await supabaseAdmin.from("doc_approval_log").insert({
+  // `doc_approval_log` là bảng BẤT BIẾN (trigger chặn UPDATE/DELETE) — phải ghi đủ giá trị ngay
+  // lần insert duy nhất này, kể cả `pades_sig_index`. Id được sinh sẵn ở đầu hàm để link xác
+  // thực trên con dấu trỏ đúng dòng log này.
+  const baseLogRow = {
+    id: logId,
     factory_id: factoryId,
     doc_id: d.id,
     doc_type: "van_ban",
@@ -638,7 +812,16 @@ async function performFileStamp(
     action: stepKey === "phe_duyet" ? "phe_duyet" : "ky_buoc",
     buoc_ky: stepKey === "phe_duyet" ? null : parseInt(stepKey, 10),
     content_hash: signedContentHash,
-  })
+  }
+  const { error: logErr } = await supabaseAdmin
+    .from("doc_approval_log")
+    .insert({ ...baseLogRow, pades_sig_index: padesSigIndex, pades_error: padesError })
+  if (logErr) {
+    // Migration 20260905 chưa chạy → 2 cột mới chưa tồn tại, PostgREST từ chối cả câu insert.
+    // Vẫn phải giữ được dòng nhật ký + hash toàn vẹn (đã có từ Giai đoạn 0), chỉ mất phần chỉ
+    // số chữ ký số — nếu không sẽ mất trắng audit trail của lượt ký này.
+    await supabaseAdmin.from("doc_approval_log").insert(baseLogRow)
+  }
 }
 
 // ── Notify helpers ────────────────────────────────────────────────────────────

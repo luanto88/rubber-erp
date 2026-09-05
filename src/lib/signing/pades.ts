@@ -152,7 +152,18 @@ function issueLeafCertificate(root: RootCa, commonName: string, email: string): 
       valueTagClass: forge.asn1.Type.UTF8 as unknown as number,
     },
   ]
-  if (email) subjectAttrs.push({ name: "emailAddress", value: email })
+  // `emailAddress` theo chuẩn X.509 là IA5String (chỉ ASCII). node-forge tự đoán kiểu ASN.1 cho
+  // attribute này (không có cách ép UTF8 cho đúng chuẩn) — giá trị chứa ký tự ngoài ASCII (dấu
+  // tiếng Việt, dấu gạch dài "—") làm TBSCertificate lúc KÝ và lúc SERIALIZE lệch byte nhau, y
+  // hệt bug đã fix cho `commonName` ngày 2026-08-31 nhưng bỏ sót attribute này. Hậu quả: chữ ký
+  // CMS vẫn đúng, nhưng chính LEAF CERT có chữ ký sai về toán học → `openssl cms -verify -CAfile`
+  // báo "rsa_verify: bad signature", Acrobat không dựng được chain dù đã import root CA.
+  //
+  // Call site hiện tại đều truyền email nội bộ dạng `username@auth...` (ASCII thuần) nên chưa
+  // từng lộ; lọc ở đây là lưới an toàn cho mọi call site sau này — thà bỏ vài ký tự trong thông
+  // tin liên hệ còn hơn phát hành chứng thư hỏng.
+  const asciiEmail = (email || "").replace(/[^\x20-\x7E]/g, "").trim()
+  if (asciiEmail) subjectAttrs.push({ name: "emailAddress", value: asciiEmail })
   subjectAttrs.push({ name: "organizationName", value: "Rubber ERP" })
   cert.setSubject(subjectAttrs)
   cert.setIssuer(root.cert.subject.attributes)

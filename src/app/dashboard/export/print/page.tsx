@@ -14,6 +14,7 @@ type Vehicle = {
   bien_truoc: string;
   bien_sau: string;
   ghi_chu: string;
+  image_urls?: string[];
   image_url_1?: string;
   image_url_2?: string;
   image_url_3?: string;

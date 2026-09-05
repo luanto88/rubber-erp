@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
         .from("profiles")
         .select("role")
         .eq("id", authUser.id)
-        .single(),
+        .maybeSingle(),
       supabaseAdmin
         .from("user_permissions")
         .select("permission_code")
@@ -36,7 +36,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { targetUserId, action, newPassword, newPin } = await req.json()
+    const body = await req.json()
+    const targetUserId = String(body.targetUserId || body.userId || "").trim()
+    const { action, newPassword, newPin } = body
 
     if (!targetUserId || !action) {
       return NextResponse.json({ error: "Thiếu thông tin người dùng hoặc hành động" }, { status: 400 })

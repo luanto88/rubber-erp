@@ -13,6 +13,18 @@ import type { ChucVuKey, SignTemplateAnchor, SignTemplateSignAsKey } from "@/lib
 // XÊ DỊCH được, nhưng chỉ TRONG khung người soạn thảo đã cài đặt. Khung mẫu
 // (`x/y/width/height`) là bất biến — client chỉ gửi được `layout` bên trong.
 
+/**
+ * Key riêng trong `van_ban_documents.placement_ky` chứa metadata mẫu đã chốt
+ * (`{loai_tai_lieu, phien_ban, chot_luc}`) — KHÔNG phải một khung ký, mọi nơi duyệt qua các key
+ * của `placement_ky` đều phải bỏ qua nó.
+ *
+ * Hằng số này thuộc về file THUẦN này (không phải `apply-template.ts`) vì cả phía client
+ * (`placement-preview.ts` → `documents/[id]/page.tsx`) lẫn phía server đều cần. `apply-template.ts`
+ * kéo theo `stamp-pdf.ts` vốn `import fs`/`path` (đọc file font) — client import nhầm vào đó sẽ
+ * làm build hỏng với "Module not found: Can't resolve 'fs'".
+ */
+export const MAU_META_KEY = "_mau"
+
 export type LayoutRect = { x: number; y: number; width: number; height: number }
 
 /**

@@ -12,6 +12,7 @@ import {
   VAN_BAN_SIGNER_NAME_STYLE,
 } from "@/lib/signing/stamp-pdf"
 import {
+  MAU_META_KEY,
   resolveAnchorPages,
   resolveEffectiveNoteLayout,
   resolveEffectiveQrRect,
@@ -66,7 +67,10 @@ export type TemplateMauMeta = {
   chot_luc: string
 }
 
-export const MAU_META_KEY = "_mau"
+// Định nghĩa thật nằm ở `template-layout.ts` (module THUẦN, client import được — file này kéo
+// theo `stamp-pdf.ts` vốn `import fs`). Re-export để mọi call site server sẵn có không phải đổi
+// import; `MAU_META_KEY` dùng trong chính file này đã được import ở khối import phía trên.
+export { MAU_META_KEY }
 
 // ── Chuyển mẫu → placement_ky ─────────────────────────────────────────────────
 
@@ -405,8 +409,22 @@ function drawNgayKyTag(
   } catch { /* bỏ qua nếu vẽ tag ngày ký thất bại */ }
 }
 
+/**
+ * Vẽ toàn bộ khung mẫu (chữ ký/tên/chức danh/tiền tố + ghi chú + ngày ký + QR) lên 1 `pdfDoc`
+ * ĐÃ ĐƯỢC LOAD SẴN, KHÔNG tự load/save.
+ *
+ * Trước 2026-09-05 hàm này tự `PDFDocument.load(fileBytes)` rồi `save()` — đúng pattern đã gây 2
+ * bug nghiêm trọng ở hệ ký dùng chung ("bug 74.8MB" và "mất chữ ký PAdES của người ký trước"):
+ * `save()` ghi lại TOÀN BỘ file, xoá mất đoạn incremental-update chứa chữ ký PAdES của các lượt
+ * ký trước. Nay caller (`api/documents/sign/route.ts`) giữ 1 instance sống load bằng
+ * `@cantoo/pdf-lib` với `forIncrementalUpdate: true` và tự `commit()` — xem `requests.ts`.
+ *
+ * Kiểu tham số vẫn khai theo `pdf-lib` gốc (không phải `@cantoo/pdf-lib`) vì hàm này dùng lại các
+ * helper vẽ của `stamp-pdf.ts` — file đó còn dùng chung với ISO nên chưa đổi thư viện. `@cantoo`
+ * là fork API tương thích; caller ép kiểu tại chỗ gọi, đúng cách `requests.ts` đang làm.
+ */
 export async function stampPdfWithTemplate(params: {
-  fileBytes: Buffer
+  pdfDoc: PDFDocument
   entry: TemplateStepPlacement
   sigBuf: Buffer | null
   signerName: string
@@ -417,8 +435,9 @@ export async function stampPdfWithTemplate(params: {
   /** Chỉ truyền ở đúng lượt đóng dấu cần vẽ — caller quyết định để tránh vẽ chồng nhiều lần. */
   ghiChu?: { entry: TemplateNotePlacement; text: string; kyNhayBuf: Buffer | null } | null
   ngayKy?: { entry: TemplateBoxesPlacement; text: string } | null
-}): Promise<Buffer> {
-  const pdfDoc = await PDFDocument.load(params.fileBytes)
+}): Promise<void> {
+  const { pdfDoc } = params
+  // Idempotent (chỉ gán `this.fontkit`) — an toàn dù caller đã gọi trước đó.
   pdfDoc.registerFontkit(fontkit)
 
   let font: PDFFont | null = null
@@ -494,6 +513,4 @@ export async function stampPdfWithTemplate(params: {
       /* lỗi nhúng QR không chặn cả lượt ký */
     }
   }
-
-  return Buffer.from(await pdfDoc.save())
 }

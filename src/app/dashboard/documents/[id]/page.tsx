@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, Fragment } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react"
 import type { RefObject } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import Draggable from "react-draggable"
@@ -60,6 +60,8 @@ import {
   type TemplateSignBox,
   type TemplateStepPlacement,
 } from "@/lib/signing/template-layout"
+import { collectPreviewBoxes, groupPreviewBoxesByPage } from "@/lib/signing/placement-preview"
+import { getKyBuocColor, getPlacementKeyColor, ROLE_COLORS } from "@/lib/signing/template-colors"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 const STORAGE_BUCKET = "iso-documents"
@@ -143,6 +145,11 @@ function ExtraDraggableBox({
   )
 }
 
+/** Bề rộng ảnh thumbnail render sẵn (px) — đủ nét cho ô ~80px, nhẹ hơn hẳn ảnh trang đầy đủ. */
+const THUMB_WIDTH_PX = 160
+/** Tài liệu dài hơn mức này thì bỏ render ảnh thumbnail (chỉ còn ô số trang + khung xem trước). */
+const MAX_THUMB_PAGES = 80
+
 /** Bố cục 4 khối con của 1 khung mẫu, ở dạng point (độc lập trang) — xem template-layout.ts. */
 type LockedBoxLayout = SignerSubLayout
 
@@ -195,6 +202,10 @@ function SignPlacementModal({
   lockedQrAdjustable,
   lockedPrefixText,
   signerChucVu,
+  placementAll,
+  signStepKey,
+  signedStepKeys,
+  stepLabels,
   userId,
   docId,
   onConfirm,
@@ -232,6 +243,18 @@ function SignPlacementModal({
   lockedPrefixText: string
   /** Chức vụ thật của người ký — quyết định có khối "chức danh" để kéo hay không. */
   signerChucVu: string
+  /**
+   * TOÀN BỘ `placement_ky` của văn bản — CHỈ để vẽ xem trước (thumbnail + lớp mờ trên canvas),
+   * giúp người ký thấy khung của mình nằm ở trang nào và bố cục chữ ký chung của cả văn bản.
+   * Không tham gia bất kỳ phép tính toạ độ nào khi ký thật.
+   */
+  placementAll: Record<string, unknown> | null
+  /** Key của bước đang ký trong `placement_ky` ("1" | "2" | … | "phe_duyet"). */
+  signStepKey: string
+  /** Các bước đã ký xong — vẽ khung nhạt kèm dấu đã ký. */
+  signedStepKeys: string[]
+  /** Nhãn hiển thị của từng key khung (vd `{ "1": "Bước 1: NMCB" }`). */
+  stepLabels: Record<string, string>
   userId: string
   docId: string
   onConfirm: (
@@ -278,6 +301,18 @@ function SignPlacementModal({
   const [pdfScale, setPdfScale] = useState(1.5)
   const [canvasReady, setCanvasReady] = useState(false)
   const [canvasError, setCanvasError] = useState<string | null>(null)
+
+  // ── Rail thumbnail các trang PDF (mirror màn cài đặt vị trí `ky/mau-vi-tri`) ──
+  // Ảnh từng trang render dần ở nền, KHÔNG chặn trang đang ký hiển thị.
+  const [thumbs, setThumbs] = useState<Record<number, string>>({})
+  /** Kích thước THẬT từng trang (point, scale 1) — cần để quy đổi khung mẫu sang % trên thumbnail. */
+  const [thumbDims, setThumbDims] = useState<Record<number, { w: number; h: number }>>({})
+  const [thumbsLoading, setThumbsLoading] = useState(false)
+  /** Hiện khung của các bước ký KHÁC (mờ, nét đứt) trên trang đang xem — người dùng tự bật/tắt. */
+  const [showOtherBoxes, setShowOtherBoxes] = useState(true)
+  const thumbRunRef = useRef<string | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderTaskRef = useRef<any>(null)
 
 
 
@@ -339,13 +374,33 @@ function SignPlacementModal({
 
     const canvas = canvasRef.current
     if (!canvas) return
+
+    // Có rail thumbnail, người dùng bấm chuyển trang rất nhanh — pdfjs ném
+    // "Cannot use the same canvas during multiple render() operations" và để lại canvas trắng nếu
+    // tác vụ render cũ chưa bị hủy. Hủy trước, nuốt RenderingCancelledException.
+    if (renderTaskRef.current) {
+      try { renderTaskRef.current.cancel() } catch { /* tác vụ đã xong */ }
+      renderTaskRef.current = null
+    }
+
     canvas.width = cW
     canvas.height = cH
 
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await page.render({ canvasContext: ctx, viewport } as any).promise
+    const task = page.render({ canvasContext: ctx, viewport } as any)
+    renderTaskRef.current = task
+    try {
+      await task.promise
+    } catch (err) {
+      // Bị hủy vì người dùng đã chuyển sang trang khác → bỏ qua, không phải lỗi thật.
+      const name = (err as { name?: string } | null)?.name
+      if (name === "RenderingCancelledException") return
+      throw err
+    } finally {
+      if (renderTaskRef.current === task) renderTaskRef.current = null
+    }
 
     const unscaledViewport = page.getViewport({ scale: 1 })
     setPdfScale(scale)
@@ -384,6 +439,54 @@ function SignPlacementModal({
       setPrefixState({ x: 220, y: cH - 55, w: 60, h: 24 })
       setQrState({ x: Math.max(20, cW - 90), y: 20, w: 70, h: 70 })
       setCanvasReady(true)
+
+      // ── Rail thumbnail: tái dùng đúng `pdf` vừa load, KHÔNG getDocument() lần 2 ──
+      if (thumbRunRef.current === sourceFileUrl) return
+      thumbRunRef.current = sourceFileUrl
+
+      // Vòng 1 (rất nhanh, không render): lấy kích thước thật mọi trang để overlay khung mẫu
+      // hoạt động được ngay cả khi ảnh thumbnail chưa kịp render xong.
+      const dims: Record<number, { w: number; h: number }> = {}
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const pg = await pdf.getPage(p)
+        if (cancelled) return
+        const vp = pg.getViewport({ scale: 1 })
+        dims[p] = { w: vp.width, h: vp.height }
+      }
+      if (cancelled) return
+      setThumbDims(dims)
+
+      // Vòng 2 (nặng): render ảnh từng trang, cập nhật DẦN để người dùng thấy thumbnail hiện ra
+      // ngay thay vì chờ hết tài liệu. Tài liệu quá dài thì bỏ ảnh, chỉ giữ ô số trang + overlay.
+      if (pdf.numPages > MAX_THUMB_PAGES) return
+      setThumbsLoading(true)
+      try {
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const pg = await pdf.getPage(p)
+          if (cancelled) return
+          const vp1 = pg.getViewport({ scale: 1 })
+          const scale = THUMB_WIDTH_PX / (vp1.width || THUMB_WIDTH_PX)
+          const vp = pg.getViewport({ scale })
+          const off = document.createElement("canvas")
+          off.width = Math.max(1, Math.floor(vp.width))
+          off.height = Math.max(1, Math.floor(vp.height))
+          const octx = off.getContext("2d")
+          if (!octx) continue
+          // JPEG không có kênh alpha — không tô trắng trước thì nền trong suốt thành ĐEN.
+          octx.fillStyle = "#ffffff"
+          octx.fillRect(0, 0, off.width, off.height)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await pg.render({ canvasContext: octx, viewport: vp } as any).promise
+          if (cancelled) return
+          const url = off.toDataURL("image/jpeg", 0.75)
+          setThumbs((prev) => ({ ...prev, [p]: url }))
+          // Nhả main thread để thao tác kéo-thả/chuyển trang không bị khựng.
+          await new Promise((r) => setTimeout(r, 0))
+          if (cancelled) return
+        }
+      } finally {
+        if (!cancelled) setThumbsLoading(false)
+      }
     }
 
     loadPdf().catch(() => {
@@ -397,6 +500,47 @@ function SignPlacementModal({
     setCurrentPage(p)
     void renderPdfPage(pdfDocRef.current, p)
   }
+
+  // ── Khung xem trước: màu của CHÍNH bước đang ký, và toàn bộ khung của văn bản ──
+  // `myColor` chính là màu người soạn thảo đã đặt cho vai trò này ở màn cài đặt vị trí (bước 1
+  // amber, bước 2 sky, …, phê duyệt emerald) — dùng lại xuyên suốt: khung trên canvas, khung
+  // sáng trên thumbnail, chip vai trò ở header.
+  const myColor = getPlacementKeyColor(signStepKey)
+
+  const previewBoxes = useMemo(
+    () =>
+      collectPreviewBoxes({
+        placementKy: placementAll,
+        pageCount: numPages,
+        dims: thumbDims,
+        myKey: signStepKey,
+        signedKeys: signedStepKeys,
+        stepLabels,
+        qrIsMine: lockedQrAdjustable,
+        ghiChuIsMine: !!lockedGhiChuBox,
+      }),
+    [
+      placementAll,
+      numPages,
+      thumbDims,
+      signStepKey,
+      signedStepKeys,
+      stepLabels,
+      lockedQrAdjustable,
+      lockedGhiChuBox,
+    ],
+  )
+  const previewByPage = useMemo(() => groupPreviewBoxesByPage(previewBoxes), [previewBoxes])
+  /** Trang đầu tiên có khung của người ký hiện tại — để nút "Tới khung của tôi" nhảy đúng chỗ. */
+  const myFirstPage = useMemo(
+    () => previewBoxes.find((b) => b.tier === "mine")?.page ?? null,
+    [previewBoxes],
+  )
+  /** Khung của bước/vai trò KHÁC trên trang đang xem — vẽ mờ làm tham chiếu bố cục. */
+  const otherBoxesOnPage = useMemo(
+    () => (previewByPage[currentPage] || []).filter((b) => b.tier !== "mine"),
+    [previewByPage, currentPage],
+  )
 
   const toPdf = (canX: number, canY: number, w: number, h: number) => ({
     x: canX / pdfScale,
@@ -661,21 +805,27 @@ function SignPlacementModal({
   // vùng canvas flex-1 overflow-auto căn giữa) thay vì hộp thoại max-w-3xl/55vh cũ vốn
   // làm trang A4 phóng to tràn cả 2 chiều, sinh 2 thanh cuộn khó thao tác.
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex flex-col">
-      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-slate-100 shrink-0">
-        <div>
-          <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {!showCanvas
-              ? "Tag chữ ký trong file Office sẽ được thay tự động khi ký"
-              : lockedEntry
-                ? "Đọc lại nội dung văn bản trước khi ký. Vị trí khung do người soạn thảo chốt — bạn chỉ xê dịch chữ ký / tên / chức danh BÊN TRONG khung viền xanh."
-                : allowQrPlacement
-                  ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký, tên và mã QR trên PDF — vị trí QR sẽ giữ nguyên cho các lượt ký sau"
-                  : "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"}
-          </p>
+    <div className="fixed inset-0 bg-[#0f172a]/70 z-50 flex flex-col">
+      <div
+        className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 shrink-0"
+        style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}
+      >
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wide">Ký số văn bản</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-extrabold text-white text-base truncate">{stepLabel}</h3>
+            {showCanvas && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white/15 border border-white/25 text-[11px] font-bold text-white">
+                <span
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ background: myColor.fg, boxShadow: `0 0 0 2px ${myColor.fg}55` }}
+                />
+                {stepLabels[signStepKey] || "Khung của bạn"}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {showCanvas && !lockedEntry && (
             <button
               onClick={() => {
@@ -697,35 +847,146 @@ function SignPlacementModal({
                   },
                 ])
               }}
-              className="px-2.5 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 transition-all font-bold text-xs flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-white transition-all font-bold text-xs flex items-center gap-1"
+              title="Nhân bản chữ ký"
             >
-              <Plus size={14} /> Nhân bản chữ ký
+              <Plus size={14} /> <span className="hidden sm:inline">Nhân bản chữ ký</span>
+            </button>
+          )}
+          {showCanvas && previewBoxes.some((b) => b.tier !== "mine") && (
+            <button
+              onClick={() => setShowOtherBoxes((v) => !v)}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all ${
+                showOtherBoxes
+                  ? "bg-white/20 border-white/40 text-white"
+                  : "bg-white/5 border-white/20 text-white/60"
+              }`}
+              title="Hiện/ẩn khung ký của các bước khác trên trang đang xem"
+            >
+              {showOtherBoxes ? <Eye size={13} /> : <EyeOff size={13} />}
+              <span className="hidden sm:inline">Khung bước khác</span>
             </button>
           )}
           {showCanvas && numPages > 1 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage <= 1}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-lg bg-white/10 border border-white/25 text-white hover:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
               >
                 <ChevronLeft size={16} />
               </button>
-              <span className="text-xs font-bold text-slate-600">Trang {currentPage} / {numPages}</span>
+              <span className="text-xs font-bold text-white/90 whitespace-nowrap">{currentPage} / {numPages}</span>
               <button
                 onClick={() => goToPage(currentPage + 1)}
                 disabled={currentPage >= numPages}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-lg bg-white/10 border border-white/25 text-white hover:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
               >
                 <ChevronRight size={16} />
               </button>
             </div>
           )}
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X size={14} /></button>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-white hover:bg-white/15"><X size={16} /></button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto flex items-start p-4 bg-slate-100">
+      {/* Dải hướng dẫn + chú giải màu — thay đoạn chữ xám dài dưới tiêu đề cũ */}
+      <div className="bg-mint-50 border-b border-mint-100 px-4 sm:px-5 py-2 shrink-0 flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-xs text-[#1f6a58]">
+          {!showCanvas
+            ? "Tag chữ ký trong file Office sẽ được thay tự động khi ký"
+            : lockedEntry
+              ? "Đọc lại nội dung trước khi ký — bạn chỉ xê dịch chữ ký / tên / chức danh BÊN TRONG khung màu của mình."
+              : allowQrPlacement
+                ? "Kéo và chỉnh kích thước để đặt chữ ký, tên và mã QR — vị trí QR giữ nguyên cho các lượt ký sau."
+                : "Kéo và chỉnh kích thước để đặt vị trí chữ ký trên trang."}
+        </p>
+        {showCanvas && previewBoxes.length > 0 && (
+          <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="w-3.5 h-3 rounded-[3px] border"
+                style={{ borderColor: myColor.fg, background: myColor.bg, borderWidth: 1.5 }}
+              />
+              Khung của bạn
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3.5 h-3 rounded-[3px] border border-dashed border-slate-400 opacity-60" />
+              Bước khác
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+        {/* Rail thumbnail các trang — mirror màn cài đặt vị trí; khung của người đang ký sáng lên */}
+        {showCanvas && numPages > 0 && (
+          <div className="flex lg:flex-col shrink-0 gap-2 overflow-x-auto lg:overflow-y-auto overscroll-x-contain w-full lg:w-28 h-[92px] lg:h-auto px-2 py-2 bg-white border-b lg:border-b-0 lg:border-r border-slate-200">
+            <div className="hidden lg:block text-[10px] uppercase tracking-wide text-slate-400 font-bold text-center">
+              {numPages} trang
+            </div>
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
+              const boxes = previewByPage[p] || []
+              const hasMine = boxes.some((b) => b.tier === "mine")
+              return (
+                <button
+                  key={p}
+                  onClick={() => goToPage(p)}
+                  title={hasMine ? `Trang ${p} — có khung ký của bạn` : `Trang ${p}`}
+                  className="relative shrink-0 w-[52px] h-[72px] lg:w-20 lg:h-28 rounded-md overflow-hidden border-2 bg-white mx-auto"
+                  style={{
+                    borderColor: p === currentPage ? "#2f5d52" : hasMine ? myColor.fg : "#e2e8f0",
+                    boxShadow: hasMine ? `0 0 0 2px ${myColor.fg}44` : undefined,
+                  }}
+                >
+                  {thumbs[p] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={thumbs[p]} alt={`Trang ${p}`} className="w-full h-full object-contain" />
+                  ) : (
+                    <div className={`w-full h-full flex items-center justify-center bg-slate-100 text-[10px] font-bold text-slate-400 ${thumbsLoading ? "animate-pulse" : ""}`}>
+                      {p}
+                    </div>
+                  )}
+
+                  {/* Khung mẫu thu nhỏ: "của tôi" sáng đúng màu vai trò, khung khác mờ */}
+                  {boxes.map((b, i) => (
+                    <span
+                      key={`${b.key}-${i}`}
+                      className="absolute pointer-events-none rounded-[2px]"
+                      style={{
+                        left: `${b.pct.x}%`,
+                        top: `${b.pct.y}%`,
+                        width: `${b.pct.w}%`,
+                        height: `${b.pct.h}%`,
+                        border:
+                          b.tier === "mine"
+                            ? `1.5px solid ${b.color.fg}`
+                            : b.tier === "done"
+                              ? `1px solid ${b.color.fg}`
+                              : `1px dashed ${b.color.fg}`,
+                        background: b.tier === "mine" ? b.color.bg : "transparent",
+                        boxShadow: b.tier === "mine" ? `0 0 0 1.5px ${b.color.fg}, 0 0 6px ${b.color.fg}` : undefined,
+                        opacity: b.tier === "mine" ? 1 : b.tier === "done" ? 0.55 : 0.35,
+                      }}
+                    />
+                  ))}
+
+                  {hasMine && (
+                    <span
+                      className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full"
+                      style={{ background: myColor.fg }}
+                    />
+                  )}
+                  <span className="absolute bottom-0 right-0 text-[9px] font-bold text-slate-500 bg-white/85 px-1 rounded-tl">
+                    {p}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+      <div className="flex-1 min-h-0 overflow-auto flex items-start justify-center p-4 bg-app-bg">
         {showCanvas ? (
           <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none mx-auto">
             <canvas ref={canvasRef} className="block" />
@@ -744,6 +1005,41 @@ function SignPlacementModal({
                     </div>
                   </div>
                 )}
+
+                {/* Khung ký của các bước/vai trò KHÁC trên đúng trang này — chỉ để tham chiếu bố
+                    cục, KHÔNG bắt sự kiện chuột (pointer-events-none) và nằm dưới mọi khối kéo
+                    được (z=6 < region z=9 < khối con z=12-15) nên không bao giờ cản thao tác. */}
+                {canvasReady && showOtherBoxes && otherBoxesOnPage.map((b, i) => {
+                  // `pct` đã tính theo kích thước THẬT của chính trang này → nhân với kích thước
+                  // canvas (= khổ trang × pdfScale) là ra px. Lấy khổ trang từ state `thumbDims`
+                  // thay vì đọc `canvasRef.current` trong lúc render: ref không kích hoạt render
+                  // lại nên khi đổi sang trang khác khổ giấy sẽ lệch mất một nhịp.
+                  const dim = thumbDims[currentPage]
+                  if (!dim) return null
+                  const cw = dim.w * pdfScale
+                  const ch = dim.h * pdfScale
+                  return (
+                    <div
+                      key={`ghost-${b.key}-${i}`}
+                      className="absolute pointer-events-none rounded"
+                      style={{
+                        left: (b.pct.x / 100) * cw,
+                        top: (b.pct.y / 100) * ch,
+                        width: (b.pct.w / 100) * cw,
+                        height: (b.pct.h / 100) * ch,
+                        border: `1px dashed ${b.color.fg}${b.tier === "done" ? "99" : "66"}`,
+                        zIndex: 6,
+                      }}
+                    >
+                      <span
+                        className="absolute -top-4 left-0 text-[9px] font-bold px-1 rounded bg-white/85 whitespace-nowrap"
+                        style={{ color: b.color.fg }}
+                      >
+                        {b.label}{b.tier === "done" ? " ✓" : ""}
+                      </span>
+                    </div>
+                  )
+                })}
 
                 {/* Luồng cũ: người ký tự do kéo-thả toàn trang (văn bản chưa chốt mẫu vị trí). */}
                 {canvasReady && !lockedEntry && (
@@ -1061,11 +1357,25 @@ function SignPlacementModal({
                       return (
                         <div
                           key={`locked-${idx}`}
-                          className="absolute border-2 border-dashed border-emerald-500 bg-emerald-50/25 rounded"
-                          style={{ left: region.x, top: region.y, width: region.w, height: region.h, zIndex: 9 }}
+                          className="absolute rounded"
+                          style={{
+                            left: region.x,
+                            top: region.y,
+                            width: region.w,
+                            height: region.h,
+                            zIndex: 9,
+                            // Đúng màu người soạn thảo đã đặt cho vai trò này ở màn cài đặt vị trí
+                            // (bước 1 amber, bước 2 sky, …, phê duyệt emerald).
+                            border: `2px dashed ${myColor.fg}`,
+                            background: myColor.bg,
+                            boxShadow: `0 0 0 3px ${myColor.fg}22`,
+                          }}
                         >
-                          <span className="absolute -top-5 left-0 text-[10px] font-bold text-emerald-700 bg-white/90 px-1 rounded whitespace-nowrap">
-                            Vùng cho phép {lockedEntry.boxes.length > 1 ? `#${idx + 1}` : ""}
+                          <span
+                            className="absolute -top-5 left-0 text-[10px] font-bold bg-white/90 px-1 rounded whitespace-nowrap"
+                            style={{ color: myColor.fg }}
+                          >
+                            Khung của bạn {lockedEntry.boxes.length > 1 ? `#${idx + 1}` : ""}
                           </span>
 
                           <ExtraDraggableBox
@@ -1080,11 +1390,14 @@ function SignPlacementModal({
                               enable={{ right: true, bottom: true, bottomRight: true }}
                               minWidth={20} minHeight={12}
                             >
-                              <div className="w-full h-full border border-amber-500 bg-amber-50/80 rounded flex items-center justify-center overflow-hidden">
+                              <div
+                                className="w-full h-full rounded flex items-center justify-center overflow-hidden bg-white/85"
+                                style={{ border: `1px solid ${myColor.fg}` }}
+                              >
                                 {signatureUrl ? (
                                   <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain" />
                                 ) : (
-                                  <span className="text-[9px] text-amber-700 font-bold px-1 text-center">Chữ ký</span>
+                                  <span className="text-[9px] font-bold px-1 text-center" style={{ color: myColor.fg }}>Chữ ký</span>
                                 )}
                               </div>
                             </Resizable>
@@ -1344,11 +1657,12 @@ function SignPlacementModal({
             </div>
           )}
       </div>
+      </div>
 
-      <div className="border-t border-slate-100 bg-white px-5 py-4 space-y-3 shrink-0">
+      <div className="border-t border-slate-200 bg-white px-4 sm:px-5 py-3.5 space-y-3 shrink-0">
           {showSignAsPicker && (
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký thay (tùy chọn)</label>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+              <label className="text-xs font-bold text-amber-800 block mb-1.5">Ký thay (tùy chọn)</label>
               <div className="flex flex-wrap gap-3">
                 <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
                   <input
@@ -1418,15 +1732,29 @@ function SignPlacementModal({
             </div>
           )}
 
-          <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-            <button
-              onClick={handleConfirm}
-              disabled={acting}
-              className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
-            >
-              <PenLine size={13} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
-            </button>
+          <div className="flex items-center gap-2 justify-between">
+            {/* Nhảy thẳng tới trang có khung của mình — tài liệu nhiều trang không phải lật tay */}
+            {showCanvas && myFirstPage != null && myFirstPage !== currentPage ? (
+              <button
+                onClick={() => goToPage(myFirstPage)}
+                className="text-xs font-bold px-3 py-2 rounded-xl border bg-white hover:bg-slate-50"
+                style={{ color: myColor.fg, borderColor: `${myColor.fg}66` }}
+              >
+                Tới khung của bạn (trang {myFirstPage})
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button
+                onClick={handleConfirm}
+                disabled={acting}
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md"
+              >
+                <PenLine size={14} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
+              </button>
+            </div>
           </div>
       </div>
     </div>
@@ -1833,6 +2161,28 @@ export default function DocumentDetailPage() {
     ? (currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban")
     : "Phê duyệt văn bản"
   const signStepKey = signModal === "phe_duyet" ? "phe_duyet" : String(doc.buoc_hien_tai + 1)
+
+  // Dữ liệu hiển thị cho khung xem trước trong modal ký (thumbnail + lớp mờ trên canvas).
+  // Cố ý KHÔNG dùng useMemo: phía trên đã có early return (loading / !doc) nên thêm hook ở đây sẽ
+  // vi phạm rules of hooks. Chi phí tính lại không đáng kể và cha không re-render khi người ký
+  // đang kéo-thả (state đó nằm trong chính modal).
+  const signedStepKeys = [
+    ...Object.keys((doc.nguoi_ky as Record<string, NguoiKyEntry> | null) || {}),
+    ...(doc.trang_thai === "da_phe_duyet" ? ["phe_duyet"] : []),
+  ]
+  const stepLabels: Record<string, string> = {
+    ...Object.fromEntries(
+      (doc.thu_tu_ky_json || []).map((s: ThuTuKyStep, i) => [
+        String(i + 1),
+        `Bước ${i + 1}: ${s.phong_ban_code || s.ten || ""}`.trim(),
+      ]),
+    ),
+    phe_duyet: "Phê duyệt",
+    qr: "Mã QR",
+    ngay_ky: "Ngày ký",
+    ghi_chu: "Ý kiến chỉ đạo",
+  }
+
   const signSigTag = signModal === "phe_duyet" ? "{{CHU_KY_PHE_DUYET}}" : `{{CHU_KY_BUOC_${signStepKey}}}`
   const signNameTag = signModal === "phe_duyet" ? "{{TEN_PHE_DUYET}}" : `{{TEN_BUOC_${signStepKey}}}`
   // QR chỉ được đặt vị trí ở lượt ký ĐẦU TIÊN của cả văn bản (chưa từng lưu
@@ -2010,17 +2360,25 @@ export default function DocumentDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Cột trái 3/5 — cột phải 2/5, `items-stretch` + `flex-1` để 2 card LUÔN cao bằng nhau
+          (trước đây grid 2+1 và card con không giãn nên bên cao bên thấp). */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
         {/* Thông tin văn bản */}
-        <div className="lg:col-span-2 space-y-5">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-sm font-bold text-slate-700 mb-4">Thông tin văn bản</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="lg:col-span-3 flex flex-col gap-5">
+          <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-mint-50 border-b border-mint-100">
+              <span className="w-8 h-8 rounded-full bg-mint-100 grid place-items-center text-[#1f6a58] shrink-0">
+                <FileText size={16} />
+              </span>
+              <h2 className="text-sm font-extrabold text-slate-800">Thông tin văn bản</h2>
+            </div>
+            <div className="p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <InfoRow label="Loại văn bản" value={doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : "—"} />
               <InfoRow label="Phòng ban" value={doc.phong_ban || "—"} />
               {!!doc.phong_ban_ky_display?.length && (
-                <div className="col-span-2">
-                  <dt className="text-xs font-bold text-slate-400 mb-1">Phòng ban đã ký</dt>
+                <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Phòng ban đã ký</dt>
                   <dd className="flex flex-wrap gap-1.5">
                     {doc.phong_ban_ky_display.map((pb) => (
                       <span key={pb} className="px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
@@ -2038,10 +2396,11 @@ export default function DocumentDetailPage() {
             </div>
             {doc.ghi_chu && (
               <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs font-bold text-slate-500 mb-1">Ghi chú</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
                 <p className="text-sm text-slate-700">{doc.ghi_chu}</p>
               </div>
             )}
+            </div>
           </div>
 
           {/* Trả về info */}
@@ -2062,16 +2421,21 @@ export default function DocumentDetailPage() {
         </div>
 
         {/* Timeline ký */}
-        <div>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h2 className="text-sm font-bold text-slate-700 mb-4">
-              {doc.is_uploaded
-                ? "Thông tin ký tay"
-                : doc.pham_vi === "Don_vi"
-                  ? "Tiến trình ký xác nhận & phê duyệt"
-                  : "Tiến trình ký duyệt"}
-            </h2>
-            <div className="space-y-3">
+        <div className="lg:col-span-2 flex">
+          <div className="flex-1 w-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-amber-50 border-b border-amber-100">
+              <span className="w-8 h-8 rounded-full bg-amber-100 grid place-items-center text-amber-700 shrink-0">
+                <ShieldCheck size={16} />
+              </span>
+              <h2 className="text-sm font-extrabold text-slate-800">
+                {doc.is_uploaded
+                  ? "Thông tin ký tay"
+                  : doc.pham_vi === "Don_vi"
+                    ? "Tiến trình ký xác nhận & phê duyệt"
+                    : "Tiến trình ký duyệt"}
+              </h2>
+            </div>
+            <ol className="relative p-5 pb-2">
               {/* Soạn thảo — ẩn nếu là văn bản upload ký tay không có tên người soạn */}
               {(!doc.is_uploaded || doc.nguoi_soan_thao_display) && (
                 <TimelineStep
@@ -2079,6 +2443,7 @@ export default function DocumentDetailPage() {
                   sublabel={doc.nguoi_soan_thao_display || ""}
                   done={true}
                   at={doc.created_at}
+                  accentColor="#94a3b8"
                 />
               )}
 
@@ -2105,6 +2470,9 @@ export default function DocumentDetailPage() {
                     pending={isCurrentStep}
                     isMyTurn={isCurrentStep && canKyBuoc}
                     at={nguoiKyEntry?.ky_at}
+                    stepNo={i + 1}
+                    // Cùng màu với khung ký của bước đó trên PDF (modal ký + màn cài đặt vị trí)
+                    accentColor={getKyBuocColor(i + 1).fg}
                   />
                 )
               })}
@@ -2123,8 +2491,37 @@ export default function DocumentDetailPage() {
                 pending={doc.trang_thai === "cho_phe_duyet"}
                 isMyTurn={doc.trang_thai === "cho_phe_duyet" && canPheDuyet}
                 at={doc.ngay_phe_duyet || undefined}
+                accentColor={ROLE_COLORS.phe_duyet.fg}
+                isLast
               />
-            </div>
+            </ol>
+
+            {/* Khối tiến độ ở đáy — vừa cho biết còn bao nhiêu bước, vừa lấp khoảng trắng khi
+                timeline ngắn hơn cột trái (2 card đã cao bằng nhau nhờ flex-1). */}
+            {!doc.is_uploaded && (() => {
+              const totalSteps = (doc.thu_tu_ky_json || []).length + 1 // + bước phê duyệt cuối
+              const doneSteps =
+                Object.keys((doc.nguoi_ky as Record<string, NguoiKyEntry> | null) || {}).length +
+                (doc.trang_thai === "da_phe_duyet" ? 1 : 0)
+              const pct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0
+              const allDone = doc.trang_thai === "da_phe_duyet"
+              return (
+                <div className="mt-auto px-5 py-4 border-t border-slate-100 bg-slate-50/60">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tiến độ ký</span>
+                    <span className={`text-xs font-extrabold ${allDone ? "text-emerald-600" : "text-amber-600"}`}>
+                      {doneSteps}/{totalSteps} bước
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${allDone ? "bg-emerald-500" : "bg-amber-500"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -2152,6 +2549,10 @@ export default function DocumentDetailPage() {
           lockedQrAdjustable={signQrAdjustable}
           lockedPrefixText={signPrefixText}
           signerChucVu={signerChucVu}
+          placementAll={(doc.placement_ky as Record<string, unknown> | null) ?? null}
+          signStepKey={signStepKey}
+          signedStepKeys={signedStepKeys}
+          stepLabels={stepLabels}
           userId={user?.id || ""}
           docId={doc.id}
           onConfirm={handleSignConfirm}
@@ -2309,9 +2710,9 @@ export default function DocumentDetailPage() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt className="text-xs font-bold text-slate-400 mb-0.5">{label}</dt>
-      <dd className="text-slate-700">{value || "—"}</dd>
+    <div className="rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+      <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">{label}</dt>
+      <dd className="text-sm font-semibold text-slate-800 break-words">{value || "—"}</dd>
     </div>
   )
 }
@@ -2323,6 +2724,9 @@ function TimelineStep({
   pending,
   isMyTurn,
   at,
+  stepNo,
+  accentColor,
+  isLast,
 }: {
   label: string
   sublabel: string
@@ -2332,34 +2736,96 @@ function TimelineStep({
   // canKyBuoc/canPheDuyet đã có sẵn ở component cha, chỉ đổi phần hiển thị ở đây.
   isMyTurn?: boolean
   at?: string | null
+  /** Số thứ tự hiện trong badge khi bước chưa ký (bước phê duyệt/soạn thảo không truyền). */
+  stepNo?: number
+  /**
+   * Màu vai trò của bước — CÙNG màu với khung ký của bước đó trên PDF (modal ký) và trên màn cài
+   * đặt vị trí, để người dùng nối được "dòng này trên timeline = khung màu kia trên văn bản".
+   */
+  accentColor?: string
+  isLast?: boolean
 }) {
+  const accent = accentColor || "#94a3b8"
+  const connector = done
+    ? "#a7f3d0"
+    : pending
+      ? "repeating-linear-gradient(to bottom,#fcd34d 0 4px,transparent 4px 8px)"
+      : "#e2e8f0"
+
   return (
-    <div className="flex items-start gap-3">
-      <div className="shrink-0 mt-0.5">
+    <li className="relative flex gap-3 pb-4 last:pb-0">
+      {!isLast && (
+        <span
+          className="absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 rounded"
+          style={done || !pending ? { background: connector } : { backgroundImage: connector }}
+        />
+      )}
+
+      <span
+        className={`relative z-10 w-8 h-8 shrink-0 rounded-full grid place-items-center ring-4 ${
+          done
+            ? "bg-emerald-500 text-white ring-emerald-100"
+            : isMyTurn
+              ? "bg-amber-500 text-white ring-amber-200 animate-pulse"
+              : pending
+                ? "bg-white text-slate-500 border-2 border-slate-300 ring-slate-100"
+                : "bg-white text-slate-300 border-2 border-dashed border-slate-200 ring-transparent"
+        }`}
+      >
         {done ? (
-          <CheckCircle2 size={18} className="text-emerald-500" />
-        ) : pending ? (
-          isMyTurn ? <Bell size={18} className="text-amber-600" /> : <Clock size={18} className="text-slate-300" />
+          <CheckCircle2 size={16} />
+        ) : isMyTurn ? (
+          <Bell size={14} />
+        ) : stepNo ? (
+          <span className="text-[11px] font-extrabold">{stepNo}</span>
         ) : (
-          <div className="w-4 h-4 rounded-full border-2 border-slate-200" />
+          <Clock size={14} />
         )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className={`text-sm font-bold ${done ? "text-slate-800" : pending ? (isMyTurn ? "text-amber-700" : "text-slate-400") : "text-slate-400"}`}>
-          {label}
-        </p>
-        {pending && (
-          <span className={`inline-flex mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${isMyTurn ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-400"}`}>
-            {isMyTurn ? "🔔 Đến lượt bạn" : "Đang chờ"}
-          </span>
-        )}
+      </span>
+
+      <div
+        className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 ${
+          done
+            ? "border-emerald-100 bg-emerald-50/60"
+            : isMyTurn
+              ? "border-amber-200 bg-amber-50 shadow-sm"
+              : pending
+                ? "border-slate-200 bg-white"
+                : "border-slate-200 border-dashed bg-slate-50/60"
+        }`}
+        style={{ borderLeft: `3px solid ${done || pending ? accent : `${accent}55`}` }}
+        title="Màu tương ứng khung ký trên văn bản"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <p className={`text-sm font-bold ${done || isMyTurn ? "text-slate-800" : "text-slate-500"}`}>
+            {label}
+          </p>
+          {done && (
+            <span className="shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+              Đã ký
+            </span>
+          )}
+          {pending && (
+            <span
+              className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                isMyTurn ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {isMyTurn ? "🔔 Đến lượt bạn" : "Đang chờ"}
+            </span>
+          )}
+        </div>
         {sublabel && (
-          <p className={`text-xs mt-0.5 ${done ? "text-slate-500" : pending ? (isMyTurn ? "text-amber-500" : "text-slate-300") : "text-slate-300"}`}>
+          <p className={`text-[13px] mt-0.5 ${done ? "text-slate-600" : isMyTurn ? "text-amber-700 font-semibold" : "text-slate-400"}`}>
             {sublabel}
           </p>
         )}
-        {at && <p className="text-xs text-slate-300 mt-0.5">{fmtDate(at)}</p>}
+        {at && (
+          <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+            <Clock size={11} /> {fmtDate(at)}
+          </p>
+        )}
       </div>
-    </div>
+    </li>
   )
 }

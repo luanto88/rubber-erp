@@ -650,9 +650,9 @@ export default function OutputPage() {
       >
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <CalendarDays size={15} className="shrink-0" />
-            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="w-[128px] md:w-auto rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
             <span className="text-slate-300 shrink-0">→</span>
-            <DateTextInput value={filterTo} onChange={setFilterTo} className="w-[128px] md:w-auto rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <DateTextInput value={filterTo} onChange={setFilterTo} className="text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
           </div>
 
           {(tab === "list" || tab === "stats") && (

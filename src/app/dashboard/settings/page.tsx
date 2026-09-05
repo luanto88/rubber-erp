@@ -878,6 +878,42 @@ export default function SettingsPage() {
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
 
+  // forceRefresh=true: bỏ qua getFreshAuthSession() (chỉ refresh khi client TỰ THẤY token sắp
+  // hết hạn) — dùng khi ĐÃ BIẾT server vừa từ chối token hiện tại (SESSION_EXPIRED_MESSAGE), lúc
+  // đó gọi lại getFreshAuthSession() bình thường có thể trả về Y NGUYÊN token cũ đã bị từ chối
+  // (bug thật đã xác nhận qua console log: retry không hề có log lỗi refresh nào, vì client vẫn
+  // nghĩ token còn hạn theo expires_at đang giữ) — phải ép refresh thật bằng forceRefreshAuthSession().
+  const getAccessToken = async (forceRefresh = false): Promise<string> => {
+    const tryOnce = async () => {
+      const session = forceRefresh ? await forceRefreshAuthSession() : await getFreshAuthSession()
+      const token = session?.access_token
+      if (!token) throw new Error("Không lấy được access token từ session hiện tại")
+      return token
+    }
+    try {
+      return await tryOnce()
+    } catch (error) {
+      // Không nuốt lỗi thật — log rõ nguyên nhân gốc để còn debug được trên production.
+      // Lỗi phổ biến nhất là race giữa nhiều nguồn refresh token cùng lúc (interval 60s,
+      // focus-listener khi người dùng quay lại tab sau khi mở app Mail lấy OTP, autoRefreshToken
+      // nền của SDK) — thường tự hết sau vài trăm mili-giây nên thử lại 1 lần trước khi kết luận.
+      console.error(
+        "getAccessToken: lần thử đầu thất bại, thử lại sau 600ms —",
+        error instanceof Error ? `${error.name}: ${error.message}` : error,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      try {
+        return await tryOnce()
+      } catch (retryError) {
+        console.error(
+          "getAccessToken: thử lại vẫn thất bại —",
+          retryError instanceof Error ? `${retryError.name}: ${retryError.message}` : retryError,
+        )
+        throw new Error(SESSION_EXPIRED_MESSAGE)
+      }
+    }
+  }
+
   // Admin reset user password & PIN modals
   const [adminResetPwdModal, setAdminResetPwdModal] = useState<{
     profile: ProfileRow
@@ -1349,10 +1385,15 @@ export default function SettingsPage() {
     }
     setAdminResetPwdModal((prev) => (prev ? { ...prev, loading: true, error: "", success: "" } : null))
     try {
+      const accessToken = await getAccessToken()
       const res = await fetch("/api/account/admin-reset-credentials", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
+          targetUserId: adminResetPwdModal.profile.id,
           userId: adminResetPwdModal.profile.id,
           action: "password",
           newPassword: adminResetPwdModal.newPassword,
@@ -1366,7 +1407,7 @@ export default function SettingsPage() {
         return
       }
       setAdminResetPwdModal((prev) =>
-        prev ? { ...prev, loading: false, success: "Đặt lại mật khẩu thành công!" } : null,
+        prev ? { ...prev, loading: false, success: data.message || "Đặt lại mật khẩu thành công!" } : null,
       )
       setTimeout(() => {
         setAdminResetPwdModal(null)
@@ -1386,10 +1427,15 @@ export default function SettingsPage() {
     }
     setAdminResetPinModal((prev) => (prev ? { ...prev, loading: true, error: "", success: "" } : null))
     try {
+      const accessToken = await getAccessToken()
       const res = await fetch("/api/account/admin-reset-credentials", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
+          targetUserId: adminResetPinModal.profile.id,
           userId: adminResetPinModal.profile.id,
           action: "pin",
           newPin: adminResetPinModal.newPin,
@@ -1403,7 +1449,7 @@ export default function SettingsPage() {
         return
       }
       setAdminResetPinModal((prev) =>
-        prev ? { ...prev, loading: false, success: "Đặt lại mã PIN thành công!" } : null,
+        prev ? { ...prev, loading: false, success: data.message || "Đặt lại mã PIN thành công!" } : null,
       )
       setTimeout(() => {
         setAdminResetPinModal(null)
@@ -2613,41 +2659,6 @@ export default function SettingsPage() {
     void loadVanBanTypes(factoryId)
   }
 
-  // forceRefresh=true: bỏ qua getFreshAuthSession() (chỉ refresh khi client TỰ THẤY token sắp
-  // hết hạn) — dùng khi ĐÃ BIẾT server vừa từ chối token hiện tại (SESSION_EXPIRED_MESSAGE), lúc
-  // đó gọi lại getFreshAuthSession() bình thường có thể trả về Y NGUYÊN token cũ đã bị từ chối
-  // (bug thật đã xác nhận qua console log: retry không hề có log lỗi refresh nào, vì client vẫn
-  // nghĩ token còn hạn theo expires_at đang giữ) — phải ép refresh thật bằng forceRefreshAuthSession().
-  const getAccessToken = async (forceRefresh = false): Promise<string> => {
-    const tryOnce = async () => {
-      const session = forceRefresh ? await forceRefreshAuthSession() : await getFreshAuthSession()
-      const token = session?.access_token
-      if (!token) throw new Error("Không lấy được access token từ session hiện tại")
-      return token
-    }
-    try {
-      return await tryOnce()
-    } catch (error) {
-      // Không nuốt lỗi thật — log rõ nguyên nhân gốc để còn debug được trên production.
-      // Lỗi phổ biến nhất là race giữa nhiều nguồn refresh token cùng lúc (interval 60s,
-      // focus-listener khi người dùng quay lại tab sau khi mở app Mail lấy OTP, autoRefreshToken
-      // nền của SDK) — thường tự hết sau vài trăm mili-giây nên thử lại 1 lần trước khi kết luận.
-      console.error(
-        "getAccessToken: lần thử đầu thất bại, thử lại sau 600ms —",
-        error instanceof Error ? `${error.name}: ${error.message}` : error,
-      )
-      await new Promise((resolve) => setTimeout(resolve, 600))
-      try {
-        return await tryOnce()
-      } catch (retryError) {
-        console.error(
-          "getAccessToken: thử lại vẫn thất bại —",
-          retryError instanceof Error ? `${retryError.name}: ${retryError.message}` : retryError,
-        )
-        throw new Error(SESSION_EXPIRED_MESSAGE)
-      }
-    }
-  }
 
   const closeSensitiveActionModal = () => {
     setSensitiveActionModal(null)

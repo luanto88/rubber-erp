@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { prepareImageForUpload } from "@/lib/image-upload";
-import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth";
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth";
 import {
   dedupeLotsByMaLo,
   normalizeLotCode,
@@ -30,6 +30,8 @@ import {
   Printer,
   ImagePlus,
   ArrowLeftRight,
+  ShieldCheck,
+  Loader2,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
@@ -39,6 +41,12 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import { CustomerGrantModal } from "@/app/dashboard/export/_components/customer-grant-modal";
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
+import {
+  fetchGrantCandidates,
+  fetchFactoryGrants,
+  deleteExportOrderGrant,
+  getErrorMessage,
+} from "@/lib/export-order-grants";
 
 // --- Types -------------------------------------------------------------------
 type Vehicle = {
@@ -337,9 +345,21 @@ export default function ExportPage() {
   const [factory, setFactory] = useState<{ id: string; name: string } | null>(
     null,
   );
-  const [currentUser, setCurrentUser] = useState<SessionUserLite | null>(null);
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null;
+    } catch {
+      return null;
+    }
+  });
+  const canGrantCustomer = currentUser?.role === "admin";
   const [canApproveOrders, setCanApproveOrders] = useState(false);
   const [grantModalOrder, setGrantModalOrder] = useState<ExportOrder | null>(null);
+  const [grantsByOrderId, setGrantsByOrderId] = useState<
+    Record<string, Array<{ id: string; userId: string; userName: string }>>
+  >({});
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
   const isNMCP = useMemo(
     () => factory?.name?.toLowerCase().includes("cuaparis") ?? false,
     [factory],
@@ -480,38 +500,87 @@ export default function ExportPage() {
     setCustomers(data || []);
   }, []);
 
-  // Bootstrap: chỉ chạy 1 lần để lấy factoryId, không có loadXxx trong deps
+  const loadGrants = useCallback(async (fid: string) => {
+    try {
+      const grantItems = await fetchFactoryGrants(fid);
+      const map: Record<
+        string,
+        Array<{ id: string; userId: string; userName: string }>
+      > = {};
+      grantItems.forEach((g) => {
+        if (!map[g.orderId]) map[g.orderId] = [];
+        map[g.orderId].push({
+          id: g.id,
+          userId: g.userId,
+          userName: g.userName || "Khách hàng",
+        });
+      });
+      setGrantsByOrderId(map);
+    } catch (err) {
+      console.error("Lỗi nạp cấp quyền KH:", err);
+    }
+  }, []);
+
+  const handleRevokeGrant = useCallback(
+    async (orderId: string, grantId: string, userName: string) => {
+      if (!confirm(`Thu hồi quyền xem đơn hàng của ${userName}?`)) return;
+      setRevokingGrantId(grantId);
+      try {
+        await deleteExportOrderGrant(grantId, factoryId || undefined);
+        setGrantsByOrderId((prev) => ({
+          ...prev,
+          [orderId]: (prev[orderId] || []).filter((g) => g.id !== grantId),
+        }));
+        showToast(`Đã thu hồi quyền của ${userName}`);
+      } catch (err) {
+        showToast(getErrorMessage(err, "Không thu hồi được quyền."), "error");
+      } finally {
+        setRevokingGrantId(null);
+      }
+    },
+    [factoryId],
+  );
+
+  // Bootstrap: lấy session user và factoryId
   useEffect(() => {
     const bootstrap = async () => {
-      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null;
-      if (!hasPermission(cachedUser, "export.view")) {
+      const authState = await hydrateActiveSession().catch(() => ({
+        session: null,
+        user: null,
+      }));
+      const user =
+        authState.user ||
+        (typeof window !== "undefined"
+          ? (JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null)
+          : null);
+
+      if (!hasPermission(user, "export.view")) {
         setLoading(false);
         window.location.replace("/dashboard");
         return;
       }
+      if (user) {
+        setCurrentUser(user);
+      }
+
       const fid = await getActiveFactoryId();
       if (!fid) {
         setLoading(false);
         return;
       }
       setFactoryId(fid);
-      const rawUser =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem("erp_user")
-          : null;
-      const parsedUser = rawUser ? (JSON.parse(rawUser) as SessionUserLite) : null;
-      setCurrentUser(parsedUser);
-      if (parsedUser?.role === "admin") {
+
+      if (user?.role === "admin") {
         setCanApproveOrders(true);
-      } else if (parsedUser?.id) {
-        const fullName = parsedUser.full_name?.trim() || "";
+      } else if (user?.id) {
+        const fullName = user.full_name?.trim() || "";
         const [staffByProfileRes, staffByNameRes] = await Promise.all([
           supabase
             .from("maintenance_staff")
             .select("ten,chuc_vu_chinh_quyen")
             .eq("factory_id", fid)
             .eq("active", true)
-            .eq("profile_id", parsedUser.id)
+            .eq("profile_id", user.id)
             .maybeSingle(),
           fullName
             ? supabase
@@ -580,6 +649,13 @@ export default function ExportPage() {
     window.history.replaceState({}, "", nextUrl);
   }, [searchParams]);
 
+  useEffect(() => {
+    const s = searchParams.get("search") || searchParams.get("lot");
+    if (s) {
+      setSearch(s);
+    }
+  }, [searchParams]);
+
   // Reload khi factoryId hoặc filter thay đổi
   useEffect(() => {
     if (!factoryId) return;
@@ -587,7 +663,8 @@ export default function ExportPage() {
     void loadLots(factoryId);
     void loadQcResults(factoryId);
     void loadCustomers(factoryId);
-  }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers]);
+    void loadGrants(factoryId);
+  }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers, loadGrants]);
 
   // -- Compute remaining per lot --------------------------------------------
   const lotById = useMemo(
@@ -1527,13 +1604,43 @@ export default function ExportPage() {
   };
 
   // -- Filtered orders -------------------------------------------------------
-  const filtered = orders.filter(
-    (o) =>
-      !search ||
-      o.ma_don?.toLowerCase().includes(search.toLowerCase()) ||
-      o.customers?.ten_kh_en?.toLowerCase().includes(search.toLowerCase()) ||
-      o.customers?.ma_kh?.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    if (!search.trim()) return orders;
+    const query = search.trim().toLowerCase();
+    const normQuery = normalizeLotCode(query);
+
+    return orders.filter((o) => {
+      if (o.ma_don?.toLowerCase().includes(query)) return true;
+      if (
+        o.customers?.ten_kh_en?.toLowerCase().includes(query) ||
+        o.customers?.ma_kh?.toLowerCase().includes(query)
+      ) {
+        return true;
+      }
+      if (
+        o.so_hop_dong?.toLowerCase().includes(query) ||
+        o.so_thong_bao?.toLowerCase().includes(query) ||
+        o.so_hoa_don?.toLowerCase().includes(query)
+      ) {
+        return true;
+      }
+      const hasLot = (o.assignments || []).some((a) => {
+        if (!a.ma_lo) return false;
+        const lotLower = a.ma_lo.toLowerCase();
+        if (lotLower.includes(query)) return true;
+        if (normQuery && normalizeLotCode(a.ma_lo).includes(normQuery)) return true;
+        return false;
+      });
+      if (hasLot) return true;
+      const hasVehicle = (o.vehicles || []).some(
+        (v) =>
+          v.bien_truoc?.toLowerCase().includes(query) ||
+          v.bien_sau?.toLowerCase().includes(query),
+      );
+      if (hasVehicle) return true;
+      return false;
+    });
+  }, [orders, search]);
 
   // -- RENDER: Toast ---------------------------------------------------------
   const Toast = () =>
@@ -1632,7 +1739,7 @@ export default function ExportPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm mã đơn, khách hàng..."
+              placeholder="Tìm mã đơn, khách hàng, số lô..."
               className="flex-1 text-sm outline-none"
             />
           </div>
@@ -1723,7 +1830,17 @@ export default function ExportPage() {
                       }
                     >
                       <td className="px-4 py-3 font-bold text-emerald-700">
-                        {order.ma_don}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{order.ma_don}</span>
+                          {(grantsByOrderId[order.id] || []).length > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 text-[10px] font-bold"
+                              title={`Đã cấp quyền cho ${(grantsByOrderId[order.id] || []).length} tài khoản khách hàng`}
+                            >
+                              <ShieldCheck size={10} /> {(grantsByOrderId[order.id] || []).length}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {order.ngay
@@ -1970,14 +2087,25 @@ export default function ExportPage() {
                                     Lô hàng
                                   </div>
                                   <div className="flex flex-wrap gap-1">
-                                    {(order.assignments || []).map((a) => (
-                                      <span
-                                        key={a.lot_id + a.vehicleIdx}
-                                        className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700"
-                                      >
-                                        {a.ma_lo} · Xe {a.vehicleIdx + 1}
-                                      </span>
-                                    ))}
+                                    {(order.assignments || []).map((a) => {
+                                      const isMatchedLot =
+                                        Boolean(search.trim()) &&
+                                        (a.ma_lo?.toLowerCase().includes(search.trim().toLowerCase()) ||
+                                          (normalizeLotCode(search.trim()) &&
+                                            normalizeLotCode(a.ma_lo).includes(normalizeLotCode(search.trim()))));
+                                      return (
+                                        <span
+                                          key={a.lot_id + a.vehicleIdx}
+                                          className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${
+                                            isMatchedLot
+                                              ? "bg-amber-100 border-2 border-amber-400 text-amber-900 font-bold shadow-sm ring-2 ring-amber-300"
+                                              : "bg-white border border-slate-200 text-slate-700"
+                                          }`}
+                                        >
+                                          {a.ma_lo} · Xe {a.vehicleIdx + 1}
+                                        </span>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}
@@ -2024,7 +2152,7 @@ export default function ExportPage() {
                               >
                                 <Printer size={11} /> Tải PDF biên bản
                               </a>
-                              {currentUser?.role === "admin" && (
+                              {canGrantCustomer && (
                                 <button
                                   type="button"
                                   onClick={() => setGrantModalOrder(order)}
@@ -2033,6 +2161,55 @@ export default function ExportPage() {
                                   <UserPlus size={11} /> Cấp quyền KH
                                 </button>
                               )}
+
+                              {/* Danh sách tài khoản khách hàng đã được cấp quyền */}
+                              {(() => {
+                                const orderGrants = grantsByOrderId[order.id] || [];
+                                return (
+                                  <div className="mt-2.5 w-full pt-2 border-t border-slate-200 flex flex-col items-center">
+                                    <div className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center gap-1 self-start">
+                                      <ShieldCheck size={12} className="text-violet-600" />
+                                      <span>Đã cấp quyền KH ({orderGrants.length}):</span>
+                                    </div>
+                                    {orderGrants.length === 0 ? (
+                                      <div className="text-[11px] text-slate-400 italic self-start">
+                                        Chưa cấp quyền KH
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col gap-1 w-full max-w-[150px]">
+                                        {orderGrants.map((g) => (
+                                          <div
+                                            key={g.id}
+                                            className="flex items-center justify-between gap-1 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800"
+                                          >
+                                            <span className="truncate font-medium text-[11px]" title={g.userName}>
+                                              {g.userName}
+                                            </span>
+                                            {canGrantCustomer && (
+                                              <button
+                                                type="button"
+                                                disabled={revokingGrantId === g.id}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  void handleRevokeGrant(order.id, g.id, g.userName);
+                                                }}
+                                                className="text-violet-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-violet-100 disabled:opacity-50 shrink-0"
+                                                title={`Xóa quyền của ${g.userName}`}
+                                              >
+                                                {revokingGrantId === g.id ? (
+                                                  <Loader2 size={11} className="animate-spin" />
+                                                ) : (
+                                                  <X size={11} />
+                                                )}
+                                              </button>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </td>
@@ -2080,6 +2257,9 @@ export default function ExportPage() {
             factoryId={factoryId}
             actorId={currentUser.id}
             onClose={() => setGrantModalOrder(null)}
+            onSaved={() => {
+              void loadGrants(factoryId);
+            }}
           />
         )}
       </div>

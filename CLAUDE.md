@@ -6207,3 +6207,174 @@ Tóm tắt các điểm dễ quên:
   lý khi nội dung thật sự là ảnh, không đụng PDF/Excel).
 - Khảo sát toàn Storage: chỉ `order-files` dính (49 file, **đã chuyển đổi hết**);
   `inventory-files`/`product-files`/`shipping-files` sạch.
+
+## Cập nhật (2026-09-05, tiếp) — Cải tiến UI màn ký các bước + trang chi tiết Văn bản
+
+Người dùng đã test tay toàn bộ luồng ký Văn bản trên localhost, **mọi bước pass**, chỉ yêu cầu 2
+cải tiến giao diện. Đã code xong (`tsc` sạch, `eslint` 0 lỗi — 4 warning `<img>` đều pre-existing).
+Chi tiết kỹ thuật đầy đủ: `.claude/rules/22-documents-module.md` mục **"Màn ký các bước: thumbnail
+trang + màu vai trò dùng chung (2026-09-05)"**. Tóm tắt điểm dễ quên:
+
+1. **Modal ký giờ có rail thumbnail các trang PDF cạnh trái** (giống màn cài đặt vị trí). Khung ký
+   của **chính người đang ký "sáng lên"** trên thumbnail bằng **đúng màu người soạn thảo đã cài
+   đặt** (bước 1 amber, bước 2 sky, …, phê duyệt emerald); khung bước khác vẽ mờ/nét đứt. Cùng màu
+   đó dùng luôn cho khung trên canvas và viền trái mỗi bước trên timeline trang chi tiết.
+2. Thêm nút **"Khung bước khác"** (bật/tắt lớp khung mờ của các bước khác trên trang đang xem) và
+   nút **"Tới khung của bạn (trang N)"** ở footer.
+3. Trang chi tiết: 2 card **cao bằng nhau** (grid 3+2 + `items-stretch` + `flex-1`), tone pastel,
+   timeline có connector dọc + badge tròn + pill trạng thái + thanh tiến độ "N/M bước".
+
+⚠️ **`ky/mau-vi-tri/page.tsx` là MẪU THAM CHIẾU — không sửa 1 ký tự** (đã xác nhận `git diff` rỗng).
+Vì vậy `src/lib/signing/template-colors.ts` là **bản sao màu có chủ đích**: đổi màu ở màn cài đặt vị
+trí thì phải sửa đồng bộ file này.
+
+**Chưa test tay** — cần: mở modal ký 1 văn bản PDF nhiều trang (thumbnail hiện dần, bấm chuyển
+trang nhanh liên tiếp không ra canvas trắng); đối chiếu màu khung bước 1/2/phê duyệt khớp màn cài
+đặt vị trí; bật/tắt "Khung bước khác" vẫn kéo-thả được chữ ký; **ký thật 1 văn bản đủ các bước →
+PDF sau ký phải y hệt trước khi đổi UI** (chỉ đổi trình bày); test nhánh luồng cũ (không mẫu) và
+nhánh file Office; mobile 390px; trang chi tiết ở 4 trạng thái + văn bản `is_uploaded`.
+
+### Prompt mở đầu session sau — Việc 6: PAdES + trang verify cho module Văn bản
+
+```
+Đọc mục "Cập nhật (2026-09-05, tiếp) — Cải tiến UI màn ký các bước" trong CLAUDE.md và mục "Màn ký
+các bước: thumbnail trang + màu vai trò dùng chung (2026-09-05)" trong .claude/rules/22-documents-
+module.md. Phần UI đó đã CODE XONG (tsc/eslint sạch, 21/21 assertion PASS cho helper toạ độ) —
+nếu tôi báo lỗi khi test tay thì sửa trước, còn không thì bắt đầu VIỆC 6.
+
+Việc 6: PAdES + trang verify cho module Văn bản nội bộ ("bấm vào chữ ký xem bằng chứng xác minh",
+giống module Bảo trì/Chất lượng/Điều xe đã có).
+
+7 ràng buộc BẮT BUỘC nắm trước khi thiết kế (đã điều tra sẵn, đừng điều tra lại):
+
+1. Văn bản dùng **hệ ký RIÊNG** (`src/app/api/documents/sign/route.ts`), tách biệt hoàn toàn với
+   hệ ký dùng chung (`src/lib/signing/requests.ts`'s `signField()`). Văn bản **KHÔNG có bản ghi
+   `nguoi_ky`** ⇒ **không dùng lại được** trang `/sign-verify/[nguoiKyId]` (trang đó đọc
+   `nguoi_ky.pades_sig_index`). Phải làm trang verify RIÊNG cho Văn bản.
+2. Tái dùng nguyên `src/lib/signing/pades.ts` (`applyPadesSignatureToDoc`/
+   `addSignaturePlaceholderToDoc`, `hasPadesRootCa`, `diagnosePadesEnv`) và
+   `src/lib/signing/verify-pades.ts` (`verifyPadesSignature`) — 2 file này đã chạy thật trên
+   production, KHÔNG viết lại từ đầu.
+3. **Bắt buộc incremental update**: `@cantoo/pdf-lib` với `forIncrementalUpdate: true`, gọi
+   `.commit()` nhiều lần trên CÙNG 1 doc sống — KHÔNG `save()` rồi reload. Đây là bài học từ 2 bug
+   đã fix: "bug 74.8MB" (reload nhiều lần làm dung lượng nhân đôi mỗi lượt ký) và "mất chữ ký PAdES
+   của người ký trước". Lời giải mẫu nằm sẵn trong `signField()` của `src/lib/signing/requests.ts`
+   — đọc kỹ trước khi viết.
+   ⚠️ `apply-template.ts`/`stamp-pdf.ts` hiện dùng `pdf-lib` GỐC (Hopding) + `save()` — CHÍNH LÀ
+   pattern đã gây bug. Phải quyết định cách chuyển sang `@cantoo/pdf-lib` cho module Văn bản mà
+   KHÔNG phá `stamp-pdf.ts` dùng chung (file đó còn phục vụ ISO — xem cách `requests.ts` ép kiểu
+   qua `PdfLibDocument` để tái dùng).
+4. `doc_approval_log` cho Văn bản đã có sẵn `content_hash` từ Giai đoạn 0 — dùng làm nguồn dữ liệu
+   cho trang verify. Cần chỗ lưu `pades_sig_index` theo TỪNG BƯỚC ký (Văn bản có nhiều bước:
+   `ky_buoc` 1..N + `phe_duyet`) — nhiều khả năng cần migration mới, hỏi phạm vi trước.
+5. Cần thêm **link annotation** trên con dấu chữ ký trỏ về trang verify — mẫu có sẵn trong
+   `signField()` (tạo `PDFArray`/dict `Annot` thủ công bằng API thấp của `@cantoo/pdf-lib`, bọc
+   try/catch, không chặn luồng ký chính).
+6. Biến môi trường `SIGN_PADES_ROOT_CA_CERT_PEM`/`SIGN_PADES_ROOT_CA_KEY_PEM` đã cấu hình sẵn ở cả
+   `.env.local` lẫn Vercel — KHÔNG tạo root CA mới. ⚠️ Giá trị dán vào Vercel phải có đủ
+   `-----BEGIN.../-----END-----` (đã từng mất 1 phiên vì thiếu 4 dòng này).
+7. Landmine đã biết: `node-forge` đoán SAI kiểu ASN.1 cho `commonName` chứa dấu tiếng Việt —
+   `pades.ts` đã ép `valueTagClass: forge.asn1.Type.UTF8`, giữ nguyên, đừng bỏ.
+
+BẮT BUỘC hỏi phạm vi qua AskUserQuestion trước khi code — tối thiểu: (a) áp dụng cho văn bản đang
+dở dang hay chỉ văn bản mới? (b) mỗi bước ký 1 chữ ký PAdES riêng, hay chỉ 1 "niêm phong hệ thống"
+duy nhất lúc phê duyệt xong? Đây là ROUTE KÝ THẬT ĐANG CHẠY PRODUCTION.
+
+Verify bắt buộc trước khi coi là xong: ký thật đủ các bước, tải file cuối, dùng `openssl cms
+-verify -binary -CAfile <root>` (công cụ ngoài, độc lập) xác nhận TỪNG chữ ký, và kiểm byte-identity
+giữa các lượt ký (chữ ký người trước không bị đụng).
+
+Chỉ dùng `npx tsc --noEmit` + `npx eslint` — không chạy `npm run build`.
+```
+
+## Cập nhật (2026-09-05, tiếp 2) — Điều tra 2 "bug" UI + Việc 6 (PAdES cho Văn bản) đã code xong
+
+### 2 "bug" UI người dùng báo — nguyên nhân THẬT: build hỏng vì client import nhầm module có `fs`
+
+Ảnh `cung_cap_dl/ui1.png`/`ui2.png` cho thấy giao diện cũ (modal ký vẫn nút `‹ Trang 2/2 ›`, không
+có rail thumbnail).
+
+⚠️ **Kết luận ban đầu của tôi ("chỉ là cache trình duyệt, hard-refresh là xong") là SAI** — ghi lại
+để phiên sau không lặp lại lối suy luận đó. Các quan sát đều đúng (chuỗi *"khung viền xanh"* không
+còn trong `src/`; chunk cũ 04/09 không chứa `"Khung của bạn"`, chunk mới 12:52 có; dev server khởi
+động 12:43 trước lúc chụp ảnh 13:13) nhưng **kết luận rút ra thì sai**: sự tồn tại của chunk mới
+không chứng minh trang đó compile được. Trang `/dashboard/documents/[id]` **báo Build Error** nên
+Next.js tiếp tục phục vụ bản cũ.
+
+Lỗi thật (người dùng gửi ảnh Build Error sau đó):
+
+```
+Module not found: Can't resolve 'fs'   ./src/lib/signing/stamp-pdf.ts (2:1)
+Import trace (Client Component Browser):
+  stamp-pdf.ts → apply-template.ts → placement-preview.ts → documents/[id]/page.tsx
+```
+
+`placement-preview.ts` (chạy trong client component) import `MAU_META_KEY` từ `apply-template.ts`,
+file này kéo theo `stamp-pdf.ts` vốn `import fs`/`path` để đọc file font → cả cây server-only bị
+kéo vào bundle trình duyệt.
+
+**Đã fix**: chuyển `MAU_META_KEY` sang `template-layout.ts` (module THUẦN, đã có sẵn nguyên tắc
+"cố ý không import pdf-lib hay thư viện server nào"); `apply-template.ts` re-export lại để mọi call
+site server không phải đổi import; `placement-preview.ts` import từ module thuần.
+
+**Quy tắc rút ra**: file nào nằm trong cây import của một `"use client"` component thì **mọi**
+module nó chạm tới phải thuần. Kiểm chứng bằng cách duyệt cây import (script tạm, đã chạy: 7 file
+từ `documents/[id]/page.tsx`, không file nào chạm `fs`/`path`/`pdf-lib`/`supabase-admin`) — `tsc`
+và `eslint` **không bắt được lỗi loại này**, chỉ Next.js lúc bundle mới báo.
+
+### Việc 6 — PAdES + trang xác thực cho Văn bản
+
+Chi tiết đầy đủ: `.claude/rules/22-documents-module.md` mục **"Chữ ký số PAdES + trang xác thực
+công khai (2026-09-05, việc 6)"**. Tóm tắt điểm dễ quên:
+
+| Việc | Chốt/kết quả |
+|---|---|
+| Phạm vi | Chỉ **văn bản mới** (văn bản dở dang giữ nguyên) |
+| Mô hình | **Mỗi bước 1 chữ ký PAdES riêng** |
+| Lưu index | Cột mới trên **`doc_approval_log`** (1 dòng log = 1 chữ ký = 1 URL xác thực) |
+| Trang xác thực | `/van-ban-verify/[logId]` + `GET /api/documents/verify/[logId]` (công khai, mirror `/sign-verify`) |
+| Thư viện PDF | `stampPdfStep` + `stampPdfWithTemplate` **bỏ hẳn load/save**, nhận doc sống `@cantoo/pdf-lib` + `forIncrementalUpdate`. `stamp-pdf.ts` (dùng chung ISO) **giữ nguyên**, chỉ ép kiểu |
+
+**🐛 Bug thật đã vá trong `src/lib/signing/pades.ts` (file DÙNG CHUNG 3 module)**: attribute
+`emailAddress` của leaf cert không được ép kiểu ASN.1 — giá trị chứa dấu tiếng Việt/em dash làm
+**chứng thư có chữ ký sai về toán học**. Triệu chứng đánh lừa: `openssl cms -verify -noverify`
+thành công nhưng thêm `-CAfile` thì `rsa_verify: bad signature`. Production không dính (mọi call
+site truyền `auth_email` ASCII), nhưng lưới lọc ASCII nay đã có để không ai vô tình tái tạo.
+
+**Đã kiểm chứng 17/17 PASS** bằng script gọi thẳng code thật: byte-identity qua 3 lượt ký (chữ ký
+người trước không bị đụng, tăng tuyến tính ~10KB/lượt) · `verifyPadesSignature()` 3/3 đúng tên có
+dấu + phát hiện tamper · **`openssl cms -verify` (công cụ ngoài) 3/3 thành công** · 3 link
+annotation đúng trang/URL. `npx tsc --noEmit` + `npx eslint` sạch. Không chạy `npm run build`.
+
+### Trạng thái test tay (cập nhật cuối phiên 2026-09-05)
+
+Người dùng đã chạy migration `20260905_doc_approval_log_pades_index.sql` và test trên localhost:
+
+- ✅ UI modal ký hiển thị đúng: **rail thumbnail** + **khung ký của chính người đang ký** sáng màu.
+- ✅ Con dấu chữ ký trong PDF **có link xác minh** (annotation được nhúng thật).
+- ⚠️ Bấm link ra **404** — KHÔNG phải bug: `.env.local` không có `NEXT_PUBLIC_APP_URL` nên
+  `api/documents/sign/route.ts` fallback `https://qlsxkpt.vercel.app`; link nhúng trong PDF trỏ
+  **production** (chưa deploy code mới) trong khi đang test ở localhost. Đây là hành vi vốn có của
+  mọi URL tuyệt đối nhúng vào PDF/QR trong dự án (QR văn bản cũng vậy) — **không sửa code**.
+
+  Cách test link trên localhost: tạm thêm `NEXT_PUBLIC_APP_URL=http://localhost:3000` vào
+  `.env.local`, restart dev, ký lại 1 văn bản MỚI (link đã nhúng trong file cũ không đổi được),
+  rồi **xoá dòng đó đi** sau khi test — nếu để lại, thông báo Telegram/email và QR sinh ra sau đó
+  sẽ mang link localhost. Hoặc đơn giản hơn: deploy rồi test thẳng trên production.
+
+### Còn lại cho phiên sau
+
+1. **Xác thực end-to-end thật**: mở trang `/van-ban-verify/{logId}` (theo 1 trong 2 cách trên) →
+   xác nhận hiện "Chữ ký hợp lệ" + đúng tên người của đúng bước đó. Có thể tra nhanh `logId` bằng
+   `SELECT id, action, buoc_ky, pades_sig_index, pades_error FROM doc_approval_log WHERE
+   doc_type='van_ban' ORDER BY created_at DESC LIMIT 5;` — `pades_sig_index` phải KHÁC NULL cho
+   văn bản mới ký (nếu NULL, đọc `pades_error` để biết lý do).
+2. Test **văn bản đang dở dang** (đã ký vài bước trước khi có tính năng): xác nhận vẫn ký tiếp bình
+   thường và trang xác thực báo rõ "bước ký này không có chữ ký số" thay vì lỗi.
+3. Test **file Office (DOCX/XLSX)**: ký bình thường, không có PAdES (đúng thiết kế).
+4. Mở file cuối bằng **Adobe Acrobat Reader thật** — xác nhận panel chữ ký hiện đủ các chữ ký, đúng
+   tên từng người; import `public/rubber-erp-signing-root-ca.pem` vào Trusted Certificates rồi mở
+   lại để xác nhận chuyển từ UNKNOWN sang TRUSTED (phép thử openssl không thay thế được).
+5. **Deploy**: toàn bộ thay đổi phiên này chưa commit/push. Nhớ kiểm tra
+   `SIGN_PADES_ROOT_CA_CERT_PEM`/`SIGN_PADES_ROOT_CA_KEY_PEM` đã có trên Vercel (đã cấu hình từ
+   2026-09-01) — thiếu thì `pades_error` sẽ ghi rõ và không chữ ký số nào được nhúng trên production.

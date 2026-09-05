@@ -3,15 +3,6 @@
 import { supabase } from "@/lib/supabase"
 import { forceRefreshAuthSession, getFreshAuthSession } from "@/lib/auth"
 
-// Cấp quyền xem 1 đơn xuất hàng cụ thể (không phải toàn bộ theo customer_id) cho 1 tài
-// khoản role="customer". Mirror đúng pattern của operation_note_shares (xem
-// src/lib/operation-notes.ts) — RLS của export_order_customer_grants tự xác thực actor
-// là admin cùng factory qua auth.uid(), không tin dữ liệu client gửi lên.
-// Xem migration: supabase/migrations/20260708_customer_portal_export_grants.sql
-
-// Supabase JS (PostgREST) ném lỗi dạng plain object { message, code, details, hint... },
-// KHÔNG phải instance của `Error` — dùng hàm này ở catch block để luôn thấy đúng lỗi thật
-// (vd vi phạm RLS, chưa chạy migration) thay vì rơi vào fallback chung chung.
 export function getErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error) return err.message
   if (err && typeof err === "object" && "message" in err) {
@@ -31,38 +22,73 @@ export type ExportOrderGrant = {
   created_at: string
 }
 
-// Danh sách tài khoản role=customer trong nhà máy — phải qua API route server-side vì
-// RLS của bảng `profiles` không cho user thường đọc toàn bộ profiles trong factory.
-// Route đích bắt buộc requireAuthUser() (xem api/export/customer-grant-candidates/route.ts)
-// nên PHẢI đính kèm Authorization Bearer token, nếu không sẽ luôn nhận lỗi
-// "Phiên đăng nhập không hợp lệ" dù admin đang đăng nhập hợp lệ.
-//
-// Dùng getFreshAuthSession() (biên độ refresh 300s, xem src/lib/auth.ts) thay vì
-// supabase.auth.getSession() thô (biên độ refresh mặc định của SDK chỉ 90s) — nếu vẫn bị server
-// từ chối với code "session_expired" (token hết hạn thật giữa lúc gửi request), retry đúng 1 lần
-// bằng forceRefreshAuthSession() (ép refresh, bỏ qua check "còn hạn hay chưa"), mirror đúng
-// pattern retry-once đã dùng ổn định ở settings/page.tsx.
-async function requestGrantCandidates(factoryId: string, token: string) {
-  const res = await fetch(`/api/export/customer-grant-candidates?factoryId=${encodeURIComponent(factoryId)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const json = (await res.json().catch(() => null)) as { users?: GrantCandidate[]; error?: string; code?: string } | null
-  return { res, json }
+export type FactoryGrantItem = {
+  id: string
+  orderId: string
+  userId: string
+  userName: string
+  grantedBy: string | null
+  createdAt: string
 }
 
-export async function fetchGrantCandidates(factoryId: string): Promise<GrantCandidate[]> {
+async function callGrantsApi(path: string, options: RequestInit = {}) {
   const session = await getFreshAuthSession()
   let token = session?.access_token || ""
-  let { res, json } = await requestGrantCandidates(factoryId, token)
+  let res = await fetch(path, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  let json = (await res.json().catch(() => null)) as any
 
   if (!res.ok && json?.code === "session_expired") {
     const freshSession = await forceRefreshAuthSession()
     token = freshSession?.access_token || ""
-    ;({ res, json } = await requestGrantCandidates(factoryId, token))
+    res = await fetch(path, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    json = (await res.json().catch(() => null)) as any
   }
 
+  return { res, json }
+}
+
+export async function fetchGrantCandidates(factoryId: string): Promise<GrantCandidate[]> {
+  const { res, json } = await callGrantsApi(
+    `/api/export/customer-grant-candidates?factoryId=${encodeURIComponent(factoryId)}`
+  )
   if (!res.ok) throw new Error(json?.error || "Không tải được danh sách khách hàng.")
-  return json?.users || []
+  return (json?.users || []) as GrantCandidate[]
+}
+
+export async function fetchFactoryGrants(factoryId: string): Promise<FactoryGrantItem[]> {
+  const { res, json } = await callGrantsApi(
+    `/api/export/customer-grants?factoryId=${encodeURIComponent(factoryId)}`
+  )
+  if (res.ok && Array.isArray(json?.grants)) {
+    return json.grants as FactoryGrantItem[]
+  }
+
+  // Fallback direct Supabase
+  const { data, error } = await supabase
+    .from("export_order_customer_grants")
+    .select("id, export_order_id, granted_to_user_id, granted_by, created_at")
+    .eq("factory_id", factoryId)
+  if (error) throw error
+  return (data || []).map((g) => ({
+    id: g.id,
+    orderId: g.export_order_id,
+    userId: g.granted_to_user_id,
+    userName: "Khách hàng",
+    grantedBy: g.granted_by,
+    createdAt: g.created_at,
+  }))
 }
 
 export async function fetchExportOrderGrants(orderId: string): Promise<ExportOrderGrant[]> {
@@ -74,15 +100,23 @@ export async function fetchExportOrderGrants(orderId: string): Promise<ExportOrd
   return (data || []) as ExportOrderGrant[]
 }
 
-// Đặt lại đúng danh sách khách hàng được cấp quyền cho 1 đơn xuất hàng (thêm người mới,
-// gỡ người bị bỏ chọn). Đi qua client Supabase bình thường — RLS tự xác thực actor thật
-// sự là admin cùng factory, không dùng service role ở đây.
 export async function setExportOrderGrants(input: {
   orderId: string
   factoryId: string
   actorId: string
   recipientUserIds: string[]
 }) {
+  const { res, json } = await callGrantsApi(`/api/export/customer-grants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+
+  if (res.ok) {
+    return
+  }
+
+  // Fallback direct Supabase
   const current = await fetchExportOrderGrants(input.orderId)
   const currentIds = new Set(current.map((g) => g.granted_to_user_id))
   const nextIds = new Set(input.recipientUserIds)
@@ -99,7 +133,7 @@ export async function setExportOrderGrants(input: {
         granted_by: input.actorId,
       })),
     )
-    if (error) throw error
+    if (error) throw new Error(json?.error || error.message)
   }
 
   if (toRemove.length) {
@@ -107,6 +141,25 @@ export async function setExportOrderGrants(input: {
       .from("export_order_customer_grants")
       .delete()
       .in("id", toRemove.map((g) => g.id))
-    if (error) throw error
+    if (error) throw new Error(json?.error || error.message)
   }
+}
+
+export async function deleteExportOrderGrant(grantId: string, factoryId?: string) {
+  const qs = factoryId ? `?id=${encodeURIComponent(grantId)}&factoryId=${encodeURIComponent(factoryId)}` : `?id=${encodeURIComponent(grantId)}`
+  const { res, json } = await callGrantsApi(`/api/export/customer-grants${qs}`, {
+    method: "DELETE",
+  })
+
+  if (res.ok) {
+    return
+  }
+
+  // Fallback direct Supabase
+  const { error } = await supabase
+    .from("export_order_customer_grants")
+    .delete()
+    .eq("id", grantId)
+
+  if (error) throw new Error(json?.error || error.message)
 }

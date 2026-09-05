@@ -9,6 +9,7 @@ export type ExportOrderPdfVehicle = {
   bien_truoc: string
   bien_sau: string
   ghi_chu: string
+  image_urls?: string[]
   image_url_1?: string | null
   image_url_2?: string | null
   image_url_3?: string | null
@@ -112,6 +113,13 @@ function ensureSpace(doc: jsPDF, y: number, needed: number, bottomMargin = MARGI
 
 const PHOTO_CAPTIONS = ["Ảnh xe / Biển số", "Ảnh hàng hóa / Niêm phong", "Ảnh chứng từ / Phiếu cân"]
 
+function getVehiclePhotoUrls(v: ExportOrderPdfVehicle): string[] {
+  if (v.image_urls && v.image_urls.length > 0) {
+    return v.image_urls.filter(Boolean)
+  }
+  return [v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[]
+}
+
 export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factoryName?: string | null) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
@@ -120,7 +128,7 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
 
   const photoUrls = new Set<string>()
   order.vehicles.forEach((v) => {
-    ;[v.image_url_1, v.image_url_2, v.image_url_3].forEach((u) => { if (u) photoUrls.add(u) })
+    getVehiclePhotoUrls(v).forEach((u) => { if (u) photoUrls.add(u) })
   })
   const photoEntries = await Promise.all(
     Array.from(photoUrls).map(async (url) => [url, await fetchImageForPdf(url)] as const),
@@ -215,12 +223,19 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
       0,
     )
     const hasLots = assignedLots.length > 0
-    const photoUrlsForVehicle = [v.image_url_1, v.image_url_2, v.image_url_3]
-    const hasPhotos = photoUrlsForVehicle.some(Boolean)
+    const photoUrlsForVehicle = getVehiclePhotoUrls(v)
+    const hasPhotos = photoUrlsForVehicle.length > 0
+
+    const cols = 3
+    const gap = 4
+    const photoW = (CONTENT_W - 8 - gap * (cols - 1)) / cols
+    const photoH = 32
+    const numRows = hasPhotos ? Math.ceil(photoUrlsForVehicle.length / cols) : 0
+    const rowStep = 6 + photoH + gap
 
     const headerH = 12
     const lotsH = hasLots ? 6 : 0
-    const photosH = hasPhotos ? 6 + 32 : 0
+    const photosH = hasPhotos ? numRows * (6 + photoH) + (numRows - 1) * gap + 2 : 0
     const blockPad = 8
     const blockH = blockPad + headerH + lotsH + photosH
 
@@ -264,25 +279,27 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
     }
 
     if (hasPhotos) {
-      const gap = 4
-      const photoW = (CONTENT_W - 8 - gap * 2) / 3
-      const photoH = 32
       innerY += 2
       photoUrlsForVehicle.forEach((url, idx) => {
-        const boxX = innerX + idx * (photoW + gap)
+        const col = idx % cols
+        const row = Math.floor(idx / cols)
+        const boxX = innerX + col * (photoW + gap)
+        const boxY = innerY + row * rowStep
+
         doc.setFont(PDF_FONT_NAME, "normal")
         doc.setFontSize(6.5)
         doc.setTextColor(...GRAY)
-        doc.text(PHOTO_CAPTIONS[idx], boxX + photoW / 2, innerY, { align: "center", maxWidth: photoW })
+        const caption = PHOTO_CAPTIONS[idx] || `Ảnh ${idx + 1}`
+        doc.text(caption, boxX + photoW / 2, boxY, { align: "center", maxWidth: photoW })
         doc.setDrawColor(...BORDER)
-        doc.rect(boxX, innerY + 1.5, photoW, photoH)
+        doc.rect(boxX, boxY + 1.5, photoW, photoH)
         const img = url ? photoMap.get(url) : null
         if (img && !isPdfImageFailure(img)) {
-          drawImageContain(doc, img, boxX, innerY + 1.5, photoW, photoH)
+          drawImageContain(doc, img, boxX, boxY + 1.5, photoW, photoH)
         } else if (url) {
           doc.setFontSize(6.5)
           doc.setTextColor(...GRAY)
-          doc.text(isPdfImageFailure(img) ? img.reason : "Không tải được ảnh", boxX + photoW / 2, innerY + 1.5 + photoH / 2, { align: "center" })
+          doc.text(isPdfImageFailure(img) ? img.reason : "Không tải được ảnh", boxX + photoW / 2, boxY + 1.5 + photoH / 2, { align: "center" })
         }
       })
     }

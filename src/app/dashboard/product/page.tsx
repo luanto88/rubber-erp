@@ -47,6 +47,7 @@ import {
   STORAGE_STATUS_PRODUCED,
 } from "@/lib/storage-status";
 import {
+  FileOutput,
   Plus,
   Search,
   X,
@@ -6274,6 +6275,15 @@ export default function ProductPage() {
                                 >
                                   <Edit2 size={12} /> Sửa lô
                                 </button>
+                              ) : isExported ? (
+                                <Link
+                                  href={`/dashboard/export?search=${encodeURIComponent(c.ma_lo)}`}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold rounded-lg transition-colors shrink-0 border border-amber-200 shadow-sm"
+                                  title={`Xem đơn xuất hàng của lô ${c.ma_lo}`}
+                                >
+                                  <FileOutput size={12} className="text-amber-600" />
+                                  <span>Đơn xuất</span>
+                                </Link>
                               ) : !lot ? (
                                 // isExported đã hiện rõ qua badge trạng thái bên trái —
                                 // không lặp lại "Đã xuất hàng" ở đây để tránh 2 nhãn chồng nhau.

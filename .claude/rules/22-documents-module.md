@@ -847,3 +847,182 @@ nên không có nút "Gửi ký" và không mở màn "Cài đặt vị trí ký
 
 Với luồng ký số (trang Soạn thảo), **người cài đặt vị trí là người soạn thảo** — vẽ 1 lần cho
 mọi vai trò, kể cả khung của người ký lẫn người phê duyệt.
+
+---
+
+## Màn ký các bước: thumbnail trang + màu vai trò dùng chung (2026-09-05)
+
+Modal ký (`SignPlacementModal`, bước "placement") trước đây chỉ render **đúng 1 trang** lên canvas
+và chuyển trang bằng 2 nút mũi tên — người ký không thấy tổng thể tài liệu, không biết khung của
+mình ở trang nào. Nay dựng lại theo **màn cài đặt vị trí** (`ky/mau-vi-tri/page.tsx`).
+
+### Bảng màu vai trò — 2 bản, phải giữ ĐỒNG BỘ THỦ CÔNG
+
+`src/lib/signing/template-colors.ts` (`ROLE_COLORS`, `KY_BUOC_CLONE_PALETTE`,
+`getKyBuocColor(stepNo)`, `getPlacementKeyColor(key)`) là **bản sao có chủ đích** của bảng màu
+trong `ky/mau-vi-tri/page.tsx` (dòng ~110-131). Màn cài đặt vị trí là MẪU THAM CHIẾU, người dùng
+yêu cầu **giữ nguyên 100%** — không refactor cho nó import từ file dùng chung.
+
+⇒ Đổi màu ở màn cài đặt vị trí thì **phải sửa đồng bộ** `template-colors.ts`, nếu không màu người
+ký nhìn thấy sẽ lệch với màu người soạn thảo đã đặt — đúng thứ tính năng này sinh ra để tránh.
+
+Ánh xạ theo key của `placement_ky`: `"1"`,`"2"`,… → `KY_BUOC_CLONE_PALETTE[(N-1)%8]` (bước 1 amber
+`#f59e0b`, bước 2 sky `#0ea5e9`, bước 3 pink `#db2777`…); `phe_duyet` emerald; `qr` violet;
+`ngay_ky` rose; `ghi_chu` teal. Cùng màu đó được dùng ở **3 nơi**: khung trên canvas modal ký,
+khung sáng trên thumbnail, và viền trái mỗi bước trên timeline trang chi tiết.
+
+### `src/lib/signing/placement-preview.ts` — hàm thuần, CHỈ để hiển thị
+
+`collectPreviewBoxes()` đọc toàn bộ `placement_ky` → danh sách khung kèm `pct` (%, gốc trên-trái)
+và `tier`:
+
+- `mine` — khung của chính người đang ký (kể cả `qr` khi còn được chỉnh, `ghi_chu` ở bước phê
+  duyệt): viền dày + nền màu + `boxShadow` glow → "sáng lên".
+- `done` — bước đã ký: viền mảnh, opacity .55.
+- `other` — bước khác: nét đứt, opacity .35.
+
+Quy đổi point (gốc **dưới-trái**) → % (gốc **trên-trái**) dùng đúng công thức màn mẫu:
+`y% = (dim.h - box.y - box.height) / dim.h * 100`. Bỏ qua `_mau` (`MAU_META_KEY`), entry thiếu
+`tu_mau`, và mọi toạ độ không `Number.isFinite` (JSONB legacy → NaN làm khung nhảy vô hình).
+
+**Tuyệt đối không import file này vào `api/documents/sign/route.ts` / `apply-template.ts`** —
+toạ độ đóng dấu thật vẫn do server tự tính và tự kẹp như cũ.
+
+Đã tự kiểm chứng bằng script gọi thẳng code thật (`node --experimental-strip-types`):
+**21/21 assertion PASS** — công thức lật trục, phân loại tier, đúng màu từng bước, bỏ dữ liệu bẩn,
+neo `moi_trang` xuất hiện ở mọi trang, thiếu `dims` không crash.
+
+### Landmine đã xử lý
+
+1. **`renderPdfPage` phải hủy tác vụ render cũ** (`renderTaskRef` + `.cancel()`, nuốt
+   `RenderingCancelledException`). Có rail thumbnail người dùng bấm chuyển trang rất nhanh → pdfjs
+   ném *"Cannot use the same canvas during multiple render() operations"* và để lại canvas trắng.
+2. **Thumbnail JPEG phải `fillRect` trắng trước `page.render`** — canvas mặc định trong suốt, JPEG
+   không có alpha ⇒ nền thành ĐEN.
+3. Sinh thumbnail **tái dùng `pdf` đã load** trong effect `loadPdf` (không `getDocument()` lần 2),
+   render tuần tự, cập nhật dần từng trang, nhả main thread giữa các trang; guard `thumbRunRef` +
+   `cancelled` sau mỗi `await` (StrictMode chạy effect 2 lần). Quá `MAX_THUMB_PAGES = 80` thì bỏ
+   ảnh, chỉ giữ ô số trang + overlay khung.
+4. Lớp khung mờ của bước khác trên canvas: bắt buộc `pointer-events-none` + `zIndex: 6` (dưới
+   region z=9 và các khối kéo z=12-15) để không cướp sự kiện kéo-thả; kích thước lấy từ state
+   `thumbDims[currentPage] × pdfScale`, **không đọc `canvasRef.current` trong lúc render** (ref
+   không kích hoạt re-render → lệch một nhịp khi đổi sang trang khác khổ giấy).
+5. `signedStepKeys`/`stepLabels` ở component cha **cố ý không dùng `useMemo`** — phía trên đã có
+   early return (`if (loading)`, `if (!doc)`), thêm hook ở đó sẽ vi phạm rules of hooks.
+
+### Trang chi tiết văn bản
+
+2 card đổi sang grid `lg:grid-cols-5` (3+2) + `items-stretch` + `flex-1` để **luôn cao bằng nhau**
+(trước đây 2+1 và card con không giãn nên bên cao bên thấp). Mỗi card có header dải pastel + icon
+tròn; `InfoRow` thành tile nền nhạt; `TimelineStep` thành `<li>` trong `<ol>` có connector dọc
+(liền emerald khi đã ký / nét đứt amber khi đang chờ), badge tròn 32px, pill trạng thái, và viền
+trái 3px mang **màu vai trò của đúng bước đó**. Đáy card có thanh tiến độ "N/M bước".
+
+---
+
+## Chữ ký số PAdES + trang xác thực công khai (2026-09-05, việc 6)
+
+Trước đây file văn bản đã ký chỉ có **con dấu hình ảnh** — không chứng minh được về mặt mật mã.
+Nay mỗi bước ký nhúng thêm 1 chữ ký PAdES thật, bấm vào con dấu mở trang xác thực công khai.
+
+### 3 quyết định phạm vi đã chốt
+
+| Câu hỏi | Chốt |
+|---|---|
+| Áp dụng cho văn bản nào | **Chỉ văn bản mới**. Văn bản đang luân chuyển dở khi deploy giữ nguyên như cũ — tránh file nửa có nửa không chữ ký, người xác thực dễ hiểu nhầm bước cũ bị giả mạo |
+| Mô hình chữ ký | **Mỗi bước 1 chữ ký riêng** (giống Bảo trì/Chất lượng/Điều xe) — bấm vào con dấu của ai ra đúng tên người đó |
+| Nơi lưu `pades_sig_index` | **Cột mới trên `doc_approval_log`** — bảng này đã có sẵn 1 dòng/bước kèm `content_hash` và trigger bất biến. 1 dòng log = 1 chữ ký = 1 URL xác thực |
+
+`resolvePadesEligibility()` quyết định bật/tắt: bật khi đây là lượt đóng dấu **đầu tiên** của văn
+bản (chưa có dòng log nào), hoặc khi các lượt trước **đã có** chữ ký số. Không cần thêm cột cờ nào
+trên `van_ban_documents`.
+
+### ⚠️ Đổi thư viện PDF — bắt buộc, không được quay lại `save()`
+
+`stampPdfStep` (route) và `stampPdfWithTemplate` (`apply-template.ts`) trước đây **tự
+`PDFDocument.load()` rồi `save()`** — chính pattern đã gây 2 bug ở hệ ký dùng chung: *bug 74.8MB*
+(dung lượng nhân đôi mỗi lượt) và *mất chữ ký PAdES của người ký trước* (`save()` ghi lại toàn bộ
+file, xoá đoạn incremental-update).
+
+Nay cả hai **nhận `pdfDoc` đã load sẵn và không tự load/save**. `performFileStamp` giữ **một
+instance sống duy nhất** load bằng `@cantoo/pdf-lib` với `forIncrementalUpdate: true`, vẽ con dấu →
+thêm link annotation → nhúng PAdES, `commit()` nhiều lần trên cùng instance.
+
+- `apply-template.ts` **chỉ Văn bản dùng** (đã grep xác nhận) → đổi an toàn.
+- `stamp-pdf.ts` **dùng chung với ISO** (`generate-pdf`, `iso/forms/finalize`) → **giữ nguyên
+  `pdf-lib` gốc**, chỉ ép kiểu `as unknown as PdfLibDocument` tại chỗ gọi, đúng cách `requests.ts`
+  đang làm.
+
+### Link "xem bằng chứng xác minh"
+
+`logId` được sinh bằng `randomUUID()` **trước khi đóng dấu** — annotation phải nằm trong phần nội
+dung được PAdES ký nên không thể chờ insert log xong mới biết id. Link phủ đúng ô con dấu (kể cả
+khung nhân bản và khung neo "mọi trang"), trỏ `/van-ban-verify/{logId}`.
+
+⚠️ `grep` chuỗi URL trong file PDF sẽ **không thấy** annotation — `@cantoo/pdf-lib` nén object
+stream. Muốn kiểm tra phải đọc lại `page.node.Annots` bằng chính thư viện.
+
+### Best-effort tuyệt đối
+
+Mọi lỗi ở lớp PAdES **chỉ làm mất chữ ký số, không bao giờ chặn luồng ký nghiệp vụ**. Lý do ghi
+vào `pades_error` và hiển thị thẳng trên trang xác thực (không im lặng báo "không có chữ ký"):
+văn bản dở dang · chưa cấu hình root CA · migration chưa chạy · lỗi nhúng.
+
+Insert log có **fallback**: nếu 2 cột mới chưa tồn tại (migration chưa chạy), PostgREST từ chối cả
+câu insert → insert lại bộ cột cũ để không mất trắng audit trail + `content_hash` của lượt ký đó.
+
+### 🐛 Bug ASN.1 đã vá trong `pades.ts` (ảnh hưởng file DÙNG CHUNG)
+
+`issueLeafCertificate` ép `valueTagClass: UTF8` cho `commonName` (fix 2026-08-31) nhưng **bỏ sót
+`emailAddress`**. Attribute này theo chuẩn X.509 là **IA5String (chỉ ASCII)**; giá trị chứa dấu
+tiếng Việt hoặc em dash "—" làm `TBSCertificate` lúc KÝ và lúc SERIALIZE lệch byte nhau → **leaf
+cert có chữ ký sai về toán học**.
+
+Triệu chứng rất dễ chẩn đoán nhầm: `openssl cms -verify -noverify` **thành công** (chữ ký CMS
+đúng) nhưng thêm `-CAfile root.pem` thì **`rsa_verify: bad signature`** — lỗi nằm ở chain, không
+phải ở chữ ký nội dung. Acrobat sẽ không dựng được chain dù đã import root CA.
+
+Production **không dính**: mọi call site đều truyền email nội bộ `username@auth...` (ASCII thuần).
+Đã vá bằng lưới lọc ASCII trong `issueLeafCertificate` + route Văn bản dùng đúng `auth_email` như
+`requests.ts`, **không** đưa mã/tên văn bản có dấu vào chứng thư.
+
+### Tự kiểm chứng — 17/17 PASS, gọi thẳng code thật
+
+Script độc lập mô phỏng đúng chuỗi 3 lượt ký (`ky_buoc 1` → `ky_buoc 2` → `phe_duyet`), tên người
+ký **có dấu tiếng Việt**:
+
+1. **Byte-identity**: bytes sau lượt N là **tiền tố** của lượt N+1 → chữ ký người trước không bị
+   đụng. Mức tăng tuyến tính ~10KB/lượt (đo tăng **tuyệt đối**, không đo tỷ lệ — file test bé nên
+   tỷ lệ luôn lớn dù hành vi đúng).
+2. **`verifyPadesSignature()` (code thật)**: 3/3 hợp lệ, đúng tên có dấu; index không tồn tại bị từ
+   chối; sửa 1 byte → phát hiện ngay.
+3. **`openssl cms -verify` (công cụ ngoài)**: 3/3 `Verification successful` với `-CAfile`; bỏ
+   `-CAfile` → đúng lỗi self-signed (tương đương "UNKNOWN" trong Acrobat).
+4. **Link annotation**: 3 link đúng trang, đúng URL; 3 signature widget.
+
+⚠️ Khi trích chữ ký cho openssl: bắt buộc cờ `-binary`, **dedupe theo giá trị `/ByteRange`** (cùng
+byteRange lặp lại qua các generation), và cắt DER theo **header TLV** (`derTotalLength`) — không
+cắt bằng cách xoá byte `00` ở đuôi (chữ ký RSA có ~1/256 khả năng kết thúc đúng bằng `0x00`).
+
+### ⚠️ Ranh giới client/server của `src/lib/signing/` (bug build 2026-09-05)
+
+`documents/[id]/page.tsx` là `"use client"` → **mọi** module trong cây import của nó bị bundle cho
+trình duyệt. Phân loại bắt buộc nhớ:
+
+| Module | Dùng được ở client? | Lý do |
+|---|---|---|
+| `template-layout.ts` | ✅ | Thuần, chỉ `import type` |
+| `template-colors.ts` | ✅ | Thuần, không import gì |
+| `placement-preview.ts` | ✅ | Chỉ được import từ 2 file trên |
+| `apply-template.ts` | ❌ | Kéo `stamp-pdf.ts` |
+| `stamp-pdf.ts` | ❌ | `import fs`, `import path` (đọc file font) |
+| `pades.ts`, `verify-pades.ts`, `requests.ts`, `templates.ts` | ❌ | node-forge / crypto / supabase-admin |
+
+Bug đã xảy ra: `placement-preview.ts` lấy `MAU_META_KEY` từ `apply-template.ts` → build hỏng
+`Module not found: Can't resolve 'fs'`. Đã chuyển hằng số sang `template-layout.ts` và re-export
+ngược lại từ `apply-template.ts` để call site server không đổi.
+
+**`tsc` và `eslint` KHÔNG bắt được lỗi này** — chỉ lộ khi Next.js bundle. Muốn tự kiểm mà không
+chạy `npm run build`: viết script duyệt đệ quy import từ file `"use client"`, bỏ qua `import type`,
+báo động nếu chạm `fs`/`path`/`pdf-lib`/`@cantoo/pdf-lib`/`node-forge`/`supabase-admin`. Hằng số
+hay type dùng chung 2 phía thì đặt ở module thuần, đừng đặt trong file có logic server.

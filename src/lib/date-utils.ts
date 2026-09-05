@@ -110,6 +110,24 @@ export function normalizeDateInput(value: string | null | undefined) {
     return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
   }
 
+  const dashMatch = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+  if (dashMatch) {
+    const day = Number(dashMatch[1])
+    const month = Number(dashMatch[2])
+    const year = Number(dashMatch[3])
+    if (!isValidDateParts(year, month, day)) return ""
+    return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
+  }
+
+  const digits8Match = raw.match(/^(\d{2})(\d{2})(\d{4})$/)
+  if (digits8Match) {
+    const day = Number(digits8Match[1])
+    const month = Number(digits8Match[2])
+    const year = Number(digits8Match[3])
+    if (!isValidDateParts(year, month, day)) return ""
+    return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`
+  }
+
   return ""
 }
 
