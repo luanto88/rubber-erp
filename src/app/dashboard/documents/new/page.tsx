@@ -160,12 +160,12 @@ export default function NewDocumentPage() {
     } catch { /* bỏ qua */ }
   }, [deptLeaders])
 
-  // Nội bộ đơn vị: load user trong phòng ban có quyền tạo/ký phòng ban/phê duyệt văn bản
+  // Nội bộ đơn vị: load toàn bộ user đang hoạt động trong phòng ban để chọn người ký xác nhận
   const loadUnitUsers = useCallback(async (fid: string, dept: string) => {
     if (!dept) return
     try {
       const res = await fetch(
-        `/api/documents/dept-users?factoryId=${fid}&dept=${dept}&leadership=false&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`,
+        `/api/documents/dept-users?factoryId=${fid}&dept=${encodeURIComponent(dept)}&leadership=false`,
       )
       if (res.ok) setUnitUsers((await res.json()) as ApproverUser[])
     } catch { /* bỏ qua */ }
@@ -750,6 +750,13 @@ export default function NewDocumentPage() {
                     Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
                   </span>
                 </label>
+                {khongCoMa && (
+                  <p className="mb-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 leading-snug">
+                    Vẫn cần chọn <strong>Loại văn bản</strong>: ngoài việc sinh mã, nó là khóa để hệ
+                    thống chọn đúng <strong>mẫu vị trí ký</strong> cho văn bản này, và dùng để lọc,
+                    thống kê, tìm kiếm bằng AI.
+                  </p>
+                )}
                 {!khongCoMa && form.loai_van_ban && form.phong_ban && (
                   <>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">

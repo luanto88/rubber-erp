@@ -11,6 +11,7 @@ import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
+import { DEFAULT_SUFFIXES, type SuffixOption } from "@/lib/suffixes"
 
 interface OutputFormProps {
   record: ProductionRecord | null   // null = thêm mới
@@ -38,12 +39,15 @@ interface DispatchVehicle {
   so_xe: string
   chuyen: number
   tai_xe: string
+  doi: number[]
+  ghi_chu: string
 }
 
 export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: OutputFormProps) {
-  const [form, setForm] = useState<OutputFormState>(emptyOutputForm)
+  const [form, setForm] = useState<OutputFormState>(emptyOutputForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [suffixes, setSuffixes] = useState<SuffixOption[]>(DEFAULT_SUFFIXES)
 
   // Dispatch-aware state
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicle[]>([])
@@ -51,10 +55,28 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
   const [enteredKeys, setEnteredKeys] = useState<Set<string>>(new Set())
 
   useEffect(() => {
+    const fetchSuffixes = async () => {
+      try {
+        const { data } = await supabase
+          .from("suffixes")
+          .select("code, name, nguon, chung_nhan")
+        if (data && data.length > 0) {
+          const valid = (data as SuffixOption[]).filter((s) => s.code)
+          if (valid.length > 0) setSuffixes(valid)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void fetchSuffixes()
+  }, [])
+
+  useEffect(() => {
     if (record) {
       setForm({
         ngay: record.ngay,
-        doi: record.doi,
+        doi: record.doi ?? "",
+        ma_nguon: record.ma_nguon || (record.doi ? "cs" : "m"),
         so_xe: record.so_xe,
         chuyen: record.chuyen,
         tai_xe: record.tai_xe ?? "",
@@ -64,6 +86,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
         dkt_tuoi: String(record.dkt_tuoi || ""), dkt_drc: String(record.dkt_drc || ""), dkt_kho: String(record.dkt_kho || ""),
         dt_tuoi:  String(record.dt_tuoi  || ""), dt_drc:  String(record.dt_drc  || ""), dt_kho:  String(record.dt_kho  || ""),
         ghi_chu: record.ghi_chu ?? "",
+        ghi_chu_tu_do: record.ghi_chu_tu_do ?? "",
       })
     }
   }, [record])
@@ -86,7 +109,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     const fetchForDate = async () => {
       setDispatchLoading(true)
       try {
-        // dispatch_entries.ngay có thể là "YYYY-MM-DD" hoặc "dd/mm/yyyy"
         const dxData = await loadDispatchEntriesWithResolvedRows(supabase, {
           factoryId,
           select: "id,ngay,rows",
@@ -96,17 +118,24 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
           .filter((entry) => normalizeDateInput(entry.ngay) === form.ngay)
           .flatMap((e) =>
           (e.rows ?? []).map((r) => {
-            const row = r as { so_xe?: string; chuyen?: number; tai_xe?: string }
+            const row = r as {
+              so_xe?: string
+              chuyen?: number
+              tai_xe?: string
+              doi?: number[]
+              ghi_chu?: string
+            }
             return {
-              so_xe: parseVehicleCode(row.so_xe ?? "").base_xe,
+              so_xe: String(row.so_xe ?? "").trim(),
               chuyen: Number(row.chuyen ?? 1),
               tai_xe: row.tai_xe ?? "",
+              doi: Array.isArray(row.doi) ? row.doi : [],
+              ghi_chu: row.ghi_chu ?? "",
             }
           })
         )
         setDispatchVehicles(rows)
 
-        // Records đã nhập ngày đó
         const { data: recData } = await supabase
           .from("production_records")
           .select("so_xe, chuyen")
@@ -123,14 +152,42 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     void fetchForDate()
   }, [form.ngay, factoryId])
 
-  // Auto-fill tài xế khi chọn xe + chuyến từ dispatch
+  // Auto-fill tài xế, nguồn mủ, đội và ký hiệu kỹ thuật khi chọn xe + chuyến từ dispatch
   useEffect(() => {
-    if (!form.so_xe || !form.chuyen || dispatchVehicles.length === 0) return
-    const match = dispatchVehicles.find(
-      d => d.so_xe === form.so_xe && d.chuyen === Number(form.chuyen)
-    )
-    if (match?.tai_xe) {
-      setForm(f => ({ ...f, tai_xe: match.tai_xe }))
+    if (!form.so_xe || dispatchVehicles.length === 0) return
+    const match =
+      dispatchVehicles.find(d => d.so_xe === form.so_xe && d.chuyen === Number(form.chuyen)) ||
+      dispatchVehicles.find(d => d.so_xe === form.so_xe)
+    if (match) {
+      setForm(f => {
+        const updates: Partial<OutputFormState> = {}
+        if (match.tai_xe && (!f.tai_xe || f.so_xe !== match.so_xe)) {
+          updates.tai_xe = match.tai_xe
+        }
+        // Auto-fill Nguồn mủ & Đội:
+        const noteUpper = (match.ghi_chu || "").toUpperCase()
+        if (noteUpper === "TM" || match.so_xe.toUpperCase().includes("3A1064")) {
+          updates.ma_nguon = "m"
+          updates.doi = ""
+        } else if (noteUpper === "GCTBK" || noteUpper.includes("TAN BIEN")) {
+          updates.ma_nguon = "gctpk"
+          updates.doi = ""
+        } else if (noteUpper === "GCCOK" || noteUpper.includes("CHU PA") || noteUpper.includes("CHU PAH")) {
+          updates.ma_nguon = "gccpk"
+          updates.doi = ""
+        } else if (noteUpper === "TL") {
+          updates.ma_nguon = "tl"
+          updates.doi = ""
+        } else if (match.doi.length === 1) {
+          updates.ma_nguon = "cs"
+          updates.doi = match.doi[0]
+        }
+        // Auto-fill Ký hiệu kỹ thuật:
+        if (!f.ghi_chu && match.ghi_chu) {
+          updates.ghi_chu = match.ghi_chu
+        }
+        return Object.keys(updates).length > 0 ? { ...f, ...updates } : f
+      })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.so_xe, form.chuyen])
@@ -138,7 +195,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
   const setField = (key: keyof OutputFormState, val: string | number) =>
     setForm(f => ({ ...f, [key]: val }))
 
-  // Auto-calc KL khô khi blur
   const handleTuoiOrDrcBlur = (prefix: LatexKey) => {
     const tuoi = parseFloat(String(form[`${prefix}_tuoi` as keyof OutputFormState] ?? "0"))
     const drc  = parseFloat(String(form[`${prefix}_drc`  as keyof OutputFormState] ?? "0"))
@@ -151,8 +207,13 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
 
   const handleSubmit = async () => {
     setError(null)
-    if (!form.doi || !form.so_xe || !form.chuyen) {
-      setError("Vui lòng điền đầy đủ Ngày, Đội, Số xe và Chuyến.")
+    const isInternal = form.ma_nguon === "cs"
+    if (isInternal && (form.doi === "" || form.doi === undefined)) {
+      setError("Vui lòng chọn Đội nông trường cho mủ nội bộ (Đội 1-12).")
+      return
+    }
+    if (!form.so_xe || !form.chuyen) {
+      setError("Vui lòng điền đầy đủ Ngày, Số xe và Chuyến.")
       return
     }
     setSaving(true)
@@ -165,7 +226,6 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     }
   }
 
-  // Danh sách xe: chỉ từ dispatch. Chế độ sửa không có dispatch → giữ xe hiện tại để xem được.
   const uniqueXeFromDispatch = [...new Map(dispatchVehicles.map(d => [d.so_xe, d])).values()]
   const noDispatch = !dispatchLoading && dispatchVehicles.length === 0
   const vehicleOptions = uniqueXeFromDispatch.length > 0
@@ -174,21 +234,19 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
       ? [{ so_xe: record.so_xe, chuyen: record.chuyen, tai_xe: record.tai_xe ?? "" }]
       : []
 
-  // Chuyến available cho xe đã chọn (từ dispatch)
   const chuyenOptions = [...new Set(
     dispatchVehicles
       .filter(d => d.so_xe === form.so_xe)
       .map(d => d.chuyen),
   )]
 
-  // Tài xế từ dispatch (readonly nếu có)
   const taiXeFromDispatch = dispatchVehicles.find(
     d => d.so_xe === form.so_xe && d.chuyen === Number(form.chuyen)
   )?.tai_xe ?? ""
 
-  // Banner tiến độ
   const daXuat = dispatchVehicles.filter(d => enteredKeys.has(`${d.so_xe}:${d.chuyen}`)).length
   const chuaNhap = dispatchVehicles.length - daXuat
+  const isInternal = form.ma_nguon === "cs"
 
   return (
     <ModalShell
@@ -209,8 +267,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
       }
     >
         <div className="space-y-4">
-          {/* Thông tin cơ bản — Ngày + Đội */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày *</label>
               <DateTextInput
@@ -220,17 +277,49 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội *</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguồn mủ *</label>
               <select
-                value={form.doi}
-                onChange={e => setField("doi", parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                value={form.ma_nguon}
+                onChange={e => {
+                  const val = e.target.value
+                  setForm(f => ({
+                    ...f,
+                    ma_nguon: val,
+                    doi: val === "cs" ? (f.doi || 1) : "",
+                  }))
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-medium"
               >
-                <option value="">-- Chọn đội --</option>
-                {Array.from({ length: 12 }, (_, i) => i + 1).map(d => (
-                  <option key={d} value={d}>Đội {d}</option>
-                ))}
+                <optgroup label="🏢 Nội bộ nông trường">
+                  <option value="cs">Nội tuyển PEFC (Đội 1-12)</option>
+                </optgroup>
+                <optgroup label="🏭 Nguồn mủ ngoài">
+                  {suffixes.filter(s => s.code !== "cs").map(s => (
+                    <option key={s.code} value={s.code}>{s.name} ({s.nguon})</option>
+                  ))}
+                </optgroup>
               </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                {isInternal ? "Đội (1-12) *" : "Đội"}
+              </label>
+              {isInternal ? (
+                <select
+                  value={form.doi}
+                  onChange={e => setField("doi", e.target.value === "" ? "" : parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  <option value="">-- Chọn đội --</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(d => (
+                    <option key={d} value={d}>Đội {d}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-400 italic">
+                  Không áp dụng (mủ ngoài)
+                </div>
+              )}
             </div>
           </div>
 
@@ -387,15 +476,29 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
             <p className="text-[11px] text-slate-400 mt-1">* KL khô tự tính khi nhập Tươi và DRC%, hoặc nhập tay.</p>
           </div>
 
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-            <RequiredNoteSelect
-              factoryId={factoryId}
-              value={form.ghi_chu}
-              onChange={(v) => setField("ghi_chu", v)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-              onError={setError}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký hiệu kỹ thuật</label>
+              <RequiredNoteSelect
+                factoryId={factoryId}
+                value={form.ghi_chu}
+                onChange={(v) => setField("ghi_chu", v)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                onError={setError}
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Mã kỹ thuật (T, Tr, TM, GCTBK...) dùng phân loại và nhóm thống kê.</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú sự cố / Vận hành</label>
+              <input
+                value={form.ghi_chu_tu_do}
+                onChange={(e) => setField("ghi_chu_tu_do", e.target.value)}
+                placeholder="VD: Cúp điện, xe nâng hư, mủ có tạp chất..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 placeholder:text-slate-300"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Ghi chú tự do ghi nhận hiện trường, không làm vỡ nhóm thống kê.</p>
+            </div>
           </div>
 
           {error && (

@@ -7,6 +7,7 @@ import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
 import QRCode from "qrcode"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { formatFactoryDateTimeVN, formatFactoryDateVN, getFactoryTodayISO } from "@/lib/date-utils"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import {
   loadSignerNameFont,
@@ -16,6 +17,23 @@ import {
   drawExtraPlacements,
   VAN_BAN_SIGNER_NAME_STYLE,
 } from "@/lib/signing/stamp-pdf"
+import { getLatestSignTemplate } from "@/lib/signing/templates"
+import {
+  buildPlacementKyFromTemplate,
+  getTemplateBoxesPlacement,
+  getTemplateNotePlacement,
+  getTemplateQrPlacement,
+  getTemplateStepPlacement,
+  loadSignerChucVu,
+  stampPdfWithTemplate,
+} from "@/lib/signing/apply-template"
+import {
+  applyNoteLayoutToEntry,
+  applyQrLayoutToEntry,
+  applySignerLayoutToEntry,
+  qrLayoutAlreadySet,
+  resolveEffectiveQrRect,
+} from "@/lib/signing/template-layout"
 
 const BUCKET = "iso-documents"
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
@@ -83,9 +101,9 @@ function isValidSignAs(v: unknown): v is Exclude<SignAsType, "none"> {
 // lượt sau (tránh vẽ nhiều QR ở nhiều vị trí khác nhau qua các bước — xem
 // performFileStamp/stampPdfStep).
 function mergeQrBox(
-  base: Record<string, SignPlacement | QrBox>,
+  base: Record<string, unknown>,
   placement: SignPlacement | null | undefined,
-): Record<string, SignPlacement | QrBox> {
+): Record<string, unknown> {
   if (base.qr) return base
   if (!placement?.showQr) return base
   if (
@@ -102,6 +120,33 @@ function mergeQrBox(
   }
 }
 
+/**
+ * Người ký đã TẮT khối tiền tố ký thay trên MỌI khung của bước này chưa.
+ *
+ * Với bước phê duyệt có nhiều khung (nhân bản khung), chỉ coi là "không ký thay" khi tắt ở tất
+ * cả các khung — còn 1 khung hiện tiền tố thì vẫn là ký thay.
+ */
+function signerTurnedPrefixOff(signLayout: unknown): boolean {
+  if (!Array.isArray(signLayout) || signLayout.length === 0) return false
+  return signLayout.every(
+    (l) => !!l && typeof l === "object" && (l as { show_prefix?: boolean }).show_prefix === false,
+  )
+}
+
+/**
+ * Chốt vị trí QR do người ký ĐẦU TIÊN xê dịch. QR là dữ liệu CẤP VĂN BẢN (vẽ trên mọi trang theo
+ * neo) nên chỉ ghi đúng 1 lần — mirror `mergeQrBox()` của luồng cũ ("đã có thì thôi"), tránh mỗi
+ * lượt ký một vị trí QR khác nhau.
+ */
+function mergeTemplateQrLayout(
+  placementKy: Record<string, unknown>,
+  qrLayout: unknown,
+): Record<string, unknown> {
+  const qrEntry = getTemplateQrPlacement(placementKy)
+  if (!qrEntry || qrLayoutAlreadySet(qrEntry)) return placementKy
+  return { ...placementKy, qr: applyQrLayoutToEntry(qrEntry, qrLayout) }
+}
+
 type VanBanRow = {
   id: string
   factory_id: string
@@ -112,9 +157,11 @@ type VanBanRow = {
   buoc_hien_tai: number
   so_buoc_tong: number
   nguoi_ky: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: string }>
-  // Key theo số bước ("1","2",...) hoặc "phe_duyet" → SignPlacement của bước đó; key
-  // "qr" (nếu đã có) → QrBox đã chốt vị trí QR chung cho cả văn bản.
-  placement_ky: Record<string, SignPlacement | QrBox>
+  // Key theo số bước ("1","2",...) hoặc "phe_duyet" → SignPlacement (luồng kéo-thả cũ) HOẶC
+  // TemplateStepPlacement (chế độ mẫu, có cờ `tu_mau`); key "qr"/"ngay_ky"/"ghi_chu"/"_mau" →
+  // các entry riêng. Để `unknown` vì JSONB này chứa nhiều shape khác nhau — nơi đọc phải tự
+  // thu hẹp kiểu (getTemplateStepPlacement / ép kiểu tường minh).
+  placement_ky: Record<string, unknown>
   soan_thao_user_id: string | null
   phe_duyet_user_id: string | null
   file_goc_url: string | null
@@ -132,6 +179,11 @@ type VanBanRow = {
   phe_duyet: string | null
   phe_duyet_is_kt: boolean | null
   phe_duyet_sign_as: string | null
+  ghi_chu: string | null
+  /** Ý kiến chỉ đạo lãnh đạo gõ NGAY LÚC PHÊ DUYỆT — khác hẳn `ghi_chu` (người soạn thảo nhập). */
+  ghi_chu_phe_duyet: string | null
+  /** Thời điểm phê duyệt chính xác tới giây (ngay_phe_duyet chỉ là DATE, không đủ cho tag ngày ký). */
+  ky_phe_duyet_at: string | null
 }
 
 type ProfileRow = {
@@ -146,7 +198,7 @@ type ProfileRow = {
 type PermissionRow = { permission_code: string }
 
 const DOC_SELECT =
-  "id, factory_id, trang_thai, cap_tl, phan_loai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet, phe_duyet_is_kt, phe_duyet_sign_as"
+  "id, factory_id, trang_thai, cap_tl, phan_loai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet, phe_duyet_is_kt, phe_duyet_sign_as, ghi_chu, ghi_chu_phe_duyet, ky_phe_duyet_at"
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -215,13 +267,18 @@ function buildStepTags(
   signerName: string,
   chucVu: string,
   dateStr: string,
+  ghiChu: string,
 ): { textTags: Record<string, string>; imageTagName: string } {
+  // {{GHI_CHU}} là tag TÙY CHỌN dùng chung cho mọi bước — template Office không có tag này thì
+  // tự bỏ qua (cơ chế sẵn có của stampOffice). Thay lặp lại qua các bước là vô hại: sau lượt
+  // đầu tag đã biến mất khỏi file nên không ghi đè chồng.
   if (stepKey === "phe_duyet") {
     return {
       textTags: {
         "{{TEN_PHE_DUYET}}": signerName,
         "{{CHUC_VU_PHE_DUYET}}": chucVu,
         "{{NGAY_BAN_HANH}}": dateStr,
+        "{{GHI_CHU}}": ghiChu,
       },
       imageTagName: "{{CHU_KY_PHE_DUYET}}",
     }
@@ -231,6 +288,7 @@ function buildStepTags(
       [`{{TEN_BUOC_${stepKey}}}`]: signerName,
       [`{{CHUC_VU_BUOC_${stepKey}}}`]: chucVu,
       [`{{NGAY_KY_BUOC_${stepKey}}}`]: dateStr,
+      "{{GHI_CHU}}": ghiChu,
     },
     imageTagName: `{{CHU_KY_BUOC_${stepKey}}}`,
   }
@@ -475,22 +533,68 @@ async function performFileStamp(
     width: 160,
     margin: 1,
   }).catch(() => null)
-  const today = new Date().toLocaleDateString("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-  const { textTags, imageTagName } = buildStepTags(stepKey, signerName, chucVu, today)
+  // Ngày in lên chứng từ (tag Office {{NGAY_BAN_HANH}}/{{NGAY_KY_BUOC_N}} và khung "Ngày ký" của
+  // mẫu vị trí) — PHẢI theo múi giờ nhà máy. `toLocaleDateString` không truyền timeZone sẽ lấy
+  // TZ của server: đúng ở localhost (máy UTC+7) nhưng sai trên Vercel (UTC) trong khoảng
+  // 00:00–06:59 sáng giờ địa phương.
+  // Thời điểm ký của LƯỢT NÀY: bước phê duyệt đã ghi `ky_phe_duyet_at` vào DB ngay trước khi
+  // gọi hàm này, dùng lại đúng mốc đó để ngày in trên PDF khớp tuyệt đối với dữ liệu đã lưu.
+  const signedAt = d.ky_phe_duyet_at ? new Date(d.ky_phe_duyet_at) : new Date()
+  const today = formatFactoryDateVN(signedAt)
+  const { textTags, imageTagName } = buildStepTags(stepKey, signerName, chucVu, today, d.ghi_chu || "")
 
   let stampedBytes: Buffer
   if (ext === "docx" || ext === "xlsx") {
     stampedBytes = await stampOffice(fileBytes, ext, textTags, imageTagName, sigBuf, stepKey, qrBuf)
   } else if (ext === "pdf") {
-    const placement = (d.placement_ky?.[stepKey] as SignPlacement | undefined) ?? null
-    const qrBox = (d.placement_ky?.qr as QrBox | undefined) ?? null
-    const defaultX =
-      stepKey === "phe_duyet" ? 460 : (parseInt(stepKey) - 1) * 120 + 30
-    stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX, qrBuf, qrBox)
+    const templateEntry = getTemplateStepPlacement(d.placement_ky, stepKey)
+    if (templateEntry) {
+      // ── Chế độ "vị trí CỨNG" theo mẫu (mau_vi_tri) ──
+      // ghi_chu / ngay_ky là dữ liệu CẤP VĂN BẢN, chỉ vẽ ĐÚNG 1 LẦN trong cả vòng đời để tránh
+      // vẽ chồng nhiều lượt lên cùng toạ độ (bài học "lệch nét/mờ chữ" của maintenance-pdf.ts).
+      // Cả hai đều thuộc bước PHÊ DUYỆT:
+      //   - ghi_chu  → ý kiến chỉ đạo lãnh đạo gõ tại chỗ (`ghi_chu_phe_duyet`), KHÔNG phải
+      //     `ghi_chu` của người soạn thảo — khung này là ô ý kiến, không phải chỗ in lại ghi chú.
+      //   - ngay_ky  → tag "Văn bản được ký dd/mm/yyyy hh:mm:ss".
+      const isPheDuyetStep = stepKey === "phe_duyet"
+      const ghiChuEntry = isPheDuyetStep ? getTemplateNotePlacement(d.placement_ky) : null
+      const ngayKyEntry = isPheDuyetStep ? getTemplateBoxesPlacement(d.placement_ky, "ngay_ky") : null
+      const ghiChuText = (d.ghi_chu_phe_duyet || "").trim()
+      stampedBytes = await stampPdfWithTemplate({
+        fileBytes,
+        entry: templateEntry,
+        sigBuf,
+        signerName,
+        chucVuByKey: await loadSignerChucVu(factoryId, userId),
+        prefixText,
+        qrBuf,
+        qrEntry: getTemplateQrPlacement(d.placement_ky),
+        ghiChu:
+          ghiChuEntry && ghiChuText
+            ? // Chữ ký nháy = chính ảnh chu_ky.png của lãnh đạo, thu nhỏ trong khung Ghi chú.
+              // Tắt khung Ghi chú (không nhập nội dung) thì chữ ký nháy cũng mất theo.
+              { entry: ghiChuEntry, text: ghiChuText, kyNhayBuf: sigBuf }
+            : null,
+        ngayKy: ngayKyEntry
+          ? { entry: ngayKyEntry, text: `Văn bản được ký ${formatFactoryDateTimeVN(signedAt)}` }
+          : null,
+      })
+    } else {
+      // Luồng cũ (văn bản gửi ký trước khi có mẫu, hoặc mẫu thiếu khung cho đúng bước này) —
+      // giữ nguyên tuyệt đối, người ký tự kéo-thả như trước.
+      const placement = (d.placement_ky?.[stepKey] as SignPlacement | undefined) ?? null
+      // Kịch bản hỗn hợp: văn bản đã chốt mẫu nhưng mẫu thiếu khung cho ĐÚNG bước này → bước
+      // này ký theo luồng cũ, nhưng QR vẫn phải dùng vị trí trong mẫu (entry qr có shape
+      // {tu_mau, boxes}, không phải QrBox) — nếu không sẽ rơi về góc trên-phải và sinh QR thứ 2.
+      const qrFromTemplate = getTemplateQrPlacement(d.placement_ky)
+      const qrBox: QrBox | null = qrFromTemplate
+        ? // Tôn trọng vị trí QR người ký đầu tiên đã xê dịch (nếu có), không lấy thô khung mẫu.
+          resolveEffectiveQrRect(qrFromTemplate.boxes[0])
+        : ((d.placement_ky?.qr as QrBox | undefined) ?? null)
+      const defaultX =
+        stepKey === "phe_duyet" ? 460 : (parseInt(stepKey) - 1) * 120 + 30
+      stampedBytes = await stampPdfStep(fileBytes, sigBuf, signerName, prefixText, placement, defaultX, qrBuf, qrBox)
+    }
   } else {
     return
   }
@@ -637,8 +741,31 @@ export async function POST(req: NextRequest) {
       ly_do?: string
       placement?: SignPlacement
       sign_as?: string
+      /** Bước đã khoá theo mẫu: bố cục 3 khối con người ký tự xê dịch, theo đúng thứ tự boxes. */
+      sign_layout?: unknown
+      /** Bố cục ô text + chữ ký nháy trong khung "Ghi chú" (theo đúng thứ tự boxes). */
+      note_layout?: unknown
+      /** Vị trí QR người ký đầu tiên xê dịch trong khung QR của mẫu (theo đúng thứ tự boxes). */
+      qr_layout?: unknown
+      /** Ý kiến chỉ đạo lãnh đạo gõ lúc phê duyệt (khung "Ghi chú" của mẫu). */
+      ghi_chu_phe_duyet?: string
+      /** Lãnh đạo chủ động TẮT khung Ghi chú — để phân biệt với "quên chưa nhập". */
+      ghi_chu_tat?: boolean
     }
-    const { docId, factoryId, action, pin, ly_do, placement, sign_as } = body
+    const {
+      docId,
+      factoryId,
+      action,
+      pin,
+      ly_do,
+      placement,
+      sign_as,
+      sign_layout,
+      note_layout,
+      qr_layout,
+      ghi_chu_phe_duyet,
+      ghi_chu_tat,
+    } = body
 
     if (!docId || !factoryId || !action) {
       return NextResponse.json({ error: "Thiếu thông tin bắt buộc" }, { status: 400 })
@@ -678,6 +805,29 @@ export async function POST(req: NextRequest) {
       const isCap1 = d.cap_tl === "Cấp 1"
       const nextStatus = isCap1 && hasSteps ? "cho_ky_phong_ban" : "cho_phe_duyet"
 
+      // Chốt (snapshot) mẫu vị trí ký của loại văn bản này vào placement_ky ngay tại đây — mọi
+      // lượt "Gửi ký" của văn bản nguồn PDF đều vừa đi qua màn /dashboard/ky/mau-vi-tri nên mẫu
+      // chắc chắn đã được người soạn thảo xem lại/xác nhận. Snapshot (không join sống) để admin
+      // sửa mẫu giữa chừng không làm lệch vị trí của văn bản đang luân chuyển dở.
+      // Lỗi đọc mẫu KHÔNG chặn gửi ký — rơi về {} như luồng cũ (người ký tự kéo-thả).
+      let seededPlacementKy: Record<string, unknown> = {}
+      try {
+        if (d.loai_van_ban && getFileExt(d.file_goc_url) === "pdf") {
+          const template = await getLatestSignTemplate(factoryId, d.loai_van_ban)
+          if (template?.khung?.length) {
+            seededPlacementKy =
+              buildPlacementKyFromTemplate({
+                khung: template.khung,
+                loaiTaiLieu: template.loai_tai_lieu,
+                phienBan: template.phien_ban,
+                soBuocTong: d.so_buoc_tong,
+              }) ?? {}
+          }
+        }
+      } catch {
+        seededPlacementKy = {}
+      }
+
       // Dọn sạch toàn bộ dữ liệu ký của vòng trước (nếu có) — bắt buộc kể cả khi văn bản
       // chưa từng được ký lần nào (draft → gui_ky lần đầu, các field này vốn đã rỗng nên
       // ghi đè không đổi gì). Nếu không dọn, timeline sẽ hiển thị nhầm các bước cũ (trước
@@ -689,7 +839,7 @@ export async function POST(req: NextRequest) {
           trang_thai: nextStatus,
           buoc_hien_tai: 0,
           nguoi_ky: {},
-          placement_ky: {},
+          placement_ky: seededPlacementKy,
           file_signed_pdf_url: null,
           file_signed_office_url: null,
           file_signed_office_type: null,
@@ -749,9 +899,16 @@ export async function POST(req: NextRequest) {
       }
 
       const chucVu = step.phong_ban_code || step.chuc_vu || ""
-      // Chỉ áp dụng ký thay (KT./TM./TL./TUQ.) cho bước phong_ban (Phó ký thay) —
-      // không áp dụng cho ca_nhân (đã đích danh 1 người, không có khái niệm "ký thay")
-      const signAs: SignAsType = step.type === "phong_ban" && isValidSignAs(sign_as) ? sign_as : "none"
+      // Bước đã khoá vị trí theo mẫu → tiền tố ký thay lấy từ chính mẫu (người soạn thảo chọn 1
+      // lần lúc vẽ), BỎ QUA sign_as client gửi lên. Quy tắc cũ giữ nguyên: chỉ áp dụng ký thay
+      // cho bước phong_ban (Phó ký thay) — ca_nhan đã đích danh 1 người, không có "ký thay".
+      const lockedStep = getTemplateStepPlacement(d.placement_ky, String(stepIndex + 1))
+      const rawSignAs: unknown = lockedStep ? lockedStep.sign_as : sign_as
+      const signAsFromTemplate: SignAsType =
+        step.type === "phong_ban" && isValidSignAs(rawSignAs) ? rawSignAs : "none"
+      // Người ký TẮT khối tiền tố trên mọi khung của bước này = không ký thay nữa → xoá luôn
+      // `sign_as` đã ghi, để timeline không hiện "KT." trong khi PDF không có.
+      const signAs: SignAsType = lockedStep && signerTurnedPrefixOff(sign_layout) ? "none" : signAsFromTemplate
       const newNguoiKy = {
         ...d.nguoi_ky,
         [String(stepIndex + 1)]: {
@@ -765,9 +922,23 @@ export async function POST(req: NextRequest) {
       const done = newBuoc >= d.so_buoc_tong
       const nextStatus = done ? "cho_phe_duyet" : "cho_ky_phong_ban"
       const stepKey = String(stepIndex + 1)
-      const newPlacementKy = placement
-        ? mergeQrBox({ ...d.placement_ky, [stepKey]: placement }, placement)
-        : d.placement_ky
+      // Đã khoá theo mẫu → KHUNG không đổi, nhưng người ký được xê dịch 3 khối con BÊN TRONG
+      // khung. `applySignerLayoutToEntry` tự kẹp mọi toạ độ vào trong khung mẫu, nên gọi thẳng
+      // API với toạ độ ngoài vùng cũng không thoát ra được (không tin cờ chặn phía UI).
+      const newPlacementKy = lockedStep
+        ? mergeTemplateQrLayout(
+            {
+              ...d.placement_ky,
+              [stepKey]: applySignerLayoutToEntry(lockedStep, sign_layout, {
+                chucVuAvailable: true,
+                prefixAvailable: signAs !== "none",
+              }),
+            },
+            qr_layout,
+          )
+        : placement
+          ? mergeQrBox({ ...d.placement_ky, [stepKey]: placement }, placement)
+          : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
@@ -829,12 +1000,51 @@ export async function POST(req: NextRequest) {
       // Ký thay được chọn ngay lúc ký (SignPlacementModal), không còn set lúc soạn
       // thảo — thay thế cơ chế cũ phe_duyet_is_kt (vẫn giữ cột đó cho văn bản cũ
       // hiển thị đúng lịch sử, nhưng không còn ghi thêm từ đây trở đi).
-      const signAsPD: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
+      // Nếu bước phê duyệt đã khoá vị trí theo mẫu, tiền tố lấy từ mẫu và bỏ qua sign_as client.
+      const lockedPD = getTemplateStepPlacement(d.placement_ky, "phe_duyet")
+      const rawSignAsPD: unknown = lockedPD ? lockedPD.sign_as : sign_as
+      const signAsFromTemplatePD: SignAsType = isValidSignAs(rawSignAsPD) ? rawSignAsPD : "none"
+      // Lãnh đạo tắt khối tiền tố trên mọi khung = không ký thay nữa (xem signerTurnedPrefixOff).
+      const signAsPD: SignAsType =
+        lockedPD && signerTurnedPrefixOff(sign_layout) ? "none" : signAsFromTemplatePD
 
-      const today = new Date().toISOString().slice(0, 10)
-      const newPlacementKy = placement
-        ? mergeQrBox({ ...d.placement_ky, phe_duyet: placement }, placement)
-        : d.placement_ky
+      // Khung "Ghi chú" của mẫu là ô Ý KIẾN CHỈ ĐẠO lãnh đạo gõ tại chỗ. Không được nuốt âm
+      // thầm: mẫu có khung mà lãnh đạo chưa nhập gì VÀ cũng chưa chủ động tắt → chặn ký, buộc
+      // ra quyết định rõ ràng (tránh tắt nhầm / bỏ sót ý kiến).
+      const ghiChuBoxPD = lockedPD ? getTemplateNotePlacement(d.placement_ky) : null
+      const ghiChuTextPD = (ghi_chu_phe_duyet || "").trim()
+      if (ghiChuBoxPD && !ghiChuTextPD && ghi_chu_tat !== true) {
+        return NextResponse.json(
+          { error: "Vui lòng nhập ý kiến chỉ đạo, hoặc tắt khung Ghi chú nếu không cần." },
+          { status: 400 },
+        )
+      }
+      const ghiChuValuePD = ghiChuBoxPD && ghi_chu_tat !== true ? ghiChuTextPD || null : null
+
+      // Ngày phê duyệt PHẢI là ngày lãnh đạo thực sự bấm duyệt theo giờ nhà máy (UTC+7).
+      // `toISOString().slice(0,10)` cũ tính theo UTC → duyệt lúc 00:00–06:59 sáng bị ghi nhận
+      // thành ngày hôm trước.
+      const kyAt = new Date()
+      const kyAtIso = kyAt.toISOString()
+      const today = getFactoryTodayISO(kyAt)
+      const newPlacementKy = lockedPD
+        ? mergeTemplateQrLayout(
+            {
+              ...d.placement_ky,
+              phe_duyet: applySignerLayoutToEntry(lockedPD, sign_layout, {
+                chucVuAvailable: true,
+                prefixAvailable: signAsPD !== "none",
+              }),
+              // Chỉ lưu bố cục ô ý kiến khi thật sự có ý kiến được đóng dấu.
+              ...(ghiChuBoxPD && ghiChuValuePD
+                ? { ghi_chu: applyNoteLayoutToEntry(ghiChuBoxPD, note_layout, { kyNhayAvailable: true }) }
+                : {}),
+            },
+            qr_layout,
+          )
+        : placement
+          ? mergeQrBox({ ...d.placement_ky, phe_duyet: placement }, placement)
+          : d.placement_ky
 
       const { error: updateErr } = await supabaseAdmin
         .from("van_ban_documents")
@@ -844,8 +1054,10 @@ export async function POST(req: NextRequest) {
           phe_duyet_user_id: userId,
           phe_duyet_sign_as: signAsPD === "none" ? null : signAsPD,
           ngay_phe_duyet: today,
+          ky_phe_duyet_at: kyAtIso,
+          ghi_chu_phe_duyet: ghiChuValuePD,
           placement_ky: newPlacementKy,
-          updated_at: new Date().toISOString(),
+          updated_at: kyAtIso,
         })
         .eq("id", docId)
 
@@ -854,6 +1066,8 @@ export async function POST(req: NextRequest) {
       // Chức vụ phê duyệt lấy từ department profile
       const chucVuPD = profile.department || profile.role || ""
       d.placement_ky = newPlacementKy
+      d.ghi_chu_phe_duyet = ghiChuValuePD
+      d.ky_phe_duyet_at = kyAtIso
       // Tiền tố chỉ vẽ riêng trên PDF (hộp draggable riêng) — KHÔNG ghép vào tên
       // dùng cho tag DOCX/XLSX (không cần cho Office, đã xác nhận với người dùng).
       const prefixTextPD = signAsPD !== "none" ? `${signAsPD}.` : null

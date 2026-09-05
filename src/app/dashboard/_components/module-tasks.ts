@@ -10,7 +10,7 @@
 // component (vốn kéo theo state/effect/UI không liên quan, không có ý nghĩa tái sử dụng ở đây).
 
 import { supabase } from "@/lib/supabase"
-import { hasPermission, type SessionUser } from "@/lib/auth"
+import { getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
 import { getIsoWeekStart } from "@/lib/date-utils"
 import { buildEffectiveStockBalances } from "@/app/dashboard/inventory/_components/inventory-stock"
 import type {
@@ -342,22 +342,66 @@ export async function getQualityTasks(factoryId: string): Promise<ModuleTaskSumm
   return { moduleLabel: "Chất lượng", items: [{ label: "Lô đang rớt hạng", count, link: "/dashboard/quality" }] }
 }
 
+// ── Hồ sơ ký số đang chờ chính người dùng ────────────────────────────────────
+// RLS `nguoi_ky_select` chỉ cho client đọc dòng của CHÍNH MÌNH — không thể tự tính "đã tới lượt
+// tôi chưa" (cần thấy trạng thái người ký TRƯỚC). Bắt buộc đi qua route service-role.
+// Lỗi mạng/hết phiên → trả 0, KHÔNG throw: layout.tsx bắt .catch → setModuleTasks(null), sẽ mất
+// luôn cả item "Biên bản chờ phê duyệt" của cùng module.
+async function getMySigningPending(
+  modun: string,
+  fallbackLink: string,
+): Promise<{ count: number; link: string }> {
+  try {
+    const session = await getFreshAuthSession()
+    const token = session?.access_token
+    if (!token) return { count: 0, link: fallbackLink }
+
+    const res = await fetch(`/api/signing/my-pending?modun=${encodeURIComponent(modun)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return { count: 0, link: fallbackLink }
+
+    const json = (await res.json()) as {
+      count?: number
+      items?: { yeuCauId: string; toiLuot: boolean }[]
+    }
+    // Link tới hồ sơ đã tới lượt CŨ NHẤT (items đã sắp theo tao_luc tăng dần ở server).
+    const first = (json.items || []).find((i) => i.toiLuot)
+    return {
+      count: json.count || 0,
+      link: first ? `/dashboard/ky/${first.yeuCauId}` : fallbackLink,
+    }
+  } catch {
+    return { count: 0, link: fallbackLink }
+  }
+}
+
 // ── Bảo trì ──────────────────────────────────────────────────────────────────
-// Chỉ hiện khi user có quyền maintenance.approve (hasPermission tự bypass cho admin).
-// Không có quyền → trả items rỗng, layout.tsx tự fallback về "Thông báo chung".
 export async function getMaintenanceTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
-  if (!hasPermission(user, "maintenance.approve")) {
-    return { moduleLabel: "Bảo trì", items: [] }
+  const items: ModuleTaskItem[] = []
+
+  // Item CŨ giữ nguyên gate `maintenance.approve`: nó đếm luồng phê duyệt cho_duyet→da_duyet CŨ,
+  // đúng ngữ nghĩa của permission đó. KHÔNG đổi sang `maintenance.phe_duyet` — quyền đó hẹp hơn
+  // hẳn (mặc định chỉ admin, chỉ để CHỌN ĐƯỢC người ký điện tử, xem
+  // 20260909_maintenance_phe_duyet_permission.sql), đổi sẽ làm hầu hết manager mất item này.
+  if (hasPermission(user, "maintenance.approve")) {
+    const { count } = await supabase
+      .from("maintenance_records")
+      .select("id", { count: "exact", head: true })
+      .eq("factory_id", factoryId)
+      .eq("trang_thai", "cho_duyet")
+    items.push({ label: "Biên bản chờ phê duyệt", count: count || 0, link: "/dashboard/maintenance/records" })
   }
-  const { count } = await supabase
-    .from("maintenance_records")
-    .select("id", { count: "exact", head: true })
-    .eq("factory_id", factoryId)
-    .eq("trang_thai", "cho_duyet")
-  return {
-    moduleLabel: "Bảo trì",
-    items: [{ label: "Biên bản chờ phê duyệt", count: count || 0, link: "/dashboard/maintenance/records" }],
-  }
+
+  // Item MỚI — KHÔNG gate permission: phạm vi đã tự giới hạn bằng chính `nguoi_ky.user_id = tôi`
+  // ở server. Trước đây hàm này return sớm khi thiếu `maintenance.approve`, sẽ nuốt mất item này
+  // với đúng nhóm cần nó nhất (nhân viên bảo trì thường, được chọn làm người ký).
+  // Chỉ đếm hồ sơ ĐÃ TỚI LƯỢT: layout.tsx ẩn hẳn "Thông báo chung" khi có bất kỳ item count > 0,
+  // nên một item "chưa tới lượt" (không hành động được) sẽ che mất chính các thông báo ký số.
+  const pending = await getMySigningPending("maintenance", "/dashboard/maintenance/records")
+  items.push({ label: "Hồ sơ chờ bạn ký", count: pending.count, link: pending.link })
+
+  return { moduleLabel: "Bảo trì", items }
 }
 
 // ── 5S — vị trí tôi phụ trách (dọn hoặc chấm) đang quá hạn/sắp đến hạn ──────────────────────

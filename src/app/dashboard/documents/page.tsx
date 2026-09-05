@@ -39,6 +39,10 @@ type AiSearchResult = {
 export default function DocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
+  // Mã phòng ban của người đang xem — chỉ cần fetch 1 lần cho cả trang (không phải N+1 theo
+  // từng dòng), dùng để tính badge "Chờ bạn" cho bước ký dạng phòng ban (mirror
+  // resolveUserDeptCode() ở documents/[id]/page.tsx).
+  const [myDeptCode, setMyDeptCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<VanBanDocument[]>([])
   const [activeTab, setActiveTab] = useState<"list" | "stats">("list")
@@ -92,7 +96,7 @@ export default function DocumentsPage() {
       const { data } = await supabase
         .from("van_ban_documents")
         .select(
-          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, file_signed_office_url, file_goc_url, nguoi_soan_thao_display, soan_thao_user_id, created_at, updated_at",
+          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, file_signed_office_url, file_goc_url, nguoi_soan_thao_display, soan_thao_user_id, phe_duyet_user_id, thu_tu_ky_json, buoc_hien_tai, created_at, updated_at",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false })
@@ -108,7 +112,20 @@ export default function DocumentsPage() {
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
       const { user: sessionUser } = await hydrateActiveSession()
-      if (sessionUser) setUser(sessionUser)
+      if (sessionUser) {
+        setUser(sessionUser)
+        try {
+          const { data } = await supabase.auth.getSession()
+          const token = data.session?.access_token || ""
+          const res = await fetch(`/api/documents/dept-code?userId=${sessionUser.id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const json = (await res.json()) as { code: string | null }
+            setMyDeptCode(json.code)
+          }
+        } catch { /* ignore */ }
+      }
     }
     void bootstrap()
   }, [])
@@ -118,6 +135,20 @@ export default function DocumentsPage() {
     (d.soan_thao_user_id === user?.id || isAdmin) && (d.trang_thai === "draft" || d.trang_thai === "tra_ve")
   const canDeleteDoc = (d: VanBanDocument) =>
     hasPermission(user, "documents.delete") && (isAdmin || d.trang_thai === "draft" || d.trang_thai === "tra_ve")
+  // Đúng lượt người xem tự thao tác — dùng để hiển thị badge "Chờ bạn" ngay trong danh sách,
+  // tái dùng dữ liệu đã có sẵn trong select() (không thêm query mới theo từng dòng).
+  const isMyTurnToAct = (d: VanBanDocument): boolean => {
+    if (isAdmin) return true
+    if (!user) return false
+    if (d.trang_thai === "cho_phe_duyet") return d.phe_duyet_user_id === user.id
+    if (d.trang_thai === "cho_ky_phong_ban") {
+      const step = (d.thu_tu_ky_json || [])[d.buoc_hien_tai]
+      if (!step) return false
+      if (step.type === "ca_nhan") return step.user_id === user.id
+      if (step.type === "phong_ban") return !!myDeptCode && step.phong_ban_code === myDeptCode
+    }
+    return false
+  }
 
   const openEdit = async (docId: string) => {
     setEditLoading(true)
@@ -453,6 +484,11 @@ export default function DocumentsPage() {
                       {doc.is_uploaded && (
                         <span className="ml-1.5 inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-700">Ký tay</span>
                       )}
+                      {(doc.trang_thai === "cho_phe_duyet" || doc.trang_thai === "cho_ky_phong_ban") && isMyTurnToAct(doc) && (
+                        <span className="ml-1.5 inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                          🔔 Chờ bạn
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
                       {doc.ngay_phe_duyet ? fmtDate(doc.ngay_phe_duyet) : <span className="text-slate-300">—</span>}
@@ -634,7 +670,7 @@ function EditDocModal({
         if (!doc.phong_ban) return
         try {
           const res = await fetch(
-            `/api/documents/dept-users?factoryId=${factoryId}&dept=${doc.phong_ban}&leadership=false&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`,
+            `/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(doc.phong_ban)}&leadership=false`,
           )
           if (res.ok) setUnitUsers((await res.json()) as EditDeptUser[])
         } catch { /* bỏ qua */ }

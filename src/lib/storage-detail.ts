@@ -23,6 +23,7 @@ export type StorageNgan = {
   trips: string[]
   lo_nguon_goc: string
   ghi_chu?: string | null
+  ghi_chu_tu_do?: string | null
 }
 
 export type StorageTripItem = {
@@ -37,6 +38,8 @@ export type StorageTripItem = {
   diem_gn: string[]
   phien: string[]
   lo_thu_hoach: string[]
+  doi?: number[]
+  chung_nhan?: string
   kl_ct: number
   kl_ck: number
   kl_dct: number
@@ -48,6 +51,7 @@ export type StorageTripItem = {
   kl_mn: number
   kl_mnk: number
   ghi_chu: string
+  ghi_chu_tu_do?: string
 }
 
 export type StorageProducedLot = {
@@ -210,7 +214,12 @@ export function getKLFromTrip(trip: StorageTripItem, loaiNl: string) {
   }
 }
 
-function mapTripRow(row: Record<string, string>, ngay: string, dispatchEntryId?: string): StorageTripItem {
+function mapTripRow(
+  row: Record<string, any>,
+  ngay: string,
+  dispatchEntryId?: string,
+  chungNhan?: string,
+): StorageTripItem {
   const date =
     row._date && /^\d{4}-\d{2}-\d{2}/.test(row._date)
       ? row._date.slice(0, 10)
@@ -229,6 +238,8 @@ function mapTripRow(row: Record<string, string>, ngay: string, dispatchEntryId?:
     diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item || "").trim()).filter(Boolean) : [],
     phien: Array.isArray(row.phien) ? row.phien.map((item) => String(item || "").trim()).filter(Boolean) : [],
     lo_thu_hoach: Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    doi: Array.isArray(row.doi) ? row.doi.map(Number).filter((n: number) => !isNaN(n)) : [],
+    chung_nhan: String(chungNhan || row.chung_nhan || "").trim(),
     kl_ct: Number(row.kl_ct) || 0,
     kl_ck: Number(row.kl_ck) || 0,
     kl_dct: Number(row.kl_dct) || 0,
@@ -240,6 +251,7 @@ function mapTripRow(row: Record<string, string>, ngay: string, dispatchEntryId?:
     kl_mn: Number(row.kl_mn) || 0,
     kl_mnk: Number(row.kl_mnk) || 0,
     ghi_chu: String(row.ghi_chu || "").trim(),
+    ghi_chu_tu_do: String(row.ghi_chu_tu_do || "").trim(),
   }
 }
 
@@ -294,9 +306,9 @@ export async function loadDispatchTripsByUids(
   if (!factoryId || tripRefs.length === 0) return []
   const requestedRefs = new Set(tripRefs.filter(Boolean))
   const tripsByRef = new Map<string, StorageTripItem>()
-  const entries = await loadDispatchEntriesWithResolvedRows(client, {
+  const entries = await loadDispatchEntriesWithResolvedRows<{ chung_nhan?: string }>(client, {
     factoryId,
-    select: "id,ngay,rows",
+    select: "id,ngay,chung_nhan,rows",
     fromDate: options?.fromDate || undefined,
     toDate: options?.toDate || undefined,
     ascending: true,
@@ -317,9 +329,10 @@ export async function loadDispatchTripsByUids(
 
   for (const entry of entries) {
     const ngay = typeof entry.ngay === "string" ? entry.ngay : ""
+    const chungNhan = typeof entry.chung_nhan === "string" ? entry.chung_nhan : ""
     const rows = Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : []
     for (const row of rows) {
-      const trip = mapTripRow(row, ngay, entry.id)
+      const trip = mapTripRow(row, ngay, entry.id, chungNhan)
       const matchesRequestedRef = requestedRefs.has(trip.ref)
       const matchesLegacyRef = tripRefs.some((tripRef) =>
         legacyCandidateRefs.get(tripRef)?.includes(trip.ref),
@@ -427,9 +440,9 @@ export async function resolveStorageNgansActualTotals(
 export async function loadDispatchTripsByDateRange(factoryId: string, fromDate: string, toDate: string) {
   if (!factoryId || !fromDate || !toDate) return []
   const tripsByUid = new Map<string, StorageTripItem>()
-  const entries = await loadDispatchEntriesWithResolvedRows(supabase, {
+  const entries = await loadDispatchEntriesWithResolvedRows<{ chung_nhan?: string }>(supabase, {
     factoryId,
-    select: "id,ngay,rows",
+    select: "id,ngay,chung_nhan,rows",
     fromDate,
     toDate,
     ascending: true,
@@ -437,9 +450,10 @@ export async function loadDispatchTripsByDateRange(factoryId: string, fromDate: 
 
   for (const entry of entries) {
     const ngay = typeof entry.ngay === "string" ? toISODate(entry.ngay) : ""
+    const chungNhan = typeof entry.chung_nhan === "string" ? entry.chung_nhan : ""
     const rows = Array.isArray(entry.rows) ? (entry.rows as Record<string, string>[]) : []
     for (const row of rows) {
-      const trip = mapTripRow(row, ngay, entry.id)
+      const trip = mapTripRow(row, ngay, entry.id, chungNhan)
       if (!trip.ref || tripsByUid.has(trip.ref)) continue
       tripsByUid.set(trip.ref, trip)
     }

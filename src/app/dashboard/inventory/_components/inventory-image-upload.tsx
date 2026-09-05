@@ -4,6 +4,7 @@
 import { useRef, useState } from "react"
 import { ImagePlus, Loader2, X, ZoomIn } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { prepareImageForUpload } from "@/lib/image-upload"
 
 type UploadedImagePayload = {
   publicUrl: string
@@ -90,8 +91,15 @@ export async function uploadInventoryImage(params: {
   file: File
 }) {
   const bucket = params.bucket || "inventory-files"
-  const path = `${params.factoryId}/${params.documentType}/${Date.now()}_${sanitizeFilename(params.file.name)}`
-  const uploadResult = await supabase.storage.from(bucket).upload(path, params.file, { upsert: true })
+
+  // Chuẩn hóa theo NỘI DUNG THẬT (chuyển HEIC sang JPEG) trước khi upload — `File.type` được
+  // suy từ đuôi tên file nên không tin được. Xem src/lib/image-format.ts.
+  const prepared = await prepareImageForUpload(params.file)
+  if (!prepared.ok) throw new Error(`${params.file.name}: ${prepared.reason}`)
+  const file = prepared.file
+
+  const path = `${params.factoryId}/${params.documentType}/${Date.now()}_${sanitizeFilename(file.name)}`
+  const uploadResult = await supabase.storage.from(bucket).upload(path, file, { upsert: true, contentType: file.type })
 
   if (uploadResult.error) {
     if (!isStorageConfigError(uploadResult.error)) throw uploadResult.error
@@ -99,7 +107,7 @@ export async function uploadInventoryImage(params: {
       bucket,
       documentType: params.documentType,
       factoryId: params.factoryId,
-      file: params.file,
+      file,
     })
     return { publicUrl }
   }

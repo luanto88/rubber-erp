@@ -1,0 +1,679 @@
+<title>Sáng kiến Truy xuất EUDR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bitter:ital,wght@0,500;0,700;1,500&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --paper: #ffffff;
+    --ground: #eceee9;
+    --ink: #1a1f1c;
+    --ink-soft: #4a544e;
+    --muted: #737d77;
+    --accent: #2f5d52;
+    --accent-soft: #e3ece8;
+    --accent-line: #b9cfc7;
+    --rule: #d7dbd4;
+    --rule-soft: #e6e9e3;
+    --flag: #8a5a2b;
+    --flag-soft: #f6ece0;
+
+    --f-display: "Bitter", Georgia, "Times New Roman", serif;
+    --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+    --measure: 74ch;
+    --pad: clamp(20px, 4vw, 56px);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #191d1a;
+      --ground: #101312;
+      --ink: #e7ebe5;
+      --ink-soft: #b3bcb5;
+      --muted: #8b958d;
+      --accent: #86bda9;
+      --accent-soft: #1e2a26;
+      --accent-line: #37514a;
+      --rule: #2c332e;
+      --rule-soft: #232823;
+      --flag: #d1a06a;
+      --flag-soft: #2a2119;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #191d1a;
+    --ground: #101312;
+    --ink: #e7ebe5;
+    --ink-soft: #b3bcb5;
+    --muted: #8b958d;
+    --accent: #86bda9;
+    --accent-soft: #1e2a26;
+    --accent-line: #37514a;
+    --rule: #2c332e;
+    --rule-soft: #232823;
+    --flag: #d1a06a;
+    --flag-soft: #2a2119;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* ── Thanh công cụ ─────────────────────────────── */
+
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 12px clamp(16px, 4vw, 40px);
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .bar-title {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: auto;
+  }
+
+  .btn {
+    font-family: var(--f-body);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 7px 15px;
+    border-radius: 3px;
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.plain { background: transparent; color: var(--ink-soft); border-color: var(--rule); }
+  .btn.plain:hover { border-color: var(--ink-soft); }
+
+  /* ── Bảng thay đổi ─────────────────────────────── */
+
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 28px clamp(12px, 3vw, 24px) 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .changes {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--flag);
+    padding: 20px clamp(18px, 3vw, 28px);
+  }
+
+  .changes h2 {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--flag);
+    margin: 0 0 14px;
+  }
+
+  .changes ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+    gap: 9px 28px;
+  }
+
+  .changes li {
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    padding-left: 17px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .changes li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--flag);
+    font-family: var(--f-mono);
+    font-size: 12px;
+  }
+  .changes b { color: var(--ink); font-weight: 600; }
+
+  /* ── Tờ văn bản ────────────────────────────────── */
+
+  .doc {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: clamp(28px, 5vw, 64px) var(--pad) clamp(40px, 6vw, 72px);
+    box-shadow: 0 1px 2px rgba(26, 31, 28, 0.06), 0 8px 24px -16px rgba(26, 31, 28, 0.22);
+  }
+
+  .doc-head {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px 32px;
+    align-items: start;
+    margin-bottom: 6px;
+  }
+
+  .org, .nation {
+    font-size: 14.5px;
+    line-height: 1.45;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .org { color: var(--ink-soft); }
+  .nation { text-align: center; color: var(--ink); }
+  .nation .creed {
+    display: block;
+    text-transform: none;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+  }
+  .org .unit {
+    display: inline-block;
+    color: var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 1px;
+    margin-top: 2px;
+  }
+  .nation::after {
+    content: "";
+    display: block;
+    width: 42%;
+    height: 1px;
+    background: var(--ink);
+    margin: 5px auto 0;
+  }
+
+  .dateline {
+    text-align: right;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin: 22px 0 34px;
+  }
+
+  h1 {
+    font-family: var(--f-display);
+    font-size: clamp(23px, 3.6vw, 30px);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-align: center;
+    text-transform: uppercase;
+    text-wrap: balance;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: var(--muted);
+    font-family: var(--f-mono);
+    letter-spacing: 0.06em;
+    margin: 0 0 34px;
+  }
+
+  .addressee {
+    font-size: 16.5px;
+    margin: 0 0 30px;
+  }
+  .addressee b { font-weight: 700; }
+
+  section { margin-bottom: 30px; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  h2.sec {
+    font-family: var(--f-display);
+    font-size: 17.5px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0;
+    flex: 1;
+  }
+  h2.sec .num { color: var(--accent); }
+
+  .copy-mini {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 3px 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .copy-mini:hover { color: var(--accent); border-color: var(--accent-line); }
+  .copy-mini:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  section p { margin: 0 0 10px; max-width: var(--measure); }
+
+  ul.body {
+    margin: 0;
+    padding: 0 0 0 1px;
+    list-style: none;
+    max-width: var(--measure);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  ul.body > li {
+    position: relative;
+    padding-left: 19px;
+  }
+  ul.body > li::before {
+    content: "–";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+  ul.body strong { font-weight: 700; color: var(--ink); }
+
+  /* Bảng người đề xuất */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 16px;
+    margin-bottom: 14px;
+  }
+  th, td {
+    border: 1px solid var(--rule);
+    padding: 8px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    font-weight: 600;
+    text-align: center;
+    color: var(--ink-soft);
+    background: var(--rule-soft);
+    font-size: 15px;
+  }
+  .tbl-scroll { overflow-x: auto; }
+
+  .roster {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 560px;
+  }
+  .roster li {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    border-bottom: 1px dotted var(--rule);
+    padding-bottom: 5px;
+  }
+  .roster b { font-weight: 600; }
+  .roster span { color: var(--ink-soft); font-size: 15px; }
+
+  /* Khối chi phí */
+
+  .cost {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    padding: 16px 20px;
+    max-width: var(--measure);
+  }
+  .cost dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 7px 22px;
+    align-items: baseline;
+  }
+  .cost dt { color: var(--ink-soft); font-size: 15.5px; }
+  .cost dd {
+    margin: 0;
+    font-family: var(--f-mono);
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .cost dd.na { color: var(--muted); font-weight: 400; font-size: 14px; }
+
+  /* Khối ký */
+
+  .signblock {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    margin-top: 46px;
+    text-align: center;
+  }
+  .sig-role {
+    font-weight: 700;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .sig-note {
+    font-size: 13.5px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 2px;
+  }
+  .sig-space { height: 78px; }
+  .sig-name { font-weight: 700; font-size: 16.5px; }
+
+  .council {
+    margin-top: 44px;
+    text-align: center;
+  }
+  .council .sig-role { color: var(--ink); }
+  .council .dots {
+    margin: 14px auto 0;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .council .dots span {
+    display: block;
+    border-bottom: 1px dotted var(--ink-soft);
+    height: 1px;
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 26px;
+    transform: translate(-50%, 12px);
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 9px 20px;
+    border-radius: 3px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 20;
+  }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+
+  @media (max-width: 620px) {
+    .doc-head { grid-template-columns: 1fr; text-align: left; }
+    .nation { text-align: left; }
+    .nation::after { margin-left: 0; width: 60%; }
+    .signblock { grid-template-columns: 1fr; gap: 40px; }
+  }
+
+  @media print {
+    body { background: #fff; }
+    .bar, .changes, .copy-mini, .toast { display: none !important; }
+    .wrap { padding: 0; max-width: none; }
+    .doc { border: 0; box-shadow: none; padding: 0; }
+  }
+</style>
+
+<div class="bar no-copy">
+  <span class="bar-title">Bản chỉnh sửa · sẵn sàng dán vào Word</span>
+  <button class="btn" id="copyAll" type="button">Sao chép toàn văn</button>
+  <button class="btn plain" id="printBtn" type="button">In</button>
+</div>
+
+<div class="wrap">
+
+  <div class="changes no-copy">
+    <h2>Đã chỉnh sửa so với bản gốc</h2>
+    <ul>
+      <li>Sửa <b>“PTCS U Phước Hòa”</b> → bỏ chữ U thừa</li>
+      <li>Sửa chính tả: <b>chặc chẽ, hệ thông, thân thiệt, nhanh chống</b></li>
+      <li>Thống nhất <b>“Chau Chok”</b> ở cả hai vị trí</li>
+      <li>Đổi <b>“modun”</b> → “phân hệ”</li>
+      <li>Tách mục 2.2 thành 4 vấn đề cụ thể thay vì một câu dài</li>
+      <li>Mục 2.3 nêu rõ <b>6 phân hệ</b> theo dòng chảy vật chất</li>
+      <li>Bổ sung mốc <b>đã vận hành thật</b> tại nhà máy</li>
+      <li>Định lượng lợi ích: truy xuất <b>dưới 1 phút</b> thay vì “nhanh chóng”</li>
+      <li>Thêm lợi ích <b>nhân rộng cho nhà máy khác</b></li>
+      <li>Dự toán ghi rõ <b>300 USD/năm</b> và phần không phát sinh</li>
+    </ul>
+  </div>
+
+  <article class="doc" id="doc">
+
+    <div class="doc-head">
+      <div class="org">
+        Công ty TNHH PTCS Phước Hòa<br>Kampong Thom<br>
+        <span class="unit">Đơn vị: Nhà máy chế biến</span>
+      </div>
+      <div class="nation">
+        Vương quốc Campuchia
+        <span class="creed">Dân tộc – Tôn giáo – Quốc Vương</span>
+      </div>
+    </div>
+
+    <p class="dateline">Kampong Thom, ngày 03 tháng 9 năm 2026</p>
+
+    <h1>Phiếu đăng ký ý tưởng</h1>
+    <p class="subtitle no-copy">Sáng kiến · cải tiến kỹ thuật</p>
+
+    <p class="addressee"><b>Kính gửi:</b> HỘI ĐỒNG KHOA HỌC CÔNG NGHỆ CÔNG TY.</p>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">1.</span> Người đề xuất</h2>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead>
+            <tr><th>Họ và tên</th><th>Chức vụ</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Vương Nguyễn Phương Lâm</td><td>Phó Tổng Giám đốc phụ trách điều hành</td></tr>
+            <tr><td>Tô Thành Luân</td><td>Phó Giám đốc nhà máy</td></tr>
+            <tr><td>Chau Chok</td><td>Phó Giám đốc nhà máy</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-bottom:8px">Những người cùng tham gia:</p>
+      <ul class="roster">
+        <li><b>Néang Ry Ta</b> <span>Nhân viên kế toán</span></li>
+        <li><b>Nguyễn Hữu Thọ</b> <span>Nhân viên kỹ thuật</span></li>
+        <li><b>Chau Nho</b> <span>Nhân viên phụ trách đội xe</span></li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">2.</span> Nội dung đăng ký</h2>
+      </div>
+      <p>Số hóa toàn tuyến từ điều xe đến xuất hàng, quản lý thành phẩm theo thời gian thực và truy xuất nguồn gốc bằng mã QR đáp ứng quy định EUDR.</p>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">2.1.</span> Tên của ý tưởng</h2>
+        <button class="copy-mini no-copy" data-copy="s21" type="button">Chép</button>
+      </div>
+      <div id="s21">
+        <p>Ứng dụng công nghệ số hóa toàn tuyến sản xuất và truy xuất nguồn gốc tuân thủ EUDR bằng mã QR.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">2.2.</span> Hiện trạng trước khi thực hiện ý tưởng</h2>
+        <button class="copy-mini no-copy" data-copy="s22" type="button">Chép</button>
+      </div>
+      <ul class="body" id="s22">
+        <li>Toàn tuyến điều xe → tiếp nhận → lưu ngăn → sản xuất → thành phẩm → lưu kho → xuất hàng đang ghi chép bằng sổ tay và biểu mẫu giấy rời rạc, do nhiều bộ phận cùng quản lý.</li>
+        <li>Dữ liệu không liên kết: khi cần truy ngược một lô thành phẩm về lô rừng, phải tra thủ công qua nhiều sổ ở nhiều bộ phận, mất nhiều giờ và dễ sai lệch.</li>
+        <li>Không xuất được tọa độ địa lý của lô vườn, chưa đáp ứng yêu cầu thẩm định EUDR của khách hàng châu Âu.</li>
+        <li>Thông tin trên kiện pallet ghi tay, không kiểm tra được tại chỗ; tồn kho thành phẩm không cập nhật theo thời gian thực.</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">2.3.</span> Tóm tắt phương thức thực hiện</h2>
+        <button class="copy-mini no-copy" data-copy="s23" type="button">Chép</button>
+      </div>
+      <div id="s23">
+        <p>Xây dựng hệ thống web quản lý sản xuất nội bộ gồm các phân hệ liên kết chặt chẽ theo đúng dòng chảy vật chất của nhà máy:</p>
+        <ul class="body">
+          <li><strong>Điều xe – Kho nguyên liệu – Sản lượng:</strong> mỗi chuyến xe gắn với điểm giao nhận và lô vườn thu hoạch; khối lượng tự đồng bộ vào ngăn lưu, không phải nhập lại thủ công.</li>
+          <li><strong>Thành phẩm:</strong> sinh mã lô tự động, in tem QR theo từng kiện; công nhân quét QR bằng điện thoại để xác nhận sản xuất ngay tại dây chuyền, thay cho phiếu báo giấy.</li>
+          <li><strong>Kiểm nghiệm – Kho thành phẩm – Xuất hàng:</strong> kết quả kiểm nghiệm, vị trí lưu kho và đơn xuất liên kết theo mã lô, kiểm soát tồn theo thời gian thực.</li>
+          <li><strong>Truy xuất EUDR:</strong> từ một đơn xuất, hệ thống dựng ngược chuỗi lô hàng → lô thành phẩm → ngăn lưu → chuyến xe → lô vườn, kèm bản đồ và tệp tọa độ địa lý.</li>
+          <li><strong>Cổng khách hàng:</strong> cấp tài khoản để khách hàng tự tra cứu hồ sơ truy xuất của đúng đơn hàng được phân quyền.</li>
+          <li><strong>Chữ ký số và hồ sơ điện tử:</strong> biên bản, phiếu kiểm nghiệm và tài liệu ISO được ký duyệt, lưu trữ điện tử thay hồ sơ giấy.</li>
+        </ul>
+        <p>Hệ thống đã hoàn thiện và đang vận hành thực tế tại Nhà máy chế biến.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec"><span class="num">2.4.</span> Kết quả, hiệu quả, lợi ích đem lại</h2>
+        <button class="copy-mini no-copy" data-copy="s24" type="button">Chép</button>
+      </div>
+      <ul class="body" id="s24">
+        <li>Loại bỏ sổ ghi chép tay về nguyên liệu, ngăn lưu, phiếu báo thành phẩm và thông tin trên kiện pallet, vẫn đáp ứng đầy đủ yêu cầu lưu hồ sơ của ISO 9001:2015.</li>
+        <li>Rút ngắn thời gian truy xuất nguồn gốc một lô hàng từ nhiều giờ tra sổ xuống <strong>dưới 1 phút</strong> bằng một lần quét mã QR.</li>
+        <li>Cung cấp đầy đủ hồ sơ và tọa độ lô vườn theo yêu cầu EUDR ngay khi khách hàng yêu cầu, không phải lập lại thủ công.</li>
+        <li>Quản lý thành phẩm và tồn kho theo thời gian thực, giảm sai lệch số liệu giữa các bộ phận.</li>
+        <li>Giao diện tiếng Việt, thao tác chủ yếu bằng điện thoại, thân thiện với người lao động không thạo công nghệ.</li>
+        <li>Hệ thống mở rộng được cho các nhà máy khác trong Công ty mà không phát sinh chi phí phát triển lại.</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2 class="sec">Dự toán ban đầu</h2>
+      </div>
+      <div class="cost">
+        <dl>
+          <dt>Cơ sở dữ liệu và hạ tầng vận hành</dt>
+          <dd>25 USD/tháng</dd>
+          <dt>Tổng chi phí cả năm</dt>
+          <dd>300 USD/năm</dd>
+          <dt>Thuê ngoài phát triển phần mềm</dt>
+          <dd class="na">không phát sinh</dd>
+          <dt>Thiết bị quét QR và in nhãn</dt>
+          <dd class="na">sử dụng sẵn có</dd>
+        </dl>
+      </div>
+    </section>
+
+    <div class="signblock">
+      <div>
+        <div class="sig-role">Trưởng đơn vị</div>
+        <div class="sig-space"></div>
+        <div class="sig-name">Tô Thành Luân</div>
+      </div>
+      <div>
+        <div class="sig-role">Người đề xuất</div>
+        <div class="sig-note">(Ký tên và ghi rõ họ tên)</div>
+        <div class="sig-space"></div>
+        <div class="sig-name">Chau Chok</div>
+      </div>
+    </div>
+
+    <div class="council">
+      <div class="sig-role">Duyệt · Hội đồng KHCN Công ty</div>
+      <div class="sig-note">(Phê duyệt chủ trương và phân cấp sáng kiến/cải tiến)</div>
+      <div class="dots">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+
+  </article>
+</div>
+
+<div class="toast" id="toast">Đã sao chép</div>
+
+<script>
+  (function () {
+    var toast = document.getElementById("toast");
+    var timer;
+
+    function flash(msg) {
+      toast.textContent = msg;
+      toast.classList.add("on");
+      clearTimeout(timer);
+      timer = setTimeout(function () { toast.classList.remove("on"); }, 1600);
+    }
+
+    function textOf(node) {
+      var clone = node.cloneNode(true);
+      clone.querySelectorAll(".no-copy").forEach(function (el) { el.remove(); });
+      return clone.innerText.replace(/\n{3,}/g, "\n\n").trim();
+    }
+
+    function copy(text, msg) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () { flash(msg); },
+          function () { flash("Không sao chép được — hãy bôi đen và nhấn Ctrl+C"); }
+        );
+      } else {
+        flash("Trình duyệt không cho sao chép — hãy bôi đen và nhấn Ctrl+C");
+      }
+    }
+
+    document.getElementById("copyAll").addEventListener("click", function () {
+      copy(textOf(document.getElementById("doc")), "Đã sao chép toàn văn");
+    });
+
+    document.getElementById("printBtn").addEventListener("click", function () {
+      window.print();
+    });
+
+    document.querySelectorAll(".copy-mini").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var target = document.getElementById(btn.dataset.copy);
+        if (target) copy(textOf(target), "Đã sao chép mục này");
+      });
+    });
+  })();
+</script>

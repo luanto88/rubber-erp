@@ -135,92 +135,168 @@ export default function MaintenanceHistoryPage() {
     async (fid: string) => {
       setLoading(true)
       try {
-        let recQ = supabase
-          .from("maintenance_records")
-          .select(
-            "id, ma_bb, hang_muc, ngay, bo_phan, nguoi_thuc_hien, nv_phu_trach, phu_trach_bao_tri",
-          )
-          .eq("factory_id", fid)
-          .eq("trang_thai", "da_duyet")
-          .order("ngay", { ascending: false })
-        if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
-        if (filterTo) recQ = recQ.lte("ngay", filterTo)
-        const { data: records } = await recQ
+        const hasSelectedTarget = selectedVehicleIds.length > 0 || selectedAssetIds.length > 0
 
-        const recList = (records || []) as {
-          id: string
-          ma_bb: string | null
-          hang_muc: string
-          ngay: string
-          bo_phan: string
-          nguoi_thuc_hien: string[]
-          nv_phu_trach: string | null
-          phu_trach_bao_tri: string | null
-        }[]
+        if (hasSelectedTarget) {
+          // Khi đã chọn thiết bị hoặc xe: truy vấn trực tiếp maintenance_record_lines trước
+          let lineQ = supabase
+            .from("maintenance_record_lines")
+            .select(
+              "id, record_id, asset_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho",
+            )
+            .eq("factory_id", fid)
 
-        if (recList.length === 0) {
-          setRows([])
-          return
-        }
+          if (selectedVehicleIds.length > 0) lineQ = lineQ.in("dispatch_vehicle_id", selectedVehicleIds)
+          else if (selectedAssetIds.length > 0) lineQ = lineQ.in("asset_id", selectedAssetIds)
 
-        const recIds = recList.map((r) => r.id)
-        let lineQ = supabase
-          .from("maintenance_record_lines")
-          .select(
-            "id, record_id, asset_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho",
-          )
-          .in("record_id", recIds)
-          .eq("factory_id", fid)
-
-        if (selectedVehicleIds.length > 0) lineQ = lineQ.in("dispatch_vehicle_id", selectedVehicleIds)
-        else if (selectedAssetIds.length > 0) lineQ = lineQ.in("asset_id", selectedAssetIds)
-
-        const { data: lines } = await lineQ
-
-        const recMap = new Map(recList.map((r) => [r.id, r]))
-        const mapped: HistoryRow[] = (
-          (lines || []) as {
-            id: string
-            record_id: string
-            asset_id: string | null
-            dispatch_vehicle_id: string | null
-            ten_tb: string
-            ma_tb: string
-            noi_dung: string | null
-            cac_khac_phuc: string | null
-            chi_phi_dk: number
-            loai_tien: string
-            cong_tho: number
-          }[]
-        ).map((l) => {
-          const rec = recMap.get(l.record_id)!
-          return {
-            record_id: l.record_id,
-            line_id: l.id,
-            ngay: rec.ngay,
-            ma_bb: rec.ma_bb,
-            hang_muc: rec.hang_muc,
-            bo_phan: rec.bo_phan,
-            noi_dung: l.noi_dung,
-            cac_khac_phuc: l.cac_khac_phuc,
-            chi_phi_dk: l.chi_phi_dk || 0,
-            loai_tien: l.loai_tien || "USD",
-            cong_tho: l.cong_tho || 0,
-            nguoi_thuc_hien: rec.nguoi_thuc_hien || [],
-            nv_phu_trach: rec.nv_phu_trach,
-            phu_trach_bao_tri: rec.phu_trach_bao_tri,
-            asset_id: l.asset_id,
-            ten_tb: l.ten_tb,
-            ma_tb: l.ma_tb,
+          const { data: lines, error: lErr } = await lineQ
+          if (lErr || !lines || lines.length === 0) {
+            setRows([])
+            return
           }
-        })
-        mapped.sort((a, b) => b.ngay.localeCompare(a.ngay))
-        setRows(mapped)
+
+          const recIds = [...new Set(lines.map((l) => l.record_id))]
+          const recList: {
+            id: string
+            ma_bb: string | null
+            hang_muc: string
+            ngay: string
+            bo_phan: string
+            nguoi_thuc_hien: string[]
+            nv_phu_trach: string | null
+            phu_trach_bao_tri: string | null
+          }[] = []
+
+          // Phân đoạn truy vấn theo lô 100 ID để tránh lỗi 400 Bad Request / URL length limit
+          for (let i = 0; i < recIds.length; i += 100) {
+            const chunk = recIds.slice(i, i + 100)
+            let recQ = supabase
+              .from("maintenance_records")
+              .select(
+                "id, ma_bb, hang_muc, ngay, bo_phan, nguoi_thuc_hien, nv_phu_trach, phu_trach_bao_tri",
+              )
+              .in("id", chunk)
+              .eq("factory_id", fid)
+              .eq("trang_thai", "da_duyet")
+
+            if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
+            if (filterTo) recQ = recQ.lte("ngay", filterTo)
+            const { data: chunkRecs } = await recQ
+            if (chunkRecs) recList.push(...chunkRecs)
+          }
+
+          if (recList.length === 0) {
+            setRows([])
+            return
+          }
+
+          const recMap = new Map(recList.map((r) => [r.id, r]))
+          const mapped: HistoryRow[] = lines
+            .filter((l) => recMap.has(l.record_id))
+            .map((l) => {
+              const rec = recMap.get(l.record_id)!
+              return {
+                record_id: l.record_id,
+                line_id: l.id,
+                ngay: rec.ngay,
+                ma_bb: rec.ma_bb,
+                hang_muc: rec.hang_muc,
+                bo_phan: rec.bo_phan,
+                noi_dung: l.noi_dung,
+                cac_khac_phuc: l.cac_khac_phuc,
+                chi_phi_dk: l.chi_phi_dk || 0,
+                loai_tien: l.loai_tien || "USD",
+                cong_tho: l.cong_tho || 0,
+                nguoi_thuc_hien: rec.nguoi_thuc_hien || [],
+                nv_phu_trach: rec.nv_phu_trach,
+                phu_trach_bao_tri: rec.phu_trach_bao_tri,
+                asset_id: l.asset_id,
+                ten_tb: l.ten_tb,
+                ma_tb: l.ma_tb,
+              }
+            })
+          mapped.sort((a, b) => b.ngay.localeCompare(a.ngay))
+          setRows(mapped)
+        } else {
+          // Khi chưa chọn thiết bị/xe: tải các biên bản theo bộ phận hoặc ngày có phân đoạn
+          let recQ = supabase
+            .from("maintenance_records")
+            .select(
+              "id, ma_bb, hang_muc, ngay, bo_phan, nguoi_thuc_hien, nv_phu_trach, phu_trach_bao_tri",
+            )
+            .eq("factory_id", fid)
+            .eq("trang_thai", "da_duyet")
+            .order("ngay", { ascending: false })
+            .limit(200)
+
+          if (filterBoPhan) recQ = recQ.eq("bo_phan", filterBoPhan)
+          if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
+          if (filterTo) recQ = recQ.lte("ngay", filterTo)
+          const { data: records } = await recQ
+
+          const recList = (records || []) as {
+            id: string
+            ma_bb: string | null
+            hang_muc: string
+            ngay: string
+            bo_phan: string
+            nguoi_thuc_hien: string[]
+            nv_phu_trach: string | null
+            phu_trach_bao_tri: string | null
+          }[]
+
+          if (recList.length === 0) {
+            setRows([])
+            return
+          }
+
+          const recIds = recList.map((r) => r.id)
+          const lines: any[] = []
+          for (let i = 0; i < recIds.length; i += 100) {
+            const chunk = recIds.slice(i, i + 100)
+            const { data: chunkLines } = await supabase
+              .from("maintenance_record_lines")
+              .select(
+                "id, record_id, asset_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho",
+              )
+              .in("record_id", chunk)
+              .eq("factory_id", fid)
+            if (chunkLines) lines.push(...chunkLines)
+          }
+
+          const recMap = new Map(recList.map((r) => [r.id, r]))
+          const mapped: HistoryRow[] = lines
+            .filter((l) => recMap.has(l.record_id))
+            .map((l) => {
+              const rec = recMap.get(l.record_id)!
+              return {
+                record_id: l.record_id,
+                line_id: l.id,
+                ngay: rec.ngay,
+                ma_bb: rec.ma_bb,
+                hang_muc: rec.hang_muc,
+                bo_phan: rec.bo_phan,
+                noi_dung: l.noi_dung,
+                cac_khac_phuc: l.cac_khac_phuc,
+                chi_phi_dk: l.chi_phi_dk || 0,
+                loai_tien: l.loai_tien || "USD",
+                cong_tho: l.cong_tho || 0,
+                nguoi_thuc_hien: rec.nguoi_thuc_hien || [],
+                nv_phu_trach: rec.nv_phu_trach,
+                phu_trach_bao_tri: rec.phu_trach_bao_tri,
+                asset_id: l.asset_id,
+                ten_tb: l.ten_tb,
+                ma_tb: l.ma_tb,
+              }
+            })
+          mapped.sort((a, b) => b.ngay.localeCompare(a.ngay))
+          setRows(mapped)
+        }
       } finally {
         setLoading(false)
       }
     },
-    [selectedAssetIds, selectedVehicleIds, filterFrom, filterTo],
+    [selectedAssetIds, selectedVehicleIds, filterBoPhan, filterFrom, filterTo],
   )
 
   useEffect(() => {

@@ -55,6 +55,7 @@ type DxRow = {
   kl_mnk: string   // Mủ nước khô — AUTO-CALC
   ngan_ref: string[]
   ghi_chu?: string
+  ghi_chu_tu_do?: string
   doi?: number[]
   row_id?: string
   dispatch_entry_id?: string
@@ -283,6 +284,7 @@ const emptyRow = (): DxRow => ({
   kl_mn: "", drc_mn: "", kl_mnk: "",
   ngan_ref: [],
   ghi_chu: "",
+  ghi_chu_tu_do: "",
   locked: false,
 })
 
@@ -736,15 +738,16 @@ export default function DispatchPage() {
   const driverOptions = drivers
   const handleAddRequiredNote = useCallback(async () => {
     if (!factoryId) return
-    const input = window.prompt("Nhập ghi chú mới")
+    const input = window.prompt("Nhập mã ký hiệu kỹ thuật mới (VD: T, Tr, TM, GCTBK, TL...)")
     if (!input || !input.trim()) return
+    const moTa = window.prompt(`Nhập mô tả / ý nghĩa cho ký hiệu "${input.trim()}" (tùy chọn, VD: Mủ thêm)`) ?? undefined
     try {
-      await createRequiredNote(supabase, factoryId, input)
+      await createRequiredNote(supabase, factoryId, input, moTa)
       const rows = await loadRequiredNotes(supabase, factoryId)
       setRequiredNotes(rows.map((row) => row.content))
-      showToast("Đã thêm ghi chú mới")
+      showToast("Đã thêm ký hiệu kỹ thuật mới")
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Không thêm được ghi chú")
+      showToast(err instanceof Error ? err.message : "Không thêm được ký hiệu kỹ thuật")
     }
   }, [factoryId])
 
@@ -2023,6 +2026,7 @@ export default function DispatchPage() {
               {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
                 <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
+              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ký hiệu KT</th>
               <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ghi chú</th>
             </tr>
           </thead>
@@ -2054,16 +2058,24 @@ export default function DispatchPage() {
                 <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.drc_dc}%</td>
                 <td className="px-3 py-2.5 font-semibold text-emerald-700">{row.kl_dck}</td>
-                <td className="px-3 py-2.5 text-slate-500 max-w-48 truncate">{row.ghi_chu || "—"}</td>
+                <td className="px-3 py-2.5 font-medium">
+                  {row.ghi_chu ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-[11px]">
+                      {row.ghi_chu}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-3 py-2.5 text-slate-500 max-w-48 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</td>
               </tr>
             ))}
           </tbody>
           <tfoot className="bg-slate-50 border-t-2 border-slate-200">
             <tr>
-              <td colSpan={9} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
+              <td colSpan={10} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
               <td className="px-3 py-2.5 font-bold text-slate-700">
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dct)||0),0).toLocaleString()}
               </td>
+              <td/>
               <td/>
               <td className="px-3 py-2.5 font-bold text-emerald-700">
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dck)||0),0).toLocaleString()}
@@ -2155,7 +2167,7 @@ export default function DispatchPage() {
           </button>
           <button onClick={() => void handleAddRequiredNote()}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors">
-            <Plus size={12}/> Thêm ghi chú
+            <Plus size={12}/> Thêm ký hiệu KT
           </button>
           <button onClick={clearAllVehicles}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-orange-600 hover:bg-orange-50 border border-orange-200 rounded-lg transition-colors">
@@ -2173,7 +2185,7 @@ export default function DispatchPage() {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","Lộ trình","Km","Ghi chú",""].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","Lộ trình","Km","Ký hiệu KT","Ghi chú",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -2300,16 +2312,29 @@ export default function DispatchPage() {
                   {row.so_km ? `${row.so_km} km` : "—"}
                 </td>
 
-                {/* Ghi chú */}
-                <td className="px-2 py-1.5 min-w-[150px]">
+                {/* Ký hiệu KT */}
+                <td className="px-2 py-1.5 min-w-[140px]">
                   {row.locked
-                    ? <span className="text-slate-500 text-xs">{row.ghi_chu || "—"}</span>
+                    ? <span className="text-slate-700 font-mono font-semibold text-xs">{row.ghi_chu || "—"}</span>
                     : <RequiredNoteSelect
                         factoryId={factoryId}
                         value={row.ghi_chu || ""}
                         onChange={v => updateRow(idx,"ghi_chu",v)}
-                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
+                        className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
                         onError={showToast}
+                      />
+                  }
+                </td>
+
+                {/* Ghi chú sự cố tự do */}
+                <td className="px-2 py-1.5 min-w-[150px]">
+                  {row.locked
+                    ? <span className="text-slate-500 text-xs block max-w-40 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</span>
+                    : <input
+                        value={row.ghi_chu_tu_do || ""}
+                        onChange={e => updateRow(idx, "ghi_chu_tu_do", e.target.value)}
+                        placeholder="Ghi chú sự cố..."
+                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400 placeholder:text-slate-300"
                       />
                   }
                 </td>

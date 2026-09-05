@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { modunLabel, loaiTaiLieuLabel } from "@/lib/signing/labels"
 
 // Màn hình ký dùng chung cho MỌI module (Giai đoạn 3 — Hệ thống ký số dùng chung).
 // Bám sát mockup đã duyệt cung_cap_dl/thiet_ke_man_hinh_ky.html, thu gọn 1 điểm so
@@ -51,26 +52,8 @@ type TruongKy = {
 }
 type ProfileLite = { id: string; full_name: string | null; username: string | null }
 
-const MODUN_LABEL: Record<string, string> = {
-  quality: "Chất lượng",
-  export: "Xuất hàng",
-  maintenance: "Bảo trì",
-  dispatch: "Điều xe",
-  output: "Sản lượng",
-  storage: "Kho nguyên liệu",
-}
-
-// Nhãn tiếng Việt cho yeu_cau_ky.loai_tai_lieu — trước đây in thẳng mã snake_case nội bộ
-// (vd "dispatch_bang_phan_xe") ra màn hình (bug đã báo 2026-09-01). Danh sách đủ 6 giá trị
-// đang tồn tại trong hệ thống (grep toàn bộ nơi gọi createSigningRequest với loaiTaiLieu:).
-const LOAI_TAI_LIEU_LABEL: Record<string, string> = {
-  dispatch_bang_phan_xe: "Bảng phân xe",
-  quality_kqkn: "Phiếu KQKN",
-  su_co_nho: "Biên bản sự cố",
-  bao_duong: "Biên bản bảo dưỡng",
-  bao_duong_xe: "Biên bản bảo dưỡng xe",
-  sua_chua_nho_xe: "Biên bản sửa chữa nhỏ xe",
-}
+// MODUN_LABEL / LOAI_TAI_LIEU_LABEL đã tách sang @/lib/signing/labels để phần thông báo
+// server-side (src/lib/signing/notify.ts) dùng chung đúng một nguồn nhãn với màn hình này.
 
 function roleLabelOf(vaiTro: NguoiKy["vai_tro"]): string {
   if (vaiTro === "phe_duyet") return "Phê duyệt"
@@ -603,10 +586,10 @@ export default function SignScreenPage() {
       <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-[#2f5d52] to-[#1c3a32] px-5 py-3.5 text-white">
         <div className="flex min-w-[220px] flex-col gap-1">
           <div className="text-[11px] opacity-75">
-            Hệ thống ký số dùng chung · {MODUN_LABEL[yeuCau.modun] || yeuCau.modun}
+            Hệ thống ký số dùng chung · {modunLabel(yeuCau.modun)}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-base font-bold">
-            {LOAI_TAI_LIEU_LABEL[yeuCau.loai_tai_lieu] || yeuCau.loai_tai_lieu}
+            {loaiTaiLieuLabel(yeuCau.loai_tai_lieu)}
             {yeuCau.ma_ho_so && (
               <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
                 {yeuCau.ma_ho_so}

@@ -33,6 +33,7 @@ export type LegacyDispatchRow = {
   kl_mnk?: string
   ngan_ref?: string[]
   ghi_chu?: string
+  ghi_chu_tu_do?: string
   locked?: boolean
   row_id?: string
   dispatch_entry_id?: string
@@ -109,6 +110,7 @@ export function dispatchDbRowToLegacy(row: LegacyDispatchRow): LegacyDispatchRow
     so_km: parseNum(row.so_km),
     ngan_ref: arr(row.ngan_ref),
     ghi_chu: row.ghi_chu || "",
+    ghi_chu_tu_do: row.ghi_chu_tu_do || "",
     locked: Boolean(row.locked),
     stops_detail: (row.stops_detail as Array<{ diem: string; phien: string[] }> | null | undefined) ?? null,
   }
@@ -148,6 +150,7 @@ export function legacyDispatchRowToDb(
     so_km: parseNum(row.so_km),
     ngan_ref: arr(row.ngan_ref),
     ghi_chu: row.ghi_chu || "",
+    ghi_chu_tu_do: row.ghi_chu_tu_do || "",
     locked: Boolean(row.locked),
     stops_detail: row.stops_detail ?? null,
   }

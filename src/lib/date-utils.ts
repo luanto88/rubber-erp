@@ -1,5 +1,57 @@
+// ⚠️ Hàm này tính ngày theo UTC — sai 1 ngày với thao tác diễn ra trong khoảng 00:00–06:59 sáng
+// giờ địa phương (UTC+7). CỐ Ý KHÔNG sửa: đang được module KPI dùng để so ngày, đổi ở đây sẽ
+// thay đổi hành vi ngoài phạm vi. Code MỚI cần ngày "hôm nay" theo giờ nhà máy phải dùng
+// getFactoryTodayISO() bên dưới.
 export function getTodayISODate() {
   return new Date().toISOString().slice(0, 10)
+}
+
+// ── Ngày theo múi giờ nhà máy ────────────────────────────────────────────────
+// Nhà máy đặt tại Kampong Thom (Campuchia) — cùng múi UTC+7 với Việt Nam. Server chạy trên
+// Vercel dùng UTC, nên mọi chỗ cần "ngày hôm nay" theo nghiệp vụ (ngày phê duyệt, ngày in lên
+// chứng từ...) PHẢI quy đổi qua múi giờ này; nếu không, thao tác lúc 00:00–06:59 sáng sẽ bị ghi
+// nhận thành ngày hôm trước.
+export const FACTORY_TIME_ZONE = "Asia/Ho_Chi_Minh"
+
+/** `YYYY-MM-DD` theo giờ nhà máy — dùng thay `getTodayISODate()` cho dữ liệu nghiệp vụ. */
+export function getFactoryTodayISO(d: Date = new Date()): string {
+  // "en-CA" cho ra sẵn định dạng YYYY-MM-DD, không phải tự ghép chuỗi.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: FACTORY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d)
+}
+
+/** `dd/mm/yyyy` theo giờ nhà máy — dùng cho ngày in lên PDF / thay tag Office. */
+export function formatFactoryDateVN(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone: FACTORY_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d)
+}
+
+/**
+ * `dd/mm/yyyy hh:mm:ss` theo giờ nhà máy — dùng cho tag "Văn bản được ký ..." đóng lên PDF.
+ * Cần tới giây nên KHÔNG dùng lại `formatFactoryDateVN()`; `en-GB` cho ra sẵn khung 24h
+ * `dd/mm/yyyy, hh:mm:ss`, chỉ cần bỏ dấu phẩy ngăn cách.
+ */
+export function formatFactoryDateTimeVN(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: FACTORY_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(d)
+    .replace(",", "")
 }
 
 function isLeapYear(year: number) {

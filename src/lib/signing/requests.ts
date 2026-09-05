@@ -10,6 +10,9 @@ import { drawSignatureImage, drawTextFit, loadSignerNameFont } from "./stamp-pdf
 import { getTodayISODate, formatDateDisplay } from "@/lib/date-utils"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "./pades"
 import { issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
+// CHỈ import type — không kéo `next/server`/nodemailer vào lõi ký. Việc GỬI thông báo do 3 route
+// handler thực hiện qua scheduleSigningNotify(), file này chỉ DỰNG kế hoạch (xem ./notify.ts).
+import type { SigningNotifyPlan } from "./notify"
 
 // Lớp điều phối "tạo yêu cầu ký" + "ký 1 người" dùng chung cho MỌI module (6 module
 // theo cung_cap_dl/du_an_ky_so_dung_chung - new.docx). Đọc/ghi 6 bảng lõi
@@ -67,7 +70,9 @@ export type CreateSigningRequestInput = {
  * `yeu_cau_ky` vừa tạo (CASCADE tự xoá nguoi_ky/truong_ky con) để không để lại hồ sơ
  * mồ côi nửa vời.
  */
-export async function createSigningRequest(input: CreateSigningRequestInput): Promise<{ yeuCauId: string }> {
+export async function createSigningRequest(
+  input: CreateSigningRequestInput,
+): Promise<{ yeuCauId: string; notifyPlan: SigningNotifyPlan }> {
   const supabase = getSupabaseAdmin()
   const yeuCauId = randomUUID()
   const storagePath = `${input.factoryId}/${input.modun}/${yeuCauId}/v1.${input.fileExt}`
@@ -163,8 +168,23 @@ export async function createSigningRequest(input: CreateSigningRequestInput): Pr
     chi_tiet: { modun: input.modun, loai_tai_lieu: input.loaiTaiLieu, so_nguoi_ky: input.signers.length },
   })
 
-  return { yeuCauId }
+  // Báo cho (các) người ký ở bước ĐẦU TIÊN — thu_tu nhỏ nhất. Nhiều người cùng thu_tu nghĩa là
+  // ký song song (theo comment schema nguoi_ky.thu_tu) → báo hết.
+  const minThuTu = Math.min(...input.signers.map((s) => s.thuTu))
+
+  return {
+    yeuCauId,
+    notifyPlan: {
+      event: "tao_yeu_cau",
+      yeuCauId,
+      actorUserId: input.nguoiTaoId,
+      recipientUserIds: input.signers.filter((s) => s.thuTu === minThuTu).map((s) => s.userId),
+      buoc: minThuTu,
+    },
+  }
 }
+
+type SignerStateRow = { id: string; user_id: string; thu_tu: number; trang_thai: string }
 
 export type SignFieldResult = {
   trangThaiYeuCau: string
@@ -174,6 +194,9 @@ export type SignFieldResult = {
   // thế nút "Phê duyệt" thủ công cũ) gặp lỗi — chữ ký vẫn được ghi nhận bình thường (sự thật
   // đã ký không thể đổi lại), chỉ báo cho người ký/admin biết cần vào Bảo trì xử lý tay.
   maintenanceIssueError?: string | null
+  // Kế hoạch thông báo cho route handler gửi qua after() (xem ./notify.ts). null = không gửi gì
+  // (lượt ký lặp lại do bấm 2 lần, hoặc còn người khác cùng thu_tu chưa ký xong).
+  notifyPlan: SigningNotifyPlan | null
 }
 
 /**
@@ -218,7 +241,14 @@ export async function signField(params: {
   if (nkErr || !nguoiKy) throw new Error("Bạn không nằm trong danh sách ký hồ sơ này")
 
   if (nguoiKy.trang_thai === "da_ky") {
-    return { trangThaiYeuCau: yeuCau.trang_thai, fileHienTai: yeuCau.file_hien_tai, alreadySigned: true }
+    // notifyPlan: null BẮT BUỘC — nhánh idempotent này chạy khi bấm "Ký" 2 lần / rớt mạng bấm
+    // lại; gửi thông báo ở đây sẽ spam trùng cho người ký kế tiếp.
+    return {
+      trangThaiYeuCau: yeuCau.trang_thai,
+      fileHienTai: yeuCau.file_hien_tai,
+      alreadySigned: true,
+      notifyPlan: null,
+    }
   }
 
   // Chặn ký sai thứ tự: người có `thu_tu` lớn hơn chỉ được ký khi TẤT CẢ người có `thu_tu`
@@ -439,11 +469,25 @@ export async function signField(params: {
 
   const { data: allSigners } = await supabase
     .from("nguoi_ky")
-    .select("id, trang_thai")
+    .select("id, user_id, thu_tu, trang_thai")
     .eq("yeu_cau_id", params.yeuCauId)
-  const allDone = (allSigners || []).every(
-    (r: { id: string; trang_thai: string }) => r.id === nguoiKy.id || r.trang_thai === "da_ky",
+
+  // Dòng của CHÍNH người vừa ký luôn coi là 'da_ky' — giữ nguyên lớp phòng thủ read-after-write
+  // vốn có ở biểu thức allDone cũ (`r.id === nguoiKy.id || ...`): UPDATE phía trên chạy TRƯỚC
+  // SELECT này nhưng vẫn có thể đọc trễ.
+  const signerRows = ((allSigners || []) as SignerStateRow[]).map((r) =>
+    r.id === nguoiKy.id ? { ...r, trang_thai: "da_ky" } : r,
   )
+  const allDone = signerRows.every((r) => r.trang_thai === "da_ky")
+
+  // Người ký kế tiếp: trong số CHƯA 'da_ky', lấy thu_tu nhỏ nhất và trả về TẤT CẢ người có cùng
+  // thu_tu đó (thu_tu trùng nhau = ký song song, theo comment schema nguoi_ky.thu_tu).
+  const pendingSigners = signerRows.filter((r) => r.trang_thai !== "da_ky")
+  const nextThuTu = pendingSigners.length ? Math.min(...pendingSigners.map((r) => r.thu_tu)) : null
+  const nextSignerUserIds =
+    nextThuTu === null
+      ? []
+      : [...new Set(pendingSigners.filter((r) => r.thu_tu === nextThuTu).map((r) => r.user_id))]
 
   // Ký lại thành công (dù là lượt đầu hay sau khi bị "Trả về") luôn coi như đã xử lý
   // xong lần trả về gần nhất — xoá 3 cột tra_ve_* để badge không còn hiện "Đã trả về"
@@ -521,6 +565,22 @@ export async function signField(params: {
     fileHienTai: newUrl,
     alreadySigned: false,
     maintenanceIssueError,
+    notifyPlan: allDone
+      ? {
+          event: "hoan_tat",
+          yeuCauId: params.yeuCauId,
+          actorUserId: params.userId,
+          recipientUserIds: [yeuCau.nguoi_tao as string],
+        }
+      : nextSignerUserIds.length
+        ? {
+            event: "ky_buoc",
+            yeuCauId: params.yeuCauId,
+            actorUserId: params.userId,
+            recipientUserIds: nextSignerUserIds,
+            buoc: nextThuTu,
+          }
+        : null,
   }
 }
 
@@ -599,7 +659,7 @@ export async function returnSigningRequest(params: {
   lyDo: string
   ip?: string
   thietBi?: string
-}): Promise<{ resetUserIds: string[] }> {
+}): Promise<{ resetUserIds: string[]; notifyPlan: SigningNotifyPlan }> {
   const supabase = getSupabaseAdmin()
   const lyDo = params.lyDo?.trim()
   if (!lyDo) throw new Error("Vui lòng nhập lý do trả về")
@@ -671,7 +731,20 @@ export async function returnSigningRequest(params: {
     chi_tiet: { ly_do: lyDo, reset_nguoi_ky_ids: predecessors.map((p) => p.id) },
   })
 
-  return { resetUserIds: predecessors.map((p) => p.user_id) }
+  const resetUserIds = predecessors.map((p) => p.user_id)
+
+  return {
+    resetUserIds,
+    // Người bị trả về trước đây KHÔNG hề biết mình phải sửa & ký lại — resetUserIds đã có sẵn
+    // từ lâu nhưng chưa nơi nào dùng để gửi thông báo.
+    notifyPlan: {
+      event: "tra_ve",
+      yeuCauId: params.yeuCauId,
+      actorUserId: params.userId,
+      recipientUserIds: resetUserIds,
+      lyDo,
+    },
+  }
 }
 
 /**

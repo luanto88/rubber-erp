@@ -62,8 +62,12 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
       : normalizeDateInput(String(row[0] ?? ""))
     if (!ngay) return
 
-    const doi = parseInt(String(row[1] ?? "0"))
-    if (!doi || doi < 1 || doi > 12) return
+    const rawDoi = String(row[1] ?? "").trim().toUpperCase()
+    let doi = parseInt(rawDoi)
+    if (isNaN(doi) || rawDoi === "TM" || rawDoi === "") {
+      doi = 0
+    }
+    if (doi < 0 || doi > 12) return
 
     const { base_xe, chuyen } = parseVehicleCode(colC)
 
@@ -76,7 +80,10 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
     const dct_tuoi = toNum(row[9]); const dct_drc = toNum(row[10]); const dct_kho = calcKho(dct_tuoi, dct_drc, toNum(row[11]))
     const dkt_tuoi = toNum(row[12]); const dkt_drc = toNum(row[13]); const dkt_kho = calcKho(dkt_tuoi, dkt_drc, toNum(row[14]))
     const dt_tuoi = toNum(row[15]); const dt_drc = toNum(row[16]);  const dt_kho = calcKho(dt_tuoi, dt_drc, toNum(row[17]))
-    const ghi_chu = String(row[18] ?? "").trim()
+    let ghi_chu = String(row[18] ?? "").trim()
+    if (!ghi_chu && doi === 0) {
+      ghi_chu = "TM"
+    }
 
     result.push({
       row_index: idx + 3,
@@ -176,10 +183,12 @@ export function matchRows(
     if (!dispIdx.has(dateKey)) dispIdx.set(dateKey, new Map())
     const dayMap = dispIdx.get(dateKey)!
     for (const row of entry.rows ?? []) {
-      const { base_xe } = parseVehicleCode(row.so_xe ?? "")
+      const rawXe = String(row.so_xe ?? "").trim().toUpperCase()
+      const { base_xe } = parseVehicleCode(rawXe)
       const chuyen = typeof row.chuyen === "number" ? row.chuyen : 1
-      const k = `${base_xe}:${chuyen}`
-      dayMap.set(k, { entryId: entry.id, tai_xe: row.tai_xe ?? "", diem_gn: row.diem_gn ?? [] })
+      const matchObj = { entryId: entry.id, tai_xe: row.tai_xe ?? "", diem_gn: row.diem_gn ?? [] }
+      dayMap.set(`${base_xe}:${chuyen}`, matchObj)
+      dayMap.set(`${rawXe}:${chuyen}`, matchObj)
     }
   }
 
@@ -217,11 +226,11 @@ export function matchRows(
       dispatch_entry_id = match.entryId
       tai_xe = match.tai_xe || null
 
-      // kiểm tra doi
+      // kiểm tra doi (bỏ qua nếu là mủ thu mua doi = 0)
       const pointDois = new Set(
         match.diem_gn.map(ma => doiByMaLo.get(ma)).filter((d): d is number => d !== undefined)
       )
-      if (pointDois.size > 0 && !pointDois.has(row.doi)) {
+      if (typeof row.doi === "number" && row.doi > 0 && pointDois.size > 0 && !pointDois.has(row.doi)) {
         warns.push("DOI_MISMATCH")
       }
     }
@@ -695,7 +704,7 @@ export function OutputImport({
               {unknownNoteGroups.length > 0 && (
                 <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3">
                   <p className="text-xs font-bold text-red-700 mb-2">
-                    {unknownNoteGroups.length} ghi chú trong file chưa có trong danh mục — bấm &quot;Thêm vào danh mục&quot; để duyệt hàng loạt, hoặc sửa từng dòng ở cột Ghi chú bên dưới.
+                    {unknownNoteGroups.length} ký hiệu kỹ thuật trong file chưa có trong danh mục — bấm &quot;Thêm vào danh mục&quot; để duyệt hàng loạt, hoặc sửa từng dòng ở cột Ký hiệu KT bên dưới.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {unknownNoteGroups.map(({ content, count }) => (
@@ -732,7 +741,7 @@ export function OutputImport({
                           <th className="px-3 py-2 text-right font-bold text-slate-600 whitespace-nowrap">{def.label} — Khô (kg)</th>
                         </Fragment>
                       ))}
-                      <th className="px-3 py-2 text-left font-bold text-slate-600">Ghi chú</th>
+                      <th className="px-3 py-2 text-left font-bold text-slate-600">Ký hiệu KT</th>
                       <th className="px-3 py-2 text-left font-bold text-slate-600">Cảnh báo</th>
                     </tr>
                   </thead>

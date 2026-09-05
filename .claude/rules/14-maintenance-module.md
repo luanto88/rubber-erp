@@ -487,9 +487,20 @@ Bảng tổng hợp lịch sử bảo trì per thiết bị, 5 cột theo mẫu 
 
 ---
 
-## Thông báo BGĐ
+## Thông báo BGĐ (`/api/maintenance/notify`)
 
-Nút **"Thông báo BGĐ"** hiển thị khi biên bản ở trạng thái `cho_duyet`. Gọi API route `POST /api/maintenance/notify` với `{ recordId, factoryId }`.
+> ⚠️ **Đính chính 2026-09-04**: nút **"Thông báo BGĐ"** mô tả bên dưới **KHÔNG còn tồn tại trong
+> code** (grep `"Thông báo"` toàn `src/app/dashboard/maintenance/` = 0 kết quả). Route
+> `/api/maintenance/notify` hiện chỉ có **1 call site duy nhất**: `handleResubmit` ở
+> `records/[id]/page.tsx` (nút "Gửi duyệt lại", chỉ hiện khi `trang_thai === "tu_choi"` — dữ liệu
+> lịch sử từ trước khi bỏ nút "Từ chối") ⇒ thực tế gần như không bao giờ chạy. Route
+> `/api/maintenance/notify-reject` là **dead code** (0 call site). Phần mô tả kênh Telegram/Email
+> dưới đây vẫn đúng với code của route, giữ lại làm tham chiếu.
+>
+> Thông báo cho luồng **ký duyệt điện tử** (thay thế luồng `cho_duyet → da_duyet` cũ) nằm ở
+> `src/lib/signing/notify.ts` — xem mục "Thông báo ký số dùng chung" cuối file này.
+
+Gọi API route `POST /api/maintenance/notify` với `{ recordId, factoryId }`.
 
 ### Kênh 1 — Telegram
 
@@ -1015,3 +1026,207 @@ Font tất cả labels và inputs vật tư: `text-xs` (không dùng `text-[10px
 2. **Kho nguồn khi ghi sổ từng chọn ngầm bằng `item.default_warehouse_ids[0]`** (phần tử đầu 1 mảng, thứ tự không được đảm bảo — chỉ là thứ tự tick checkbox kho lúc tạo/sửa vật tư trong Cài đặt). Đã sửa: thêm field `primaryWarehouseId`/`primaryWarehouseCode` trên `InventoryItemOption`, suy luận ưu tiên đọc `inventory_item_warehouse_rules.is_primary` (nguồn có chủ đích cho "kho chính", dù không có ràng buộc DB cứng), chỉ fallback `default_warehouse_ids[0]` khi vật tư chưa có rule nào `is_primary`. `handleApprove` dòng suy luận `sourceWarehouseId` giờ dùng `item.primaryWarehouseId`. **Không** thêm bộ chọn kho thủ công cho từng dòng vật tư — `maintenance_materials` không có cột `warehouse_id`, thêm picker sẽ cần schema mới, ngoài phạm vi lần sửa này. Thay vào đó chỉ **hiển thị rõ mã kho** ngay cạnh mọi chỗ hiện "Tồn: X" (badge chọn vật tư, dòng dropdown, cảnh báo "Vượt (X)"/"Hết tồn") để không còn hoàn toàn ngầm định.
 
 `npx tsc --noEmit`, `npx eslint`, `npm run build` đều sạch (đối chiếu qua `git stash` xác nhận 5 warning còn lại là pre-existing, không liên quan thay đổi này). **Chưa test tay** — cần: chạy migration trên Supabase SQL Editor trước; phê duyệt lại đúng biên bản từng lỗi (vật tư "Dao băm (máy băm thô/tinh)"/"Motor Tunglee 3,7kw") xác nhận không còn báo lỗi và tồn kho giảm đúng; test case xuất hơn nửa tồn (trước đây cũng bị chặn sai); "Hủy phê duyệt" xác nhận tồn được hoàn lại đúng; test 1 vật tư quản lý lô (hóa chất KB) xuất vượt tồn lô ở Kho vật tư → Xuất kho vẫn bị chặn đúng bởi chính RPC; mở 1 biên bản dùng vật tư `trong_kho` xác nhận "Tồn: X" hiện kèm đúng mã kho, khớp với trang Tồn kho lọc theo kho đó.
+
+---
+
+## Thông báo ký số dùng chung (2026-09-04)
+
+Trước ngày này, TOÀN BỘ luồng ký số dùng chung (`src/lib/signing/`, phục vụ Bảo trì / Chất
+lượng / Điều xe) **không gửi bất kỳ thông báo nào**: người ký kế tiếp không biết tới lượt mình,
+người bị "Trả về" không biết phải sửa & ký lại. Đã bổ sung 3 kênh × 4 mốc.
+
+### Kiến trúc
+
+- **Lõi**: `src/lib/signing/notify.ts` — lib server-side, gọi **thẳng** từ 3 route handler
+  (`/api/signing/create-request`, `sign-field`, `return-request`). **Không** tạo route HTTP
+  riêng, **không** self-fetch (trên Vercel serverless self-fetch là thêm 1 invocation vô ích).
+  Tiền lệ: `src/lib/maintenance-stock-issuance.ts` cũng được `signField()` gọi thẳng.
+- **Tách "dựng kế hoạch" khỏi "gửi"**: `requests.ts` chỉ TRẢ VỀ `notifyPlan` (chỉ chứa ID);
+  route handler gọi `scheduleSigningNotify(plan)`. Lý do: giữ `requests.ts` **không import
+  `next/server`** — `after()` ném lỗi E468 khi chạy ngoài request scope (script/cron sau này).
+  `requests.ts` chỉ `import type { SigningNotifyPlan }`.
+- **Không chặn response**: `scheduleSigningNotify` dùng `after()` từ `next/server` (map sang
+  `waitUntil`, giữ invocation sống sau khi response đã flush) — Telegram + SMTP mất 1-3s, không
+  được cộng vào thời gian chờ của người vừa bấm "Ký". Đây là **lần đầu repo dùng `after()`**;
+  có fallback `try { after(task) } catch { void task() }`.
+- **Không cần migration**: `notifications.type` và `doc_type` là TEXT tự do (không CHECK
+  constraint) ⇒ dùng `doc_type: "yeu_cau_ky"` được ngay; policy `notifications_service_insert
+  WITH CHECK (true)` cho service role ghi.
+
+### 4 mốc gửi
+
+| Mốc | `notifications.type` | Tiêu đề | Người nhận |
+|---|---|---|---|
+| Tạo yêu cầu ký | `ky_so_cho_ky` | Hồ sơ chờ bạn ký | signer có `thu_tu` nhỏ nhất |
+| Ký xong 1 bước | `ky_so_den_luot` | Đến lượt bạn ký hồ sơ | các signer chưa ký có `thu_tu` nhỏ nhất |
+| Ký hoàn tất | `ky_so_hoan_tat` | Hồ sơ đã ký hoàn tất | `yeu_cau_ky.nguoi_tao` |
+| Trả về | `ky_so_tra_ve` | Hồ sơ bị trả về — cần ký lại | `resetUserIds` (người bị reset về `cho`) |
+
+- **`thu_tu` trùng nhau = ký song song** → báo TẤT CẢ người cùng `thu_tu` nhỏ nhất, không chỉ 1.
+- Nhánh **idempotent** của `signField` (bấm "Ký" 2 lần / rớt mạng bấm lại) trả `notifyPlan: null`
+  — **bắt buộc**, nếu không sẽ spam trùng.
+- `sendSigningNotifications` tự loại `actorUserId` khỏi danh sách nhận (không tự báo cho chính
+  mình) và khử trùng lặp.
+- Link của cả 4 mốc đều là `/dashboard/ky/{yeuCauId}` (kể cả `hoan_tat`): màn đó hiển thị PDF
+  cuối + panel "Luồng ký hồ sơ", là trang hồ sơ đúng nghĩa cho MỌI module — trỏ về module gốc sẽ
+  cần map `modun → route` mà 3 module có cấu trúc route khác hẳn nhau (quality không có trang
+  chi tiết theo id).
+
+### 3 kênh (độc lập, lỗi 1 kênh không chặn 2 kênh còn lại, không kênh nào ném ra ngoài)
+
+1. **Chuông in-app** — insert `notifications`, `doc_type: "yeu_cau_ky"`. Đây là kênh **duy nhất
+   làm badge đỏ trên chuông sáng lên** (`layout.tsx` chỉ đếm `notifications` chưa đọc).
+2. **Telegram** — dùng chung nhóm Bảo trì (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`) cho MỌI
+   module theo quyết định vận hành. Muốn tách nhóm riêng cho Chất lượng/Điều xe: thêm 1 entry
+   vào `TELEGRAM_BY_MODUN` trong `notify.ts` + 2 biến môi trường, **không đụng chỗ nào khác**.
+3. **Email** — Gmail SMTP, tra email theo **`maintenance_staff.profile_id`** (KHÔNG theo `ten`
+   như `/api/maintenance/notify` — khớp chuỗi tiếng Việt có dấu, sai chính tả là mất email im
+   lặng). Không dùng `profiles.auth_email` (email tổng hợp `username@AUTH_EMAIL_DOMAIN`, không
+   phải hòm thư thật). Không tìm được hòm thư nào → `console.warn`, không throw.
+
+### Bắt buộc escape HTML
+
+Mọi giá trị từ DB (`ma_ho_so`, tên người, tên nhà máy, lý do trả về) phải qua
+`escapeHtml()` (`src/lib/html-escape.ts`) trước khi nội suy vào tin Telegram (`parse_mode:
+"HTML"`) và thân email. Không escape ⇒ một mã hồ sơ chứa `&`/`<`/`>` khiến Telegram trả **HTTP
+400 `can't parse entities`** và **mất trắng cả tin nhắn**, không chỉ hỏng định dạng.
+
+> Repo còn 2 bản copy `escapeHtml` (`api/kpi/notify`, `lib/inventory-notify`) và 2 route KHÔNG
+> escape gì cả (`api/documents/notify`, `api/maintenance/notify`). Cố ý chưa gom lại để không
+> đụng luồng ISO/Văn bản/Bảo trì đang chạy thật.
+
+### Nhãn dùng chung
+
+`MODUN_LABEL`/`LOAI_TAI_LIEU_LABEL` đã tách từ `dashboard/ky/[id]/page.tsx` sang
+`src/lib/signing/labels.ts` để chuông/Telegram/email và SignScreen dùng chung MỘT nguồn — tránh
+tình trạng thông báo hiển thị mã snake_case nội bộ (`dispatch_bang_phan_xe`) trong khi màn ký
+hiển thị tiếng Việt.
+
+### Mục chuông "Hồ sơ chờ bạn ký"
+
+Xem `.claude/rules/24-notification-bell-module-tasks.md` mục "Hồ sơ ký chờ chính người dùng" —
+gồm route `GET /api/signing/my-pending` và lý do BẮT BUỘC phải là route service-role (RLS
+`nguoi_ky_select` chặn client đọc trạng thái người ký trước ⇒ không tự tính được "tới lượt").
+
+---
+
+## Bug ảnh HEIC đội lốt `.jpg` (2026-09-04) — PDF in "Không tải được ảnh"
+
+### Triệu chứng
+
+Biên bản `MT-020926/001` ký số xong, trang "HÌNH ẢNH BIÊN BẢN" của PDF hiện 3 ô **"Không tải
+được ảnh"**, trong khi trang chi tiết biên bản vẫn hiển thị ảnh bình thường.
+
+⚠️ **Hai chỗ đó là HAI TẬP ẢNH KHÁC NHAU** — không phải "cùng ảnh mà chỗ hiện chỗ không". PDF
+chụp 3 ảnh HEIC tải lên lúc 00:06; trang chi tiết hiển thị 4 ảnh JPEG tải lên lúc 00:32 (người
+dùng đã tự khắc phục bằng cách gửi ảnh qua Zalo — Zalo tự chuyển HEIC sang JPEG — rồi tải lên
+lại). Đừng mất thời gian đi tìm "vì sao cùng một ảnh mà hai nơi khác nhau".
+
+### Nguyên nhân gốc rễ
+
+Ảnh là **file HEIC** (định dạng mặc định của điện thoại đời mới) nhưng mang **đuôi `.jpg`**.
+`File.type` và `Content-Type` đều được hệ điều hành/Storage suy ra từ **đuôi tên file**, nên mọi
+lớp kiểm tra dựa vào MIME đều bị qua mặt:
+
+1. `validateImageFile()` chỉ xét `file.type` = `"image/jpeg"` → cho qua.
+2. `compressImageForUpload()` không giải mã được HEIC (Chrome trên Android không hỗ trợ) →
+   `catch { return file }` (**fail-open**) → đẩy nguyên file HEIC lên Storage.
+3. `fetchRemoteImage()` dựng `data:image/jpeg;base64,<dữ liệu HEIC>` rồi gán vào `img.src`.
+   **Data URL khai báo MIME tường minh nên trình duyệt tin lời khai đó thay vì nội dung** →
+   chọn nhầm bộ giải mã JPEG → `onerror` → `catch { return null }` → in "Không tải được ảnh".
+
+Lỗi ảnh hưởng **cả luồng "In biên bản" thường**, không riêng ký số (dùng chung `fetchRemoteImage`).
+
+### Cách kiểm chứng nhanh khi nghi ngờ tái diễn
+
+```bash
+# 1. Ảnh có phải JPEG thật không? (ffd8ff = JPEG, ftyp+heic = HEIC)
+node -e "fetch('<url ảnh>').then(r=>r.arrayBuffer()).then(b=>console.log(Buffer.from(b).slice(0,16).toString('hex')))"
+
+# 2. PDF có thật sự nhúng được ảnh không? Đếm stream JPEG — phải bằng số ảnh, KHÔNG phải 0.
+node -e "fetch('<url pdf>').then(r=>r.arrayBuffer()).then(b=>{const t=Buffer.from(b).toString('latin1');console.log('DCTDecode:',(t.match(/\/DCTDecode/g)||[]).length,'| Image:',(t.match(/\/Subtype\s*\/Image/g)||[]).length)})"
+```
+
+Đây chính là 2 phép đo đã dùng để tìm ra lỗi: `v1.pdf` có **1 XObject ảnh (chỉ QR) và 0 stream
+JPEG** — bằng chứng không ảnh nào được nhúng, chứ không phải nhúng rồi hiển thị sai.
+
+### Đã sửa
+
+| Nơi | Thay đổi |
+|---|---|
+| `src/lib/image-format.ts` (mới) | Nguồn duy nhất để nhận diện định dạng theo **magic bytes**; `convertHeicBlobToJpeg` (nạp lười `heic-to`, ~3MB WASM, chỉ tải khi gặp HEIC); `fetchImageForPdf` dùng chung cho mọi PDF |
+| `src/lib/image-upload.ts` | Thêm `prepareImageForUpload` — nhận diện theo nội dung, chuyển HEIC→JPEG, sửa MIME/đuôi khai báo sai, kiểm tra dung lượng **sau** khi chuyển đổi |
+| `maintenance/records/[id]/page.tsx` | Dùng `prepareImageForUpload`; truyền `contentType` đúng khi upload |
+| `maintenance-pdf.ts`, `export-order-pdf.ts` | `fetchRemoteImage` cũ thay bằng `fetchImageForPdf`; in **lý do cụ thể** thay vì câu chung chung |
+
+### Quy tắc bắt buộc cho code mới
+
+- **KHÔNG BAO GIỜ tin `file.type` / `blob.type` / `Content-Type`** để quyết định định dạng ảnh —
+  chỉ tin magic bytes qua `sniffImageFormat()`.
+- **KHÔNG dựng `data:<mime>;base64,...` rồi gán `img.src`** để đo kích thước ảnh. Dùng
+  `createImageBitmap(blob)` hoặc object URL — cả hai nhận diện theo nội dung. Đây chính là dòng
+  code đã gây ra lỗi này.
+- Với định dạng trình duyệt không tự giải mã được: **fail-closed** (từ chối kèm lý do), không
+  fail-open đẩy file hỏng lên Storage.
+- jsPDF chỉ nhận chắc chắn **JPEG/PNG** — mọi định dạng khác phải quy về qua canvas trước khi
+  `addImage` (kể cả WebP).
+
+### Dữ liệu cũ
+
+`scripts/convert-heic-images.mjs` — chuyển các file HEIC đã nằm trong Storage sang JPEG.
+**Ghi đè đúng đường dẫn cũ** (sau khi sao lưu bản gốc sang `<path>.heic.bak`) nên URL không đổi,
+**không phải sửa bảng nào** — tránh hẳn rủi ro đụng vào `image_urls` / `export_orders.vehicles`.
+
+```bash
+node --env-file=.env.local scripts/convert-heic-images.mjs            # khảo sát
+node --env-file=.env.local scripts/convert-heic-images.mjs --apply    # chuyển đổi thật
+```
+
+⚠️ **PDF đã ký là bất biến** (PAdES + nhật ký ký) — không sửa lại được. Ảnh trong những PDF đó
+vẫn hiện "Không tải được ảnh" vĩnh viễn; script chỉ giúp ảnh hiển thị lại ở trang chi tiết và ở
+các bản PDF in/ký **MỚI**.
+
+### Đã áp dụng cho TOÀN BỘ module (2026-09-05, mở rộng phạm vi)
+
+Rà soát bằng `grep -rn "storage\.from([^)]*)\.upload("` và `grep -rn 'accept="image'` toàn
+`src/` — mọi điểm upload ảnh nghiệp vụ đều đã được vá:
+
+| Điểm upload | Module | Cách vá |
+|---|---|---|
+| `src/lib/image-upload.ts` | Bảo trì | `prepareImageForUpload` |
+| `src/lib/kpi-5s.ts` `uploadKpi5sEvaluationImage` | KPI 5S | `prepareImageForUploadOrThrow` |
+| `src/lib/kpi-tasks.ts` `uploadKpiEvidenceImage` | KPI công việc | `prepareImageForUploadOrThrow` |
+| `src/lib/kpi-tasks.ts` `uploadKpiEvidenceFile` | KPI (ảnh lẫn tài liệu) | `prepareUploadFileIfImage` — chỉ xử lý khi nội dung thật sự là ảnh |
+| `src/lib/operation-notes.ts` `uploadOperationNoteImage` | Ghi chú nhanh | `prepareImageForUploadOrThrow` |
+| `inventory-image-upload.tsx` `uploadInventoryImage` | Kho vật tư + Thành phẩm | `prepareImageForUpload` (vá ở điểm vào chung, phủ cả 2 đường: upload thẳng và fallback qua API route) |
+| `export/page.tsx` `handleVehicleImageUpload` | Xuất hàng | `prepareImageForUpload` + gom lỗi vào `showToast` |
+| `process/measurements/page.tsx` (2 chỗ) | Kiểm soát quá trình | `prepareImageForUpload` |
+| `api/storage/upload-image/route.ts` | Máy chủ | **Lớp phòng vệ cuối**: `sniffImageFormat` trên nội dung thật, từ chối HEIC kèm hướng dẫn; đặt `contentType` theo định dạng thật thay vì `fileEntry.type` |
+
+**Vá ở tầng hàm dùng chung (`src/lib/*.ts`), không phải ở từng picker** — nhờ vậy mọi nơi gọi
+chúng (`note-image-picker`, `kpi-evidence-picker`, `kpi-5s-image-picker`,
+`kpi-task-form-modal`...) đều tự động được vá, không phải sửa từng file UI.
+
+**Ảnh của Kiểm soát quá trình còn được gửi lên Gemini để OCR Po/Mo** — file HEIC làm hỏng cả OCR
+(gửi kèm `mimeType` khai báo sai), nên ở đó phải chuẩn hóa **trước** khi vừa OCR vừa upload, dùng
+chung một bản file đã chuyển đổi cho cả hai việc.
+
+Máy chủ **cố ý không tự chuyển đổi** HEIC (chỉ từ chối kèm hướng dẫn) để khỏi kéo thư viện giải
+mã HEIC vào runtime — client đã chuyển đổi trước khi gửi, nhánh này chỉ chặn client cũ hoặc gọi
+thẳng API.
+
+### Khảo sát toàn bộ Storage (2026-09-05)
+
+| Bucket | Tổng file | HEIC |
+|---|---|---|
+| `order-files` | 6.121 | **49 → đã chuyển đổi hết** |
+| `inventory-files` | 237 | 0 |
+| `product-files` | 390 | 0 |
+| `shipping-files` | 0 | 0 |
+
+Chỉ `order-files` dính (đúng các module cho `accept="image/*"` hoặc không kiểm tra nội dung).
+`inventory-files`/`product-files` sạch vì đi qua API route có kiểm tra MIME chặt hơn.
+
+Sau khi chuyển đổi, `order-files` còn 6.021 JPEG + 59 PNG + 1 WebP + **40 tệp `%PDF`** — 40 tệp
+này là **nhãn lô in ra** (`product-predict/.../*-large.pdf`), không phải ảnh hỏng; script báo
+"không nhận ra" là đúng (chúng không phải ảnh) — **không cần xử lý gì**.

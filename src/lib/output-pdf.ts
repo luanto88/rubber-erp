@@ -138,7 +138,13 @@ export async function downloadOutputDayPdf(params: {
 
   const totalTuoi = records.reduce((sum, record) => sum + totalFresh(record), 0)
   const totalKho = records.reduce((sum, record) => sum + totalDry(record), 0)
-  const doiSet = [...new Set(records.map((record) => record.doi))].sort((a, b) => a - b)
+  const doiSet = [
+    ...new Set(
+      records
+        .map((record) => record.doi)
+        .filter((d): d is number => typeof d === "number"),
+    ),
+  ].sort((a, b) => a - b)
   const warnings = records.reduce((sum, record) => sum + record.warn_codes.length, 0)
 
   renderHeader(
@@ -180,7 +186,7 @@ export async function downloadOutputDayPdf(params: {
     body: records.map((record) => [
       record.so_xe || "-",
       String(record.chuyen || 1),
-      String(record.doi || "-"),
+      record.doi ? `Đội ${record.doi}` : (record.ma_nguon === "m" || record.doi === 0 ? "Thu mua" : (record.ma_nguon?.toUpperCase() || "-")),
       record.tai_xe || "-",
       ...MATERIAL_COLUMNS.flatMap((material) => [
         fmtNum(Number(record[material.tuoiKey] ?? 0)),

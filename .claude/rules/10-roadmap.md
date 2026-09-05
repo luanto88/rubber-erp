@@ -74,7 +74,7 @@ Thay thế AppSheet + Google Apps Script cho workflow ký duyệt tài liệu.
 
 ### Giai đoạn 4 ✅ Hoàn thành
 
-- Trang in (bypass sidebar) ✅ (`documents/print/`, watermark "MẬT", auto-print)
+- Trang in (bypass sidebar) — đã xoá hẳn phiên 2026-09-03 (`documents/print/` + nút "In"), xem CLAUDE.md; xem file đã ký thật qua nút "Xem file" thay thế
 - In-app notification bell ✅ (`Bell` icon + `notifications` state trong `dashboard/layout.tsx`)
 - QR public view cho PDF đã ký ✅ (`qr_url` trong `iso_documents`)
 

@@ -2,6 +2,7 @@ import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { convertCurrency } from "@/lib/currency"
+import { fetchImageForPdf, isPdfImageFailure, type PdfImage, type PdfImageResult } from "@/lib/image-format"
 
 // ─── Types (mirror DB shape dùng bởi maintenance/print/page.tsx) ────────────
 
@@ -623,68 +624,17 @@ function drawMaterialsTable(doc: jsPDF, startY: number, materials: MaterialRow[]
 
 // ─── Ảnh hiện trường ───────────────────────────────────────────────────────
 
-type RemoteImage = { dataUrl: string; format: "PNG" | "JPEG" | "WEBP"; width: number; height: number }
-
 // Chỉ áp dụng khi forSigning=true (PDF dùng để ký số, nhúng thẳng vào file
 // signing-documents giới hạn 20MB) — bản "In biên bản" thường giữ nguyên ảnh gốc đầy đủ
 // chi tiết, không đụng tới. Ảnh hiện trường tải thẳng từ điện thoại (chưa từng qua bước
 // nén nào) là nguồn chính gây phình file — đo thật xác nhận 1 hồ sơ chưa ai ký đã sẵn
 // >20MB, trong khi ảnh chữ ký chỉ 47-99KB (không đáng kể). Nén bằng <canvas> trình duyệt
-// (fetchRemoteImage chạy client-side, dùng chung logic build PDF của "In biên bản") —
+// (fetchImageForPdf chạy client-side, dùng chung logic build PDF của "In biên bản") —
 // không cần thư viện ảnh server-side nào.
 const SIGNING_IMAGE_MAX_DIM = 1200
 const SIGNING_IMAGE_JPEG_QUALITY = 0.72
 
-async function fetchRemoteImage(url: string, forSigning = false): Promise<RemoteImage | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    const format: RemoteImage["format"] = blob.type.includes("png")
-      ? "PNG"
-      : blob.type.includes("webp")
-        ? "WEBP"
-        : "JPEG"
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => reject(reader.error)
-      reader.readAsDataURL(blob)
-    })
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error("Không đọc được kích thước ảnh."))
-      el.src = dataUrl
-    })
-    const naturalW = img.naturalWidth || 1
-    const naturalH = img.naturalHeight || 1
-
-    if (forSigning && Math.max(naturalW, naturalH) > SIGNING_IMAGE_MAX_DIM) {
-      const scale = SIGNING_IMAGE_MAX_DIM / Math.max(naturalW, naturalH)
-      const targetW = Math.max(1, Math.round(naturalW * scale))
-      const targetH = Math.max(1, Math.round(naturalH * scale))
-      const canvas = document.createElement("canvas")
-      canvas.width = targetW
-      canvas.height = targetH
-      const ctx = canvas.getContext("2d")
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, targetW, targetH)
-        return {
-          dataUrl: canvas.toDataURL("image/jpeg", SIGNING_IMAGE_JPEG_QUALITY),
-          format: "JPEG",
-          width: targetW,
-          height: targetH,
-        }
-      }
-    }
-    return { dataUrl, format, width: naturalW, height: naturalH }
-  } catch {
-    return null
-  }
-}
-
-function drawImageContain(doc: jsPDF, img: RemoteImage, boxX: number, boxY: number, boxW: number, boxH: number) {
+function drawImageContain(doc: jsPDF, img: PdfImage, boxX: number, boxY: number, boxW: number, boxH: number) {
   const boxRatio = boxW / boxH
   const imgRatio = img.width / img.height
   let drawW = boxW
@@ -701,9 +651,14 @@ function drawImageContain(doc: jsPDF, img: RemoteImage, boxX: number, boxY: numb
   doc.addImage(img.dataUrl, img.format, dx, dy, drawW, drawH)
 }
 
-async function collectAndFetchImages(urls: string[], forSigning = false): Promise<Map<string, RemoteImage | null>> {
+async function collectAndFetchImages(urls: string[], forSigning = false): Promise<Map<string, PdfImageResult>> {
   const unique = Array.from(new Set(urls.filter(Boolean)))
-  const entries = await Promise.all(unique.map(async (u) => [u, await fetchRemoteImage(u, forSigning)] as const))
+  const entries = await Promise.all(
+    unique.map(async (u) => [
+      u,
+      await fetchImageForPdf(u, forSigning ? { maxDimension: SIGNING_IMAGE_MAX_DIM, jpegQuality: SIGNING_IMAGE_JPEG_QUALITY } : undefined),
+    ] as const),
+  )
   return new Map(entries)
 }
 
@@ -712,7 +667,7 @@ async function drawPhotoSection(
   y: number,
   groupLabel: string | null,
   imgUrls: string[],
-  photoMap: Map<string, RemoteImage | null>,
+  photoMap: Map<string, PdfImageResult>,
 ): Promise<number> {
   if (imgUrls.length === 0) return y
   if (groupLabel) y = drawGroupHeaderBar(doc, y + 2, groupLabel)
@@ -730,13 +685,15 @@ async function drawPhotoSection(
       doc.setDrawColor(...BORDER)
       doc.rect(x, y, cellW, cellH)
       const img = photoMap.get(url)
-      if (img) {
+      if (img && !isPdfImageFailure(img)) {
         drawImageContain(doc, img, x, y, cellW, cellH)
       } else {
+        // In đúng lý do thất bại (HEIC không giải mã được / lỗi mạng / tệp hỏng) thay vì một
+        // câu chung chung — nhìn PDF là biết ngay nguyên nhân, không phải dò lại từ đầu.
         doc.setFont(PDF_FONT_NAME, "normal")
         doc.setFontSize(7)
         doc.setTextColor(...GRAY)
-        doc.text("Không tải được ảnh", x + cellW / 2, y + cellH / 2, { align: "center" })
+        doc.text(isPdfImageFailure(img) ? img.reason : "Không tải được ảnh", x + cellW / 2, y + cellH / 2, { align: "center" })
       }
     }
     y += cellH + gap

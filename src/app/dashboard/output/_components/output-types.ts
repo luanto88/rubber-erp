@@ -15,7 +15,7 @@ export interface ProductionRecord {
   id: string
   factory_id: string
   ngay: string
-  doi: number
+  doi: number | null
   so_xe: string
   chuyen: number
   tai_xe: string | null
@@ -28,6 +28,8 @@ export interface ProductionRecord {
   warn_codes: WarnCode[]
   import_batch_id: string | null
   ghi_chu: string | null
+  ghi_chu_tu_do?: string | null
+  ma_nguon?: string | null
   created_by: string | null
   nguoi_upload: string | null
   created_at: string
@@ -37,10 +39,12 @@ export interface ProductionRecord {
 export interface ParsedSlRow {
   row_index: number
   ngay: string
-  doi: number
+  doi: number | null
+  ma_nguon?: string
   base_xe: string
   chuyen: number
   ghi_chu: string
+  ghi_chu_tu_do?: string
   mn_tuoi: number; mn_drc: number; mn_kho: number
   ct_tuoi: number; ct_drc: number; ct_kho: number
   dct_tuoi: number; dct_drc: number; dct_kho: number
@@ -57,7 +61,8 @@ export interface MatchedSlRow extends ParsedSlRow {
 export type ProductionRecordInsert = Omit<ProductionRecord, "id" | "created_at" | "updated_at">
 
 export interface OutputSummary {
-  doi: number
+  doi: number | null
+  ma_nguon?: string | null
   so_xe: string
   chuyen: number
   tai_xe: string | null
@@ -66,9 +71,10 @@ export interface OutputSummary {
   so_ban_ghi: number
 }
 
-export interface OutputFormState {
+export interface OutputFormData {
   ngay: string
   doi: number | ""
+  ma_nguon: string
   so_xe: string
   chuyen: number | ""
   tai_xe: string
@@ -78,12 +84,16 @@ export interface OutputFormState {
   dkt_tuoi: string; dkt_drc: string; dkt_kho: string
   dt_tuoi: string; dt_drc: string; dt_kho: string
   ghi_chu: string
+  ghi_chu_tu_do: string
 }
 
-export function emptyOutputForm(): OutputFormState {
+export type OutputFormState = OutputFormData
+
+export function emptyOutputForm(): OutputFormData {
   return {
     ngay: getTodayISODate(),
     doi: "",
+    ma_nguon: "cs",
     so_xe: "",
     chuyen: 1,
     tai_xe: "",
@@ -93,23 +103,27 @@ export function emptyOutputForm(): OutputFormState {
     dkt_tuoi: "", dkt_drc: "", dkt_kho: "",
     dt_tuoi: "", dt_drc: "", dt_kho: "",
     ghi_chu: "",
+    ghi_chu_tu_do: "",
   }
 }
 
 export function parseVehicleCode(raw: string): { base_xe: string; chuyen: number } {
   const s = raw.trim().toUpperCase().replace(/^0+(\d)/, "$1")
-  const m = s.match(/^(\d+[A-Z]+)(\d+)?$/)
+  // Chỉ nhận diện số chuyến ở đuôi nếu là 1 chữ số (chuyến 1-9 cho xe nội bộ như 13A1, 13A2, 8B1, 8B2)
+  // Nếu đuôi có từ 2 chữ số trở lên (như 3A1064, 2B1234), đây là biển số xe, không cắt chuyến
+  const m = s.match(/^(\d+[A-Z]+)(\d)$/)
   if (!m) return { base_xe: s, chuyen: 1 }
-  return { base_xe: m[1], chuyen: m[2] ? parseInt(m[2]) : 1 }
+  return { base_xe: m[1], chuyen: parseInt(m[2]) }
 }
 
 export function buildProductionRecordKey(input: {
   ngay: string
-  doi: number
+  doi: number | null | undefined
   so_xe: string
   chuyen: number
+  ma_nguon?: string | null
 }) {
-  return `${normalizeDateInput(input.ngay)}__${input.doi}__${input.so_xe.trim().toUpperCase()}__${input.chuyen}`
+  return `${normalizeDateInput(input.ngay)}__${input.doi ?? 0}__${input.so_xe.trim().toUpperCase()}__${input.chuyen}__${input.ma_nguon || "cs"}`
 }
 
 export function totalTuoi(r: Pick<ProductionRecord, "mn_tuoi"|"ct_tuoi"|"dct_tuoi"|"dkt_tuoi"|"dt_tuoi">): number {
@@ -279,10 +293,14 @@ export async function writeBackToDispatch(
       const nextRows = (entry.rows ?? []).map((row) => {
         const rowDate = normalizeDateInput(String(row._date ?? entry.ngay))
         if (rowDate !== normalizedNgay) return row
-        const key = `${parseVehicleCode(String(row.so_xe ?? "")).base_xe}:${Number(row.chuyen ?? 1)}`
+        const rawSoXe = String(row.so_xe ?? "").trim().toUpperCase()
+        const rowChuyen = Number(row.chuyen ?? 1)
+        const keyExact = `${rawSoXe}:${rowChuyen}`
+        const keyParsed = `${parseVehicleCode(rawSoXe).base_xe}:${rowChuyen}`
+        const groupKg = groups.get(keyExact) ?? groups.get(keyParsed) ?? ZERO_KG
         const next = {
           ...(row as Record<string, unknown>),
-          ...buildDispatchPayload(groups.get(key) ?? ZERO_KG),
+          ...buildDispatchPayload(groupKg),
           _date: rowDate,
         } as Record<string, unknown>
         const uid = String(next.uid ?? "")

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser } from "@/app/api/account/_lib/security"
 import { returnSigningRequest } from "@/lib/signing/requests"
+import { scheduleSigningNotify } from "@/lib/signing/notify"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +20,17 @@ export async function POST(req: NextRequest) {
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || ""
     const thietBi = req.headers.get("user-agent") || ""
 
-    const result = await returnSigningRequest({ yeuCauId, userId: authUser.id, lyDo: lyDo || "", ip, thietBi })
+    const { notifyPlan, ...result } = await returnSigningRequest({
+      yeuCauId,
+      userId: authUser.id,
+      lyDo: lyDo || "",
+      ip,
+      thietBi,
+    })
+
+    // Báo (các) người bị trả về kèm lý do — trước đây họ không hề biết phải sửa & ký lại.
+    scheduleSigningNotify(notifyPlan)
+
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })

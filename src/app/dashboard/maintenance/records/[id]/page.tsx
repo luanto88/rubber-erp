@@ -28,7 +28,7 @@ import {
 } from "../../_components/maintenance-data"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
-import { compressImageForUpload, validateImageFile, withRetry } from "@/lib/image-upload"
+import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 import { MaintenanceSignModal } from "../_components/maintenance-sign-modal"
 import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "../_components/maintenance-sign-status"
@@ -460,16 +460,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     const urls: string[] = []
     const errors: string[] = []
     for (const rawFile of files) {
-      const validation = validateImageFile(rawFile)
-      if (!validation.ok) {
-        errors.push(`${rawFile.name}: ${validation.reason}`)
-        continue
-      }
       try {
-        const file = await compressImageForUpload(rawFile)
+        // Nhận diện định dạng theo NỘI DUNG THẬT (không tin đuôi file/MIME) và chuyển HEIC sang
+        // JPEG trước khi upload — xem src/lib/image-format.ts để biết lý do.
+        const prepared = await prepareImageForUpload(rawFile)
+        if (!prepared.ok) {
+          errors.push(`${rawFile.name}: ${prepared.reason}`)
+          continue
+        }
+        const file = prepared.file
         const path = `${factoryId}/maintenance/${Date.now()}_${Math.random().toString(36).slice(2)}_${sanitizeFilename(file.name)}`
         const uploadResult = await withRetry(async () => {
-          const res = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, { upsert: false })
+          const res = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, { upsert: false, contentType: file.type })
           if (res.error) throw res.error
           return res
         })

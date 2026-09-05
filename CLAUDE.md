@@ -4996,3 +4996,1214 @@ dev server của tôi có đang chạy song song hay không (trừ khi đang CH�
 để loại trừ nguyên nhân Fast Refresh như gợi ý ở trên — khi đó phải hỏi và xác nhận chắc chắn
 không có npm run dev nào chạy song song trước).
 ```
+
+## Kế hoạch phiên sau (2026-09-02) — Mở rộng ký số dùng chung sang Văn bản (ưu
+tiên) rồi ISO: PHẢI xây trang "Cài đặt vị trí ký" (mau_vi_tri) trước khi đụng vào
+2 module này
+
+Người dùng xác nhận muốn tiếp tục nhân rộng hệ thống ký số dùng chung sang 2 module
+còn lại thuộc "nhóm KHÓ HƠN" (đã có hệ thống ký RIÊNG chạy thật production — xem
+mục "Kế hoạch phiên sau — Giai đoạn 4" cũ) — **ưu tiên Văn bản nội bộ trước, ISO
+sau**. Phiên này CHƯA CODE GÌ — chỉ điều tra hiện trạng để chuẩn bị cho phiên sau.
+
+### Khác biệt căn bản so với Chất lượng/Điều xe/Bảo trì — đọc kỹ trước khi bắt đầu
+
+3 module đã xong đều tự sinh PDF bằng `jsPDF` (toạ độ khung ký biết trước, cố định,
+tính bằng code) — không cần người dùng đặt vị trí tay. **Văn bản và ISO thì
+NGƯỢC LẠI: người dùng UPLOAD file PDF/DOCX từ máy tính**, layout không biết trước.
+Đã điều tra kỹ (đọc trực tiếp code, không đoán) hiện trạng đặt vị trí ký của 2
+module này:
+
+- **Văn bản** (`src/app/api/documents/sign/route.ts`, `src/app/dashboard/documents/
+  [id]/page.tsx`'s `SignPlacementModal`): mỗi bước ký (ký phòng ban/phê duyệt) mở
+  modal với toạ độ MẶC ĐỊNH CỐ ĐỊNH (`sigState={x:60,y:200,w:140,h:60}`...) —
+  người ký phải TỰ KÉO-THẢ LẠI khung MỖI LẦN ký, không hề đọc `placement_ky` của
+  bước trước để prefill. Ngoại lệ duy nhất: QR được "chốt" ở lượt ký đầu tiên qua
+  `mergeQrBox()` (`route.ts`, chỉ ghi nếu `placement_ky.qr` chưa tồn tại) và giữ
+  nguyên cho lượt sau — NHƯNG hành động `gui_ky` (gửi lại sau khi bị trả về) XÓA
+  SẠCH `placement_ky` + cả 2 file đã ký (`route.ts` dòng ~686-701), nên kể cả cơ
+  chế "chốt QR" này cũng không bền vững qua nhiều vòng trả về/gửi lại.
+- **ISO** (`src/app/api/sign/generate-pdf/route.ts`, `src/app/dashboard/iso/
+  documents/[id]/page.tsx`): TỆ HƠN Văn bản — hoàn toàn không có cơ chế tái dùng
+  vị trí nào, kể cả QR (chỉ bước `soan_thao` mới hiện hộp kéo QR — các bước sau
+  không có QR nào để đặt). Mỗi bước ký mở modal với toạ độ hard-code cố định y
+  hệt nhau (`sigX:100,sigY:100,sigW:120,sigH:60,nameX:90,nameY:168...`). Có 1 lớp
+  "preview mờ" (opacity 0.45) hiển thị vị trí chữ ký của bước TRƯỚC làm tham
+  chiếu hình ảnh cho mắt người dùng, nhưng đây chỉ là ảnh tĩnh — khung có thể kéo/
+  resize của bước đang ký vẫn luôn bắt đầu từ toạ độ mặc định, không đọc
+  `soan_thao_placement`/`xem_xet_placement`/`phe_duyet_placement` để tự prefill.
+
+Kết luận: **UX đặt vị trí ký hiện tại của cả 2 module đều lặp lại, dễ sai, và
+chính là loại thao tác mà toàn bộ dự án ký số dùng chung này được sinh ra để loại
+bỏ** (đã ghi rõ trong lịch sử CLAUDE.md mục "Kế hoạch phiên sau (2026-08-27)" khi
+thiết kế `mau_vi_tri`). Việc nhân rộng ký số dùng chung sang 2 module này **không
+thể chỉ đơn thuần "mirror lại 4 việc" đã làm cho Bảo trì/Điều xe** (build PDF kèm
+tọa độ / modal tạo yêu cầu ký / route signing-status / badge trạng thái) — vì 2
+module này không có "hàm build PDF với tọa độ biết trước" để mirror; phải giải
+quyết bài toán "PDF từ file upload, layout không biết trước" TRƯỚC.
+
+### Hạ tầng đã có sẵn nhưng CHƯA từng được dùng — `mau_vi_tri` + `cau_hinh_tai_lieu`
+
+Migration `supabase/migrations/20260902_signing_core_tables.sql` đã tạo sẵn đúng 2
+bảng để giải quyết bài toán trên, nhưng **chưa có bất kỳ hàm/route/UI nào trong
+`src/lib/signing/` hay ở bất kỳ đâu đọc/ghi 2 bảng này** — chỉ tồn tại dưới dạng
+migration:
+
+- `mau_vi_tri` (`id, factory_id, loai_tai_lieu TEXT, phien_ban INT DEFAULT 1,
+  khung JSONB DEFAULT '[]'`, unique `(factory_id, loai_tai_lieu, phien_ban)`) —
+  `khung` là mảng CÁC VAI TRÒ (không phải người cụ thể):
+  `[{vai_tro, neo_trang, so_trang, x_pt, y_pt, w_pt, h_pt}, ...]`.
+  `neo_trang` ∈ `"dau"|"cuoi"|"moi_trang"` (mọi trang — dùng cho ký nháy lặp lại
+  mỗi trang); `so_trang=0` kèm `neo_trang="cuoi"` nghĩa là trang cuối cùng dù tài
+  liệu dài bao nhiêu trang. **Sửa mẫu KHÔNG ghi đè** — tạo dòng mới
+  `phien_ban+1`, giữ nguyên bản cũ để các `yeu_cau_ky` đã tạo trước đó không bị
+  ảnh hưởng khi admin chỉnh sửa mẫu sau này.
+- `cau_hinh_tai_lieu` (`id, factory_id, loai_tai_lieu, modun, ten_hien_thi,
+  dinh_tuyen JSONB DEFAULT '[]', muc_xac_thuc, yeu_cau_chu_ky_so, sla_gio,
+  can_dat_truong BOOLEAN DEFAULT true`, unique `(factory_id, loai_tai_lieu)`) —
+  `dinh_tuyen` ánh xạ mỗi `vai_tro` trong `mau_vi_tri.khung` sang người ký thật
+  cụ thể theo đúng loại tài liệu đó (thứ tự, cách xác định người — có thể tương
+  tự cơ chế "tự nhận diện lãnh đạo phòng ban" đã dùng ở Văn bản
+  `/api/documents/dept-leader`).
+- RLS 2 bảng này chỉ có SELECT — mọi INSERT/UPDATE phải qua service role (giống
+  toàn bộ 6 bảng lõi ký số).
+
+**Việc bắt buộc của phiên sau (theo đúng yêu cầu người dùng)**: xây dựng 1 trang
+**"Cài đặt vị trí ký cho người soạn thảo"** — nơi người soạn thảo (hoặc admin)
+VẼ khung vị trí ký 1 LẦN cho mỗi loại tài liệu (`loai_tai_lieu`), lưu vào
+`mau_vi_tri`, để các hồ sơ SAU của cùng loại đó tự động áp dụng lại đúng vị trí —
+không phải kéo-thả lại mỗi lần ký. Đây LÀ điều kiện tiên quyết trước khi mở rộng
+ký số dùng chung sang Văn bản/ISO, không phải 1 việc phụ có thể làm sau.
+
+### Mockup UI đã duyệt sẵn — bắt buộc đọc/mở trước khi code, không tự vẽ lại UI mới
+
+File `cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html` — mockup HTML tương tác đã
+DUYỆT từ trước (xem lịch sử "Cập nhật (tiếp 3)" mục "Giai đoạn 0 mục 8" trong
+CLAUDE.md, phần "Kế hoạch phiên sau (2026-08-27)"), demo đúng luồng "Soạn thảo vị
+trí ký":
+
+- Người soạn thảo chọn 1 loại tài liệu (`loai_tai_lieu`), vẽ khung kéo/resize cho
+  từng vai trò cố định (6 vai trò: `ky_nhay`, `soan_thao`, `xem_xet`, `phe_duyet`,
+  `qr`, `ngay_ky`) trực tiếp trên ảnh render trang PDF.
+- Lưới căn chỉnh (gridline ngang/dọc, bước 5%) + snap-to-grid khi kéo/resize —
+  khung tự làm tròn về đúng vạch lưới khi bật lưới.
+- **"Nhân bản khung"**: 1 người ký ở ≥2 vị trí trên cùng 1 tài liệu (vd Phê duyệt
+  vừa ký cuối văn bản vừa ký nháy phụ lục riêng) — tạo bản sao độc lập neo `đầu`
+  + trang tự chọn, preview hiện đúng tên/chữ ký của người gốc qua liên kết
+  `clonedFrom`. Tương thích hoàn toàn với schema `truong_ky` hiện có (1 người ký
+  → nhiều dòng `truong_ky` không có ràng buộc unique nào cản trở).
+- Cơ chế chọn 1-trong-3 loại chức vụ hiển thị (`chucVuKey`): chính quyền / kiêm
+  nhiệm / đoàn thể — dropdown liệt kê rõ NHÃN LOẠI + GIÁ TRỊ THẬT, chỉ hiện loại
+  nào có dữ liệu, mặc định ưu tiên chính quyền → kiêm nhiệm → đoàn thể nhưng cho
+  đổi tay. **Lưu ý gap schema CHƯA XỬ LÝ**: bảng nhân sự hiện chỉ có 2 cột chức
+  vụ (`maintenance_staff.chuc_vu`, `chuc_vu_chinh_quyen`), thực tế công ty có 3
+  loại độc lập (chính quyền/kiêm nhiệm/đoàn thể, có thể cùng tồn tại trên 1
+  người) — đã ghi nhận là gap CHƯA CHỐT cách migrate (tên cột cụ thể/tách bảng
+  riêng), cần hỏi lại người dùng trước khi đụng, KHÔNG tự quyết định.
+- Cấu hình "Hiện tên & chức vụ" (`showName`) + `chucVuKey` là **cấu hình khoá
+  THEO MẪU** (`mau_vi_tri`), đặt 1 lần bởi người soạn thảo lúc vẽ mẫu — KHÁC hẳn
+  cách Văn bản/ISO hiện tại đang làm (mỗi người ký tự bật/tắt ẩn/hiện chữ
+  ký/tên MỖI LẦN ký qua `SignPlacement`'s `showSignature`/`showSignerName`) —
+  đây chính là hành vi lặp lại mà tính năng "Cài đặt vị trí ký" phải loại bỏ.
+  Quy tắc nghiệp vụ cũ vẫn giữ nguyên không đổi: tài liệu cha chỉ ẩn được tên,
+  không ẩn được chữ ký; hồ sơ con/file phụ ẩn được cả hai — chỉ đổi CHỖ cấu hình.
+- **Quy tắc QR bắt buộc** (đã xác nhận với người dùng, phải giữ nguyên khi thiết
+  kế `mau_vi_tri`): vị trí QR chỉ được đặt/kéo-thả **1 lần duy nhất ở bước đầu
+  tiên** (Soạn thảo) và áp dụng cho **TẤT CẢ các trang** của tài liệu — các bước
+  ký sau đó (Xem xét, Phê duyệt) **không** hiển thị lại khung QR để đặt/sửa nữa.
+  Đây đúng là hành vi ISO hiện tại đã ghi trong `.claude/rules/16-iso-vanban-
+  module.md`/`17-iso-soat-xet.md` ("Chỉ bước `soan_thao` mới được hiện/đặt QR
+  draggable... Bước `xem_xet` và `phe_duyet` không được hiện lại QR draggable")
+  — khi thiết kế `mau_vi_tri.khung` và tích hợp vào route ký của cả Văn bản lẫn
+  ISO, PHẢI giữ đúng quy tắc này: vai trò `qr` trong mẫu chỉ set 1 lần lúc soạn
+  mẫu, neo `moi_trang` (áp dụng mọi trang), không có UI đặt lại QR ở các bước ký
+  sau.
+
+**KHÔNG được tự vẽ lại UI mới từ mô tả text ở trên** — mở file mockup lên xem/
+thao tác thử trực tiếp trước khi build, vì nhiều chi tiết hành vi (cách "Nhân bản
+khung" hoạt động chính xác, cách preview chữ ký mẫu render, animation snap...)
+chỉ được quyết định qua tương tác thật với mockup, không mô tả đầy đủ bằng lời ở
+bất kỳ đâu khác.
+
+### Pattern cần replicate — icon-action + ẩn/hiện Sửa/Xóa/Gửi ký
+
+Đã đối chiếu lại 3 badge component đã xong (`quality-sign-status.tsx`,
+`dispatch-sign-status.tsx`, `maintenance-sign-status.tsx`) — cả 3 mirror đúng 1
+cấu trúc 3-nhánh, PHẢI áp dụng y hệt (không tự sáng tạo UI mới) khi làm badge cho
+Văn bản/ISO:
+
+1. **Chưa có yêu cầu ký** (`!status`): nếu không đủ quyền tạo (`!canCreate`) →
+   badge tĩnh mờ "Chưa gửi ký duyệt" (hoặc ẩn hẳn, tùy module — Bảo trì trả `null`
+   thay vì badge mờ); nếu đủ quyền → nút thật `PenTool` "Gửi ký duyệt" (violet).
+2. **Đã hoàn tất** (`trangThai==="hoan_tat"`): `CheckCircle2` "Đã ký duyệt"
+   (emerald) bình thường, đổi sang `AlertTriangle` "Đã ký — dữ liệu đã đổi"
+   (amber) nếu `status.dataChanged` (so `updated_at` dữ liệu nguồn với
+   `yeu_cau_ky.tao_luc`).
+3. **Đang chờ ký** (`dang_luan_chuyen`) — nhiều nhánh con:
+   - `canContinueSign` (admin hoặc đúng người phê duyệt/tham gia).
+   - `canCancel = (isAdmin || isCreator) && !hasAnySigned(signers)` — nút
+     `XCircle` "Hủy yêu cầu" (`hasAnySigned` từ `signing-my-turn.ts`, chặn hủy
+     nếu đã có ai ký).
+   - `canResign` khi `status.traVeLyDo` tồn tại → `RotateCcw` "Trả về — Sửa & ký
+     lại" (rose), kèm hiện rõ lý do trả về (không chỉ tooltip).
+   - `myTurn = computeMyTurn(signers, currentUser.id)` (dùng chung
+     `signing-my-turn.ts`) → nếu đúng lượt: `Bell` "Chờ BẠN ký duyệt" (amber-500,
+     nổi bật); còn lại: `Clock` "Chờ ký duyệt" (mờ hơn, hoặc tĩnh không click nếu
+     `!canContinueSign`).
+   - Mọi link đều trỏ `/dashboard/ky/{yeuCauId}` (SignScreen dùng chung, không
+     xây màn ký riêng cho Văn bản/ISO).
+
+**Ẩn/hiện nút "Gửi ký duyệt"** phải dùng đúng ownership-gating pattern đã tighten
+2026-08-31 cho Điều xe/Chất lượng và vừa fix xong cho Bảo trì (2026-09-02):
+`canOwnerAct = isAdmin || (record.created_by != null && record.created_by ===
+user?.id)` — **NULL `created_by` = chỉ admin, KHÔNG fallback so khớp tên**. Với
+Văn bản/ISO, 2 module này ĐÃ có sẵn `soan_thao_user_id` (UUID thật, không phải
+TEXT snapshot như `maintenance_records.nguoi_tao` cũ) nên **không cần thêm cột
+`created_by` mới** — dùng thẳng `soan_thao_user_id` làm cơ sở ownership cho nút
+"Gửi ký duyệt" (dùng hệ ký mới) — nhưng PHẢI xác nhận lại với người dùng đây có
+đúng là "chủ sở hữu" theo đúng nghĩa nghiệp vụ hay không trước khi code (khác
+với Bảo trì/Điều xe/Chất lượng — nơi user tự do tạo bản ghi, `soan_thao_user_id`
+của Văn bản/ISO có thể mang ý nghĩa khác do đã có workflow ký phức tạp sẵn).
+
+Nút "Sửa"/"Xóa" của Văn bản/ISO **ĐÃ CÓ SẴN** đúng ownership pattern
+(`canEditDoc`/`canDeleteDoc` dùng `soan_thao_user_id === user.id || isAdmin` kèm
+điều kiện trạng thái `draft`/`tra_ve`) — không cần sửa lại, chỉ cần đối chiếu khi
+thêm nút "Gửi ký duyệt" (hệ mới) cạnh các nút này để nhất quán style.
+
+### Rủi ro & nguyên tắc bắt buộc khi bắt đầu
+
+- Văn bản và ISO đều là **hệ thống ký ĐANG CHẠY THẬT trên production** — không
+  giống việc thêm tính năng mới cho Bảo trì/Điều xe/Chất lượng (nơi trước đó
+  hoàn toàn chưa có ký số nào). Bất kỳ thay đổi nào PHẢI không phá vỡ tài liệu/
+  văn bản ĐÃ ký xong trước đó và luồng ký ĐANG diễn ra dở dang.
+- Do độ phức tạp cao (2 module, phải xây `mau_vi_tri` UI trước, rồi mới tích hợp
+  từng module), **KHÔNG được tự ý làm hết trong 1 phiên** — bắt buộc hỏi lại
+  người dùng qua `AskUserQuestion` ngay đầu phiên về phạm vi cụ thể của phiên đó
+  (ví dụ: "chỉ xây trang Cài đặt vị trí ký (mau_vi_tri CRUD + vẽ khung theo
+  mockup) trong phiên này, CHƯA đụng route ký thật của Văn bản/ISO" — khuyến
+  nghị mặc định, an toàn nhất) trước khi viết bất kỳ dòng code nào.
+- Đề xuất trình tự hợp lý (chỉ là gợi ý, không phải quyết định cuối — vẫn phải
+  hỏi lại người dùng):
+  1. Xây UI "Cài đặt vị trí ký" độc lập (CRUD `mau_vi_tri` theo mockup, chưa
+     đụng route ký nào) — có thể để trong `Cài đặt` (mirror cấu trúc admin config
+     khác, xem `.claude/rules/12-settings-permissions.md`) hoặc tab riêng trong
+     chính module Văn bản/ISO — cần hỏi người dùng vị trí đặt trang này.
+  2. Tích hợp `mau_vi_tri` vào route ký THẬT của Văn bản (`api/documents/sign/
+     route.ts`) — thay cơ chế `mergeQrBox`/toạ độ mặc định cứng bằng đọc mẫu đã
+     lưu, ánh xạ `vai_tro` → người ký qua `cau_hinh_tai_lieu.dinh_tuyen`. Đây là
+     bước RỦI RO CAO nhất (đổi hành vi route đang chạy thật) — cần đối chiếu
+     byte-identical/verify kỹ như đã làm ở Giai đoạn 1 (refactor `src/lib/
+     signing/`, xem lịch sử CLAUDE.md mục "Cập nhật (tiếp 4)").
+  3. Lặp lại tương tự cho ISO sau khi Văn bản đã ổn định.
+- File tham chiếu bắt buộc đọc trước khi code (không suy diễn lại từ mô tả):
+  `src/lib/signing/requests.ts`, `src/lib/signing/stamp-pdf.ts`,
+  `src/app/api/documents/sign/route.ts`, `src/app/dashboard/documents/[id]/
+  page.tsx` (SignPlacementModal), `src/app/api/sign/generate-pdf/route.ts`,
+  `src/app/dashboard/iso/documents/[id]/page.tsx`,
+  `supabase/migrations/20260902_signing_core_tables.sql`,
+  `cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html`,
+  `.claude/rules/22-documents-module.md`, `.claude/rules/16-iso-vanban-module.md`.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Kế hoạch phiên sau (2026-09-02) — Mở rộng ký số dùng chung sang Văn bản
+(ưu tiên) rồi ISO" trong CLAUDE.md (mục này vừa được thêm, ngay phía trên) — đã
+điều tra kỹ hiện trạng, KHÔNG cần đọc lại code từ đầu trừ khi nghi ngờ thông tin
+đã lỗi thời. Tóm tắt: Văn bản/ISO đều cho phép upload PDF từ máy tính (khác 3
+module đã xong dùng jsPDF tự sinh PDF có toạ độ biết trước), và hiện tại người ký
+phải tự kéo-thả lại vị trí khung MỖI LẦN ký (Văn bản còn "chốt" được vị trí QR 1
+lần qua mergeQrBox() nhưng bị xóa sạch mỗi khi gửi lại; ISO không có cơ chế tái
+dùng nào cả). 2 bảng `mau_vi_tri`/`cau_hinh_tai_lieu` đã có migration
+(20260902_signing_core_tables.sql) nhưng CHƯA có code nào dùng.
+
+Việc BẮT BUỘC đầu tiên: hỏi tôi qua AskUserQuestion phạm vi phiên này — khuyến
+nghị mặc định (an toàn nhất): **chỉ xây trang "Cài đặt vị trí ký cho người soạn
+thảo"** (CRUD bảng mau_vi_tri: chọn loại tài liệu, vẽ/kéo/resize khung theo từng
+vai trò cố định trên ảnh render PDF, lưu thành mẫu — theo đúng mockup đã duyệt
+cung_cap_dl/thiet_ke_soan_thao_vi_tri_ky.html, PHẢI mở file này xem/thao tác thử
+trước khi code, không tự vẽ lại UI từ mô tả text) — CHƯA đụng vào route ký thật
+của Văn bản (api/documents/sign/route.ts) hay ISO (api/sign/generate-pdf/
+route.ts) trong phiên này. Việc tích hợp mau_vi_tri vào 2 route đó (Văn bản
+trước, ISO sau) để dành phiên sau nữa, sau khi trang Cài đặt đã ổn định và được
+duyệt.
+
+Khi làm badge trạng thái ký cho Văn bản/ISO (khi tới lượt tích hợp thật), PHẢI
+mirror đúng cấu trúc 3-nhánh đã dùng ở quality-sign-status.tsx/dispatch-sign-
+status.tsx/maintenance-sign-status.tsx (chưa có yêu cầu / đang chờ [canContinueSign/
+canCancel+hasAnySigned/canResign/myTurn qua computeMyTurn()] / hoàn tất
+[thường/dataChanged]) — không tự thiết kế UI mới. Icon: PenTool/CheckCircle2/
+AlertTriangle/Clock/Bell/RotateCcw/XCircle. Với Văn bản/ISO, nút "Sửa"/"Xóa" ĐÃ
+có sẵn đúng ownership pattern (soan_thao_user_id===user.id||isAdmin, kèm điều
+kiện trạng thái draft/tra_ve) — không cần sửa lại; nút "Gửi ký duyệt" (hệ mới)
+nên dùng thẳng soan_thao_user_id làm cơ sở ownership (không cần thêm cột
+created_by mới như đã làm cho Bảo trì) nhưng PHẢI xác nhận lại với tôi ý nghĩa
+nghiệp vụ trước khi code, vì 2 module này có workflow ký phức tạp sẵn có khác
+hẳn Bảo trì/Điều xe/Chất lượng.
+
+Gap "3 loại chức vụ" (chính quyền/kiêm nhiệm/đoàn thể) trong mockup vẫn CHƯA
+CHỐT cách migrate schema — không tự ý viết migration cho việc này, hỏi tôi
+trước.
+
+Nhớ đúng quy tắc QR: chỉ đặt/kéo-thả 1 lần ở bước Soạn thảo, áp dụng cho TẤT CẢ
+các trang tài liệu — các bước Xem xét/Phê duyệt sau đó KHÔNG hiển thị lại khung
+QR để đặt/sửa nữa (đúng hành vi ISO hiện tại, giữ nguyên khi thiết kế mau_vi_tri).
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build
+khi không chắc dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-02, tiếp — cùng ngày) — Trang "Cài đặt vị trí ký" đã CODE XONG cho
+Văn bản, gắn vào luồng "Gửi ký" thật, CHƯA test tay
+
+Thực hiện ngay trong phiên đọc mục kế hoạch ở trên. Đã hỏi phạm vi qua `AskUserQuestion`
+(chốt: "Chỉ xây trang Cài đặt vị trí ký", không đụng route ký thật) — sau đó người dùng
+chỉnh 1 điểm quan trọng khi đang bàn vị trí đặt màn hình: **KHÔNG cho lần "Gửi ký" nào bỏ
+qua màn xác nhận vị trí, kể cả khi loại tài liệu ĐÃ có mẫu lưu sẵn** — người soạn thảo luôn
+phải xem lại/xác nhận vị trí (mẫu cũ hiện sẵn để xác nhận, hoặc vẽ mới nếu chưa có) trước khi
+hệ thống thực sự gửi đi. Đây là thay đổi so với thiết kế ban đầu (dự kiến: có mẫu rồi thì bỏ
+qua màn này) — đã áp dụng đúng theo yêu cầu mới.
+
+### Kiến trúc đã dựng
+
+- `src/lib/signing/templates.ts` (mới) — `getLatestSignTemplate()`/`saveSignTemplate()`,
+  đọc/ghi bảng `mau_vi_tri` qua `getSupabaseAdmin()`. Không bao giờ ghi đè — mỗi lần lưu
+  tăng `phien_ban`. Type `SignTemplateBox` mở rộng thêm so với comment tối thiểu của cột
+  `khung` trong migration (`vai_tro/neo_trang/so_trang/x_pt/y_pt/w_pt/h_pt`) — thêm
+  `clone_of`, `loai` ('chu_ky'|'qr'|'ngay_ky'), `nhan`, `bat_buoc`, `show_name`,
+  `chuc_vu_key` — hợp lệ vì cột `khung` chỉ ràng buộc `jsonb_typeof=array`, không có schema
+  cứng nào khác.
+- `src/app/api/signing/templates/route.ts` (mới) — `GET` (đọc mẫu mới nhất theo
+  `factoryId+loaiTaiLieu`) + `POST` (lưu phiên bản mới). Gate quyền: `documents.create`
+  (mirror đúng logic 2 bước explicit `user_permissions.granted=true` rồi
+  `role_permissions.role` đã dùng ở `dept-users/route.ts` — không lặp lại bug thiếu
+  `.eq("granted", true)` đã từng xảy ra ở `approvers/route.ts`, xem
+  `.claude/rules/22-documents-module.md`). `mau_vi_tri` RLS chỉ có SELECT nên mọi ghi bắt
+  buộc qua route service-role này, đúng thiết kế đã ghi trong migration
+  `20260902_signing_core_tables.sql`.
+- `src/app/dashboard/ky/mau-vi-tri/page.tsx` (mới, ~940 dòng) — màn vẽ khung theo mockup đã
+  duyệt, bám sát cơ chế: render PDF tham chiếu qua `pdfjs` (mirror đúng kỹ thuật canvas-tạm
+  → `toDataURL()` của `ky/[id]/page.tsx`, tránh race điều kiện đã ghi trong comment gốc),
+  kéo/resize bằng pointer events (không remount DOM khi kéo — mirror kỹ thuật đã sửa lỗi
+  giật trong chính mockup), lưới căn chỉnh + snap 5%, "Nhân bản khung" (duplicate role →
+  `clone_of` trỏ về vai trò gốc), toggle "Hiện tên & chức vụ" + chọn 1-trong-3 loại chức vụ
+  (`chinh_quyen`/`kiem_nhiem`/`doan_the`, chỉ là NHÃN LOẠI tĩnh ở bước này — chưa có dữ liệu
+  người ký thật để hiển thị giá trị cụ thể, vì `dinh_tuyen`/ánh xạ người thật chưa được tích
+  hợp), cảnh báo khung ngoài khổ giấy, "Xem trước" đổi khung sang nội dung chữ ký mẫu/QR/ngày
+  giả lập.
+  - Route này tự bypass sidebar (đã có sẵn cơ chế `pathname.startsWith("/dashboard/ky/")`
+    trong `dashboard/layout.tsx` — không cần sửa gì thêm).
+  - Nhận query params: `loai` (`loai_tai_lieu`, bắt buộc), `pdfUrl` (file PDF tham chiếu để
+    render, bắt buộc), `docLabel` (hiển thị), `returnTo` (URL quay lại sau khi xác nhận).
+
+### Vai trò cố định cho module Văn bản (khác 6 vai trò ISO trong mockup)
+
+Mockup gốc định nghĩa 6 vai trò cho ISO (`ky_nhay, soan_thao, xem_xet, phe_duyet, qr,
+ngay_ky`). Văn bản không có khái niệm "ký nháy" và có SỐ BƯỚC KÝ PHÒNG BAN THAY ĐỔI theo
+từng văn bản (`thu_tu_ky_json` do người soạn thảo tự chọn số bước) — nên đã định nghĩa lại 4
+vai trò gốc cho `documents`: `ky_buoc` (Ký bước — phòng ban/cá nhân, bắt buộc), `phe_duyet`
+(bắt buộc), `qr` (tuỳ chọn), `ngay_ky` (tuỳ chọn). Số bước ký phòng ban thật của 1 văn bản cụ
+thể được xử lý qua cơ chế **"Nhân bản khung"** có sẵn trong mockup (nhân bản `ky_buoc` thành
+`ky_buoc__ban2`, `ban3`...) — không cần thiết kế mới, đúng tinh thần schema `truong_ky`/
+`mau_vi_tri.khung` vốn đã hỗ trợ 1 vai trò → nhiều khung.
+
+### Đơn giản hoá có chủ đích so với mockup — bỏ lựa chọn "chỉ áp dụng cho hồ sơ này"
+
+Mockup có modal 2 lựa chọn khi lưu vị trí đã chỉnh: "Cập nhật mẫu vị trí (dùng chung)" hoặc
+"Chỉ áp dụng cho hồ sơ này". Lựa chọn thứ 2 cần nơi lưu override RIÊNG CHO TỪNG YÊU CẦU KÝ
+(`truong_ky`, chỉ tồn tại sau khi `createSigningRequest()` chạy) — nhưng phiên này CHƯA tích
+hợp `mau_vi_tri` vào bất kỳ route ký thật nào, nên không có nơi nào để "chỉ áp dụng cho hồ sơ
+này" đi tới. Đã bỏ hẳn lựa chọn này — nút "Xác nhận vị trí & Gửi đi" chỉ có 1 hành vi: nếu có
+thay đổi (hoặc chưa từng có mẫu) → lưu thành phiên bản `mau_vi_tri` MỚI dùng chung cho mọi hồ
+sơ sau; nếu không đổi gì so với mẫu đã tải → bỏ qua bước lưu, đi thẳng tới gửi đi.
+
+### Gắn vào luồng "Gửi ký" thật của Văn bản — chỉ đổi UI điều hướng, KHÔNG đụng route ký
+
+`src/app/dashboard/documents/[id]/page.tsx`:
+
+- `handleGuiKy()` (nút "Gửi ký", action `gui_ky`, đưa văn bản từ `draft`/`tra_ve` sang bước ký
+  đầu tiên): nếu văn bản có **file nguồn là PDF** (`docExt === "pdf"`, dùng đúng biến
+  `docSourceUrl`/`docExt` đã có sẵn trong file — computed từ `file_goc_url` ở trạng thái
+  draft) VÀ có `loai_van_ban`, điều hướng sang
+  `/dashboard/ky/mau-vi-tri?loai=...&pdfUrl=...&docLabel=...&returnTo=/dashboard/documents/{id}`
+  thay vì gọi thẳng `doAction("gui_ky")`. Văn bản nguồn **Office (DOCX/XLSX)** không có khái
+  niệm "vị trí" (dùng tag `{{...}}`) nên **bỏ qua hoàn toàn** màn này, gửi thẳng như cũ —
+  không đổi hành vi cho luồng Office.
+- Effect mới (`autoSendTriedRef` chặn lặp) đọc query param `confirmedSignTemplate=1` khi quay
+  lại từ màn cài đặt vị trí — tự gọi lại đúng `doAction("gui_ky")` **đúng 1 lần**, rồi
+  `router.replace()` dọn query param khỏi URL (tránh gửi lặp nếu F5 lại trang).
+- **Không đụng** `api/documents/sign/route.ts`, `SignPlacementModal`, hay bất kỳ logic đóng
+  dấu PDF thật nào — các bước ký sau đó (`ky_buoc`, `phe_duyet`) vẫn dùng nguyên
+  `SignPlacementModal` cũ với toạ độ mặc định hard-code như trước, KHÔNG đọc `mau_vi_tri`.
+  Nghĩa là: mẫu vị trí giờ ĐƯỢC LƯU đúng lúc gửi ký, nhưng CHƯA được ĐỌC để tự động áp dụng
+  vào bất kỳ khung ký thật nào — đó là việc của phiên tích hợp tiếp theo (mục 2 trong đề xuất
+  trình tự đã ghi ở kế hoạch phía trên).
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` (toàn repo) và `npx eslint` trên cả 4 file (mới + đã sửa) đều sạch — 0
+lỗi, 0 warning mới (2 warning `<img>` còn lại trong `documents/[id]/page.tsx` là pre-existing
+ở dòng 537/738, cách xa mọi chỗ đã sửa lần này). Không chạy `npm run build`.
+
+### CHƯA test tay — bắt buộc trước khi coi tính năng này là hoàn tất
+
+1. Tạo 1 văn bản mới (nguồn PDF), bấm "Gửi ký" lần đầu (chưa có mẫu `mau_vi_tri` cho loại
+   văn bản đó) → xác nhận điều hướng đúng sang màn Cài đặt vị trí ký, 4 vai trò hiện đúng
+   trạng thái "Chưa đặt", 2 vai trò bắt buộc (`ky_buoc`, `phe_duyet`) chặn nút gửi nếu chưa
+   đặt đủ.
+2. Đặt đủ khung, bấm "Xác nhận vị trí & Gửi đi" → xác nhận: (a) tạo đúng 1 dòng `mau_vi_tri`
+   mới (`phien_ban=1`) trong DB; (b) quay lại đúng trang chi tiết văn bản; (c) văn bản THẬT
+   SỰ đã chuyển trạng thái (`gui_ky` đã chạy) — không bị kẹt ở `draft`.
+3. Tạo văn bản thứ 2 CÙNG loại → bấm "Gửi ký" → xác nhận màn Cài đặt vị trí ký hiện SẴN 2
+   khung đã lưu từ lần trước (không phải trống), có thể bấm thẳng "Xác nhận vị trí & Gửi đi"
+   mà không sửa gì → xác nhận KHÔNG tạo thêm `phien_ban` mới (vì không đổi gì) và văn bản vẫn
+   được gửi đi đúng.
+4. Thử "Nhân bản" 1 khung (`ky_buoc`) để mô phỏng văn bản có nhiều bước ký phòng ban → xác
+   nhận bản sao xuất hiện đúng, đặt được vị trí riêng, lưu thành công, tải lại xác nhận đọc
+   lại đúng cấu trúc `clone_of`.
+5. Test văn bản nguồn Office (DOCX/XLSX) → xác nhận bấm "Gửi ký" đi thẳng như cũ, KHÔNG bị
+   điều hướng sang màn Cài đặt vị trí ký.
+6. Test tài khoản KHÔNG có `documents.create` (và không phải admin) → xác nhận `POST
+   /api/signing/templates` trả 403, hiển thị lỗi rõ ràng trên màn (không crash trắng trang).
+7. Test lưới căn chỉnh (snap 5%) và cảnh báo "khung ngoài khổ giấy" hoạt động đúng khi kéo
+   khung ra sát mép trang.
+8. Xác nhận nút "Huỷ" (không lưu gì, quay lại `returnTo`) và văn bản vẫn ở nguyên trạng thái
+   `draft`/`tra_ve` như trước khi bấm "Gửi ký".
+
+### Bước tiếp theo (chưa làm, đúng như kế hoạch — cần hỏi lại phạm vi trước khi bắt đầu)
+
+Tích hợp `mau_vi_tri` vào route ký thật (`api/documents/sign/route.ts`) để các bước
+`ky_buoc`/`phe_duyet` tự đọc mẫu đã lưu và prefill khung thay vì toạ độ mặc định hard-code —
+đây là bước RỦI RO CAO hơn hẳn (đổi hành vi route đang chạy thật), cần verify kỹ (đối chiếu
+byte-identical hoặc test tay đầy đủ) trước khi coi là xong, và cần `cau_hinh_tai_lieu.dinh_tuyen`
+để ánh xạ `vai_tro` → người ký thật (bảng này cũng chưa có route/UI nào ghi tới, tương tự
+`mau_vi_tri` trước phiên này).
+
+## Cập nhật (2026-09-02, tiếp — cùng ngày, phiên mới) — Đồng bộ màn "Cài đặt vị trí ký" với
+người ký thật của Văn bản — ĐÃ CODE XONG, CHƯA test tay
+
+Người dùng test tay màn "Cài đặt vị trí ký" mới xong (mục ngay phía trên) và báo 3 vấn đề dựa
+trên 1 kịch bản thật: văn bản phòng ban NMCB, `pham_vi="Don_vi"`, chọn Phê duyệt = Tô Thành Luân
+(Giám đốc nhà máy), chọn nhiều nhân viên cụ thể theo thứ tự làm "Ký xác nhận". Đã đi qua đúng
+quy trình EnterPlanMode (Explore agent đọc code thật → Plan agent thiết kế → 2 câu hỏi
+`AskUserQuestion` xác nhận kiến trúc → viết plan → `ExitPlanMode` được duyệt) trước khi code —
+chi tiết đầy đủ xem trong chính plan đã duyệt (không lặp lại toàn văn ở đây).
+
+### 3 vấn đề đã fix
+
+1. **Trải nghiệm mong muốn**: màn vị trí phải tự khớp với đúng người đã chọn ở `new/page.tsx`
+   (không phải vai trò trừu tượng chung chung).
+2. **Bug UX**: bấm vào 1 dòng vai trò không kích hoạt công cụ vẽ khung — phải đổi dropdown neo
+   trang trước (vì `armRole()` chỉ gắn vào `onChange` của `<select>`, không có nút "+" riêng).
+3. **Xem trước** phải hiện tên/chức danh/ảnh chữ ký THẬT của người đã gắn cố định, không phải
+   placeholder giả ("Nguyễn Văn A", SVG cố định).
+
+### Quyết định kiến trúc đã chốt qua `AskUserQuestion`
+
+- **Không gộp** màn "chọn người/bước ký" (`new/page.tsx`) vào màn "Cài đặt vị trí ký" — giữ 2
+  màn riêng, chỉ đồng bộ DỮ LIỆU. Lý do: `mau_vi_tri` phải giữ mức trừu tượng (vai trò) để tái
+  dùng cho văn bản tương lai; logic chọn người là đặc thù Văn bản, gộp vào màn dùng chung sẽ
+  phá vỡ khả năng tái dùng cho ISO sau này.
+- **Slot dư** (mẫu có nhiều "Ký bước" hơn số người thật của văn bản đang mở): **ẩn hẳn khỏi
+  UI đang thao tác**, nhưng dữ liệu vẫn giữ nguyên trong `mau_vi_tri` khi lưu phiên bản mới
+  (ẩn ở tầng hiển thị, không lọc khỏi payload lưu).
+
+### Nguyên tắc nền tảng đã giữ xuyên suốt khi code
+
+`mau_vi_tri.khung`/`SignTemplateBox` chỉ chứa dữ liệu TRỪU TƯỢNG (vai trò, toạ độ, `loai`,
+`nhan` tĩnh, `bat_buoc`, `show_name`, `chuc_vu_key`). Dữ liệu người thật (tên/chức vụ/ảnh chữ
+ký/tên phòng ban) chỉ tồn tại như state phiên làm việc song song (`docSignerByRoleId`,
+`signerInfoById`, `docSteps`, `docPheDuyetUserId`) — KHÔNG bao giờ ghi vào `EditorRole` các
+field lưu-lên-server hay gửi lên `POST /api/signing/templates`. Lý do kỹ thuật: `dirty` tính
+bằng `JSON.stringify(roles) !== initialSnapshot` — nhét dữ liệu người thật vào `EditorRole` sẽ
+khiến mở lại màn luôn "dirty" giả, ép tạo `phien_ban` mới vô nghĩa mỗi lần mở.
+
+### File đã sửa/tạo
+
+| File | Thay đổi |
+|---|---|
+| `src/app/dashboard/documents/[id]/page.tsx` | `handleGuiKy()` thêm `docId: doc.id` vào `URLSearchParams` khi điều hướng sang màn vị trí (1 dòng) |
+| `src/app/api/documents/signer-info/route.ts` (mới) | `GET ?factoryId=&userIds=` — mirror đúng cách `dept-leader/route.ts` tra `maintenance_staff.chuc_vu`/`chuc_vu_chinh_quyen` qua `profile_id` (KHÔNG lọc từ khoá lãnh đạo — người đã được chọn sẵn); xác nhận có ảnh chữ ký qua `storage.list(...,{search:"chu_ky.png"})` (rẻ hơn `download()` toàn bộ bytes) |
+| `src/app/dashboard/ky/mau-vi-tri/page.tsx` | Sửa chính — xem chi tiết dưới |
+
+### `mau-vi-tri/page.tsx` — chi tiết thay đổi
+
+- `EditorRole` thêm field `hiddenForDoc: boolean` — lọc khỏi `rolesOnPage`/sidebar list/
+  `missingRequired`/`outOfBoundsRoles`, nhưng **KHÔNG** lọc khỏi `buildKhungPayload()` (giữ
+  nguyên hành vi cũ ở đó — đảm bảo slot dư không mất khi lưu).
+- Tách `makeCloneRole(baseId, n, sourceBox)` khỏi `duplicateRole()` — dùng chung cho cả nhân
+  bản thủ công lẫn "pad" tự động. Thêm `roleCloneIndex(role)` (base=1, `__banN`→N) để sắp thứ
+  tự ổn định, map 1-1 với `thu_tu_ky_json[i]`.
+  `reconcileForDoc(prevRoles, docSteps, cloneSeqRef)` (hàm thuần, top-level): tự thêm slot
+  "Ký bước" nếu `N=thu_tu_ky_json.length` lớn hơn số slot hiện có (dùng `makeCloneRole`, không
+  tự `armRole()` — khác `duplicateRole()`, đây là hành vi hệ thống không phải người dùng chủ
+  động bấm); đánh dấu `hiddenForDoc:true` cho các slot vượt quá `N` nếu mẫu có nhiều hơn.
+- 3 effect mới, chạy nối tiếp theo đúng thứ tự phụ thuộc:
+  1. Nạp `van_ban_documents` (`thu_tu_ky_json`, `phe_duyet_user_id`) khi có `docId` — set
+     `docSteps`/`docPheDuyetUserId`/`docFetchOk`/`docLoaded`. Lỗi/không tìm thấy → `docFetchOk
+     =false` (fallback an toàn — coi như không có `docId`, không ẩn/pad gì cả).
+  2. Gọi `/api/documents/signer-info` 1 lần với danh sách `userId` gom từ bước 1 → set
+     `signerInfoById`. Lỗi không chặn luồng (fallback placeholder).
+  3. **Effect "đối chiếu"** — chờ CẢ `templateLoaded` (cờ mới, set ở cuối effect nạp mẫu hiện
+     có, cả 2 nhánh có/không có mẫu) VÀ `docLoaded` đều sẵn sàng, chạy `reconcileForDoc` ĐÚNG 1
+     LẦN (guard bằng `reconciledRef`, không phải dependency `roles` — tránh vòng lặp vì effect
+     tự gọi `setRoles`). Set `initialSnapshot` MỚI sau khi đối chiếu (không phải trước) — nếu
+     không, việc tự pad/ẩn slot sẽ khiến `dirty=true` giả ngay khi vừa mở màn.
+- `docSignerByRoleId` (`useMemo`) — map vị trí slot "Ký bước" (đã sort theo `roleCloneIndex`)
+  1-1 với `docSteps[i]` theo đúng thứ tự đã chọn lúc soạn thảo; `phe_duyet` map thẳng
+  `docPheDuyetUserId`. Bước `type:"phong_ban"` (Cong_ty, chưa có người cố định) → chỉ có tên
+  phòng ban, không có ảnh/chức vụ.
+- **Bug UX #2 đã fix**: dropdown neo trang đổi sang chỉ set state cục bộ
+  `pendingAnchorByRole[role.id]` (không tự `armRole()`); thêm nút "+" riêng (icon `Plus`) —
+  `onClick` mới gọi `armRole(role.id, pendingAnchorByRole[role.id] ?? "dau")`.
+  `duplicateRole()` giữ nguyên tự `armRole()` ngay (hành động chủ động của người dùng).
+- Sidebar: thêm dòng phụ nhỏ dưới mỗi vai trò (chỉ khi có `docSignerByRoleId[role.id]`) —
+  `→ Tô Thành Luân · Giám đốc nhà máy` hoặc `→ Phòng {tên phòng ban} (chưa xác định người ký)`.
+- `PreviewContent` nhận thêm `signer`/`factoryId` — `kind:"ca_nhan"` hiện ảnh chữ ký thật qua
+  `supabase.storage.from("iso-documents").getPublicUrl(...)` nếu `has_signature`, tên/chức vụ
+  thật (fallback nhãn tĩnh `chucVuKey` nếu `chuc_vu` rỗng — bug gốc `chuc_vu=""` khi lưu
+  `thu_tu_ky_json` ở `new/page.tsx` KHÔNG sửa ở đây, ngoài phạm vi); `kind:"phong_ban"` chỉ
+  hiện tên phòng ban + ghi chú "(người ký thật xác định khi ký)"; không có `signer` → giữ
+  nguyên hành vi cũ 100% (SVG giả/"Nguyễn Văn A"/QR giả/ngày giả) — không đổi gì khi mở màn
+  không kèm `docId`.
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` (toàn repo) và `npx eslint` trên cả 3 file (2 sửa + 1 mới) đều sạch — 0 lỗi,
+0 warning mới (2 warning `<img>` còn lại trong `documents/[id]/page.tsx` pre-existing, không
+liên quan). Không chạy `npm run build`.
+
+### CHƯA test tay — bắt buộc trước khi coi tính năng này là hoàn tất
+
+Lặp lại đúng kịch bản người dùng đã báo cáo:
+
+1. Tạo văn bản NMCB, `pham_vi="Don_vi"`, phê duyệt tự nhận diện Tô Thành Luân, chọn 2-3 nhân
+   viên "Ký xác nhận" theo thứ tự → Lưu → "Gửi ký duyệt" → xác nhận màn vị trí hiện đúng số
+   dòng "Ký bước" (khớp số người đã chọn), mỗi dòng có dòng phụ hiện đúng tên/chức vụ thật
+   (hoặc "(chưa rõ tên)"/chức vụ rỗng nếu `maintenance_staff` thiếu dữ liệu), dòng "Phê duyệt"
+   hiện đúng Tô Thành Luân.
+2. Bấm thẳng vào 1 dòng vai trò CHƯA đặt (không đổi dropdown) → xác nhận nút "+" kích hoạt chế
+   độ vẽ khung ngay lập tức.
+3. Bật "Xem trước" → xác nhận ảnh chữ ký thật hiện đúng cho người đã upload ảnh (Cài đặt → ISO
+   & Văn bản → Chữ ký cá nhân), chữ "Chưa có ảnh chữ ký" cho người chưa có.
+4. Test slot dư: lưu 1 mẫu có 3 "Ký bước" (chọn văn bản có 3 người xác nhận), mở 1 văn bản khác
+   cùng `loai_van_ban` chỉ cần 1 người ký → xác nhận 2 slot dư ẩn hẳn khỏi UI, không chặn nút
+   gửi (không còn tính là "thiếu vai trò bắt buộc"); lưu phiên bản mới xong, mở lại 1 văn bản
+   cần đủ 3 người → xác nhận cả 3 vị trí vẫn còn nguyên (không mất do lần lưu trước ẩn chúng).
+5. Test văn bản `pham_vi="Cong_ty"` (bước `phong_ban`) → xác nhận preview chỉ hiện tên phòng
+   ban + ghi chú, không có ảnh/chức vụ giả.
+6. Test văn bản `pham_vi="Don_vi"` nhưng KHÔNG chọn "Ký xác nhận" nào (N=0, hợp lệ theo rule 22
+   — bước này là tuỳ chọn) → xác nhận slot "Ký bước" gốc tự ẩn, KHÔNG chặn gửi dù `batBuoc`
+   (đúng thiết kế: N=0 nghĩa là văn bản này thật sự không cần vị trí "Ký bước" nào).
+7. Xác nhận văn bản Office (DOCX/XLSX) và luồng không kèm `docId` (nếu còn cách truy cập trực
+   tiếp `/dashboard/ky/mau-vi-tri`) hoạt động y hệt trước khi có thay đổi này.
+
+## Cập nhật (2026-09-03) — 3 phát hiện từ test tay màn Cài đặt vị trí ký
+
+Người dùng test tay màn "Cài đặt vị trí ký" trên desktop (`npm run dev`, localhost) và báo 3
+việc. Đã hỏi lại 2 câu qua `AskUserQuestion` để làm rõ trước khi ghi kế hoạch (tránh phiên sau
+phải đoán lại), và tự xác nhận thêm 1 bug qua đọc code (không phải suy đoán) trong lúc soạn kế
+hoạch. **Phiên này KHÔNG sửa code** — chỉ ghi lại phát hiện + soạn kế hoạch cho phiên sau.
+
+1. **Sidebar cần kéo giãn bề rộng** — đã hỏi rõ và xác nhận: cả câu "thanh phải thêm chức năng
+   tăng giảm bề rộng" lẫn câu tiếp theo ("Khung ký hiện tại vẽ ra 1 kích thước cố định không
+   tăng giãm kích thước không di chuyển được") đều nói về **panel sidebar 320px cố định bên
+   phải** (danh sách vai trò) — người dùng chọn đáp án gộp cả 2 câu vào ý "sidebar", KHÔNG chọn
+   đáp án "cả hai" (tức tách riêng thành 1 bug khung ký trên canvas). Nếu khung ký (role box)
+   trên canvas thực sự cũng không kéo/resize được khi test lại ở phiên sau, đó là bug MỚI cần
+   người dùng báo riêng — không giả định sẵn là có.
+2. **Vấn đề lớn nhất — xác nhận qua code, đúng như đã ghi rõ từ đầu là "chưa tích hợp"**: sau
+   khi lưu mẫu vị trí, bước ký THẬT (`SignPlacementModal` trong `documents/[id]/page.tsx`, gọi
+   khi bấm "Ký phòng ban"/"Ký xác nhận"/"Phê duyệt") vẫn dùng toạ độ mặc định hard-code, hoàn
+   toàn không đọc `mau_vi_tri` — việc tích hợp nằm ngoài phạm vi phiên trước (đã ghi rõ trong
+   mục "Cập nhật (2026-09-02, tiếp — cùng ngày, phiên mới)" ở trên). Đã hỏi người dùng hướng
+   tích hợp cho phiên sau — **CHỐT: vị trí CỨNG** — khi ký thật, hệ thống tự đặt đúng vị trí đã
+   lưu trong `mau_vi_tri`, người ký chỉ xác nhận PIN, không còn canvas kéo-thả tự do nữa (khác
+   hẳn UX `SignPlacementModal` hiện tại).
+3. **Bug đã xác nhận qua đọc code trực tiếp (không phải suy đoán)** — phát hiện thêm trong lúc
+   soạn kế hoạch này: validation "còn thiếu vai trò bắt buộc" (`missingRequired`,
+   `mau-vi-tri/page.tsx:541`) chỉ check `role.batBuoc` — nhưng `makeCloneRole()` (dòng 172,
+   dùng cho CẢ nhân bản thủ công LẪN tự "pad" slot theo `reconcileForDoc()`) luôn set
+   `batBuoc: false`. Nghĩa là khi hệ thống tự sinh thêm slot "Ký bước" khớp số người thật
+   (`docSteps.length`), CHỈ slot gốc (`ky_buoc`) và `phe_duyet` bị coi là bắt buộc — các slot
+   pad thêm (dù đại diện cho người ký THẬT theo `docSignerByRoleId`) không bị chặn nếu bỏ
+   trống → khớp đúng lời người dùng báo "chưa cài đặt hết vị trí ký xác nhận vẫn lưu được".
+
+## Kế hoạch phiên sau — Fix validation + sidebar resizable + tích hợp mau_vi_tri VÀO route ký
+thật (vị trí CỨNG)
+
+Chia 3 phần theo độ rủi ro tăng dần — khuyến nghị làm tuần tự, KHÔNG bắt buộc làm hết trong 1
+phiên (đúng tinh thần đã áp dụng xuyên suốt dự án ký số này).
+
+### Phần A — Fix rõ ràng, rủi ro thấp (làm ngay, không cần hỏi thêm)
+
+- `mau-vi-tri/page.tsx`: sửa `missingRequired` (hoặc thêm 1 biến mới song song, KHÔNG đổi
+  nghĩa `batBuoc` gốc — `batBuoc` vẫn đúng nghĩa "bắt buộc ở cấp độ MẪU trừu tượng, dùng khi
+  lưu `mau_vi_tri`") — khi có `docId`, 1 slot `ky_buoc`-family phải coi là bắt buộc đặt trước
+  khi "Xác nhận vị trí & Gửi đi" nếu nó có mặt trong `docSignerByRoleId` (tương ứng 1 bước ký
+  thật của văn bản đang mở), bất kể `role.batBuoc` gốc. Đề xuất: hàm `isRequiredForConfirm(role)`
+  = `role.batBuoc || (docId && role.id in docSignerByRoleId)`, dùng thay `role.batBuoc` đúng
+  tại chỗ tính `missingRequired` (dòng 541) — KHÔNG đổi `role.batBuoc`/`bat_buoc` lưu vào
+  `mau_vi_tri` (payload lưu mẫu giữ nguyên ý nghĩa trừu tượng cũ).
+- Sidebar resizable: thêm 1 thanh kéo (divider) giữa vùng canvas và sidebar 320px
+  (`mau-vi-tri/page.tsx`, khu vực `<div className="w-[320px] ...">`) — đổi từ width cố định
+  sang width kéo giãn được bằng pointer events, mirror ĐÚNG kỹ thuật drag đã tự viết trong
+  chính file này (`startDrag`/`onDragMove`/`onDragEnd`, dùng `setPointerCapture`) thay vì thêm
+  dependency mới — lưu width vào 1 state (`sidebarWidth`, có min/max hợp lý, ví dụ 260–480px),
+  không cần persist qua session khác.
+
+### Phần B — Cần TEST TAY lại để xác nhận trước khi sửa (không tự ý đoán fix)
+
+Mở lại đúng màn Cài đặt vị trí ký, ở chế độ ĐANG SỬA (không phải Xem trước), thử kéo di chuyển
+1 khung đã đặt và resize bằng handle góc dưới-phải — xác nhận có THỰC SỰ bị lỗi (không di
+chuyển/không resize được) hay không. Nếu có bug thật, đọc kỹ `startDrag`/`onDragMove`/
+`startResize`/`onResizeMove` (đã dùng `setPointerCapture`, có vẻ đúng kỹ thuật khi đọc code
+tĩnh — nếu vẫn lỗi khi test thật, khả năng cao là vấn đề khác: handle resize quá nhỏ (12px,
+khó bấm trúng), hoặc xung đột `onClick={handlePageClick}` ở div cha bị bắt nhầm sự kiện — cần
+debug bằng console.log/React DevTools thật, không suy đoán suông).
+
+### Phần C — Tích hợp `mau_vi_tri` vào route ký thật, vị trí CỨNG (rủi ro cao nhất, cần thiết
+kế kỹ trước khi code)
+
+- **Đã chốt hướng**: lúc ký thật (bấm "Ký phòng ban"/"Ký xác nhận"/"Phê duyệt"), hệ thống tự
+  đặt đúng vị trí đã lưu trong `mau_vi_tri`, người ký chỉ xác nhận PIN — bỏ hẳn canvas kéo-thả
+  tự do ở bước ký (khác hẳn UX hiện tại của `SignPlacementModal`).
+- **Phát hiện quan trọng cần điều tra kỹ trước khi thiết kế** (chưa xác nhận, chỉ là gợi ý
+  hướng đi rẻ hơn `cau_hinh_tai_lieu.dinh_tuyen` đã phác thảo trong kế hoạch cũ): `van_ban_documents`
+  đã có sẵn cột `placement_ky JSONB` (`documents-types.ts:62`), và code hiện tại (`mergeQrBox()`
+  trong `api/documents/sign/route.ts`) đã có tiền lệ đọc/ghi `placement_ky.qr` giữa các bước
+  ký. Rất có thể **không cần** xây dựng cơ chế tổng quát `cau_hinh_tai_lieu.dinh_tuyen` (như
+  phác thảo ban đầu, dành cho N module dùng chung) — chỉ cần: lúc bấm "Xác nhận vị trí & Gửi
+  đi" ở `mau-vi-tri/page.tsx`, tính sẵn toạ độ pt CHÍNH XÁC cho từng bước ký thật (dùng đúng
+  `docSignerByRoleId`/`roleCloneIndex` đã có) rồi ghi thẳng vào `van_ban_documents.placement_ky`
+  (mở rộng cấu trúc hiện có, ví dụ key theo `stepKey`/vai_tro), và route ký thật +
+  `SignPlacementModal` đọc thẳng từ đó — tái dùng đúng field/cơ chế đã tồn tại, rủi ro thấp hơn
+  xây mới toàn bộ. **Bắt buộc đọc kỹ TOÀN BỘ `api/documents/sign/route.ts` (không chỉ đoạn
+  `mergeQrBox`) trước khi quyết định** — đây chỉ là giả thuyết cần verify, không phải kết luận.
+- Cần thiết kế: `SignPlacementModal` khi phát hiện bước hiện tại ĐÃ có toạ độ cứng trong
+  `placement_ky` → bỏ qua hẳn canvas/kéo-thả, chỉ hiện xác nhận PIN (giữ nguyên UI khi
+  `placement_ky` thiếu dữ liệu — văn bản soạn trước khi có tính năng này — fallback về hành vi
+  cũ, KHÔNG chặn ký của văn bản cũ).
+- Vì đây là ROUTE KÝ THẬT ĐANG CHẠY PRODUCTION, bắt buộc: hỏi lại phạm vi cụ thể qua
+  `AskUserQuestion` trước khi code (ví dụ: có áp dụng ngay cho MỌI văn bản đang dở dang hay chỉ
+  văn bản tạo mới sau khi có tính năng?), và verify kỹ (test tay đầy đủ hoặc đối chiếu
+  byte-identical như đã làm ở Giai đoạn 1 refactor `src/lib/signing/`) trước khi coi là xong.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-03) — 3 phát hiện từ test tay màn Cài đặt vị trí ký" và "Kế hoạch
+phiên sau — Fix validation + sidebar resizable + tích hợp mau_vi_tri VÀO route ký thật (vị trí
+CỨNG)" trong CLAUDE.md (2 mục vừa thêm, ngay phía trên).
+
+Làm theo đúng thứ tự, dừng lại hỏi khi tới Phần C:
+
+1. **Phần A** (làm ngay, không cần hỏi): sửa bug validation ở `mau-vi-tri/page.tsx` —
+   `missingRequired` hiện chỉ check `role.batBuoc` nhưng các slot "Ký bước" tự pad thêm
+   (`makeCloneRole()`, dòng ~172) luôn có `batBuoc:false` dù đại diện người ký thật — thêm
+   logic coi 1 slot là bắt buộc khi nó có mặt trong `docSignerByRoleId`, không chỉ dựa
+   `batBuoc`. Đồng thời thêm thanh sidebar resizable (kéo giãn panel 320px bên phải) — mirror
+   đúng kỹ thuật `setPointerCapture` đã có sẵn trong file, không thêm dependency mới.
+
+2. **Phần B**: test tay lại việc kéo-di chuyển/resize khung ký ở chế độ ĐANG SỬA (không phải
+   Xem trước) — xác nhận có bug thật không trước khi sửa gì (đọc code tĩnh không thấy bug rõ
+   ràng, cần debug bằng thao tác thật/React DevTools nếu tái hiện được).
+
+3. **Phần C** (rủi ro cao nhất — route ký thật `api/documents/sign/route.ts` đang chạy
+   production): đã chốt hướng "vị trí CỨNG" với người dùng, nhưng PHẢI đọc kỹ toàn bộ
+   `api/documents/sign/route.ts` (không chỉ đoạn `mergeQrBox`) để xác nhận giả thuyết tái dùng
+   cột `placement_ky` có sẵn (thay vì xây `cau_hinh_tai_lieu.dinh_tuyen` mới) có khả thi không,
+   rồi BẮT BUỘC hỏi lại phạm vi cụ thể qua `AskUserQuestion` (ví dụ: áp dụng ngay cho văn bản
+   đang dở dang hay chỉ văn bản mới) trước khi code bất kỳ dòng nào.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-03, tiếp) — 7 hạng mục an toàn đã code xong (UI mẫu vị trí + badge "Chờ
+bạn" + xoá nút In cũ); Phần C (tích hợp "vị trí CỨNG" vào route ký thật) VẪN CHƯA làm
+
+Người dùng test tay tiếp và gửi 1 loạt phát hiện mới (bản test luồng ký văn bản NMCB trên
+desktop). Đã dùng Plan Mode đầy đủ (3 Explore agent + 1 Plan agent đọc trực tiếp code, 2 vòng
+`AskUserQuestion` làm rõ phạm vi + 2 quyết định thiết kế) trước khi code — xem plan đã duyệt tại
+`.claude/plans/th-m-m-c-k-generic-elephant.md` nếu cần đối chiếu chi tiết từng dòng.
+
+**Phát hiện quan trọng đầu phiên**: khi đọc lại `mau-vi-tri/page.tsx` để lên kế hoạch, xác nhận
+**Phần A của mục kế hoạch cũ ở trên (fix `missingRequired` + sidebar resizable) ĐÃ ĐƯỢC LÀM** bởi
+1 phiên khác ngoài transcript trước khi phiên này bắt đầu — `isRequiredForConfirm()` đã tồn tại
+đúng như đề xuất, `sidebarWidth`/kéo-giãn panel đã có sẵn (min 260/max 480 cố định). Phiên này chỉ
+mở rộng thêm max sidebar (xem mục 2 dưới), không phải làm lại từ đầu.
+
+### 7 hạng mục đã code xong phiên này (tất cả đều KHÔNG đụng route ký thật/production)
+
+1. **Lưới căn chỉnh ô vuông thật, nhỏ hơn** (`mau-vi-tri/page.tsx`) — trước đây lưới dùng `%`
+   độc lập theo mỗi trục nên ô bị méo (khổ giấy không vuông). Đổi sang `GRID_STEP_PX = 16` (px cố
+   định qua CSS `backgroundSize`) — luôn vuông thật bất kể tỉ lệ khổ giấy. Snap khi kéo/resize
+   cũng đổi theo: `pctStepFor(axisPx)` tính lại % tương ứng 16px theo ĐÚNG trục đang thao tác
+   (`rectW`/`rectH` đo thật lúc bắt đầu kéo), thay vì dùng chung 1 hằng số % cho cả 2 trục.
+2. **Sidebar max width tối đa 50% màn hình** — `onSidebarDragMove` đổi từ hằng số 480 sang
+   `Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth * 0.5)`, tính động ngay lúc đang kéo.
+3. **Màu khung riêng cho từng người/slot cùng cấp** — trước đây mọi bản sao "Ký bước" dùng chung
+   1 màu cam. Thêm `KY_BUOC_CLONE_PALETTE` (8 màu luân phiên: amber/sky/pink/lime/indigo/orange/
+   cyan/amber đậm) + hàm `getRoleColor(role)` — chỉ áp dụng đa sắc cho family `ky_buoc` (nhiều
+   người cùng ký 1 bước); `qr`/`phe_duyet`/`ngay_ky`/`ghi_chu` giữ nguyên đúng 1 màu cố định.
+4. **Vai trò mới "Ghi chú"** (`ghi_chu`) — thêm vào `BaseRoleId`/`ROLE_ORDER`/`BASE_ROLE_DEFS`/
+   `ROLE_COLORS` (teal) + `SignTemplateBoxLoai` (`src/lib/signing/templates.ts`, additive, không
+   có DB CHECK constraint nên không phá dữ liệu cũ). Người soạn thảo đặt vị trí 1 lần lúc vẽ mẫu
+   (đúng quyết định đã chốt) — mục đích để sau này (Phần C) route ký thật in `van_ban_documents.
+   ghi_chu` lên đúng vị trí trên PDF. Preview hiện placeholder text, chưa có nội dung thật (đúng
+   phạm vi — trang này chỉ lưu VỊ TRÍ, không đọc `ghi_chu` thật của bất kỳ văn bản nào).
+5. **Tiền tố ký thay KT./TM./TL./TUQ. chuyển sang chọn-lúc-vẽ-mẫu** — thêm
+   `SignTemplateSignAsKey`/`SIGN_TEMPLATE_SIGN_AS_OPTIONS`/`SIGN_TEMPLATE_SIGN_AS_LABEL` vào
+   `templates.ts` (mirror giá trị 1-1 với `SignAsType`/`SIGN_AS_OPTIONS` của `documents-types.ts`,
+   khai riêng để `templates.ts` giữ độc lập module — dùng chung được cho ISO sau này); `EditorRole`
+   thêm `signAs`, UI thêm dropdown ngay dưới khối "Hiện tên & chức vụ" (chỉ hiện với
+   `role.loai==="chu_ky"`, tức `ky_buoc`/`phe_duyet`). **Chỉ lưu vào `mau_vi_tri` — CHƯA đổi**
+   `SignPlacementModal`/`api/documents/sign/route.ts`, người ký thật vẫn tự chọn KT/TM/TL/TUQ như
+   cũ cho tới khi Phần C tích hợp xong.
+6. **Badge "Chờ BẠN" vs "Chờ [người khác]"** — tái dùng nguyên `canKyBuoc`/`canPheDuyet` đã có sẵn
+   (`documents/[id]/page.tsx`), CHỈ đổi phần hiển thị:
+   - Trang chi tiết: `TimelineStep` thêm prop `isMyTurn` — icon `Bell` (amber) + badge pill "🔔
+     Đến lượt bạn" khi đúng lượt người xem; icon `Clock` mờ + "Đang chờ" khi không. Sublabel bước
+     "Ký bước" phân biệt "Chờ BẠN ký" vs "Chờ {tên người}/phòng {tên phòng ban} ký"; bước "Phê
+     duyệt" phân biệt "Chờ BẠN phê duyệt" vs "Đang chờ phê duyệt...".
+   - Trang danh sách (`documents/page.tsx`) — theo đúng Phương án A đã chọn: thêm 1 lần gọi
+     `/api/documents/dept-code` khi trang mount (không phải N+1 theo dòng) lấy `myDeptCode`, cộng
+     3 cột mới vào `select()` (`phe_duyet_user_id, thu_tu_ky_json, buoc_hien_tai`) — đủ dữ liệu
+     tính `isMyTurnToAct(doc)` cho MỌI dòng, hiện badge "🔔 Chờ bạn" cạnh badge trạng thái.
+7. **Xoá hẳn nút "In" + trang `documents/print/page.tsx`** — đã grep xác nhận không còn tham
+   chiếu nào khác trong repo (email/Telegram/route API khác đều không dùng). Xoá khối `<a>` +
+   import `Printer` (`documents/[id]/page.tsx`), xoá cả thư mục `src/app/dashboard/documents/
+   print/`. `dashboard/layout.tsx`'s check `pathname.includes("/print")` (bypass sidebar) GIỮ
+   NGUYÊN — dùng chung cho các route `/print` khác (inventory/process/maintenance/quality
+   reports), không đụng. Cập nhật luôn 2 file tài liệu nội bộ phản ánh đã xoá:
+   `.claude/rules/22-documents-module.md` (mục "Trang in văn bản") và `.claude/rules/
+   10-roadmap.md` (dòng nhắc `documents/print/`).
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` sạch trên toàn bộ source code — chỉ còn đúng 1 lỗi **không liên quan code
+thật**: `.next/types/validator.ts` (file tự sinh, gitignored) còn tham chiếu stale tới route
+`documents/print/page.tsx` vừa xoá — đây là cache build cũ, Next.js tự tái tạo file này khi dev
+server/build chạy lại, không cần và không nên sửa tay. `npx eslint` trên cả 4 file đã sửa
+(`templates.ts`, `mau-vi-tri/page.tsx`, `documents/[id]/page.tsx`, `documents/page.tsx`) sạch — 0
+lỗi, chỉ còn 2 warning `<img>` pre-existing (dòng 537/738 của `[id]/page.tsx`, không liên quan
+thay đổi lần này). Không chạy `npm run build`. Không có migration nào — không đổi schema DB
+(`mau_vi_tri.khung` vẫn là JSONB tự do, additive).
+
+### CHƯA làm trong phiên này (cố ý, để dành sau)
+
+- **Phần C** (đổi tên gọi từ mục kế hoạch cũ ở trên — nội dung không đổi, chỉ bổ sung thêm 2 việc
+  mới phát sinh từ mục 4/5 ở trên) — xem mục "Kế hoạch phiên sau" MỚI ngay dưới đây, đã cập nhật
+  đầy đủ.
+- **Item 8 từ báo cáo test tay của người dùng — "Khi ký xong không click vào chữ ký để xem bằng
+  chứng"**: Văn bản nội bộ dùng hệ ký RIÊNG (`api/documents/sign/route.ts`), hoàn toàn tách biệt
+  với hệ ký dùng chung có PAdES/`/sign-verify/[nguoiKyId]` (`src/lib/signing/requests.ts`'s
+  `signField()`, dùng cho Chất lượng/Điều xe/Bảo trì) — Văn bản chỉ import
+  `computeIntegrityHash`/`getSignatureImage` từ `src/lib/signing/`, QR nhúng trỏ thẳng trang chi
+  tiết văn bản chứ không phải trang verify. Thêm tính năng "click chữ ký xem bằng chứng" cho Văn
+  bản là 1 sáng kiến RIÊNG, chưa được scope (cần quyết định: gắn PAdES trực tiếp vào
+  `api/documents/sign/route.ts` tương tự cách đã làm cho hệ dùng chung, hay xây 1 cơ chế nhẹ hơn
+  chỉ hiện metadata `doc_approval_log`) — **chưa làm, chưa hỏi phạm vi, để dành phiên khác riêng**
+  nếu người dùng muốn tiếp tục hướng này.
+
+### CHƯA test tay — bắt buộc trước khi coi 7 hạng mục trên là hoàn tất
+
+1. Mở `/dashboard/ky/mau-vi-tri` (kèm 1 văn bản thật qua `?docId=...`) → bật "Lưới căn chỉnh" →
+   xác nhận ô lưới là hình vuông thật (không méo), nhỏ hơn hẳn trước; kéo/resize 1 khung khi lưới
+   bật → xác nhận khung tự làm tròn đúng theo lưới vuông ở cả 2 trục.
+2. Kéo thanh chia sidebar sang phải hết cỡ → xác nhận panel mở rộng được tới ~50% chiều rộng màn
+   hình (không còn dừng cứng ở 480px).
+3. Tạo/mở 1 văn bản có ≥2 người "Ký xác nhận" (nhiều slot "Ký bước") → xác nhận mỗi slot có màu
+   khung khác nhau rõ ràng (không còn tất cả cùng màu cam), cả trên canvas lẫn danh sách sidebar.
+4. Đặt khung "Ghi chú" mới → xác nhận đặt/kéo/resize được như các vai trò khác, lưu mẫu thành
+   công; mở lại → khung "Ghi chú" vẫn còn đúng vị trí.
+5. Với 1 vai trò "Ký bước"/"Phê duyệt" đã đặt khung, chọn tiền tố "TM. (Thay mặt)" ở dropdown mới
+   → lưu mẫu → mở lại → xác nhận dropdown giữ đúng lựa chọn đã chọn.
+6. Mở trang chi tiết 1 văn bản đang `cho_ky_phong_ban`/`cho_phe_duyet` bằng ĐÚNG tài khoản tới
+   lượt ký/duyệt → xác nhận thấy badge "🔔 Đến lượt bạn" nổi bật (amber); đăng nhập tài khoản
+   KHÁC (không tới lượt) → xác nhận chỉ thấy "Đang chờ" mờ, sublabel đúng tên người/phòng ban
+   đang được chờ.
+7. Mở trang danh sách `/dashboard/documents` với cùng 2 tài khoản trên → xác nhận badge "🔔 Chờ
+   bạn" chỉ hiện đúng cho tài khoản tới lượt, cả trường hợp bước `ca_nhan` lẫn `phong_ban`.
+8. Xác nhận nút "In" đã biến mất khỏi trang chi tiết văn bản; truy cập trực tiếp URL cũ
+   `/dashboard/documents/print/?docId=...` → xác nhận trả về 404 (route không còn tồn tại).
+9. Sau khi test xong mục 1-8, restart `npm run dev` (hoặc chờ Next.js tự regenerate) rồi chạy
+   lại `npx tsc --noEmit` xác nhận lỗi `.next/types/validator.ts` đã tự biến mất.
+
+## Kế hoạch phiên sau — Phần C: tích hợp `mau_vi_tri` (kèm `sign_as`/`ghi_chu` mới) vào route ký
+thật, "vị trí CỨNG" (cập nhật, thay thế nội dung Phần C cũ ở trên)
+
+Nội dung cốt lõi giữ nguyên như mục "Phần C" đã ghi ở kế hoạch cũ phía trên (đọc lại đoạn đó để
+có đầy đủ ngữ cảnh: giả thuyết tái dùng `van_ban_documents.placement_ky` thay vì xây
+`cau_hinh_tai_lieu.dinh_tuyen` mới, yêu cầu đọc kỹ TOÀN BỘ `api/documents/sign/route.ts`, bắt
+buộc `AskUserQuestion` xác nhận phạm vi văn bản áp dụng trước khi code). Bổ sung 2 việc MỚI phát
+sinh từ phiên này (mục 4, 5 ở trên) — mẫu `mau_vi_tri` giờ đã mang thêm 2 loại dữ liệu mà route ký
+thật cần đọc thêm khi tích hợp:
+
+- **`loai: "ghi_chu"`** — khi route ký thật vẽ/stamp theo mẫu, nếu mẫu có khung `ghi_chu`, phải
+  lấy nội dung từ `van_ban_documents.ghi_chu` (trường đã có sẵn, đang chỉ hiển thị ở trang chi
+  tiết) và in/vẽ text đó vào đúng toạ độ khung — với PDF dùng `pdf-lib` (đã có sẵn hạ tầng vẽ text
+  trong `src/lib/signing/stamp-pdf.ts`, xem cách stamp tên người ký để mirror đúng kỹ thuật đo
+  chữ/wrap); với Office cần thêm tag mới (vd `{{GHI_CHU}}`) vào `buildStepTags`/logic thay tag —
+  hiện HOÀN TOÀN CHƯA có tag này (đã xác nhận qua grep phiên trước, 0 kết quả).
+- **`sign_as` trên `SignTemplateBox`** — khi route ký thật ở bước có mẫu khoá cứng vị trí, tiền tố
+  KT./TM./TL./TUQ. giờ đã được người soạn thảo chọn SẴN lúc vẽ mẫu (không cần hỏi lại người ký) —
+  route chỉ cần đọc `box.sign_as` cho đúng vai trò (`phe_duyet`, hoặc `ky_buoc` khi
+  `step.type==="phong_ban"`) và áp dụng y hệt logic `isValidSignAs`/vẽ tiền tố đã có sẵn, KHÔNG
+  cần `SignPlacementModal` hỏi lại qua radio group nữa (`showSignAsPicker` cần bỏ hẳn khi field
+  này đã có trong mẫu áp dụng).
+
+**Không đổi** phần còn lại của kế hoạch Phần C cũ — vẫn cần: đọc kỹ route ký thật trước khi thiết
+kế, hỏi phạm vi áp dụng (văn bản dở dang vs chỉ văn bản mới) qua `AskUserQuestion`, và verify kỹ
+(test tay hoặc đối chiếu byte-identical) trước khi coi là xong — đây vẫn là ROUTE ĐANG CHẠY
+PRODUCTION, không được tự ý suy diễn phạm vi.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Cập nhật (2026-09-03, tiếp) — 7 hạng mục an toàn đã code xong" và "Kế hoạch phiên sau —
+Phần C: tích hợp mau_vi_tri (kèm sign_as/ghi_chu mới) vào route ký thật" trong CLAUDE.md (2 mục
+mới nhất, cuối file). 7 hạng mục UI/badge/xoá nút In ĐÃ CODE XONG (tsc/eslint sạch) nhưng CHƯA
+được người dùng xác nhận test tay — đọc kỹ checklist "CHƯA test tay" (9 mục) trước khi làm gì
+tiếp; nếu người dùng báo lỗi ở 1 trong 9 mục đó, sửa đúng chỗ liên quan trước khi đụng Phần C.
+
+Nếu người dùng xác nhận cả 7 hạng mục đã ổn, bắt đầu Phần C — tích hợp `mau_vi_tri` vào route ký
+thật (`api/documents/sign/route.ts`), khoá cứng vị trí ("vị trí CỨNG", đã chốt trước đó). Đọc kỹ
+TOÀN BỘ route này trước khi thiết kế (không chỉ đoạn `mergeQrBox`), xác nhận giả thuyết tái dùng
+`van_ban_documents.placement_ky` thay vì xây bảng `cau_hinh_tai_lieu.dinh_tuyen` mới. Nhớ xử lý
+thêm 2 việc mới: khung `ghi_chu` (cần vẽ nội dung `van_ban_documents.ghi_chu` lên PDF/thêm tag
+Office mới, hiện chưa có tag nào cho việc này) và `sign_as` đã chọn sẵn trong mẫu (route đọc thẳng
+từ mẫu, không cần `SignPlacementModal` hỏi lại qua radio group nữa).
+
+BẮT BUỘC hỏi phạm vi qua `AskUserQuestion` trước khi code (áp dụng cho văn bản đang dở dang hay
+chỉ văn bản mới?), và verify kỹ (test tay đầy đủ hoặc đối chiếu byte-identical như Giai đoạn 1
+refactor `src/lib/signing/`) trước khi coi là xong — đây là route ký thật đang chạy production.
+
+Item "click chữ ký xem bằng chứng" (PAdES/verify cho Văn bản) vẫn CHƯA được scope — nếu người
+dùng muốn làm, đó là 1 sáng kiến riêng cần bàn phạm vi từ đầu, không tự ý gộp vào Phần C.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Xác nhận (2026-09-03, cuối phiên) — Người dùng đã test tay trên `npm run dev`, cả 9 mục
+checklist PASS đúng như kế hoạch
+
+Người dùng xác nhận đã test trên localhost và kết quả khớp đúng kế hoạch — **coi 7 hạng mục ở
+mục "Cập nhật (2026-09-03, tiếp)" ngay phía trên là HOÀN TẤT**, không cần test lại: lưới vuông
+nhỏ hơn, sidebar kéo tới ~50% màn hình, màu khung đa sắc theo từng slot "Ký bước", khung "Ghi
+chú" đặt/lưu được, dropdown tiền tố KT/TM/TL/TUQ lưu đúng vào mẫu, badge "Chờ BẠN ký/duyệt" hiển
+thị đúng theo người xem ở cả trang chi tiết lẫn trang danh sách, nút "In" đã biến mất và route
+`/dashboard/documents/print/` trả 404.
+
+### Việc tiếp theo cho session sau — chỉ còn Phần C (chưa bắt đầu)
+
+Toàn bộ phần "an toàn" (UI mẫu vị trí + badge + xoá nút In) đã xong và đã verify bằng tay. Việc
+DUY NHẤT còn lại trong lộ trình module Văn bản là **Phần C — tích hợp `mau_vi_tri` vào route ký
+thật, khoá cứng vị trí ("vị trí CỨNG")** — xem đầy đủ nội dung ở mục "Kế hoạch phiên sau — Phần
+C..." ngay phía trên, tóm tắt lại đúng 4 điểm phải làm theo thứ tự khi bắt đầu:
+
+1. Đọc kỹ TOÀN BỘ `api/documents/sign/route.ts` (không chỉ đoạn `mergeQrBox`) trước khi thiết kế
+   — xác nhận giả thuyết tái dùng cột `van_ban_documents.placement_ky` có sẵn thay vì xây bảng
+   `cau_hinh_tai_lieu.dinh_tuyen` mới.
+2. BẮT BUỘC hỏi phạm vi qua `AskUserQuestion` trước khi code — áp dụng "vị trí CỨNG" cho văn bản
+   đang dở dang hay chỉ văn bản mới soạn sau khi có tính năng.
+3. Khi thiết kế, nhớ xử lý thêm 2 việc phát sinh từ hạng mục 4/5 vừa xong (không có trong scope
+   Phần C gốc ban đầu): khung `ghi_chu` (vẽ nội dung `van_ban_documents.ghi_chu` lên đúng vị trí
+   trên PDF; với Office cần thêm tag mới, ví dụ `{{GHI_CHU}}`, hiện chưa tồn tại) và `sign_as` đã
+   chọn sẵn trong mẫu (route đọc thẳng từ `mau_vi_tri`, bỏ hẳn bước `SignPlacementModal` hỏi lại
+   qua radio group).
+4. Verify kỹ trước khi coi là xong — test tay đầy đủ hoặc đối chiếu byte-identical (mirror cách
+   đã làm ở Giai đoạn 1 refactor `src/lib/signing/`) — đây là ROUTE KÝ THẬT ĐANG CHẠY PRODUCTION.
+
+Item "click chữ ký xem bằng chứng" (PAdES/verify cho Văn bản) vẫn ngoài phạm vi, chưa scope —
+không tự ý gộp vào Phần C nếu chưa hỏi lại người dùng.
+
+### Prompt gợi ý để mở đầu session tiếp theo
+
+```
+Đọc mục "Xác nhận (2026-09-03, cuối phiên)" và "Kế hoạch phiên sau — Phần C: tích hợp mau_vi_tri
+(kèm sign_as/ghi_chu mới) vào route ký thật" trong CLAUDE.md (2 mục cuối file). 7 hạng mục UI/
+badge/xoá nút In ĐÃ HOÀN TẤT và ĐÃ ĐƯỢC NGƯỜI DÙNG XÁC NHẬN TEST TAY PASS trên npm run dev —
+KHÔNG cần test lại trừ khi tôi (người dùng) báo lỗi mới.
+
+Bắt đầu ngay Phần C — tích hợp `mau_vi_tri` vào route ký thật (`api/documents/sign/route.ts`),
+khoá cứng vị trí ("vị trí CỨNG", đã chốt từ trước). Đọc kỹ TOÀN BỘ route này trước khi thiết kế
+(không chỉ đoạn `mergeQrBox`), xác nhận giả thuyết tái dùng `van_ban_documents.placement_ky`
+thay vì xây bảng `cau_hinh_tai_lieu.dinh_tuyen` mới. Nhớ xử lý thêm khung `ghi_chu` (vẽ nội dung
+`van_ban_documents.ghi_chu` lên PDF/thêm tag Office mới) và `sign_as` đã chọn sẵn trong mẫu
+(route đọc thẳng từ mẫu, không cần `SignPlacementModal` hỏi lại qua radio group nữa).
+
+BẮT BUỘC hỏi phạm vi qua `AskUserQuestion` trước khi code (áp dụng cho văn bản đang dở dang hay
+chỉ văn bản mới?), và verify kỹ (test tay đầy đủ hoặc đối chiếu byte-identical như Giai đoạn 1
+refactor `src/lib/signing/`) trước khi coi là xong — đây là route ký thật đang chạy production.
+
+Chỉ dùng npx tsc --noEmit + npx eslint để tự kiểm tra — không chạy npm run build khi không chắc
+dev server của tôi có đang chạy song song hay không.
+```
+
+## Cập nhật (2026-09-04) — Phần C ĐÃ CODE XONG: mẫu vị trí ký được áp vào route ký thật ("vị trí CỨNG")
+
+Việc cuối cùng của lộ trình module Văn bản (xem mục "Xác nhận (2026-09-03, cuối phiên)" ngay
+trên) đã hoàn tất. Chi tiết đầy đủ: `.claude/rules/22-documents-module.md` mục **"Vị trí CỨNG —
+áp mẫu `mau_vi_tri` vào route ký thật"** — không lặp lại ở đây. Tóm tắt các điểm dễ quên:
+
+- **Không cần migration** — `placement_ky` là JSONB tự do, cột `ghi_chu` đã có sẵn.
+- **Hệ toạ độ của `mau_vi_tri` trùng khớp tuyệt đối với pdf-lib** (point, gốc dưới-trái) → ánh
+  xạ thuần, không quy đổi. Giả thuyết "tái dùng `placement_ky`, không cần bảng
+  `cau_hinh_tai_lieu.dinh_tuyen`" đã được xác nhận ĐÚNG.
+- **Tách 2 luồng tự động theo cờ `tu_mau`, kiểm theo TỪNG BƯỚC** — `stampPdfStep` cũ không sửa
+  1 dòng nào; văn bản gửi ký trước 2026-09-04 chạy y hệt như cũ.
+- **Phát sinh ngoài phạm vi ban đầu**: đã tách công tắc gộp "Hiện tên & chức vụ" thành **2 công
+  tắc ĐỘC LẬP** ở màn cài đặt vị trí (`show_name` / `show_chuc_vu`), theo yêu cầu người dùng —
+  file PDF gốc có thể đã in sẵn tên và/hoặc chức vụ, chỉ người soạn thảo biết cần đè cái nào.
+  Mẫu lưu trước 2026-09-04 chỉ có `show_name` → mọi nơi đọc PHẢI fallback
+  `show_chuc_vu ?? show_name`.
+
+### Đã tự kiểm chứng (không chỉ tsc/eslint)
+
+`npx tsc --noEmit` sạch; `npx eslint` trên 5 file đã sửa/thêm — 0 lỗi, chỉ 2 warning `<img>`
+pre-existing. Không chạy `npm run build`.
+
+Ngoài ra đã chạy **2 bộ test gọi thẳng code thật** (`node --experimental-strip-types` + resolve
+hook map `@/` → `src/`, import trực tiếp `src/lib/signing/apply-template.ts`, KHÔNG test bản
+copy) — tổng **42/42 assertion PASS**:
+
+- **24 assertion logic ánh xạ**: id nhân bản không liên tục (`ky_buoc`, `__ban2`, `__ban4` →
+  bước 1,2,3); cắt theo `so_buoc_tong`; `phe_duyet` gộp bản gốc + nhân bản vào 1 entry;
+  fallback `show_chuc_vu` cho mẫu cũ; entry legacy KHÔNG bị nhận nhầm là mẫu; `resolveAnchorPages`
+  (dau/cuoi/moi_trang/clamp/PDF 0 trang).
+- **18 assertion vẽ PDF thật**: dựng PDF 3 trang, gọi `stampPdfWithTemplate`, rồi **trích text
+  bằng pdfjs** (công cụ độc lập, không tin code tự đánh giá chính nó) để xác nhận tên/chức vụ/
+  tiền tố/ghi chú/ngày ký nằm ĐÚNG trang và KHÔNG lem sang trang khác; 4 tổ hợp công tắc
+  tên/chức vụ; ký nháy `moi_trang`; nhân bản khung phê duyệt ở 2 trang.
+
+### Kẽ hở đã vá khi rà kịch bản hỗn hợp
+
+Mẫu thiếu khung cho đúng 1 bước → bước đó rơi về luồng cũ, nhưng `placement_ky.qr` lúc này có
+shape `{tu_mau, boxes}` chứ không phải `QrBox` → `stampPdfStep` sẽ đọc `qrBox?.x` ra `undefined`
+và vẽ QR **thứ hai** ở góc trên-phải. Đã vá trong `performFileStamp`: quy đổi entry mẫu về
+`QrBox` (lấy `boxes[0]`) trước khi truyền cho nhánh cũ.
+
+### CHƯA test tay trên trình duyệt thật
+
+Toàn bộ verify ở trên là ở tầng logic/PDF, **chưa chạy qua UI thật**. Checklist 8 bước (luồng
+khoá cứng, 2 công tắc độc lập, nhân bản khung, neo trang, **không hồi quy văn bản đang dở
+dang**, Office, fallback thiếu slot, trả về rồi gửi lại) nằm trong plan file
+`C:\Users\Software\.claude\plans\vi-c-l-m-agile-crab.md` mục "Verification".
+
+Việc "click chữ ký xem bằng chứng" (PAdES cho Văn bản) vẫn **ngoài phạm vi, chưa scope**.
+
+## Cập nhật (2026-09-04, tiếp) — Fix ngày phê duyệt lệch múi giờ + Loại VB tùy chọn khi không có mã
+
+2 việc phát sinh khi test tay Phần C. Chi tiết đầy đủ:
+`.claude/rules/22-documents-module.md` mục **"Ngày phê duyệt theo múi giờ nhà máy + Loại VB tùy
+chọn khi không có mã"**. Tóm tắt các điểm dễ quên:
+
+- **Bug thật đã fix**: `api/documents/sign/route.ts` tính "ngày hôm nay" bằng
+  `toISOString().slice(0,10)` (UTC) và `toLocaleDateString("vi-VN")` (không set `timeZone`) →
+  nhà máy ở UTC+7, thao tác trong khoảng **00:00–06:59 sáng** bị ghi nhận **lệch 1 ngày về
+  trước**, cả trong DB (`ngay_phe_duyet`) lẫn ngày in lên PDF/tag Office. Đã đo bằng code thật:
+  sai đúng **7/24** khung giờ.
+- Fix bằng 2 helper mới trong `src/lib/date-utils.ts`: `getFactoryTodayISO()` /
+  `formatFactoryDateVN()` + hằng `FACTORY_TIME_ZONE = "Asia/Ho_Chi_Minh"`.
+- ⚠️ **`getTodayISODate()` cũ cùng lỗi nhưng CỐ Ý không sửa** (module KPI đang dùng để so ngày,
+  đổi sẽ ảnh hưởng ngoài phạm vi) — đã ghi chú cảnh báo ngay cạnh hàm. **Nếu sau này rà lỗi ngày
+  ở module khác, đây là điểm cần xem đầu tiên.**
+- `loai_van_ban` thành **tùy chọn ở trang Upload ký tay** khi tick "không có mã" (luồng đó không
+  dùng mẫu vị trí ký), **giữ bắt buộc ở trang Soạn thảo** (là khóa chọn `mau_vi_tri`). Không cần
+  migration — cột đã nullable.
+- **Không phải bug**: văn bản Upload ký tay không có nút "Gửi ký"/màn cài đặt vị trí — luồng đó
+  lưu thẳng `da_phe_duyet`, không có bước ký số. Người cài đặt vị trí của luồng ký số là **người
+  soạn thảo**.
+
+### Đã tự kiểm chứng
+
+`npx eslint` trên 4 file đã sửa: **exit 0, sạch tuyệt đối**. `npx tsc --noEmit`: **không có lỗi
+nào ở file đã sửa** (7 lỗi còn lại đều thuộc `src/app/dashboard/output/page.tsx` +
+`src/lib/output-pdf.ts` — xem cảnh báo ở mục dưới).
+
+Test helper múi giờ bằng cách **gọi thẳng `src/lib/date-utils.ts`** (`node
+--experimental-strip-types` + resolve hook), chạy **2 lần với `TZ=UTC` (mô phỏng Vercel) và TZ
+máy** — **16/16 assertion PASS** cả 2 lần: 6 mốc giờ trong ngày đều ra đúng ngày địa phương,
+chứng minh code cũ sai đúng 7/24 khung giờ, và xác nhận `getTodayISODate()` cũ không bị đổi.
+
+### ⚠️ File dở dang NGOÀI PHẠM VI — cần người dùng xử lý
+
+`src/app/dashboard/output/{page.tsx,_components/*}` và `src/lib/output-pdf.ts` đang có **7 lỗi
+TypeScript** (`Cannot find name 'closeDayDetail' / 'ArrowLeft' / 'bulkDeleting' /
+'toggleAllDetailRows'`, `'a' is possibly null`). Các file này **không thuộc phiên nào của module
+Văn bản** và không có trong `git status` lúc bắt đầu phiên trước — nhiều khả năng là việc đang
+làm dở của người dùng ở module Sản lượng. **Cố ý không đụng, không commit.** Cần hoàn tất hoặc
+hoàn tác trước khi build/deploy, nếu không `npm run build` sẽ fail.
+
+## Cập nhật (2026-09-05) — Module Văn bản: ĐÃ CODE XONG việc 1→5, chưa test tay
+
+Chi tiết kỹ thuật đầy đủ: `.claude/rules/22-documents-module.md` — 5 mục mới ở cuối file
+("Người ký ĐỌC được PDF…", "Khung Ghi chú = ô Ý KIẾN CHỈ ĐẠO…", "Tag ngày ký…", "Việc 4 & 5",
+"Tự kiểm chứng"). Tóm tắt các điểm dễ quên:
+
+| # | Việc | Điểm cốt lõi |
+|---|---|---|
+| 1 | Người ký đọc PDF + xê dịch 3 khối | Module thuần mới `src/lib/signing/template-layout.ts` (**không import pdf-lib**) — UI và server dùng **chung một công thức**. Server **bắt buộc tự kẹp** toạ độ (`applySignerLayoutToEntry`), không tin client |
+| 2 | Khung Ghi chú = ý kiến lãnh đạo | Cột mới `ghi_chu_phe_duyet`; vẽ ở bước **phê duyệt** bằng `drawTextWrapped()` (wrap nhiều dòng); chữ ký nháy góc trên-phải TRONG khung, tắt khung thì mất theo; chưa nhập & chưa tắt → **chặn ký cả 2 tầng** |
+| 3 | Tag ngày ký | Cột mới `ky_phe_duyet_at`; tick vẽ bằng **2 `drawLine`** (không dùng ký tự `✓` — rủi ro thiếu glyph), chữ xám mờ có giây |
+| 4 | Dropdown neo trang | Hiện cả khi khung đã đặt; `changeRoleAnchor()` nắn luôn `role.page` theo neo |
+| 5 | Nhãn nút | PDF → "Cài đặt vị trí & Gửi ký"; Office giữ "Gửi ký" |
+
+**Quy tắc 2 TẦNG (đổi nghĩa `show_name`/`show_chuc_vu` của mẫu)**: mẫu **bật** = "CHO PHÉP hiển
+thị", người ký tự tắt/mở; mẫu **tắt** = người ký không thấy và không bật lên được. Lựa chọn thực
+tế của người ký lưu trong `layout` của từng khung.
+
+**Tương thích ngược**: entry không có `layout` (văn bản ký trước bản này) rơi về đúng công thức
+chia dải cũ — đã verify bằng số (`y = box.y + height*0.26`), không đổi 1 pixel.
+
+### Migration cần chạy
+
+`supabase/migrations/20260904_van_ban_ghi_chu_phe_duyet.sql` (2 cột `ghi_chu_phe_duyet TEXT`,
+`ky_phe_duyet_at TIMESTAMPTZ`) — **CHƯA CHẠY**. Việc 1/4/5 không cần migration.
+
+### Đã tự kiểm chứng — 103 assertion, KHÔNG chỉ tsc/eslint
+
+`npx tsc --noEmit` sạch **toàn repo** (0 lỗi — 7 lỗi module Sản lượng nêu ở mục dưới nay đã hết);
+`npx eslint` 0 lỗi. Cộng thêm 2 bộ test gọi **thẳng code thật** qua
+`node --experimental-strip-types`: 67 assertion logic kẹp toạ độ/2 tầng/công thức mặc định, và
+36 assertion trên **PDF thật** (trích lại text bằng pdfjs — công cụ độc lập) xác nhận mọi thứ vẽ
+ra đều nằm trong khung kể cả khi client cố gửi toạ độ ngoài vùng.
+
+### CHƯA test tay trên trình duyệt
+
+1. Chạy migration trước.
+2. **Việc 1**: soạn văn bản PDF nhiều trang → đặt khung → ký từng bước: sau PIN phải **thấy PDF
+   đọc được**, 3 khối kéo/resize riêng được, **không kéo ra ngoài khung** (viền xanh đứt); PDF
+   sau ký khớp đúng vị trí đã kéo. Thử gọi thẳng API với toạ độ ngoài vùng → server phải tự kẹp.
+   Mẫu TẮT Tên → người ký không thấy khối Tên và không bật lên được; mẫu BẬT → tắt/mở tự do.
+3. **Việc 2**: mẫu có khung Ghi chú → bước phê duyệt hiện ô nhập; bỏ trống và không tắt → **bị
+   chặn kèm banner**; nhập 2-3 dòng → wrap đúng trong khung, có chữ ký nháy nhỏ góc trên-phải,
+   chữ **không đè** lên nó; bấm "Không ghi ý kiến" → không vẽ cả ghi chú lẫn ký nháy. Mẫu KHÔNG
+   đặt khung Ghi chú → phê duyệt không hiện ô nào.
+4. **Việc 3**: sau phê duyệt, PDF hiện tick xanh + "Văn bản được ký dd/mm/yyyy hh:mm:ss" xám mờ,
+   giờ khớp thời điểm bấm ký (kiểm cả khung 00:00–06:59 sáng để chắc múi giờ đúng).
+5. **Việc 4**: đặt 1 khung xong, đổi neo trang sang "Mọi trang" ngay tại chỗ; lưu rồi mở lại
+   thấy đúng.
+6. **Việc 5**: văn bản PDF thấy "Cài đặt vị trí & Gửi ký"; văn bản DOCX vẫn "Gửi ký".
+7. **Không hồi quy**: văn bản dở dang từ trước (không có `_mau`) ký tiếp bình thường bằng canvas
+   kéo-thả tự do như cũ; văn bản Upload ký tay không đổi.
+
+### Việc 6 — chưa làm (đã chốt để riêng 1 phiên)
+
+PAdES + trang verify cho Văn bản. Lưu ý: Văn bản dùng hệ ký RIÊNG, **không có bản ghi
+`nguoi_ky`** nên không dùng lại được `/dashboard/sign-verify/[nguoiKyId]`; bắt buộc dùng
+incremental update (`@cantoo/pdf-lib` + `commit()`) theo bài học "bug 74.8MB".
+
+---
+
+## Cập nhật (2026-09-05, tiếp) — 4 cải tiến sau khi test tay việc 1→5 PASS
+
+Người dùng test tay việc 1→5 trên localhost, xác nhận **pass**, rồi nêu 4 điểm cải tiến. Tất cả
+đều xoay quanh cùng một nguyên tắc: **mọi thứ hệ thống đóng dấu lên PDF đều phải cho người ký
+NHÌN THẤY và XÊ DỊCH được, nhưng chỉ TRONG khung người soạn thảo đã cài đặt.** Trước đợt này
+chỉ 3 khối (ảnh chữ ký / tên / chức danh) đạt chuẩn đó.
+
+Chi tiết kỹ thuật đầy đủ: `.claude/rules/22-documents-module.md` — 3 mục đã cập nhật (tiền tố
+thành khối con thứ 4, khung Ghi chú thành vùng cho phép 2 khối, khung QR) + mục "Việc 4 & 5"
+(nhãn nút) + "Tự kiểm chứng". Tóm tắt các điểm dễ quên:
+
+| # | Cải tiến | Điểm cốt lõi |
+|---|---|---|
+| 1 | Nhãn nút | PDF → **"Vào cài đặt vị trí"** (bấm là VÀO màn cài đặt, việc gửi ký chỉ xảy ra sau khi xác nhận vị trí) |
+| 2 | QR kéo/resize | Người ký **ĐẦU TIÊN** chỉnh trong khung QR mẫu, các lượt sau chỉ xem — route ghi **đúng 1 lần** (`mergeTemplateQrLayout`, mirror `mergeQrBox` cũ) |
+| 3 | Khung Ghi chú | Thành "vùng cho phép" chứa **2 khối kéo/resize**: ô text + chữ ký nháy — để ý kiến dài không đè lên chữ sẵn có của văn bản |
+| 4 | Tiền tố KT./TM. | Khối con **thứ 4** nằm TRONG khung ký (trước vẽ cứng NGOÀI mép trên), kéo + **tắt được**; tắt trên mọi khung ⇒ route ghi `sign_as = "none"` (timeline cũng không hiện "KT.") |
+
+**Không cần migration** — `placement_ky` là JSONB tự do, chỉ thêm field `layout` optional vào
+từng box.
+
+**Đổi bố cục mặc định có chủ đích**: khung CÓ `sign_as` giờ chia thêm dải trên 16% cho tiền tố,
+3 khối còn lại co xuống. Khung **không** có `sign_as` ⇒ không đổi 1 pixel.
+
+### Đã tự kiểm chứng — 158 assertion (102 logic + 56 PDF thật)
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` 0 lỗi (4 warning `<img>`, đều pre-existing hoặc
+do khối ký nháy mới thay thế khối cũ). Cộng 2 bộ test gọi **thẳng code thật** qua
+`node --experimental-strip-types` — trích lại text/ảnh bằng **pdfjs** (công cụ độc lập, không
+tin code tự đánh giá chính nó). Tất cả PASS. Không chạy `npm run build`.
+
+### CHƯA test tay trên trình duyệt
+
+1. **Nút**: văn bản PDF hiện "Vào cài đặt vị trí"; DOCX vẫn "Gửi ký".
+2. **QR**: ký bước 1 → **thấy QR thật**, kéo/resize (khoá tỉ lệ) trong vùng tím; ký xong mở lại
+   ở bước 2 → QR **chỉ xem**, nhãn "QR đã chốt ở lượt ký trước", đúng vị trí bước 1 đã chỉnh;
+   PDF sau ký khớp.
+3. **Tiền tố**: mẫu chọn KT cho Phê duyệt → thấy khối `KT.` viền cam kéo được **trong khung**;
+   tắt → PDF không có "KT." **và** timeline cũng không hiện "KT.".
+4. **Ghi chú**: nhập ý kiến dài → kéo/resize ô text né chữ trên văn bản, kéo ký nháy sang chỗ
+   khác → PDF đúng vị trí đã kéo, chữ tự xuống dòng, không đè ký nháy. Bấm "Không ghi ý kiến" →
+   cả 2 khối biến mất.
+5. **Không hồi quy**: văn bản dở dang không có `_mau` vẫn ký bằng canvas kéo-thả tự do như cũ;
+   văn bản Upload ký tay không đổi.
+6. Migration `20260904_van_ban_ghi_chu_phe_duyet.sql` (từ đợt việc 1→5) — xác nhận đã chạy.
+
+---
+
+## Prompt mở đầu session sau — Việc 6 (PAdES + trang verify cho Văn bản)
+
+```
+Đọc mục "Cập nhật (2026-09-05)" và "Cập nhật (2026-09-05, tiếp)" trong CLAUDE.md. Việc 1→5 và
+4 cải tiến sau đó đã CODE XONG (158 assertion pass, tsc/eslint sạch). Nếu tôi báo đã test tay
+xong và không có lỗi, bắt đầu việc 6; nếu tôi báo lỗi, sửa đúng chỗ liên quan trước.
+
+Việc 6: PAdES + trang verify cho module Văn bản nội bộ ("bấm vào chữ ký xem bằng chứng xác
+minh", giống module Bảo trì/Chất lượng/Điều xe đã có).
+
+Ràng buộc BẮT BUỘC phải nắm trước khi thiết kế (đã điều tra, đừng điều tra lại):
+
+1. Văn bản dùng **hệ ký RIÊNG** (`src/app/api/documents/sign/route.ts`), hoàn toàn tách biệt
+   với hệ ký dùng chung (`src/lib/signing/requests.ts`'s `signField()`). Văn bản **KHÔNG có
+   bản ghi `nguoi_ky`** ⇒ **không dùng lại được** trang `/sign-verify/[nguoiKyId]` hiện có
+   (trang đó đọc `nguoi_ky.pades_sig_index`). Cần trang verify RIÊNG cho Văn bản.
+2. Tái dùng nguyên `src/lib/signing/pades.ts` (`applyPadesSignatureToDoc`/
+   `addSignaturePlaceholderToDoc`, `hasPadesRootCa`, `diagnosePadesEnv`) và
+   `src/lib/signing/verify-pades.ts` (`verifyPadesSignature`) — 2 file này đã chạy thật trên
+   production, KHÔNG viết lại từ đầu.
+3. **Bắt buộc incremental update**: dùng `@cantoo/pdf-lib` với `forIncrementalUpdate: true` và
+   gọi `.commit()` nhiều lần trên CÙNG 1 doc sống — KHÔNG `save()` rồi reload. Đây là bài học
+   từ 2 bug đã fix: "bug 74.8MB" (reload nhiều lần làm dung lượng nhân đôi mỗi lượt ký) và
+   "mất chữ ký PAdES của người ký trước". Lời giải mẫu nằm sẵn trong `signField()` của
+   `src/lib/signing/requests.ts` — đọc kỹ trước khi viết.
+   ⚠️ `stampPdfWithTemplate`/`stampPdfStep` (`apply-template.ts`/`stamp-pdf.ts`) hiện dùng
+   `pdf-lib` GỐC (Hopding) + `save()` — chính là pattern đã gây bug. Phải quyết định cách
+   chuyển sang `@cantoo/pdf-lib` cho module Văn bản mà KHÔNG phá `stamp-pdf.ts` dùng chung
+   (file đó còn phục vụ ISO — xem cách `requests.ts` ép kiểu qua `PdfLibDocument` để tái dùng).
+4. `doc_approval_log` cho Văn bản đã có sẵn `content_hash` từ Giai đoạn 0 — dùng làm nguồn dữ
+   liệu cho trang verify. Cần chỗ lưu `pades_sig_index` theo TỪNG BƯỚC ký (Văn bản có nhiều
+   bước: `ky_buoc` 1..N + `phe_duyet`) — nhiều khả năng cần migration mới, hỏi phạm vi trước.
+5. Cần thêm **link annotation** trên con dấu chữ ký trỏ về trang verify — mẫu có sẵn trong
+   `signField()` (tạo `PDFArray`/dict `Annot` thủ công bằng API thấp của `@cantoo/pdf-lib`,
+   bọc try/catch, không chặn luồng ký chính).
+6. Biến môi trường `SIGN_PADES_ROOT_CA_CERT_PEM`/`SIGN_PADES_ROOT_CA_KEY_PEM` đã cấu hình sẵn
+   ở cả `.env.local` lẫn Vercel — KHÔNG tạo root CA mới. ⚠️ Giá trị dán vào Vercel phải có đủ
+   `-----BEGIN.../-----END-----` (đã từng mất 1 phiên vì thiếu 4 dòng này).
+7. Landmine đã biết: `node-forge` đoán SAI kiểu ASN.1 cho `commonName` chứa dấu tiếng Việt —
+   `pades.ts` đã ép `valueTagClass: forge.asn1.Type.UTF8`, giữ nguyên, đừng bỏ.
+
+BẮT BUỘC hỏi phạm vi qua `AskUserQuestion` trước khi code — tối thiểu: (a) áp dụng cho văn bản
+đang dở dang hay chỉ văn bản mới? (b) mỗi bước ký 1 chữ ký PAdES riêng, hay chỉ 1 "niêm phong
+hệ thống" duy nhất lúc phê duyệt xong? Đây là ROUTE KÝ THẬT ĐANG CHẠY PRODUCTION.
+
+Verify bắt buộc trước khi coi là xong: ký thật đủ các bước, tải file cuối, dùng `openssl cms
+-verify -binary -CAfile <root>` (công cụ ngoài, độc lập) xác nhận TỪNG chữ ký, và kiểm
+byte-identity giữa các lượt ký (chữ ký người trước không bị đụng).
+
+Chỉ dùng `npx tsc --noEmit` + `npx eslint` để tự kiểm tra — không chạy `npm run build`.
+```
+
+---
+
+## Kế hoạch phiên sau (2026-09-04) — Module Văn bản: 6 việc còn lại sau khi test tay Phần C
+
+**CHƯA CODE GÌ cho 6 việc này.** Kế hoạch chi tiết đã duyệt nằm ở
+`C:\Users\Software\.claude\plans\vi-c-l-m-agile-crab.md` (đọc file đó trước khi bắt đầu — có đầy
+đủ hướng làm từng việc, file cần sửa, và checklist verify). Dưới đây là bản tóm tắt để không phải
+điều tra lại.
+
+### Đã xong và người dùng đã test tay xác nhận
+
+- **Phần C "vị trí CỨNG"** — người dùng xác nhận *"Các vị trí nhớ rất tốt"*.
+- **`loai_van_ban` tùy chọn** ở trang Upload ký tay khi tick "không có mã" — xác nhận *"bỏ require"*.
+- Tách 2 công tắc **Hiện tên** / **Hiện chức vụ**; ngày phê duyệt theo múi giờ nhà máy (code xong,
+  chưa test tay).
+
+### 6 việc cần làm, theo thứ tự ưu tiên
+
+1. **⭐ QUAN TRỌNG NHẤT — người ký phải ĐỌC được PDF và xê dịch chữ ký.** Hiện bước ký chỉ hiện
+   hộp PIN (hệ quả của Phần C), người ký không nhìn thấy nội dung văn bản. Mong muốn: sau PIN →
+   hiện canvas PDF; chữ ký/tên/chức danh đặt sẵn theo mẫu nhưng **kéo được, giới hạn CHỈ bên
+   trong khung mẫu**, và **tách thành 3 khối độc lập**. **Server bắt buộc tự kẹp toạ độ** (không
+   tin client). Tái dùng `bounds="parent"` của `DraggableBox` sẵn có.
+   - **Quy tắc bật/tắt 2 TẦNG (đã chốt, ĐỔI NGHĨA `show_name`/`show_chuc_vu`)**: mẫu **bật** →
+     người ký thấy và **tắt/mở tự do**; mẫu **tắt** → người ký **không thấy, không bật được**.
+     Tức mẫu chuyển từ *"có vẽ hay không"* sang *"có CHO PHÉP hiển thị hay không"*.
+2. **Khung "Ghi chú" đang bị hiểu SAI mục đích.** Code hiện tại in `van_ban_documents.ghi_chu`
+   (ghi chú người soạn thảo) — **sai**. Thực tế đây là ô để **lãnh đạo gõ ý kiến chỉ đạo ngay lúc
+   phê duyệt** (vd *"Phòng TCHC phối hợp NMCB tham mưu thực hiện, hạn chót 15/9/2026"*). Cần: ô
+   nhập ở modal phê duyệt (chỉ hiện khi mẫu có đặt khung), nút bật/tắt, **chưa nhập & chưa tắt thì
+   KHÔNG CHO KÝ + banner cảnh báo** (đang bị nuốt âm thầm), và **wrap nhiều dòng**.
+   - **Chữ ký nháy** của lãnh đạo nằm **cố định góc trên-phải TRONG khung Ghi chú** (không phải
+     khung chữ ký chính), dùng ảnh `chu_ky.png` thu nhỏ, **chỉ lãnh đạo phê duyệt**, **tắt khung
+     Ghi chú thì mất luôn**. Vùng wrap text phải chừa chỗ, không đè lên chữ ký nháy.
+3. **Tag ngày ký trên PDF**: thay chuỗi ngày trơn bằng **tick xanh + "Văn bản được ký
+   dd/mm/yyyy hh:mm:ss" màu xám mờ**. Cần giây → phải thêm cột timestamp (xem Migration).
+   ⚠️ Vẽ tick bằng `drawLine`, **không dùng ký tự `✓`** (font TimesNewRoman có thể thiếu glyph —
+   bài học ở `.claude/rules/14-maintenance-module.md`).
+4. **Dropdown neo trang biến mất sau khi đặt khung** (`ky/mau-vi-tri/page.tsx` ~dòng 1180-1194):
+   chỉ render trong nhánh `!role.placed`. → cho hiện cả khi đã đặt, đổi trực tiếp `role.anchor`.
+   Áp dụng **mọi vai trò**, không riêng QR.
+5. **Đổi nhãn nút "Gửi ký"** → **"Cài đặt vị trí & Gửi ký"** khi `docExt === "pdf"` (vì luôn mở
+   màn cài đặt vị trí trước); giữ "Gửi ký" cho file Office.
+6. **Bấm chữ ký xem bằng chứng xác minh** (như Bảo trì) — người dùng chọn **PAdES + trang verify
+   đầy đủ**. Việc lớn nhất, **làm riêng 1 phiên**. Lưu ý: Văn bản dùng hệ ký RIÊNG, **không có
+   bản ghi `nguoi_ky`** nên không dùng lại được `/sign-verify/[nguoiKyId]`; bắt buộc dùng
+   incremental update (`@cantoo/pdf-lib` + `commit()`) theo bài học "bug 74.8MB".
+
+### Migration cần chạy (gộp 1 file, phục vụ việc 2 và 3)
+
+```sql
+ALTER TABLE van_ban_documents
+  ADD COLUMN IF NOT EXISTS ghi_chu_phe_duyet TEXT,          -- ý kiến lãnh đạo lúc phê duyệt
+  ADD COLUMN IF NOT EXISTS ky_phe_duyet_at   TIMESTAMPTZ;   -- thời điểm ký chính xác tới giây
+```
+
+Việc 1, 4, 5 không cần migration.
+
+### ⚠️ Cảnh báo — file dở dang NGOÀI phạm vi module Văn bản
+
+`src/app/dashboard/output/{page.tsx,_components/*}` và `src/lib/output-pdf.ts` đang có **7 lỗi
+TypeScript** (`Cannot find name 'closeDayDetail' / 'ArrowLeft' / 'bulkDeleting' /
+'toggleAllDetailRows'`, `'a' is possibly null`) — việc đang làm dở của người dùng ở **module Sản
+lượng**. **Không đụng, không commit.** `npm run build` sẽ fail cho tới khi được hoàn tất/hoàn tác.
+
+Toàn bộ code các phiên gần đây **chưa commit**.
+
+## Cập nhật (2026-09-04) — Fix bug ảnh HEIC đội lốt `.jpg` làm PDF in "Không tải được ảnh"
+
+Chi tiết đầy đủ (triệu chứng, chuỗi nhân quả, lệnh kiểm chứng, quy tắc cho code mới):
+`.claude/rules/14-maintenance-module.md` mục **"Bug ảnh HEIC đội lốt `.jpg` (2026-09-04)"**.
+Tóm tắt các điểm dễ quên:
+
+- **Nguyên nhân**: điện thoại lưu ảnh HEIC nhưng đặt đuôi `.jpg`; `File.type`/`Content-Type` đều
+  suy từ ĐUÔI TÊN FILE nên mọi lớp kiểm tra dựa vào MIME đều bị qua mặt. Khi dựng PDF, code cũ
+  tạo `data:image/jpeg;base64,<dữ liệu HEIC>` rồi gán `img.src` — data URL khai báo MIME tường
+  minh nên trình duyệt chọn nhầm bộ giải mã → `onerror` → in "Không tải được ảnh".
+- **2 ảnh trong báo cáo lỗi là 2 TẬP ẢNH KHÁC NHAU** (PDF = 3 ảnh HEIC lúc 00:06; trang chi tiết
+  = 4 ảnh JPEG lúc 00:32 sau khi người dùng gửi qua Zalo rồi tải lên lại) — đừng đi tìm "vì sao
+  cùng một ảnh mà hai nơi khác nhau".
+- **File mới `src/lib/image-format.ts`** là nguồn duy nhất nhận diện định dạng theo **magic
+  bytes** + `fetchImageForPdf()` dùng chung cho `maintenance-pdf.ts` và `export-order-pdf.ts`.
+  Thư viện `heic-to` (~3MB WASM) **nạp lười**, chỉ tải khi thật sự gặp HEIC.
+- **Quy tắc bắt buộc**: không tin `file.type`/`blob.type`/`Content-Type`; không dựng
+  `data:<mime>;base64` rồi gán `img.src` để đo kích thước ảnh (dùng `createImageBitmap`/object
+  URL); jsPDF chỉ nhận chắc chắn JPEG/PNG.
+- **Dữ liệu cũ**: `scripts/convert-heic-images.mjs` ghi đè đúng đường dẫn cũ sau khi sao lưu bản
+  gốc sang `<path>.heic.bak` → URL không đổi, **không phải sửa bảng nào**.
+- **PDF đã ký là bất biến** — biên bản `MT-020926/001` sẽ vĩnh viễn thiếu ảnh, không sửa được.
+
+### Mở rộng ra toàn bộ module (2026-09-05)
+
+Đã rà toàn `src/` và vá **mọi điểm upload ảnh**, không riêng Bảo trì — bảng đầy đủ ở
+`.claude/rules/14-maintenance-module.md` mục "Đã áp dụng cho TOÀN BỘ module". Điểm cần nhớ:
+
+- Vá ở **tầng hàm dùng chung trong `src/lib/`** (`kpi-5s.ts`, `kpi-tasks.ts`,
+  `operation-notes.ts`, `image-upload.ts`) và ở **điểm vào chung** `uploadInventoryImage` —
+  nhờ vậy mọi picker gọi chúng tự động được vá, không phải sửa từng file UI.
+- Vá inline thêm 3 nơi upload trực tiếp: Xuất hàng (ảnh xe), Kiểm soát quá trình (2 chỗ).
+- `api/storage/upload-image/route.ts` có **lớp phòng vệ cuối** phía máy chủ: nhận diện theo
+  nội dung thật, từ chối HEIC (máy chủ **không** tự chuyển đổi — tránh kéo thư viện giải mã
+  HEIC vào runtime).
+- Ảnh Kiểm soát quá trình còn được gửi Gemini OCR Po/Mo — HEIC làm hỏng cả OCR, nên phải
+  chuẩn hóa **trước** khi vừa OCR vừa upload.
+- `uploadKpiEvidenceFile` nhận cả tài liệu lẫn ảnh → dùng `prepareUploadFileIfImage` (chỉ xử
+  lý khi nội dung thật sự là ảnh, không đụng PDF/Excel).
+- Khảo sát toàn Storage: chỉ `order-files` dính (49 file, **đã chuyển đổi hết**);
+  `inventory-files`/`product-files`/`shipping-files` sạch.

@@ -127,40 +127,46 @@ export default function MaintenancePrintPage() {
         if (printType === "ly_lich") {
           // Two-step query helper for one asset
           const fetchRowsForAsset = async (aid: string, factoryId?: string): Promise<HistoryRow[]> => {
-            let recQ = supabase
-              .from("maintenance_records")
-              .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, phu_trach_bao_tri")
-              .eq("trang_thai", "da_duyet")
-              .order("ngay", { ascending: true })
-            if (factoryId) recQ = recQ.eq("factory_id", factoryId)
-            if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
-            if (filterTo) recQ = recQ.lte("ngay", filterTo)
-            const { data: recs } = await recQ
-            const recList = (recs || []) as {
-              id: string; ma_bb: string | null; hang_muc: string; ngay: string
-              nguoi_thuc_hien: string[]; nv_phu_trach: string | null; phu_trach_bao_tri: string | null
-            }[]
-            if (recList.length === 0) return []
-            const recIds = recList.map((r) => r.id)
             const { data: linesData } = await supabase
               .from("maintenance_record_lines")
               .select("id, record_id, asset_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho")
-              .in("record_id", recIds)
               .eq("asset_id", aid)
+            if (!linesData || linesData.length === 0) return []
+
+            const recIds = [...new Set(linesData.map((l) => l.record_id))]
+            const recList: {
+              id: string; ma_bb: string | null; hang_muc: string; ngay: string
+              nguoi_thuc_hien: string[]; nv_phu_trach: string | null; phu_trach_bao_tri: string | null
+            }[] = []
+
+            for (let i = 0; i < recIds.length; i += 100) {
+              const chunk = recIds.slice(i, i + 100)
+              let recQ = supabase
+                .from("maintenance_records")
+                .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, phu_trach_bao_tri")
+                .in("id", chunk)
+                .eq("trang_thai", "da_duyet")
+                .order("ngay", { ascending: true })
+              if (factoryId) recQ = recQ.eq("factory_id", factoryId)
+              if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
+              if (filterTo) recQ = recQ.lte("ngay", filterTo)
+              const { data: chunkRecs } = await recQ
+              if (chunkRecs) recList.push(...(chunkRecs as any[]))
+            }
+
+            if (recList.length === 0) return []
             const recMap = new Map(recList.map((r) => [r.id, r]))
-            const mapped: HistoryRow[] = ((linesData || []) as {
-              id: string; record_id: string; asset_id: string | null
-              ten_tb: string; ma_tb: string; noi_dung: string | null; cac_khac_phuc: string | null
-              chi_phi_dk: number; loai_tien: string; cong_tho: number
-            }[]).map((d) => {
-              const rec = recMap.get(d.record_id)!
-              return {
-                ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
-                ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
-                chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
-                nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach, phu_trach_bao_tri: rec.phu_trach_bao_tri,
-              }
-            })
+            const mapped: HistoryRow[] = linesData
+              .filter((d) => recMap.has(d.record_id))
+              .map((d) => {
+                const rec = recMap.get(d.record_id)!
+                return {
+                  ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
+                  ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
+                  chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
+                  nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach, phu_trach_bao_tri: rec.phu_trach_bao_tri,
+                }
+              })
             mapped.sort((a, b) => a.ngay.localeCompare(b.ngay))
             return mapped
           }
@@ -243,42 +249,48 @@ export default function MaintenancePrintPage() {
             })
 
             const fetchVehicleHistory = async (hangMuc: string): Promise<VehicleHistoryRow[]> => {
-              let recQ = supabase
-                .from("maintenance_records")
-                .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, factory_id")
-                .eq("hang_muc", hangMuc)
-                .eq("trang_thai", "da_duyet")
-                .eq("factory_id", v.factory_id)
-                .order("ngay", { ascending: true })
-              if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
-              if (filterTo) recQ = recQ.lte("ngay", filterTo)
-              const { data: recs } = await recQ
-              const recList = (recs || []) as {
-                id: string; ma_bb: string | null; hang_muc: string; ngay: string
-                nguoi_thuc_hien: string[]; nv_phu_trach: string | null; factory_id: string
-              }[]
-              if (recList.length === 0) return []
-              const recIds = recList.map((r) => r.id)
               const { data: linesData } = await supabase
                 .from("maintenance_record_lines")
                 .select("id, record_id, dispatch_vehicle_id, ten_tb, ma_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, cong_tho, km_dong_ho")
-                .in("record_id", recIds)
                 .eq("dispatch_vehicle_id", vid)
+              if (!linesData || linesData.length === 0) return []
+
+              const recIds = [...new Set(linesData.map((l) => l.record_id))]
+              const recList: {
+                id: string; ma_bb: string | null; hang_muc: string; ngay: string
+                nguoi_thuc_hien: string[]; nv_phu_trach: string | null; factory_id: string
+              }[] = []
+
+              for (let i = 0; i < recIds.length; i += 100) {
+                const chunk = recIds.slice(i, i + 100)
+                let recQ = supabase
+                  .from("maintenance_records")
+                  .select("id, ma_bb, hang_muc, ngay, nguoi_thuc_hien, nv_phu_trach, factory_id")
+                  .in("id", chunk)
+                  .eq("hang_muc", hangMuc)
+                  .eq("trang_thai", "da_duyet")
+                  .eq("factory_id", v.factory_id)
+                  .order("ngay", { ascending: true })
+                if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
+                if (filterTo) recQ = recQ.lte("ngay", filterTo)
+                const { data: chunkRecs } = await recQ
+                if (chunkRecs) recList.push(...(chunkRecs as any[]))
+              }
+
+              if (recList.length === 0) return []
               const recMap = new Map(recList.map((r) => [r.id, r]))
-              return ((linesData || []) as {
-                id: string; record_id: string; dispatch_vehicle_id: string | null
-                ten_tb: string; ma_tb: string; noi_dung: string | null; cac_khac_phuc: string | null
-                chi_phi_dk: number; loai_tien: string; cong_tho: number; km_dong_ho: number | null
-              }[]).map((d) => {
-                const rec = recMap.get(d.record_id)!
-                return {
-                  ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
-                  km_dong_ho: d.km_dong_ho,
-                  ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
-                  chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
-                  nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach,
-                }
-              }).sort((a, b) => a.ngay.localeCompare(b.ngay))
+              return linesData
+                .filter((d) => recMap.has(d.record_id))
+                .map((d) => {
+                  const rec = recMap.get(d.record_id)!
+                  return {
+                    ngay: rec.ngay, ma_bb: rec.ma_bb, hang_muc: rec.hang_muc,
+                    km_dong_ho: d.km_dong_ho,
+                    ten_tb: d.ten_tb, ma_tb: d.ma_tb, noi_dung: d.noi_dung, cac_khac_phuc: d.cac_khac_phuc,
+                    chi_phi_dk: d.chi_phi_dk || 0, loai_tien: d.loai_tien || "USD", cong_tho: d.cong_tho || 0,
+                    nguoi_thuc_hien: rec.nguoi_thuc_hien || [], nv_phu_trach: rec.nv_phu_trach,
+                  }
+                }).sort((a, b) => a.ngay.localeCompare(b.ngay))
             }
 
             const [maintRows, repairRows] = await Promise.all([

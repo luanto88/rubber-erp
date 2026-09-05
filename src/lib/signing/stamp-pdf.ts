@@ -185,6 +185,103 @@ export function drawTextFit(
   } catch { /* bỏ qua nếu vẽ text thất bại */ }
 }
 
+/**
+ * Xuống dòng tự động (word-wrap) trong 1 khung, canh trái, canh trên. Khác `drawTextFit()` —
+ * hàm đó chỉ vẽ ĐÚNG 1 DÒNG và tràn ra ngoài khung nếu vẫn quá rộng ở cỡ chữ nhỏ nhất.
+ *
+ * Dùng cho ý kiến chỉ đạo của lãnh đạo (khung "Ghi chú" của mẫu vị trí) — nội dung thường dài
+ * vài dòng. `reserveTopHeight` chừa sẵn một dải phía trên khung cho chữ ký nháy, để chữ không
+ * đè lên ảnh chữ ký.
+ */
+export function drawTextWrapped(
+  page: PDFPage,
+  text: string | undefined,
+  box: { x: number; y: number; width: number; height: number },
+  font: PDFFont | null,
+  opts?: {
+    maxFontSize?: number
+    minFontSize?: number
+    fontStep?: number
+    lineHeightRatio?: number
+    reserveTopHeight?: number
+    color?: { r: number; g: number; b: number }
+  },
+): void {
+  if (!text || !font) return
+  const maxFontSize = opts?.maxFontSize ?? 10
+  const minFontSize = opts?.minFontSize ?? 6
+  const fontStep = opts?.fontStep ?? 0.5
+  const lineHeightRatio = opts?.lineHeightRatio ?? 1.25
+  const reserveTop = Math.max(0, opts?.reserveTopHeight ?? 0)
+  const color = opts?.color ?? { r: 0, g: 0, b: 0 }
+
+  const availH = box.height - reserveTop
+  if (availH <= 0) return
+
+  const wrapAt = (size: number): string[] => {
+    const out: string[] = []
+    for (const paragraph of text.split(/\r?\n/)) {
+      if (!paragraph.trim()) {
+        out.push("")
+        continue
+      }
+      let line = ""
+      for (const word of paragraph.split(/\s+/)) {
+        const candidate = line ? `${line} ${word}` : word
+        if (font.widthOfTextAtSize(candidate, size) <= box.width) {
+          line = candidate
+          continue
+        }
+        if (line) out.push(line)
+        // Từ đơn dài hơn cả khung (mã số, đường dẫn...) → cắt theo ký tự.
+        let chunk = ""
+        for (const ch of word) {
+          if (font.widthOfTextAtSize(chunk + ch, size) > box.width && chunk) {
+            out.push(chunk)
+            chunk = ch
+          } else {
+            chunk += ch
+          }
+        }
+        line = chunk
+      }
+      out.push(line)
+    }
+    return out
+  }
+
+  try {
+    let fontSize = maxFontSize
+    let lines = wrapAt(fontSize)
+    while (fontSize > minFontSize && lines.length * fontSize * lineHeightRatio > availH) {
+      fontSize -= fontStep
+      lines = wrapAt(fontSize)
+    }
+
+    const lineH = fontSize * lineHeightRatio
+    const maxLines = Math.max(1, Math.floor(availH / lineH))
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines)
+      const last = lines[maxLines - 1]
+      lines[maxLines - 1] = last.length > 1 ? `${last.slice(0, -1)}…` : "…"
+    }
+
+    let cursorY = box.y + availH - fontSize
+    for (const line of lines) {
+      if (line) {
+        page.drawText(line, {
+          x: box.x,
+          y: cursorY,
+          size: fontSize,
+          font,
+          color: rgb(color.r, color.g, color.b),
+        })
+      }
+      cursorY -= lineH
+    }
+  } catch { /* bỏ qua nếu vẽ text thất bại */ }
+}
+
 /** Nhân bản chữ ký/tên sang các trang/vị trí khác — tính năng "Nhân bản khung". */
 export async function drawExtraPlacements(
   pdfDoc: PDFDocument,

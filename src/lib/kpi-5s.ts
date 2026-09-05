@@ -7,6 +7,7 @@
 // Xem đầy đủ .claude/rules/27-kpi-module.md, mục "Database Schema" (5S) + "UI".
 
 import { supabase } from "@/lib/supabase"
+import { prepareImageForUploadOrThrow } from "@/lib/image-upload"
 import { addDaysISO, getIsoWeekStart, getTodayISODate } from "@/lib/date-utils"
 import { KPI_WEEKDAY_LABEL } from "@/lib/kpi-templates"
 
@@ -364,10 +365,13 @@ export function buildKpi5sLocationUrl(locationId: string): string {
   return origin ? `${origin}${path}` : path
 }
 
-export async function uploadKpi5sEvaluationImage(factoryId: string, locationId: string, file: File): Promise<string> {
+export async function uploadKpi5sEvaluationImage(factoryId: string, locationId: string, rawFile: File): Promise<string> {
+  // Chuẩn hóa theo nội dung thật (chuyển HEIC sang JPEG) trước khi upload — xem
+  // src/lib/image-format.ts để biết lý do.
+  const file = await prepareImageForUploadOrThrow(rawFile)
   const ext = file.name.split(".").pop() || "jpg"
   const path = `${factoryId}/kpi/5s/${locationId}/evaluations/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type })
   if (error) throw error
   const { data } = supabase.storage.from("order-files").getPublicUrl(path)
   return data.publicUrl

@@ -203,13 +203,12 @@ export default function UploadVanBanPage() {
     }
   }, [factoryId, form.phong_ban, form.pham_vi, loadDonViUsers])
 
-  // Ký xác nhận (Nội bộ đơn vị) — danh sách ứng viên đủ quyền, mirror loadUnitUsers
-  // của new/page.tsx (permission=documents.create,documents.ky_phong_ban,documents.phe_duyet)
+  // Ký xác nhận (Nội bộ đơn vị) — danh sách toàn bộ nhân sự trong đơn vị, mirror loadUnitUsers của new/page.tsx
   const loadUnitSignUsers = useCallback(async (fid: string, dept: string) => {
     setUnitSignUsersLoading(true)
     try {
       const res = await fetch(
-        `/api/documents/dept-users?factoryId=${fid}&dept=${encodeURIComponent(dept)}&leadership=false&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet`,
+        `/api/documents/dept-users?factoryId=${fid}&dept=${encodeURIComponent(dept)}&leadership=false`,
       )
       setUnitSignUsers(res.ok ? ((await res.json()) as ApproverUser[]) : [])
     } catch {
@@ -331,8 +330,15 @@ export default function UploadVanBanPage() {
 
   const handleSave = async () => {
     if (!factoryId) return
-    if (!form.loai_van_ban || !form.phong_ban || !form.ten_van_ban.trim()) {
-      setSaveError("Vui lòng điền đầy đủ thông tin bắt buộc: Loại văn bản, Phòng ban, Tên văn bản.")
+    if (!form.phong_ban || !form.ten_van_ban.trim()) {
+      setSaveError("Vui lòng điền đầy đủ thông tin bắt buộc: Phòng ban, Tên văn bản.")
+      return
+    }
+    // Loại văn bản chỉ bắt buộc khi văn bản CÓ mã (nó là thành phần sinh ra mã). Văn bản không
+    // có mã thì loại chỉ còn ý nghĩa phân loại/tra cứu, cho phép để trống — luồng upload ký tay
+    // không dùng mẫu vị trí ký nên không cần loại làm khóa như trang Soạn thảo.
+    if (!khongCoMa && !form.loai_van_ban) {
+      setSaveError("Vui lòng chọn Loại văn bản (bắt buộc khi văn bản có mã).")
       return
     }
     if (!khongCoMa && !maVanBan.trim()) {
@@ -430,7 +436,7 @@ export default function UploadVanBanPage() {
         factory_id: factoryId,
         ma_van_ban: khongCoMa ? null : finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
-        loai_van_ban: form.loai_van_ban,
+        loai_van_ban: form.loai_van_ban || null,
         phong_ban: form.phong_ban,
         so_van_ban: soStr,
         nam,
@@ -690,7 +696,12 @@ export default function UploadVanBanPage() {
               {/* Loại văn bản */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại văn bản <span className="text-red-500">*</span>
+                  Loại văn bản{" "}
+                  {khongCoMa ? (
+                    <span className="font-normal text-slate-400">(không bắt buộc khi văn bản không có mã)</span>
+                  ) : (
+                    <span className="text-red-500">*</span>
+                  )}
                 </label>
                 <select
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"

@@ -3,6 +3,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { prepareImageForUpload } from "@/lib/image-upload";
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth";
 import {
   dedupeLotsByMaLo,
@@ -1121,17 +1122,30 @@ export default function ExportPage() {
     setUploadingVehicleIdx(vehicleIdx);
     try {
       const uploaded: string[] = [];
-      for (const file of toUpload) {
+      const uploadErrors: string[] = [];
+      for (const rawFile of toUpload) {
+        // Chuẩn hóa theo nội dung thật (chuyển HEIC sang JPEG) trước khi upload — ảnh xe được
+        // nhúng vào PDF biên bản xuất hàng, file HEIC sẽ không nhúng được. Xem
+        // src/lib/image-format.ts.
+        const prepared = await prepareImageForUpload(rawFile);
+        if (!prepared.ok) {
+          uploadErrors.push(`${rawFile.name}: ${prepared.reason}`);
+          continue;
+        }
+        const file = prepared.file;
         const ext = file.name.split(".").pop() ?? "jpg";
         const path = `${factoryId}/vehicles/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
         const { error } = await supabase.storage
           .from("order-files")
-          .upload(path, file, { upsert: true });
+          .upload(path, file, { upsert: true, contentType: file.type });
         if (error) continue;
         const { data: urlData } = supabase.storage
           .from("order-files")
           .getPublicUrl(path);
         uploaded.push(urlData.publicUrl);
+      }
+      if (uploadErrors.length > 0) {
+        showToast(`Một số ảnh không tải được:\n${uploadErrors.join("\n")}`, "error");
       }
       if (uploaded.length > 0) {
         setForm((p) => ({

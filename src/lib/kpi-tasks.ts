@@ -10,6 +10,7 @@
 // UUID auth.users thật, khớp `kpi_task_members.user_id`/`auth.uid()`).
 
 import { supabase } from "@/lib/supabase"
+import { prepareImageForUploadOrThrow, prepareUploadFileIfImage } from "@/lib/image-upload"
 import type { SessionUser } from "@/lib/auth"
 
 export const KPI_DUE_SOON_HOURS = 24
@@ -716,19 +717,25 @@ export async function fetchKpiTaskEvidenceLinks(taskId: string): Promise<KpiTask
 }
 
 // ── Upload bằng chứng (ảnh/file), bucket dùng chung order-files ────────────────────────
-export async function uploadKpiEvidenceImage(factoryId: string, taskId: string, file: File): Promise<string> {
+export async function uploadKpiEvidenceImage(factoryId: string, taskId: string, rawFile: File): Promise<string> {
+  // Chuẩn hóa theo nội dung thật (chuyển HEIC sang JPEG) — xem src/lib/image-format.ts.
+  const file = await prepareImageForUploadOrThrow(rawFile)
   const ext = file.name.split(".").pop() || "jpg"
   const path = `${factoryId}/kpi/tasks/${taskId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type })
   if (error) throw error
   const { data } = supabase.storage.from("order-files").getPublicUrl(path)
   return data.publicUrl
 }
 
-export async function uploadKpiEvidenceFile(factoryId: string, taskId: string, file: File): Promise<{ url: string; name: string }> {
+export async function uploadKpiEvidenceFile(factoryId: string, taskId: string, rawFile: File): Promise<{ url: string; name: string }> {
+  // Ô này nhận cả tài liệu (PDF/Excel...) lẫn ảnh — chỉ xử lý khi nội dung thật sự là ảnh.
+  const prepared = await prepareUploadFileIfImage(rawFile)
+  if (!prepared.ok) throw new Error(`${rawFile.name}: ${prepared.reason}`)
+  const file = prepared.file
   const ext = file.name.split(".").pop() || "dat"
   const path = `${factoryId}/kpi/tasks/${taskId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type || undefined })
   if (error) throw error
   const { data } = supabase.storage.from("order-files").getPublicUrl(path)
   return { url: data.publicUrl, name: file.name }

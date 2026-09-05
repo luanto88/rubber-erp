@@ -47,18 +47,21 @@ export async function GET(req: NextRequest) {
 
   // Lọc theo phòng ban (3-way match: department_id FK, tên đầy đủ, code text)
   if (dept) {
-    const deptUpper = dept.toUpperCase()
+    const deptTrim = dept.trim()
+    const deptUpper = deptTrim.toUpperCase()
 
     const { data: deptRow } = await supabaseAdmin
       .from("departments")
       .select("id, name, code")
-      .eq("code", deptUpper)
+      .or(`code.ilike.${deptUpper},name.ilike.${deptTrim}`)
       .maybeSingle()
 
     rows = rows.filter((p) => {
       if (deptRow?.id && p.department_id === deptRow.id) return true
-      if (deptRow?.name && p.department === deptRow.name) return true
-      if (p.department?.toUpperCase() === deptUpper) return true
+      if (deptRow?.name && p.department?.trim().toLowerCase() === deptRow.name.toLowerCase()) return true
+      if (deptRow?.code && p.department?.trim().toUpperCase() === deptRow.code.toUpperCase()) return true
+      if (p.department?.trim().toUpperCase() === deptUpper) return true
+      if (p.department?.trim().toLowerCase() === deptTrim.toLowerCase()) return true
       return false
     })
   }

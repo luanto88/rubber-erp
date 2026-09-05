@@ -66,6 +66,7 @@ import {
   ShoppingBag,
   FileText,
   KeyRound,
+  Fingerprint,
   ImagePlus,
   Target,
   Eye,
@@ -109,12 +110,20 @@ type FactoryOption = {
   name: string
 }
 
+type DepartmentOption = {
+  id: string
+  code: string
+  name: string
+  sort_order?: number
+}
+
 type ProfileRow = {
   id: string
   username: string
   full_name: string
   factory_id: string | null
   department: string | null
+  department_id?: string | null
   role: AppRole
   status: "pending" | "active" | "disabled"
   approved_by: string | null
@@ -159,6 +168,8 @@ type UserEditor = {
   username: string
   fullName: string
   factoryId: string
+  department?: string
+  departmentId?: string
   role: AppRole
   permissions: string[]
   mode: "approve" | "edit"
@@ -238,6 +249,8 @@ type MaintenanceStaffRow = {
   chuc_vu_chinh_quyen: string | null
   chuc_vu_kim_nhiem: string | null
   email: string | null
+  phong_ban?: string | null
+  department_id?: string | null
   active: boolean
 }
 
@@ -313,6 +326,7 @@ type RequiredNoteForm = {
   content: string
   sort_order: string
   is_active: boolean
+  mo_ta: string
 }
 
 const BO_PHAN_OPTIONS = ["Mủ tạp", "Mủ nước", "Nước thải", "Biomass", "Đội xe", "Văn phòng", "Khác"] as const
@@ -862,6 +876,27 @@ export default function SettingsPage() {
   const [maintError, setMaintError] = useState("")
   const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "staff-group" | "ext-mat"; id: string; label: string } | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
+
+  // Admin reset user password & PIN modals
+  const [adminResetPwdModal, setAdminResetPwdModal] = useState<{
+    profile: ProfileRow
+    newPassword: string
+    show: boolean
+    loading: boolean
+    error: string
+    success: string
+  } | null>(null)
+
+  const [adminResetPinModal, setAdminResetPinModal] = useState<{
+    profile: ProfileRow
+    newPin: string
+    show: boolean
+    loading: boolean
+    error: string
+    success: string
+  } | null>(null)
+
   const [staffForm, setStaffForm] = useState({
     profile_id: "",
     ten: "",
@@ -872,6 +907,8 @@ export default function SettingsPage() {
     chuc_vu_chinh_quyen: "",
     chuc_vu_kim_nhiem: "",
     email: "",
+    phong_ban: "",
+    department_id: "",
     active: true,
   })
   const [staffViewFilter, setStaffViewFilter] = useState<StaffViewFilter>("all")
@@ -902,7 +939,7 @@ export default function SettingsPage() {
   const [requiredNotesLoaded, setRequiredNotesLoaded] = useState(false)
   const [requiredNoteModal, setRequiredNoteModal] = useState<"add" | "edit" | null>(null)
   const [requiredNoteEditId, setRequiredNoteEditId] = useState<string | null>(null)
-  const [requiredNoteForm, setRequiredNoteForm] = useState<RequiredNoteForm>({ content: "", sort_order: "0", is_active: true })
+  const [requiredNoteForm, setRequiredNoteForm] = useState<RequiredNoteForm>({ content: "", sort_order: "0", is_active: true, mo_ta: "" })
   const [requiredNoteSaving, setRequiredNoteSaving] = useState(false)
   const [requiredNoteError, setRequiredNoteError] = useState("")
   const [requiredNoteDelConfirm, setRequiredNoteDelConfirm] = useState<{ id: string; label: string } | null>(null)
@@ -941,11 +978,20 @@ export default function SettingsPage() {
     setSuffixes(data || [])
   }, [])
 
+  const loadDepartments = useCallback(async () => {
+    const { data } = await supabase
+      .from("departments")
+      .select("id, code, name, sort_order")
+      .eq("is_active", true)
+      .order("sort_order")
+    setDepartments((data || []) as DepartmentOption[])
+  }, [])
+
   const loadProfiles = useCallback(async (fid: string) => {
     const { data } = await supabase
       .from("profiles")
       .select(
-        "id, username, full_name, factory_id, department, role, status, approved_by, approved_at, disabled_by, disabled_at",
+        "id, username, full_name, factory_id, department, department_id, role, status, approved_by, approved_at, disabled_by, disabled_at",
       )
       .eq("factory_id", fid)
       .order("status")
@@ -1085,10 +1131,26 @@ export default function SettingsPage() {
         if (row.is_primary) existing.primary_group_id = row.group_id
         groupMap.set(row.staff_id, existing)
       }
+
+      // Tra cứu phòng ban từ profiles liên kết để dự phòng khi bảng maintenance_staff chưa có cột
+      const linkedProfileIds = (sRes.data || []).map((s: any) => s.profile_id).filter(Boolean) as string[]
+      const profileDeptMap = new Map<string, { department: string | null; department_id: string | null }>()
+      if (linkedProfileIds.length > 0) {
+        const { data: linkedProfs } = await supabase.from("profiles").select("id, department, department_id").in("id", linkedProfileIds)
+        if (linkedProfs) {
+          for (const p of linkedProfs) {
+            profileDeptMap.set(p.id, { department: p.department || null, department_id: p.department_id || null })
+          }
+        }
+      }
+
       const nextStaff = ((sRes.data || []) as Array<Omit<MaintenanceStaffRow, "group_ids" | "group_names" | "primary_group_id">>).map((staff) => {
         const groups = groupMap.get(staff.id)
+        const linkedDept = staff.profile_id ? profileDeptMap.get(staff.profile_id) : null
         return {
           ...staff,
+          phong_ban: (staff as any).phong_ban || linkedDept?.department || null,
+          department_id: (staff as any).department_id || linkedDept?.department_id || null,
           group_ids: groups?.group_ids || [],
           group_names: groups?.group_names || [],
           primary_group_id: groups?.primary_group_id || null,
@@ -1207,7 +1269,7 @@ export default function SettingsPage() {
           if (!profileAvailability.ok) { setMaintError(profileAvailability.error); return }
         }
 
-        const payload = {
+        const payload: Record<string, any> = {
           factory_id: factoryId,
           profile_id: nextProfileId,
           ten: staffForm.ten.trim(),
@@ -1216,14 +1278,39 @@ export default function SettingsPage() {
           chuc_vu_chinh_quyen: staffForm.chuc_vu_chinh_quyen.trim() || null,
           chuc_vu_kim_nhiem: staffForm.chuc_vu_kim_nhiem.trim() || null,
           email: staffForm.email.trim() || null,
+          phong_ban: staffForm.phong_ban?.trim() || null,
+          department_id: staffForm.department_id || null,
           active: staffForm.active,
         }
-      const result = maintEditId
+      let result = maintEditId
         ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
         : await supabase.from("maintenance_staff").insert(payload).select("id").single()
+      if (
+        result.error &&
+        (result.error.code === "42703" ||
+          result.error.code === "PGRST204" ||
+          /schema cache|does not exist|42703/i.test(result.error.message))
+      ) {
+        const { phong_ban, department_id, ...fallbackPayload } = payload
+        result = maintEditId
+          ? await supabase.from("maintenance_staff").update(fallbackPayload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
+          : await supabase.from("maintenance_staff").insert(fallbackPayload).select("id").single()
+      }
       if (result.error) {
         setMaintError(isMaintenanceProfileLinkConstraintError(result.error.message) ? getMaintenanceProfileLinkConflictMessage() : result.error.message)
         return
+      }
+
+      // Đồng bộ thông tin phòng ban sang profile người dùng nếu đã liên kết
+      if (nextProfileId) {
+        await supabase
+          .from("profiles")
+          .update({
+            department: staffForm.phong_ban?.trim() || null,
+            department_id: staffForm.department_id || null,
+          })
+          .eq("id", nextProfileId)
+        void loadProfiles(factoryId)
       }
       const savedStaffId = result.data?.id
       if (savedStaffId && personnelGroupsAvailable) {
@@ -1252,6 +1339,80 @@ export default function SettingsPage() {
       setMaintModal(null)
       void loadMaintenanceData(factoryId)
     } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
+  }
+
+  const handleAdminResetPassword = async () => {
+    if (!adminResetPwdModal) return
+    if (!adminResetPwdModal.newPassword || adminResetPwdModal.newPassword.length < 6) {
+      setAdminResetPwdModal((prev) => (prev ? { ...prev, error: "Mật khẩu mới phải có ít nhất 6 ký tự" } : null))
+      return
+    }
+    setAdminResetPwdModal((prev) => (prev ? { ...prev, loading: true, error: "", success: "" } : null))
+    try {
+      const res = await fetch("/api/account/admin-reset-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: adminResetPwdModal.profile.id,
+          action: "password",
+          newPassword: adminResetPwdModal.newPassword,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setAdminResetPwdModal((prev) =>
+          prev ? { ...prev, loading: false, error: data.error || "Không thể đặt lại mật khẩu" } : null,
+        )
+        return
+      }
+      setAdminResetPwdModal((prev) =>
+        prev ? { ...prev, loading: false, success: "Đặt lại mật khẩu thành công!" } : null,
+      )
+      setTimeout(() => {
+        setAdminResetPwdModal(null)
+      }, 1500)
+    } catch (e) {
+      setAdminResetPwdModal((prev) =>
+        prev ? { ...prev, loading: false, error: e instanceof Error ? e.message : "Lỗi kết nối" } : null,
+      )
+    }
+  }
+
+  const handleAdminResetPin = async () => {
+    if (!adminResetPinModal) return
+    if (!/^\d{4,6}$/.test(adminResetPinModal.newPin)) {
+      setAdminResetPinModal((prev) => (prev ? { ...prev, error: "Mã PIN phải gồm từ 4 đến 6 chữ số" } : null))
+      return
+    }
+    setAdminResetPinModal((prev) => (prev ? { ...prev, loading: true, error: "", success: "" } : null))
+    try {
+      const res = await fetch("/api/account/admin-reset-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: adminResetPinModal.profile.id,
+          action: "pin",
+          newPin: adminResetPinModal.newPin,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setAdminResetPinModal((prev) =>
+          prev ? { ...prev, loading: false, error: data.error || "Không thể đặt lại mã PIN" } : null,
+        )
+        return
+      }
+      setAdminResetPinModal((prev) =>
+        prev ? { ...prev, loading: false, success: "Đặt lại mã PIN thành công!" } : null,
+      )
+      setTimeout(() => {
+        setAdminResetPinModal(null)
+      }, 1500)
+    } catch (e) {
+      setAdminResetPinModal((prev) =>
+        prev ? { ...prev, loading: false, error: e instanceof Error ? e.message : "Lỗi kết nối" } : null,
+      )
+    }
   }
 
   const savePersonnelGroup = async () => {
@@ -1771,6 +1932,7 @@ export default function SettingsPage() {
 
     await Promise.all([
       loadSuffixes(fid),
+      loadDepartments(),
       loadProfiles(fid),
       loadPermissions(),
       supabase
@@ -1800,7 +1962,7 @@ export default function SettingsPage() {
     ])
 
     setLoading(false)
-  }, [loadPermissions, loadProfiles, loadSuffixes])
+  }, [loadDepartments, loadPermissions, loadProfiles, loadSuffixes])
 
   useEffect(() => {
     bootstrap()
@@ -2010,6 +2172,8 @@ export default function SettingsPage() {
       chuc_vu_chinh_quyen: "",
       chuc_vu_kim_nhiem: "",
       email: "",
+      phong_ban: profile?.department || "",
+      department_id: profile?.department_id || "",
       active: true,
     })
     setMaintModal("staff")
@@ -2028,6 +2192,8 @@ export default function SettingsPage() {
       chuc_vu_chinh_quyen: staff.chuc_vu_chinh_quyen || "",
       chuc_vu_kim_nhiem: staff.chuc_vu_kim_nhiem || "",
       email: staff.email || "",
+      phong_ban: staff.phong_ban || "",
+      department_id: staff.department_id || "",
       active: staff.active,
     })
     setMaintModal("staff")
@@ -2174,6 +2340,8 @@ export default function SettingsPage() {
       username: profile.username,
       fullName: profile.full_name,
       factoryId: profile.factory_id || factoryId || "",
+      department: profile.department || "",
+      departmentId: profile.department_id || "",
       role: profile.role,
       permissions: fallback,
       mode: "approve",
@@ -2189,6 +2357,8 @@ export default function SettingsPage() {
       username: profile.username,
       fullName: profile.full_name,
       factoryId: profile.factory_id || factoryId || "",
+      department: profile.department || "",
+      departmentId: profile.department_id || "",
       role: profile.role,
       permissions: selected.length ? selected : ROLE_DEFAULTS[profile.role] || [],
       mode: "edit",
@@ -2235,6 +2405,8 @@ export default function SettingsPage() {
           ? {
               factory_id: userEditor.factoryId,
               role: userEditor.role,
+              department: userEditor.department?.trim() || null,
+              department_id: userEditor.departmentId || null,
               status: "active",
               approved_by: user.id,
               approved_at: new Date().toISOString(),
@@ -2244,6 +2416,8 @@ export default function SettingsPage() {
           : {
               factory_id: userEditor.factoryId,
               role: userEditor.role,
+              department: userEditor.department?.trim() || null,
+              department_id: userEditor.departmentId || null,
             }
 
       const { error: profileError } = await supabase
@@ -2280,8 +2454,23 @@ export default function SettingsPage() {
         return
       }
 
+      try {
+        await supabase
+          .from("maintenance_staff")
+          .update({
+            phong_ban: userEditor.department?.trim() || null,
+            department_id: userEditor.departmentId || null,
+          })
+          .eq("profile_id", userEditor.userId)
+      } catch (ignored) {}
+
       setUserEditor(null)
-      if (factoryId) await loadProfiles(factoryId)
+      if (factoryId) {
+        await Promise.all([
+          loadProfiles(factoryId),
+          loadMaintenanceData(factoryId),
+        ])
+      }
     } finally {
       setSavingUser(false)
     }
@@ -2325,18 +2514,20 @@ export default function SettingsPage() {
 
   const saveRequiredNote = async () => {
     if (!factoryId) return
-    if (isBlankNoteContent(requiredNoteForm.content)) { setRequiredNoteError("Nội dung ghi chú không hợp lệ (không được để trống hoặc là số 0)"); return }
+    if (isBlankNoteContent(requiredNoteForm.content)) { setRequiredNoteError("Mã ký hiệu kỹ thuật không hợp lệ (không được để trống hoặc là số 0)"); return }
     setRequiredNoteSaving(true)
     setRequiredNoteError("")
     try {
+      const payload: Record<string, unknown> = {
+        content: requiredNoteForm.content.trim(),
+        sort_order: Number(requiredNoteForm.sort_order) || 0,
+        is_active: requiredNoteForm.is_active,
+        mo_ta: requiredNoteForm.mo_ta?.trim() || null,
+      }
       if (requiredNoteEditId) {
         const { error: updateError } = await supabase
           .from("required_notes")
-          .update({
-            content: requiredNoteForm.content.trim(),
-            sort_order: Number(requiredNoteForm.sort_order) || 0,
-            is_active: requiredNoteForm.is_active,
-          })
+          .update(payload)
           .eq("id", requiredNoteEditId)
           .eq("factory_id", factoryId)
         if (updateError) { setRequiredNoteError(updateError.message); return }
@@ -2344,16 +2535,14 @@ export default function SettingsPage() {
         const { error: insertError } = await supabase
           .from("required_notes")
           .insert({
+            ...payload,
             factory_id: factoryId,
-            content: requiredNoteForm.content.trim(),
-            sort_order: Number(requiredNoteForm.sort_order) || 0,
-            is_active: requiredNoteForm.is_active,
           })
         if (insertError) { setRequiredNoteError(insertError.message); return }
       }
       setRequiredNoteModal(null)
       setRequiredNoteEditId(null)
-      setRequiredNoteForm({ content: "", sort_order: "0", is_active: true })
+      setRequiredNoteForm({ content: "", sort_order: "0", is_active: true, mo_ta: "" })
       void loadMasterRequiredNotes(factoryId)
     } catch (e) {
       setRequiredNoteError(e instanceof Error ? e.message : "Lỗi")
@@ -2967,7 +3156,7 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Username", "Họ tên", "Role", "Trạng thái", "Phê duyệt lúc", ""].map((head) => (
+                      {["Username", "Họ tên", "Phòng ban", "Role", "Trạng thái", "Phê duyệt lúc", ""].map((head) => (
                         <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
                           {head}
                         </th>
@@ -2979,6 +3168,7 @@ export default function SettingsPage() {
                       <tr key={profile.id} className="row-hover">
                         <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
+                        <td className="px-4 py-3 text-slate-600 font-medium">{profile.department || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{profile.role}</td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
@@ -2989,18 +3179,56 @@ export default function SettingsPage() {
                           {profile.approved_at ? new Date(profile.approved_at).toLocaleString("vi-VN") : "—"}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             {canEditPermissions && (
                               <button
                                 onClick={() => openEditUserModal(profile)}
+                                title="Sửa thông tin & phân quyền"
                                 className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
                               >
                                 <Edit2 size={13} />
                               </button>
                             )}
+                            {(isAdmin || canApproveUsers) && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    setAdminResetPwdModal({
+                                      profile,
+                                      newPassword: "",
+                                      show: false,
+                                      loading: false,
+                                      error: "",
+                                      success: "",
+                                    })
+                                  }
+                                  title="Đặt lại mật khẩu nhanh"
+                                  className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-lg transition-colors"
+                                >
+                                  <KeyRound size={13} />
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setAdminResetPinModal({
+                                      profile,
+                                      newPin: "",
+                                      show: false,
+                                      loading: false,
+                                      error: "",
+                                      success: "",
+                                    })
+                                  }
+                                  title="Đặt lại mã PIN ký số nhanh"
+                                  className="p-1.5 hover:bg-purple-50 text-purple-600 rounded-lg transition-colors"
+                                >
+                                  <Fingerprint size={13} />
+                                </button>
+                              </>
+                            )}
                             {canApproveUsers && (
                               <button
                                 onClick={() => disableUser(profile)}
+                                title="Khóa tài khoản"
                                 className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
                               >
                                 <Lock size={13} />
@@ -3024,7 +3252,7 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Username", "Họ tên", "Role", "Khóa lúc", ""].map((head) => (
+                      {["Username", "Họ tên", "Phòng ban", "Role", "Khóa lúc", ""].map((head) => (
                         <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
                           {head}
                         </th>
@@ -3034,7 +3262,7 @@ export default function SettingsPage() {
                   <tbody className="divide-y divide-slate-100">
                     {disabledUsers.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                           Không có tài khoản bị khóa
                         </td>
                       </tr>
@@ -3043,20 +3271,59 @@ export default function SettingsPage() {
                         <tr key={profile.id} className="row-hover">
                           <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
+                          <td className="px-4 py-3 text-slate-600 font-medium">{profile.department || "—"}</td>
                           <td className="px-4 py-3 text-slate-500">{profile.role}</td>
                           <td className="px-4 py-3 text-slate-500">
                             {profile.disabled_at ? new Date(profile.disabled_at).toLocaleString("vi-VN") : "—"}
                           </td>
                           <td className="px-4 py-3">
-                            {canApproveUsers && (
-                              <button
-                                onClick={() => openApproveModal(profile)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
-                              >
-                                <Unlock size={13} />
-                                Mở khóa
-                              </button>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {(isAdmin || canApproveUsers) && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      setAdminResetPwdModal({
+                                        profile,
+                                        newPassword: "",
+                                        show: false,
+                                        loading: false,
+                                        error: "",
+                                        success: "",
+                                      })
+                                    }
+                                    title="Đặt lại mật khẩu nhanh"
+                                    className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-lg transition-colors"
+                                  >
+                                    <KeyRound size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      setAdminResetPinModal({
+                                        profile,
+                                        newPin: "",
+                                        show: false,
+                                        loading: false,
+                                        error: "",
+                                        success: "",
+                                      })
+                                    }
+                                    title="Đặt lại mã PIN ký số nhanh"
+                                    className="p-1.5 hover:bg-purple-50 text-purple-600 rounded-lg transition-colors"
+                                  >
+                                    <Fingerprint size={13} />
+                                  </button>
+                                </>
+                              )}
+                              {canApproveUsers && (
+                                <button
+                                  onClick={() => openApproveModal(profile)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
+                                >
+                                  <Unlock size={13} />
+                                  Mở khóa
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3205,18 +3472,19 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Tên", "Tài khoản", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
+                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredMaintStaff.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
                     ) : filteredMaintStaff.map((s) => (
                       <tr key={`sys-${s.id}`} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
+                        <td className="px-4 py-3 text-slate-600">{s.phong_ban || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
@@ -4119,15 +4387,15 @@ export default function SettingsPage() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
             <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileText size={16} className="text-amber-600" />
-                <span className="font-extrabold text-slate-700">Ghi chú bắt buộc</span>
-                <span className="text-xs text-slate-400 ml-1">({requiredNotes.length} ghi chú)</span>
+                <Tag size={16} className="text-amber-600" />
+                <span className="font-extrabold text-slate-700">Ký hiệu kỹ thuật</span>
+                <span className="text-xs text-slate-400 ml-1">({requiredNotes.length} ký hiệu)</span>
               </div>
               {canManageSettings && (
                 <button
                   onClick={() => {
                     setRequiredNoteEditId(null)
-                    setRequiredNoteForm({ content: "", sort_order: String(requiredNotes.length + 1), is_active: true })
+                    setRequiredNoteForm({ content: "", sort_order: String(requiredNotes.length + 1), is_active: true, mo_ta: "" })
                     setRequiredNoteError("")
                     setRequiredNoteModal("add")
                   }}
@@ -4143,15 +4411,15 @@ export default function SettingsPage() {
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : requiredNotes.length === 0 ? (
                 <div className="p-8 text-center text-slate-400">
-                  <FileText size={32} className="mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Chưa có ghi chú dùng chung nào</p>
+                  <Tag size={32} className="mx-auto mb-2 opacity-30 text-amber-500" />
+                  <p className="text-sm">Chưa có ký hiệu kỹ thuật nào</p>
                 </div>
               ) : (
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Nội dung", "Thứ tự", "Trạng thái", ""].map((head) => (
+                      {["Mã ký hiệu", "Mô tả / Ý nghĩa", "Thứ tự", "Trạng thái", ""].map((head) => (
                         <th key={head} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
                           {head}
                         </th>
@@ -4161,7 +4429,14 @@ export default function SettingsPage() {
                   <tbody className="divide-y divide-slate-100">
                     {requiredNotes.map((item) => (
                       <tr key={item.id} className="row-hover">
-                        <td className="px-4 py-3 text-slate-700 font-medium">{item.content}</td>
+                        <td className="px-4 py-3 font-medium">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-xs">
+                            {item.content}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {item.mo_ta || <span className="text-slate-300 italic">—</span>}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{item.sort_order}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${item.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
@@ -4174,7 +4449,7 @@ export default function SettingsPage() {
                               <button
                                 onClick={() => {
                                   setRequiredNoteEditId(item.id)
-                                  setRequiredNoteForm({ content: item.content, sort_order: String(item.sort_order), is_active: item.is_active })
+                                  setRequiredNoteForm({ content: item.content, sort_order: String(item.sort_order), is_active: item.is_active, mo_ta: item.mo_ta || "" })
                                   setRequiredNoteError("")
                                   setRequiredNoteModal("edit")
                                 }}
@@ -4509,19 +4784,20 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Tên", "Tài khoản", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
+                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredMaintStaff.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
                     ) : filteredMaintStaff.map((s) => (
                       <tr key={s.id} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
-                          <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
-                          <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
+                        <td className="px-4 py-3 text-slate-600">{s.phong_ban || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
                           <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.chuc_vu_chinh_quyen || "—"}</td>
@@ -4678,6 +4954,8 @@ export default function SettingsPage() {
                       ...prev,
                       profile_id: nextProfileId,
                       ten: linkedProfile && !prev.ten.trim() ? linkedProfile.full_name : prev.ten,
+                      phong_ban: linkedProfile?.department || prev.phong_ban,
+                      department_id: linkedProfile?.department_id || prev.department_id,
                     }))
                   }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
@@ -4686,6 +4964,28 @@ export default function SettingsPage() {
                   {availableProfilesForStaffForm.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.full_name} ({profile.username})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban</label>
+                <select
+                  value={staffForm.department_id || ""}
+                  onChange={(e) => {
+                    const selectedDept = departments.find((d) => d.id === e.target.value)
+                    setStaffForm((prev) => ({
+                      ...prev,
+                      department_id: selectedDept?.id || "",
+                      phong_ban: selectedDept?.name || "",
+                    }))
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                >
+                  <option value="">-- Chưa chọn phòng ban --</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name} ({dept.code})
                     </option>
                   ))}
                 </select>
@@ -5031,7 +5331,7 @@ export default function SettingsPage() {
 
       {requiredNoteModal && (
         <ModalShell
-          title={requiredNoteModal === "add" ? "Thêm ghi chú" : "Sửa ghi chú"}
+          title={requiredNoteModal === "add" ? "Thêm ký hiệu kỹ thuật" : "Sửa ký hiệu kỹ thuật"}
           onClose={() => setRequiredNoteModal(null)}
           maxWidth="md"
           footer={
@@ -5044,8 +5344,23 @@ export default function SettingsPage() {
             <div className="space-y-4">
               {requiredNoteError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{requiredNoteError}</div>}
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung ghi chú *</label>
-                <input value={requiredNoteForm.content} onChange={e => setRequiredNoteForm((p) => ({ ...p, content: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500" placeholder="VD: Xe hư giữa đường" />
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã ký hiệu kỹ thuật *</label>
+                <input
+                  value={requiredNoteForm.content}
+                  onChange={e => setRequiredNoteForm((p) => ({ ...p, content: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono font-semibold outline-none focus:border-amber-500"
+                  placeholder="VD: T, Tr, TM, GCTBK, TL..."
+                />
+                <p className="text-[11px] text-slate-400 mt-1">Mã ngắn gọn dùng cho phân loại, thống kê và tách ngăn lưu (không nhập văn bản sự cố tự do vào đây).</p>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả / Ý nghĩa (tùy chọn)</label>
+                <input
+                  value={requiredNoteForm.mo_ta}
+                  onChange={e => setRequiredNoteForm((p) => ({ ...p, mo_ta: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                  placeholder="VD: Mủ thêm (T), Mủ trộn (Tr), Thu mua (TM)..."
+                />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -5073,7 +5388,7 @@ export default function SettingsPage() {
             </>
           }
         >
-            <p className="text-sm text-slate-600">Xóa ghi chú <span className="font-bold text-red-600">&quot;{requiredNoteDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
+            <p className="text-sm text-slate-600">Xóa ký hiệu kỹ thuật <span className="font-bold text-red-600">&quot;{requiredNoteDelConfirm.label}&quot;</span>? Thao tác không thể hoàn tác.</p>
         </ModalShell>
       )}
 
@@ -5243,7 +5558,7 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhà máy *</label>
                   <select
@@ -5254,6 +5569,29 @@ export default function SettingsPage() {
                     {factories.map((factory) => (
                       <option key={factory.id} value={factory.id}>
                         {factory.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Phòng ban</label>
+                  <select
+                    value={userEditor.departmentId || ""}
+                    onChange={(e) => {
+                      const selectedDept = departments.find((d) => d.id === e.target.value)
+                      setUserEditor({
+                        ...userEditor,
+                        departmentId: selectedDept?.id || "",
+                        department: selectedDept?.name || "",
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
+                    <option value="">-- Chưa chọn phòng ban --</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name} ({dept.code})
                       </option>
                     ))}
                   </select>
@@ -6326,6 +6664,136 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+        </ModalShell>
+      )}
+
+      {adminResetPwdModal && (
+        <ModalShell
+          title={`Đặt lại mật khẩu: ${adminResetPwdModal.profile.full_name} (${adminResetPwdModal.profile.username})`}
+          onClose={() => setAdminResetPwdModal(null)}
+          maxWidth="sm"
+          footer={
+            <>
+              <button
+                onClick={() => setAdminResetPwdModal(null)}
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleAdminResetPassword}
+                disabled={adminResetPwdModal.loading}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all"
+              >
+                <KeyRound size={14} />
+                {adminResetPwdModal.loading ? "Đang xử lý..." : "Đặt lại mật khẩu"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500 -mt-2">
+              Quản trị viên có thể trực tiếp đặt lại mật khẩu mới cho người dùng này mà không cần mã OTP hay mật khẩu cũ.
+            </p>
+            {adminResetPwdModal.error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2">
+                <AlertTriangle size={14} /> {adminResetPwdModal.error}
+              </div>
+            )}
+            {adminResetPwdModal.success && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 size={14} /> {adminResetPwdModal.success}
+              </div>
+            )}
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Mật khẩu mới (tối thiểu 6 ký tự) *</label>
+              <div className="relative">
+                <input
+                  type={adminResetPwdModal.show ? "text" : "password"}
+                  value={adminResetPwdModal.newPassword}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setAdminResetPwdModal((prev) => (prev ? { ...prev, newPassword: val, error: "" } : null))
+                  }}
+                  className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 font-mono"
+                  placeholder="Nhập mật khẩu mới"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAdminResetPwdModal((prev) => (prev ? { ...prev, show: !prev.show } : null))}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {adminResetPwdModal.show ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {adminResetPinModal && (
+        <ModalShell
+          title={`Đặt lại mã PIN ký số: ${adminResetPinModal.profile.full_name} (${adminResetPinModal.profile.username})`}
+          onClose={() => setAdminResetPinModal(null)}
+          maxWidth="sm"
+          footer={
+            <>
+              <button
+                onClick={() => setAdminResetPinModal(null)}
+                className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleAdminResetPin}
+                disabled={adminResetPinModal.loading}
+                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 flex items-center gap-2 shadow-sm transition-all"
+              >
+                <Fingerprint size={14} />
+                {adminResetPinModal.loading ? "Đang xử lý..." : "Đặt lại mã PIN"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500 -mt-2">
+              Quản trị viên có thể trực tiếp cấp lại mã PIN ký số điện tử (4-6 chữ số) cho người dùng này.
+            </p>
+            {adminResetPinModal.error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2">
+                <AlertTriangle size={14} /> {adminResetPinModal.error}
+              </div>
+            )}
+            {adminResetPinModal.success && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 size={14} /> {adminResetPinModal.success}
+              </div>
+            )}
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã PIN mới (4-6 chữ số) *</label>
+              <div className="relative">
+                <input
+                  type={adminResetPinModal.show ? "text" : "password"}
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={adminResetPinModal.newPin}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "")
+                    setAdminResetPinModal((prev) => (prev ? { ...prev, newPin: val, error: "" } : null))
+                  }}
+                  className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-xl text-sm outline-none focus:border-purple-500 font-mono tracking-widest text-center text-lg"
+                  placeholder="VD: 123456"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAdminResetPinModal((prev) => (prev ? { ...prev, show: !prev.show } : null))}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {adminResetPinModal.show ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          </div>
         </ModalShell>
       )}
     </div>

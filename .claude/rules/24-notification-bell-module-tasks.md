@@ -37,7 +37,7 @@ Switch theo tiền tố route qua `isUnderRoute(pathname, base)` (khớp `pathna
 | `/dashboard/export` | `getExportTasks` | `src/app/dashboard/export/page.tsx` (`canApproveOrders` qua `maintenance_staff.chuc_vu_chinh_quyen`, `EXPORT_ORDER_STATUS_PENDING`) + lô rớt hạng dùng chung `getRotHangLotCount` |
 | `/dashboard/inventory` | `getInventoryTasks` | `inventory_documents.status='draft'` + `buildEffectiveStockBalances` (tái dùng pure function từ `inventory/_components/inventory-stock.ts`) + công thức `alertRows` ở `inventory/analytics/page.tsx` |
 | `/dashboard/quality`, `/dashboard/quality-analytics` | `getQualityTasks` | dùng chung `getRotHangLotCount` |
-| `/dashboard/maintenance` | `getMaintenanceTasks` | `maintenance_records.trang_thai='cho_duyet'`, chỉ hiện với người có quyền `maintenance.approve` (`hasPermission`, tự bypass cho admin) |
+| `/dashboard/maintenance` | `getMaintenanceTasks` | **2 item**: (1) "Biên bản chờ phê duyệt" — `maintenance_records.trang_thai='cho_duyet'`, gate `maintenance.approve`; (2) "Hồ sơ chờ bạn ký" — qua `GET /api/signing/my-pending?modun=maintenance`, **không gate permission** (xem mục "Hồ sơ ký chờ chính người dùng" bên dưới) |
 | `/dashboard/kpi` | `getKpiTasks` | Module lớn, nhiều item (`role`/`tab`) — xem trực tiếp code `getKpiTasks` trong `module-tasks.ts`, không chép lại logic vào rule này vì thay đổi thường xuyên |
 
 Route khác (dispatch, storage, product, warehouse, settings, dashboard, process, notes, warehouse-thành-phẩm, map, eudr, customer-portal...) → `getModuleTasks` trả `null`, fallback "Thông báo chung".
@@ -76,3 +76,34 @@ Route khác (dispatch, storage, product, warehouse, settings, dashboard, process
 - Đã thêm `getMaintenanceTasks` (xem bảng ở trên). Module KPI (`getKpiTasks`) cũng đã có từ trước nhưng không được ghi vào bảng gốc — đã bổ sung.
 - **Bug đã fix**: trên mobile, panel chuông (bottom-sheet) chỉ hiển thị được đúng 1 dòng, gần như không cuộn được dù CSS scroll (`max-h-[65dvh] overflow-y-auto`) hoàn toàn đúng. Nguyên nhân: `<header>` (`layout.tsx`) có class `backdrop-blur-sm` — theo spec CSS, `backdrop-filter` (cùng nhóm `filter`/`transform`/`perspective`/`will-change`/`contain`) khiến phần tử đó trở thành **containing block mới cho mọi hậu duệ `position: fixed`**. Panel chuông dùng `fixed inset-x-0 bottom-0` trên mobile (chỉ override `md:absolute` từ `md:` trở lên) — vì `<header>` là tổ tiên có `backdrop-blur-sm`, `bottom-0`/`inset-x-0` bị tính theo hộp mỏng ~52px của `<header>` thay vì theo viewport, đẩy gần hết nội dung panel ra tọa độ y âm (ngoài màn hình), chỉ còn lọt vào vùng nhìn thấy đúng 1 dòng. Đã fix bằng cách bỏ hẳn `backdrop-blur-sm` khỏi `<header>` — giải quyết dứt điểm, không cần đổi cấu trúc panel (`createPortal`...).
 - **Landmine cần nhớ cho code sau này**: KHÔNG thêm `filter`/`backdrop-filter`/`transform`/`perspective`/`will-change`/`contain` vào `<header>` (hoặc bất kỳ ancestor `sticky`/tĩnh nào bao ngoài các overlay `position: fixed` dùng cho mobile bottom-sheet/drawer) — các thuộc tính này âm thầm biến ancestor đó thành containing block cho `fixed`, làm hỏng positioning trên mobile mà desktop (`md:absolute`) không hề lộ ra vì `absolute` dừng containing-block sớm hơn ở ancestor `relative` gần nhất. Nếu thực sự cần hiệu ứng blur/transform trên 1 vùng, đặt nó lệch khỏi cây chứa các overlay `fixed` (hoặc portal overlay ra `document.body`), không đặt chung 1 ancestor.
+
+## Hồ sơ ký chờ chính người dùng — item "Hồ sơ chờ bạn ký" (2026-09-04)
+
+Item thứ 2 của `getMaintenanceTasks`. Khác mọi item chuông khác ở chỗ **không đếm được từ
+client**: RLS `nguoi_ky_select` (`20260902_signing_core_tables.sql`) chỉ cho đọc dòng
+`user_id = auth.uid()`, trong khi để biết "đã TỚI LƯỢT tôi chưa" phải nhìn được trạng thái của
+những người ký TRƯỚC mình. Vì vậy phải đi qua route service-role.
+
+- Route: `GET /api/signing/my-pending?modun=<modun>` — `requireAuthUser` (Bearer), trả
+  `{ count, countChoLuot, items[] }` sắp theo `tao_luc` tăng dần.
+- **Không tin `factoryId` từ client** — luôn đọc `profiles.factory_id` của chính người gọi
+  (mirror `create-request/route.ts`); truyền `factoryId` lệch → 403.
+- `toiLuot` tính bằng công thức **mirror đúng guard server trong `signField()`**:
+  `!rows.some(r => r.thu_tu < myThuTu && r.trang_thai !== "da_ky")` — không phát minh lại.
+- Helper client: `getMySigningPending(modun, fallbackLink)` trong `module-tasks.ts`, dùng
+  `getFreshAuthSession()` lấy Bearer. **Lỗi mạng/hết phiên → trả 0, KHÔNG throw** —
+  `layout.tsx` bắt `.catch → setModuleTasks(null)` sẽ làm mất luôn item cùng module.
+- **Chỉ đếm `toiLuot = true`**, không thêm item "chưa tới lượt": `layout.tsx` ẩn hoàn toàn
+  "Thông báo chung" khi có bất kỳ item `count > 0`, nên một item không hành động được sẽ che
+  mất chính các thông báo ký số (`doc_type='yeu_cau_ky'`). API vẫn trả `countChoLuot` để dành.
+- **Không gate permission** — phạm vi đã tự giới hạn bằng `nguoi_ky.user_id = tôi` ở server;
+  thêm gate chỉ tạo tình huống "được chọn làm người ký nhưng chuông không báo". Vì vậy
+  `getMaintenanceTasks` **không được `return { items: [] }` sớm** khi thiếu `maintenance.approve`
+  (bug cũ đã sửa) — gate đó chỉ áp cho item "Biên bản chờ phê duyệt".
+- Tái dùng cho module khác: bỏ `modun` thì trả toàn bộ mọi module. Muốn thêm cho Chất lượng/
+  Điều xe chỉ cần gọi `getMySigningPending("quality" | "dispatch", ...)` trong getter tương ứng.
+
+⚠️ **Không đổi gate của item "Biên bản chờ phê duyệt" sang `maintenance.phe_duyet`**: item đó
+đếm luồng `cho_duyet → da_duyet` CŨ, đúng ngữ nghĩa `maintenance.approve`.
+`maintenance.phe_duyet` là quyền hẹp (mặc định chỉ admin, chỉ để CHỌN ĐƯỢC người ký điện tử —
+xem `20260909_maintenance_phe_duyet_permission.sql`); đổi sẽ làm hầu hết manager mất item.

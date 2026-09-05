@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import { createSigningRequest, type SigningSignerInput } from "@/lib/signing/requests"
+import { scheduleSigningNotify } from "@/lib/signing/notify"
 
 export const dynamic = "force-dynamic"
 
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File rỗng" }, { status: 400 })
     }
 
-    const { yeuCauId } = await createSigningRequest({
+    const { yeuCauId, notifyPlan } = await createSigningRequest({
       factoryId: body.factoryId,
       modun: body.modun,
       loaiTaiLieu: body.loaiTaiLieu,
@@ -103,6 +104,9 @@ export async function POST(req: NextRequest) {
       signers: body.signers,
       hanXuLy: body.hanXuLy ?? null,
     })
+
+    // Báo cho người ký đầu tiên SAU khi response đã trả về (Telegram + SMTP mất 1-3s).
+    scheduleSigningNotify(notifyPlan)
 
     return NextResponse.json({ yeuCauId })
   } catch (err) {

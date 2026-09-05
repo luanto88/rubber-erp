@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, Fragment } from "react"
 import type { RefObject } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { QRCodeSVG } from "qrcode.react"
@@ -39,13 +39,27 @@ import {
   ArrowLeft,
   PenLine,
   ShieldCheck,
-  Printer,
+  Bell,
   Share2,
   Loader2,
   Upload,
   Plus,
 } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
+import {
+  clampRectToBox,
+  computeDefaultNoteLayout,
+  computeDefaultSubLayout,
+  resolveAnchorPages,
+  resolveEffectiveQrRect,
+  type LayoutRect,
+  type NoteSubLayout,
+  type SignerSubLayout,
+  type TemplateNoteBox,
+  type TemplateQrBox,
+  type TemplateSignBox,
+  type TemplateStepPlacement,
+} from "@/lib/signing/template-layout"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 const STORAGE_BUCKET = "iso-documents"
@@ -129,6 +143,40 @@ function ExtraDraggableBox({
   )
 }
 
+/** Bố cục 4 khối con của 1 khung mẫu, ở dạng point (độc lập trang) — xem template-layout.ts. */
+type LockedBoxLayout = SignerSubLayout
+
+/** Khối con nào của khung ký đang được kéo/resize. */
+type SignBlockKey = "sig" | "name" | "chuc_vu" | "prefix"
+
+/**
+ * Bố cục mặc định cho 1 khung mẫu.
+ *
+ * Quy tắc 2 TẦNG: mẫu TẮT `show_name`/`show_chuc_vu` → người ký không thấy khối đó và không có
+ * cách nào bật lên; mẫu BẬT → hiện sẵn và người ký tự tắt/mở được. Khối chức danh còn cần có
+ * chức vụ thật để hiển thị (chưa khai báo trong hồ sơ nhân sự thì không có gì để vẽ); khối tiền
+ * tố chỉ tồn tại khi mẫu có chọn ký thay (`sign_as`) cho bước đó.
+ */
+function buildDefaultLockedLayout(
+  box: TemplateSignBox,
+  chucVu: string,
+  prefixText: string,
+): LockedBoxLayout {
+  const withName = box.show_name
+  const withChucVu = box.show_chuc_vu && !!chucVu
+  const withPrefix = !!prefixText
+  const d = computeDefaultSubLayout(box, { withName, withChucVu, withPrefix })
+  return {
+    sig: d.sig,
+    name: d.name,
+    chuc_vu: d.chuc_vu,
+    prefix: d.prefix,
+    show_name: withName,
+    show_chuc_vu: withChucVu,
+    show_prefix: withPrefix,
+  }
+}
+
 function SignPlacementModal({
   stepLabel,
   sourceFileUrl,
@@ -140,6 +188,13 @@ function SignPlacementModal({
   acting,
   allowSignAs,
   allowQrPlacement,
+  lockedPlacement,
+  lockedEntry,
+  lockedGhiChuBox,
+  lockedQrBox,
+  lockedQrAdjustable,
+  lockedPrefixText,
+  signerChucVu,
   userId,
   docId,
   onConfirm,
@@ -158,12 +213,44 @@ function SignPlacementModal({
   // QR kéo-thả để chọn vị trí; các lượt ký sau tái dùng đúng vị trí đã lưu, không
   // hiện hộp QR nữa (tránh vẽ chồng nhiều QR ở nhiều vị trí khác nhau qua các lần ký).
   allowQrPlacement: boolean
+  // true khi bước ký này đã được KHOÁ vị trí theo mẫu (mau_vi_tri, chốt lúc gửi ký) — khung ký
+  // do người soạn thảo chốt, người ký KHÔNG đổi được khung, cũng không hỏi ký thay (tiền tố đã
+  // chọn sẵn trong mẫu). Vẫn hiện canvas để ĐỌC văn bản và xê dịch 3 khối con TRONG khung.
+  lockedPlacement: boolean
+  /** Entry mẫu của đúng bước đang ký — nguồn để vẽ "vùng cho phép" và giới hạn kéo-thả. */
+  lockedEntry: TemplateStepPlacement | null
+  /** Khung "Ghi chú" của mẫu (nếu có) — chỉ dùng ở bước phê duyệt để nhập ý kiến chỉ đạo. */
+  lockedGhiChuBox: TemplateNoteBox | null
+  /** Khung QR của mẫu (nếu có) — hiện QR thật để người ký biết nó rơi vào đâu. */
+  lockedQrBox: TemplateQrBox | null
+  /**
+   * QR chưa được lượt ký nào chỉnh → người ký HIỆN TẠI được xê dịch, và vị trí đó chốt cho mọi
+   * lượt sau. Ngược lại chỉ xem (QR là dữ liệu cấp văn bản, không được lệch giữa các bước).
+   */
+  lockedQrAdjustable: boolean
+  /** Tiền tố ký thay đã chọn trong mẫu (vd "KT.") — rỗng nghĩa là bước này không ký thay. */
+  lockedPrefixText: string
+  /** Chức vụ thật của người ký — quyết định có khối "chức danh" để kéo hay không. */
+  signerChucVu: string
   userId: string
   docId: string
-  onConfirm: (pin: string, placement: SignPlacement | null, signAs: SignAsType) => void
+  onConfirm: (
+    pin: string,
+    placement: SignPlacement | null,
+    signAs: SignAsType,
+    extra?: {
+      signLayout?: SignerSubLayout[]
+      noteLayout?: NoteSubLayout[]
+      qrLayout?: LayoutRect[]
+      ghiChuPheDuyet?: string
+      ghiChuTat?: boolean
+    },
+  ) => void
   onClose: () => void
 }) {
   const isPdf = fileExt === "pdf" || urlIsPdf(sourceFileUrl)
+  // Kể cả khi vị trí đã khoá theo mẫu, người ký vẫn PHẢI đọc được nội dung PDF trước khi ký —
+  // trước đây bước ký khoá chỉ hiện hộp PIN, ký "mù" không nhìn thấy văn bản.
   const showCanvas = isPdf && !!sourceFileUrl
   // Ký thay (KT./TM./TL./TUQ.) chỉ có ý nghĩa trên PDF (vẽ hộp riêng) — DOCX/XLSX
   // không cần tính năng này (đã xác nhận với người dùng), nên chỉ hiện picker khi
@@ -206,6 +293,33 @@ function SignPlacementModal({
     nameX: number; nameY: number; nameW: number; nameH: number
     showSignature: boolean; showSignerName: boolean
   }>>([])
+
+  // ── Chế độ "vị trí CỨNG": 3 khối con xê dịch trong khung mẫu ────────────────
+  // Lưu ở hệ POINT (không phải canvas px) để không phụ thuộc trang đang xem — mỗi trang PDF có
+  // thể khác khổ giấy, quy đổi sang px chỉ diễn ra lúc render.
+  const [lockedLayouts, setLockedLayouts] = useState<LockedBoxLayout[]>([])
+  const [noteLayout, setNoteLayout] = useState<NoteSubLayout | null>(null)
+  const [qrRect, setQrRect] = useState<LayoutRect | null>(null)
+  const [ghiChuText, setGhiChuText] = useState("")
+  const [ghiChuOff, setGhiChuOff] = useState(false)
+  const [confirmError, setConfirmError] = useState("")
+
+  useEffect(() => {
+    if (!lockedEntry) { setLockedLayouts([]); return }
+    setLockedLayouts(
+      lockedEntry.boxes.map((box) => buildDefaultLockedLayout(box, signerChucVu, lockedPrefixText)),
+    )
+  }, [lockedEntry, signerChucVu, lockedPrefixText])
+
+  useEffect(() => {
+    if (!lockedGhiChuBox) { setNoteLayout(null); return }
+    setNoteLayout(computeDefaultNoteLayout(lockedGhiChuBox, { withKyNhay: !!signatureUrl }))
+  }, [lockedGhiChuBox, signatureUrl])
+
+  useEffect(() => {
+    // Đã chỉnh ở lượt trước → `resolveEffectiveQrRect` trả đúng vị trí đã chốt (chỉ để xem).
+    setQrRect(lockedQrBox ? resolveEffectiveQrRect(lockedQrBox) : null)
+  }, [lockedQrBox])
 
   const sigNodeRef = useRef<HTMLDivElement>(null)
   const nameNodeRef = useRef<HTMLDivElement>(null)
@@ -291,6 +405,81 @@ function SignPlacementModal({
     height: h / pdfScale,
   })
 
+  /** Point (gốc dưới-trái) → canvas px (gốc trên-trái) của TRANG ĐANG XEM. Nghịch đảo `toPdf`. */
+  const toCanvas = (r: LayoutRect) => ({
+    x: r.x * pdfScale,
+    y: (pdfPageH - (r.y + r.height)) * pdfScale,
+    w: r.width * pdfScale,
+    h: r.height * pdfScale,
+  })
+
+  /**
+   * Cập nhật 1 khối con sau khi kéo/resize. Luôn kẹp lại vào trong khung mẫu bằng ĐÚNG hàm mà
+   * server dùng (`clampRectToBox`) — UI và server không thể lệch chuẩn biên.
+   */
+  const setLockedRect = (
+    idx: number,
+    key: SignBlockKey,
+    canX: number,
+    canY: number,
+    canW: number,
+    canH: number,
+  ) => {
+    if (!lockedEntry) return
+    const box = lockedEntry.boxes[idx]
+    if (!box) return
+    const clamped = clampRectToBox(toPdf(canX, canY, canW, canH), box)
+    setLockedLayouts((prev) => prev.map((cur, i) => (i === idx ? { ...cur, [key]: clamped } : cur)))
+  }
+
+  /**
+   * Bật/tắt khối Tên / Chức danh / Tiền tố. Đổi lựa chọn sẽ ĐẶT LẠI bố cục mặc định của cả khung
+   * — vì tỉ lệ chia dải phụ thuộc số khối đang hiện (tắt tên mà giữ nguyên ô chữ ký cũ sẽ để lại
+   * một khoảng trống vô nghĩa). Người ký nên bật/tắt trước rồi mới xê dịch.
+   */
+  const toggleLockedBlock = (idx: number, key: "name" | "chuc_vu" | "prefix") => {
+    if (!lockedEntry) return
+    setLockedLayouts((prev) =>
+      prev.map((cur, i) => {
+        if (i !== idx) return cur
+        const box = lockedEntry.boxes[i]
+        if (!box) return cur
+        const withName = key === "name" ? !cur.show_name : cur.show_name
+        const withChucVu = key === "chuc_vu" ? !cur.show_chuc_vu : cur.show_chuc_vu
+        const withPrefix = key === "prefix" ? !cur.show_prefix : cur.show_prefix
+        const d = computeDefaultSubLayout(box, { withName, withChucVu, withPrefix })
+        return {
+          sig: d.sig,
+          name: d.name,
+          chuc_vu: d.chuc_vu,
+          prefix: d.prefix,
+          show_name: withName,
+          show_chuc_vu: withChucVu,
+          show_prefix: withPrefix,
+        }
+      }),
+    )
+  }
+
+  /** Kéo/resize ô text hoặc chữ ký nháy trong khung Ghi chú — luôn kẹp vào khung. */
+  const setNoteRect = (
+    key: "text" | "ky_nhay",
+    canX: number,
+    canY: number,
+    canW: number,
+    canH: number,
+  ) => {
+    if (!lockedGhiChuBox) return
+    const clamped = clampRectToBox(toPdf(canX, canY, canW, canH), lockedGhiChuBox)
+    setNoteLayout((prev) => (prev ? { ...prev, [key]: clamped } : prev))
+  }
+
+  /** Kéo/resize QR — chỉ mở cho lượt ký đầu tiên, và luôn nằm trong khung QR của mẫu. */
+  const setQrRectFromCanvas = (canX: number, canY: number, canW: number, canH: number) => {
+    if (!lockedQrBox || !lockedQrAdjustable) return
+    setQrRect(clampRectToBox(toPdf(canX, canY, canW, canH), lockedQrBox))
+  }
+
   // Xác thực PIN thật qua server (mirror handlePinConfirm của
   // iso/documents/[id]/page.tsx) TRƯỚC khi mở bước đặt vị trí chữ ký — bắt lỗi PIN sai
   // ngay, không cần đợi tới lúc bấm "Xác nhận ký" ở cuối. /api/documents/sign vẫn tự
@@ -313,6 +502,8 @@ function SignPlacementModal({
       })
       const json = await res.json()
       if (!res.ok) { setPinError(json.error || "PIN không đúng"); return }
+      // Kể cả khi vị trí đã khoá theo mẫu vẫn sang bước xem PDF — người ký phải đọc được nội
+      // dung văn bản và xê dịch chữ ký trong khung trước khi ký, không ký "mù" như trước.
       setStep("placement")
     } catch {
       setPinError("Không thể xác thực PIN, vui lòng thử lại")
@@ -323,6 +514,38 @@ function SignPlacementModal({
 
   const handleConfirm = () => {
     if (!pin.trim()) { setStep("pin"); setPinError("Vui lòng nhập lại PIN"); return }
+
+    // Chế độ khoá theo mẫu: khung do người soạn thảo chốt, chỉ gửi lên bố cục 3 khối con.
+    // Chạy TRƯỚC nhánh kiểm tra canvas để vẫn ký được khi PDF không tải lên xem trước được
+    // (khi đó dùng bố cục mặc định, server tự kẹp toạ độ).
+    if (lockedEntry) {
+      if (lockedGhiChuBox && !ghiChuOff && !ghiChuText.trim()) {
+        setConfirmError(
+          "Mẫu văn bản này có khung Ghi chú. Vui lòng nhập ý kiến chỉ đạo, hoặc bấm “Không ghi ý kiến” nếu không cần.",
+        )
+        return
+      }
+      const signLayout: SignerSubLayout[] = lockedLayouts.map((l) => ({
+        sig: l.sig,
+        name: l.show_name ? l.name : null,
+        chuc_vu: l.show_chuc_vu ? l.chuc_vu : null,
+        prefix: l.show_prefix ? l.prefix : null,
+        show_name: l.show_name,
+        show_chuc_vu: l.show_chuc_vu,
+        show_prefix: l.show_prefix,
+      }))
+      onConfirm(pin, null, "none", {
+        signLayout,
+        // Mảng theo đúng thứ tự `boxes`; UI chỉ thao tác khung đầu tiên, các khung còn lại
+        // (nếu mẫu nhân bản) giữ bố cục mặc định ở server.
+        noteLayout: lockedGhiChuBox && noteLayout && !ghiChuOff ? [noteLayout] : undefined,
+        qrLayout: lockedQrAdjustable && qrRect ? [qrRect] : undefined,
+        ghiChuPheDuyet: lockedGhiChuBox && !ghiChuOff ? ghiChuText.trim() : undefined,
+        ghiChuTat: lockedGhiChuBox ? ghiChuOff : undefined,
+      })
+      return
+    }
+
     if (!showCanvas || !canvasReady) {
       onConfirm(pin, null, "none")
       return
@@ -385,11 +608,11 @@ function SignPlacementModal({
             <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
             <button
               onClick={() => void handleVerifyPin()}
-              disabled={pinVerifying}
+              disabled={pinVerifying || acting}
               className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
             >
-              {pinVerifying ? <Loader2 size={13} className="animate-spin" /> : <PenLine size={13} />}
-              {pinVerifying ? "Đang xác thực..." : "Xác nhận"}
+              {pinVerifying || acting ? <Loader2 size={13} className="animate-spin" /> : <PenLine size={13} />}
+              {pinVerifying ? "Đang xác thực..." : acting ? "Đang ký..." : lockedPlacement ? "Xác nhận ký" : "Xác nhận"}
             </button>
           </>
         }
@@ -422,6 +645,12 @@ function SignPlacementModal({
               <AlertTriangle size={11} /> {pinError}
             </p>
           )}
+          {lockedPlacement && (
+            <p className="mt-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 leading-snug">
+              Vị trí khung ký đã được cố định theo mẫu do người soạn thảo cài đặt. Nhập PIN xong
+              bạn sẽ xem được nội dung văn bản và xê dịch chữ ký trong khung trước khi ký.
+            </p>
+          )}
         </div>
       </ModalShell>
     )
@@ -437,15 +666,17 @@ function SignPlacementModal({
         <div>
           <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            {showCanvas
-              ? allowQrPlacement
-                ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký, tên và mã QR trên PDF — vị trí QR sẽ giữ nguyên cho các lượt ký sau"
-                : "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
-              : "Tag chữ ký trong file Office sẽ được thay tự động khi ký"}
+            {!showCanvas
+              ? "Tag chữ ký trong file Office sẽ được thay tự động khi ký"
+              : lockedEntry
+                ? "Đọc lại nội dung văn bản trước khi ký. Vị trí khung do người soạn thảo chốt — bạn chỉ xê dịch chữ ký / tên / chức danh BÊN TRONG khung viền xanh."
+                : allowQrPlacement
+                  ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký, tên và mã QR trên PDF — vị trí QR sẽ giữ nguyên cho các lượt ký sau"
+                  : "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {showCanvas && (
+          {showCanvas && !lockedEntry && (
             <button
               onClick={() => {
                 const offset = 30 * (extraSigBoxes.length + 1)
@@ -514,7 +745,8 @@ function SignPlacementModal({
                   </div>
                 )}
 
-                {canvasReady && (
+                {/* Luồng cũ: người ký tự do kéo-thả toàn trang (văn bản chưa chốt mẫu vị trí). */}
+                {canvasReady && !lockedEntry && (
                   <>
                     {/* Chữ ký */}
                     <Draggable
@@ -811,6 +1043,289 @@ function SignPlacementModal({
                     ))}
                   </>
                 )}
+
+                {/* Chế độ "vị trí CỨNG": mỗi khung mẫu là 1 VÙNG CHO PHÉP (viền đứt), bên trong
+                    có 3 khối con kéo/resize độc lập nhưng không ra khỏi vùng (bounds="parent"
+                    + kẹp lại bằng clampRectToBox, server kẹp lần nữa khi lưu). */}
+                {canvasReady && lockedEntry && (
+                  <>
+                    {lockedEntry.boxes.map((box, idx) => {
+                      const layout = lockedLayouts[idx]
+                      if (!layout) return null
+                      if (!resolveAnchorPages(box, numPages).includes(currentPage)) return null
+                      const region = toCanvas({ x: box.x, y: box.y, width: box.width, height: box.height })
+                      const sigCan = toCanvas(layout.sig)
+                      const nameCan = layout.show_name && layout.name ? toCanvas(layout.name) : null
+                      const chucVuCan = layout.show_chuc_vu && layout.chuc_vu ? toCanvas(layout.chuc_vu) : null
+                      const allowChucVu = box.show_chuc_vu && !!signerChucVu
+                      return (
+                        <div
+                          key={`locked-${idx}`}
+                          className="absolute border-2 border-dashed border-emerald-500 bg-emerald-50/25 rounded"
+                          style={{ left: region.x, top: region.y, width: region.w, height: region.h, zIndex: 9 }}
+                        >
+                          <span className="absolute -top-5 left-0 text-[10px] font-bold text-emerald-700 bg-white/90 px-1 rounded whitespace-nowrap">
+                            Vùng cho phép {lockedEntry.boxes.length > 1 ? `#${idx + 1}` : ""}
+                          </span>
+
+                          <ExtraDraggableBox
+                            position={{ x: sigCan.x - region.x, y: sigCan.y - region.y }}
+                            onStop={(_, d) => setLockedRect(idx, "sig", region.x + d.x, region.y + d.y, sigCan.w, sigCan.h)}
+                            zIndex={13}
+                          >
+                            <Resizable
+                              size={{ width: sigCan.w, height: sigCan.h }}
+                              onResizeStop={(_, __, ___, delta) =>
+                                setLockedRect(idx, "sig", sigCan.x, sigCan.y, sigCan.w + delta.width, sigCan.h + delta.height)}
+                              enable={{ right: true, bottom: true, bottomRight: true }}
+                              minWidth={20} minHeight={12}
+                            >
+                              <div className="w-full h-full border border-amber-500 bg-amber-50/80 rounded flex items-center justify-center overflow-hidden">
+                                {signatureUrl ? (
+                                  <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain" />
+                                ) : (
+                                  <span className="text-[9px] text-amber-700 font-bold px-1 text-center">Chữ ký</span>
+                                )}
+                              </div>
+                            </Resizable>
+                          </ExtraDraggableBox>
+
+                          {nameCan && (
+                            <ExtraDraggableBox
+                              position={{ x: nameCan.x - region.x, y: nameCan.y - region.y }}
+                              onStop={(_, d) => setLockedRect(idx, "name", region.x + d.x, region.y + d.y, nameCan.w, nameCan.h)}
+                              zIndex={14}
+                            >
+                              <Resizable
+                                size={{ width: nameCan.w, height: nameCan.h }}
+                                onResizeStop={(_, __, ___, delta) =>
+                                  setLockedRect(idx, "name", nameCan.x, nameCan.y, nameCan.w + delta.width, nameCan.h + delta.height)}
+                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                minWidth={30} minHeight={10}
+                              >
+                                <div className="w-full h-full border border-sky-500 bg-sky-50/85 rounded flex items-center justify-center overflow-hidden">
+                                  <span className="text-[10px] font-bold text-sky-800 truncate px-1">{userName || "Người ký"}</span>
+                                </div>
+                              </Resizable>
+                            </ExtraDraggableBox>
+                          )}
+
+                          {chucVuCan && (
+                            <ExtraDraggableBox
+                              position={{ x: chucVuCan.x - region.x, y: chucVuCan.y - region.y }}
+                              onStop={(_, d) => setLockedRect(idx, "chuc_vu", region.x + d.x, region.y + d.y, chucVuCan.w, chucVuCan.h)}
+                              zIndex={14}
+                            >
+                              <Resizable
+                                size={{ width: chucVuCan.w, height: chucVuCan.h }}
+                                onResizeStop={(_, __, ___, delta) =>
+                                  setLockedRect(idx, "chuc_vu", chucVuCan.x, chucVuCan.y, chucVuCan.w + delta.width, chucVuCan.h + delta.height)}
+                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                minWidth={30} minHeight={10}
+                              >
+                                <div className="w-full h-full border border-violet-500 bg-violet-50/85 rounded flex items-center justify-center overflow-hidden">
+                                  <span className="text-[9px] font-semibold text-violet-800 truncate px-1">{signerChucVu}</span>
+                                </div>
+                              </Resizable>
+                            </ExtraDraggableBox>
+                          )}
+
+                          {/* Tiền tố ký thay (KT./TM./…) — khối con thứ 4, chỉ có khi mẫu chọn
+                              ký thay cho bước này. Nằm TRONG khung như 3 khối kia. */}
+                          {layout.show_prefix && layout.prefix && (() => {
+                            const preCan = toCanvas(layout.prefix)
+                            return (
+                              <ExtraDraggableBox
+                                position={{ x: preCan.x - region.x, y: preCan.y - region.y }}
+                                onStop={(_, d) => setLockedRect(idx, "prefix", region.x + d.x, region.y + d.y, preCan.w, preCan.h)}
+                                zIndex={15}
+                              >
+                                <Resizable
+                                  size={{ width: preCan.w, height: preCan.h }}
+                                  onResizeStop={(_, __, ___, delta) =>
+                                    setLockedRect(idx, "prefix", preCan.x, preCan.y, preCan.w + delta.width, preCan.h + delta.height)}
+                                  enable={{ right: true, bottom: true, bottomRight: true }}
+                                  minWidth={24} minHeight={10}
+                                >
+                                  <div className="w-full h-full border border-orange-500 bg-orange-50/85 rounded flex items-center justify-center overflow-hidden">
+                                    <span className="text-[10px] font-extrabold text-orange-800 truncate px-1">{lockedPrefixText}</span>
+                                  </div>
+                                </Resizable>
+                              </ExtraDraggableBox>
+                            )
+                          })()}
+
+                          {/* Nút bật/tắt đặt NGOÀI khối (dưới vùng cho phép) để còn bật lại được
+                              sau khi đã tắt. Chỉ hiện đúng những khối mẫu CHO PHÉP. */}
+                          {(box.show_name || allowChucVu || !!lockedPrefixText) && (
+                            <div className="absolute -bottom-6 left-0 flex items-center gap-1" style={{ zIndex: 20 }}>
+                              {!!lockedPrefixText && (
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "prefix") }}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_prefix ? "bg-white border-orange-300 text-orange-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
+                                  title={layout.show_prefix ? `Tắt ký thay ${lockedPrefixText} (không đóng dấu tiền tố)` : `Bật lại ký thay ${lockedPrefixText}`}
+                                >
+                                  {layout.show_prefix ? <Eye size={10} /> : <EyeOff size={10} />} {lockedPrefixText}
+                                </button>
+                              )}
+                              {box.show_name && (
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "name") }}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_name ? "bg-white border-sky-300 text-sky-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
+                                  title={layout.show_name ? "Ẩn tên (đặt lại vị trí mặc định)" : "Hiện tên"}
+                                >
+                                  {layout.show_name ? <Eye size={10} /> : <EyeOff size={10} />} Tên
+                                </button>
+                              )}
+                              {allowChucVu && (
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "chuc_vu") }}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_chuc_vu ? "bg-white border-violet-300 text-violet-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
+                                  title={layout.show_chuc_vu ? "Ẩn chức danh (đặt lại vị trí mặc định)" : "Hiện chức danh"}
+                                >
+                                  {layout.show_chuc_vu ? <Eye size={10} /> : <EyeOff size={10} />} Chức danh
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* Khung Ghi chú = VÙNG CHO PHÉP chứa 2 khối con kéo/resize được: ô ý kiến
+                        chỉ đạo (chữ tự xuống dòng) và chữ ký nháy. Lãnh đạo tự né chỗ đã có chữ
+                        trên văn bản. Nội dung gõ ở panel dưới. */}
+                    {lockedGhiChuBox && noteLayout && resolveAnchorPages(lockedGhiChuBox, numPages).includes(currentPage) && (() => {
+                      const g = toCanvas({
+                        x: lockedGhiChuBox.x,
+                        y: lockedGhiChuBox.y,
+                        width: lockedGhiChuBox.width,
+                        height: lockedGhiChuBox.height,
+                      })
+                      const off = ghiChuOff || !ghiChuText.trim()
+                      const textCan = toCanvas(noteLayout.text)
+                      const kyNhayCan = noteLayout.ky_nhay ? toCanvas(noteLayout.ky_nhay) : null
+                      return (
+                        <div
+                          className={`absolute border-2 border-dashed rounded ${off ? "border-slate-300 bg-slate-100/50" : "border-teal-500 bg-teal-50/25"}`}
+                          style={{ left: g.x, top: g.y, width: g.w, height: g.h, zIndex: 8 }}
+                        >
+                          <span className="absolute -top-5 left-0 text-[10px] font-bold text-teal-700 bg-white/90 px-1 rounded whitespace-nowrap">
+                            Vùng ý kiến chỉ đạo
+                          </span>
+
+                          {off ? (
+                            <p className="text-[9px] text-slate-400 italic p-1">Không ghi ý kiến</p>
+                          ) : (
+                            <>
+                              <ExtraDraggableBox
+                                position={{ x: textCan.x - g.x, y: textCan.y - g.y }}
+                                onStop={(_, d) => setNoteRect("text", g.x + d.x, g.y + d.y, textCan.w, textCan.h)}
+                                zIndex={12}
+                              >
+                                <Resizable
+                                  size={{ width: textCan.w, height: textCan.h }}
+                                  onResizeStop={(_, __, ___, delta) =>
+                                    setNoteRect("text", textCan.x, textCan.y, textCan.w + delta.width, textCan.h + delta.height)}
+                                  enable={{ right: true, bottom: true, bottomRight: true }}
+                                  minWidth={40} minHeight={12}
+                                >
+                                  {/* Xem trước wrap bằng CSS nên XẤP XỈ vị trí xuống dòng thật của
+                                      drawTextWrapped (pdf-lib đo theo font TimesNewRoman) — đủ để
+                                      né chữ, không cam kết khớp từng dòng. */}
+                                  <div className="w-full h-full border border-teal-600 bg-teal-50/90 rounded overflow-hidden px-0.5">
+                                    <p className="text-[9px] leading-tight text-slate-800 whitespace-pre-wrap break-words">
+                                      {ghiChuText}
+                                    </p>
+                                  </div>
+                                </Resizable>
+                              </ExtraDraggableBox>
+
+                              {kyNhayCan && (
+                                <ExtraDraggableBox
+                                  position={{ x: kyNhayCan.x - g.x, y: kyNhayCan.y - g.y }}
+                                  onStop={(_, d) => setNoteRect("ky_nhay", g.x + d.x, g.y + d.y, kyNhayCan.w, kyNhayCan.h)}
+                                  zIndex={13}
+                                >
+                                  <Resizable
+                                    size={{ width: kyNhayCan.w, height: kyNhayCan.h }}
+                                    onResizeStop={(_, __, ___, delta) =>
+                                      setNoteRect("ky_nhay", kyNhayCan.x, kyNhayCan.y, kyNhayCan.w + delta.width, kyNhayCan.h + delta.height)}
+                                    enable={{ right: true, bottom: true, bottomRight: true }}
+                                    minWidth={20} minHeight={10}
+                                  >
+                                    <div className="w-full h-full border border-amber-500 bg-amber-50/85 rounded flex items-center justify-center overflow-hidden">
+                                      {signatureUrl ? (
+                                        <img src={signatureUrl} alt="Chữ ký nháy" className="w-full h-full object-contain" />
+                                      ) : (
+                                        <span className="text-[9px] text-amber-700 font-bold">Ký nháy</span>
+                                      )}
+                                    </div>
+                                  </Resizable>
+                                </ExtraDraggableBox>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )
+                    })()}
+
+                    {/* Khung QR: người ký ĐẦU TIÊN kéo/resize được, các lượt sau chỉ xem. */}
+                    {lockedQrBox && qrRect && resolveAnchorPages(lockedQrBox, numPages).includes(currentPage) && (() => {
+                      const region = toCanvas({
+                        x: lockedQrBox.x,
+                        y: lockedQrBox.y,
+                        width: lockedQrBox.width,
+                        height: lockedQrBox.height,
+                      })
+                      const q = toCanvas(qrRect)
+                      const qrValue = `${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/documents/${docId}`
+                      const qrInner = (
+                        <div className={`w-full h-full rounded bg-white flex items-center justify-center overflow-hidden ${lockedQrAdjustable ? "border border-violet-600" : "border border-slate-400 opacity-80"}`}>
+                          <QRCodeSVG value={qrValue} size={Math.max(16, Math.min(q.w, q.h) - 2)} level="L" />
+                        </div>
+                      )
+                      return (
+                        <div
+                          className={`absolute rounded ${lockedQrAdjustable ? "border-2 border-dashed border-violet-500 bg-violet-50/25" : "border border-dashed border-slate-400"}`}
+                          style={{ left: region.x, top: region.y, width: region.w, height: region.h, zIndex: 8 }}
+                        >
+                          <span className="absolute -top-5 left-0 text-[10px] font-bold bg-white/90 px-1 rounded whitespace-nowrap text-violet-700">
+                            {lockedQrAdjustable ? "Vùng QR" : "QR đã chốt ở lượt ký trước"}
+                          </span>
+                          {lockedQrAdjustable ? (
+                            <ExtraDraggableBox
+                              position={{ x: q.x - region.x, y: q.y - region.y }}
+                              onStop={(_, d) => setQrRectFromCanvas(region.x + d.x, region.y + d.y, q.w, q.h)}
+                              zIndex={12}
+                            >
+                              <Resizable
+                                size={{ width: q.w, height: q.h }}
+                                onResizeStop={(_, __, ___, delta) =>
+                                  setQrRectFromCanvas(q.x, q.y, q.w + delta.width, q.h + delta.height)}
+                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                lockAspectRatio
+                                minWidth={20} minHeight={20}
+                              >
+                                {qrInner}
+                              </Resizable>
+                            </ExtraDraggableBox>
+                          ) : (
+                            <div className="absolute" style={{ left: q.x - region.x, top: q.y - region.y, width: q.w, height: q.h }}>
+                              {qrInner}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </>
+                )}
               </div>
           ) : (
             <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl max-w-md">
@@ -859,6 +1374,50 @@ function SignPlacementModal({
             </div>
           )}
 
+          {/* Ô ý kiến chỉ đạo — chỉ hiện khi người soạn thảo CÓ đặt khung "Ghi chú" trong mẫu
+              (quy tắc 2 tầng: mẫu không đặt khung thì lãnh đạo không có ô này, và cũng không có
+              chữ ký nháy). Bắt buộc quyết định rõ: nhập nội dung, hoặc tắt hẳn. */}
+          {lockedGhiChuBox && (
+            <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-teal-200 bg-teal-50/60"}`}>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Ý kiến chỉ đạo <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setGhiChuOff((v) => !v); setConfirmError("") }}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${ghiChuOff ? "bg-white border-teal-300 text-teal-700" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                >
+                  {ghiChuOff ? "Bật lại khung Ghi chú" : "Không ghi ý kiến"}
+                </button>
+              </div>
+              {ghiChuOff ? (
+                <p className="text-[11px] text-slate-500 italic">
+                  Khung Ghi chú sẽ bị bỏ trống — không đóng dấu ý kiến lẫn chữ ký nháy lên văn bản.
+                </p>
+              ) : (
+                <>
+                  <textarea
+                    value={ghiChuText}
+                    onChange={(e) => { setGhiChuText(e.target.value); setConfirmError("") }}
+                    rows={2}
+                    placeholder="VD: Phòng TCHC phối hợp Nhà máy chế biến tham mưu thực hiện, hạn chót 15/9/2026"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500 resize-y"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Nội dung sẽ được đóng vào khung Ghi chú trên văn bản, kèm chữ ký nháy của bạn ở góc trên-phải khung.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          {confirmError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>{confirmError}</span>
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end">
             <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
             <button
@@ -877,7 +1436,11 @@ function SignPlacementModal({
 export default function DocumentDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const docId = params.id as string
+  // Đánh dấu đã tự động gửi ký sau khi quay lại từ màn "Cài đặt vị trí ký" — chỉ trigger
+  // đúng 1 lần/lượt mount, tránh gửi lặp nếu user F5 lại trang còn giữ query param cũ.
+  const autoSendTriedRef = useRef(false)
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -1031,9 +1594,76 @@ export default function DocumentDetailPage() {
     }
   }
 
-  const handleGuiKy = () => void doAction("gui_ky")
+  // "Gửi ký" của văn bản nguồn PDF phải đi qua màn "Cài đặt vị trí ký" trước — CẢ khi
+  // loại tài liệu đã có mẫu lưu sẵn (không chỉ lần đầu): người soạn thảo luôn phải xem
+  // lại/xác nhận đúng vị trí mẫu (hoặc vẽ mới nếu chưa có) rồi mới thật sự gửi đi, theo
+  // đúng yêu cầu đã chốt (CLAUDE.md mục "Kế hoạch phiên sau 2026-09-02"). Văn bản nguồn
+  // Office (DOCX/XLSX) không có khái niệm "vị trí" (dùng tag {{...}}) nên bỏ qua màn
+  // này, gửi thẳng như cũ. Đây CHỈ là điều hướng UI — chưa đụng gì tới
+  // api/documents/sign/route.ts hay logic đóng dấu PDF thật.
+  const handleGuiKy = () => {
+    if (doc && docExt === "pdf" && docSourceUrl && doc.loai_van_ban) {
+      const qs = new URLSearchParams({
+        loai: doc.loai_van_ban,
+        pdfUrl: docSourceUrl,
+        docLabel: doc.ten_van_ban || doc.ma_van_ban || doc.loai_van_ban,
+        returnTo: `/dashboard/documents/${doc.id}`,
+        docId: doc.id,
+      })
+      router.push(`/dashboard/ky/mau-vi-tri?${qs.toString()}`)
+      return
+    }
+    void doAction("gui_ky")
+  }
 
-  const handleSignConfirm = async (pin: string, placement: SignPlacement | null, signAs: SignAsType) => {
+  // Quay lại từ màn "Cài đặt vị trí ký" (đã xác nhận vị trí, kể cả không đổi gì) — tự
+  // động gọi lại đúng hành động gửi ký, đúng 1 lần, rồi dọn query param khỏi URL.
+  useEffect(() => {
+    if (autoSendTriedRef.current) return
+    if (!doc || !factoryId) return
+    if (searchParams.get("confirmedSignTemplate") !== "1") return
+    autoSendTriedRef.current = true
+    router.replace(`/dashboard/documents/${doc.id}`)
+    void doAction("gui_ky")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, factoryId, searchParams])
+
+  // Chức vụ thật của chính người đang đăng nhập — quyết định khối "chức danh" có nội dung để
+  // hiển thị/kéo hay không. Tái dùng đúng route mà màn "Cài đặt vị trí ký" đang dùng
+  // (maintenance_staff.chuc_vu_chinh_quyen || chuc_vu qua profile_id), không tự tra kiểu khác.
+  const [signerChucVu, setSignerChucVu] = useState("")
+
+  useEffect(() => {
+    const uid = user?.id
+    if (!factoryId || !uid) return
+    let cancelled = false
+    const load = async () => {
+      const token = await getAuthToken()
+      if (!token) return
+      const res = await fetch(
+        `/api/documents/signer-info?factoryId=${encodeURIComponent(factoryId)}&userIds=${encodeURIComponent(uid)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      if (!res.ok) return
+      const rows = (await res.json()) as Array<{ id: string; chuc_vu: string }>
+      if (!cancelled) setSignerChucVu(rows.find((r) => r.id === uid)?.chuc_vu || "")
+    }
+    void load().catch(() => {})
+    return () => { cancelled = true }
+  }, [factoryId, user?.id])
+
+  const handleSignConfirm = async (
+    pin: string,
+    placement: SignPlacement | null,
+    signAs: SignAsType,
+    extra?: {
+      signLayout?: SignerSubLayout[]
+      noteLayout?: NoteSubLayout[]
+      qrLayout?: LayoutRect[]
+      ghiChuPheDuyet?: string
+      ghiChuTat?: boolean
+    },
+  ) => {
     if (!factoryId || !doc || !signModal) return
     const action = signModal
     setActing(true)
@@ -1050,6 +1680,11 @@ export default function DocumentDetailPage() {
           pin,
           placement,
           sign_as: signAs === "none" ? undefined : signAs,
+          sign_layout: extra?.signLayout,
+          note_layout: extra?.noteLayout,
+          qr_layout: extra?.qrLayout,
+          ghi_chu_phe_duyet: extra?.ghiChuPheDuyet,
+          ghi_chu_tat: extra?.ghiChuTat,
         }),
       })
       const json = (await res.json()) as { ok?: boolean; error?: string }
@@ -1204,6 +1839,44 @@ export default function DocumentDetailPage() {
   // placement_ky.qr) — các lượt ký sau tái dùng đúng vị trí đã chọn, tránh vẽ nhiều
   // QR ở nhiều vị trí khác nhau qua các lần ký (xem sign/route.ts's performFileStamp).
   const hasQrPlacement = !!(doc.placement_ky as Record<string, unknown> | null)?.["qr"]
+  // Bước ký này đã được khoá vị trí theo mẫu (chốt lúc "Gửi ký", xem buildPlacementKyFromTemplate)
+  // → khung ký cố định, người ký chỉ xê dịch 3 khối con bên trong. Kiểm theo TỪNG BƯỚC (không
+  // phải cả văn bản): nếu mẫu thiếu khung cho đúng bước nào, riêng bước đó vẫn rơi về canvas
+  // kéo-thả tự do cũ thay vì chặn ký.
+  const signStepEntry = ((doc.placement_ky as Record<string, unknown> | null)?.[signStepKey] as
+    | (TemplateStepPlacement & { tu_mau?: boolean })
+    | undefined) || null
+  const signStepLocked =
+    signStepEntry?.tu_mau === true && Array.isArray(signStepEntry.boxes) && signStepEntry.boxes.length > 0
+  const signLockedEntry = signStepLocked ? (signStepEntry as TemplateStepPlacement) : null
+  // Khung "Ghi chú" = ô ý kiến chỉ đạo của lãnh đạo, CHỈ xuất hiện ở bước phê duyệt và chỉ khi
+  // người soạn thảo có đặt khung này trong mẫu (mẫu không đặt → không có ô, cũng không có chữ
+  // ký nháy — đúng quy tắc 2 tầng).
+  const ghiChuTemplateEntry = ((doc.placement_ky as Record<string, unknown> | null)?.["ghi_chu"] as
+    | { tu_mau?: boolean; boxes?: TemplateNoteBox[] }
+    | undefined) || null
+  const signGhiChuBox =
+    signModal === "phe_duyet" && signStepLocked && ghiChuTemplateEntry?.tu_mau === true
+      ? ghiChuTemplateEntry.boxes?.[0] ?? null
+      : null
+
+  // QR của mẫu: hiện để người ký nhìn thấy, và cho lượt ký ĐẦU TIÊN xê dịch. Đã có `layout` ở
+  // bất kỳ khung nào ⇒ lượt trước đã chốt ⇒ các lượt sau chỉ xem (mirror `mergeQrBox` luồng cũ).
+  const qrTemplateEntry = ((doc.placement_ky as Record<string, unknown> | null)?.["qr"] as
+    | { tu_mau?: boolean; boxes?: TemplateQrBox[] }
+    | undefined) || null
+  const signQrBox =
+    signStepLocked && qrTemplateEntry?.tu_mau === true ? qrTemplateEntry.boxes?.[0] ?? null : null
+  const signQrAdjustable = !!signQrBox && !qrTemplateEntry?.boxes?.some((b) => !!b.layout)
+
+  // Tiền tố ký thay do người soạn thảo chọn trong mẫu. Giữ đúng rule cũ: bước `ky_buoc` chỉ áp
+  // dụng cho phòng ban (ca_nhan đã đích danh 1 người, không có khái niệm "ký thay").
+  const signPrefixAllowed =
+    signModal === "phe_duyet" || (signModal === "ky_buoc" && currentStep?.type === "phong_ban")
+  const signPrefixText =
+    signStepLocked && signPrefixAllowed && signLockedEntry?.sign_as
+      ? `${signLockedEntry.sign_as}.`
+      : ""
 
   return (
     <DocumentsShell>
@@ -1282,15 +1955,6 @@ export default function DocumentDetailPage() {
               </button>
             </>
           )}
-          <a
-            href={`/dashboard/documents/print/?docId=${doc.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-all"
-          >
-            <Printer size={15} />
-            In
-          </a>
           {canDistribute && (
             <button
               onClick={() => void openDistModal()}
@@ -1307,7 +1971,10 @@ export default function DocumentDetailPage() {
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
               <Send size={15} />
-              Gửi ký
+              {/* Văn bản nguồn PDF: bấm vào là VÀO MÀN CÀI ĐẶT VỊ TRÍ, việc gửi ký chỉ xảy ra
+                  sau khi xác nhận vị trí ở màn đó — nhãn phải mô tả đúng hành động ngay lập tức.
+                  File Office đi thẳng (dùng tag {{…}}, không có màn vị trí). */}
+              {docExt === "pdf" ? "Vào cài đặt vị trí" : "Gửi ký"}
             </button>
           )}
           {canKyBuoc && (
@@ -1419,6 +2086,10 @@ export default function DocumentDetailPage() {
               {(doc.thu_tu_ky_json || []).map((step: ThuTuKyStep, i) => {
                 const nguoiKyEntry = (doc.nguoi_ky as Record<string, NguoiKyEntry>)[String(i + 1)]
                 const isCurrentStep = doc.trang_thai === "cho_ky_phong_ban" && doc.buoc_hien_tai === i
+                const otherWaitLabel =
+                  step.type === "ca_nhan"
+                    ? `Chờ ${step.ten || "người được chỉ định"} ký`
+                    : `Chờ phòng ${step.phong_ban_name || step.phong_ban_code || ""} ký`
                 return (
                   <TimelineStep
                     key={i}
@@ -1426,10 +2097,13 @@ export default function DocumentDetailPage() {
                     sublabel={
                       nguoiKyEntry?.ten
                         ? `${signAsPrefixLabel(nguoiKyEntry.sign_as, nguoiKyEntry.is_kt)}${nguoiKyEntry.ten}`
-                        : (isCurrentStep ? "Đang chờ ký..." : "Chờ")
+                        : isCurrentStep
+                          ? (canKyBuoc ? "Chờ BẠN ký" : otherWaitLabel)
+                          : "Chờ"
                     }
                     done={!!nguoiKyEntry}
                     pending={isCurrentStep}
+                    isMyTurn={isCurrentStep && canKyBuoc}
                     at={nguoiKyEntry?.ky_at}
                   />
                 )
@@ -1442,11 +2116,12 @@ export default function DocumentDetailPage() {
                   doc.trang_thai === "da_phe_duyet"
                     ? `${signAsPrefixLabel(doc.phe_duyet_sign_as as SignAsType | null, doc.phe_duyet_is_kt)}${doc.phe_duyet || "Đã phê duyệt"}`
                     : doc.trang_thai === "cho_phe_duyet"
-                      ? "Đang chờ phê duyệt..."
+                      ? (canPheDuyet ? "Chờ BẠN phê duyệt" : "Đang chờ phê duyệt...")
                       : doc.phe_duyet || "Chờ phê duyệt"
                 }
                 done={doc.trang_thai === "da_phe_duyet"}
                 pending={doc.trang_thai === "cho_phe_duyet"}
+                isMyTurn={doc.trang_thai === "cho_phe_duyet" && canPheDuyet}
                 at={doc.ngay_phe_duyet || undefined}
               />
             </div>
@@ -1465,8 +2140,18 @@ export default function DocumentDetailPage() {
           sigTag={signSigTag}
           nameTag={signNameTag}
           acting={acting}
-          allowSignAs={(signModal === "ky_buoc" && currentStep?.type === "phong_ban") || signModal === "phe_duyet"}
+          allowSignAs={
+            !signStepLocked &&
+            ((signModal === "ky_buoc" && currentStep?.type === "phong_ban") || signModal === "phe_duyet")
+          }
           allowQrPlacement={!hasQrPlacement}
+          lockedPlacement={signStepLocked}
+          lockedEntry={signLockedEntry}
+          lockedGhiChuBox={signGhiChuBox}
+          lockedQrBox={signQrBox}
+          lockedQrAdjustable={signQrAdjustable}
+          lockedPrefixText={signPrefixText}
+          signerChucVu={signerChucVu}
           userId={user?.id || ""}
           docId={doc.id}
           onConfirm={handleSignConfirm}
@@ -1636,12 +2321,16 @@ function TimelineStep({
   sublabel,
   done,
   pending,
+  isMyTurn,
   at,
 }: {
   label: string
   sublabel: string
   done: boolean
   pending?: boolean
+  // true khi bước đang "pending" này chính là lượt của người đang xem — tái dùng nguyên
+  // canKyBuoc/canPheDuyet đã có sẵn ở component cha, chỉ đổi phần hiển thị ở đây.
+  isMyTurn?: boolean
   at?: string | null
 }) {
   return (
@@ -1650,17 +2339,22 @@ function TimelineStep({
         {done ? (
           <CheckCircle2 size={18} className="text-emerald-500" />
         ) : pending ? (
-          <Clock size={18} className="text-amber-500" />
+          isMyTurn ? <Bell size={18} className="text-amber-600" /> : <Clock size={18} className="text-slate-300" />
         ) : (
           <div className="w-4 h-4 rounded-full border-2 border-slate-200" />
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className={`text-sm font-bold ${done ? "text-slate-800" : pending ? "text-amber-700" : "text-slate-400"}`}>
+        <p className={`text-sm font-bold ${done ? "text-slate-800" : pending ? (isMyTurn ? "text-amber-700" : "text-slate-400") : "text-slate-400"}`}>
           {label}
         </p>
+        {pending && (
+          <span className={`inline-flex mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${isMyTurn ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-400"}`}>
+            {isMyTurn ? "🔔 Đến lượt bạn" : "Đang chờ"}
+          </span>
+        )}
         {sublabel && (
-          <p className={`text-xs ${done ? "text-slate-500" : pending ? "text-amber-500" : "text-slate-300"}`}>
+          <p className={`text-xs mt-0.5 ${done ? "text-slate-500" : pending ? (isMyTurn ? "text-amber-500" : "text-slate-300") : "text-slate-300"}`}>
             {sublabel}
           </p>
         )}

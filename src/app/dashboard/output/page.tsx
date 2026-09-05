@@ -7,6 +7,7 @@ import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/l
 import {
   AlertTriangle,
   BarChart3,
+  Calendar,
   CalendarDays,
   ChevronRight,
   Droplet,
@@ -196,6 +197,10 @@ export default function OutputPage() {
   const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null)
 
   const isAdmin = currentUser?.role === "admin"
+  const canCreate = hasPermission(currentUser, "output.create")
+  const canEdit = hasPermission(currentUser, "output.edit")
+  const canDelete = hasPermission(currentUser, "output.delete")
+  const canImport = hasPermission(currentUser, "output.import")
 
   const loadRecords = useCallback(async (fid: string) => {
     setLoading(true)
@@ -313,7 +318,7 @@ export default function OutputPage() {
     })
     .sort((a, b) => {
       if (a.ngay !== b.ngay) return b.ngay.localeCompare(a.ngay)
-      if (a.doi !== b.doi) return a.doi - b.doi
+      if (a.doi !== b.doi) return (a.doi ?? 0) - (b.doi ?? 0)
       const xeCompare = a.so_xe.localeCompare(b.so_xe)
       if (xeCompare !== 0) return xeCompare
       return a.chuyen - b.chuyen
@@ -362,12 +367,14 @@ export default function OutputPage() {
   const byDoi = new Map<number, number>()
   for (const record of statsFiltered) {
     const kho = getFilteredTotals(record, filterLoai).kho
-    byDoi.set(record.doi, (byDoi.get(record.doi) ?? 0) + kho)
+    const doiKey = record.doi ?? 0
+    byDoi.set(doiKey, (byDoi.get(doiKey) ?? 0) + kho)
   }
 
   const byVehicle = new Map<string, { doi: number; taiXe: string; tuoi: number; kho: number }>()
   for (const record of statsFiltered) {
-    const key = `${record.doi}:${record.so_xe}:${record.chuyen}`
+    const doiKey = record.doi ?? 0
+    const key = `${doiKey}:${record.so_xe}:${record.chuyen}`
     const totals = getFilteredTotals(record, filterLoai)
     const current = byVehicle.get(key)
     if (current) {
@@ -375,7 +382,7 @@ export default function OutputPage() {
       current.kho += totals.kho
     } else {
       byVehicle.set(key, {
-        doi: record.doi,
+        doi: doiKey,
         taiXe: record.tai_xe ?? "",
         tuoi: totals.tuoi,
         kho: totals.kho,
@@ -439,17 +446,26 @@ export default function OutputPage() {
 
   const handleSave = async (form: OutputFormState) => {
     if (!factoryId) return
-    if (!isAdmin) {
-      setSaveError("Chỉ tài khoản admin mới được thêm hoặc sửa từng dòng sản lượng.")
+    if (!editRecord && !canCreate) {
+      setSaveError("Bạn không có quyền thêm mới sản lượng.")
+      return
+    }
+    if (editRecord && !canEdit) {
+      setSaveError("Bạn không có quyền sửa sản lượng.")
       return
     }
 
     setSaveError(null)
-    const payload = {
+    const isInternal = form.ma_nguon === "cs"
+    const parsedDoi = isInternal
+      ? (typeof form.doi === "number" ? form.doi : parseInt(String(form.doi)) || 1)
+      : null
+
+    const payload: Record<string, unknown> = {
       factory_id: factoryId,
       ngay: form.ngay,
-      doi: Number(form.doi),
-      so_xe: parseVehicleCode(form.so_xe).base_xe,
+      doi: parsedDoi,
+      so_xe: form.so_xe.trim().toUpperCase(),
       chuyen: Number(form.chuyen),
       tai_xe: form.tai_xe || null,
       mn_tuoi: parseFloat(form.mn_tuoi) || 0,
@@ -468,25 +484,51 @@ export default function OutputPage() {
       dt_drc: parseFloat(form.dt_drc) || 0,
       dt_kho: parseFloat(form.dt_kho) || 0,
       ghi_chu: form.ghi_chu || null,
+      ghi_chu_tu_do: form.ghi_chu_tu_do?.trim() || null,
+      ma_nguon: form.ma_nguon || "cs",
       nguoi_upload: currentUser?.full_name || currentUser?.username || null,
       created_by: currentUser?.id ?? null,
     }
 
     let error
     let savedId: string | null = null
-    if (editRecord) {
-      const res = await supabase.from("production_records").update(payload).eq("id", editRecord.id).select("id").single()
-      error = res.error
-      savedId = res.data?.id ?? editRecord.id
-    } else {
-      const res = await supabase
-        .from("production_records")
-        .upsert(payload, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" })
-        .select("id")
-        .single()
-      error = res.error
-      savedId = res.data?.id ?? null
+    const executeSave = async (dataPayload: Record<string, unknown>) => {
+      if (editRecord) {
+        return supabase.from("production_records").update(dataPayload).eq("id", editRecord.id).select("id").single()
+      } else {
+        const res = await supabase.from("production_records").upsert(dataPayload, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" }).select("id").single()
+        if (res.error && (res.error.message.includes("ON CONFLICT") || res.error.message.includes("constraint"))) {
+          let query = supabase.from("production_records")
+            .select("id")
+            .eq("factory_id", dataPayload.factory_id as string)
+            .eq("ngay", dataPayload.ngay as string)
+            .eq("so_xe", dataPayload.so_xe as string)
+            .eq("chuyen", dataPayload.chuyen as number)
+          if (dataPayload.doi === null || dataPayload.doi === undefined) {
+            query = query.is("doi", null)
+          } else {
+            query = query.eq("doi", dataPayload.doi as number)
+          }
+          const { data: existing } = await query.maybeSingle()
+          if (existing?.id) {
+            return supabase.from("production_records").update(dataPayload).eq("id", existing.id).select("id").single()
+          } else {
+            return supabase.from("production_records").insert(dataPayload).select("id").single()
+          }
+        }
+        return res
+      }
     }
+
+    let res = await executeSave(payload)
+    if (res.error && res.error.message.includes("does not exist")) {
+      const fallback = { ...payload }
+      delete fallback.ghi_chu_tu_do
+      delete fallback.ma_nguon
+      res = await executeSave(fallback)
+    }
+    error = res.error
+    savedId = res.data?.id ?? editRecord?.id ?? null
     if (error) throw new Error(error.message)
 
     setShowForm(false)
@@ -502,7 +544,7 @@ export default function OutputPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!factoryId) return
+    if (!factoryId || !canDelete) return
     const record = records.find((item) => item.id === id)
     await supabase.from("production_records").delete().eq("id", id)
     setDelConfirm(null)
@@ -511,7 +553,7 @@ export default function OutputPage() {
   }
 
   const handleDeleteSelectedRows = async () => {
-    if (!factoryId || !detailGroup || selectedRowIds.length === 0) return
+    if (!factoryId || !detailGroup || selectedRowIds.length === 0 || !canDelete) return
     setDeletingRows(true)
     try {
       const { error } = await supabase.from("production_records").delete().in("id", selectedRowIds)
@@ -564,14 +606,16 @@ export default function OutputPage() {
         icon={Droplet}
         action={
           <>
-            <button
-              onClick={() => setShowImport(true)}
-              className="flex items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/15 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/25"
-            >
-              <Upload size={15} />
-              Import file
-            </button>
-            {isAdmin && (
+            {(isAdmin || canImport) && (
+              <button
+                onClick={() => setShowImport(true)}
+                className="flex items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/15 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/25"
+              >
+                <Upload size={15} />
+                Import file
+              </button>
+            )}
+            {(isAdmin || canCreate) && (
               <button
                 onClick={() => { setEditRecord(null); setFormInitialDate(null); setShowForm(true) }}
                 className="flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 font-bold text-brand shadow-sm transition-all hover:bg-white/90"
@@ -615,6 +659,7 @@ export default function OutputPage() {
             <>
               <select value={filterDoi} onChange={(e) => setFilterDoi(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400">
                 <option value="">Tất cả đội</option>
+                <option value="0">Thu mua</option>
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((doi) => (
                   <option key={doi} value={doi}>Đội {doi}</option>
                 ))}
@@ -681,43 +726,47 @@ export default function OutputPage() {
           </div>
       </FilterBar>
 
-      {tab === "list" && (
-        <>
-          {loading ? (
-            <div className="p-12 text-center text-slate-400">Đang tải...</div>
-          ) : groupedDates.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">
-              <BarChart3 size={40} className="mx-auto mb-3 opacity-30" />
-              <p>Không có dữ liệu sản lượng trong kỳ này</p>
-            </div>
-          ) : detailGroup ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                <button onClick={() => { setDetailDay(null); setSelectedRowIds([]) }} className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100">
-                  <X size={18} />
+      {/* List content */}
+      {loading ? (
+        <div className="p-12 text-center text-sm text-slate-400">Đang tải dữ liệu...</div>
+      ) : tab === "list" ? (
+        filtered.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-400">
+            <Calendar size={36} className="mx-auto mb-2 opacity-30" />
+            <p className="font-semibold text-slate-600">Không tìm thấy bản ghi nào</p>
+            <p className="mt-1 text-xs">Thử thay đổi khoảng ngày hoặc điều kiện lọc</p>
+          </div>
+        ) : detailGroup ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+              <button onClick={() => { setDetailDay(null); setSelectedRowIds([]) }} className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100">
+                <X size={18} />
+              </button>
+              <div className="flex-1">
+                <h2 className="text-2xl font-extrabold text-slate-800">Sản lượng ngày {fmtDate(detailGroup.ngay)}</h2>
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                  <span>{detailGroup.records.length} dòng</span>
+                  <span>·</span>
+                  <span>Tươi {fmtNum(detailGroup.totalTuoi, 0)} kg</span>
+                  <span>·</span>
+                  <span>Khô {fmtNum(detailGroup.totalKho, 0)} kg</span>
+                </p>
+                <p className="mt-2 text-xs text-slate-400">Chọn 1 dòng để sửa hoặc chọn nhiều dòng để xóa.</p>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <button onClick={() => void handleExportDayPdf(detailGroup.ngay, detailGroup.records)} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
+                  <FileText size={14} />
+                  PDF ngày
                 </button>
-                <div className="flex-1">
-                  <h2 className="text-2xl font-extrabold text-slate-800">Sản lượng ngày {fmtDate(detailGroup.ngay)}</h2>
-                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                    <span>{detailGroup.records.length} dòng</span>
-                    <span>·</span>
-                    <span>Tươi {fmtNum(detailGroup.totalTuoi, 0)} kg</span>
-                    <span>·</span>
-                    <span>Khô {fmtNum(detailGroup.totalKho, 0)} kg</span>
-                  </p>
-                  <p className="mt-2 text-xs text-slate-400">Chọn 1 dòng để sửa hoặc chọn nhiều dòng để xóa.</p>
-                </div>
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <button onClick={() => void handleExportDayPdf(detailGroup.ngay, detailGroup.records)} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
-                    <FileText size={14} />
-                    PDF ngày
-                  </button>
-                  {isAdmin && (
-                    <>
+                {(isAdmin || canCreate || canEdit || canDelete) && (
+                  <>
+                    {(isAdmin || canCreate) && (
                       <button onClick={() => openCreateForDate(detailGroup.ngay)} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
                         <Plus size={14} />
                         Thêm dòng
                       </button>
+                    )}
+                    {(isAdmin || canEdit) && (
                       <button
                         onClick={() => selectedDetailRecords.length === 1 && openEditRecord(selectedDetailRecords[0])}
                         disabled={selectedDetailRecords.length !== 1}
@@ -726,6 +775,8 @@ export default function OutputPage() {
                         <Edit2 size={14} />
                         Sửa
                       </button>
+                    )}
+                    {(isAdmin || canDelete) && (
                       <button
                         onClick={() => void handleDeleteSelectedRows()}
                         disabled={selectedDetailRecords.length === 0 || deletingRows}
@@ -734,139 +785,181 @@ export default function OutputPage() {
                         <Trash2 size={14} />
                         {deletingRows ? "Đang xóa..." : `Xóa ${selectedDetailRecords.length || ""}`.trim()}
                       </button>
-                    </>
-                  )}
-                </div>
+                    )}
+                  </>
+                )}
               </div>
-
-              <ResponsiveTableWrapper className="rounded-2xl">
-                  <table className="w-full min-w-[1080px] text-sm">
-                    <thead className="border-b border-slate-200 bg-slate-50">
-                      <tr>
-                        {isAdmin && (
-                          <th className="px-4 py-3 text-left">
-                            <input
-                              type="checkbox"
-                              checked={detailGroup.records.length > 0 && selectedDetailRecords.length === detailGroup.records.length}
-                              onChange={() => toggleSelectAllRows(detailGroup.records)}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                            />
-                          </th>
-                        )}
-                        {["Xe", "Chuyến", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ghi chú", "Người Upload"].map((header) => (
-                          <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
-                        ))}
-                        {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Thao tác</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {detailGroup.records.map((record) => {
-                        const totals = getFilteredTotals(record, filterLoai)
-                        const materials = getMaterialSummary(record, filterLoai)
-                        const hasRed = record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "red")
-                        const hasAmber = !hasRed && record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "amber")
-                        const rowClass = selectedRowIds.includes(record.id)
-                          ? "bg-blue-50"
-                          : hasRed
-                            ? "bg-red-50/60"
-                            : hasAmber
-                              ? "bg-amber-50/60"
-                              : "hover:bg-slate-50"
-                        return (
-                          <tr key={record.id} className={`transition-colors ${rowClass}`}>
-                            {isAdmin && (
-                              <td className="px-4 py-3">
-                                <input type="checkbox" checked={selectedRowIds.includes(record.id)} onChange={() => toggleRowSelection(record.id)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
-                              </td>
-                            )}
-                            <td className="px-4 py-3 font-bold text-emerald-700">{record.so_xe || "—"}</td>
-                            <td className="px-4 py-3"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{record.chuyen}</span></td>
-                            <td className="px-4 py-3 text-slate-700">{record.tai_xe || "—"}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-wrap gap-1">
-                                {materials.length > 0 ? materials.map((part) => (
-                                  <span key={part} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">{part}</span>
-                                )) : <span className="text-slate-400">—</span>}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-slate-700">{fmtNum(totals.tuoi, 0)} kg</td>
-                            <td className="px-4 py-3 font-bold text-emerald-700">{fmtNum(totals.kho, 0)} kg</td>
-                            <td className="px-4 py-3">
-                              {(record.warn_codes as WarnCode[]).length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {(record.warn_codes as WarnCode[]).map((code) => <WarnBadge key={code} code={code} />)}
-                                </div>
-                              ) : <span className="text-slate-400">Không có</span>}
-                            </td>
-                            <td className="px-4 py-3 text-slate-500">{record.ghi_chu || "—"}</td>
-                            <td className="px-4 py-3 text-slate-500">{record.nguoi_upload || "—"}</td>
-                            {isAdmin && (
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => openEditRecord(record)} className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50" title="Sửa"><Edit2 size={14} /></button>
-                                  <button onClick={() => setDelConfirm(record.id)} className="rounded-lg p-1.5 text-red-400 hover:bg-red-50" title="Xóa"><Trash2 size={14} /></button>
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-              </ResponsiveTableWrapper>
             </div>
-          ) : (
+
             <ResponsiveTableWrapper className="rounded-2xl">
-                <table className="w-full min-w-[1040px] text-sm">
-                  <thead className="border-b border-slate-200 bg-slate-50">
-                    <tr>
-                      {["Ngày", "Số xe", "Ghi chú", "Người Upload", "Cảnh báo", "Tổng KL tươi", "Tổng KL khô", "Thao tác"].map((header) => (
-                        <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {groupedDates.map(({ ngay, records: dayRecords, totalTuoi, totalKho }) => {
-                      const vehicleCount = [...new Set(dayRecords.map((record) => record.so_xe))].length
-                      const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter((note) => !isBlankNoteContent(note)))]
-                      const uploaders = [...new Set(
-                        dayRecords
-                          .map((record) => record.nguoi_upload?.trim())
-                          .filter((name): name is string => Boolean(name)),
-                      )]
-                      const dayWarnCount = dayRecords.reduce((sum, record) => sum + record.warn_codes.length, 0)
-                      return (
-                        <tr key={ngay} className="cursor-pointer transition-colors hover:bg-slate-50">
-                          <td className="px-4 py-3 font-bold text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtDate(ngay)}</td>
-                          <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{vehicleCount} xe / {dayRecords.length} dòng</td>
-                          <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{notes.length > 0 ? notes.join(", ") : "—"}</td>
-                          <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{uploaders.length > 0 ? uploaders.join(", ") : "—"}</td>
-                          <td className="px-4 py-3" onClick={() => openDayDetail(ngay)}>
-                            {dayWarnCount > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{dayWarnCount} cảnh báo</span> : <span className="text-slate-400">Không có</span>}
+              <table className="w-full min-w-[1080px] text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50">
+                  <tr>
+                    {(isAdmin || canEdit || canDelete) && (
+                      <th className="w-10 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={detailGroup.records.length > 0 && selectedRowIds.length === detailGroup.records.length}
+                          onChange={() => toggleSelectAllRows(detailGroup.records)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                      </th>
+                    )}
+                    {["Xe", "Chuyến", "Đội / Nguồn", "Tài xế", "Nguyên liệu", "KL tươi", "KL khô", "Cảnh báo", "Ký hiệu KT", "Ghi chú", "Người Upload"].map((header) => (
+                      <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
+                    ))}
+                    {(isAdmin || canEdit || canDelete) && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Thao tác</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {detailGroup.records.map((record) => {
+                    const totals = getFilteredTotals(record, filterLoai)
+                    const materials = getMaterialSummary(record, filterLoai)
+                    const hasRed = record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "red")
+                    const hasAmber = !hasRed && record.warn_codes.some((code) => WARN_SEVERITY[code as WarnCode] === "amber")
+                    const rowClass = selectedRowIds.includes(record.id)
+                      ? "bg-blue-50"
+                      : hasRed
+                        ? "bg-red-50/60"
+                        : hasAmber
+                          ? "bg-amber-50/60"
+                          : "hover:bg-slate-50"
+                    return (
+                      <tr key={record.id} className={`transition-colors ${rowClass}`}>
+                        {(isAdmin || canEdit || canDelete) && (
+                          <td className="px-4 py-3">
+                            <input type="checkbox" checked={selectedRowIds.includes(record.id)} onChange={() => toggleRowSelection(record.id)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                           </td>
-                          <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtNum(totalTuoi, 0)} kg</td>
-                          <td className="px-4 py-3 font-semibold text-emerald-700" onClick={() => openDayDetail(ngay)}>{fmtNum(totalKho, 0)} kg</td>
+                        )}
+                        <td className="px-4 py-3 font-bold text-emerald-700">{record.so_xe || "—"}</td>
+                        <td className="px-4 py-3"><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{record.chuyen}</span></td>
+                        <td className="px-4 py-3 font-semibold text-slate-700">
+                          {record.ma_nguon === "m" || record.doi === 0 ? (
+                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">Thu mua</span>
+                          ) : record.ma_nguon === "gctpk" ? (
+                            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-800">GC Tân Biên</span>
+                          ) : record.ma_nguon === "gccpk" ? (
+                            <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-800">GC Chư Păh</span>
+                          ) : record.ma_nguon === "tl" ? (
+                            <span className="rounded bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-800">Thanh lý</span>
+                          ) : (
+                            record.doi ? `Đội ${record.doi}` : "—"
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{record.tai_xe || "—"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {materials.length > 0 ? materials.map((part) => (
+                              <span key={part} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">{part}</span>
+                            )) : <span className="text-slate-400">—</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-700">{fmtNum(totals.tuoi, 0)} kg</td>
+                        <td className="px-4 py-3 font-bold text-emerald-700">{fmtNum(totals.kho, 0)} kg</td>
+                        <td className="px-4 py-3">
+                          {(record.warn_codes as WarnCode[]).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(record.warn_codes as WarnCode[]).map((code) => <WarnBadge key={code} code={code} />)}
+                            </div>
+                          ) : <span className="text-slate-400">Không có</span>}
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          {record.ghi_chu ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-xs">
+                              {record.ghi_chu}
+                            </span>
+                          ) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 max-w-44 truncate" title={record.ghi_chu_tu_do || undefined}>
+                          {record.ghi_chu_tu_do || <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{record.nguoi_upload || "—"}</td>
+                        {(isAdmin || canEdit || canDelete) && (
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1">
-                              <button onClick={(e) => { e.stopPropagation(); void handleExportDayPdf(ngay, dayRecords) }} className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50" title="Xuất PDF ngày"><FileText size={14} /></button>
-                              {isAdmin && (
-                                <>
-                                  <button onClick={(e) => { e.stopPropagation(); if (dayRecords.length === 1) openEditRecord(dayRecords[0]); else openDayDetail(ngay) }} className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50" title="Sửa"><Edit2 size={14} /></button>
-                                  <button onClick={(e) => { e.stopPropagation(); if (dayRecords.length === 1) setDelConfirm(dayRecords[0].id); else openDayDetail(ngay) }} className="rounded-lg p-1.5 text-red-400 hover:bg-red-50" title="Xóa"><Trash2 size={14} /></button>
-                                </>
+                              {(isAdmin || canEdit) && (
+                                <button
+                                  onClick={() => openEditRecord(record)}
+                                  className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50"
+                                  title="Sửa dòng"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
                               )}
-                              <button onClick={() => openDayDetail(ngay)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Xem chi tiết"><ChevronRight size={16} /></button>
+                              {(isAdmin || canDelete) && (
+                                <button
+                                  onClick={() => setDelConfirm(record.id)}
+                                  className="rounded-lg p-1.5 text-red-400 hover:bg-red-50"
+                                  title="Xóa dòng"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
                             </div>
                           </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </ResponsiveTableWrapper>
-          )}
-        </>
-      )}
+          </div>
+        ) : (
+          <ResponsiveTableWrapper className="rounded-2xl">
+            <table className="w-full min-w-[960px] text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50">
+                <tr>
+                  {["Ngày", "Số xe / dòng", "Ký hiệu KT", "Người Upload", "Cảnh báo", "Tổng tươi", "Tổng khô", "Thao tác"].map((header) => (
+                    <th key={header} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {groupedDates.map(({ ngay, records: dayRecords, totalTuoi, totalKho }) => {
+                  const vehicleCount = [...new Set(dayRecords.map((record) => record.so_xe))].length
+                  const notes = [...new Set(dayRecords.map((record) => record.ghi_chu).filter((note) => !isBlankNoteContent(note)))]
+                  const uploaders = [...new Set(
+                    dayRecords
+                      .map((record) => record.nguoi_upload?.trim())
+                      .filter((name): name is string => Boolean(name)),
+                  )]
+                  const dayWarnCount = dayRecords.reduce((sum, record) => sum + record.warn_codes.length, 0)
+                  return (
+                    <tr key={ngay} className="cursor-pointer transition-colors hover:bg-slate-50">
+                      <td className="px-4 py-3 font-bold text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtDate(ngay)}</td>
+                      <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{vehicleCount} xe / {dayRecords.length} dòng</td>
+                      <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{notes.length > 0 ? notes.join(", ") : "—"}</td>
+                      <td className="px-4 py-3 text-slate-500" onClick={() => openDayDetail(ngay)}>{uploaders.length > 0 ? uploaders.join(", ") : "—"}</td>
+                      <td className="px-4 py-3" onClick={() => openDayDetail(ngay)}>
+                        {dayWarnCount > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{dayWarnCount} cảnh báo</span> : <span className="text-slate-400">Không có</span>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700" onClick={() => openDayDetail(ngay)}>{fmtNum(totalTuoi, 0)} kg</td>
+                      <td className="px-4 py-3 font-semibold text-emerald-700" onClick={() => openDayDetail(ngay)}>{fmtNum(totalKho, 0)} kg</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); void handleExportDayPdf(ngay, dayRecords) }} className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50" title="Xuất PDF ngày"><FileText size={14} /></button>
+                          {(isAdmin || canEdit || canDelete) && (
+                            <>
+                              {(isAdmin || canEdit) && (
+                                <button onClick={(e) => { e.stopPropagation(); if (dayRecords.length === 1) openEditRecord(dayRecords[0]); else openDayDetail(ngay) }} className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50" title="Sửa"><Edit2 size={14} /></button>
+                              )}
+                              {(isAdmin || canDelete) && (
+                                <button onClick={(e) => { e.stopPropagation(); if (dayRecords.length === 1) setDelConfirm(dayRecords[0].id); else openDayDetail(ngay) }} className="rounded-lg p-1.5 text-red-400 hover:bg-red-50" title="Xóa"><Trash2 size={14} /></button>
+                              )}
+                            </>
+                          )}
+                          <button onClick={() => openDayDetail(ngay)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Xem chi tiết"><ChevronRight size={16} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
+        )
+      ) : null}
 
       {tab === "stats" && (
         <div className="space-y-5">
@@ -885,7 +978,9 @@ export default function OutputPage() {
                 const pct = Math.round((kho / maxKho) * 100)
                 return (
                   <div key={doi} className="flex items-center gap-3">
-                    <span className="w-12 text-right text-xs font-bold text-slate-500">Đội {doi}</span>
+                    <span className="w-16 text-right text-xs font-bold text-slate-500">
+                      {doi === 0 ? "Thu mua" : `Đội ${doi}`}
+                    </span>
                     <div className="h-4 flex-1 overflow-hidden rounded-full bg-slate-100">
                       <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
                     </div>
@@ -914,7 +1009,9 @@ export default function OutputPage() {
                     const [, soXe, chuyen] = key.split(":")
                     return (
                       <tr key={key} className={`border-t border-slate-100 ${index % 2 === 0 ? "" : "bg-slate-50/50"}`}>
-                        <td className="px-3 py-2 font-bold text-slate-700">{value.doi}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700">
+                          {value.doi === 0 ? "Thu mua" : `Đội ${value.doi}`}
+                        </td>
                         <td className="px-3 py-2 font-bold text-slate-800">{soXe}</td>
                         <td className="px-3 py-2 text-slate-600">{chuyen}</td>
                         <td className="px-3 py-2 text-slate-600">{value.taiXe || "—"}</td>

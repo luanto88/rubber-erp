@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { mimeOfImageFormat, sniffImageFormat } from "@/lib/image-format"
 
 const IMAGE_BUCKET_CONFIG = {
   "inventory-files": {
@@ -117,9 +118,27 @@ export async function POST(req: NextRequest) {
 
     const storagePath = `${factoryId}/${documentType}/${Date.now()}_${sanitizeFilename(fileEntry.name)}`
     const fileBuffer = Buffer.from(await fileEntry.arrayBuffer())
+
+    // Lớp phòng vệ cuối: kiểm tra định dạng theo NỘI DUNG THẬT, không tin `fileEntry.type`
+    // (được suy ra từ đuôi tên file, nên ảnh HEIC tên ".jpg" khai báo là "image/jpeg" và lọt
+    // qua kiểm tra MIME phía trên). Client đã tự chuyển HEIC sang JPEG trước khi gửi lên
+    // (src/lib/image-upload.ts), nhánh này chỉ chặn khi client cũ/gọi thẳng API. Máy chủ không
+    // tự chuyển đổi để khỏi kéo thêm thư viện giải mã HEIC vào runtime.
+    const realFormat = sniffImageFormat(new Uint8Array(fileBuffer.subarray(0, 64)))
+    if (!realFormat || !config.allowedMimeTypes.includes(mimeOfImageFormat(realFormat))) {
+      return NextResponse.json(
+        {
+          error: realFormat === "heic"
+            ? "Ảnh định dạng HEIC không được hỗ trợ. Vui lòng đổi cài đặt camera sang JPEG rồi chụp lại."
+            : "Nội dung tệp không phải ảnh PNG/JPEG/WebP hợp lệ.",
+        },
+        { status: 400 },
+      )
+    }
+
     const uploadResult = await supabaseAdmin.storage.from(bucket).upload(storagePath, fileBuffer, {
       upsert: true,
-      contentType: fileEntry.type,
+      contentType: mimeOfImageFormat(realFormat),
     })
 
     if (uploadResult.error) {

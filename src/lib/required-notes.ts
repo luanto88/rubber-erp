@@ -9,6 +9,7 @@ export type RequiredNote = {
   content: string
   sort_order: number
   is_active: boolean
+  mo_ta?: string | null
 }
 
 export async function loadRequiredNotes(
@@ -18,7 +19,7 @@ export async function loadRequiredNotes(
 ) {
   let query = supabase
     .from("required_notes")
-    .select("id, factory_id, content, sort_order, is_active")
+    .select("*")
     .eq("factory_id", factoryId)
     .order("sort_order")
     .order("content")
@@ -34,9 +35,10 @@ export async function createRequiredNote(
   supabase: SupabaseClient,
   factoryId: string,
   content: string,
+  moTa?: string,
 ) {
   const trimmed = content.trim()
-  if (isBlankNoteContent(trimmed)) throw new Error("Ghi chú không hợp lệ (không được để trống hoặc là số 0)")
+  if (isBlankNoteContent(trimmed)) throw new Error("Ký hiệu kỹ thuật không hợp lệ (không được để trống hoặc là số 0)")
 
   const { data: existing } = await supabase
     .from("required_notes")
@@ -67,14 +69,17 @@ export async function createRequiredNote(
   if (maxError) throw maxError
 
   const nextSort = Number(maxRows?.[0]?.sort_order || 0) + 1
+  const payload: Record<string, unknown> = {
+    factory_id: factoryId,
+    content: trimmed,
+    sort_order: nextSort,
+    is_active: true,
+  }
+  if (moTa?.trim()) payload.mo_ta = moTa.trim()
+
   const { data, error } = await supabase
     .from("required_notes")
-    .insert({
-      factory_id: factoryId,
-      content: trimmed,
-      sort_order: nextSort,
-      is_active: true,
-    })
+    .insert(payload)
     .select("id, factory_id, content, sort_order, is_active")
     .single()
 

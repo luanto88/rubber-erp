@@ -4057,7 +4057,7 @@ export default function ProductPage() {
 
           <div className="mb-3">
             <label className="text-xs font-bold text-slate-600 block mb-1.5">
-              Ghi chú
+              Ký hiệu kỹ thuật <span className="text-slate-400 font-normal">(VD: T, Tr...)</span>
             </label>
             <RequiredNoteSelect
               factoryId={factoryId}
@@ -6160,7 +6160,7 @@ export default function ProductPage() {
                       </div>
                       <div>
                         <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                          Ghi chú
+                          Ký hiệu kỹ thuật <span className="text-slate-400 font-normal">(VD: T, Tr...)</span>
                         </label>
                         <RequiredNoteSelect
                           factoryId={factoryId}

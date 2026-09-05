@@ -1,6 +1,7 @@
 import jsPDF from "jspdf"
 import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { formatDateDisplay } from "@/lib/date-utils"
+import { fetchImageForPdf, isPdfImageFailure, type PdfImage } from "@/lib/image-format"
 
 export type ExportOrderPdfVehicle = {
   id: string
@@ -79,40 +80,13 @@ async function loadLogoBase64(): Promise<string> {
   return logoBase64Promise
 }
 
-type RemoteImage = { dataUrl: string; format: "PNG" | "JPEG" | "WEBP"; width: number; height: number }
-
 // Ảnh xe/hàng hóa/chứng từ do người dùng upload lên Supabase Storage (public bucket) — fetch
 // qua network thay vì static asset local, nên phải chịu lỗi mềm: ảnh không tải được (mạng lỗi,
-// CORS, file đã xóa...) chỉ bỏ qua đúng ảnh đó, không được làm hỏng toàn bộ PDF.
-async function fetchRemoteImage(url: string): Promise<RemoteImage | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    const format: RemoteImage["format"] = blob.type.includes("png")
-      ? "PNG"
-      : blob.type.includes("webp")
-        ? "WEBP"
-        : "JPEG"
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => reject(reader.error)
-      reader.readAsDataURL(blob)
-    })
-    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve({ width: img.naturalWidth || 1, height: img.naturalHeight || 1 })
-      img.onerror = () => reject(new Error("Không đọc được kích thước ảnh."))
-      img.src = dataUrl
-    })
-    return { dataUrl, format, width, height }
-  } catch {
-    return null
-  }
-}
+// CORS, file đã xóa, định dạng HEIC...) chỉ bỏ qua đúng ảnh đó kèm lý do, không được làm hỏng
+// toàn bộ PDF. Việc nhận diện định dạng + chuẩn hóa nằm ở `fetchImageForPdf`
+// (src/lib/image-format.ts), dùng chung với module Bảo trì.
 
-function drawImageContain(doc: jsPDF, img: RemoteImage, boxX: number, boxY: number, boxW: number, boxH: number) {
+function drawImageContain(doc: jsPDF, img: PdfImage, boxX: number, boxY: number, boxW: number, boxH: number) {
   const boxRatio = boxW / boxH
   const imgRatio = img.width / img.height
   let drawW = boxW, drawH = boxH
@@ -149,7 +123,7 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
     ;[v.image_url_1, v.image_url_2, v.image_url_3].forEach((u) => { if (u) photoUrls.add(u) })
   })
   const photoEntries = await Promise.all(
-    Array.from(photoUrls).map(async (url) => [url, await fetchRemoteImage(url)] as const),
+    Array.from(photoUrls).map(async (url) => [url, await fetchImageForPdf(url)] as const),
   )
   const photoMap = new Map(photoEntries)
 
@@ -303,12 +277,12 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
         doc.setDrawColor(...BORDER)
         doc.rect(boxX, innerY + 1.5, photoW, photoH)
         const img = url ? photoMap.get(url) : null
-        if (img) {
+        if (img && !isPdfImageFailure(img)) {
           drawImageContain(doc, img, boxX, innerY + 1.5, photoW, photoH)
         } else if (url) {
           doc.setFontSize(6.5)
           doc.setTextColor(...GRAY)
-          doc.text("Không tải được ảnh", boxX + photoW / 2, innerY + 1.5 + photoH / 2, { align: "center" })
+          doc.text(isPdfImageFailure(img) ? img.reason : "Không tải được ảnh", boxX + photoW / 2, innerY + 1.5 + photoH / 2, { align: "center" })
         }
       })
     }

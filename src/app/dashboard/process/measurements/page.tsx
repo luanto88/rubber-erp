@@ -7,6 +7,7 @@ import {
 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { prepareImageForUpload } from "@/lib/image-upload"
 import { isProductSelectableStorageStatus } from "@/lib/storage-status"
 import { ProcessShell } from "../_components/process-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
@@ -617,14 +618,25 @@ export default function MeasurementsPage() {
     setUploadingRowId(rowId)
     try {
       const newUrls: string[] = []
-      for (const file of Array.from(files)) {
+      const prepareErrors: string[] = []
+      for (const rawFile of Array.from(files)) {
+        // Chuẩn hóa theo nội dung thật (chuyển HEIC sang JPEG) — xem src/lib/image-format.ts.
+        const prepared = await prepareImageForUpload(rawFile)
+        if (!prepared.ok) {
+          prepareErrors.push(`${rawFile.name}: ${prepared.reason}`)
+          continue
+        }
+        const file = prepared.file
         const ext = file.name.split(".").pop()
         const path = `${factoryId}/process/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-        const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+        const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type })
         if (!error) {
           const { data: urlData } = supabase.storage.from("order-files").getPublicUrl(path)
           newUrls.push(urlData.publicUrl)
         }
+      }
+      if (prepareErrors.length) {
+        setSaveError(`Một số ảnh không tải được:\n${prepareErrors.join("\n")}`)
       }
       if (newUrls.length) {
         updateRow(rowId, {
@@ -652,7 +664,18 @@ export default function MeasurementsPage() {
     const key = `${rowId}-auto`
     setOcrLoadingKey(key)
     try {
-      const results = await Promise.all(Array.from(files).map(async (file) => {
+      // Chuẩn hóa TRƯỚC khi vừa gửi OCR vừa upload: ảnh HEIC không chỉ hỏng khi nhúng PDF mà
+      // còn làm OCR thất bại (gửi lên Gemini với mimeType khai báo sai). Xem
+      // src/lib/image-format.ts.
+      const preparedFiles: File[] = []
+      const prepareErrors: string[] = []
+      for (const rawFile of Array.from(files)) {
+        const prepared = await prepareImageForUpload(rawFile)
+        if (prepared.ok) preparedFiles.push(prepared.file)
+        else prepareErrors.push(`${rawFile.name}: ${prepared.reason}`)
+      }
+
+      const results = await Promise.all(preparedFiles.map(async (file) => {
         const imageBase64 = await readFileAsBase64(file)
         const mimeType = file.type || "image/jpeg"
         const res = await fetch("/api/process/ocr-image", {
@@ -673,7 +696,7 @@ export default function MeasurementsPage() {
         // Vẫn lưu ảnh dù OCR không nhận dạng được, để không mất ảnh hiện trường đã chụp
         const ext = file.name.split(".").pop() || "jpg"
         const path = `${factoryId}/process/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-        const { error: uploadErr } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+        const { error: uploadErr } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type })
         if (!uploadErr) {
           const { data: urlData } = supabase.storage.from("order-files").getPublicUrl(path)
           newUrls.push(urlData.publicUrl)
@@ -703,8 +726,13 @@ export default function MeasurementsPage() {
         setOcrToast(`Đã tự nhận dạng và điền ${detectedCts.map(ct => `${ct}=${patchKetQua[ct]}`).join(", ")} từ ảnh`)
         setTimeout(() => setOcrToast(null), 3500)
       }
-      if (failedNames.length) {
-        setSaveError(`Không nhận dạng được ${failedNames.length} ảnh (${failedNames.join(", ")}), vui lòng nhập tay.`)
+      if (failedNames.length || prepareErrors.length) {
+        const parts: string[] = []
+        if (failedNames.length) {
+          parts.push(`Không nhận dạng được ${failedNames.length} ảnh (${failedNames.join(", ")}), vui lòng nhập tay.`)
+        }
+        if (prepareErrors.length) parts.push(`Một số ảnh không tải được:\n${prepareErrors.join("\n")}`)
+        setSaveError(parts.join("\n"))
       }
     } finally {
       setOcrLoadingKey(null)

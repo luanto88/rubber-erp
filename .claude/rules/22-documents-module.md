@@ -262,22 +262,12 @@ Luôn dùng `maintenance_staff.email` theo `profile_id` — **KHÔNG** dùng `pr
 
 ---
 
-## Trang in văn bản
+## Trang in văn bản — ĐÃ XOÁ (2026-09-03)
 
-Route: `/dashboard/documents/print/?docId={uuid}`
-
-- Layout bypass sidebar: `dashboard/layout.tsx` kiểm tra `pathname.includes("/print")` → render `{children}` trực tiếp, không có sidebar.
-- Load `van_ban_documents` theo `docId` từ query param.
-- Nội dung trang in:
-  - Header "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"
-  - QRCodeSVG (size=80), URL: `{APP_URL}/dashboard/documents/{docId}`
-  - Số văn bản, tên văn bản
-  - Bảng metadata: Loại, Phòng ban, Ngày phê duyệt, Người phê duyệt, Phân loại (Thường/Mật)
-  - Bảng tiến trình ký: các bước đã ký kèm tên + ngày
-- **Watermark Mật**: khi `phan_loai = 'Mat'` — `position: fixed`, `opacity: 0.07`, `transform: rotate(-45deg)`, `font-size: 120px`, `color: #dc2626`, centered trên toàn trang
-- Auto-print: `setTimeout(() => window.print(), 800)` sau khi doc load
-- CSS in: `@page { size: A4; margin: 20mm 15mm; }`
-- Nút In trên `[id]/page.tsx`: thẻ `<a>` mở `_blank`, luôn hiển thị khi doc đã load, không phụ thuộc trạng thái
+Route `/dashboard/documents/print/?docId={uuid}` (trang HTML dựng lại riêng, hoàn toàn tách biệt
+với file PDF/DOCX đã ký thật) và nút "In" trên `[id]/page.tsx` đã bị xoá hẳn — xem CLAUDE.md mục
+"Cập nhật (2026-09-03)". File thật đã ký vẫn xem được qua nút "Xem file" (dùng
+`file_signed_pdf_url`/`file_signed_office_url`/`file_goc_url`) đã có sẵn ở trang chi tiết.
 
 ---
 
@@ -564,3 +554,296 @@ server cho `/api/documents/distribute`, nút "Thay file" khi bị trả về, v�
 Toàn bộ các fix đó đã qua `tsc`/`eslint`/`npm run build` sạch nhưng **chưa được test tay
 xác nhận** tính đến 2026-08-01 — nếu người dùng báo lỗi liên quan tới ký duyệt/QR/upload văn
 bản, đọc file lịch sử để biết chi tiết implementation trước khi sửa lại.
+
+---
+
+## "Vị trí CỨNG" — áp mẫu `mau_vi_tri` vào route ký thật (2026-09-04, Phần C)
+
+Từ nay mọi lượt **"Gửi ký"** văn bản nguồn **PDF** đều đi qua màn `/dashboard/ky/mau-vi-tri`,
+và mẫu vị trí được **chốt (snapshot)** vào `van_ban_documents.placement_ky` ngay trong câu
+UPDATE của action `gui_ky`. Các bước ký sau đó **chỉ hỏi PIN** — không còn canvas kéo-thả,
+không còn radio "Ký thay" (tiền tố lấy thẳng từ mẫu).
+
+### Nguyên tắc nền
+
+- **Hệ toạ độ trùng khớp tuyệt đối**: `mau_vi_tri.khung[].x_pt/y_pt/w_pt/h_pt` đã là *point,
+  gốc dưới-trái* — đúng hệ pdf-lib. Tuyệt đối **không** quy đổi thêm, **không** dùng
+  `coords.ts` (file đó dành cho jsPDF mm/top-left).
+- **Snapshot, không join sống**: admin sửa mẫu giữa chừng không làm lệch văn bản đang luân
+  chuyển dở. `placement_ky._mau` ghi `{loai_tai_lieu, phien_ban, chot_luc}`.
+- **Tách 2 luồng tự động theo cờ `tu_mau`**: entry nào có `tu_mau: true` → đường mới; không có
+  → `stampPdfStep` cũ **giữ nguyên không sửa 1 dòng**. Văn bản gửi ký trước 2026-09-04 vì vậy
+  chạy y hệt như cũ. Kiểm **theo TỪNG BƯỚC**, không phải cả văn bản — mẫu thiếu khung cho bước
+  nào thì riêng bước đó rơi về canvas cũ, không chặn ký.
+
+### Ánh xạ vai trò mẫu → `placement_ky` (`src/lib/signing/apply-template.ts`)
+
+| Vai trò mẫu | Key | Quy tắc |
+|---|---|---|
+| `ky_buoc`, `ky_buoc__banN` | `"1"`, `"2"`… | Mỗi bản nhân bản = **1 BƯỚC KÝ KHÁC NHAU**. Sắp theo `cloneIndexOf()` rồi lấy **index mảng** làm số bước (id có thể không liên tục: `ky_buoc`, `__ban2`, `__ban4` → bước 1,2,3). Cắt theo `so_buoc_tong` |
+| `phe_duyet`, `phe_duyet__banN` | `"phe_duyet"` | Ngược lại — **CÙNG 1 người ký ở nhiều vị trí**, gộp hết vào `boxes[]` của 1 entry |
+| `qr` / `ngay_ky` / `ghi_chu` | cùng tên | Cấp văn bản, `{tu_mau, boxes[]}` |
+
+Không có khung ký nào (chỉ qr/ghi_chu) → `buildPlacementKyFromTemplate` trả `null` → giữ
+nguyên `placement_ky = {}` như cũ.
+
+### Quy tắc vẽ
+
+- **2 công tắc ĐỘC LẬP** `show_name` / `show_chuc_vu` — file PDF gốc có thể đã in sẵn tên
+  và/hoặc chức vụ, chỉ người soạn thảo biết cần đè cái nào. Chia dải khung: tắt cả hai → ảnh
+  chữ ký chiếm **trọn** khung; bật 1 → chữ ký 72% + dòng đó; bật cả 2 → 55% / tên / chức vụ.
+  **Mẫu lưu trước 2026-09-04 chỉ có `show_name`** → mọi nơi đọc phải fallback
+  `show_chuc_vu ?? show_name` (giữ ý nghĩa "bật là bật cả hai").
+- **Chức vụ** tra `maintenance_staff.chuc_vu_chinh_quyen || chuc_vu` (mirror
+  `signer-info/route.ts`). `chuc_vu_key` = `kiem_nhiem`/`doan_the` **trả rỗng** — DB chưa có 2
+  cột này (gap chưa chốt cách migrate, **không tự bịa nguồn khác**).
+- **Neo trang** (`resolveAnchorPages`): `dau` → trang `so_trang` (clamp); `cuoi` → trang cuối;
+  `moi_trang` → mọi trang (ký nháy).
+- **`ghi_chu` vẽ 1 lần** ở lượt đóng dấu đầu tiên (`"1"` nếu Cấp 1 có bước, ngược lại
+  `"phe_duyet"`); **`ngay_ky` vẽ 1 lần** ở bước `phe_duyet`, giá trị = ngày ban hành. Vẽ 1 lần
+  duy nhất để tránh chồng nét qua nhiều lượt (bài học `maintenance-pdf.ts`).
+- **Tiền tố ký thay** dùng `drawTextFit` canh giữa **trên mép trên khung** (không dùng
+  `drawSignPrefix` — hàm đó canh trái, không nhận chiều rộng). Vẫn giữ rule cũ: chỉ áp dụng cho
+  bước `phong_ban`, không áp dụng `ca_nhan`.
+- **Mẫu không đặt khung QR** → giữ fallback góc trên-phải mọi trang như luồng cũ, để không im
+  lặng làm mất QR tra cứu công khai.
+
+### Chống ghi đè
+
+Khi bước đã khoá: route **bỏ qua** `placement` và `sign_as` client gửi lên (`placement &&
+!lockedStep`), lấy `sign_as` từ chính entry mẫu. Client cũng tự ẩn canvas/picker
+(`lockedPlacement` → `showCanvas = false`, `handleVerifyPin` gọi thẳng `onConfirm`).
+
+### Office (DOCX/XLSX)
+
+Không đi qua màn mẫu (dùng tag `{{...}}`), **không bao giờ** được gieo `tu_mau`. Chỉ bổ sung
+tag tuỳ chọn mới `{{GHI_CHU}}` vào `buildStepTags` cho mọi bước — template không có tag thì tự
+bỏ qua, thay lặp qua các bước là vô hại (sau lượt đầu tag đã biến mất khỏi file).
+
+### Không cần migration
+
+`placement_ky` là JSONB tự do; cột `ghi_chu` đã tồn tại. `SignTemplateBox.show_chuc_vu` là
+field optional thêm vào JSONB `mau_vi_tri.khung`.
+
+---
+
+## Ngày phê duyệt theo múi giờ nhà máy + Loại VB tùy chọn khi không có mã (2026-09-04)
+
+### Bug đã fix: ngày phê duyệt lệch 1 ngày (00:00–06:59 sáng)
+
+`api/documents/sign/route.ts` có 2 chỗ tính "ngày hôm nay", cả hai đều sai với nhà máy ở UTC+7:
+
+| Chỗ | Code cũ | Vấn đề |
+|---|---|---|
+| action `phe_duyet` | `new Date().toISOString().slice(0,10)` → lưu `ngay_phe_duyet` | Luôn tính theo **UTC** |
+| `performFileStamp` | `new Date().toLocaleDateString("vi-VN", {…})` → in lên PDF + tag `{{NGAY_BAN_HANH}}`/`{{NGAY_KY_BUOC_N}}` + khung `ngay_ky` của mẫu vị trí | **Không truyền `timeZone`** → dùng TZ server: đúng ở localhost (máy UTC+7), **sai trên Vercel (UTC)** |
+
+Cửa sổ lệch: **00:00–06:59 sáng giờ địa phương** — bấm duyệt 05:00 ngày 04/09 bị ghi thành 03/09.
+Đã đo bằng code thật: sai đúng **7/24** khung giờ. Nhật ký có thao tác thật rơi vào khung này
+(`doc_approval_log` lúc `2026-09-02T23:34:16Z` = 06:34 sáng 03/09 giờ VN).
+
+**Fix**: 2 helper mới trong `src/lib/date-utils.ts` — `FACTORY_TIME_ZONE = "Asia/Ho_Chi_Minh"`,
+`getFactoryTodayISO()` (`YYYY-MM-DD`), `formatFactoryDateVN()` (`dd/mm/yyyy`), đều dùng
+`Intl.DateTimeFormat` với `timeZone`. Route ký thay đúng 2 chỗ trên.
+
+⚠️ `getTodayISODate()` sẵn có **cũng dùng UTC** (cùng lỗi) nhưng module KPI đang dùng để so ngày
+→ **cố ý KHÔNG sửa**, đã ghi chú cảnh báo ngay cạnh hàm. Code mới cần "hôm nay" theo nghiệp vụ
+phải dùng `getFactoryTodayISO()`.
+
+Các `new Date().toISOString()` còn lại trong route (`updated_at`, `ky_at`, `tra_ve_at`) là
+timestamp đầy đủ, không cắt lấy phần ngày → không bị lệch, không đụng.
+
+### `loai_van_ban` tùy chọn khi tick "Văn bản này không có mã"
+
+Trước đây cả 2 trang đều bắt buộc `loai_van_ban` kể cả khi không có mã — vô lý vì người dùng
+hiểu trường này chỉ để sinh mã. Thực tế nó còn là **khóa chọn mẫu vị trí ký**
+(`mau_vi_tri.loai_tai_lieu`) và dùng để lọc/thống kê/tìm bằng AI.
+
+- **`new/upload/page.tsx` (Upload ký tay)**: luồng này **không bao giờ** dùng mẫu vị trí ký (văn
+  bản đã ký tay trên giấy) → `loai_van_ban` chỉ còn ý nghĩa phân loại ⇒ **tùy chọn** khi
+  `khongCoMa`, payload ghi `|| null` (cột đã nullable, không cần migration). Nhãn động bỏ dấu `*`
+  và hiện chú thích.
+- **`new/page.tsx` (Soạn thảo)**: **giữ bắt buộc** — thiếu nó sẽ không chọn được mẫu vị trí ký.
+  Chỉ thêm chú thích giải thích khi tick "không có mã".
+
+---
+
+## Người ký ĐỌC được PDF + xê dịch 3 khối trong khung mẫu (2026-09-05, việc 1)
+
+Phần C ("vị trí CỨNG") ban đầu làm bước ký chỉ còn hộp PIN — người ký **không nhìn thấy nội
+dung văn bản** trước khi ký. Nay đổi ngữ nghĩa khung mẫu từ *"vị trí đóng dấu cố định"* thành
+**"vùng cho phép"**.
+
+### Module thuần dùng chung `src/lib/signing/template-layout.ts`
+
+**KHÔNG import pdf-lib** (nếu import, UI sẽ kéo cả pdf-lib vào bundle client). Chứa types +
+`resolveAnchorPages`, `computeDefaultSubLayout`, `clampRectToBox`, `sanitizeSignerSubLayout`,
+`applySignerLayoutToEntry`, `resolveEffectiveSubLayout`. `apply-template.ts` re-export lại các
+type/`resolveAnchorPages` cho nơi đang import sẵn.
+
+UI (`documents/[id]/page.tsx`) và server (`api/documents/sign/route.ts` → `apply-template.ts`)
+**dùng chung đúng các hàm này** ⇒ bản xem trước và bản đóng dấu không thể lệch nhau.
+
+### Bố cục 4 khối con
+
+`TemplateSignBox.layout?: SignerSubLayout` (`{ sig, name, chuc_vu, prefix, show_* }`, hệ
+**point**) — lưu thẳng vào `placement_ky` (JSONB, **không cần migration**). Không có `layout` =
+văn bản ký trước bản này → `resolveEffectiveSubLayout` rơi về công thức chia dải cũ
+(0.55 / 0.72 / 1.0), **giao diện không đổi 1 pixel**.
+
+- UI giữ state ở **point** (không phải canvas px) vì mỗi trang PDF có thể khác khổ giấy; quy
+  đổi sang px chỉ lúc render (`toCanvas`), đổi ngược bằng `toPdf` khi kéo xong.
+- Kéo bị chặn 2 lớp: `bounds="parent"` (parent = div "vùng cho phép") **và** `clampRectToBox`.
+- **Server BẮT BUỘC kẹp lại** — `applySignerLayoutToEntry` chạy trong cả `ky_buoc` lẫn
+  `phe_duyet`. Gọi thẳng API với toạ độ ngoài vùng cũng không thoát ra được. Khung mẫu
+  (`x/y/width/height`) client **không sửa được**, chỉ gửi được `layout` bên trong.
+- Toggle Tên/Chức danh **đặt lại bố cục mặc định** của cả khung (tỉ lệ chia dải phụ thuộc số
+  khối đang hiện). Nút toggle đặt NGOÀI khối (dưới vùng cho phép) để còn bật lại sau khi tắt.
+
+### Quy tắc 2 TẦNG — `show_name`/`show_chuc_vu` ĐỔI NGHĨA
+
+| Mẫu (người soạn thảo) | Người ký thấy gì |
+|---|---|
+| **Bật** | Thấy khối và **tắt/mở tự do** |
+| **Tắt** | **Không thấy**, không có cách nào bật lên |
+
+Tức mẫu chuyển từ *"có vẽ hay không"* → ***"có CHO PHÉP hiển thị hay không"***; lựa chọn thực
+tế của người ký lưu trong `layout.show_name`/`show_chuc_vu`. Khối chức danh còn cần có chức vụ
+thật (`maintenance_staff` qua `/api/documents/signer-info`) mới hiện.
+
+⚠️ `TEMPLATE_SIGNER_NAME_STYLE` (apply-template.ts) = `VAN_BAN_SIGNER_NAME_STYLE` nhưng
+`minMaxWidth: 0`. Bản gốc ép bề rộng tên ≥ 60pt kể cả khi khung hẹp hơn ⇒ chữ tràn ra NGOÀI
+khối người ký vừa kéo, phá vỡ cam kết "chỉ xê dịch trong vùng cho phép".
+
+### Tiền tố ký thay KT./TM./TL./TUQ. — khối con thứ 4 (2026-09-05)
+
+Trước đây vẽ **cứng NGOÀI mép trên khung** (`y = box.y + box.height`), không kéo/tắt được. Nay:
+
+- Là 1 khối con như 3 khối kia, **vùng cho phép = chính khung ký** (không mở rộng ra ngoài).
+- `computeDefaultSubLayout` nhận thêm `withPrefix`: tiền tố chiếm **dải trên cùng 16%** chiều cao
+  khung, 3 khối còn lại chia theo đúng tỉ lệ cũ trên phần chiều cao **còn lại**.
+  ⚠️ **Đổi bố cục mặc định có chủ đích** cho khung CÓ `sign_as`; khung không có `sign_as` ⇒
+  `innerH === box.height` ⇒ không đổi 1 pixel.
+- Người ký **tắt được**. Tắt trên MỌI khung của bước ⇒ route ghi `sign_as = "none"` cho bước đó
+  (`signerTurnedPrefixOff()` trong `sign/route.ts`) — tắt tiền tố = **không ký thay nữa**, để
+  timeline không hiện "KT." trong khi PDF không có. Còn 1 khung hiện tiền tố thì vẫn là ký thay.
+- Quy tắc 2 tầng: mẫu không chọn `sign_as` ⇒ không có khối này, người ký không bật lên được
+  (`prefixAvailable`).
+
+---
+
+## Khung "Ghi chú" = ô Ý KIẾN CHỈ ĐẠO lúc phê duyệt (2026-09-05, việc 2)
+
+**Code trước đây hiểu SAI mục đích**: in `van_ban_documents.ghi_chu` (ghi chú người soạn thảo
+nhập lúc tạo) vào khung này, ở lượt đóng dấu ĐẦU TIÊN. Thực tế đây là ô để **lãnh đạo gõ ý kiến
+chỉ đạo ngay tại bước phê duyệt**.
+
+- Cột mới `ghi_chu_phe_duyet TEXT` (migration `20260904_van_ban_ghi_chu_phe_duyet.sql`).
+- Vẽ ở **bước `phe_duyet`** (không phải lượt đầu), bằng `drawTextWrapped()` — hàm mới trong
+  `stamp-pdf.ts`, wrap nhiều dòng + tự thu nhỏ + cắt `…` khi tràn. `drawTextFit()` cũ chỉ vẽ
+  **1 dòng** và tràn ra ngoài khung ở cỡ chữ nhỏ nhất.
+- **Khung Ghi chú là "vùng cho phép" chứa 2 khối con kéo/resize được** (2026-09-05):
+  `TemplateNoteBox.layout?: NoteSubLayout` = `{ text, ky_nhay }`. Lý do: ý kiến dài có thể **đè
+  lên chữ sẵn có của văn bản** mà lãnh đạo không né được, vì mẫu có khi cho đặt khung ở bất kỳ
+  đâu. Bố cục **mặc định** vẫn y hệt trước (ký nháy góc trên-phải, ô text = khung trừ dải trên) —
+  `computeDefaultNoteLayout()` giữ nguyên công thức, nên văn bản dở dang không đổi.
+- **Chữ ký nháy**: dùng thu nhỏ chính `signatures/{factory}/{user}/chu_ky.png` — không có mục
+  upload ảnh ký nháy riêng. Chỉ lãnh đạo phê duyệt có; `ky_buoc` không có. Từ 2026-09-05 **kéo/
+  resize được** trong khung (trước đây cố định góc trên-phải).
+- Vì 2 khối đã tách rời, `drawGhiChuBox` gọi `drawTextWrapped` với `reserveTopHeight = 0` —
+  việc chừa dải trên nay do **bố cục mặc định** đảm nhiệm, không phải tham số vẽ.
+- Xem trước wrap ở UI dùng CSS ⇒ **xấp xỉ** vị trí xuống dòng thật (pdf-lib đo theo font
+  TimesNewRoman). Đủ để né chữ; không cam kết khớp từng dòng.
+- **Không nuốt âm thầm**: mẫu CÓ khung mà lãnh đạo chưa nhập gì VÀ chưa bấm "Không ghi ý kiến"
+  → **chặn ký** (banner đỏ ở UI **và** HTTP 400 ở server — không chỉ chặn UI).
+- **Tắt khung Ghi chú thì chữ ký nháy mất theo** (một thao tác, không tách rời).
+- **Mẫu KHÔNG đặt khung Ghi chú → lãnh đạo không có ô nhập, cũng KHÔNG có chữ ký nháy** ở bất
+  kỳ đâu (đã chốt — không tự sinh vị trí mặc định nào).
+
+---
+
+## Tag ngày ký: tick xanh + chữ xám mờ có giây (2026-09-05, việc 3)
+
+- Cột mới `ky_phe_duyet_at TIMESTAMPTZ` (cùng migration trên). `ngay_phe_duyet` chỉ là DATE;
+  `updated_at` bị mọi thao tác sau ghi đè nên không dùng làm mốc ký được.
+- Khung `ngay_ky` của mẫu giờ vẽ `✓ Văn bản được ký dd/mm/yyyy hh:mm:ss` — tick **xanh
+  `rgb(0.06,0.6,0.35)`**, chữ **xám `rgb(0.45,0.45,0.45)`**, canh giữa khung.
+- ⚠️ Tick vẽ bằng **2 `drawLine`**, KHÔNG dùng ký tự `✓` — `TimesNewRoman.ttf` có thể thiếu
+  glyph (bài học ký tự Unicode ở `.claude/rules/14-maintenance-module.md`).
+- Giờ lấy từ `formatFactoryDateTimeVN()` (`date-utils.ts`, `en-GB` 24h + `timeZone` nhà máy).
+  `performFileStamp` đọc `d.ky_phe_duyet_at` (route đã set vào `d` trước khi gọi) nên ngày in
+  trên PDF khớp tuyệt đối với dữ liệu đã lưu.
+
+---
+
+## Khung QR: người ký ĐẦU TIÊN xê dịch, các lượt sau chỉ xem (2026-09-05)
+
+Trước đây màn ký (chế độ mẫu) **không hiện QR** — người ký không biết QR rơi vào đâu.
+
+- `TemplateQrBox.layout?: LayoutRect` — 1 rect trong khung QR của mẫu.
+- `qrLayoutAlreadySet(entry)` quyết định còn chỉnh được không; route chỉ ghi **đúng 1 lần**
+  (`mergeTemplateQrLayout()` trong `sign/route.ts`, mirror `mergeQrBox()` cũ "đã có thì thôi").
+  Lý do: QR là dữ liệu **cấp văn bản**, vẽ trên mọi trang theo neo — để mỗi bước ký một vị trí
+  khác nhau sẽ ra QR lệch nhau giữa các lượt đóng dấu.
+- `resolveEffectiveQrRect(box)`: có layout → dùng (đã kẹp); không có → **trọn khung** (hành vi cũ).
+  Dùng ở cả `stampPdfWithTemplate` lẫn nhánh hỗn hợp `qrFromTemplate` của `stampPdfStep`.
+- UI: `lockedQrAdjustable` → khối `QRCodeSVG` kéo/resize (khoá tỉ lệ) trong vùng cho phép tím;
+  ngược lại chỉ xem, nhãn "QR đã chốt ở lượt ký trước".
+
+---
+
+## Việc 4 & 5 (2026-09-05)
+
+- **Dropdown neo trang** (`ky/mau-vi-tri/page.tsx`) giờ hiện ở **cả khi khung đã đặt** — trước
+  đây chỉ render trong nhánh `!role.placed` nên muốn đổi neo phải xoá khung đặt lại. Hàm mới
+  `changeRoleAnchor()` đổi thẳng `role.anchor` và **nắn `role.page`** theo neo (`cuoi` → trang
+  cuối, `moi_trang` → trang 1) để round-trip lưu→nạp lại không lệch toạ độ khi các trang khác
+  khổ giấy. Áp dụng cho **mọi vai trò**, không riêng QR.
+- **Nhãn nút** ở trang chi tiết: `docExt === "pdf"` → **"Vào cài đặt vị trí"** (bấm là VÀO màn
+  cài đặt; việc gửi ký chỉ xảy ra sau khi xác nhận vị trí ở màn đó — nhãn phải mô tả đúng hành
+  động ngay lập tức); file Office giữ **"Gửi ký"** (đi thẳng, dùng tag `{{…}}`).
+
+---
+
+## Tự kiểm chứng (2026-09-05) — 158 assertion, gọi thẳng code thật
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` 0 lỗi (4 warning `<img>`, 2 pre-existing).
+
+Chạy `node --experimental-strip-types` + resolve hook `@/`→`src/`, import **file thật** (không
+phải bản copy):
+
+- **102 assertion logic** (`template-layout.ts`): mọi rect "tấn công" (âm, khổng lồ, NaN, sai
+  kiểu, `null`) đều bị kẹp vào khung — cho **cả 4 loại khối** (sig/name/chức danh **+ prefix**),
+  ô text + ký nháy của khung Ghi chú, và rect QR; công thức chia dải mặc định khớp **đúng số**
+  công thức cũ (`withPrefix: false` ⇒ giống hệt không truyền); quy tắc 2 tầng cho cả tiền tố
+  (mẫu không chọn `sign_as` ⇒ không bật lên được); `computeDefaultNoteLayout` giữ đúng hành vi
+  cũ (ký nháy bám mép trên-phải, ô text nằm dưới); `qrLayoutAlreadySet` đúng 3 nhánh; khung mẫu
+  không bị client sửa ở cả 3 hàm `apply*LayoutToEntry`; `resolveAnchorPages` đủ 5 nhánh.
+- **56 assertion PDF thật**: dựng PDF 2 trang → `stampPdfWithTemplate` → **trích lại text bằng
+  pdfjs** (công cụ độc lập) xác nhận: tên/chức danh **nằm trong khung** dù client gửi toạ độ
+  ngoài vùng; ghi chú wrap ≥2 dòng không tràn ngang/dọc; tag ngày ký trong khung; trang 2 không
+  bị lem; **entry không có `layout` vẽ đúng `y = box.y + height*0.26`** (y hệt công thức cũ);
+  chữ ghi chú không lấn dải chữ ký nháy; ảnh ký nháy được nhúng; có lệnh vẽ đường (tick) và
+  **không** có ký tự `✓`. Bổ sung 2026-09-05: **tiền tố nằm TRONG khung ký** (không còn ở
+  `y = box.y + box.height` như trước); ghi chú vẽ vào đúng **ô text đã kéo** (không phải cả
+  khung); **QR vẽ đúng rect đã kéo** và **trọn khung khi không có layout**.
+
+⚠️ Khi kiểm QR bằng pdfjs: `getOperatorList()` **tách 1 lệnh `cm` thành nhiều `OPS.transform`**
+(translate rồi scale) — phải **nhân dồn ma trận** theo quy ước PDF (`CTM' = M × CTM`) và tôn
+trọng `save`/`restore` mới ra vị trí ảnh thật; đọc từng transform rời sẽ ra `[1,0,0,1,0,0]` và
+kết luận sai.
+
+⚠️ Nếu chạy lại script kiểu này: `process.cwd()` phải là repo root, nếu không
+`loadSignerNameFont()` trả `null` và **mọi hàm vẽ text im lặng không vẽ gì** (đều có guard
+`if (!font) return`) — test sẽ fail sạch mà không báo lỗi font.
+
+---
+
+### Không phải bug: văn bản Upload ký tay không có nút "Gửi ký"
+
+Luồng `new/upload` lưu thẳng `trang_thai = "da_phe_duyet"`, `is_uploaded = true`, file vào
+`file_signed_pdf_url` (`vanban/uploads/`), `file_goc_url = null` — **không có bước ký số nào**,
+nên không có nút "Gửi ký" và không mở màn "Cài đặt vị trí ký". Đúng thiết kế.
+
+Với luồng ký số (trang Soạn thảo), **người cài đặt vị trí là người soạn thảo** — vẽ 1 lần cho
+mọi vai trò, kể cả khung của người ký lẫn người phê duyệt.

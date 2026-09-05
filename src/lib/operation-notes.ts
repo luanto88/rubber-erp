@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { getTodayISODate } from "@/lib/date-utils"
+import { prepareImageForUploadOrThrow } from "@/lib/image-upload"
 
 export const OPERATION_NOTE_MAX_IMAGES = 10
 
@@ -77,10 +78,12 @@ export async function fetchOperationNotes(
   return (data || []) as OperationNote[]
 }
 
-export async function uploadOperationNoteImage(factoryId: string, file: File): Promise<string> {
+export async function uploadOperationNoteImage(factoryId: string, rawFile: File): Promise<string> {
+  // Chuẩn hóa theo nội dung thật (chuyển HEIC sang JPEG) — xem src/lib/image-format.ts.
+  const file = await prepareImageForUploadOrThrow(rawFile)
   const ext = file.name.split(".").pop() || "jpg"
   const path = `${factoryId}/notes/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false })
+  const { error } = await supabase.storage.from("order-files").upload(path, file, { upsert: false, contentType: file.type })
   if (error) throw error
   const { data } = supabase.storage.from("order-files").getPublicUrl(path)
   return data.publicUrl

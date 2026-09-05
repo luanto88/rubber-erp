@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { jwtVerify } from "jose"
 import { signField, type SigningPlacementOverride } from "@/lib/signing/requests"
+import { scheduleSigningNotify } from "@/lib/signing/notify"
 
 export const dynamic = "force-dynamic"
 
@@ -38,7 +39,19 @@ export async function POST(req: NextRequest) {
     const thietBi = req.headers.get("user-agent") || ""
     const appOrigin = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin
 
-    const result = await signField({ yeuCauId, userId: payload.userId, ip, thietBi, appOrigin, placementOverrides })
+    const { notifyPlan, ...result } = await signField({
+      yeuCauId,
+      userId: payload.userId,
+      ip,
+      thietBi,
+      appOrigin,
+      placementOverrides,
+    })
+
+    // Báo người ký kế tiếp (hoặc người tạo khi đã hoàn tất) SAU khi response đã trả về —
+    // Telegram + SMTP mất 1-3s, không được cộng vào thời gian chờ của người vừa bấm "Ký".
+    scheduleSigningNotify(notifyPlan)
+
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })

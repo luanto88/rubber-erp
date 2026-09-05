@@ -10,6 +10,7 @@ import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
+import { DEFAULT_SUFFIXES, type SuffixOption } from "@/lib/suffixes"
 import {
   addDaysISO,
   buildDispatchTripRef,
@@ -97,6 +98,7 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
   tong_tuoi: 0, tong_kho: 0,
   lo_nguon_goc: "",
   ghi_chu: "",
+  ghi_chu_tu_do: "",
 })
 
 type StorageForm = ReturnType<typeof emptyForm>
@@ -212,6 +214,8 @@ export default function StoragePage() {
   const [reportFrom, setReportFrom] = useState("")
   const [reportTo, setReportTo] = useState("")
   const [reportLoaiNL, setReportLoaiNL] = useState("")
+  const [suffixes, setSuffixes] = useState<SuffixOption[]>(DEFAULT_SUFFIXES)
+  const [selectedSuffixCode, setSelectedSuffixCode] = useState<string>("")
 
   // modal / form
   const [modal, setModal]         = useState<"add" | "edit" | "view" | null>(null)
@@ -465,6 +469,23 @@ export default function StoragePage() {
   }, [factoryId, loadData])
 
   useEffect(() => {
+    const fetchSuffixes = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("suffixes")
+          .select("code, name, nguon, chung_nhan")
+          .order("sort_order", { ascending: true })
+        if (!error && data && data.length > 0) {
+          setSuffixes(data as SuffixOption[])
+        }
+      } catch {
+        // fallback to DEFAULT_SUFFIXES
+      }
+    }
+    void fetchSuffixes()
+  }, [])
+
+  useEffect(() => {
     if (!factoryId) return
     const run = async () => {
       try {
@@ -502,13 +523,16 @@ export default function StoragePage() {
     if (!reportTo && to) setReportTo(to)
   }, [ngans, dayChuyen, factoryCode, reportFrom, reportTo])
 
-  // ── Fetch trips from dispatch ─────────────────────────────────────────────
+  // ── Fetch trips from dispatch (với 3 tầng lọc EUDR nghiêm ngặt) ───────────
   const fetchTrips = useCallback(async (
     ngay_bd: string,
     ngay_kt: string,
     loaiNL: string,
     autoSelect = false,
     overrideEditId?: string | null,
+    targetNguon?: string,
+    targetCert?: string,
+    targetNote?: string,
   ): Promise<TripItem[]> => {
     if (!ngay_bd || !factoryId) return []
     setLoadingTrips(true)
@@ -517,18 +541,64 @@ export default function StoragePage() {
       const editingId = overrideEditId ?? editId
       const otherNgans = ngans.filter(n => n.id !== editingId)
       const assignedUIDs = new Set(otherNgans.flatMap(n => n.trips || []))
+
+      const cert = (targetCert ?? form.chung_nhan ?? "").trim()
+      const nguon = (targetNguon ?? form.nguon_goc ?? "").trim()
+      const note = (targetNote ?? form.ghi_chu ?? "").trim().toUpperCase()
+
       const trips: TripItem[] = (data || [])
         .filter(t => !assignedUIDs.has(t.ref) && !assignedUIDs.has(t.uid))
         .filter(t => {
           const kl = getKLFromTrip(t, loaiNL)
           return kl.tuoi > 0 || kl.kho > 0
         })
+        .filter(t => {
+          // ── Tầng lọc phân loại EUDR cách ly ──
+          const tripCert = (t.chung_nhan || "").trim()
+          const tripNote = (t.ghi_chu || "").trim().toUpperCase()
+          const isExternalLatex =
+            tripNote === "TM" ||
+            t.so_xe.includes("3A1064") ||
+            tripNote.startsWith("GC") ||
+            tripNote === "TL"
+
+          // 1. Ngăn PEFC CS / Nông trường (NT):
+          // Cách ly tuyệt đối EUDR: KHÔNG nhận xe thu mua, xe gia công, xe thanh lý
+          if (cert === "PEFC CS" || nguon === "NT") {
+            if (tripCert && tripCert !== "PEFC CS") return false
+            if (isExternalLatex) return false
+            return true
+          }
+
+          // 2. Ngăn Thu mua (M) / Ký hiệu TM:
+          if (nguon === "M" || note === "TM") {
+            return (
+              tripNote === "TM" ||
+              t.so_xe.includes("3A1064") ||
+              tripCert !== "PEFC CS" ||
+              !t.doi ||
+              t.doi.length === 0
+            )
+          }
+
+          // 3. Ngăn Gia công (GC...) / Ký hiệu GC:
+          if (nguon.startsWith("GC") || note.startsWith("GC")) {
+            return tripNote.startsWith("GC") || tripNote === note
+          }
+
+          // 4. Ngăn Thanh lý (TL):
+          if (nguon === "TL" || note === "TL") {
+            return tripNote === "TL"
+          }
+
+          return true
+        })
       if (autoSelect) setSelectedTrips(new Set(trips.map(t => t.ref)))
       return trips
     } finally {
       setLoadingTrips(false)
     }
-  }, [factoryId, ngans, editId])
+  }, [factoryId, ngans, editId, form.chung_nhan, form.nguon_goc, form.ghi_chu])
 
   // ── Auto-calc KL from selected trips (filtered by loai_nl) ───────────────
   const formLoaiNL = form.loai_nl
@@ -575,7 +645,16 @@ export default function StoragePage() {
     setSelectedTrips((prev) => new Set(Array.from(prev).filter((uid) => allowed.has(uid))))
   }, [])
 
-  const chungNhanOpts = factoryCode === "cuaparis" ? CHUNG_NHAN_BASE : ["PEFC CS", "Không"]
+  const nguonGocOpts = useMemo(() => {
+    const fromSuffixes = suffixes.map(s => s.nguon).filter(Boolean)
+    return Array.from(new Set([...fromSuffixes, ...NGUON_GOC_OPTS]))
+  }, [suffixes])
+
+  const chungNhanOpts = useMemo(() => {
+    const base = factoryCode === "cuaparis" ? CHUNG_NHAN_BASE : ["PEFC CS", "Không"]
+    const fromSuffixes = suffixes.map(s => s.chung_nhan).filter(Boolean)
+    return Array.from(new Set([...base, ...fromSuffixes]))
+  }, [suffixes, factoryCode])
 
   const busyPositions = new Set(
     ngans
@@ -711,7 +790,7 @@ export default function StoragePage() {
         },
         { tuoi: 0, kho: 0 },
       )
-      const payload = {
+      const payload: Record<string, any> = {
         ...form,
         ten_ngan: normalizedPosition,
         trang_thai: trangThai,
@@ -723,12 +802,26 @@ export default function StoragePage() {
         tong_kho: Math.round(totals.kho * 100) / 100,
         trips: selectedTripUids,
         ghi_chu: form.ghi_chu || null,
+        ghi_chu_tu_do: form.ghi_chu_tu_do || null,
       }
       if (editId) {
-        const { error } = await supabase.from("ngans").update(payload).eq("id", editId)
+        let { error } = await supabase.from("ngans").update(payload).eq("id", editId)
+        if (error && error.message.includes("ghi_chu_tu_do")) {
+          const fallback = { ...payload }
+          delete fallback.ghi_chu_tu_do
+          const retry = await supabase.from("ngans").update(fallback).eq("id", editId)
+          error = retry.error
+        }
         if (error) { setSaveError(error.message); return }
       } else {
-        const { data: inserted, error } = await supabase.from("ngans").insert(payload).select("id").single()
+        let { data: inserted, error } = await supabase.from("ngans").insert(payload).select("id").single()
+        if (error && error.message.includes("ghi_chu_tu_do")) {
+          const fallback = { ...payload }
+          delete fallback.ghi_chu_tu_do
+          const retry = await supabase.from("ngans").insert(fallback).select("id").single()
+          inserted = retry.data
+          error = retry.error
+        }
         if (error) { setSaveError(error.message); return }
         if (inserted) {
           setKpiPrompt({ recordId: inserted.id, recordLabel: `Ngăn ${normalizedPosition}` })
@@ -762,6 +855,7 @@ export default function StoragePage() {
     const loaiNL = dayChuyen === "Mủ nước" ? "Mủ nước" : "Mủ đông chén"
     const f = emptyForm(loaiNL)
     setForm({ ...f, ma_ngan: genMaNgan(f) })
+    setSelectedSuffixCode("cs")
     setEditId(null)
     setSelectedTrips(new Set())
     setLinkedTrips([])
@@ -788,6 +882,9 @@ export default function StoragePage() {
       return
     }
 
+    const matchedSuffix = suffixes.find(s => s.nguon === n.nguon_goc)
+    setSelectedSuffixCode(matchedSuffix?.code || "")
+
     const f = {
       ma_ngan: n.ma_ngan || "", ten_ngan: n.ten_ngan || "",
       loai_nl: n.loai_nl || "Mủ đông chén", nguon_goc: n.nguon_goc || "NT",
@@ -800,6 +897,7 @@ export default function StoragePage() {
       tong_tuoi: n.tong_tuoi || 0, tong_kho: n.tong_kho || 0,
       lo_nguon_goc: n.lo_nguon_goc || "",
       ghi_chu: n.ghi_chu || "",
+      ghi_chu_tu_do: n.ghi_chu_tu_do || "",
     }
     setForm(f)
     setEditId(n.id)
@@ -818,7 +916,7 @@ export default function StoragePage() {
             }).catch(() => [])
           : Promise.resolve([]),
         f.ngay_bd
-          ? fetchTrips(f.ngay_bd, f.ngay_kt, f.loai_nl, false, n.id).catch(() => [])
+          ? fetchTrips(f.ngay_bd, f.ngay_kt, f.loai_nl, false, n.id, f.nguon_goc, f.chung_nhan, f.ghi_chu).catch(() => [])
           : Promise.resolve([]),
       ])
       setLinkedTrips(storedTrips)
@@ -1246,9 +1344,9 @@ export default function StoragePage() {
               options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
               selected={filterGhiChu}
               onChange={setFilterGhiChu}
-              labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
-              placeholder="Tất cả ghi chú"
-              searchPlaceholder="Tìm ghi chú..."
+              labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
+              placeholder="Tất cả ký hiệu KT"
+              searchPlaceholder="Tìm ký hiệu KT..."
               className="min-w-64"
             />
             {(search || filterTT || filterGhiChu.length > 0 || reportFrom || reportTo || reportLoaiNL) && (
@@ -1562,9 +1660,18 @@ export default function StoragePage() {
                     </div>
                     {n.ghi_chu && (
                       <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
-                        <Tag size={14} className="text-slate-400 shrink-0 mt-0.5" />
+                        <Tag size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                        <span className="text-xs text-slate-500 w-24 shrink-0">Ký hiệu KT</span>
+                        <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 break-words">
+                          {n.ghi_chu}
+                        </span>
+                      </div>
+                    )}
+                    {n.ghi_chu_tu_do && (
+                      <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
+                        <FileText size={14} className="text-slate-400 shrink-0 mt-0.5" />
                         <span className="text-xs text-slate-500 w-24 shrink-0">Ghi chú</span>
-                        <span className="text-xs font-semibold text-slate-700 break-words">{n.ghi_chu}</span>
+                        <span className="text-xs font-medium text-slate-700 break-words">{n.ghi_chu_tu_do}</span>
                       </div>
                     )}
                   </div>
@@ -1774,8 +1881,8 @@ export default function StoragePage() {
           }
         >
             <div className="space-y-4">
-              {/* Row 1: Vị trí · Loại NL · Nguồn gốc */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* Row 1: Vị trí · Loại NL · Phân loại hậu tố · Nguồn gốc */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
                     Vị trí {subTerm.toLowerCase()} <span className="text-red-500">*</span>
@@ -1785,27 +1892,74 @@ export default function StoragePage() {
                     value={form.ten_ngan}
                     onChange={e => updateForm({ ten_ngan: e.target.value.toUpperCase().slice(0, 10) })}
                     placeholder="-- Chọn --"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-bold"
                   />
                   <datalist id="positions-list">
                     {availablePositions.map(p => <option key={p} value={p} />)}
                   </datalist>
                   <p className="mt-1 text-[10px] text-slate-400">
-                    Có thể chọn nhanh N1-N24 hoặc nhập tay mã ngoài dải chuẩn như BN, 10.2, MN.
+                    N1-N24 hoặc BN, 10.2, MN...
                   </p>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại nguyên liệu</label>
-                  <select value={form.loai_nl} onChange={e => updateForm({ loai_nl: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                  <select
+                    value={form.loai_nl}
+                    onChange={e => {
+                      const nextNL = e.target.value
+                      updateForm({ loai_nl: nextNL })
+                      void fetchTrips(form.ngay_bd, form.ngay_kt, nextNL, modal === "add", editId, form.nguon_goc, form.chung_nhan, form.ghi_chu).then((trips) => {
+                        applyFetchedTrips(trips, modal === "add")
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  >
                     {loaiNLByDC(dayChuyen, factoryCode).map(o => <option key={o}>{o}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguồn gốc</label>
-                  <select value={form.nguon_goc} onChange={e => updateForm({ nguon_goc: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {NGUON_GOC_OPTS.map(o => <option key={o}>{o}</option>)}
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Phân loại (Hậu tố lô)</label>
+                  <select
+                    value={selectedSuffixCode}
+                    onChange={e => {
+                      const code = e.target.value
+                      setSelectedSuffixCode(code)
+                      const s = suffixes.find(item => item.code === code)
+                      if (s) {
+                        const patch: Partial<StorageForm> = {
+                          nguon_goc: s.nguon,
+                          chung_nhan: s.chung_nhan || "Không",
+                        }
+                        updateForm(patch)
+                        void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, s.nguon, s.chung_nhan || "Không", form.ghi_chu).then((trips) => {
+                          applyFetchedTrips(trips, modal === "add")
+                        })
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-medium text-slate-700"
+                  >
+                    <option value="">-- Tự chọn --</option>
+                    {suffixes.map(s => (
+                      <option key={s.code} value={s.code}>
+                        {s.name} ({s.nguon}) {s.chung_nhan ? `· ${s.chung_nhan}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã nguồn gốc</label>
+                  <select
+                    value={form.nguon_goc}
+                    onChange={e => {
+                      const nextNguon = e.target.value
+                      updateForm({ nguon_goc: nextNguon })
+                      void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, nextNguon, form.chung_nhan, form.ghi_chu).then((trips) => {
+                        applyFetchedTrips(trips, modal === "add")
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono"
+                  >
+                    {nguonGocOpts.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </div>
               </div>
@@ -1821,9 +1975,18 @@ export default function StoragePage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Chứng nhận</label>
-                  <select value={form.chung_nhan} onChange={e => updateForm({ chung_nhan: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
-                    {chungNhanOpts.map(o => <option key={o}>{o}</option>)}
+                  <select
+                    value={form.chung_nhan}
+                    onChange={e => {
+                      const nextCert = e.target.value
+                      updateForm({ chung_nhan: nextCert })
+                      void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, form.nguon_goc, nextCert, form.ghi_chu).then((trips) => {
+                        applyFetchedTrips(trips, modal === "add")
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-semibold text-emerald-700"
+                  >
+                    {chungNhanOpts.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </div>
               </div>
@@ -1888,9 +2051,9 @@ export default function StoragePage() {
                         options={tripNoteOptions}
                         selected={tripNoteFilter}
                         onChange={setTripNoteFilter}
-                        labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
-                        placeholder="Tất cả ghi chú"
-                        searchPlaceholder="Tìm ghi chú..."
+                        labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
+                        placeholder="Tất cả ký hiệu KT"
+                        searchPlaceholder="Tìm ký hiệu KT..."
                         className="min-w-48"
                       />
                       <button
@@ -1914,7 +2077,7 @@ export default function StoragePage() {
                     </div>
                   ) : noteFilteredTrips.length === 0 ? (
                     <div className="p-6 text-center text-slate-400 text-sm">
-                      Không có chuyến xe nào khớp bộ lọc Ghi chú đang chọn
+                      Không có chuyến xe nào khớp bộ lọc Ký hiệu KT đang chọn
                     </div>
                   ) : (
                     <div className="max-h-56 overflow-y-auto">
@@ -1926,7 +2089,7 @@ export default function StoragePage() {
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Xe</th>
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Chuyến</th>
                             <th className="px-3 py-2 text-left text-slate-500 font-bold">Tài xế</th>
-                            <th className="px-3 py-2 text-left text-slate-500 font-bold">Ghi chú</th>
+                            <th className="px-3 py-2 text-left text-slate-500 font-bold">Ký hiệu KT</th>
                             <th className="px-3 py-2 text-right text-slate-500 font-bold">KL tươi</th>
                             <th className="px-3 py-2 text-right text-slate-500 font-bold">KL khô</th>
                           </tr>
@@ -1993,16 +2156,37 @@ export default function StoragePage() {
                 </div>
               </div>
 
-              {/* Mã ngăn (auto-generated, read-only) */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-                <RequiredNoteSelect
-                  factoryId={factoryId}
-                  value={form.ghi_chu}
-                  onChange={(v) => updateForm({ ghi_chu: v })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                  onError={setSaveError}
-                />
+              {/* Ký hiệu kỹ thuật & Ghi chú tự do */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Ký hiệu kỹ thuật <span className="text-slate-400 font-normal">(VD: T, Tr, TM, GCTBK, TL...)</span>
+                  </label>
+                  <RequiredNoteSelect
+                    factoryId={factoryId}
+                    value={form.ghi_chu}
+                    onChange={(v) => {
+                      updateForm({ ghi_chu: v })
+                      void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, form.nguon_goc, form.chung_nhan, v).then((trips) => {
+                        applyFetchedTrips(trips, modal === "add")
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                    onError={setSaveError}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Ghi chú ngăn <span className="text-slate-400 font-normal">(sự cố, lưu ý tự do)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.ghi_chu_tu_do || ""}
+                    onChange={(e) => updateForm({ ghi_chu_tu_do: e.target.value })}
+                    placeholder="VD: Xe nâng hư, cúp điện, kiểm tra lại..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
 
               <div>
@@ -2071,6 +2255,8 @@ export default function StoragePage() {
                   : "—"],
                 ["Số chuyến",  (viewNgan.trips || []).length + " chuyến"],
                 ["Trạng thái", viewNgan.trang_thai],
+                ...(viewNgan.ghi_chu ? [["Ký hiệu KT", viewNgan.ghi_chu]] : []),
+                ...(viewNgan.ghi_chu_tu_do ? [["Ghi chú", viewNgan.ghi_chu_tu_do]] : []),
               ] as [string, string][]).map(([k, v]) => (
                 <div key={k} className="flex justify-between py-2 border-b border-dashed border-slate-200 last:border-0">
                   <span className="text-slate-500">{k}</span>
