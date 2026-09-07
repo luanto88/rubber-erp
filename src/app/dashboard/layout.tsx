@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   Activity,
@@ -56,6 +56,20 @@ interface AppNotification {
   link: string | null
   is_read: boolean
   created_at: string
+}
+
+// Bảng cần nghe realtime để tính lại "Việc cần làm" của từng module — chỉ khai báo cho các
+// module mà getModuleTasks() thực sự hỗ trợ (xem module-tasks.ts). Module ngoài map này không
+// subscribe gì cả, giữ nguyên hành vi cũ. Mọi bảng ở đây bắt buộc phải có cột `factory_id`
+// (dùng làm filter) — thêm bảng mới phải kiểm tra điều đó trước.
+const MODULE_TASK_TABLES: Record<string, string[]> = {
+  "/dashboard/documents": ["van_ban_documents"],
+  "/dashboard/iso": ["iso_documents", "iso_form_instances"],
+  "/dashboard/maintenance": ["maintenance_records", "nguoi_ky"],
+  "/dashboard/quality": ["qc_results"],
+  "/dashboard/quality-analytics": ["qc_results"],
+  "/dashboard/export": ["export_orders"],
+  "/dashboard/inventory": ["inventory_documents"],
 }
 
 type NavLeaf = {
@@ -409,14 +423,56 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Việc cần làm theo module hiện tại — chỉ tính lại khi đổi MODULE (không phải mỗi lần
   // đổi sub-tab trong cùng module), dùng moduleRoutePrefix làm dependency.
-  useEffect(() => {
+  const refreshModuleTasks = useCallback(async () => {
     if (isPublicStorageLookup) return
     if (!user?.id || !user?.factory_id) { setModuleTasks(null); return }
-    let alive = true
-    void getModuleTasks(pathname, user.factory_id as string, user)
-      .then((summary) => { if (alive) setModuleTasks(summary) })
-      .catch(() => { if (alive) setModuleTasks(null) })
-    return () => { alive = false }
+    try {
+      const summary = await getModuleTasks(pathname, user.factory_id as string, user)
+      setModuleTasks(summary)
+    } catch {
+      setModuleTasks(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPublicStorageLookup, user?.id, user?.factory_id, pathname])
+
+  useEffect(() => {
+    void refreshModuleTasks()
+    // Cố ý KHÔNG phụ thuộc `refreshModuleTasks` (identity đổi theo `pathname` đầy đủ) — chỉ
+    // recompute khi đổi MODULE, giữ đúng chủ đích ban đầu. Việc làm mới trong cùng module do
+    // 2 cơ chế khác lo: bấm mở chuông, và realtime bên dưới.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPublicStorageLookup, user?.id, user?.factory_id, moduleRoutePrefix])
+
+  // Realtime: dữ liệu nghiệp vụ đổi (ký/duyệt/trả về...) thì tính lại "Việc cần làm" ngay,
+  // không để chuông giữ số cũ cho tới lần đổi module kế tiếp. Mirror pattern đã dùng ở
+  // documents-shell.tsx (badge tab "Việc của tôi").
+  useEffect(() => {
+    if (isPublicStorageLookup) return
+    if (!user?.id || !user?.factory_id) return
+    const tables = MODULE_TASK_TABLES[moduleRoutePrefix]
+    if (!tables?.length) return
+    const fid = user.factory_id as string
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const bump = () => {
+      if (timer) clearTimeout(timer)
+      // Gộp nhiều thay đổi liên tiếp (ký hàng loạt) thành 1 lần tính lại.
+      timer = setTimeout(() => { void refreshModuleTasks() }, 800)
+    }
+    // Tên channel phải KHÁC channel của documents-shell.tsx (cùng bảng van_ban_documents) —
+    // trùng tên sẽ khiến 1 trong 2 nơi không nhận được sự kiện.
+    let channel = supabase.channel(`module-tasks-${user.id}-${moduleRoutePrefix}`)
+    for (const table of tables) {
+      channel = channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table, filter: `factory_id=eq.${fid}` },
+        bump,
+      )
+    }
+    channel.subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      void supabase.removeChannel(channel)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPublicStorageLookup, user?.id, user?.factory_id, moduleRoutePrefix])
 
@@ -748,7 +804,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Bell notifications */}
           <div ref={notifRef} className="relative">
             <button
-              onClick={() => setNotifOpen(!notifOpen)}
+              onClick={() => {
+                const next = !notifOpen
+                setNotifOpen(next)
+                // Tính lại ngay khi MỞ — lớp bảo vệ chính, không phụ thuộc realtime có kết nối
+                // được hay không. Trước đây chuông giữ số cũ tới lần đổi module kế tiếp.
+                if (next) void refreshModuleTasks()
+              }}
               className="relative flex h-10 w-10 items-center justify-center rounded-xl hover:bg-slate-100 transition-colors"
               title={tc("notifications")}
             >

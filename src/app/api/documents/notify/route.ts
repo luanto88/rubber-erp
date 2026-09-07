@@ -13,7 +13,11 @@ const ACTION_LABEL: Record<string, string> = {
   ky_buoc: "Văn bản cần ký bước tiếp theo",
   phe_duyet: "Văn bản đã được phê duyệt",
   tra_ve: "Văn bản bị trả về",
+  doi_nguoi_ky: "Bạn được chỉ định ký thay bước này",
 }
+
+/** Các action mà `lyDo` là thông tin bắt buộc phải hiện cho người nhận. */
+const SHOW_LY_DO = new Set(["tra_ve", "doi_nguoi_ky"])
 
 // ── Channel: in-app ───────────────────────────────────────────────────────────
 
@@ -30,7 +34,7 @@ async function sendInApp(
 
   const title = ACTION_LABEL[action] || action
   let body = `${actorName} — "${docTen}"`
-  if (action === "tra_ve" && lyDo) body += `\nLý do: ${lyDo}`
+  if (SHOW_LY_DO.has(action) && lyDo) body += `\nLý do: ${lyDo}`
 
   const rows = recipientUserIds.map((uid) => ({
     factory_id: factoryId,
@@ -65,7 +69,7 @@ async function sendTelegram(
   const link = `${APP_URL}/dashboard/documents/${docId}`
   const stepLine = stepN ? `\n📋 Bước ký: ${stepN}` : ""
   const maLine = docMa ? `\n📄 Mã: <b>${docMa}</b>` : ""
-  const lyDoLine = action === "tra_ve" && lyDo ? `\n⚠️ Lý do: ${lyDo}` : ""
+  const lyDoLine = SHOW_LY_DO.has(action) && lyDo ? `\n⚠️ Lý do: ${lyDo}` : ""
 
   const text =
     `🏭 <b>${factoryName}</b>\n` +
@@ -122,7 +126,7 @@ async function sendEmail(
   const stepLine = stepN ? `<tr><td style="padding:4px 0; color:#64748b">Bước ký:</td><td style="padding:4px 8px; font-weight:600">${stepN}</td></tr>` : ""
   const maLine = docMa ? `<tr><td style="padding:4px 0; color:#64748b">Mã văn bản:</td><td style="padding:4px 8px; font-weight:600">${docMa}</td></tr>` : ""
   const lyDoLine =
-    action === "tra_ve" && lyDo
+    SHOW_LY_DO.has(action) && lyDo
       ? `<tr><td style="padding:4px 0; color:#dc2626">Lý do:</td><td style="padding:4px 8px; color:#dc2626; font-weight:600">${lyDo}</td></tr>`
       : ""
 

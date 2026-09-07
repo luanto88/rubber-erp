@@ -23,6 +23,7 @@ import {
   fmtDate,
   sanitizeStorageFileName,
   stepDisplayLabel,
+  stepSignerUserId,
   type VanBanDocument,
   type ThuTuKyStep,
   type SignAsType,
@@ -36,6 +37,7 @@ import {
   FileText,
   Send,
   RotateCcw,
+  UserCog,
   Eye,
   EyeOff,
   ChevronLeft,
@@ -73,6 +75,9 @@ const STORAGE_BUCKET = "iso-documents"
 
 type NguoiKyEntry = { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }
 type DistUser = { id: string; full_name: string; department: string; role: string; alreadyReceived: string[] }
+
+/** Người dùng trong 1 phòng ban — trả về bởi GET /api/documents/dept-users */
+type DeptUser = { id: string; full_name: string; username: string; role: string; department: string }
 
 type SignPlacement = {
   page: number
@@ -1800,6 +1805,13 @@ export default function DocumentDetailPage() {
   const [traVeModal, setTraVeModal] = useState(false)
   const [traVeLyDo, setTraVeLyDo] = useState("")
 
+  // Đổi người ký bước hiện tại — gỡ kẹt khi người ký đích danh đi vắng
+  const [doiNguoiKyModal, setDoiNguoiKyModal] = useState(false)
+  const [doiNguoiKyUsers, setDoiNguoiKyUsers] = useState<DeptUser[]>([])
+  const [doiNguoiKyLoading, setDoiNguoiKyLoading] = useState(false)
+  const [doiNguoiKyUserId, setDoiNguoiKyUserId] = useState("")
+  const [doiNguoiKyLyDo, setDoiNguoiKyLyDo] = useState("")
+
   // Distribution modal
   const [distModal, setDistModal] = useState(false)
   const [distUsers, setDistUsers] = useState<DistUser[]>([])
@@ -1916,7 +1928,7 @@ export default function DocumentDetailPage() {
     return data.session?.access_token || ""
   }
 
-  const doAction = async (action: string, extra?: Record<string, string>) => {
+  const doAction = async (action: string, extra?: Record<string, string | number>) => {
     if (!factoryId || !doc) return
     setActing(true)
     setActionError(null)
@@ -2064,6 +2076,46 @@ export default function DocumentDetailPage() {
     setTraVeLyDo("")
   })
 
+  // Đổi người ký bước đang chờ — nạp danh sách người trong ĐÚNG phòng ban của bước đó
+  // (cùng route mà EditDocModal ở trang danh sách đang dùng), loại người ký hiện tại.
+  const openDoiNguoiKyModal = useCallback(async () => {
+    if (!factoryId || !doc) return
+    const step = (doc.thu_tu_ky_json || [])[doc.buoc_hien_tai]
+    if (!step) return
+    setDoiNguoiKyModal(true)
+    setDoiNguoiKyUserId("")
+    setDoiNguoiKyLyDo("")
+    setDoiNguoiKyUsers([])
+    if (!step.phong_ban_code) return
+    setDoiNguoiKyLoading(true)
+    try {
+      const res = await fetch(
+        `/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(step.phong_ban_code)}&leadership=false`,
+      )
+      const json = (await res.json()) as DeptUser[] | { error?: string }
+      const list = Array.isArray(json) ? json : []
+      const currentSignerId = stepSignerUserId(step)
+      setDoiNguoiKyUsers(list.filter((u) => u.id !== currentSignerId))
+    } catch {
+      setDoiNguoiKyUsers([])
+    } finally {
+      setDoiNguoiKyLoading(false)
+    }
+  }, [factoryId, doc])
+
+  const handleDoiNguoiKy = () => {
+    if (!doc || !doiNguoiKyUserId || !doiNguoiKyLyDo.trim()) return
+    void doAction("doi_nguoi_ky", {
+      stepIndex: doc.buoc_hien_tai,
+      newUserId: doiNguoiKyUserId,
+      ly_do: doiNguoiKyLyDo.trim(),
+    }).then(() => {
+      setDoiNguoiKyModal(false)
+      setDoiNguoiKyUserId("")
+      setDoiNguoiKyLyDo("")
+    })
+  }
+
   const openDistModal = useCallback(async () => {
     if (!factoryId || !doc) return
     setDistModal(true)
@@ -2164,6 +2216,13 @@ export default function DocumentDetailPage() {
     (doc.trang_thai === "cho_phe_duyet" && isPheDuyetNguoi)
 
   const canDistribute = doc.trang_thai === "da_phe_duyet" && hasPermission(user, "documents.distribute")
+
+  // Đổi người ký bước đang chờ — chỉ người soạn thảo/admin, chỉ đúng bước buoc_hien_tai và
+  // chỉ khi bước đó CHƯA ai ký (đã ký thì file PDF đã đóng dấu, không đổi ngược được).
+  const canDoiNguoiKy =
+    doc.trang_thai === "cho_ky_phong_ban" &&
+    isSoanThao &&
+    !(doc.nguoi_ky || {})[String(doc.buoc_hien_tai + 1)]
 
   const fileUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
 
@@ -2370,6 +2429,17 @@ export default function DocumentDetailPage() {
             >
               <ShieldCheck size={15} />
               Phê duyệt
+            </button>
+          )}
+          {canDoiNguoiKy && (
+            <button
+              onClick={() => void openDoiNguoiKyModal()}
+              disabled={acting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 rounded-xl transition-all"
+              title="Chỉ định người khác ký thay bước đang chờ (khi người ký đi vắng)"
+            >
+              <UserCog size={15} />
+              Đổi người ký
             </button>
           )}
           {canTraVe && (
@@ -2763,6 +2833,86 @@ export default function DocumentDetailPage() {
                 autoFocus
               />
             </div>
+        </ModalShell>
+      )}
+
+      {/* Đổi người ký bước đang chờ */}
+      {doiNguoiKyModal && doc && (
+        <ModalShell
+          title={`Đổi người ký — Bước ${doc.buoc_hien_tai + 1}`}
+          onClose={() => setDoiNguoiKyModal(false)}
+          maxWidth="sm"
+          footer={
+            <>
+              <button
+                onClick={handleDoiNguoiKy}
+                disabled={acting || !doiNguoiKyUserId || !doiNguoiKyLyDo.trim()}
+                className="flex-1 py-2.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-xl transition-all"
+              >
+                {acting ? "Đang xử lý..." : "Xác nhận đổi"}
+              </button>
+              <button
+                onClick={() => setDoiNguoiKyModal(false)}
+                disabled={acting}
+                className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Hủy
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Chỉ định người khác ký thay bước đang chờ (khi người ký đi vắng). Chỉ áp dụng cho
+              bước hiện tại và khi bước này chưa ai ký — các bước khác giữ nguyên.
+            </p>
+
+            <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs">
+              <span className="text-slate-500">Người ký hiện tại: </span>
+              <span className="font-bold text-slate-700">
+                {stepDisplayLabel((doc.thu_tu_ky_json || [])[doc.buoc_hien_tai]) || "—"}
+              </span>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                Người ký mới <span className="text-rose-500">*</span>
+              </label>
+              {doiNguoiKyLoading ? (
+                <div className="text-xs text-slate-400 py-2">Đang tải danh sách...</div>
+              ) : doiNguoiKyUsers.length === 0 ? (
+                <div className="text-xs text-rose-600 py-2">
+                  Không tìm thấy người dùng nào khác trong phòng ban của bước này.
+                </div>
+              ) : (
+                <select
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                  value={doiNguoiKyUserId}
+                  onChange={(e) => setDoiNguoiKyUserId(e.target.value)}
+                >
+                  <option value="">— Chọn người ký —</option>
+                  {doiNguoiKyUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name || u.username}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                Lý do đổi <span className="text-rose-500">*</span>
+              </label>
+              <textarea
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 resize-none"
+                rows={3}
+                placeholder="Ví dụ: anh A nghỉ phép tới 15/09, nhờ anh B ký thay..."
+                value={doiNguoiKyLyDo}
+                onChange={(e) => setDoiNguoiKyLyDo(e.target.value)}
+              />
+            </div>
+          </div>
         </ModalShell>
       )}
 

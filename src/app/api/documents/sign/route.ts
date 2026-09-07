@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin, verifyCurrentPin } from "@/app/api/account/_lib/security"
 import { resolveUserDeptCode } from "@/lib/documents-dept"
-import { SIGN_AS_OPTIONS, type ThuTuKyStep, type SignAsType } from "@/app/dashboard/documents/_components/documents-types"
+import { SIGN_AS_OPTIONS, stepSignerUserId, type ThuTuKyStep, type SignAsType } from "@/app/dashboard/documents/_components/documents-types"
 // @cantoo/pdf-lib (fork của pdf-lib, API tương thích) là thư viện DUY NHẤT hỗ trợ
 // `forIncrementalUpdate` + `commit()` — bắt buộc để chữ ký PAdES của người ký trước không bị
 // xoá khi người sau đóng dấu tiếp. Type của các helper vẽ dùng chung (`stamp-pdf.ts`,
@@ -926,9 +926,13 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as {
       docId: string
       factoryId: string
-      action: "gui_ky" | "ky_buoc" | "phe_duyet" | "tra_ve"
+      action: "gui_ky" | "ky_buoc" | "phe_duyet" | "tra_ve" | "doi_nguoi_ky"
       pin?: string
       ly_do?: string
+      /** doi_nguoi_ky: chỉ số bước cần đổi người ký (phải trùng buoc_hien_tai). */
+      stepIndex?: number
+      /** doi_nguoi_ky: người ký mới, phải cùng factory và khác người ký hiện tại. */
+      newUserId?: string
       placement?: SignPlacement
       sign_as?: string
       /** Bước đã khoá theo mẫu: bố cục 3 khối con người ký tự xê dịch, theo đúng thứ tự boxes. */
@@ -955,6 +959,8 @@ export async function POST(req: NextRequest) {
       qr_layout,
       ghi_chu_phe_duyet,
       ghi_chu_tat,
+      stepIndex,
+      newUserId,
     } = body
 
     if (!docId || !factoryId || !action) {
@@ -1345,6 +1351,114 @@ export async function POST(req: NextRequest) {
       })
 
       return NextResponse.json({ ok: true, trang_thai: "tra_ve" })
+    }
+
+    // ── doi_nguoi_ky ──────────────────────────────────────────────────────────
+    // Gỡ kẹt khi người ký đích danh đi vắng (nghỉ phép, đi tua). Cố ý giới hạn RẤT hẹp:
+    // chỉ đúng bước đang chờ ký và CHƯA ai ký, để không phải đụng tới file PDF đã đóng dấu
+    // hay khung vị trí ký (`placement_ky` gắn với BƯỚC, không gắn với người — giữ nguyên).
+    if (action === "doi_nguoi_ky") {
+      if (d.trang_thai !== "cho_ky_phong_ban") {
+        return NextResponse.json(
+          { error: "Chỉ đổi được người ký khi văn bản đang chờ ký phòng ban" },
+          { status: 400 },
+        )
+      }
+      if (!isAdmin && d.soan_thao_user_id !== userId) {
+        return NextResponse.json(
+          { error: "Chỉ người soạn thảo hoặc quản trị viên mới đổi được người ký" },
+          { status: 403 },
+        )
+      }
+      if (typeof stepIndex !== "number" || stepIndex !== d.buoc_hien_tai) {
+        return NextResponse.json(
+          { error: "Chỉ đổi được người ký của bước đang chờ ký" },
+          { status: 400 },
+        )
+      }
+      const steps = [...(d.thu_tu_ky_json || [])]
+      const targetStep = steps[stepIndex]
+      if (!targetStep) {
+        return NextResponse.json({ error: "Không tìm thấy bước ký" }, { status: 400 })
+      }
+      const stepKey = String(stepIndex + 1)
+      if ((d.nguoi_ky || {})[stepKey]) {
+        return NextResponse.json(
+          { error: "Bước này đã được ký, không đổi được người ký" },
+          { status: 400 },
+        )
+      }
+      if (!newUserId) {
+        return NextResponse.json({ error: "Chưa chọn người ký mới" }, { status: 400 })
+      }
+      if (newUserId === stepSignerUserId(targetStep)) {
+        return NextResponse.json(
+          { error: "Người ký mới trùng với người ký hiện tại" },
+          { status: 400 },
+        )
+      }
+      if (!ly_do?.trim()) {
+        return NextResponse.json({ error: "Vui lòng nhập lý do đổi người ký" }, { status: 400 })
+      }
+
+      // Người ký mới phải là tài khoản active cùng nhà máy — không tin client gửi lên.
+      const { data: newProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, username, status, factory_id")
+        .eq("id", newUserId)
+        .maybeSingle()
+      if (!newProfile || newProfile.factory_id !== factoryId || newProfile.status !== "active") {
+        return NextResponse.json(
+          { error: "Người ký mới không hợp lệ (khác nhà máy hoặc tài khoản không hoạt động)" },
+          { status: 400 },
+        )
+      }
+      const newName = newProfile.full_name || newProfile.username || "Người dùng"
+
+      // Chỉ đổi user_id + ten. GIỮ NGUYÊN `type` (quyết định có cho tiền tố KT./TM./TL./TUQ.
+      // hay không) và `phong_ban_code`/`phong_ban_name` (chính là chuỗi in dưới chữ ký).
+      // `mat_recipient_user_id` (khoá legacy văn bản "Mật" cũ) phải xoá, nếu không
+      // `stepSignerUserId()` vẫn ưu tiên `user_id` nhưng để lại dữ liệu mâu thuẫn.
+      const oldSignerId = stepSignerUserId(targetStep)
+      steps[stepIndex] = {
+        ...targetStep,
+        user_id: newUserId,
+        ten: newName,
+        mat_recipient_user_id: undefined,
+      }
+
+      const { error: updateErr } = await supabaseAdmin
+        .from("van_ban_documents")
+        .update({ thu_tu_ky_json: steps, updated_at: new Date().toISOString() })
+        .eq("id", docId)
+      if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+
+      // doc_approval_log là bảng BẤT BIẾN (trigger chặn UPDATE/DELETE) — ghi đủ ngay lần
+      // insert duy nhất. `action` là TEXT không CHECK constraint nên không cần migration.
+      await supabaseAdmin.from("doc_approval_log").insert({
+        factory_id: factoryId,
+        doc_id: docId,
+        doc_type: "van_ban",
+        user_id: userId,
+        action: "doi_nguoi_ky",
+        buoc_ky: stepIndex + 1,
+        phong_ban: targetStep.phong_ban_code ?? null,
+        ly_do: `Đổi người ký bước ${stepIndex + 1}${
+          oldSignerId ? "" : " (bước cũ chưa gắn người)"
+        }: ${ly_do.trim()}`,
+      })
+
+      fireNotify({
+        docId,
+        factoryId,
+        action: "doi_nguoi_ky",
+        recipientUserIds: [newUserId],
+        lyDo: ly_do.trim(),
+        actorUserId: userId,
+        stepN: stepIndex + 1,
+      })
+
+      return NextResponse.json({ ok: true, thu_tu_ky_json: steps })
     }
 
     return NextResponse.json({ error: "Action không hợp lệ" }, { status: 400 })

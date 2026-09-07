@@ -6471,8 +6471,9 @@ verify lại toàn cục: 8/8 người đang dùng module đều qua guard.
 | `documents/[id]/page.tsx` | Guard `hasPermission(user,"documents.view")` trong bootstrap (Pattern A rule 12) + đổi thông điệp khi `!doc` thành "Không tìm thấy, hoặc bạn không có quyền xem" (chuẩn bị cho RLS ở PR 3) |
 | `src/lib/auth.ts` | Bổ sung 9 mã `documents.*` vào `DEFAULT_PERMISSION_CODES`; `ROLE_DEFAULTS.manager` +8 mã (trừ `delete`), `ROLE_DEFAULTS.user` +`documents.view` — **mirror đúng `role_permissions` thật trên DB** |
 
-⚠️ Ghi nhận thêm (ngoài phạm vi, chưa làm): `DEFAULT_PERMISSION_CODES` còn thiếu hoàn toàn các nhóm
-`maintenance.*`, `warehouse.*`, `output.*`, `process.*` — cùng loại thiếu sót, cần rà riêng.
+⚠️ Ghi nhận thêm: `DEFAULT_PERMISSION_CODES` còn thiếu hoàn toàn các nhóm `maintenance.*`,
+`warehouse.*`, `output.*`, `process.*` — **đã vá ngày 2026-09-07**, xem mục "Cập nhật (2026-09-07)"
+ở cuối file.
 
 `npx tsc --noEmit` + `npx eslint` sạch (4 warning `<img>` pre-existing). **Chưa test tay.**
 
@@ -6597,13 +6598,123 @@ Workflow (bỏ Cấp 1/Cấp 2, dùng `so_buoc_tong`).
    Đăng nhập bằng tài khoản thường rồi mở danh sách → **không được** có lỗi recursion.
 3. Xác nhận nhãn timeline giờ hiện "Bước 1: Nguyễn Văn A · NMCB"; văn bản **cũ** (bước chưa có
    `user_id`) vẫn hiện mã phòng ban, không crash.
-4. **Việc còn treo ngoài phạm vi module này**: `DEFAULT_PERMISSION_CODES` (`src/lib/auth.ts`) vẫn
-   thiếu hoàn toàn `maintenance.*`, `warehouse.*`, `output.*`, `process.*` — cùng loại thiếu sót đã
-   vá cho `documents.*` ở PR 0, cần rà riêng.
-5. **Chưa làm, nên làm sớm** (ghi trong plan mục "Để sau"): nút **"Đổi người ký bước này"** cho
-   người soạn thảo khi văn bản còn `cho_ky_phong_ban`. Ký đích danh tuyệt đối nghĩa là người nghỉ
-   phép ⇒ văn bản kẹt, chỉ admin gỡ được.
+4. ~~**Việc còn treo ngoài phạm vi module này**: `DEFAULT_PERMISSION_CODES` thiếu 4 nhóm~~ — **đã
+   làm 2026-09-07**, xem mục "Cập nhật (2026-09-07)" ở cuối file.
+5. ~~**Chưa làm, nên làm sớm**: nút **"Đổi người ký bước này"**~~ — **đã làm 2026-09-07**, xem mục
+   "Cập nhật (2026-09-07)" ở cuối file.
 
 ⚠️ **Chưa commit/push** toàn bộ PR 0-4. `git status` có 4 file rác Windows trong `cung_cap_dl/`
 (`desktop.ini`, `~$sl_mau.xlsx`) ở trạng thái đã xoá + 1 file PDF test chưa track — **không phải do
 các phiên này**, cần hỏi người dùng trước khi commit.
+(Đính chính 2026-09-07: PR 0-4 đã lên `main` trong commit `6994c87`.)
+
+---
+
+## Cập nhật (2026-09-07) — Fix chuông đếm lệch + vá 4 nhóm quyền + nút "Đổi người ký bước này"
+
+Ba việc độc lập, không cần migration nào.
+
+### 1. Chuông "Việc cần làm" giữ số cũ — `src/app/dashboard/layout.tsx`
+
+**Triệu chứng**: chuông báo "Văn bản cần phê duyệt: 3" trong khi tab "Việc của tôi" rỗng.
+
+**KHÔNG phải sai công thức** — đã loại trừ bằng dữ liệu thật: cả `module-tasks.ts:224` lẫn
+`my-tasks/page.tsx:102` đều dùng `isAdmin || phe_duyet_user_id === uid`, cả 4 nơi dùng chung
+`canSignStep()` (thống nhất từ commit `6994c87`); toàn DB lúc điều tra có **0 văn bản** ở
+`cho_phe_duyet`/`cho_ky_phong_ban` ⇒ my-tasks rỗng là ĐÚNG. Log `updated_at` cho thấy chính
+người dùng vừa phê duyệt liên tiếp đúng 3 văn bản (`11/BC`, `13/BC`, `14/BC`, 02:31→02:33).
+
+**Nguyên nhân**: effect tính `moduleTasks` chỉ chạy lại khi đổi **module** (`moduleRoutePrefix`
+= 2 segment đầu của pathname) và **không subscribe realtime** — khác badge tab "Việc của tôi"
+(`documents-shell.tsx:140` đã subscribe từ trước). Duyệt xong rồi sang sub-tab khác trong cùng
+module ⇒ chuông không recompute.
+
+**Fix**: tách `refreshModuleTasks` (`useCallback`) ra khỏi effect, rồi gọi lại ở 2 nơi mới:
+- **Bấm mở chuông** ⇒ tính lại ngay. Đây là lớp bảo vệ chính, không phụ thuộc realtime.
+- **Realtime** qua hằng số mới `MODULE_TASK_TABLES` (map `moduleRoutePrefix → bảng cần nghe`,
+  chỉ khai báo cho module `getModuleTasks()` thực sự hỗ trợ), debounce 800ms.
+
+⚠️ Landmine khi thêm bảng vào `MODULE_TASK_TABLES`: bảng **bắt buộc phải có cột `factory_id`**
+(dùng làm filter realtime). Và **tên channel phải khác** channel của `documents-shell.tsx`
+(cùng bảng `van_ban_documents`) — trùng tên thì 1 trong 2 nơi mất sự kiện; đã dùng
+`module-tasks-${user.id}-${moduleRoutePrefix}`.
+
+Effect gốc **cố ý vẫn phụ thuộc `moduleRoutePrefix`** (không phải `refreshModuleTasks`, vốn đổi
+identity theo `pathname` đầy đủ) để giữ đúng chủ đích ban đầu: không recompute mỗi lần đổi
+sub-tab.
+
+### 2. `DEFAULT_PERMISSION_CODES` thiếu 4 nhóm — `src/lib/auth.ts`
+
+Đã bổ sung **20 mã** `maintenance.*` (8), `output.*` (5), `process.*` (5), `warehouse.*` (2),
+và bổ sung `ROLE_DEFAULTS.manager` (+14 mã) / `ROLE_DEFAULTS.user` (+4 mã).
+
+**Mirror ĐÚNG `role_permissions` thật trên DB** — đã verify bằng script đối chiếu trực tiếp
+hằng số với DB: 0 sai lệch cả 2 chiều, không mã trùng.
+
+⚠️ **`warehouse.*` chỉ nằm trong `DEFAULT_PERMISSION_CODES`, CỐ Ý không có trong
+`ROLE_DEFAULTS.manager/user`** — bảng `role_permissions` không có dòng seed warehouse nào cho
+bất kỳ role nào. Muốn cấp phải cấp tay từng tài khoản. Đừng "sửa cho đồng bộ".
+
+**Vì sao đây là bug thật, không phải dọn dẹp**: 31/31 tài khoản active đều có
+`user_permissions` tường minh ⇒ `fetchPermissionCodesForUser` early-return, **không bao giờ
+chạm `ROLE_DEFAULTS` lúc runtime**. Hệ quả nằm ở Cài đặt → Phân quyền:
+`handleRoleChange()` (`settings/page.tsx:2425`) ghi đè `permissions` bằng `ROLE_DEFAULTS[role]`
+⇒ đổi dropdown Role là **bỏ tick sạch 4 nhóm này**, `saveUserApproval()` (`:2479`)
+DELETE+INSERT sau đó **xoá vĩnh viễn**. 15/31 tài khoản đang thực sự có các quyền này.
+
+⚠️ **Còn treo, cần quyết định riêng**: `inventory.cancel` được kiểm ở 3 nơi
+(`inventory/issues|transfers|receipts/page.tsx`) nhưng **không tồn tại trong bảng `permissions`**
+⇒ `hasPermission(user,"inventory.cancel")` **luôn false với mọi non-admin**. Vá đúng cần
+migration seed mã mới ⇒ hỏi người dùng trước.
+
+### 3. Nút "Đổi người ký bước này"
+
+Gỡ kẹt khi người ký đích danh đi vắng. Trước đây chỉ admin sửa thẳng DB mới gỡ được.
+
+| File | Thay đổi |
+|---|---|
+| `api/documents/sign/route.ts` | Action mới `doi_nguoi_ky`; import thêm `stepSignerUserId` |
+| `api/documents/notify/route.ts` | `ACTION_LABEL.doi_nguoi_ky` + hằng `SHOW_LY_DO` (thay 3 chỗ hard-code `action === "tra_ve"` để lý do hiện được cho cả 2 action) |
+| `documents/[id]/page.tsx` | Type `DeptUser`, 5 state, `openDoiNguoiKyModal`/`handleDoiNguoiKy`, gate `canDoiNguoiKy`, nút amber trước "Trả về", modal; nới `doAction` sang `Record<string, string \| number>` |
+
+**Phạm vi cố ý RẤT hẹp** (đã chốt với người dùng): chỉ **người soạn thảo + admin**, chỉ đúng
+bước `buoc_hien_tai` khi văn bản `cho_ky_phong_ban` và bước đó **chưa ai ký**, chọn người
+**trong cùng phòng ban của bước**. Nhờ vậy **không phải đụng file PDF đã đóng dấu**.
+
+Chốt chặn ở **server**, không chỉ UI: trạng thái, `stepIndex === buoc_hien_tai`, bước chưa ký,
+quyền, lý do bắt buộc, và người ký mới phải là profile `active` **cùng `factory_id`** (không tin
+`newUserId` client gửi lên).
+
+⚠️ **Chỉ đổi `user_id` + `ten`, GIỮ NGUYÊN `type` và `phong_ban_code`/`phong_ban_name`** —
+`type` quyết định có cho tiền tố KT./TM./TL./TUQ. hay không, `phong_ban_code` chính là chuỗi in
+dưới chữ ký (`sign/route.ts`'s `chucVu = step.phong_ban_code || step.chuc_vu`). Xoá
+`mat_recipient_user_id` (khoá legacy văn bản "Mật" cũ) để không để lại dữ liệu mâu thuẫn.
+
+**Không đụng `placement_ky`** — khung vị trí gắn với BƯỚC, không gắn với người.
+
+Ghi `doc_approval_log` (`action: "doi_nguoi_ky"`, `buoc_ky`, `phong_ban`, `ly_do`) — không cần
+migration vì cột `action` là TEXT không CHECK (đã verify: DB đang có 9 giá trị `action` khác
+nhau). Bảng bất biến, insert-only.
+
+**Tác dụng phụ có chủ đích**: với văn bản `che_do_xem = 'gioi_han'`, hàm RLS
+`van_ban_is_participant` quét `thu_tu_ky_json` ⇒ đổi người ký **tự chuyển quyền xem** sang
+người mới và cắt quyền người cũ. `canSignStep` là helper dùng chung ở 4 nơi và đều đọc
+`thu_tu_ky_json` sống từ DB ⇒ danh sách/my-tasks/badge/chuông tự phản ánh đúng.
+
+### Đã kiểm tra
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` trên cả 5 file — 0 lỗi, chỉ 4 warning `<img>`
+pre-existing trong `documents/[id]/page.tsx`. Không chạy `npm run build`.
+
+### CHƯA test tay — bắt buộc trước khi coi là xong
+
+1. **Chuông**: mở `/dashboard/documents`, phê duyệt 1 văn bản, **không F5** bấm mở lại chuông ⇒
+   số phải giảm ngay. Tab thứ hai (tài khoản khác) duyệt hộ ⇒ chuông tab đầu tự giảm ~1 giây.
+   Xác nhận bottom-sheet chuông trên mobile (≤430px) vẫn cuộn được.
+2. **Quyền**: Cài đặt → Phân quyền hiện đủ 20 mã mới; mở 1 tài khoản đang có `maintenance.*`
+   (vd `cnho`), **đổi dropdown Role rồi đổi lại**, xác nhận tick không mất sạch như trước; xác
+   nhận `warehouse.*` **không** tự tick khi chọn manager/user.
+3. **Đổi người ký**: tài khoản soạn thảo thấy nút, tài khoản khác (không admin) không thấy; đổi
+   xong timeline hiện tên mới, người mới nhận thông báo đúng tiêu đề tiếng Việt; người cũ mất
+   nút "Ký phòng ban", người mới ký được, PDF sau ký in đúng mã phòng ban; ký xong nút biến mất.
+   Gọi thẳng API với `stepIndex` khác `buoc_hien_tai` hoặc bằng tài khoản khác ⇒ phải 400/403.

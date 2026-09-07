@@ -488,8 +488,6 @@ export const DEFAULT_PERMISSION_CODES = [
   // Nhóm documents.* đã được seed vào bảng `permissions`/`role_permissions` từ migration
   // 20260522 nhưng bị bỏ quên ở danh sách fallback này — nghĩa là khi DB chưa seed kịp,
   // `ROLE_DEFAULTS` sinh ra bộ quyền KHÔNG có module Văn bản. Bổ sung cho khớp đúng DB thật.
-  // (Các nhóm maintenance.*/warehouse.*/output.*/process.* cũng đang thiếu tương tự — ngoài
-  // phạm vi đợt này, cần rà riêng.)
   "documents.view",
   "documents.create",
   "documents.edit",
@@ -499,6 +497,36 @@ export const DEFAULT_PERMISSION_CODES = [
   "documents.print",
   "documents.upload_signed",
   "documents.distribute",
+  // 4 nhóm dưới đây bị bỏ quên ở danh sách fallback này suốt thời gian dài (cùng loại thiếu
+  // sót đã vá cho documents.*). Hệ quả THẬT không nằm ở runtime — mọi tài khoản active đều có
+  // `user_permissions` tường minh nên `fetchPermissionCodesForUser` early-return, không chạm
+  // `ROLE_DEFAULTS`. Hệ quả nằm ở Cài đặt → Phân quyền: danh sách checkbox thiếu hẳn 4 nhóm,
+  // và `handleRoleChange()` ghi đè `permissions` bằng `ROLE_DEFAULTS[role]` ⇒ đổi dropdown Role
+  // là bỏ tick sạch 4 nhóm này, `saveUserApproval()` DELETE+INSERT sau đó xoá vĩnh viễn.
+  // Danh sách dưới đây khớp đúng bảng `permissions` thật trên DB (đã đối chiếu 2026-09-07).
+  "maintenance.view",
+  "maintenance.create",
+  "maintenance.edit",
+  "maintenance.delete",
+  "maintenance.approve",
+  "maintenance.phe_duyet",
+  "maintenance.print",
+  "maintenance.export_file",
+  "output.view",
+  "output.create",
+  "output.edit",
+  "output.delete",
+  "output.import",
+  "process.view",
+  "process.create",
+  "process.edit",
+  "process.delete",
+  "process.print",
+  // warehouse.* có trong bảng `permissions` nhưng KHÔNG có dòng seed nào trong
+  // `role_permissions` cho bất kỳ role nào — nên chỉ xuất hiện ở đây (để hiện checkbox), cố ý
+  // KHÔNG đưa vào ROLE_DEFAULTS.manager/user bên dưới. Muốn cấp thì cấp tay từng tài khoản.
+  "warehouse.view",
+  "warehouse.manage",
   "notes.view",
   "notes.create",
   "notes.edit",
@@ -559,6 +587,23 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "documents.print",
     "documents.upload_signed",
     "documents.distribute",
+    // Khớp đúng role_permissions trên DB (đối chiếu 2026-09-07): manager có maintenance trừ
+    // delete/phe_duyet, output trừ delete, process trừ delete. warehouse.* không có dòng seed
+    // nào cho bất kỳ role nào nên cố ý KHÔNG liệt kê ở đây.
+    "maintenance.view",
+    "maintenance.create",
+    "maintenance.edit",
+    "maintenance.approve",
+    "maintenance.print",
+    "maintenance.export_file",
+    "output.view",
+    "output.create",
+    "output.edit",
+    "output.import",
+    "process.view",
+    "process.create",
+    "process.edit",
+    "process.print",
     "notes.view",
     "notes.create",
     "notes.edit",
@@ -582,6 +627,12 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "iso.signature",
     // Khớp đúng role_permissions trên DB: role `user` chỉ được xem văn bản
     "documents.view",
+    // Khớp đúng role_permissions trên DB (đối chiếu 2026-09-07): user chỉ có 3 mã maintenance
+    // và output.view; process.* và warehouse.* không có dòng seed nào cho role này.
+    "maintenance.view",
+    "maintenance.create",
+    "maintenance.print",
+    "output.view",
     "notes.view",
     "notes.create",
     "notes.edit",
