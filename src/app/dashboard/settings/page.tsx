@@ -665,6 +665,15 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "users.edit_permission": "sửa quyền người dùng",
   "users.approve": "duyệt tài khoản",
   "suffixes.quick_add": "thêm nhanh hậu tố",
+  "documents.view": "xem văn bản",
+  "documents.create": "soạn thảo văn bản mới",
+  "documents.edit": "sửa văn bản",
+  "documents.delete": "xóa văn bản",
+  "documents.ky_phong_ban": "ký phòng ban",
+  "documents.phe_duyet": "phê duyệt văn bản",
+  "documents.print": "in văn bản",
+  "documents.upload_signed": "tải lên bản đã ký tay",
+  "documents.distribute": "phân phối văn bản",
 }
 
 function prettifyPermissionModule(moduleName: string) {

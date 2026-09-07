@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, hasPermission } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import type { SessionUser } from "@/lib/auth"
 import { DocumentsShell } from "./_components/documents-shell"
+import { EditDocModal } from "./_components/edit-doc-modal"
 import {
   CHE_DO_XEM_COLOR,
   CHE_DO_XEM_DESC,
@@ -18,9 +19,8 @@ import {
   fmtDate,
   type VanBanDocument,
   type VanBanTrangThai,
-  type ThuTuKyStep,
 } from "./_components/documents-types"
-import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Plus, AlertTriangle, Download, FileSignature, Globe, Lock } from "lucide-react"
+import { FileText, Search, Eye, Sparkles, Loader2, X, BarChart2, Pencil, Trash2, Download, FileSignature, Lock } from "lucide-react"
 import Link from "next/link"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -69,6 +69,7 @@ export default function DocumentsPage() {
   const [aiResults, setAiResults] = useState<AiSearchResult[] | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
   const aiInputRef = useRef<HTMLInputElement>(null)
+  const [hasViewPerm, setHasViewPerm] = useState<boolean | null>(null)
 
   const handleAiSearch = async () => {
     if (!aiQuery.trim() || !factoryId) return
@@ -76,26 +77,23 @@ export default function DocumentsPage() {
     setAiError(null)
     setAiResults(null)
     try {
-      // Route tìm kiếm chạy service role (bỏ qua RLS) nên từ 2026-09-05 bắt buộc Bearer token —
-      // thiếu header này sẽ nhận 401. Cùng lỗi đã từng xảy ra ở `fetchGrantCandidates`
-      // (Customer Portal), xem `.claude/rules/08-module-export.md`.
-      const session = await getFreshAuthSession()
-      const token = session?.access_token
-      if (!token) {
-        setAiError("Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang.")
-        return
-      }
+      const { data: session } = await supabase.auth.getSession()
+      const token = session.session?.access_token || ""
       const res = await fetch("/api/documents/search", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ query: aiQuery.trim(), factoryId }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ query: aiQuery, factoryId }),
       })
-      const json = (await res.json()) as AiSearchResult[] | { error: string }
-      if (!res.ok || "error" in json) {
-        setAiError((json as { error: string }).error || "Tìm kiếm thất bại")
-      } else {
-        setAiResults(json as AiSearchResult[])
+      if (!res.ok) {
+        const errJson = (await res.json()) as { error?: string }
+        setAiError(errJson.error || "Tìm kiếm thất bại.")
+        return
       }
+      const data = (await res.json()) as AiSearchResult[]
+      setAiResults(data)
     } catch {
       setAiError("Lỗi kết nối. Vui lòng thử lại.")
     } finally {
@@ -127,6 +125,12 @@ export default function DocumentsPage() {
       const { user: sessionUser } = await hydrateActiveSession()
       if (sessionUser) {
         setUser(sessionUser)
+        const canView = hasPermission(sessionUser, "documents.view")
+        setHasViewPerm(canView)
+        if (!canView) {
+          setLoading(false)
+          return
+        }
         try {
           const { data } = await supabase.auth.getSession()
           const token = data.session?.access_token || ""
@@ -138,12 +142,16 @@ export default function DocumentsPage() {
             setMyDeptCode(json.code)
           }
         } catch { /* ignore */ }
+      } else {
+        setHasViewPerm(false)
+        setLoading(false)
       }
     }
     void bootstrap()
   }, [])
 
   const isAdmin = user?.role === "admin"
+  const canCreate = (user && hasPermission(user, "documents.create")) || isAdmin
   const canEditDoc = (d: VanBanDocument) =>
     (d.soan_thao_user_id === user?.id || isAdmin) && (d.trang_thai === "draft" || d.trang_thai === "tra_ve")
   const canDeleteDoc = (d: VanBanDocument) =>
@@ -186,8 +194,8 @@ export default function DocumentsPage() {
   }
 
   useEffect(() => {
-    if (factoryId) void loadData(factoryId)
-  }, [factoryId, loadData])
+    if (factoryId && hasViewPerm) void loadData(factoryId)
+  }, [factoryId, hasViewPerm, loadData])
 
   const filtered = useMemo(() => {
     return docs.filter((d) => {
@@ -206,6 +214,29 @@ export default function DocumentsPage() {
     })
   }, [docs, search, filterLoai, filterTrangThai, filterPhongBan])
 
+  if (hasViewPerm === false) {
+    return (
+      <DocumentsShell>
+        <PageBackgroundMotif theme="cyan" />
+        <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
+          <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock size={28} />
+          </div>
+          <h2 className="text-lg font-bold text-slate-800 mb-2">Không có quyền truy cập</h2>
+          <p className="text-sm text-slate-500 mb-6">
+            Bạn chưa được phân quyền xem module Văn bản nội bộ. Vui lòng liên hệ Quản trị viên để được cấp quyền <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs text-slate-700 font-mono">documents.view</code> trong Cài đặt.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-xl transition-all"
+          >
+            Về Bảng điều khiển
+          </Link>
+        </div>
+      </DocumentsShell>
+    )
+  }
+
   return (
     <DocumentsShell>
       <PageBackgroundMotif theme="cyan" />
@@ -215,21 +246,23 @@ export default function DocumentsPage() {
         theme="cyan"
         icon={FileSignature}
         action={
-          <>
-            <Link
-              href="/dashboard/documents/new"
-              className="flex items-center gap-2 px-5 py-2.5 bg-white text-cyan-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
-            >
-              <FileText size={16} />
-              Soạn thảo mới
-            </Link>
-            <Link
-              href="/dashboard/documents/new/upload"
-              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-white/15 hover:bg-white/25 border border-white/40 rounded-xl transition-all"
-            >
-              Upload ký tay
-            </Link>
-          </>
+          canCreate ? (
+            <>
+              <Link
+                href="/dashboard/documents/new"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white text-cyan-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+              >
+                <FileText size={16} />
+                Soạn thảo mới
+              </Link>
+              <Link
+                href="/dashboard/documents/new/upload"
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-white/15 hover:bg-white/25 border border-white/40 rounded-xl transition-all"
+              >
+                Upload ký tay
+              </Link>
+            </>
+          ) : undefined
         }
       />
 
@@ -621,398 +654,6 @@ export default function DocumentsPage() {
         </ModalShell>
       )}
     </DocumentsShell>
-  )
-}
-
-// ─── EditDocModal ────────────────────────────────────────────────────────────
-// Sửa nhanh: chỉ Tên/Ghi chú/Mô tả AI + danh sách bước ký (nếu đang draft/tra_ve,
-// tức chưa ai ký) — KHÔNG sửa loại VB, phòng ban soạn thảo, mã VB, cấp VB,
-// phạm vi hay người phê duyệt, để tránh phức tạp hóa lại số VB/luồng ký.
-// File đính kèm được thay ở trang chi tiết văn bản (nút "Thay file", cùng điều
-// kiện draft/tra_ve) — không lặp lại ở modal sửa nhanh này.
-
-type EditStepForm = {
-  id: string
-  type: "phong_ban"
-  phong_ban_code: string
-  /** Người ký đích danh — bắt buộc từ 2026-09-05 (trước đây chỉ dùng cho văn bản "Mật"). */
-  user_id: string
-}
-
-type EditDeptUser = { id: string; full_name: string; username: string; department?: string }
-
-function emptyEditStep(step: number): EditStepForm {
-  return { id: `edit-step-${step}-${Date.now()}`, type: "phong_ban", phong_ban_code: "", user_id: "" }
-}
-
-function EditDocModal({
-  doc,
-  factoryId,
-  onClose,
-  onSaved,
-}: {
-  doc: VanBanDocument
-  factoryId: string
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const isDonVi = doc.pham_vi === "Don_vi"
-
-  // Phạm vi hiển thị sửa được sau khi tạo — đây là đường thoát khi người soạn thảo đặt nhầm
-  // "Giới hạn" (đổi về Công khai) hoặc phát hiện văn bản cần siết lại. Nhánh Nội bộ đơn vị giữ
-  // nguyên hành vi cũ: luôn Công khai, không hiện lựa chọn.
-  const [cheDoXem, setCheDoXem] = useState(doc.che_do_xem === "gioi_han" ? "gioi_han" : "cong_khai")
-  const isGioiHan = cheDoXem === "gioi_han"
-
-  const [tenVanBan, setTenVanBan] = useState(doc.ten_van_ban)
-  const [ghiChu, setGhiChu] = useState(doc.ghi_chu || "")
-  const [moTaTimKiem, setMoTaTimKiem] = useState(doc.mo_ta_tim_kiem || "")
-  const [steps, setSteps] = useState<EditStepForm[]>(
-    !isDonVi
-      ? (doc.thu_tu_ky_json || [])
-          .filter((s) => s.type === "phong_ban")
-          .map((s, i) => ({
-            id: `edit-step-${i}-${Date.now()}`,
-            type: "phong_ban" as const,
-            phong_ban_code: s.phong_ban_code || "",
-            // Văn bản cũ: ưu tiên user_id, fallback khoá legacy của văn bản "Mật"
-            user_id: s.user_id || s.mat_recipient_user_id || "",
-          }))
-      : [],
-  )
-  const [selectedUnitUserIds, setSelectedUnitUserIds] = useState<string[]>(
-    isDonVi
-      ? (doc.thu_tu_ky_json || []).filter((s) => s.type === "ca_nhan").map((s) => s.user_id || "").filter(Boolean)
-      : [],
-  )
-  const [unitUsers, setUnitUsers] = useState<EditDeptUser[]>([])
-  const [deptLeaders, setDeptLeaders] = useState<Record<string, EditDeptUser[]>>({})
-  const [approverDept, setApproverDept] = useState("")
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const load = async () => {
-      if (isDonVi) {
-        if (!doc.phong_ban) return
-        try {
-          const res = await fetch(
-            `/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(doc.phong_ban)}&leadership=false`,
-          )
-          if (res.ok) setUnitUsers((await res.json()) as EditDeptUser[])
-        } catch { /* bỏ qua */ }
-      } else if (doc.phe_duyet_user_id) {
-        try {
-          const res = await fetch(`/api/documents/approvers?factoryId=${factoryId}`)
-          if (res.ok) {
-            const list = (await res.json()) as EditDeptUser[]
-            const approver = list.find((a) => a.id === doc.phe_duyet_user_id)
-            setApproverDept(approver?.department || "")
-          }
-        } catch { /* bỏ qua */ }
-      }
-    }
-    void load()
-  }, [factoryId, isDonVi, doc.phong_ban, doc.phe_duyet_user_id])
-
-  const loadDeptLeaders = async (deptCode: string) => {
-    if (!deptCode || deptLeaders[deptCode]) return
-    try {
-      const res = await fetch(`/api/documents/dept-users?factoryId=${factoryId}&dept=${deptCode}&leadership=false`)
-      if (res.ok) {
-        const data = (await res.json()) as EditDeptUser[]
-        setDeptLeaders((prev) => ({ ...prev, [deptCode]: data }))
-      }
-    } catch { /* bỏ qua */ }
-  }
-
-  // Nạp sẵn danh sách người cho các phòng ban ĐÃ có trong văn bản ngay khi mở modal. Nếu không,
-  // `deptLeaders` rỗng cho tới khi người dùng đổi phòng ban → <select> có `value={s.user_id}`
-  // nhưng không có option nào khớp nên hiển thị trống, người dùng tưởng chưa chọn ai (đúng loại
-  // bug "select value không khớp option" đã ghi trong CLAUDE.md ở module Dự đoán số lô).
-  useEffect(() => {
-    if (isDonVi || !factoryId) return
-    const codes = [...new Set(
-      (doc.thu_tu_ky_json || [])
-        .filter((s) => s.type === "phong_ban" && s.phong_ban_code)
-        .map((s) => s.phong_ban_code as string),
-    )]
-    let alive = true
-    void (async () => {
-      for (const code of codes) {
-        try {
-          const res = await fetch(`/api/documents/dept-users?factoryId=${factoryId}&dept=${code}&leadership=false`)
-          if (!res.ok || !alive) continue
-          const data = (await res.json()) as EditDeptUser[]
-          if (alive) setDeptLeaders((prev) => (prev[code] ? prev : { ...prev, [code]: data }))
-        } catch { /* bỏ qua — chỉ mất gợi ý, không chặn sửa */ }
-      }
-    })()
-    return () => { alive = false }
-  }, [factoryId, isDonVi, doc.thu_tu_ky_json])
-
-  const addStep = () => setSteps((prev) => [...prev, emptyEditStep(prev.length + 1)])
-  const removeStep = (id: string) => setSteps((prev) => prev.filter((s) => s.id !== id))
-  const updateStepPhongBan = (id: string, phong_ban_code: string) => {
-    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, phong_ban_code, user_id: "" } : s)))
-    // LUÔN nạp danh sách người của phòng ban — mọi bước đều phải chọn người ký đích danh
-    if (phong_ban_code) void loadDeptLeaders(phong_ban_code)
-  }
-  const updateStepSigner = (id: string, user_id: string) => {
-    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, user_id } : s)))
-  }
-
-  const handleSave = async () => {
-    if (!tenVanBan.trim()) { setSaveError("Vui lòng nhập Tên / Trích yếu."); return }
-
-    let thuTuKyJson: ThuTuKyStep[]
-    if (isDonVi) {
-      thuTuKyJson = selectedUnitUserIds.map((uid, i) => {
-        const u = unitUsers.find((x) => x.id === uid)
-        return { step: i + 1, type: "ca_nhan" as const, user_id: uid, ten: u?.full_name || u?.username || "", chuc_vu: "" }
-      })
-    } else {
-      for (const s of steps) {
-        if (!s.phong_ban_code) { setSaveError("Vui lòng chọn phòng ban cho tất cả các bước ký."); return }
-        // Từ 2026-09-05 mọi bước đều phải chọn người ký đích danh (không riêng văn bản "Mật")
-        if (!s.user_id) {
-          setSaveError(`Vui lòng chọn người ký cho bước phòng ban "${s.phong_ban_code}".`)
-          return
-        }
-      }
-      // Bỏ rule "Cấp 1 cần ít nhất 1 bước" (2026-09-05) — xoá hết bước là hợp lệ, nghĩa là văn
-      // bản sẽ đi thẳng lên phê duyệt.
-      // Giữ `type: "phong_ban"` — vẫn là thứ cho phép tiền tố ký thay và in mã phòng ban dưới
-      // chữ ký; `user_id` là người ký đích danh.
-      thuTuKyJson = steps.map((s, i) => {
-        const signer = (deptLeaders[s.phong_ban_code] || []).find((u) => u.id === s.user_id)
-        return {
-          step: i + 1,
-          type: "phong_ban" as const,
-          phong_ban_code: s.phong_ban_code,
-          phong_ban_name: s.phong_ban_code,
-          user_id: s.user_id,
-          ten: signer?.full_name || signer?.username || "",
-          chuc_vu: "",
-        }
-      })
-    }
-
-    setSaving(true)
-    setSaveError(null)
-    try {
-      const { error } = await supabase
-        .from("van_ban_documents")
-        .update({
-          ten_van_ban: tenVanBan.trim(),
-          ghi_chu: ghiChu.trim() || null,
-          mo_ta_tim_kiem: moTaTimKiem.trim() || null,
-          thu_tu_ky_json: thuTuKyJson,
-          so_buoc_tong: thuTuKyJson.length,
-          che_do_xem: isDonVi ? "cong_khai" : cheDoXem,
-        })
-        .eq("id", doc.id)
-      if (error) { setSaveError(error.message); return }
-      onSaved()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <ModalShell
-      title="Sửa văn bản"
-      onClose={onClose}
-      maxWidth="lg"
-      footer={
-        <>
-          <button onClick={onClose} disabled={saving} className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
-            Hủy
-          </button>
-          <button
-            onClick={() => void handleSave()}
-            disabled={saving}
-            className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all"
-          >
-            {saving ? "Đang lưu..." : "Lưu"}
-          </button>
-        </>
-      }
-    >
-      {saveError && (
-        <div className="mb-3 flex items-center gap-1.5 text-xs text-red-600 font-bold">
-          <AlertTriangle size={12} />{saveError}
-        </div>
-      )}
-      <div className="space-y-4">
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">
-            Tên / Trích yếu nội dung <span className="text-red-500">*</span>
-          </label>
-          <input
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-            value={tenVanBan}
-            onChange={(e) => setTenVanBan(e.target.value)}
-          />
-        </div>
-
-        {!isDonVi && (
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi hiển thị</label>
-            <div className="flex rounded-xl overflow-hidden border border-slate-200">
-              {([
-                { val: "cong_khai", Icon: Globe },
-                { val: "gioi_han", Icon: Lock },
-              ] as const).map(({ val, Icon }) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setCheDoXem(val)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-bold transition-all ${
-                    cheDoXem === val
-                      ? val === "gioi_han"
-                        ? "bg-amber-600 text-white"
-                        : "bg-slate-700 text-white"
-                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  <Icon size={14} />
-                  {CHE_DO_XEM_LABEL[val]}
-                </button>
-              ))}
-            </div>
-            <p className={`text-xs mt-1.5 ${isGioiHan ? "text-amber-700 font-medium" : "text-slate-400"}`}>
-              {isGioiHan ? CHE_DO_XEM_DESC.gioi_han : CHE_DO_XEM_DESC.cong_khai}
-            </p>
-          </div>
-        )}
-
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-          <textarea
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
-            rows={2}
-            value={ghiChu}
-            onChange={(e) => setGhiChu(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả tìm kiếm AI</label>
-          <textarea
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 resize-none"
-            rows={2}
-            value={moTaTimKiem}
-            onChange={(e) => setMoTaTimKiem(e.target.value)}
-          />
-        </div>
-
-        {isDonVi ? (
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ký xác nhận (tùy chọn)</label>
-            {!doc.phong_ban ? (
-              <p className="text-xs text-amber-600">Văn bản chưa có phòng ban.</p>
-            ) : unitUsers.length === 0 ? (
-              <p className="text-xs text-slate-400">Không tìm thấy người dùng trong phòng ban {doc.phong_ban}.</p>
-            ) : (
-              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                {unitUsers
-                  .filter((u) => u.id !== doc.phe_duyet_user_id)
-                  .map((u) => {
-                    const idx = selectedUnitUserIds.indexOf(u.id)
-                    const selected = idx >= 0
-                    return (
-                      <label
-                        key={u.id}
-                        className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
-                          selected ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={(e) => {
-                            setSelectedUnitUserIds((prev) =>
-                              e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
-                            )
-                          }}
-                          className="rounded"
-                        />
-                        {selected && (
-                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
-                            {idx + 1}
-                          </span>
-                        )}
-                        <span className="text-sm text-slate-700 flex-1">{u.full_name || u.username}</span>
-                      </label>
-                    )
-                  })}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-slate-600">Các bước ký phòng ban</label>
-              <button
-                onClick={addStep}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
-              >
-                <Plus size={12} /> Thêm bước
-              </button>
-            </div>
-            {steps.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-3">Chưa có bước ký.</p>
-            ) : (
-              <div className="space-y-2">
-                {steps.map((s, i) => (
-                  <div key={s.id} className={`rounded-lg border p-2.5 space-y-2 ${isGioiHan ? "border-amber-200 bg-amber-50/40" : "border-slate-200"}`}>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
-                        {i + 1}
-                      </div>
-                      <select
-                        className="flex-1 px-2 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500"
-                        value={s.phong_ban_code}
-                        onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
-                      >
-                        <option value="">— Chọn phòng ban —</option>
-                        {PHONG_BAN_VAN_BAN_OPTIONS.filter((pb) => pb !== approverDept).map((pb) => (
-                          <option key={pb} value={pb}>{pb}</option>
-                        ))}
-                      </select>
-                      <button onClick={() => removeStep(s.id)} className="p-1.5 text-slate-300 hover:text-red-500 rounded transition-all">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                    {/* Người ký đích danh — luôn hiện, bắt buộc (trước đây chỉ hiện khi "Mật") */}
-                    <div className="ml-8">
-                      <label className="text-[10px] font-bold text-slate-600 block mb-1">
-                        Người ký <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
-                          !s.user_id && s.phong_ban_code
-                            ? "border-amber-300 bg-amber-50 focus:border-amber-400"
-                            : "border-slate-300 focus:border-blue-400"
-                        }`}
-                        value={s.user_id}
-                        onChange={(e) => updateStepSigner(s.id, e.target.value)}
-                        disabled={!s.phong_ban_code}
-                      >
-                        <option value="">{s.phong_ban_code ? "— Chọn người ký —" : "— Chọn phòng ban trước —"}</option>
-                        {(deptLeaders[s.phong_ban_code] || []).map((u) => (
-                          <option key={u.id} value={u.id}>{u.full_name || u.username}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </ModalShell>
   )
 }
 

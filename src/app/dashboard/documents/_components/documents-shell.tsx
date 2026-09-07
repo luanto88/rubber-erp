@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { FileText, Upload, PenLine, ClipboardList, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { canSignStep } from "./documents-types"
 
 type NavTab = {
@@ -81,6 +81,7 @@ export function DocumentsShell({ children }: DocumentsShellProps) {
   // Badge "Việc của tôi" — mirror IsoShell (pendingTaskCount), trước đây module Văn bản
   // hoàn toàn không có badge này dù trang my-tasks/chuông thông báo đã tính đúng.
   const [pendingTaskCount, setPendingTaskCount] = useState(0)
+  const [canCreate, setCanCreate] = useState(true)
 
   useEffect(() => {
     let alive = true
@@ -93,6 +94,11 @@ export function DocumentsShell({ children }: DocumentsShellProps) {
       if (!fid || !uid) {
         if (alive) setPendingTaskCount(0)
         return
+      }
+
+      const { user: sessionUser } = await hydrateActiveSession()
+      if (sessionUser && alive) {
+        setCanCreate(sessionUser.role === "admin" || hasPermission(sessionUser, "documents.create"))
       }
 
       // role + deptCode — cần cho đúng điều kiện đếm "cần ký phòng ban" (mirror
@@ -153,11 +159,18 @@ export function DocumentsShell({ children }: DocumentsShellProps) {
     }
   }, [])
 
+  const visibleTabs = tabs.filter((t) => {
+    if ((t.href === "/dashboard/documents/new" || t.href === "/dashboard/documents/new/upload") && !canCreate) {
+      return false
+    }
+    return true
+  })
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex gap-1 p-2 overflow-x-auto">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = isActive(pathname, tab)
             const Icon = tab.icon
             return (

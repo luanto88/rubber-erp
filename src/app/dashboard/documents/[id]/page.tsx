@@ -9,6 +9,7 @@ import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
+import { EditDocModal } from "../_components/edit-doc-modal"
 import {
   LOAI_VAN_BAN_LABEL,
   TRANG_THAI_COLOR,
@@ -41,6 +42,7 @@ import {
   ChevronRight,
   ArrowLeft,
   PenLine,
+  Pencil,
   ShieldCheck,
   Bell,
   Share2,
@@ -1809,6 +1811,7 @@ export default function DocumentDetailPage() {
   // Thay file đính kèm — chỉ khả dụng khi văn bản còn đang draft/tra_ve (canGuiKy)
   const fileReplaceInputRef = useRef<HTMLInputElement>(null)
   const [replacingFile, setReplacingFile] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
 
   // Fetch department code via admin API — PHẢI gắn Authorization, nếu không
   // requireAuthUser() ở route sẽ throw và route trả về { code: null } với status 200,
@@ -1860,6 +1863,7 @@ export default function DocumentDetailPage() {
           file_signed_pdf_url: null,
           file_signed_office_url: null,
           file_signed_office_type: null,
+          placement_ky: {},
         })
         .eq("id", doc.id)
       if (updateErr) throw new Error(updateErr.message)
@@ -2299,6 +2303,13 @@ export default function DocumentDetailPage() {
           )}
           {canGuiKy && (
             <>
+              <button
+                onClick={() => setEditModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all"
+              >
+                <Pencil size={15} />
+                Sửa thông tin
+              </button>
               <input
                 ref={fileReplaceInputRef}
                 type="file"
@@ -2753,6 +2764,21 @@ export default function DocumentDetailPage() {
               />
             </div>
         </ModalShell>
+      )}
+
+      {/* Sửa thông tin văn bản Modal */}
+      {editModalOpen && doc && factoryId && (
+        <EditDocModal
+          doc={doc}
+          factoryId={factoryId}
+          onClose={() => setEditModalOpen(false)}
+          onSaved={() => {
+            setEditModalOpen(false)
+            setActionOk("Đã cập nhật văn bản thành công!")
+            setTimeout(() => setActionOk(null), 3000)
+            void loadDoc(factoryId)
+          }}
+        />
       )}
     </DocumentsShell>
   )

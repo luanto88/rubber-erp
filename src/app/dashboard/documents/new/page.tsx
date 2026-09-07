@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
 import {
   CHE_DO_XEM_DESC,
@@ -121,6 +122,7 @@ export default function NewDocumentPage() {
 
   const [steps, setSteps] = useState<StepForm[]>([])
   const [file, setFile] = useState<File | null>(null)
+  const [hasCreatePerm, setHasCreatePerm] = useState<boolean | null>(null)
 
   const loadTypes = useCallback(async () => {
     const { data } = await supabase
@@ -241,6 +243,16 @@ export default function NewDocumentPage() {
       if (sessionUser) {
         setUserId(sessionUser.id)
         setUserFullName(sessionUser.full_name || sessionUser.username || null)
+        const canCreate = sessionUser.role === "admin" || (hasPermission(sessionUser, "documents.view") && hasPermission(sessionUser, "documents.create"))
+        setHasCreatePerm(canCreate)
+        if (!canCreate) {
+          setLoading(false)
+          return
+        }
+      } else {
+        setHasCreatePerm(false)
+        setLoading(false)
+        return
       }
       await Promise.all([loadTypes(), loadApprovers(fid)])
       setLoading(false)
@@ -524,6 +536,29 @@ export default function NewDocumentPage() {
     return (
       <DocumentsShell>
         <div className="p-12 text-center text-slate-400">Đang tải...</div>
+      </DocumentsShell>
+    )
+  }
+
+  if (hasCreatePerm === false) {
+    return (
+      <DocumentsShell>
+        <PageBackgroundMotif theme="cyan" />
+        <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
+          <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock size={28} />
+          </div>
+          <h2 className="text-lg font-bold text-slate-800 mb-2">Không có quyền tạo văn bản</h2>
+          <p className="text-sm text-slate-500 mb-6">
+            Bạn chưa được phân quyền tạo văn bản mới. Vui lòng liên hệ Quản trị viên để được cấp quyền <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs text-slate-700 font-mono">documents.create</code> trong Cài đặt.
+          </p>
+          <Link
+            href="/dashboard/documents"
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-xl transition-all"
+          >
+            Về Danh sách văn bản
+          </Link>
+        </div>
       </DocumentsShell>
     )
   }

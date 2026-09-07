@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
+import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
 import {
   LOAI_VAN_BAN_LABEL,
@@ -14,7 +14,7 @@ import {
   type VanBanDocument,
   type ThuTuKyStep,
 } from "../_components/documents-types"
-import { ClipboardList, ArrowRight, FileSignature } from "lucide-react"
+import { ClipboardList, ArrowRight, FileSignature, Lock } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
@@ -31,6 +31,7 @@ export default function MyTasksPage() {
   const [userDeptCode, setUserDeptCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<TaskItem[]>([])
+  const [hasViewPerm, setHasViewPerm] = useState<boolean | null>(null)
 
   const resolveUserDeptCode = useCallback(async (uid: string) => {
     try {
@@ -124,7 +125,14 @@ export default function MyTasksPage() {
       if (!fid) { setLoading(false); return }
 
       const { user: sessionUser } = await hydrateActiveSession()
-      if (!sessionUser) { setLoading(false); return }
+      if (!sessionUser) { setLoading(false); setHasViewPerm(false); return }
+
+      const canView = hasPermission(sessionUser, "documents.view")
+      setHasViewPerm(canView)
+      if (!canView) {
+        setLoading(false)
+        return
+      }
 
       const deptCode = await resolveUserDeptCode(sessionUser.id)
       setUserDeptCode(deptCode)
@@ -132,6 +140,29 @@ export default function MyTasksPage() {
     }
     void bootstrap()
   }, [resolveUserDeptCode, loadTasks])
+
+  if (hasViewPerm === false) {
+    return (
+      <DocumentsShell>
+        <PageBackgroundMotif theme="cyan" />
+        <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
+          <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock size={28} />
+          </div>
+          <h2 className="text-lg font-bold text-slate-800 mb-2">Không có quyền truy cập</h2>
+          <p className="text-sm text-slate-500 mb-6">
+            Bạn chưa được phân quyền xem module Văn bản nội bộ. Vui lòng liên hệ Quản trị viên để được cấp quyền <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs text-slate-700 font-mono">documents.view</code> trong Cài đặt.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-xl transition-all"
+          >
+            Về Bảng điều khiển
+          </Link>
+        </div>
+      </DocumentsShell>
+    )
+  }
 
   return (
     <DocumentsShell>
