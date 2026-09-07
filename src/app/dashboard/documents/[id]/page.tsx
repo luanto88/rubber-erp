@@ -989,9 +989,16 @@ function SignPlacementModal({
           </div>
         )}
 
-      <div className="flex-1 min-h-0 overflow-auto flex items-start justify-center p-4 bg-app-bg">
+      {/*
+        KHÔNG dùng `flex justify-center` (hay `items-center` với flex-col) ở vùng cuộn này.
+        Canvas render ở scale cố định 1.5 ⇒ trên mobile nó rộng hơn container. Với flex centering,
+        phần tràn ra ở phía ĐẦU (bên trái) nằm ngoài vùng cuộn được — người dùng chỉ kéo được sang
+        phải, mất hẳn mép trái tài liệu. Dùng block + `w-max mx-auto`: khi hẹp hơn thì margin auto
+        căn giữa như cũ, khi rộng hơn thì margin auto tự về 0 nên cuộn được đủ cả hai chiều.
+      */}
+      <div className="flex-1 min-h-0 overflow-auto p-4 bg-app-bg">
         {showCanvas ? (
-          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none mx-auto">
+          <div ref={containerRef} className="relative w-max mx-auto shadow-2xl bg-white select-none">
             <canvas ref={canvasRef} className="block" />
 
                 {!canvasReady && !canvasError && (
@@ -1644,7 +1651,7 @@ function SignPlacementModal({
                 )}
               </div>
           ) : (
-            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl max-w-md">
+            <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl max-w-md mx-auto">
               <p className="text-sm font-bold text-sky-800 mb-2">File Office — tag sẽ được thay tự động</p>
               <div className="space-y-1 text-xs text-sky-700">
                 <div className="flex items-center gap-2">
