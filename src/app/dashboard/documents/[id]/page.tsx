@@ -13,12 +13,15 @@ import {
   LOAI_VAN_BAN_LABEL,
   TRANG_THAI_COLOR,
   TRANG_THAI_LABEL,
-  PHAN_LOAI_LABEL,
-  PHAN_LOAI_COLOR,
+  CHE_DO_XEM_COLOR,
+  CHE_DO_XEM_DESC,
+  CHE_DO_XEM_LABEL,
   SIGN_AS_OPTIONS,
   SIGN_AS_LABEL,
+  canSignStep,
   fmtDate,
   sanitizeStorageFileName,
+  stepDisplayLabel,
   type VanBanDocument,
   type ThuTuKyStep,
   type SignAsType,
@@ -1871,14 +1874,20 @@ export default function DocumentDetailPage() {
       setFactoryId(fid)
 
       const { user: sessionUser } = await hydrateActiveSession()
-      if (sessionUser) {
-        setUser(sessionUser)
-        void resolveUserDeptCode(sessionUser.id)
-        const { data: sigUrlData } = supabase.storage
-          .from("iso-documents")
-          .getPublicUrl(`signatures/${fid}/${sessionUser.id}/chu_ky.png`)
-        setSignatureUrl(sigUrlData.publicUrl)
+      // Guard quyền (Pattern A — `.claude/rules/12-settings-permissions.md`). Trước 2026-09-05
+      // trang này KHÔNG kiểm tra quyền nào: layout chỉ ẩn mục menu chứ không chặn route, repo
+      // không có middleware, nên bất kỳ ai cùng nhà máy biết URL đều mở được chi tiết văn bản.
+      if (!sessionUser || !hasPermission(sessionUser, "documents.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
       }
+      setUser(sessionUser)
+      void resolveUserDeptCode(sessionUser.id)
+      const { data: sigUrlData } = supabase.storage
+        .from("iso-documents")
+        .getPublicUrl(`signatures/${fid}/${sessionUser.id}/chu_ky.png`)
+      setSignatureUrl(sigUrlData.publicUrl)
       setLoading(false)
     }
     void bootstrap()
@@ -2104,7 +2113,10 @@ export default function DocumentDetailPage() {
       <DocumentsShell>
         <div className="p-12 text-center text-slate-400">
           <FileText size={40} className="mx-auto mb-3 opacity-30" />
-          <p>Không tìm thấy văn bản</p>
+          {/* Từ khi có phạm vi hiển thị "Giới hạn", `data === null` còn có nghĩa là RLS đã chặn
+              — không chỉ là văn bản không tồn tại. Diễn đạt bao được cả hai để người xem không
+              tưởng dữ liệu bị mất. */}
+          <p>Không tìm thấy văn bản, hoặc bạn không có quyền xem văn bản này</p>
           <button onClick={() => router.push("/dashboard/documents")} className="mt-4 text-blue-600 underline text-sm">
             Quay lại danh sách
           </button>
@@ -2119,21 +2131,13 @@ export default function DocumentDetailPage() {
   const isSoanThao = doc.soan_thao_user_id === user?.id || isAdmin
   const canGuiKy = isSoanThao && (doc.trang_thai === "draft" || doc.trang_thai === "tra_ve")
 
-  // Ký bước: kiểm tra bước hiện tại có thuộc phòng ban của user không
+  // Quyền ký bước hiện tại — dùng helper chung `canSignStep` (documents-types.ts), cùng công
+  // thức với danh sách / "Việc của tôi" / badge sidebar / chuông thông báo.
   let canKyBuoc = false
   let currentStep: ThuTuKyStep | null = null
   if (doc.trang_thai === "cho_ky_phong_ban" && user) {
-    const stepIndex = doc.buoc_hien_tai
-    currentStep = (doc.thu_tu_ky_json || [])[stepIndex] || null
-    if (currentStep) {
-      if (isAdmin) {
-        canKyBuoc = true
-      } else if (currentStep.type === "phong_ban" && userDeptCode === currentStep.phong_ban_code) {
-        canKyBuoc = true
-      } else if (currentStep.type === "ca_nhan" && currentStep.user_id === user.id) {
-        canKyBuoc = true
-      }
-    }
+    currentStep = (doc.thu_tu_ky_json || [])[doc.buoc_hien_tai] || null
+    canKyBuoc = canSignStep(currentStep, user.id, userDeptCode, isAdmin)
   }
 
   // Chỉ đúng người được chỉ định phe_duyet_user_id (hoặc admin) mới được Phê duyệt /
@@ -2174,7 +2178,7 @@ export default function DocumentDetailPage() {
     ...Object.fromEntries(
       (doc.thu_tu_ky_json || []).map((s: ThuTuKyStep, i) => [
         String(i + 1),
-        `Bước ${i + 1}: ${s.phong_ban_code || s.ten || ""}`.trim(),
+        `Bước ${i + 1}: ${stepDisplayLabel(s)}`.trim(),
       ]),
     ),
     phe_duyet: "Phê duyệt",
@@ -2260,10 +2264,13 @@ export default function DocumentDetailPage() {
               <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
                 {TRANG_THAI_LABEL[doc.trang_thai]}
               </span>
-              {doc.phan_loai && doc.phan_loai !== "Thuong" && (
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${PHAN_LOAI_COLOR[doc.phan_loai] || "bg-red-100 text-red-700 border border-red-200"}`}>
+              {doc.che_do_xem === "gioi_han" && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${CHE_DO_XEM_COLOR.gioi_han}`}
+                  title={CHE_DO_XEM_DESC.gioi_han}
+                >
                   <Lock size={10} />
-                  {PHAN_LOAI_LABEL[doc.phan_loai] || doc.phan_loai}
+                  {CHE_DO_XEM_LABEL.gioi_han}
                 </span>
               )}
             </div>
@@ -2388,12 +2395,48 @@ export default function DocumentDetailPage() {
                   </dd>
                 </div>
               )}
-              <InfoRow label="Cấp văn bản" value={doc.cap_tl || "—"} />
-              <InfoRow label="Phân loại" value={doc.phan_loai ? (PHAN_LOAI_LABEL[doc.phan_loai] || doc.phan_loai) : "Thường"} />
+              <InfoRow
+                label="Phạm vi hiển thị"
+                value={CHE_DO_XEM_LABEL[doc.che_do_xem] || CHE_DO_XEM_LABEL.cong_khai}
+              />
               <InfoRow label="Người soạn thảo" value={doc.nguoi_soan_thao_display || "—"} />
               <InfoRow label="Người phê duyệt" value={doc.phe_duyet || "—"} />
               <InfoRow label="Ngày phê duyệt" value={fmtDate(doc.ngay_phe_duyet)} />
             </div>
+            {doc.che_do_xem === "gioi_han" && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1.5 flex items-center gap-1.5">
+                  <Lock size={11} /> Ai xem được văn bản này
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    doc.nguoi_soan_thao_display,
+                    ...(doc.thu_tu_ky_json || []).map((s) => s.ten),
+                    doc.phe_duyet,
+                  ]
+                    .map((n) => (n || "").trim())
+                    .filter((n, i, arr) => n && arr.indexOf(n) === i)
+                    .map((n) => (
+                      <span
+                        key={n}
+                        className="px-2 py-0.5 text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 rounded-lg"
+                      >
+                        {n}
+                      </span>
+                    ))}
+                  <span className="px-2 py-0.5 text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200 rounded-lg">
+                    Quản trị viên
+                  </span>
+                  <span className="px-2 py-0.5 text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200 rounded-lg">
+                    Người được Phân phối
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                  Giới hạn áp dụng cho danh sách, trang chi tiết và tìm kiếm. Người đang giữ sẵn
+                  đường dẫn tệp PDF vẫn tải được tệp đó.
+                </p>
+              </div>
+            )}
             {doc.ghi_chu && (
               <div className="mt-4 pt-4 border-t border-slate-100">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
@@ -2458,7 +2501,7 @@ export default function DocumentDetailPage() {
                 return (
                   <TimelineStep
                     key={i}
-                    label={`Bước ${i + 1}: ${step.phong_ban_code || step.ten || ""}`}
+                    label={`Bước ${i + 1}: ${stepDisplayLabel(step)}`}
                     sublabel={
                       nguoiKyEntry?.ten
                         ? `${signAsPrefixLabel(nguoiKyEntry.sign_as, nguoiKyEntry.is_kt)}${nguoiKyEntry.ten}`

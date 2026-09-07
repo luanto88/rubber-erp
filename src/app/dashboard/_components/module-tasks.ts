@@ -27,6 +27,7 @@ import {
   isKpi5sDeadlineOverdue,
   type Kpi5sLocation,
 } from "@/lib/kpi-5s"
+import { canSignStep } from "@/app/dashboard/documents/_components/documents-types"
 import { fetchPendingSubstitutionsForApprover } from "@/lib/kpi-templates"
 import { KPI_TASK_HIGHLIGHT_LABEL } from "@/lib/kpi-tasks"
 
@@ -162,7 +163,15 @@ export async function getIsoTasks(factoryId: string, userId: string): Promise<Mo
 
 // ── Văn bản nội bộ ───────────────────────────────────────────────────────────
 // Mirror logic ở src/app/dashboard/documents/my-tasks/page.tsx
-type ThuTuKyStep = { step: number; type: "phong_ban" | "ca_nhan"; phong_ban_code?: string; user_id?: string }
+// Khớp shape với ThuTuKyStep của module Văn bản ở mức đủ dùng cho `canSignStep`
+type ThuTuKyStep = {
+  step: number
+  type: "phong_ban" | "ca_nhan"
+  phong_ban_code?: string
+  user_id?: string
+  /** @deprecated Văn bản "Mật" cũ — vẫn đọc như user_id */
+  mat_recipient_user_id?: string
+}
 
 async function resolveUserDeptCode(userId: string): Promise<string | null> {
   try {
@@ -203,12 +212,10 @@ export async function getDocumentsTasks(factoryId: string, user: SessionUser): P
       continue
     }
     if (doc.trang_thai === "cho_ky_phong_ban") {
+      // Dùng helper chung với danh sách/my-tasks/badge sidebar — xem `canSignStep`
+      // trong documents/_components/documents-types.ts
       const step = (doc.thu_tu_ky_json || [])[doc.buoc_hien_tai]
-      const match =
-        isAdmin ||
-        (step?.type === "phong_ban" && deptCode === step.phong_ban_code) ||
-        (step?.type === "ca_nhan" && step.user_id === user.id)
-      if (match) kyBuocCount++
+      if (canSignStep(step, user.id, deptCode, isAdmin)) kyBuocCount++
       continue
     }
     // Chỉ đúng người được chỉ định phe_duyet_user_id hoặc admin — không gate theo

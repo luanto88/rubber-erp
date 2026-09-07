@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
 import {
+  CHE_DO_XEM_DESC,
+  CHE_DO_XEM_LABEL,
   LOAI_VAN_BAN_KY_HIEU,
   LOAI_VAN_BAN_LABEL,
   LOAI_VAN_BAN_OPTIONS,
@@ -24,8 +26,8 @@ import {
   X,
   FileText,
   GripVertical,
+  Globe,
   Lock,
-  Shield,
   Sparkles,
   FileSignature,
 } from "lucide-react"
@@ -54,7 +56,12 @@ type StepForm = {
   id: string
   type: "phong_ban"
   phong_ban_code: string
-  mat_recipient_user_id: string
+  /**
+   * Người ký ĐÍCH DANH của bước (bắt buộc từ 2026-09-05). Trước đây trường này chỉ dùng cho văn
+   * bản "Mật" (`mat_recipient_user_id`) để chọn người nhận thông báo; nay mọi bước đều chọn người
+   * cụ thể — nhờ vậy màn "Cài đặt vị trí ký" hiện được đúng tên + ảnh chữ ký thật.
+   */
+  user_id: string
 }
 
 function emptyStep(step: number): StepForm {
@@ -62,7 +69,7 @@ function emptyStep(step: number): StepForm {
     id: `step-${step}-${Date.now()}`,
     type: "phong_ban",
     phong_ban_code: "",
-    mat_recipient_user_id: "",
+    user_id: "",
   }
 }
 
@@ -83,8 +90,9 @@ export default function NewDocumentPage() {
     loai_van_ban: "",
     phong_ban: "",
     ten_van_ban: "",
-    cap_tl: "Cấp 1",
-    phan_loai: "Thuong",
+    // `cap_tl` đã bỏ khỏi form 2026-09-05 — số bước ký do người soạn thảo tự chọn.
+    // `phan_loai` (Thường/Mật) đã bỏ 2026-09-06 — thay bằng `che_do_xem` (phạm vi hiển thị thật).
+    che_do_xem: "cong_khai",
     pham_vi: "Cong_ty",        // 'Cong_ty' | 'Don_vi'
     phe_duyet_user_id: "",
     ghi_chu: "",
@@ -297,27 +305,20 @@ export default function NewDocumentPage() {
   const updateStepPhongBan = (id: string, phong_ban_code: string) => {
     setSteps((prev) =>
       prev.map((s) =>
-        s.id === id ? { ...s, phong_ban_code, mat_recipient_user_id: "" } : s,
+        s.id === id ? { ...s, phong_ban_code, user_id: "" } : s,
       ),
     )
-    if (form.phan_loai === "Mat" && factoryId && phong_ban_code) {
+    // LUÔN nạp danh sách người của phòng ban (bỏ điều kiện chỉ-khi-Mật) — mọi bước giờ đều phải
+    // chọn người ký đích danh.
+    if (factoryId && phong_ban_code) {
       void loadDeptLeaders(factoryId, phong_ban_code)
     }
   }
 
-  const updateStepRecipient = (id: string, mat_recipient_user_id: string) => {
+  const updateStepSigner = (id: string, user_id: string) => {
     setSteps((prev) =>
-      prev.map((s) => s.id === id ? { ...s, mat_recipient_user_id } : s),
+      prev.map((s) => s.id === id ? { ...s, user_id } : s),
     )
-  }
-
-  const handlePhanLoaiChange = (val: string) => {
-    setForm((f) => ({ ...f, phan_loai: val }))
-    if (val === "Mat" && factoryId) {
-      for (const s of steps) {
-        if (s.phong_ban_code) void loadDeptLeaders(factoryId, s.phong_ban_code)
-      }
-    }
   }
 
   // Bug 4: Auto-fill tên từ tên file khi trường đang trống
@@ -379,20 +380,19 @@ export default function NewDocumentPage() {
       setSaveError("Vui lòng chọn Người phê duyệt cuối.")
       return
     }
-    if (form.cap_tl === "Cấp 1" && form.pham_vi === "Cong_ty" && steps.length === 0) {
-      setSaveError("Cấp 1 Nội bộ công ty cần ít nhất 1 bước ký phòng ban.")
-      return
-    }
+    // Bỏ rule "Cấp 1 cần ít nhất 1 bước ký" (2026-09-05): số bước do người soạn thảo tự quyết,
+    // 0 bước là hợp lệ và có nghĩa "gửi thẳng lên phê duyệt".
     if (form.pham_vi === "Cong_ty") {
       for (const s of steps) {
         if (!s.phong_ban_code) {
           setSaveError("Vui lòng chọn phòng ban cho tất cả các bước ký.")
           return
         }
-        if (form.phan_loai === "Mat" && !s.mat_recipient_user_id) {
-          setSaveError(
-            `Văn bản Mật: vui lòng chọn đích danh người nhận cho bước ký phòng ban "${s.phong_ban_code}".`,
-          )
+        // Từ 2026-09-05 MỌI bước đều phải chọn người ký đích danh (không còn chỉ riêng văn bản
+        // "Mật") — đây là điều kiện để màn "Cài đặt vị trí ký" hiện đúng tên/ảnh chữ ký, và để
+        // quyền ký gắn với đúng người thay vì cả phòng ban.
+        if (!s.user_id) {
+          setSaveError(`Vui lòng chọn người ký cho bước phòng ban "${s.phong_ban_code}".`)
           return
         }
       }
@@ -442,15 +442,21 @@ export default function NewDocumentPage() {
           }
         })
       } else {
-        thuTuKyJson = steps.map((s, i) => ({
-          step: i + 1,
-          type: "phong_ban" as const,
-          phong_ban_code: s.phong_ban_code,
-          phong_ban_name: s.phong_ban_code,
-          ...(form.phan_loai === "Mat" && s.mat_recipient_user_id
-            ? { mat_recipient_user_id: s.mat_recipient_user_id }
-            : {}),
-        }))
+        // `type: "phong_ban"` GIỮ NGUYÊN dù bước đã có người đích danh — nó vẫn là thứ quyết định
+        // (1) tiền tố ký thay KT./TM./TL./TUQ. có được phép hay không, và (2) mã phòng ban được in
+        // dưới chữ ký trên chứng từ (`chucVu = step.phong_ban_code || step.chuc_vu` ở route ký).
+        thuTuKyJson = steps.map((s, i) => {
+          const signer = (deptLeaders[s.phong_ban_code] || []).find((u) => u.id === s.user_id)
+          return {
+            step: i + 1,
+            type: "phong_ban" as const,
+            phong_ban_code: s.phong_ban_code,
+            phong_ban_name: s.phong_ban_code,
+            user_id: s.user_id,
+            ten: signer?.full_name || signer?.username || "",
+            chuc_vu: "",
+          }
+        })
       }
       const soBuocTong = thuTuKyJson.length
 
@@ -479,8 +485,9 @@ export default function NewDocumentPage() {
         phong_ban: form.phong_ban,
         so_van_ban: finalSoStr,
         nam: new Date().getFullYear(),
-        cap_tl: form.pham_vi === "Don_vi" ? "Cấp 1" : form.cap_tl,
-        phan_loai: form.pham_vi === "Don_vi" ? "Thuong" : form.phan_loai,
+        // Nhánh Nội bộ đơn vị giữ nguyên hành vi cũ (luôn Công khai trong nhà máy) — phạm vi
+        // hiển thị hạn chế hiện chỉ áp dụng cho văn bản Nội bộ công ty.
+        che_do_xem: form.pham_vi === "Don_vi" ? "cong_khai" : form.che_do_xem,
         trang_thai: "draft",
         is_uploaded: false,
         thu_tu_ky_json: thuTuKyJson,
@@ -521,7 +528,7 @@ export default function NewDocumentPage() {
     )
   }
 
-  const isMat = form.phan_loai === "Mat"
+  const isGioiHan = form.che_do_xem === "gioi_han"
   // Nội bộ đơn vị: người phê duyệt là lãnh đạo phòng ban tự động xác định (deptLeaderCandidates),
   // không nằm trong danh sách approvers toàn nhà máy dùng cho Nội bộ công ty.
   const selectedApprover =
@@ -626,7 +633,7 @@ export default function NewDocumentPage() {
                         setForm((f) => ({
                           ...f,
                           pham_vi: val,
-                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
+                          ...(val === "Don_vi" ? { che_do_xem: "cong_khai" } : {}),
                           phe_duyet_user_id: "",
                         }))
                         setSelectedUnitUserIds([])
@@ -647,43 +654,47 @@ export default function NewDocumentPage() {
                 )}
               </div>
 
-              {/* Phân loại Thường/Mật — chỉ áp dụng Nội bộ công ty */}
+              {/* Phạm vi hiển thị — chỉ áp dụng Nội bộ công ty (thay "Phân loại Thường/Mật" cũ) */}
               {form.pham_vi !== "Don_vi" && (
                 <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
                   <label className="text-xs font-bold text-slate-600 block mb-2.5">
-                    Phân loại <span className="text-red-500">*</span>
+                    Phạm vi hiển thị <span className="text-red-500">*</span>
                   </label>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => handlePhanLoaiChange("Thuong")}
+                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "cong_khai" }))}
                       className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        !isMat
+                        !isGioiHan
                           ? "bg-slate-700 text-white border-slate-700 shadow-md"
                           : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
                       }`}
                     >
-                      <Shield size={17} />
-                      Thường
+                      <Globe size={17} />
+                      {CHE_DO_XEM_LABEL.cong_khai}
                     </button>
                     <button
                       type="button"
-                      onClick={() => handlePhanLoaiChange("Mat")}
+                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "gioi_han" }))}
                       className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        isMat
-                          ? "bg-red-600 text-white border-red-600 shadow-md"
-                          : "bg-white text-red-500 border-red-300 hover:bg-red-50"
+                        isGioiHan
+                          ? "bg-amber-600 text-white border-amber-600 shadow-md"
+                          : "bg-white text-amber-700 border-amber-300 hover:bg-amber-50"
                       }`}
                     >
                       <Lock size={17} />
-                      Mật
+                      {CHE_DO_XEM_LABEL.gioi_han}
                     </button>
                   </div>
-                  <p className={`text-xs mt-2 ${isMat ? "text-red-500 font-medium" : "text-slate-400"}`}>
-                    {isMat
-                      ? "Văn bản Mật: mỗi bước ký cần chọn đích danh người nhận thông báo."
-                      : "Văn bản Thường: thông báo đến trưởng/phó phòng ban tương ứng."}
+                  <p className={`text-xs mt-2 ${isGioiHan ? "text-amber-700 font-medium" : "text-slate-400"}`}>
+                    {isGioiHan ? CHE_DO_XEM_DESC.gioi_han : CHE_DO_XEM_DESC.cong_khai}
                   </p>
+                  {isGioiHan && (
+                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                      Lưu ý: giới hạn áp dụng cho danh sách, trang chi tiết và tìm kiếm. Người đang
+                      giữ sẵn đường dẫn tệp PDF vẫn tải được tệp đó.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -821,19 +832,8 @@ export default function NewDocumentPage() {
                 />
               </div>
 
-              {form.pham_vi !== "Don_vi" && (
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp văn bản</label>
-                  <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                    value={form.cap_tl}
-                    onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
-                  >
-                    <option value="Cấp 1">Cấp 1 — Ký xác nhận/vòng ký, sau đó phê duyệt</option>
-                    <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
-                  </select>
-                </div>
-              )}
+              {/* Ô "Cấp văn bản" đã gỡ 2026-09-05 — số bước ký ở khối "Vòng ký" bên dưới quyết
+                  định luồng: có bước ⇒ đi vòng ký, không có bước ⇒ lên thẳng phê duyệt. */}
 
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
@@ -1031,31 +1031,24 @@ export default function NewDocumentPage() {
               /* --- Nội bộ công ty: vòng ký phòng ban --- */
               <>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-bold text-slate-700">
-                    Vòng ký phòng ban
-                    {form.cap_tl === "Cấp 2" && (
-                      <span className="ml-2 text-xs font-normal text-slate-400">(bỏ qua với Cấp 2)</span>
-                    )}
-                  </h2>
-                  {form.cap_tl === "Cấp 1" && (
-                    <button
-                      onClick={addStep}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
-                    >
-                      <Plus size={12} />
-                      Thêm bước
-                    </button>
-                  )}
+                  <h2 className="text-sm font-bold text-slate-700">Vòng ký phòng ban</h2>
+                  <button
+                    onClick={addStep}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                  >
+                    <Plus size={12} />
+                    Thêm bước
+                  </button>
                 </div>
 
-                {form.cap_tl === "Cấp 2" ? (
+                {/* Không còn nhánh "Cấp 2 chuyển thẳng lên phê duyệt" — 0 bước giờ là lựa chọn
+                    hợp lệ và mang đúng ý nghĩa đó. */}
+                {steps.length === 0 ? (
                   <div className="text-sm text-slate-400 text-center py-4">
-                    Văn bản Cấp 2 chuyển thẳng lên phê duyệt.
-                  </div>
-                ) : steps.length === 0 ? (
-                  <div className="text-sm text-slate-400 text-center py-4">
-                    Chưa có bước ký. Nhấn{" "}
-                    <span className="font-bold text-blue-600">+ Thêm bước</span>.
+                    Chưa có bước ký — văn bản sẽ được gửi thẳng lên người phê duyệt.
+                    <br />
+                    Nhấn <span className="font-bold text-blue-600">+ Thêm bước</span> nếu cần ký qua
+                    các phòng ban trước.
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1065,7 +1058,7 @@ export default function NewDocumentPage() {
                         <div
                           key={s.id}
                           className={`rounded-lg border p-2.5 space-y-2 ${
-                            isMat ? "border-red-200 bg-red-50/40" : "border-slate-200"
+                            isGioiHan ? "border-amber-200 bg-amber-50/40" : "border-slate-200"
                           }`}
                         >
                           <div className="flex items-center gap-2">
@@ -1104,46 +1097,44 @@ export default function NewDocumentPage() {
                             </div>
                           )}
 
-                          {isMat && (
-                            <div className="ml-7">
-                              <label className="text-[10px] font-bold text-red-600 block mb-1">
-                                Người nhận thông báo (đích danh) <span className="text-red-500">*</span>
-                              </label>
-                              <select
-                                className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
-                                  isMat && !s.mat_recipient_user_id && s.phong_ban_code
-                                    ? "border-red-300 bg-red-50 focus:border-red-400"
-                                    : "border-slate-300 focus:border-red-400"
-                                }`}
-                                value={s.mat_recipient_user_id}
-                                onChange={(e) => updateStepRecipient(s.id, e.target.value)}
-                                disabled={!s.phong_ban_code}
-                              >
-                                <option value="">
-                                  {s.phong_ban_code
-                                    ? "— Chọn đích danh —"
-                                    : "— Chọn phòng ban trước —"}
+                          {/* Chọn người ký đích danh — LUÔN hiện và bắt buộc (trước 2026-09-05 chỉ
+                              hiện với văn bản "Mật"). Chọn phòng ban ở trên chỉ để lọc danh sách. */}
+                          <div className="ml-7">
+                            <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                              Người ký <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
+                                !s.user_id && s.phong_ban_code
+                                  ? "border-amber-300 bg-amber-50 focus:border-amber-400"
+                                  : "border-slate-300 focus:border-blue-400"
+                              }`}
+                              value={s.user_id}
+                              onChange={(e) => updateStepSigner(s.id, e.target.value)}
+                              disabled={!s.phong_ban_code}
+                            >
+                              <option value="">
+                                {s.phong_ban_code ? "— Chọn người ký —" : "— Chọn phòng ban trước —"}
+                              </option>
+                              {(deptLeaders[s.phong_ban_code] || []).map((u) => (
+                                <option key={u.id} value={u.id}>
+                                  {u.full_name || u.username}
                                 </option>
-                                {(deptLeaders[s.phong_ban_code] || []).map((u) => (
-                                  <option key={u.id} value={u.id}>
-                                    {u.full_name || u.username}
-                                  </option>
-                                ))}
-                              </select>
-                              {s.phong_ban_code && !(deptLeaders[s.phong_ban_code]?.length) && (
-                                <p className="text-[10px] text-slate-400 mt-0.5">
-                                  Không tìm thấy người dùng trong phòng {s.phong_ban_code}.
-                                </p>
-                              )}
-                            </div>
-                          )}
+                              ))}
+                            </select>
+                            {s.phong_ban_code && !(deptLeaders[s.phong_ban_code]?.length) && (
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                Không tìm thấy người dùng trong phòng {s.phong_ban_code}.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )
                     })}
                   </div>
                 )}
 
-                {form.cap_tl === "Cấp 1" && steps.length > 0 && selectedApprover && (
+                {steps.length > 0 && selectedApprover && (
                   <div className="mt-3 pt-3 border-t border-slate-100">
                     <div className="flex items-center gap-2 text-xs text-slate-400">
                       <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">

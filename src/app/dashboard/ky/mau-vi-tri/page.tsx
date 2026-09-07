@@ -162,7 +162,16 @@ type EditorRole = {
 // ── Đồng bộ với dữ liệu người ký thật của 1 văn bản cụ thể (chỉ khi mở kèm docId) — KHÔNG
 // bao giờ lưu vào EditorRole/gửi lên /api/signing/templates, chỉ dùng để hiển thị preview.
 type DocSignerInfo =
-  | { kind: "ca_nhan"; userId: string; fullName: string; chucVu: string; hasSignature: boolean }
+  | {
+      kind: "ca_nhan"
+      userId: string
+      fullName: string
+      chucVu: string
+      hasSignature: boolean
+      /** Mã phòng ban của bước (nếu có) — vẫn được in dưới chữ ký trên chứng từ thật. */
+      deptLabel?: string
+    }
+  // Chỉ còn với văn bản tạo TRƯỚC 2026-09-05: bước chỉ định phòng ban, chưa gắn người cụ thể.
   | { kind: "phong_ban"; label: string }
 
 // Chỉ lấy đúng field cần dùng từ ThuTuKyStep (documents-types.ts) — không import type đó từ
@@ -173,6 +182,14 @@ type DocStepLite = {
   ten?: string
   phong_ban_code?: string
   phong_ban_name?: string
+  /** @deprecated Văn bản "Mật" cũ — đọc như user_id để vẫn tra được tên người ký. */
+  mat_recipient_user_id?: string
+}
+
+/** Người ký đích danh của bước (gộp khoá legacy). null = bước cũ chỉ định theo phòng ban. */
+function docStepSignerId(step?: DocStepLite | null): string | null {
+  if (!step) return null
+  return step.user_id || step.mat_recipient_user_id || null
 }
 
 // Lưới căn chỉnh dùng đơn vị PIXEL cố định (không phải % theo mỗi trục) — trang PDF không phải
@@ -550,7 +567,10 @@ export default function SignTemplateEditorPage() {
     if (!docLoaded || !docFetchOk || !factoryId) return
     const ids = Array.from(
       new Set([
-        ...docSteps.filter((s) => s.type === "ca_nhan" && s.user_id).map((s) => s.user_id as string),
+        // MỌI bước có người đích danh — không chỉ `ca_nhan`. Trước 2026-09-05 bước nhánh Nội bộ
+        // công ty (`phong_ban`) không có user_id nên không tra được tên, khiến màn này chỉ hiện
+        // đúng tên người Phê duyệt; nay bước nào cũng có người ký cụ thể.
+        ...docSteps.map((s) => docStepSignerId(s)).filter((id): id is string => !!id),
         ...(docPheDuyetUserId ? [docPheDuyetUserId] : []),
       ]),
     )
@@ -615,16 +635,21 @@ export default function SignTemplateEditorPage() {
     docSteps.forEach((step, idx) => {
       const role = kyBuocFamily[idx]
       if (!role) return
-      if (step.type === "ca_nhan" && step.user_id) {
-        const info = signerInfoById[step.user_id]
+      const signerId = docStepSignerId(step)
+      if (signerId) {
+        const info = signerInfoById[signerId]
         map[role.id] = {
           kind: "ca_nhan",
-          userId: step.user_id,
+          userId: signerId,
           fullName: info?.fullName || step.ten || "",
           chucVu: info?.chucVu || "",
           hasSignature: info?.hasSignature || false,
+          // Bước nhánh Nội bộ công ty vừa có người đích danh vừa thuộc 1 phòng ban — giữ nhãn
+          // phòng ban làm thông tin phụ vì đó mới là thứ được in dưới chữ ký trên chứng từ.
+          deptLabel: step.phong_ban_name || step.phong_ban_code || undefined,
         }
       } else if (step.type === "phong_ban") {
+        // Văn bản cũ (trước 2026-09-05) — chưa gắn người, người ký thật xác định lúc ký.
         map[role.id] = { kind: "phong_ban", label: step.phong_ban_name || step.phong_ban_code || "" }
       }
     })
@@ -1184,7 +1209,9 @@ export default function SignTemplateEditorPage() {
                         {signer && (
                           <div className="text-[10.5px] text-slate-500 mt-0.5 truncate">
                             {signer.kind === "ca_nhan"
-                              ? `→ ${signer.fullName || "(chưa rõ tên)"}${signer.chucVu ? " · " + signer.chucVu : ""}`
+                              ? `→ ${signer.fullName || "(chưa rõ tên)"}${signer.chucVu ? " · " + signer.chucVu : ""}${
+                                  signer.deptLabel ? " · " + signer.deptLabel : ""
+                                }`
                               : `→ Phòng ${signer.label} (chưa xác định người ký)`}
                           </div>
                         )}
@@ -1387,6 +1414,11 @@ function PreviewContent({
         )}
         {role.showChucVu && chucVuText && (
           <div className="text-[8.5px] italic text-slate-500">{chucVuText}</div>
+        )}
+        {/* Mã phòng ban của bước — thông tin phụ, vì đây mới là thứ thực sự được in dưới chữ ký
+            trên chứng từ (`chucVu = step.phong_ban_code || step.chuc_vu` ở route ký). */}
+        {signer.deptLabel && (
+          <div className="text-[8px] text-slate-400">{signer.deptLabel}</div>
         )}
       </div>
     )

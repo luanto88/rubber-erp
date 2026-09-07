@@ -9,6 +9,7 @@ import {
   LOAI_VAN_BAN_LABEL,
   TRANG_THAI_COLOR,
   TRANG_THAI_LABEL,
+  canSignStep,
   fmtDate,
   type VanBanDocument,
   type ThuTuKyStep,
@@ -53,7 +54,7 @@ export default function MyTasksPage() {
       const { data } = await supabase
         .from("van_ban_documents")
         .select(
-          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, cap_tl, trang_thai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, soan_thao_user_id, phe_duyet_user_id, is_uploaded, ngay_phe_duyet, nguoi_soan_thao_display, created_at, updated_at, tra_ve_step, tra_ve_ly_do, tra_ve_nguoi, tra_ve_at, phe_duyet, ghi_chu, placement_ky, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, phong_ban_ky_display, mo_ta_tim_kiem, so_van_ban, nam"
+          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, soan_thao_user_id, phe_duyet_user_id, is_uploaded, ngay_phe_duyet, nguoi_soan_thao_display, created_at, updated_at, tra_ve_step, tra_ve_ly_do, tra_ve_nguoi, tra_ve_at, phe_duyet, ghi_chu, placement_ky, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, phong_ban_ky_display, mo_ta_tim_kiem, so_van_ban, nam"
         )
         .eq("factory_id", fid)
         .in("trang_thai", ["draft", "cho_ky_phong_ban", "cho_phe_duyet", "tra_ve"])
@@ -82,15 +83,8 @@ export default function MyTasksPage() {
         if (doc.trang_thai === "cho_ky_phong_ban") {
           const stepIndex = doc.buoc_hien_tai
           const step = (doc.thu_tu_ky_json || [])[stepIndex] as ThuTuKyStep | undefined
-          let match = false
-          if (isAdmin) {
-            match = true
-          } else if (step?.type === "phong_ban" && deptCode === step.phong_ban_code) {
-            match = true
-          } else if (step?.type === "ca_nhan" && step.user_id === uid) {
-            match = true
-          }
-          if (match) {
+          // Dùng helper chung — xem `canSignStep` trong documents-types.ts
+          if (canSignStep(step, uid, deptCode, isAdmin)) {
             result.push({
               doc,
               role: "ky_buoc",

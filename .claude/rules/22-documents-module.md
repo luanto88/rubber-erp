@@ -19,6 +19,7 @@ Permissions: `documents.view`, `documents.create`, `documents.edit`, `documents.
 | `20260610_van_ban_search_rpc.sql` | Function `match_van_ban_documents` (pgvector semantic search) | Cần chạy sau khi `extend` đã chạy |
 | `20260611_van_ban_distribution.sql` | Bảng `van_ban_distribution_batches`, `van_ban_distribution_recipients`; RLS; seed permission `documents.distribute` cho admin/manager | **Cần chạy lại** — bản gốc có bug (xem 2026-07-24) khiến chưa từng chạy thành công |
 | `20260621_van_ban_pham_vi.sql` | Thêm `pham_vi TEXT DEFAULT 'Cong_ty'` và `phe_duyet_is_kt BOOLEAN DEFAULT false` vào `van_ban_documents` | Cần chạy |
+| `20260914_van_ban_che_do_xem.sql` | Cột `che_do_xem` + hàm `van_ban_is_participant` + **thay** policy `FOR ALL` cũ bằng 4 policy tách riêng + 2 index. **Chạy TRƯỚC khi deploy code** (migration là no-op: mọi dòng cũ = `cong_khai` ⇒ tương đương policy cũ) | Cần chạy |
 
 **Lỗi đã biết khi chạy `types_sequences`**: `policy "van_ban_sequences_factory_read" already exists` → đã sửa bằng `DROP POLICY IF EXISTS` trước `CREATE POLICY`.
 
@@ -32,7 +33,9 @@ Cột quan trọng (thêm vào schema gốc từ 20260522):
 loai_van_ban TEXT,              -- DN | TTR | BC | KH | BB
 so_van_ban TEXT,                -- "01" — text
 nam INTEGER,
-phan_loai TEXT NOT NULL DEFAULT 'Thuong',  -- 'Thuong' | 'Mat'
+che_do_xem TEXT NOT NULL DEFAULT 'cong_khai',  -- 'cong_khai' | 'gioi_han' (migration 20260914)
+phan_loai TEXT NOT NULL DEFAULT 'Thuong',  -- LEGACY, code KHÔNG đọc/ghi nữa (thay bằng che_do_xem)
+cap_tl TEXT,                               -- LEGACY, code KHÔNG đọc/ghi nữa (so_buoc_tong thay thế)
 thu_tu_ky_json JSONB DEFAULT '[]',
 buoc_hien_tai INTEGER DEFAULT 0,
 so_buoc_tong INTEGER DEFAULT 0,
@@ -67,43 +70,154 @@ phe_duyet_is_kt BOOLEAN DEFAULT false -- true → thêm "KT." trước tên ngư
 
 ---
 
-## Phân loại Thường/Mật
+## Phạm vi hiển thị `che_do_xem` (thay hẳn "Thường / Mật" từ 2026-09-06)
 
-### Cột DB
+Migration `20260914_van_ban_che_do_xem.sql`.
+
+### Vì sao thay
+
+`phan_loai = 'Mat'` **CHƯA TỪNG lọc dữ liệu ở bất kỳ đâu**: RLS cũ (`van_ban_documents_factory`,
+`FOR ALL`) chỉ lọc `factory_id`; danh sách / chi tiết / tìm kiếm không hề xét cột này; "đóng dấu
+MẬT khi in" là chữ trên UI không có code (module đã bỏ trang in từ 2026-09-03). Khác biệt thật duy
+nhất giữa Thường và Mật là **định tuyến thông báo**. Tức thứ người dùng tưởng mình đang có — giới
+hạn ai được xem — thực ra không tồn tại.
+
+### Cột DB & giá trị
+
 ```sql
-phan_loai TEXT NOT NULL DEFAULT 'Thuong'  -- 'Thuong' | 'Mat'
+che_do_xem TEXT NOT NULL DEFAULT 'cong_khai'  -- 'cong_khai' | 'gioi_han'
 ```
 
+| Giá trị | Ai xem được |
+|---|---|
+| `cong_khai` | Mọi người trong nhà máy có quyền `documents.view` |
+| `gioi_han` | Người soạn thảo (`soan_thao_user_id`/`created_by`) + mọi `user_id` trong `thu_tu_ky_json` + `phe_duyet_user_id` + người có dòng trong `van_ban_distribution_recipients` + admin |
+
+`cap_tl` và `phan_loai` giữ lại trong DB làm **LEGACY** (có `COMMENT` đánh dấu), code không đọc/ghi
+nữa. Dữ liệu cũ tự thành `cong_khai` nhờ `NOT NULL DEFAULT` (PG11+ không rewrite bảng, không cần
+backfill).
+
+### Thực thi ở tầng DATABASE, không phải chỉ UI
+
+Hàm `van_ban_is_participant(p_doc_id, p_user_id)` — `SECURITY DEFINER`, **bắt buộc**: policy của
+`van_ban_documents` phải đọc lại chính bảng đó (quét `thu_tu_ky_json`), không bọc hàm sẽ dính
+`infinite recursion detected in policy` (đúng lỗi đã gặp ở `operation_notes`).
+
+3 chi tiết CỐ Ý trong hàm, **đừng "tối ưu" lại**:
+
+- So sánh **dạng TEXT** (`lower(s ->> 'user_id')`), KHÔNG ép `::uuid` — một dòng JSONB rác sẽ throw
+  ngay trong policy và làm **cả bảng** không đọc được, cho mọi người.
+- Guard `jsonb_typeof(thu_tu_ky_json) = 'array'` — cùng lý do trên (`jsonb_array_elements` throw
+  "cannot extract elements from an object"), đồng thời xử lý luôn NULL của văn bản Upload ký tay.
+- Đọc luôn `mat_recipient_user_id` — văn bản "Mật" cũ **tự nâng cấp** thành đích danh, khỏi phải
+  migrate JSONB.
+
+Policy **tách 4** (SELECT / INSERT / UPDATE / DELETE), **KHÔNG** giữ `FOR ALL`: `FOR ALL` sinh
+`WITH CHECK` = `USING` ⇒ văn bản mới đặt `gioi_han` chưa khớp điều kiện sẽ bị từ chối ngay lúc
+INSERT. INSERT giữ nguyên độ lỏng cũ (chỉ `factory_id`); UPDATE dùng `USING` chặt nhưng `WITH CHECK`
+lỏng để người soạn thảo đổi `gioi_han` → `cong_khai` mà không tự khoá mình ra.
+
+⚠️ **Bẫy sống còn**: migration phải `DROP POLICY "van_ban_documents_factory"`. Policy PERMISSIVE
+cộng dồn bằng OR — quên drop thì phần siết chỉ là trang trí **và test vẫn "pass"** vì mọi người vẫn
+xem được.
+
+### `search/route.ts` PHẢI tự lọc — RLS không che được
+
+Route này gọi RPC `match_van_ban_documents` bằng **service role** ⇒ bỏ qua hoàn toàn RLS. Sau khi
+RPC trả kết quả, route đọc `che_do_xem` của các id trả về, rồi gọi chính hàm
+`van_ban_is_participant` (không tự viết lại điều kiện, để 2 nơi không trôi lệch) cho các dòng
+`gioi_han`. Quên bước này = tìm kiếm AI vẫn rò rỉ tên + trích yếu văn bản Giới hạn.
+
+### Phân phối văn bản `gioi_han`
+
+`POST /api/documents/distribute` chặn thêm: chỉ **người soạn thảo / người tạo / người phê duyệt /
+admin** mới phân phối được văn bản `gioi_han`. Quyền `documents.distribute` nói chung **không đủ** —
+nếu không, quyền phân phối trở thành đường vòng vô hiệu hoá toàn bộ cơ chế giới hạn (route chạy
+service role, RLS không chặn giúp).
+
+### GIỚI HẠN phải nói rõ với người dùng
+
+File PDF nằm trong bucket **public** (`getPublicUrl`). RLS che **metadata** (danh sách / chi tiết /
+tìm kiếm), **KHÔNG che file** — ai đang giữ sẵn URL vẫn tải được. Muốn che thật phải chuyển toàn bộ
+sang signed URL (đánh đổi: mất khả năng copy link nhanh). UI đã ghi cảnh báo này ở form soạn thảo,
+form upload và trang chi tiết.
+
+### Phạm vi áp dụng
+
+Chỉ nhánh `pham_vi = "Cong_ty"` có lựa chọn phạm vi hiển thị. Nhánh `"Don_vi"` giữ nguyên hành vi cũ:
+luôn `cong_khai`, UI ẩn hẳn khối chọn.
+
 ### ThuTuKyStep
+
 ```typescript
 type ThuTuKyStep = {
   step: number
-  type: "phong_ban" | "ca_nhan"
+  type: "phong_ban" | "ca_nhan"   // PHẢI GIỮ — xem mục "Bước ký đích danh"
   phong_ban_code?: string
   phong_ban_name?: string
-  user_id?: string           // chỉ ca_nhan
+  user_id?: string           // từ 2026-09-05: MỌI bước đều có (ký đích danh)
   ten?: string
   chuc_vu?: string
-  mat_recipient_user_id?: string  // chỉ khi phan_loai = 'Mat'
+  /** @deprecated khoá của văn bản "Mật" cũ — vẫn ĐỌC như `user_id`, không bao giờ ghi mới */
+  mat_recipient_user_id?: string
 }
 ```
 
-### Luồng thông báo
+### Dropdown người ký theo phòng ban
 
-**Thường** (`phan_loai = 'Thuong'`):
-- `getNextRecipients()` trong `sign/route.ts`: `targetDeptCode = step.phong_ban_code`
-- `notify/route.ts` `resolveDeptLeaderIds(factoryId, deptCode)`: query `profiles` WHERE `role IN ('admin','manager')` AND `department` match (case-insensitive)
-- Gửi đến **tất cả** trưởng/phó phòng ban đó
+- `loadDeptLeaders(factoryId, phong_ban_code)` gọi `GET /api/documents/dept-users?leadership=false`
+  — trả về **tất cả** user active trong phòng ban (không lọc chỉ admin/manager), để Phó GĐ và các
+  chức danh khác cũng xuất hiện.
+- Từ 2026-09-05 dropdown này **luôn hiện** cho mọi bước (trước đây chỉ hiện khi văn bản "Mật").
 
-**Mật** (`phan_loai = 'Mat'`):
-- Mỗi bước `phong_ban` phải chọn `mat_recipient_user_id` đích danh
-- `getNextRecipients()`: `recipientUserIds = [step.mat_recipient_user_id]`
-- Chỉ gửi đến 1 người đó
+---
 
-### Dropdown người nhận Mật
+## Bước ký đích danh (2026-09-05)
 
-- `loadDeptLeaders(factoryId, phong_ban_code)` gọi `GET /api/documents/dept-users?leadership=false` — trả về **tất cả** user active trong phòng ban (không lọc chỉ admin/manager), để Phó GĐ và các chức danh khác cũng xuất hiện.
-- Không dùng `leadership=true` cho dropdown Mật.
+Trước đây bước nhánh Nội bộ công ty chỉ lưu `phong_ban_code` → **bất kỳ ai** thuộc phòng ban đó ký
+được, và màn "Cài đặt vị trí ký" chỉ hiện được nhãn mã phòng ban (không có tên/ảnh chữ ký). Nay mỗi
+bước lưu **cả phòng ban lẫn `user_id` đích danh**.
+
+### PHẢI GIỮ `step.type = "phong_ban"`
+
+Không đổi sang `ca_nhan` dù bước đã có `user_id`:
+
+- `sign/route.ts` chỉ cho phép tiền tố ký thay **KT./TM./TL./TUQ.** khi `type === "phong_ban"` —
+  đổi type sẽ **âm thầm giết tính năng ký thay**.
+- `chucVu` snapshot vào `nguoi_ky` lấy `step.phong_ban_code || step.chuc_vu` ⇒ **mã phòng ban** là
+  thứ được in dưới chữ ký trên chứng từ. Giờ step có cả hai, sẽ có người nghĩ nên ưu tiên chức vụ
+  thật → mã phòng ban biến mất khỏi chứng từ. **Không đổi dòng này.**
+
+### Helper dùng chung (`documents-types.ts`)
+
+| Hàm | Việc |
+|---|---|
+| `stepSignerUserId(step)` | ID người ký đích danh, gộp cả khoá legacy `mat_recipient_user_id`. `null` = bước legacy theo phòng ban |
+| `canSignStep(step, userId, deptCode, isAdmin)` | Có `stepSignerUserId` → so **đúng userId** (người cùng phòng KHÔNG ký được); không có → fallback so `deptCode` |
+| `stepDisplayLabel(step)` | Nhãn hiển thị: `"Tên người · MÃ_PB"`, bước legacy chỉ còn mã phòng ban. **Chỉ để hiển thị** — không dùng cho `chucVu` snapshot |
+
+`canSignStep` là **nguồn sự thật duy nhất phía client**, thay 4 khối matching từng lặp lại ở
+`documents/page.tsx`, `my-tasks/page.tsx`, `documents-shell.tsx` (badge), `module-tasks.ts` (chuông).
+
+⚠️ `sign/route.ts` **mirror y hệt** logic này ở tầng server (không import được vì khác runtime
+boundary) — có comment chéo ở cả hai nơi. Đây là cặp dễ trôi lệch nhất: lệch một chiều = người ký
+không thấy việc trong danh sách nhưng vẫn ký được qua URL (rất khó phát hiện).
+
+### Nhánh legacy BẮT BUỘC giữ
+
+Bước **không có** `user_id` = văn bản tạo trước 2026-09-05. Bỏ nhánh fallback theo phòng ban ⇒ mọi
+văn bản đang luân chuyển dở lúc deploy **kẹt vĩnh viễn, không ai ký được**.
+
+### Thay đổi người dùng cảm nhận rõ nhất
+
+Trưởng phòng **hết nhận thông báo** mọi văn bản đi qua phòng mình — thông báo giờ gửi đích danh
+người được chỉ định. Phải báo trước cho người dùng.
+
+### Chưa làm — đường thoát khi người được chỉ định vắng mặt
+
+Đích danh tuyệt đối nghĩa là người nghỉ phép ⇒ văn bản kẹt, chỉ admin gỡ được. Cần bổ sung nút
+"Đổi người ký bước này" cho người soạn thảo khi văn bản còn ở `cho_ky_phong_ban`, ghi log vào
+`doc_approval_log`.
 
 ---
 
@@ -146,7 +260,7 @@ Cột `pham_vi TEXT DEFAULT 'Cong_ty'` phân biệt 2 luồng vòng ký khác nh
   - **0 kết quả**: chặn lưu (nút Lưu `disabled`), hiện banner đỏ hướng dẫn cụ thể 3 điều cần kiểm tra (Chức vụ trong Nhân sự bảo trì, đã "Liên kết tài khoản", đã được cấp quyền `documents.phe_duyet`).
   - **Đúng 1 kết quả**: tự động gán `form.phe_duyet_user_id`, hiển thị badge "Tự động xác định" (không cho đổi tay).
   - **≥2 kết quả**: hiện `<select>` chỉ trong số các lãnh đạo hợp lệ đó (không phải toàn nhà máy).
-- **`cap_tl` và `phan_loai` bị khóa cứng cho `Don_vi`**: `cap_tl` luôn là `"Cấp 1"` (không còn lựa chọn Cấp 2), `phan_loai` luôn `"Thuong"` — UI ẩn hẳn khối chọn "Phân loại Thường/Mật" khi `pham_vi === "Don_vi"` (chỉ hiện cho `Cong_ty`).
+- **`Don_vi` luôn `che_do_xem = "cong_khai"`** — UI ẩn hẳn khối chọn "Phạm vi hiển thị" khi `pham_vi === "Don_vi"` (chỉ hiện cho `Cong_ty`), giữ đúng hành vi cũ của nhánh này. (`cap_tl`/`phan_loai` đã bỏ khỏi nghiệp vụ, xem 2 mục LEGACY ở trên.)
 - Bước "Ký xác nhận" (chọn người ký theo thứ tự, `type: "ca_nhan"`) giờ là **tùy chọn, có thể để trống** cho `Don_vi` — không còn bắt buộc ≥1 step như trước; validate save chỉ còn bắt buộc với `Cấp 1` + `Cong_ty` (≥1 step phòng ban).
 - Danh sách ứng viên cho bước "Ký xác nhận" (khác với người phê duyệt cuối) vẫn dùng `GET /api/documents/dept-users?...&permission=documents.create,documents.ky_phong_ban,documents.phe_duyet` — `dept-users/route.ts` giờ hỗ trợ **nhiều permission code phân tách bằng dấu phẩy (OR-match)** thay vì chỉ 1 code như trước.
 - `thu_tu_ky_json` lưu mảng step với `type: "ca_nhan"`, `user_id`, `ten`
@@ -237,19 +351,17 @@ Tất cả routes dùng `supabaseAdmin` để bypass RLS khi cần list users.
 
 ## Workflow
 
-### Cấp 1 — Nội bộ công ty (`pham_vi = "Cong_ty"`)
-```
-draft → cho_ky_phong_ban (steps type "phong_ban") → cho_phe_duyet → da_phe_duyet
-                                                 ↘ tra_ve
-```
+`so_buoc_tong` là **nguồn sự thật duy nhất** cho việc có vòng ký hay không (Cấp 1/Cấp 2 đã bỏ
+2026-09-05). Người soạn thảo tự chọn 0..N bước.
 
-### Cấp 1 — Nội bộ đơn vị (`pham_vi = "Don_vi"`)
+### Có bước ký (`so_buoc_tong > 0`)
 ```
-draft → cho_ky_phong_ban (steps type "ca_nhan") → cho_phe_duyet → da_phe_duyet
-                                               ↘ tra_ve
+draft → cho_ky_phong_ban → cho_phe_duyet → da_phe_duyet
+                         ↘ tra_ve
 ```
+Bước là `type: "phong_ban"` với nhánh Nội bộ công ty, `type: "ca_nhan"` với nhánh Nội bộ đơn vị.
 
-### Cấp 2 (gửi thẳng phê duyệt)
+### Không có bước ký (`so_buoc_tong = 0`)
 ```
 draft → cho_phe_duyet → da_phe_duyet
      ↘ tra_ve

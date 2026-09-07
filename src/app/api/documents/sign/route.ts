@@ -160,8 +160,11 @@ type VanBanRow = {
   id: string
   factory_id: string
   trang_thai: string
-  cap_tl: string | null
-  phan_loai: string | null   // 'Thuong' | 'Mat'
+  // `cap_tl` (Cấp 1/Cấp 2) đã bỏ khỏi luồng nghiệp vụ 2026-09-05 — cột vẫn còn trong DB làm
+  // lịch sử nhưng route này không đọc nữa; `so_buoc_tong` quyết định có vòng ký hay không.
+  // `phan_loai` (Thường/Mật) đã bỏ khỏi luồng nghiệp vụ 2026-09-06 — route này không đọc nữa.
+  // Thay bằng `che_do_xem`, và nó KHÔNG ảnh hưởng luồng ký (route chạy service role, bỏ qua RLS);
+  // `che_do_xem` chỉ quyết định ai ĐỌC được văn bản, không quyết định ai được ký.
   thu_tu_ky_json: ThuTuKyStep[]
   buoc_hien_tai: number
   so_buoc_tong: number
@@ -207,7 +210,7 @@ type ProfileRow = {
 type PermissionRow = { permission_code: string }
 
 const DOC_SELECT =
-  "id, factory_id, trang_thai, cap_tl, phan_loai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet, phe_duyet_is_kt, phe_duyet_sign_as, ghi_chu, ghi_chu_phe_duyet, ky_phe_duyet_at"
+  "id, factory_id, trang_thai, thu_tu_ky_json, buoc_hien_tai, so_buoc_tong, nguoi_ky, placement_ky, soan_thao_user_id, phe_duyet_user_id, file_goc_url, file_signed_pdf_url, file_signed_office_url, file_signed_office_type, auto_convert_pdf, ten_van_ban, so_van_ban, ma_van_ban, loai_van_ban, phong_ban, nam, nguoi_soan_thao_display, phe_duyet, phe_duyet_is_kt, phe_duyet_sign_as, ghi_chu, ghi_chu_phe_duyet, ky_phe_duyet_at"
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -826,21 +829,21 @@ async function performFileStamp(
 
 // ── Notify helpers ────────────────────────────────────────────────────────────
 
-// Giải quyết người nhận thông báo cho bước phong_ban theo phân loại Thường/Mật
+/**
+ * Người nhận thông báo cho một bước ký dạng phòng ban.
+ *
+ * Từ 2026-09-05 bước luôn có người ký đích danh ⇒ gửi thẳng cho đúng người đó, thay vì gửi cho
+ * TOÀN BỘ lãnh đạo phòng ban như trước (hành vi cũ của văn bản "Thường"). Hệ quả người dùng cảm
+ * nhận rõ nhất: trưởng phòng không còn nhận thông báo cho mọi văn bản đi qua phòng mình.
+ *
+ * Bước không có người đích danh = văn bản cũ → giữ nguyên gửi theo phòng ban (`targetDeptCode`),
+ * `notify/route.ts` sẽ tự resolve danh sách lãnh đạo.
+ */
 function resolvePhongBanRecipients(
   step: ThuTuKyStep,
-  phanLoai: string | null,
 ): { recipientUserIds: string[]; targetDeptCode: string | null } {
-  if (phanLoai === "Mat") {
-    // Mật: chỉ gửi đến đích danh đã chọn cho bước này
-    const uid = step.mat_recipient_user_id
-    return {
-      recipientUserIds: uid ? [uid] : [],
-      targetDeptCode: null,
-    }
-  }
-  // Thường (mặc định): gửi đến toàn bộ trưởng/phó phòng ban
-  // notify route sẽ resolve danh sách từ targetDeptCode
+  const signerId = step.user_id || step.mat_recipient_user_id || null
+  if (signerId) return { recipientUserIds: [signerId], targetDeptCode: null }
   return { recipientUserIds: [], targetDeptCode: step.phong_ban_code ?? null }
 }
 
@@ -850,14 +853,18 @@ function getNextRecipients(
   newBuoc: number,
 ): { recipientUserIds: string[]; targetDeptCode: string | null } {
   if (action === "gui_ky") {
-    const isCap1WithSteps = d.cap_tl === "Cấp 1" && d.so_buoc_tong > 0
-    if (isCap1WithSteps) {
+    // Từ 2026-09-05 bỏ khái niệm Cấp 1/Cấp 2: số bước ký do người soạn thảo tự chọn, nên
+    // `so_buoc_tong` là nguồn sự thật duy nhất — 0 bước ⇒ gửi thẳng người phê duyệt (hành xử
+    // y hệt "Cấp 2" cũ). Phải khớp tuyệt đối với điều kiện tính `nextStatus` bên dưới, nếu
+    // lệch thì thông báo gửi cho người này nhưng trạng thái lại chờ người khác.
+    const hasSteps = d.so_buoc_tong > 0
+    if (hasSteps) {
       const firstStep = (d.thu_tu_ky_json || [])[0]
       if (!firstStep) return { recipientUserIds: [], targetDeptCode: null }
       if (firstStep.type === "ca_nhan" && firstStep.user_id) {
         return { recipientUserIds: [firstStep.user_id], targetDeptCode: null }
       }
-      return resolvePhongBanRecipients(firstStep, d.phan_loai)
+      return resolvePhongBanRecipients(firstStep)
     }
     return {
       recipientUserIds: d.phe_duyet_user_id ? [d.phe_duyet_user_id] : [],
@@ -878,7 +885,7 @@ function getNextRecipients(
     if (nextStep.type === "ca_nhan" && nextStep.user_id) {
       return { recipientUserIds: [nextStep.user_id], targetDeptCode: null }
     }
-    return resolvePhongBanRecipients(nextStep, d.phan_loai)
+    return resolvePhongBanRecipients(nextStep)
   }
 
   if (action === "phe_duyet" || action === "tra_ve") {
@@ -984,9 +991,10 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      const hasSteps = d.so_buoc_tong > 0
-      const isCap1 = d.cap_tl === "Cấp 1"
-      const nextStatus = isCap1 && hasSteps ? "cho_ky_phong_ban" : "cho_phe_duyet"
+      // Điểm quyết định trạng thái DUY NHẤT của luồng gửi ký. Bỏ `cap_tl` (2026-09-05):
+      // có bước ký ⇒ vào vòng ký, không có ⇒ lên thẳng phê duyệt. Giữ đồng bộ với
+      // `getNextRecipients` (cùng dùng `so_buoc_tong > 0`).
+      const nextStatus = d.so_buoc_tong > 0 ? "cho_ky_phong_ban" : "cho_phe_duyet"
 
       // Chốt (snapshot) mẫu vị trí ký của loại văn bản này vào placement_ky ngay tại đây — mọi
       // lượt "Gửi ký" của văn bản nguồn PDF đều vừa đi qua màn /dashboard/ky/mau-vi-tri nên mẫu
@@ -1065,19 +1073,36 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Không tìm thấy bước ký hiện tại" }, { status: 400 })
       }
 
-      if (step.type === "ca_nhan") {
-        if (!isAdmin && step.user_id !== userId) {
+      // Kiểm quyền ký — MIRROR y hệt `canSignStep` ở
+      // `src/app/dashboard/documents/_components/documents-types.ts` (không import được vì khác
+      // runtime boundary). Sửa một bên thì PHẢI sửa bên kia, nếu không sẽ thành: người ký không
+      // thấy việc trong danh sách nhưng vẫn ký được qua URL, hoặc ngược lại.
+      //
+      // Từ 2026-09-05 bước nhánh Nội bộ công ty luôn có `user_id` ⇒ chỉ ĐÚNG người đó ký được
+      // (người cùng phòng ban cũng không). Bước KHÔNG có `user_id` là văn bản tạo trước mốc này
+      // → giữ nguyên kiểm theo phòng ban, nếu bỏ nhánh này thì mọi văn bản đang luân chuyển dở
+      // sẽ KẸT VĨNH VIỄN vì không ai ký được.
+      const signerId = step.user_id || step.mat_recipient_user_id || null
+      if (!isAdmin) {
+        if (signerId) {
+          if (signerId !== userId) {
+            return NextResponse.json(
+              { error: "Bước này đã chỉ định người ký cụ thể — bạn không được phép ký." },
+              { status: 403 },
+            )
+          }
+        } else if (step.type === "phong_ban") {
+          const deptCode = await getUserDeptCode(profile)
+          if (deptCode !== step.phong_ban_code) {
+            return NextResponse.json(
+              {
+                error: `Bước này yêu cầu phòng ban ${step.phong_ban_code}. Phòng ban của bạn: ${deptCode || "(chưa thiết lập)"}`,
+              },
+              { status: 403 },
+            )
+          }
+        } else {
           return NextResponse.json({ error: "Bạn không được phép ký bước này" }, { status: 403 })
-        }
-      } else if (step.type === "phong_ban") {
-        const deptCode = await getUserDeptCode(profile)
-        if (!isAdmin && deptCode !== step.phong_ban_code) {
-          return NextResponse.json(
-            {
-              error: `Bước này yêu cầu phòng ban ${step.phong_ban_code}. Phòng ban của bạn: ${deptCode || "(chưa thiết lập)"}`,
-            },
-            { status: 403 },
-          )
         }
       }
 

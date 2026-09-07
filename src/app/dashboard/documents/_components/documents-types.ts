@@ -33,14 +33,74 @@ export const SIGN_AS_LABEL: Record<Exclude<SignAsType, "none">, string> = {
 
 export type ThuTuKyStep = {
   step: number
+  /**
+   * Bộ phân biệt cách kiểm quyền ký, KHÔNG được bỏ dù bước nào giờ cũng có `user_id`:
+   * - `sign/route.ts` chỉ cho phép tiền tố ký thay KT./TM./TL./TUQ. khi `type === "phong_ban"`;
+   * - `chucVu` snapshot vào `nguoi_ky` lấy `phong_ban_code` trước `chuc_vu`, tức mã phòng ban là
+   *   thứ được in dưới chữ ký trên chứng từ.
+   */
   type: "phong_ban" | "ca_nhan"
   phong_ban_code?: string
   phong_ban_name?: string
+  /**
+   * TỪ 2026-09-05: bước "phong_ban" của nhánh Nội bộ công ty LUÔN có `user_id` (ký đích danh).
+   * Bước không có `user_id` là văn bản tạo TRƯỚC mốc này → rơi về kiểm quyền theo phòng ban.
+   */
   user_id?: string
   ten?: string
   chuc_vu?: string
-  // Dùng khi phan_loai = 'Mat': đích danh 1 người nhận thông báo cho bước này
+  /** @deprecated Văn bản "Mật" cũ. Vẫn ĐỌC như `user_id`, nhưng không bao giờ ghi mới. */
   mat_recipient_user_id?: string
+}
+
+/**
+ * ID người ký đích danh của một bước, gộp cả khoá legacy `mat_recipient_user_id`.
+ * `null` = bước cũ chỉ định theo phòng ban, chưa gắn người cụ thể.
+ */
+export function stepSignerUserId(step?: ThuTuKyStep | null): string | null {
+  if (!step) return null
+  return step.user_id || step.mat_recipient_user_id || null
+}
+
+/**
+ * Người này có được ký bước này không — NGUỒN SỰ THẬT DUY NHẤT phía client, dùng chung cho danh
+ * sách, "Việc của tôi", badge sidebar và chuông thông báo (trước đây 4 nơi tự lặp logic, rất dễ
+ * trôi lệch nhau).
+ *
+ * ⚠️ `src/app/api/documents/sign/route.ts` MIRROR y hệt logic này ở tầng server (không import
+ * được vì khác runtime boundary). Sửa ở đây thì phải sửa cả bên đó, nếu không sẽ thành: người ký
+ * không thấy việc trong danh sách nhưng vẫn ký được qua URL, hoặc ngược lại.
+ */
+export function canSignStep(
+  step: ThuTuKyStep | undefined | null,
+  userId: string | null | undefined,
+  deptCode: string | null | undefined,
+  isAdmin: boolean,
+): boolean {
+  if (isAdmin) return true
+  if (!step || !userId) return false
+  const signerId = stepSignerUserId(step)
+  // Đã đích danh → CHỈ đúng người đó, bỏ qua phòng ban (kể cả người cùng phòng cũng không ký được)
+  if (signerId) return signerId === userId
+  // Legacy: bước cũ chưa gắn người → giữ nguyên kiểm theo phòng ban để văn bản đang luân chuyển
+  // dở lúc deploy không bị kẹt vĩnh viễn.
+  if (step.type === "phong_ban") return !!deptCode && step.phong_ban_code === deptCode
+  return false
+}
+
+/**
+ * Nhãn hiển thị của một bước ký: ưu tiên TÊN NGƯỜI ký đích danh, mã phòng ban làm nhãn phụ
+ * ("Nguyễn Văn A · NMCB"). Bước legacy (chưa gắn người) chỉ còn lại mã phòng ban như trước.
+ *
+ * ⚠️ KHÔNG dùng cho `chucVu` snapshot vào `nguoi_ky` lúc ký (`sign/route.ts`) — chỗ đó CỐ Ý ưu
+ * tiên `phong_ban_code`, vì đó là thứ được in dưới chữ ký trên chứng từ.
+ */
+export function stepDisplayLabel(step?: ThuTuKyStep | null): string {
+  if (!step) return ""
+  const ten = (step.ten || "").trim()
+  const pb = (step.phong_ban_code || "").trim()
+  if (ten && pb) return `${ten} · ${pb}`
+  return ten || pb || ""
 }
 
 export type VanBanDocument = {
@@ -48,12 +108,25 @@ export type VanBanDocument = {
   factory_id: string
   ma_van_ban: string | null
   ten_van_ban: string
-  cap_tl: string | null
+  /**
+   * @deprecated LEGACY — Cấp 1/Cấp 2 đã bỏ khỏi nghiệp vụ 2026-09-05. Cột vẫn còn trong DB để
+   * tra cứu lịch sử nhưng KHÔNG code nào được đọc/ghi nữa: số bước ký do người soạn thảo tự
+   * chọn, `so_buoc_tong > 0` quyết định có vòng ký hay không.
+   */
+  cap_tl?: string | null
   phong_ban: string | null
   loai_van_ban: string | null
   so_van_ban: string | null
   nam: number | null
-  phan_loai: string       // 'Thuong' | 'Mat'
+  /**
+   * @deprecated LEGACY — "Thường/Mật" đã bị thay bằng `che_do_xem` từ 2026-09-06. Cột vẫn còn
+   * trong DB để tra cứu lịch sử. Lý do thay: `Mat` CHƯA TỪNG lọc dữ liệu ở bất kỳ đâu (RLS cũ chỉ
+   * lọc `factory_id`), nó chỉ đổi cách định tuyến thông báo — tức thứ người dùng tưởng mình đang
+   * có ("giới hạn ai được xem") thực ra không tồn tại.
+   */
+  phan_loai?: string
+  /** 'cong_khai' | 'gioi_han' — phạm vi hiển thị THẬT, được thực thi bằng RLS ở tầng database. */
+  che_do_xem: string
   trang_thai: VanBanTrangThai
   thu_tu_ky_json: ThuTuKyStep[]
   buoc_hien_tai: number
@@ -85,17 +158,31 @@ export type VanBanDocument = {
   updated_at: string
 }
 
-export const PHAN_LOAI_OPTIONS = ["Thuong", "Mat"] as const
-export type PhanLoaiCode = (typeof PHAN_LOAI_OPTIONS)[number]
+// ── Phạm vi hiển thị (thay hẳn "Thường / Mật" từ 2026-09-06) ─────────────────
+// Khác biệt cốt lõi so với Thường/Mật: `gioi_han` được THỰC THI bằng RLS ở tầng
+// database (policy `van_ban_documents_select` + hàm `van_ban_is_participant`), không
+// chỉ ẩn nút trên giao diện.
+//
+// ⚠️ GIỚI HẠN PHẢI NÓI RÕ VỚI NGƯỜI DÙNG: file PDF nằm trong bucket public
+// (`getPublicUrl`). RLS che METADATA (danh sách / chi tiết / tìm kiếm), KHÔNG che
+// file — ai đang giữ sẵn URL vẫn tải được. Muốn che thật phải chuyển sang signed URL.
+export const CHE_DO_XEM_OPTIONS = ["cong_khai", "gioi_han"] as const
+export type CheDoXemCode = (typeof CHE_DO_XEM_OPTIONS)[number]
 
-export const PHAN_LOAI_LABEL: Record<string, string> = {
-  Thuong: "Thường",
-  Mat: "Mật",
+export const CHE_DO_XEM_LABEL: Record<string, string> = {
+  cong_khai: "Công khai",
+  gioi_han: "Giới hạn",
 }
 
-export const PHAN_LOAI_COLOR: Record<string, string> = {
-  Thuong: "bg-slate-100 text-slate-600",
-  Mat: "bg-red-100 text-red-700 border border-red-200",
+export const CHE_DO_XEM_COLOR: Record<string, string> = {
+  cong_khai: "bg-slate-100 text-slate-600",
+  gioi_han: "bg-amber-100 text-amber-800 border border-amber-300",
+}
+
+export const CHE_DO_XEM_DESC: Record<string, string> = {
+  cong_khai: "Mọi người trong nhà máy có quyền xem Văn bản đều đọc được.",
+  gioi_han:
+    "Chỉ người soạn thảo, người ký ở từng bước, người phê duyệt, người được Phân phối và quản trị viên.",
 }
 
 export const LOAI_VAN_BAN_OPTIONS = ["DN", "TTR", "BC", "KH", "BB"] as const

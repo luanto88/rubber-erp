@@ -6378,3 +6378,232 @@ Người dùng đã chạy migration `20260905_doc_approval_log_pades_index.sql`
 5. **Deploy**: toàn bộ thay đổi phiên này chưa commit/push. Nhớ kiểm tra
    `SIGN_PADES_ROOT_CA_CERT_PEM`/`SIGN_PADES_ROOT_CA_KEY_PEM` đã có trên Vercel (đã cấu hình từ
    2026-09-01) — thiếu thì `pades_error` sẽ ghi rõ và không chữ ký số nào được nhúng trên production.
+
+## Kế hoạch phiên sau (2026-09-05) — Văn bản nội bộ: bỏ Cấp 1/2 + Thường/Mật, chuyển sang ký đích danh & phạm vi hiển thị
+
+**CHƯA CODE GÌ.** Phiên này chỉ khảo sát + lập kế hoạch (người dùng đã duyệt). Kế hoạch đầy đủ:
+`C:\Users\Software\.claude\plans\deploy-test-th-t-keen-brook.md` — **đọc file đó trước khi code**,
+mục dưới đây chỉ là bản tóm tắt để không phải khảo sát lại.
+
+### Vấn đề & 3 quan sát then chốt (đã xác minh bằng đọc code, không cần điều tra lại)
+
+1. **`phan_loai = "Mat"` chưa từng lọc dữ liệu ở bất kỳ đâu.** RLS `van_ban_documents` chỉ có 1
+   policy `FOR ALL` lọc `factory_id` (`20260522_iso_vanban_module.sql:134-141`); danh sách/chi tiết/
+   tìm kiếm không xét `phan_loai`. "Đóng dấu MẬT khi in" (`new/upload/page.tsx:690`) là chữ trên UI,
+   không có code (module đã bỏ trang in 2026-09-03). Khác biệt THẬT duy nhất: Mật gửi notify cho 1
+   người đích danh, Thường gửi cả phòng ban (`sign/route.ts:830-845`).
+2. **Màn cài đặt vị trí chỉ hiện tên người Phê duyệt** vì nhánh `Cong_ty` sinh bước
+   `{type:"phong_ban", phong_ban_code}` **không có `user_id`** (`new/page.tsx:432-454`) →
+   `docSignerByRoleId` (`ky/mau-vi-tri/page.tsx:627-629`) chỉ gán được nhãn mã phòng ban. Thứ tự slot
+   KHÔNG phải nguyên nhân (đã kiểm `roleCloneIndex`/`reconcileForDoc` map đúng 1-1).
+3. **`cap_tl` chỉ chi phối 2 dòng**: `sign/route.ts:988-989` (quyết định trạng thái) và `:853`
+   (chọn người nhận notify). 3 transition còn lại không đọc nó.
+
+⇒ **Ba yêu cầu hội tụ thành MỘT thay đổi**: cho bước ký nhánh Công ty mang **cả phòng ban lẫn người
+đích danh**. Khi đó màn cài đặt vị trí tự hiện đúng tên + ảnh chữ ký, Cấp 1/2 thành thừa.
+
+### 7 quyết định đã chốt với người dùng (không được đổi)
+
+1. Bước ký nhánh Công ty **2 tầng**: chọn phòng ban (vẫn lưu để in lên chứng từ) → chọn đích danh 1 người.
+2. **Bỏ Cấp 1/Cấp 2**; `so_buoc_tong` là nguồn sự thật duy nhất (0 bước ⇒ lên thẳng phê duyệt).
+3. **Bỏ Thường/Mật**, thay bằng `che_do_xem`: **`cong_khai`** | **`gioi_han`**.
+4. "Giới hạn" = người soạn thảo + mọi người trong các bước ký + người phê duyệt + admin + **người đã
+   được Phân phối**.
+5. Thực thi ở **cả RLS lẫn UI**; vá luôn lỗ hổng trang chi tiết thiếu guard `documents.view`.
+6. Dữ liệu cũ **tất cả thành Công khai**; giữ cột `cap_tl`/`phan_loai` làm lịch sử, code ngừng đọc/ghi.
+7. Chỉ đụng nhánh `pham_vi = "Cong_ty"`; nhánh `"Don_vi"` giữ nguyên.
+
+### 3 điều KHÔNG được làm sai (đã verify tại chỗ)
+
+- **PHẢI GIỮ `step.type`** — `sign/route.ts:1091` chỉ cho phép tiền tố ký thay KT./TM./TL./TUQ. khi
+  `type === "phong_ban"`. Đổi sang `ca_nhan` sẽ âm thầm giết tính năng ký thay. `chucVu =
+  step.phong_ban_code || step.chuc_vu` (dòng 1084) là thứ in mã phòng ban dưới chữ ký — cũng không
+  được "sửa cho đúng chức vụ thật".
+- **`ThuTuKyStep` đã có sẵn `user_id`/`ten`/`chuc_vu`** (`documents-types.ts:34-45`) → không cần đổi
+  type, chỉ cần nhánh `Cong_ty` bắt đầu ghi `user_id`.
+- **UI chọn người theo phòng ban ĐÃ TỒN TẠI**: `deptLeaders` (`new/page.tsx:80`), `loadDeptLeaders`
+  (`:150-161`), dropdown (`:1127`) — chỉ cần gỡ điều kiện `isMat &&`, không phải xây mới.
+
+### 2 phát hiện bổ sung ảnh hưởng phạm vi
+
+- **`search/route.ts:45` dùng `supabaseAdmin`** → bypass RLS. Chỉ vá RLS thì tìm kiếm AI vẫn rò rỉ
+  văn bản Giới hạn → **bắt buộc vá cùng lúc**.
+- **`sign/route.ts` dùng service role ở mọi thao tác** → RLS mới **không thể làm gãy luồng ký**. Đây
+  là phao cứu sinh cho phép tách PR RLS ra riêng, rủi ro thấp.
+
+### Lộ trình 5 PR (chi tiết trong plan file)
+
+`PR 0` vá an ninh + seed 9 mã `documents.*` (`src/lib/auth.ts:429-497` hiện **thiếu hoàn toàn** nhóm
+này) → `PR 1` bỏ `cap_tl` (chỉ code) → `PR 2` bước ký đích danh (**rủi ro cao nhất**, chạm route ký)
+→ `PR 3` `che_do_xem` + RLS (migration TRƯỚC, code SAU) → `PR 4` dọn `phan_loai` + tài liệu.
+
+### Giới hạn phải nói rõ với người dùng
+
+File PDF nằm trong bucket public (`getPublicUrl`). RLS che metadata, **không che file** — ai có URL
+vẫn tải được. "Giới hạn" ở phiên bản này = giới hạn ở danh sách/chi tiết/tìm kiếm. Muốn che thật phải
+làm signed URL (đã ghi ở mục "Để sau" trong plan file).
+
+### Tiến độ: PR 0 ĐÃ XONG (2026-09-05), chưa test tay
+
+**Rà soát DB thật trước khi code** (script tạm, đã xoá) cho 3 kết quả làm nhẹ phạm vi:
+
+- `permissions` + `role_permissions` **đã có sẵn đủ 9 mã `documents.*`** (migration 20260522 seed
+  rồi) → **không cần migration seed quyền** như plan dự kiến. Chỉ thiếu ở fallback code-side.
+- **Dữ liệu bẩn cho PR 1: SẠCH** — `SELECT ... WHERE cap_tl='Cấp 2' AND so_buoc_tong>0` trả 0 dòng
+  → PR 1 không phải dọn dữ liệu.
+- Toàn nhà máy chỉ có **1 văn bản `phan_loai='Mat'`** trên tổng 51.
+
+**Phát hiện rủi ro thật (plan đã cảnh báo, và nó có thật)**: 16/31 user active không có
+`documents.view` hiệu lực, trong đó **2 người ĐANG THỰC SỰ DÙNG module** — Vương Nguyễn Phương Lâm
+(role `user`, tham gia **38 văn bản**) và Đỗ Hữu Việt (role `manager`, 1 văn bản). Nguyên nhân:
+`fetchPermissionCodesForUser` (`auth.ts:230-255`) — **user có bất kỳ dòng `user_permissions` nào thì
+CHỈ dùng tập đó**, bỏ qua hoàn toàn `role_permissions`. Cả 2 đều có `user_permissions` tường minh
+nhưng thiếu `documents.view`. Người dùng đã đồng ý cho cấp; đã INSERT 2 dòng
+`user_permissions(documents.view, granted=true)` và **đọc lại từ DB xác minh** `granted=true`, sau đó
+verify lại toàn cục: 8/8 người đang dùng module đều qua guard.
+
+**Đã sửa:**
+
+| File | Việc |
+|---|---|
+| `api/documents/search/route.ts` | Thêm `requireAuthUser` + **không tin `factoryId` client gửi** (đối chiếu `profiles.factory_id`). Trước đó route chạy service role, không xác thực gì → ai cũng tra được nội dung văn bản mọi nhà máy chỉ bằng đoán `factoryId` |
+| `dashboard/documents/page.tsx` | `handleAiSearch` gửi `Authorization: Bearer` (client trước đó **không gửi token** — sửa server mà quên client là hỏng ngay tìm kiếm AI, đúng bug đã từng gặp ở `fetchGrantCandidates`) |
+| `documents/[id]/page.tsx` | Guard `hasPermission(user,"documents.view")` trong bootstrap (Pattern A rule 12) + đổi thông điệp khi `!doc` thành "Không tìm thấy, hoặc bạn không có quyền xem" (chuẩn bị cho RLS ở PR 3) |
+| `src/lib/auth.ts` | Bổ sung 9 mã `documents.*` vào `DEFAULT_PERMISSION_CODES`; `ROLE_DEFAULTS.manager` +8 mã (trừ `delete`), `ROLE_DEFAULTS.user` +`documents.view` — **mirror đúng `role_permissions` thật trên DB** |
+
+⚠️ Ghi nhận thêm (ngoài phạm vi, chưa làm): `DEFAULT_PERMISSION_CODES` còn thiếu hoàn toàn các nhóm
+`maintenance.*`, `warehouse.*`, `output.*`, `process.*` — cùng loại thiếu sót, cần rà riêng.
+
+`npx tsc --noEmit` + `npx eslint` sạch (4 warning `<img>` pre-existing). **Chưa test tay.**
+
+### Tiến độ: PR 1 + PR 2 ĐÃ XONG (2026-09-05), chưa test tay
+
+**PR 1 — bỏ Cấp 1/Cấp 2.** Rà DB trước: `cap_tl='Cấp 2' AND so_buoc_tong>0` = **0 dòng** nên không
+phải dọn dữ liệu. Đã sửa:
+- `sign/route.ts`: `getNextRecipients` và điểm quyết định trạng thái đều đổi sang `so_buoc_tong > 0`
+  (2 chỗ phải luôn khớp nhau, nếu lệch thì báo cho người này mà trạng thái chờ người khác); bỏ
+  `cap_tl` khỏi `VanBanRow` + `DOC_SELECT`.
+- Gỡ UI ở `new/page.tsx` (state, validate "Cấp 1 cần ≥1 bước", payload, ô "Cấp văn bản", 3 nhánh
+  render), `new/upload/page.tsx`, `documents/page.tsx` (EditDocModal), `[id]/page.tsx` (InfoRow),
+  `my-tasks/page.tsx` (dead select). `documents-types.ts` giữ `cap_tl?` đánh dấu `@deprecated`.
+- 0 bước giờ là lựa chọn hợp lệ, UI ghi rõ "gửi thẳng lên người phê duyệt".
+
+**PR 2 — bước ký đích danh (2 tầng: phòng ban → người).**
+- **Helper dùng chung mới** `stepSignerUserId` + `canSignStep` trong `documents-types.ts`. Đã thay
+  **5 nơi** trước đây tự lặp logic matching: `documents/page.tsx` (`isMyTurnToAct`),
+  `my-tasks/page.tsx`, `documents-shell.tsx` (badge), `module-tasks.ts` (chuông), `[id]/page.tsx`
+  (`canKyBuoc`). ⚠️ `sign/route.ts` **mirror y hệt** logic này ở tầng server (không import được vì
+  khác runtime boundary) — có comment chéo ở cả 2 nơi, đây là cặp dễ trôi lệch nhất.
+- **GIỮ `step.type = "phong_ban"`** dù bước đã có `user_id` — vì `sign/route.ts` chỉ cho phép tiền
+  tố ký thay KT./TM./TL./TUQ. khi type này, và `chucVu = step.phong_ban_code || step.chuc_vu` là
+  thứ in mã phòng ban dưới chữ ký. Đổi sang `ca_nhan` sẽ âm thầm giết 2 tính năng đó.
+- **Tương thích ngược**: bước KHÔNG có `user_id` = văn bản tạo trước mốc này → giữ nguyên kiểm theo
+  phòng ban. Bỏ nhánh này thì mọi văn bản đang luân chuyển dở sẽ **kẹt vĩnh viễn**.
+- Văn bản "Mật" cũ **tự nâng cấp**: `mat_recipient_user_id` được đọc như `user_id` ở mọi nơi, không
+  cần migrate JSONB.
+- Form soạn thảo + EditDocModal: dropdown "Người ký" **luôn hiện và bắt buộc** (trước chỉ hiện khi
+  Mật); `loadDeptLeaders` bỏ điều kiện `isMat &&`; payload ghi `user_id` + `ten`.
+- **Bug đã phòng trước**: EditDocModal mở văn bản cũ thì `deptLeaders` rỗng → `<select>` có
+  `value={s.user_id}` nhưng không option nào khớp, hiển thị trống dù dữ liệu vẫn đúng (đúng loại bug
+  đã ghi ở module Dự đoán số lô). Đã thêm effect nạp sẵn danh sách người cho mọi phòng ban có trong
+  văn bản ngay khi mở modal.
+- **Notify đổi hành vi**: `resolvePhongBanRecipients` bỏ tham số `phanLoai`, gửi đích danh khi bước
+  có người. Hệ quả người dùng cảm nhận rõ nhất: **trưởng phòng không còn nhận thông báo mọi văn bản
+  đi qua phòng mình** — cần báo trước.
+- **`ky/mau-vi-tri/page.tsx` (vấn đề gốc người dùng báo)**: `userIds` giờ gom người của **MỌI** bước
+  (không chỉ `ca_nhan`); `docSignerByRoleId` ưu tiên người đích danh → hiện đúng tên + chức vụ + ảnh
+  chữ ký thật, kèm mã phòng ban làm nhãn phụ. Bước cũ không có người vẫn hiện nhãn phòng ban như trước.
+
+**Đã kiểm chứng**: `npx tsc --noEmit` + `npx eslint` sạch (4 warning `<img>` pre-existing) và **15/15
+assertion** cho `canSignStep` — gồm 2 kịch bản then chốt: *người CÙNG PHÒNG với người được chỉ định
+không ký được* (chứng minh đã chuyển sang đích danh) và *văn bản cũ chỉ có phòng ban vẫn ký được*
+(chứng minh không kẹt). **Chưa test tay.**
+
+**Còn lại: PR 3** (`che_do_xem` Công khai/Giới hạn + RLS + vá `search/route.ts` lọc theo phạm vi) và
+**PR 4** (dọn `phan_loai`). PR 3 cần chạy migration TRƯỚC khi deploy code.
+
+### Tiến độ: PR 3 + mục "timeline" + PR 4 ĐÃ XONG (2026-09-06), chưa chạy migration, chưa test tay
+
+Toàn bộ lộ trình 5 PR của module Văn bản nay đã code xong. `npx tsc --noEmit` sạch; `npx eslint`
+trên cả `src/app/dashboard/documents` và `src/app/api/documents` — **0 lỗi**, chỉ 4 warning `<img>`
+pre-existing.
+
+**PR 3 — `che_do_xem` (Công khai / Giới hạn) + RLS.**
+
+Migration mới **`supabase/migrations/20260914_van_ban_che_do_xem.sql`** — ⚠️ **CHƯA CHẠY**. Đặt số
+`20260914` (không phải `20260906` như plan) để nằm sau `20260913` đang là migration cuối cùng trong
+thư mục, giữ đúng thứ tự đọc. Nội dung: cột `che_do_xem` + CHECK + 3 `COMMENT` đánh dấu LEGACY; hàm
+`van_ban_is_participant` (SECURITY DEFINER); **DROP `van_ban_documents_factory`** rồi tạo 4 policy
+tách riêng; 2 index. Có sẵn khối rollback + 3 câu kiểm chứng ở cuối file.
+
+**Chạy migration TRƯỚC, deploy code SAU** — migration là no-op về hành vi (mọi dòng cũ đều
+`cong_khai` ⇒ nhánh chặn ngắn `che_do_xem <> 'gioi_han'` luôn true ⇒ tương đương policy cũ), code cũ
+không đọc cột mới nên khoảng giữa 2 bước an toàn.
+
+Đã kiểm chứng bằng script trước khi viết migration (không đoán): `van_ban_distribution_recipients`
+và `van_ban_distribution_batches` **đều tồn tại thật** trong DB (0 và 1 dòng) ⇒ hàm SECURITY DEFINER
+tham chiếu tới chúng sẽ tạo được (nếu bảng không tồn tại, `CREATE FUNCTION` lỗi và rollback CẢ
+migration). `che_do_xem` chưa có; có đúng **1** văn bản `phan_loai='Mat'` — theo quyết định đã chốt
+nó thành `cong_khai` như mọi dòng khác, **không** tự động chuyển thành `gioi_han`. Nếu muốn giữ tính
+mật cho đúng văn bản đó, phải tự đổi tay sau khi chạy migration.
+
+Siết thêm 2 điểm so với plan gốc:
+- Thêm guard **`jsonb_typeof(thu_tu_ky_json) = 'array'`** trước `jsonb_array_elements`. Không có
+  guard này, một dòng JSONB không phải mảng sẽ throw *bên trong policy* ⇒ hỏng **cả bảng** cho mọi
+  người, không chỉ dòng đó. (Cùng họ với lý do plan cấm ép `::uuid`.)
+- `COMMENT ON COLUMN` viết 1 dòng thay vì nối 2 literal qua xuống dòng — tránh phụ thuộc quy tắc
+  nối chuỗi ngầm của Postgres.
+
+Code: `CHE_DO_XEM_OPTIONS/LABEL/COLOR/DESC` trong `documents-types.ts`; UI chọn phạm vi ở
+`new/page.tsx` + `new/upload/page.tsx` (icon `Globe`/`Lock` thay `Shield`/`Lock`) và **thêm mới** ở
+EditDocModal (`documents/page.tsx`) để đổi được sau khi tạo — đây là đường thoát khi đặt nhầm
+"Giới hạn"; badge "Giới hạn" ở danh sách + trang chi tiết; khối **"Ai xem được văn bản này"** ở
+trang chi tiết liệt kê tên cụ thể; `che_do_xem` đã thêm vào câu `.select()` tường minh của danh
+sách (thiếu là badge không bao giờ hiện).
+
+`api/documents/search/route.ts`: sau khi RPC trả kết quả, đọc `che_do_xem` của các id rồi gọi **chính
+hàm `van_ban_is_participant`** (không tự viết lại điều kiện) cho các dòng `gioi_han`; admin bỏ qua
+bước lọc. `api/documents/distribute/route.ts`: chặn phân phối văn bản `gioi_han` bởi người không
+phải soạn thảo / người tạo / phê duyệt / admin — quyền `documents.distribute` nói chung **không đủ**,
+nếu không nó thành đường vòng vô hiệu hoá cả cơ chế giới hạn.
+
+Đã kiểm tra bẫy #7 của plan (realtime rò rỉ): `documents-shell.tsx` subscribe `postgres_changes`
+nhưng callback **bỏ qua hoàn toàn payload**, chỉ gọi `loadPendingTasks()` (query qua RLS) ⇒ không rò
+rỉ nội dung, cùng lắm là người ngoài cuộc bị trigger 1 lần reload vô hại. Không cần sửa gì.
+
+**Mục "timeline hiện mã phòng ban thay vì tên người"** — thêm helper `stepDisplayLabel(step)` vào
+`documents-types.ts` (`"Tên người · MÃ_PB"`, bước legacy chỉ còn mã phòng ban), dùng ở đúng 2 chỗ
+trong `[id]/page.tsx` (`stepLabels` và prop `label` của `TimelineStep`). Đã grep xác nhận không còn
+nơi nào khác render nhãn bước ký kiểu cũ. **Không đụng** `chucVu = step.phong_ban_code ||
+step.chuc_vu` ở route ký — đó là thứ in dưới chữ ký trên chứng từ.
+
+**PR 4 — dọn `phan_loai`**: bỏ khỏi type `VanBanRow` và `DOC_SELECT` của `sign/route.ts`, xoá hằng
+`PHAN_LOAI_LABEL` (đã thành dead code). Cột DB `phan_loai`/`cap_tl` **giữ nguyên**, chỉ đánh dấu
+LEGACY bằng `COMMENT` trong migration. Đã cập nhật `.claude/rules/22-documents-module.md`: thay mục
+"Phân loại Thường/Mật" bằng mục `che_do_xem` đầy đủ (kèm cảnh báo file PDF vẫn public), thêm mục
+"Bước ký đích danh" (PR 2 trước đây chưa được ghi vào rule), sửa bảng migration + bảng cột + mục
+Workflow (bỏ Cấp 1/Cấp 2, dùng `so_buoc_tong`).
+
+### Việc cần làm cho session sau
+
+1. **Chạy `supabase/migrations/20260914_van_ban_che_do_xem.sql`** trên Supabase SQL Editor, rồi chạy
+   3 câu kiểm chứng ở cuối file đó: `che_do_xem` 100% `cong_khai`; `pg_policies` đúng **4** dòng và
+   **không còn** `van_ban_documents_factory`; `prosecdef = true` cho `van_ban_is_participant`.
+2. **Test tay theo kịch bản 5 nhân vật** trong plan (A soạn thảo · B bước 1 · C bước 2 · D phê
+   duyệt · **E ngoài cuộc, cùng phòng với B**). Trọng tâm: A đặt văn bản **Giới hạn** → A/B/C/D mở
+   được; **E dán URL → "không có quyền xem"**, không thấy trong danh sách, chuông không đếm, và
+   **tìm kiếm AI không trả về** (nếu vẫn trả về = `search/route.ts` chưa deploy). A phân phối cho E
+   → E mở được ngay. A đổi về **Công khai** (qua nút Sửa) → E thấy lại. Admin mở được mọi văn bản.
+   Đăng nhập bằng tài khoản thường rồi mở danh sách → **không được** có lỗi recursion.
+3. Xác nhận nhãn timeline giờ hiện "Bước 1: Nguyễn Văn A · NMCB"; văn bản **cũ** (bước chưa có
+   `user_id`) vẫn hiện mã phòng ban, không crash.
+4. **Việc còn treo ngoài phạm vi module này**: `DEFAULT_PERMISSION_CODES` (`src/lib/auth.ts`) vẫn
+   thiếu hoàn toàn `maintenance.*`, `warehouse.*`, `output.*`, `process.*` — cùng loại thiếu sót đã
+   vá cho `documents.*` ở PR 0, cần rà riêng.
+5. **Chưa làm, nên làm sớm** (ghi trong plan mục "Để sau"): nút **"Đổi người ký bước này"** cho
+   người soạn thảo khi văn bản còn `cho_ky_phong_ban`. Ký đích danh tuyệt đối nghĩa là người nghỉ
+   phép ⇒ văn bản kẹt, chỉ admin gỡ được.
+
+⚠️ **Chưa commit/push** toàn bộ PR 0-4. `git status` có 4 file rác Windows trong `cung_cap_dl/`
+(`desktop.ini`, `~$sl_mau.xlsx`) ở trạng thái đã xoá + 1 file PDF test chưa track — **không phải do
+các phiên này**, cần hỏi người dùng trước khi commit.

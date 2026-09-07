@@ -485,6 +485,20 @@ export const DEFAULT_PERMISSION_CODES = [
   "iso.phe_duyet",
   "iso.print",
   "iso.signature",
+  // Nhóm documents.* đã được seed vào bảng `permissions`/`role_permissions` từ migration
+  // 20260522 nhưng bị bỏ quên ở danh sách fallback này — nghĩa là khi DB chưa seed kịp,
+  // `ROLE_DEFAULTS` sinh ra bộ quyền KHÔNG có module Văn bản. Bổ sung cho khớp đúng DB thật.
+  // (Các nhóm maintenance.*/warehouse.*/output.*/process.* cũng đang thiếu tương tự — ngoài
+  // phạm vi đợt này, cần rà riêng.)
+  "documents.view",
+  "documents.create",
+  "documents.edit",
+  "documents.delete",
+  "documents.ky_phong_ban",
+  "documents.phe_duyet",
+  "documents.print",
+  "documents.upload_signed",
+  "documents.distribute",
   "notes.view",
   "notes.create",
   "notes.edit",
@@ -536,6 +550,15 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "iso.edit",
     "iso.soat_xet",
     "iso.signature",
+    // Khớp đúng role_permissions trên DB: manager có đủ trừ documents.delete
+    "documents.view",
+    "documents.create",
+    "documents.edit",
+    "documents.ky_phong_ban",
+    "documents.phe_duyet",
+    "documents.print",
+    "documents.upload_signed",
+    "documents.distribute",
     "notes.view",
     "notes.create",
     "notes.edit",
@@ -557,6 +580,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "export.view",
     "iso.view",
     "iso.signature",
+    // Khớp đúng role_permissions trên DB: role `user` chỉ được xem văn bản
+    "documents.view",
     "notes.view",
     "notes.create",
     "notes.edit",

@@ -7,6 +7,7 @@ import { FileText, Upload, PenLine, ClipboardList, type LucideIcon } from "lucid
 import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { canSignStep } from "./documents-types"
 
 type NavTab = {
   href: string
@@ -58,7 +59,15 @@ type DocumentsShellProps = {
   children?: ReactNode
 }
 
-type ThuTuKyStepLite = { step: number; type: "phong_ban" | "ca_nhan"; phong_ban_code?: string; user_id?: string }
+// Khớp shape với ThuTuKyStep ở mức đủ dùng cho `canSignStep`
+type ThuTuKyStepLite = {
+  step: number
+  type: "phong_ban" | "ca_nhan"
+  phong_ban_code?: string
+  user_id?: string
+  /** @deprecated Văn bản "Mật" cũ — vẫn đọc như user_id */
+  mat_recipient_user_id?: string
+}
 type VanBanTaskRow = {
   trang_thai: string
   thu_tu_ky_json: ThuTuKyStepLite[] | null
@@ -118,12 +127,9 @@ export function DocumentsShell({ children }: DocumentsShellProps) {
           continue
         }
         if (doc.trang_thai === "cho_ky_phong_ban") {
+          // Dùng helper chung — xem `canSignStep` trong documents-types.ts
           const step = (doc.thu_tu_ky_json || [])[doc.buoc_hien_tai]
-          const match =
-            isAdmin ||
-            (step?.type === "phong_ban" && deptCode === step.phong_ban_code) ||
-            (step?.type === "ca_nhan" && step.user_id === uid)
-          if (match) count++
+          if (canSignStep(step, uid, deptCode, isAdmin)) count++
           continue
         }
         if (doc.trang_thai === "cho_phe_duyet" && (isAdmin || doc.phe_duyet_user_id === uid)) count++

@@ -51,7 +51,7 @@ async function requireDistributePermission(req: NextRequest) {
     }
   }
 
-  return { userId: authUser.id, factoryId: (profile.factory_id as string | null) }
+  return { userId: authUser.id, factoryId: (profile.factory_id as string | null), isAdmin }
 }
 
 function errorStatus(msg: string): number {
@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
 // POST: Tạo batch phân phối
 export async function POST(req: NextRequest) {
   try {
-    const { userId, factoryId: callerFactoryId } = await requireDistributePermission(req)
+    const { userId, factoryId: callerFactoryId, isAdmin } = await requireDistributePermission(req)
 
     const body = (await req.json()) as {
       factoryId: string
@@ -134,6 +134,43 @@ export async function POST(req: NextRequest) {
     }
     if (factoryId !== callerFactoryId) {
       return NextResponse.json({ error: "Bạn không có quyền truy cập nhà máy này" }, { status: 403 })
+    }
+
+    // Văn bản "Giới hạn": chỉ chủ sở hữu nội dung (soạn thảo / tạo / phê duyệt) hoặc
+    // admin mới được mở rộng danh sách người xem. Người có quyền `documents.distribute`
+    // nói chung KHÔNG đủ — nếu không, quyền phân phối trở thành đường vòng vô hiệu hoá
+    // toàn bộ cơ chế giới hạn (route này chạy service role, RLS không chặn giúp).
+    if (!isAdmin) {
+      const { data: docRows } = await supabaseAdmin
+        .from("van_ban_documents")
+        .select("id, ma_van_ban, ten_van_ban, che_do_xem, soan_thao_user_id, created_by, phe_duyet_user_id")
+        .eq("factory_id", factoryId)
+        .in("id", docIds)
+      const blocked = ((docRows || []) as {
+        ma_van_ban: string | null
+        ten_van_ban: string | null
+        che_do_xem: string | null
+        soan_thao_user_id: string | null
+        created_by: string | null
+        phe_duyet_user_id: string | null
+      }[]).filter(
+        (d) =>
+          d.che_do_xem === "gioi_han" &&
+          d.soan_thao_user_id !== userId &&
+          d.created_by !== userId &&
+          d.phe_duyet_user_id !== userId,
+      )
+      if (blocked.length) {
+        const names = blocked.map((d) => d.ma_van_ban || d.ten_van_ban || "?").join(", ")
+        return NextResponse.json(
+          {
+            error:
+              "Văn bản Giới hạn chỉ được phân phối bởi người soạn thảo, người phê duyệt " +
+              `hoặc quản trị viên: ${names}`,
+          },
+          { status: 403 },
+        )
+      }
     }
 
     // "Người phân phối" luôn lấy từ danh tính đã xác thực server-side (userId), KHÔNG

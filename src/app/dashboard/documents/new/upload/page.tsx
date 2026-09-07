@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession } from "@/lib/auth"
 import { DocumentsShell } from "../../_components/documents-shell"
 import {
+  CHE_DO_XEM_DESC,
+  CHE_DO_XEM_LABEL,
   LOAI_VAN_BAN_KY_HIEU,
   LOAI_VAN_BAN_LABEL,
   LOAI_VAN_BAN_OPTIONS,
@@ -19,7 +21,7 @@ import {
   type VanBanDocumentType,
   type SignAsType,
 } from "../../_components/documents-types"
-import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2, Shield, Lock, FileSignature } from "lucide-react"
+import { Upload, AlertTriangle, X, FileText, CheckCircle2, Plus, Trash2, Globe, Lock, FileSignature } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
@@ -47,12 +49,12 @@ export default function UploadVanBanPage() {
     ngay_phe_duyet: "",
     ghi_chu: "",
     pham_vi: "Cong_ty" as "Cong_ty" | "Don_vi",
-    cap_tl: "Cấp 1",
-    phan_loai: "Thuong",
+    // `cap_tl` đã bỏ 2026-09-05, `phan_loai` (Thường/Mật) đã bỏ 2026-09-06 — xem khối form bên dưới
+    che_do_xem: "cong_khai",
     soan_thao_user_id: "",
     phe_duyet_user_id: "",
   })
-  const isMat = form.phan_loai === "Mat"
+  const isGioiHan = form.che_do_xem === "gioi_han"
   // Văn bản upload ký tay không đi qua SignPlacementModal (không có bước ký live) —
   // chọn ký thay ngay tại đây, ghi trực tiếp vào phe_duyet_sign_as lúc lưu.
   const [pheDuyetSignAs, setPheDuyetSignAs] = useState<SignAsType>("none")
@@ -442,8 +444,8 @@ export default function UploadVanBanPage() {
         nam,
         trang_thai: "da_phe_duyet",
         is_uploaded: true,
-        cap_tl: form.pham_vi === "Don_vi" ? "Cấp 1" : form.cap_tl,
-        phan_loai: form.pham_vi === "Don_vi" ? "Thuong" : form.phan_loai,
+        // Nhánh Nội bộ đơn vị giữ nguyên hành vi cũ (luôn Công khai trong nhà máy).
+        che_do_xem: form.pham_vi === "Don_vi" ? "cong_khai" : form.che_do_xem,
         ngay_phe_duyet: form.ngay_phe_duyet || null,
         file_signed_pdf_url: ext === "pdf" ? fileUrl : null,
         file_goc_url: ext !== "pdf" ? fileUrl : null,
@@ -632,7 +634,7 @@ export default function UploadVanBanPage() {
                           pham_vi: val,
                           phe_duyet_user_id: "",
                           soan_thao_user_id: "",
-                          ...(val === "Don_vi" ? { cap_tl: "Cấp 1", phan_loai: "Thuong" } : {}),
+                          ...(val === "Don_vi" ? { che_do_xem: "cong_khai" } : {}),
                         }))
                         setSteps([])
                         setDeptLeaderCandidates([])
@@ -653,43 +655,47 @@ export default function UploadVanBanPage() {
                 )}
               </div>
 
-              {/* Phân loại Thường/Mật — chỉ áp dụng Nội bộ công ty, giống new/page.tsx */}
+              {/* Phạm vi hiển thị — chỉ áp dụng Nội bộ công ty, giống new/page.tsx */}
               {form.pham_vi !== "Don_vi" && (
                 <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
                   <label className="text-xs font-bold text-slate-600 block mb-2.5">
-                    Phân loại <span className="text-red-500">*</span>
+                    Phạm vi hiển thị <span className="text-red-500">*</span>
                   </label>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => setForm((f) => ({ ...f, phan_loai: "Thuong" }))}
+                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "cong_khai" }))}
                       className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        !isMat
+                        !isGioiHan
                           ? "bg-slate-700 text-white border-slate-700 shadow-md"
                           : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
                       }`}
                     >
-                      <Shield size={17} />
-                      Thường
+                      <Globe size={17} />
+                      {CHE_DO_XEM_LABEL.cong_khai}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setForm((f) => ({ ...f, phan_loai: "Mat" }))}
+                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "gioi_han" }))}
                       className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        isMat
-                          ? "bg-red-600 text-white border-red-600 shadow-md"
-                          : "bg-white text-red-500 border-red-300 hover:bg-red-50"
+                        isGioiHan
+                          ? "bg-amber-600 text-white border-amber-600 shadow-md"
+                          : "bg-white text-amber-700 border-amber-300 hover:bg-amber-50"
                       }`}
                     >
                       <Lock size={17} />
-                      Mật
+                      {CHE_DO_XEM_LABEL.gioi_han}
                     </button>
                   </div>
-                  <p className={`text-xs mt-2 ${isMat ? "text-red-500 font-medium" : "text-slate-400"}`}>
-                    {isMat
-                      ? "Văn bản Mật: đóng dấu MẬT khi in và hiển thị badge cảnh báo trên trang chi tiết."
-                      : "Văn bản Thường."}
+                  <p className={`text-xs mt-2 ${isGioiHan ? "text-amber-700 font-medium" : "text-slate-400"}`}>
+                    {isGioiHan ? CHE_DO_XEM_DESC.gioi_han : CHE_DO_XEM_DESC.cong_khai}
                   </p>
+                  {isGioiHan && (
+                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                      Lưu ý: giới hạn áp dụng cho danh sách, trang chi tiết và tìm kiếm. Người đang
+                      giữ sẵn đường dẫn tệp PDF vẫn tải được tệp đó.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -803,20 +809,9 @@ export default function UploadVanBanPage() {
                 />
               </div>
 
-              {/* Cấp văn bản — chỉ áp dụng Nội bộ công ty, khóa cứng "Cấp 1" cho Nội bộ đơn vị */}
-              {form.pham_vi !== "Don_vi" && (
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp văn bản</label>
-                  <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                    value={form.cap_tl}
-                    onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))}
-                  >
-                    <option value="Cấp 1">Cấp 1 — Có vòng ký phòng ban trước khi phê duyệt</option>
-                    <option value="Cấp 2">Cấp 2 — Phê duyệt trực tiếp</option>
-                  </select>
-                </div>
-              )}
+              {/* Ô "Cấp văn bản" đã gỡ 2026-09-05 cùng với luồng soạn thảo. Ở luồng upload nó
+                  vốn thuần trang trí: văn bản ký tay được insert thẳng ở trạng thái
+                  `da_phe_duyet`, không đi qua vòng ký nào. */}
 
               {/* Ngày phê duyệt */}
               <div>
