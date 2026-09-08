@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, CheckCircle2, Clock, Eye, FileText, Loader2, Plus, Wrench } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Clock, Download, Eye, FileText, Loader2, Plus, Wrench } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { MaintenanceShell } from "./_components/maintenance-shell"
 import { currencySymbol } from "./_components/maintenance-data"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -265,15 +266,26 @@ export default function MaintenanceDashboardPage() {
                       return (
                         <div className="flex items-center gap-1.5">
                           {status?.fileHienTai ? (
-                            <a
-                              href={status.fileHienTai}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={status.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <Eye size={15} />
-                            </a>
+                            <>
+                              <a
+                                href={status.fileHienTai}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={status.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
+                                className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                              >
+                                <Eye size={15} />
+                              </a>
+                              {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
+                                  `download` KHÔNG có tác dụng vì file khác origin với app. */}
+                              <a
+                                href={buildStorageDownloadUrl(status.fileHienTai, `Biên bản ${r.ma_bb || r.id}`)}
+                                title={status.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
+                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              >
+                                <Download size={15} />
+                              </a>
+                            </>
                           ) : canPrint ? (
                             <Link
                               href={`/dashboard/maintenance/print?type=${bundle}&record_id=${r.id}`}

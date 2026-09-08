@@ -10,6 +10,7 @@ import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { downloadQualityKqknPdf, type QualityKqknResult } from "@/lib/quality-pdf"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { QualitySignModal } from "@/app/dashboard/quality/_components/quality-sign-modal"
 import { QualitySignStatusBadge, type QualitySigningStatus } from "@/app/dashboard/quality/_components/quality-sign-status"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
@@ -2272,12 +2273,22 @@ export default function QualityPage() {
                                 {/* PDF: chưa ký → render bản in nháp; đã có yêu cầu ký → mở đúng file hiện
                                     tại (đã có chữ ký Lập biểu nếu đang chờ, đủ cả 2 chữ ký nếu hoàn tất) */}
                                 {signingStatusByDate.get(date)?.fileHienTai ? (
-                                  <a href={signingStatusByDate.get(date)!.fileHienTai!} target="_blank" rel="noreferrer"
-                                    onClick={e=>e.stopPropagation()}
-                                    title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập biểu"}
-                                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
-                                    <Eye size={15}/>
-                                  </a>
+                                  <>
+                                    <a href={signingStatusByDate.get(date)!.fileHienTai!} target="_blank" rel="noreferrer"
+                                      onClick={e=>e.stopPropagation()}
+                                      title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập biểu"}
+                                      className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
+                                      <Eye size={15}/>
+                                    </a>
+                                    {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
+                                        `download` KHÔNG có tác dụng vì file khác origin với app. */}
+                                    <a href={buildStorageDownloadUrl(signingStatusByDate.get(date)!.fileHienTai!, `Phiếu KQKN ${factoryCode} ${date}`)}
+                                      onClick={e=>e.stopPropagation()}
+                                      title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
+                                      className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors">
+                                      <Download size={15}/>
+                                    </a>
+                                  </>
                                 ) : (
                                   <button onClick={async e=>{e.stopPropagation();
                                     // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)

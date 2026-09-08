@@ -8,6 +8,7 @@ import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcMa
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
 import { formatDateDisplay, getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
 import { DispatchSignStatusBadge, type DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
@@ -1911,11 +1912,21 @@ export default function DispatchPage() {
                         {!signingStatusLoaded ? (
                           <span className="p-1.5 text-slate-300"><Loader2 size={14} className="animate-spin"/></span>
                         ) : signingStatusByEntry.get(entry.id)?.fileHienTai ? (
-                          <button onClick={(e) => { e.stopPropagation(); window.open(signingStatusByEntry.get(entry.id)!.fileHienTai!, "_blank") }}
-                            className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
-                            title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}>
-                            <Eye size={14}/>
-                          </button>
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); window.open(signingStatusByEntry.get(entry.id)!.fileHienTai!, "_blank") }}
+                              className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
+                              title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}>
+                              <Eye size={14}/>
+                            </button>
+                            {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
+                                `download` KHÔNG có tác dụng vì file khác origin với app. */}
+                            <a href={buildStorageDownloadUrl(signingStatusByEntry.get(entry.id)!.fileHienTai!, `Phiếu điều xe ${entry.ma_dx || entry.ngay}`)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg transition-colors"
+                              title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}>
+                              <Download size={14}/>
+                            </a>
+                          </>
                         ) : (
                           <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
                             className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF (chưa ký)">

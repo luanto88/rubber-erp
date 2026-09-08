@@ -6718,3 +6718,101 @@ pre-existing trong `documents/[id]/page.tsx`. Không chạy `npm run build`.
    xong timeline hiện tên mới, người mới nhận thông báo đúng tiêu đề tiếng Việt; người cũ mất
    nút "Ký phòng ban", người mới ký được, PDF sau ký in đúng mã phòng ban; ký xong nút biến mất.
    Gọi thẳng API với `stepIndex` khác `buoc_hien_tai` hoặc bằng tài khoản khác ⇒ phải 400/403.
+
+---
+
+## Cập nhật (2026-09-08) — Nút tải file đã ký (3 module) + icon-only cho module Văn bản
+
+### Bối cảnh: bản CHƯA ký tải được, bản ĐÃ ký thì không
+
+Khảo sát xác nhận **cả 3 module Điều xe / Bảo trì / Chất lượng đều KHÔNG có nút tải file đã ký** —
+mỗi dòng chỉ có 1 icon 👁 mở tab (`window.open` ở Điều xe; `<a target="_blank">` ở 2 module kia).
+Trong khi đó nhánh **chưa ký** lại tải thật về máy (jsPDF `doc.save()`). Nghịch lý: thứ người dùng
+cần gửi đi (bản đã ký) lại là thứ khó lấy nhất. Cả 3 badge `*SignStatusBadge` ở nhánh `hoan_tat`
+chỉ render `<span>` tĩnh, không có link tải.
+
+**Phát hiện ngoài yêu cầu**: nút "Tải" ở module Văn bản dùng `<a href={url} target="_blank"
+download>` trên URL Supabase — **thuộc tính `download` bị trình duyệt bỏ qua khi cross-origin**,
+nên nút này thực chất cũng chỉ mở tab. Đã sửa luôn (người dùng chốt).
+
+### ⚠️ Cơ chế tải — `?download=` của Supabase Storage, KHÔNG dùng `<a download>`
+
+Đã kiểm chứng bằng HTTP thật:
+
+```
+GET .../v4.pdf                        → không có content-disposition  (trình duyệt mở tab xem)
+GET .../v4.pdf?download=Biên bản.pdf  → content-disposition: attachment;
+                                        filename*=UTF-8''Bi%C3%AAn%20b%E1%BA%A3n.pdf
+```
+
+Hoạt động trên **cả 2 bucket** (`signing-documents`, `iso-documents`), giữ đúng **tên tiếng Việt
+có dấu**, `access-control-allow-origin: *`.
+
+Chọn cách này thay vì fetch→blob→objectURL (mẫu `iso/forms/[id]/page.tsx:1140`) vì: không tải cả
+file vài MB vào RAM, không phụ thuộc CORS, và vẫn hoạt động khi người dùng chuột phải "Lưu liên
+kết".
+
+⚠️ **Supabase Storage không hỗ trợ HEAD/Range** (trả 400) — script kiểm tra header phải dùng GET
+đầy đủ, kèm `AbortController` nếu ngại file lớn.
+
+### Helper mới `src/lib/storage-download.ts`
+
+`buildStorageDownloadUrl(url, fileName)` · `safeDownloadFileName(name, ext?)` ·
+`extFromStorageUrl(url)`.
+
+⚠️ **KHÔNG dùng `sanitizeStorageFileName()`** (`documents-types.ts:237`) cho tên tải về — hàm đó
+cố ý **bỏ dấu tiếng Việt** vì để đặt tên object trên Storage. `safeDownloadFileName` ngược lại
+**giữ dấu**, chỉ thay ký tự Windows/URL cấm. Quan trọng nhất là dấu `/` (rất hay gặp trong mã văn
+bản `20/BC-NMCB` và mã biên bản `DX-180826/002`) → thay thành `-`, nếu không tên file sinh ra hỏng.
+
+### 4 điểm chạm
+
+| File | Thay đổi |
+|---|---|
+| `dispatch/page.tsx` | Thêm nút ⬇ sau nút 👁 trong nhánh `fileHienTai`; tên `Phiếu điều xe {ma_dx \|\| ngay}` |
+| `maintenance/page.tsx` + `records/page.tsx` | Như trên, tên `Biên bản {ma_bb}`; **phải thêm import `Download`** (2 file này chưa có) |
+| `quality/page.tsx` | Như trên, tên `Phiếu KQKN {factoryCode} {date}` |
+| `documents/page.tsx` | 4 nút Xem/Tải/Sửa/Xóa → **icon-only**; nút Tải đổi sang `buildStorageDownloadUrl` |
+
+Nút ⬇ hiện **cùng điều kiện với 👁** (có `fileHienTai` là có, kể cả đang luân chuyển), tooltip tự
+phân biệt theo `trangThai`. Màu `indigo` (chưa dùng ở hàng nút nào), kích thước icon giữ đúng con
+số hàng xóm trong từng file (Điều xe 14, Bảo trì/Chất lượng 15).
+
+⚠️ `e.stopPropagation()` **bắt buộc** ở Điều xe và Chất lượng — dòng cha có `onClick` điều hướng.
+
+⚠️ **Không sửa route `signing-status`**: payload không trả `maHoSo`, nhưng client đã có sẵn
+`entry.ma_dx` / `r.ma_bb` / `date` trên chính object đang render.
+
+### Module Văn bản — icon-only
+
+4 nút đổi sang mẫu dùng chung `p-1.5 rounded-lg text-{color}-600 hover:bg-{color}-50
+transition-colors`, icon `size={12}` → `15`, container `gap-2` → `gap-1`. **Bắt buộc thêm `title`
+cho Xem/Sửa/Xóa** — trước đó chỉ nút "Tải" có tooltip, bỏ chữ mà không thêm là mất hẳn thông tin.
+
+### Đã kiểm chứng
+
+`npx tsc --noEmit` sạch. `npx eslint`: 0 lỗi mới (10 lỗi `no-explicit-any` trong `quality/page.tsx`
+là pre-existing — xác nhận bằng `git diff`: 0 dòng thêm mới chứa `any`).
+
+Cộng thêm 2 lớp test thật, không chỉ tin `tsc`:
+- **14/14 assertion logic** cho helper (giữ dấu tiếng Việt, thay `/` và ký tự cấm, không nhân đôi
+  phần mở rộng, URL đã có query string, URL rỗng/dị dạng).
+- **HTTP thật** trên file đang có trên Storage: `Biên bản DX-180826-002.pdf`,
+  `Phiếu KQKN NMCB 2026-01-09.pdf`, `20-BC-NMCB BC-08-NMCB - Tổng hợp sản lượng Tháng.pdf` — tất
+  cả trả `content-disposition: attachment`, tên đúng như mong đợi.
+
+⚠️ **Điều xe chưa test được bằng dữ liệu thật**: cả 11 hồ sơ `dispatch/hoan_tat` đều trỏ tới
+`dispatch_entries` **đã bị xóa** (dữ liệu test cũ) ⇒ script không lấy được `ma_dx`. Code giống hệt
+3 nơi kia nên rủi ro thấp, nhưng cần test tay đúng module này. Tương tự, 2 hồ sơ
+`quality/hoan_tat` có `ma_ho_so` dạng `PKN-E2E-*` trả HTTP 400 vì file đã dọn sau test E2E cũ —
+**không phải bug**, các hồ sơ thật (`2026-01-08`…`2026-01-11`) đều 200.
+
+### CHƯA test tay
+
+1. Mỗi module: dòng có badge "Đã ký duyệt" ⇒ thấy **2 icon** 👁 và ⬇; bấm ⬇ **tải thẳng về máy**
+   (không mở tab), tên file tiếng Việt đúng; bấm 👁 vẫn mở tab như cũ.
+2. Dòng **đang luân chuyển** ⇒ vẫn có ⬇, tooltip "đang chờ ký tiếp". Dòng **chưa gửi ký** ⇒ vẫn
+   là icon 📄 in bản nháp, **không** có ⬇.
+3. Điều xe + Chất lượng: bấm ⬇ **không được** nhảy sang trang chi tiết.
+4. Văn bản: chỉ còn icon, rê chuột hiện tooltip đủ 4 nút; tải thật về máy; màn hình ≤430px không
+   còn tràn ngang; test cả văn bản chỉ có `file_goc_url` và văn bản Office (DOCX).

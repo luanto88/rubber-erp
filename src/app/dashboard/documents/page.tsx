@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import type { SessionUser } from "@/lib/auth"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DocumentsShell } from "./_components/documents-shell"
 import { EditDocModal } from "./_components/edit-doc-modal"
 import {
@@ -550,45 +551,46 @@ export default function DocumentsPage() {
                       {(() => {
                         const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
                         return (
-                          <div className="flex items-center gap-2">
+                          // Nút icon-only (chỉ icon + tooltip) — đồng bộ với Điều xe/Bảo trì/Chất
+                          // lượng, tránh hàng nút tràn ngang trên điện thoại.
+                          <div className="flex items-center gap-1">
                             <Link
                               href={`/dashboard/documents/${doc.id}`}
                               onClick={(e) => e.stopPropagation()}
-                              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                              title="Xem chi tiết văn bản"
+                              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
                             >
-                              <Eye size={12} />
-                              Xem
+                              <Eye size={15} />
                             </Link>
                             {downloadUrl && (
+                              // Tải về máy: dùng ?download= của Supabase Storage. Trước đây dùng
+                              // <a download target="_blank"> nhưng thuộc tính `download` KHÔNG có
+                              // tác dụng vì file khác origin với app → thực chất chỉ mở tab.
                               <a
-                                href={downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                download
+                                href={buildStorageDownloadUrl(downloadUrl, `${doc.ma_van_ban || "Van ban"} ${doc.ten_van_ban || ""}`)}
                                 onClick={(e) => e.stopPropagation()}
-                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-all"
-                                title="Tải xuống văn bản"
+                                className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                title="Tải văn bản về máy"
                               >
-                                <Download size={12} />
-                                Tải
+                                <Download size={15} />
                               </a>
                             )}
                             {canEditDoc(doc) && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); void openEdit(doc.id) }}
-                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-all"
+                                title="Sửa văn bản"
+                                className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors"
                               >
-                                <Pencil size={12} />
-                                Sửa
+                                <Pencil size={15} />
                               </button>
                             )}
                             {canDeleteDoc(doc) && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDelConfirmId(doc.id) }}
-                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-all"
+                                title="Xóa văn bản"
+                                className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
                               >
-                                <Trash2 size={12} />
-                                Xóa
+                                <Trash2 size={15} />
                               </button>
                             )}
                           </div>
