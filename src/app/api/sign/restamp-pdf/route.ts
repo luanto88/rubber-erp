@@ -371,31 +371,67 @@ async function replaceInvalidatedPdfText(
   }
 }
 
+// Quy cách con dấu "HẾT HIỆU LỰC" (chốt với nghiệp vụ 2026-09-08): chữ phải nằm TRONG một khung
+// viền đỏ, kích thước TOÀN KHUNG (tính cả nét viền) là 38mm ngang × 13mm dọc — tỉ lệ của con dấu
+// chữ nhật nằm ngang, khớp với chiều chữ "HẾT HIỆU LỰC".
+const MM_TO_PT = 72 / 25.4
+const STAMP_BOX_WIDTH_PT = 38 * MM_TO_PT // ~107.7pt
+const STAMP_BOX_HEIGHT_PT = 13 * MM_TO_PT // ~36.9pt
+const STAMP_BORDER_PT = 1.5
+const STAMP_INNER_PADDING_PT = 3
+const STAMP_TOP_MARGIN_PT = 18
+const STAMP_RED = rgb(0.85, 0, 0)
+
 function stampPdfInvalidatedMark(
   pdfDoc: PDFDocument,
   font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
 ) {
+  const stampText = "HẾT HIỆU LỰC"
+
   for (const page of pdfDoc.getPages()) {
     const { width, height } = page.getSize()
-    const stampText = "HẾT HIỆU LỰC"
-    let fontSize = 22
-    while (fontSize > 14 && font.widthOfTextAtSize(stampText, fontSize) > width - 120) {
-      fontSize -= 1
-    }
-    const textWidth = font.widthOfTextAtSize(stampText, fontSize)
 
+    // Khổ giấy hẹp bất thường thì co khung lại cho khỏi tràn mép, còn lại giữ đúng 38×13mm.
+    const boxWidth = Math.min(STAMP_BOX_WIDTH_PT, width - 24)
+    const boxHeight = STAMP_BOX_HEIGHT_PT
+    const boxX = (width - boxWidth) / 2
+    const boxY = height - STAMP_TOP_MARGIN_PT - boxHeight
+
+    // Thu nhỏ cỡ chữ tới khi nằm lọt trong lòng khung (đã trừ nét viền + padding 2 bên).
+    const innerWidth = boxWidth - 2 * (STAMP_BORDER_PT + STAMP_INNER_PADDING_PT)
+    let fontSize = 18
+    while (fontSize > 6 && font.widthOfTextAtSize(stampText, fontSize) > innerWidth) {
+      fontSize -= 0.5
+    }
+
+    const textWidth = font.widthOfTextAtSize(stampText, fontSize)
+    // Căn giữa theo chiều dọc: pdf-lib nhận toạ độ ĐƯỜNG CHÂN CHỮ (baseline), nên phải cộng thêm
+    // phần chân chữ thò xuống (descender) mới ra giữa khung thật sự.
+    const glyphHeight = font.heightAtSize(fontSize)
+    const descender = glyphHeight - font.heightAtSize(fontSize, { descender: false })
+    const baselineY = boxY + (boxHeight - glyphHeight) / 2 + descender
+
+    // Đường kẻ mảnh chân trang — giữ nguyên từ bản cũ, không liên quan con dấu.
     page.drawLine({
       start: { x: 28, y: 26 },
       end: { x: width - 28, y: 26 },
       thickness: 0.4,
       color: rgb(0.75, 0.8, 0.85),
     })
+    page.drawRectangle({
+      x: boxX,
+      y: boxY,
+      width: boxWidth,
+      height: boxHeight,
+      borderColor: STAMP_RED,
+      borderWidth: STAMP_BORDER_PT,
+    })
     page.drawText(stampText, {
-      x: (width - textWidth) / 2,
-      y: height - 42,
+      x: boxX + (boxWidth - textWidth) / 2,
+      y: baselineY,
       size: fontSize,
       font,
-      color: rgb(0.85, 0, 0),
+      color: STAMP_RED,
     })
   }
 }
@@ -445,6 +481,11 @@ function ensureDocxPngContentType(contentTypesXml: string): string {
   return contentTypesXml.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>')
 }
 
+// Cùng quy cách con dấu với bản PDF (xem STAMP_BOX_* phía trên): khung viền đỏ 38mm × 13mm.
+// Word đo bằng twip (1mm = 56,6929 twip) và độ dày viền bằng 1/8 point (sz=12 → 1,5pt).
+const DOCX_STAMP_WIDTH_TWIP = Math.round(38 * 56.6929) // 2154
+const DOCX_STAMP_HEIGHT_TWIP = Math.round(13 * 56.6929) // 737
+
 function buildInvalidatedStampParagraph(): string {
   const runProperties = [
     "<w:rPr>",
@@ -455,14 +496,40 @@ function buildInvalidatedStampParagraph(): string {
     "</w:rPr>",
   ].join("")
 
+  const border = (side: string) => `<w:${side} w:val="single" w:sz="12" w:space="0" w:color="C00000"/>`
+
+  // Dùng bảng 1 ô thay cho đoạn văn thường — đây là cách duy nhất trong DOCX đặt được khung viền
+  // có kích thước cố định chính xác theo mm.
+  //
+  // ⚠️ Thứ tự các phần tử con là BẮT BUỘC theo lược đồ OOXML (ECMA-376), viết sai thứ tự thì Word
+  // có thể báo file hỏng: w:tblPr = tblW → jc → tblBorders → tblLayout; w:trPr = trHeight → jc;
+  // w:tcPr = tcW → vAlign; w:pPr = spacing → jc.
   return [
-    "<w:p>",
-    "<w:pPr>",
+    "<w:tbl>",
+    "<w:tblPr>",
+    `<w:tblW w:w="${DOCX_STAMP_WIDTH_TWIP}" w:type="dxa"/>`,
     '<w:jc w:val="center"/>',
-    '<w:spacing w:after="120"/>',
-    "</w:pPr>",
+    "<w:tblBorders>",
+    border("top"),
+    border("left"),
+    border("bottom"),
+    border("right"),
+    "</w:tblBorders>",
+    '<w:tblLayout w:type="fixed"/>',
+    "</w:tblPr>",
+    `<w:tblGrid><w:gridCol w:w="${DOCX_STAMP_WIDTH_TWIP}"/></w:tblGrid>`,
+    "<w:tr>",
+    `<w:trPr><w:trHeight w:hRule="exact" w:val="${DOCX_STAMP_HEIGHT_TWIP}"/><w:jc w:val="center"/></w:trPr>`,
+    "<w:tc>",
+    `<w:tcPr><w:tcW w:w="${DOCX_STAMP_WIDTH_TWIP}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>`,
+    '<w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:jc w:val="center"/></w:pPr>',
     textRunXml("HẾT HIỆU LỰC", runProperties),
     "</w:p>",
+    "</w:tc>",
+    "</w:tr>",
+    "</w:tbl>",
+    // Word yêu cầu có một đoạn văn ngay sau bảng, nếu không file bị coi là hỏng cấu trúc.
+    '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>',
   ].join("")
 }
 

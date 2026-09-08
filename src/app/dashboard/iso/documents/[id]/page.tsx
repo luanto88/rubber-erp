@@ -4,6 +4,9 @@ import { Fragment, type RefObject, useCallback, useEffect, useRef, useState } fr
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
+// `<a download>` bị trình duyệt BỎ QUA khi file khác origin (Supabase Storage) — nút "Tải" khi đó
+// chỉ mở tab xem. Phải đi qua `?download=` của Storage, xem src/lib/storage-download.ts.
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { IsoShell } from "../../_components/iso-shell"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
@@ -2553,7 +2556,12 @@ export default function IsoDocumentDetailPage() {
                       <a href={url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem hồ sơ">
                         <Eye size={14} />
                       </a>
-                      <a href={url} download className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200" title="Tải hồ sơ">
+                      <a
+                        href={buildStorageDownloadUrl(url, `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim())}
+                        download
+                        className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200"
+                        title="Tải hồ sơ"
+                      >
                         <Download size={14} />
                       </a>
                     </>
@@ -3817,7 +3825,12 @@ export default function IsoDocumentDetailPage() {
                               <a href={sibUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem file">
                                 <Eye size={13} />
                               </a>
-                              <a href={sibUrl} download className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200" title="Tải file">
+                              <a
+                                href={buildStorageDownloadUrl(sibUrl, `${sib.ma_tai_lieu || "Hồ sơ ISO"} ${sib.ten_tai_lieu || ""}`.trim())}
+                                download
+                                className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200"
+                                title="Tải file"
+                              >
                                 <Download size={13} />
                               </a>
                             </>
@@ -3880,7 +3893,7 @@ export default function IsoDocumentDetailPage() {
                     <Eye size={18} />
                   </a>
                   <a
-                    href={doc.file_signed_pdf_url}
+                    href={buildStorageDownloadUrl(doc.file_signed_pdf_url, `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim())}
                     download
                     title="Tải PDF có chữ ký"
                     className="shrink-0 rounded-xl bg-slate-800 p-2.5 text-white shadow-sm transition-all hover:bg-slate-900"
@@ -3909,7 +3922,12 @@ export default function IsoDocumentDetailPage() {
                       <a href={mainFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Xem file hiện tại">
                         <Eye size={13} className="text-violet-600" />
                       </a>
-                      <a href={mainFileUrl} download className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Tải file hiện tại">
+                      <a
+                        href={buildStorageDownloadUrl(mainFileUrl, `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim())}
+                        download
+                        className="shrink-0 p-1 hover:bg-violet-100 rounded-lg"
+                        title="Tải file hiện tại"
+                      >
                         <Download size={13} className="text-violet-600" />
                       </a>
                     </div>

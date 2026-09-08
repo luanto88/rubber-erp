@@ -156,6 +156,30 @@ const NAV: NavItem[] = [
   { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, permission: "settings.view" },
 ]
 
+/**
+ * Đích điều hướng khi xác định CHẮC CHẮN người dùng chưa đăng nhập.
+ *
+ * Mặc định là `/login`. Ngoại lệ duy nhất: QR in trên tài liệu ISO trỏ thẳng vào
+ * `/dashboard/iso/documents/{id}` — đường dẫn này đã được IN RA GIẤY hàng trăm bản nên không thể
+ * đổi. Người ngoài (đánh giá viên ISO, khách) quét QR mà bị đá về `/login` thì coi như QR vô dụng,
+ * nên chuyển họ sang trang tra cứu công khai `/iso-doc/{id}`. Người ĐÃ đăng nhập không đi qua đây,
+ * vẫn vào trang dashboard đầy đủ như cũ.
+ *
+ * Đọc pathname tại thời điểm gọi (không phải từ closure) vì hàm này được dùng cả trong interval
+ * và listener focus/visibility sống lâu hơn một lần render.
+ */
+const ISO_DOC_ROUTE_RE = /^\/dashboard\/iso\/documents\/([0-9a-fA-F-]{36})\/?$/
+
+function isoPublicFallbackFor(pathname: string): string | null {
+  const matched = pathname.match(ISO_DOC_ROUTE_RE)
+  return matched ? `/iso-doc/${matched[1]}` : null
+}
+
+function resolveUnauthenticatedRedirect(): string {
+  if (typeof window === "undefined") return "/login"
+  return isoPublicFallbackFor(window.location.pathname) ?? "/login"
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -283,7 +307,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (alive) {
           setAuthResolved("unauthenticated")
           setUser(null)
-          window.location.replace("/login")
+          window.location.replace(redirectBase)
         }
       }
     }
@@ -306,7 +330,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         // khi syncSession thật sự resolve. Điều này khác bản cũ: bản cũ để timeout tự suy ra
         // "không có user" rồi redirect về /login dù session có thể vẫn hợp lệ, chỉ là chậm.
         await Promise.race([
-          syncSession("/login", true),
+          syncSession(resolveUnauthenticatedRedirect(), true),
           new Promise<void>((resolve) => setTimeout(resolve, 20_000)),
         ])
       } finally {
@@ -349,28 +373,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (alive) {
           setAuthResolved("unauthenticated")
           setUser(null)
-          window.location.replace("/login")
+          window.location.replace(resolveUnauthenticatedRedirect())
         }
         return
       }
       if (event === "SIGNED_IN") {
         // Bỏ qua nếu bootstrap đã hoàn thành — tránh double full hydration
         if (!bootstrapDone) {
-          await syncSession("/login", true)
+          await syncSession(resolveUnauthenticatedRedirect(), true)
         }
       }
     })
 
     // Interval: lightweight — chỉ verify token, không fetch DB
     const intervalId = window.setInterval(() => {
-      void syncSession("/login", false)
+      void syncSession(resolveUnauthenticatedRedirect(), false)
     }, 60_000)
 
     const handleVisibilityOrFocus = () => {
       const now = Date.now()
       if (document.visibilityState === "visible" && now - lastSyncTime > 30_000) {
         lastSyncTime = now
-        void syncSession("/login", false)
+        void syncSession(resolveUnauthenticatedRedirect(), false)
       }
     }
 
@@ -546,9 +570,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (isPublicStorageLookup) return
     if (authResolved === "unauthenticated") {
-      window.location.replace("/login")
+      window.location.replace(isoPublicFallbackFor(pathname) ?? "/login")
     }
-  }, [isPublicStorageLookup, authResolved])
+  }, [isPublicStorageLookup, authResolved, pathname])
 
   // Tài khoản role="customer" chỉ được dùng "Đơn hàng của tôi" — đây chỉ là UX điều hướng,
   // KHÔNG phải lớp bảo vệ chính. Bảo mật thật nằm ở RESTRICTIVE RLS + API route tự verify

@@ -7179,3 +7179,135 @@ KHÔNG tự ý làm mẫu vị trí ký cho ISO (nỗi đau 19 file/lượt ký)
 Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build (dev server của tôi thường
 đang chạy song song trên cổng 3000).
 ```
+
+## Cập nhật (2026-09-08, tiếp 2) — 2 fix người dùng báo + Giai đoạn 3 (trang công khai QR) đã code xong
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` **0 lỗi** trên mọi file đã sửa/thêm (10 warning
+`no-unused-vars` còn lại ở `iso/documents/[id]/page.tsx` đều pre-existing, không liên quan). Cộng
+**63 assertion** chạy bằng script gọi thư viện thật + dữ liệu ISO thật (chi tiết từng mục dưới).
+Không chạy `npm run build`.
+
+### Fix 1 — Nút "Tải" ở TRANG CHI TIẾT ISO chỉ mở tab, không tải file
+
+Giai đoạn 1 chỉ vá 3 nút ở **danh sách** (`iso/documents/page.tsx` ×2, `iso/forms/page.tsx`) —
+**bỏ sót 4 nút ở trang chi tiết** `iso/documents/[id]/page.tsx`, đúng chỗ trong ảnh người dùng
+gửi. Đã vá cả 4 bằng `buildStorageDownloadUrl` (`src/lib/storage-download.ts`), tên file theo
+đúng quy ước Giai đoạn 1 (`{ma_tai_lieu} {ten_tai_lieu}`):
+
+| Vị trí | Nút |
+|---|---|
+| Card "PDF có chữ ký" | Tải PDF có chữ ký ← **nút trong ảnh** |
+| Card file hiện tại (violet) | Tải file hiện tại |
+| Panel "Hồ sơ đã lưu" | Tải hồ sơ (từng hồ sơ con) |
+| Panel "Các hồ sơ trong bộ này" | Tải file (từng hồ sơ anh em) |
+
+⚠️ Nguyên nhân gốc luôn là: `<a href={storageUrl} download>` — thuộc tính `download` **bị trình
+duyệt bỏ qua khi khác origin**. Bất kỳ nút tải nào trỏ Supabase Storage đều phải qua
+`buildStorageDownloadUrl`, không có ngoại lệ.
+
+### Fix 2 — Con dấu "HẾT HIỆU LỰC" phải nằm trong khung đỏ 13×38mm
+
+`stampPdfInvalidatedMark()` (`api/sign/restamp-pdf/route.ts`) trước đây chỉ vẽ chữ đỏ trần giữa
+đầu trang, **không có khung**. Nay là khung viền đỏ kích thước **toàn khung 38mm ngang × 13mm
+dọc** (diễn giải "13*38mm" theo chiều chữ nằm ngang — nếu ngược lại thì đổi 2 hằng
+`STAMP_BOX_WIDTH_PT`/`STAMP_BOX_HEIGHT_PT`), chữ tự thu nhỏ để nằm lọt trong lòng khung, căn giữa
+cả 2 chiều.
+
+- Căn giữa dọc phải cộng thêm phần **chân chữ thò xuống** (descender) vì pdf-lib nhận toạ độ
+  đường chân chữ, không phải mép dưới chữ: `baselineY = boxY + (boxHeight - h)/2 + descender`.
+- Khổ giấy hẹp bất thường thì co khung cho khỏi tràn mép (nhánh `Math.min(..., width - 24)`).
+- Đường kẻ mảnh chân trang cũ **giữ nguyên**, không đụng.
+- **DOCX cũng áp cùng quy cách** — `buildInvalidatedStampParagraph()` đổi từ đoạn văn đỏ trần
+  sang **bảng 1 ô** viền đỏ `2154 × 737 twip` (= 38 × 13mm), `tblLayout=fixed` +
+  `trHeight hRule="exact"` để khung không co theo nội dung.
+  ⚠️ Thứ tự phần tử con trong OOXML là **BẮT BUỘC** theo lược đồ ECMA-376, viết sai Word có thể
+  báo file hỏng: `w:tblPr` = tblW → jc → tblBorders → tblLayout; `w:trPr` = trHeight → jc;
+  `w:tcPr` = tcW → vAlign; `w:pPr` = spacing → jc. Bản gốc vốn đang sai thứ tự `jc → spacing`
+  (Word bỏ qua được), bản mới đã viết đúng.
+  XLSX **không có con dấu** từ trước (chỉ thay chữ trong ô) — không đổi gì.
+
+**Đã kiểm chứng bằng số, không chỉ tsc**: script dựng PDF thật bằng pdf-lib + font
+`TimesNewRoman.ttf` thật trên 3 khổ giấy → **18/18 PASS**: khung đúng **38.000 × 13.000mm**, chữ
+lọt trong khung cả 2 chiều, căn giữa dọc **lệch 0.00pt**, cỡ chữ tự chọn 14pt trên A4. Script thứ
+hai parse XML DOCX bằng `saxes` → **16/16 PASS**: well-formed, đủ 4 cạnh viền đỏ, đúng cả 6 thứ tự
+lược đồ, có đoạn văn ngay sau bảng (Word bắt buộc). DOCX rộng 37.994mm — lệch 0.006mm do twip là
+đơn vị nhỏ nhất của Word, không thể chính xác hơn.
+
+### Giai đoạn 3 — Trang công khai cho QR
+
+QR in trên PDF trỏ `/dashboard/iso/documents/{id}` (đã in ra giấy hàng trăm bản, **không đổi
+được**), người ngoài quét bị đá về `/login`. Nay:
+
+| File | Vai trò |
+|---|---|
+| `src/app/iso-doc/[id]/page.tsx` + `_components/iso-doc-public-client.tsx` | Trang công khai, top-level ngoài `/dashboard` để không bị layout đá về `/login` — mirror `/storage` và `/van-ban-verify` |
+| `src/app/api/iso/public-doc/[id]/route.ts` | Route service-role, chỉ trả metadata |
+| `src/app/dashboard/layout.tsx` | Chuyển hướng khi **chưa đăng nhập** |
+
+**Cách giữ URL cũ**: layout có sẵn 5 điểm redirect về `/login`. Thêm hàm thuần
+`isoPublicFallbackFor(pathname)` + `resolveUnauthenticatedRedirect()` (đọc
+`window.location.pathname` **tại thời điểm gọi**, không lấy từ closure — vì hàm này chạy cả trong
+interval 60s và listener focus sống lâu hơn 1 lần render). Chỉ đổi đích của 4 điểm "chưa đăng
+nhập"; điểm "tài khoản bị khoá" vẫn về `/login?reason=` như cũ (người đó ĐÃ đăng nhập, chỉ bị
+chặn). Người đã đăng nhập **không đi qua nhánh này**, vào dashboard đầy đủ như cũ.
+
+⚠️ **KHÔNG dùng lại cơ chế `isPublicStorageLookup`** (bypass auth hoàn toàn cho
+`/dashboard/storage/*`) — yêu cầu của ISO ngược lại: người đăng nhập phải thấy trang dashboard
+đầy đủ, chỉ người chưa đăng nhập mới bị chuyển.
+
+**Mức lộ thông tin** (mirror `/api/documents/verify`): chỉ metadata vốn đã in trên bìa bản giấy —
+mã/tên/loại/phòng ban/cấp/lần ban hành/ngày hiệu lực/trạng thái + link file. **Cố ý KHÔNG trả**
+tên người soạn thảo/xem xét/phê duyệt, lý do & nội dung soát xét, ghi chú nội bộ. Chỉ tài liệu
+`co_hieu_luc`/`het_hieu_luc` mới công khai — bản nháp/đang luân chuyển trả 403 kèm thông báo
+trung tính.
+
+**Bản thay thế**: tài liệu hết hiệu lực hiện banner đỏ + thẻ dẫn sang bản đang có hiệu lực. Tra 2
+đường vì soát xét cho phép đổi mã: theo `ma_tai_lieu_moi || ma_tai_lieu`, rồi theo
+`ma_tai_lieu_cu` của bản mới. Dùng 2 truy vấn `.eq()` rời thay `.or(...)` — chuỗi filter PostgREST
+tự tách bằng dấu phẩy nên mã tài liệu chứa ký tự lạ có thể làm hỏng câu lệnh.
+
+Không cần migration: `restamp-pdf` vốn **ghi đè** `file_signed_pdf_url` bằng bản đã đóng dấu ⇒ QR
+cũ tự nhiên quét ra đúng bản mới nhất.
+
+**Đã kiểm chứng trên dữ liệu ISO THẬT** (102 tài liệu: 71 có hiệu lực, 29 hết hiệu lực, 2 chưa ban
+hành): **29/29** tài liệu hết hiệu lực đều tra ra đúng bản thay thế (0 trường hợp không tìm thấy);
+tài liệu `cho_phe_duyet` bị từ chối đúng; 0 tài liệu công khai nào thiếu file.
+
+Thêm link "Là nhân viên nội bộ? Đăng nhập" ở chân trang công khai — lối thoát cho nhân viên bị
+rơi vào đây do phiên hết hạn giữa chừng, nếu không họ mắc kẹt và phải tự gõ `/login`.
+
+### Trả lời câu hỏi: ISO có màn "cài đặt vị trí ký" không?
+
+**KHÔNG có.** ISO dùng hệ ký RIÊNG (`api/sign/generate-pdf`), không phải hệ ký dùng chung
+`src/lib/signing/`. Mỗi người ký phải **tự kéo-thả lại** vị trí chữ ký MỖI LẦN ký, bắt đầu từ toạ
+độ mặc định hard-code (100,100). Bộ tài liệu cha + 18 hồ sơ con = **19 lần kéo-thả liên tiếp** cho
+1 lượt phê duyệt.
+
+Đồng ý là nên có (Văn bản nội bộ đã có: `/dashboard/ky/mau-vi-tri` + bảng `mau_vi_tri`). **Chưa
+làm theo đúng phạm vi đã chốt.** 3 coupling cứng với Văn bản phải gỡ trước:
+
+1. `dashboard/ky/mau-vi-tri/page.tsx:538-543` query thẳng `.from("van_ban_documents")`.
+2. `api/signing/templates/route.ts:82` gate bằng `documents.create` ⇒ người chỉ có quyền `iso.*`
+   bị 403.
+3. Từ vựng vai trò cố định `ky_buoc | phe_duyet | qr | ngay_ky | ghi_chu` — ISO là
+   `soan_thao → xem_xet → phe_duyet`, cần ánh xạ.
+4. `mau_vi_tri` **không có cột `modun`**, unique chỉ `(factory_id, loai_tai_lieu, phien_ban)`.
+   Hiện 2 tập mã rời nhau (Văn bản BB/BC/CV/DN/KH/TB/TTR/VB — ISO CS/F/HD/MT/OB/PL/QC/QT/QĐ/ST/TC)
+   nên **chưa va chạm**, nhưng namespace phẳng không có bảo vệ ⇒ nên thêm cột `modun` hoặc prefix
+   `iso:QT` khi tích hợp.
+
+### CHƯA test tay — cần làm sau khi deploy
+
+1. **Nút Tải** (4 chỗ ở trang chi tiết ISO): bấm phải **tải thẳng về máy**, tên file tiếng Việt
+   có dấu đúng, không mở tab.
+2. **Con dấu hết hiệu lực**: soát xét 1 tài liệu PDF → mở bản cũ, đo khung đỏ đúng 38×13mm, chữ
+   nằm gọn trong khung, không đè nội dung. Làm thêm 1 tài liệu **DOCX** → mở bằng Word thật xác
+   nhận file **không báo hỏng** và khung đúng kích thước.
+3. **QR công khai**: trình duyệt ẩn danh dán URL QR ⇒ ra `/iso-doc/{id}` đúng trạng thái; tài liệu
+   hết hiệu lực ⇒ banner đỏ + thẻ bản thay thế bấm được; **đăng nhập rồi mở cùng URL ⇒ vẫn vào
+   dashboard đầy đủ** (đây là mục dễ hỏng nhất, phải thử kỹ); tài liệu chưa ban hành ⇒ thông báo
+   403 trung tính.
+4. **Không hồi quy đăng nhập**: đăng xuất ở 1 trang dashboard bất kỳ KHÁC ⇒ vẫn về `/login` như
+   cũ (không bị đưa nhầm sang `/iso-doc`).
+5. 2 mục còn treo của Giai đoạn 2 (bấm con dấu mở trang xác thực; mở bằng Acrobat thật) — chỉ xác
+   minh được sau deploy.
