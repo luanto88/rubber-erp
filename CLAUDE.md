@@ -7026,3 +7026,93 @@ Khác biệt nhỏ có chủ đích: dùng `current_profile_factory_id()`/`curre
 3 chỗ (`iso/documents/page.tsx` ×2 gồm cả hồ sơ con, `iso/forms/page.tsx`) vẫn dùng
 `<a download>` cross-origin (bị trình duyệt bỏ qua ⇒ chỉ mở tab). Đổi sang
 `buildStorageDownloadUrl()`, tên file giữ dấu tiếng Việt.
+
+## Cập nhật (2026-09-08, tiếp) — Giai đoạn 1 đã deploy; Giai đoạn 2 (PAdES ISO + trang xác thực) đã code xong
+
+**Giai đoạn 1 đã commit + push** (`775a6a7`, gộp chung việc trang chủ/đa ngữ theo yêu cầu) ⇒
+production hết 4 lỗ hổng. Migration `20260908_iso_form_instances_rls_hardening.sql` đã chạy,
+người dùng đã test tay pass (ký tài liệu / ký hồ sơ / soát xét, không hồi quy).
+
+### Giai đoạn 2 — 1 niêm phong PAdES lúc phê duyệt
+
+**Không cần migration** (`doc_approval_log` đã có sẵn `pades_sig_index`/`pades_error` từ
+`20260905`; đã xác nhận bằng truy vấn thật: 2 cột này TỒN TẠI trên DB, không rơi vào nhánh
+fallback).
+
+`src/lib/signing/verify-link.ts` (mới) — tách `addVerifyLinkAnnotations` từ
+`api/documents/sign/route.ts` (trước là hàm private) để **không còn 2 bản logic**, cộng
+`sealPdfWithVerifyLink(bytes, targets, url, signerName, email)` cho caller chỉ có bytes.
+Module Văn bản giữ nguyên hành vi, chỉ đổi sang import từ lib (nó vẫn dùng
+`addVerifyLinkAnnotations` trên `pdfDoc` sống — **không** được chuyển sang
+`sealPdfWithVerifyLink` vì load lại sẽ tái tạo đúng bug 74.8MB đã ghi trong `pades.ts`).
+
+`api/sign/generate-pdf/route.ts`: sau `finalDoc.save()`, sinh `logId = randomUUID()` **trước**
+khi ký (link annotation phải nằm trong phần được PAdES ký), phủ link lên **mọi** ô con dấu rồi
+niêm phong. Dòng `doc_approval_log` giờ ghi `id: logId` + `pades_sig_index`/`pades_error`, có
+fallback insert bộ cột cũ nếu migration chưa chạy.
+
+⚠️ **Điều kiện niêm phong: `action === "phe_duyet" && signFileKind === "main"`.**
+- Không niêm phong ở bước soạn thảo/xem xét: route dựng lại file từ `file_goc_url` mỗi lượt rồi
+  `create()+copyPages()+save()` — thao tác phẳng hoá file, **xoá sạch chữ ký của lượt trước**.
+- Không niêm phong file phụ soát xét: chúng lưu ở **cột URL khác**, trong khi trang xác thực tra
+  theo `doc_id` rồi tải `file_signed_pdf_url` ⇒ dòng log của file phụ sẽ trỏ nhầm sang file chính.
+- File dựng lại từ đầu ⇒ luôn đúng 1 chữ ký ⇒ `pades_sig_index` luôn = 0.
+
+### Trang xác thực dùng chung (Văn bản + ISO)
+
+`api/documents/verify/[logId]` nhận thêm `doc_type = "iso"` (tra `iso_documents`), trả thêm
+`docType` + `severity`. Field đổi tên trung tính: `maVanBan`/`tenVanBan`/`trangThaiVanBan` →
+`maTaiLieu`/`tenTaiLieu`/`trangThai`.
+
+⚠️ **Giữ nguyên đường dẫn `/van-ban-verify/[logId]` dù đã dùng cho ISO** — link này đã được IN
+VÀO các file PDF đã ký từ trước, không đổi lại được.
+
+**3 mức `severity` (tính ở server, client chỉ render):**
+
+| Tình huống | severity | Màu |
+|---|---|---|
+| Chữ ký khớp | `ok` | Xanh |
+| ISO `het_hieu_luc` + chữ ký không khớp | `warn` | **Vàng, trung tính** |
+| Còn lại (kể cả `co_hieu_luc` + không khớp) | `error` | Đỏ |
+
+Nhánh `warn` là BẮT BUỘC: `restamp-pdf` ghi đè `file_signed_pdf_url` bằng bản đóng dấu "Hết hiệu
+lực" ⇒ chữ ký bản ban hành chắc chắn hỏng. Thiếu nhánh này thì **mọi** tài liệu hết hiệu lực sẽ
+hiện cảnh báo đỏ "file bị sửa" và gây hoảng khi đánh giá ISO.
+
+### Đã tự kiểm chứng (không chỉ tin code tự đánh giá chính nó)
+
+`npx tsc --noEmit` + `npx eslint` sạch (0 lỗi, 0 warning mới).
+
+1. **9/9 assertion** gọi THẲNG code thật (`sealPdfWithVerifyLink` + `verifyPadesSignature`) trên
+   PDF dựng theo đúng chuỗi `create()+copyPages()+save()` của route: đúng 1 chữ ký, giữ nguyên số
+   trang, link phủ đủ 2 trang và trỏ đúng URL, tên có dấu tiếng Việt đọc đúng, RSA-2048+SHA-256,
+   index sai bị từ chối, sửa 1 byte → phát hiện ngay.
+2. **OpenSSL (công cụ ngoài, độc lập)**: `cms -verify -binary -CAfile <root>` → `CMS Verification
+   successful`; bỏ `-CAfile` → đúng lỗi `self-signed certificate in certificate chain` (tương
+   đương "UNKNOWN" trong Acrobat khi chưa import root CA). `pkcs7 -print_certs` cho
+   `CN=Nguyễn Văn Phê Duyệt` (dấu tiếng Việt đúng) và chain trỏ `CN=Rubber ERP Internal Root CA`.
+3. **API thật qua dev server, dữ liệu ISO thật**: tài liệu `het_hieu_luc` (NMCB-QT01-F11) →
+   `severity: warn`; tài liệu `co_hieu_luc` (QLCL-QT03) → `severity: error`; văn bản nội bộ
+   (16/BC-NMCB) vẫn `valid: true, severity: ok` — **không hồi quy**; trang HTML trả 200.
+
+⚠️ Khi viết script test tương tự: **KHÔNG grep chuỗi URL trong raw bytes PDF** để kiểm tra link —
+`@cantoo/pdf-lib` nén annotation vào object stream, phải load lại bằng chính thư viện đó rồi đọc
+dict. Và **không** tamper bằng `indexOf("chữ trong trang")` — nội dung trang nằm trong stream đã
+nén FlateDecode; phải sửa byte trong vùng `ByteRange`.
+
+### CHƯA test tay — cần làm trước khi coi Giai đoạn 2 là xong
+
+1. Phê duyệt 1 tài liệu ISO **PDF** thật qua UI ⇒ tải file cuối ⇒ `openssl cms -verify -binary
+   -CAfile public/rubber-erp-signing-root-ca.pem` phải thành công.
+2. Mở file bằng **Adobe Acrobat Reader thật** ⇒ có panel chữ ký, đúng tên người phê duyệt.
+3. Bấm vào con dấu trong PDF ⇒ mở đúng `/van-ban-verify/{logId}` ⇒ "Chữ ký hợp lệ".
+4. `SELECT pades_sig_index, pades_error FROM doc_approval_log WHERE doc_type='iso' ORDER BY
+   created_at DESC LIMIT 5` ⇒ dòng `generate_pdf` mới có `pades_sig_index = 0`.
+5. Ký bước **soạn thảo/xem xét** (chưa phê duyệt) ⇒ xác nhận **không** nhúng PAdES, luồng không đổi.
+6. Soát xét bản mới → phê duyệt → bản cũ bị `restamp-pdf` đóng dấu ⇒ mở trang xác thực của bản cũ
+   ⇒ phải hiện **vàng trung tính**, KHÔNG phải cảnh báo đỏ.
+7. Ký 1 **văn bản nội bộ** bình thường ⇒ không hồi quy sau khi tách `addVerifyLinkAnnotations`.
+
+### Giai đoạn 3 (trang công khai cho QR) — CHƯA làm, đúng phạm vi đã chốt
+
+Cũng chưa đụng: mẫu vị trí ký cho ISO (nỗi đau 19 file/lượt) và nhánh Thực hiện hồ sơ ISO.

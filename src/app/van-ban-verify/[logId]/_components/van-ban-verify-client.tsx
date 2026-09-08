@@ -1,21 +1,28 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react"
 
 // Mirror src/app/sign-verify/[nguoiKyId]/_components/sign-verify-client.tsx (hệ ký dùng chung).
-// Bản riêng cho Văn bản nội bộ vì module này dùng hệ ký RIÊNG, định danh chữ ký theo dòng
-// `doc_approval_log` chứ không phải bản ghi `nguoi_ky`, và hiển thị thêm mã/tên văn bản.
+// Bản riêng DÙNG CHUNG cho Văn bản nội bộ + ISO: cả hai module này dùng hệ ký RIÊNG, định danh
+// chữ ký theo dòng `doc_approval_log` chứ không phải bản ghi `nguoi_ky`.
+//
+// ⚠️ Giữ nguyên đường dẫn `/van-ban-verify/...` kể cả cho ISO — link đã được in vào các file PDF
+// đã ký từ trước, không đổi lại được.
+
+type Severity = "ok" | "warn" | "error"
 
 type VerifyResponse = {
+  docType: "van_ban" | "iso"
   signerName: string
   buoc: string
   kyLuc: string | null
-  maVanBan: string | null
-  tenVanBan: string | null
-  trangThaiVanBan: string | null
+  maTaiLieu: string | null
+  tenTaiLieu: string | null
+  trangThai: string | null
   contentHash: string | null
   valid: boolean
+  severity: Severity
   reason?: string
   error?: string
   // Chỉ có khi valid === true — xem verifyPadesSignature() trong src/lib/signing/verify-pades.ts
@@ -26,12 +33,29 @@ type VerifyResponse = {
   digestAlgorithm?: string
 }
 
-const TRANG_THAI_LABEL: Record<string, string> = {
-  draft: "Nháp",
-  cho_ky_phong_ban: "Chờ ký",
-  cho_phe_duyet: "Chờ phê duyệt",
-  da_phe_duyet: "Đã phê duyệt",
-  tra_ve: "Trả về",
+const TRANG_THAI_LABEL: Record<string, Record<string, string>> = {
+  van_ban: {
+    draft: "Nháp",
+    cho_ky_phong_ban: "Chờ ký",
+    cho_phe_duyet: "Chờ phê duyệt",
+    da_phe_duyet: "Đã phê duyệt",
+    tra_ve: "Trả về",
+  },
+  iso: {
+    draft: "Nháp",
+    cho_xem_xet: "Chờ xem xét",
+    cho_phe_duyet: "Chờ phê duyệt",
+    co_hieu_luc: "Có hiệu lực",
+    het_hieu_luc: "Hết hiệu lực",
+    tra_ve: "Trả về",
+    bi_tu_choi_phe_duyet: "Phê duyệt từ chối",
+  },
+}
+
+const SEVERITY_STYLE: Record<Severity, { box: string; title: string; text: string }> = {
+  ok: { box: "bg-emerald-50", title: "text-emerald-700", text: "text-emerald-600" },
+  warn: { box: "bg-amber-50", title: "text-amber-700", text: "text-amber-700" },
+  error: { box: "bg-red-50", title: "text-red-700", text: "text-red-600" },
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -85,35 +109,54 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
     )
   }
 
+  const isIso = data.docType === "iso"
+  // Tài liệu cũ (trước khi API trả `severity`) vẫn hiển thị đúng nhờ suy từ `valid`.
+  const severity: Severity = data.severity ?? (data.valid ? "ok" : "error")
+  const style = SEVERITY_STYLE[severity]
+
+  const title =
+    severity === "ok"
+      ? "Chữ ký hợp lệ"
+      : severity === "warn"
+        ? "Tài liệu đã hết hiệu lực"
+        : "Không xác minh được"
+
+  // Nhánh "warn" chỉ phát sinh với ISO hết hiệu lực: bản ban hành đã bị đóng dấu lại nên chữ ký số
+  // không còn nguyên vẹn — là quy trình bình thường, KHÔNG phải dấu hiệu file bị sửa trái phép.
+  const message =
+    severity === "warn"
+      ? "Tài liệu này đã hết hiệu lực và được đóng dấu lại, nên chữ ký số của bản ban hành không còn nguyên vẹn — đây là điều bình thường, không phải dấu hiệu file bị can thiệp."
+      : data.reason
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
-      <div className={`p-6 flex items-center gap-3 ${data.valid ? "bg-emerald-50" : "bg-red-50"}`}>
-        {data.valid ? (
+      <div className={`p-6 flex items-center gap-3 ${style.box}`}>
+        {severity === "ok" ? (
           <CheckCircle2 size={32} className="text-emerald-600 shrink-0" />
+        ) : severity === "warn" ? (
+          <AlertTriangle size={32} className="text-amber-500 shrink-0" />
         ) : (
           <XCircle size={32} className="text-red-600 shrink-0" />
         )}
         <div>
-          <p className={`text-lg font-extrabold ${data.valid ? "text-emerald-700" : "text-red-700"}`}>
-            {data.valid ? "Chữ ký hợp lệ" : "Không xác minh được"}
-          </p>
-          {!data.valid && data.reason && <p className="text-sm text-red-600 mt-0.5">{data.reason}</p>}
+          <p className={`text-lg font-extrabold ${style.title}`}>{title}</p>
+          {message && <p className={`text-sm mt-0.5 ${style.text}`}>{message}</p>}
         </div>
       </div>
 
       <div className="p-6 space-y-3 text-sm">
-        {data.maVanBan && <Row label="Số/Mã văn bản" value={data.maVanBan} />}
-        {data.tenVanBan && <Row label="Trích yếu" value={data.tenVanBan} />}
+        {data.maTaiLieu && <Row label={isIso ? "Mã tài liệu" : "Số/Mã văn bản"} value={data.maTaiLieu} />}
+        {data.tenTaiLieu && <Row label={isIso ? "Tên tài liệu" : "Trích yếu"} value={data.tenTaiLieu} />}
         <Row label="Bước ký" value={data.buoc} />
         <Row label="Người ký" value={data.signerName} />
         <Row
           label="Thời gian ký"
           value={data.kyLuc ? new Date(data.kyLuc).toLocaleString("vi-VN") : "—"}
         />
-        {data.trangThaiVanBan && (
+        {data.trangThai && (
           <Row
-            label="Trạng thái văn bản"
-            value={TRANG_THAI_LABEL[data.trangThaiVanBan] || data.trangThaiVanBan}
+            label={isIso ? "Trạng thái tài liệu" : "Trạng thái văn bản"}
+            value={TRANG_THAI_LABEL[data.docType]?.[data.trangThai] || data.trangThai}
           />
         )}
       </div>

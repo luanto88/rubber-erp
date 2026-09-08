@@ -6,10 +6,13 @@ import QRCode from "qrcode"
 import fontkit from "@pdf-lib/fontkit"
 import fs from "fs"
 import path from "path"
+import { randomUUID } from "crypto"
 import { computeIntegrityHash } from "@/lib/signing/hash"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import { loadSignerNameFont, computeNameSlot, ISO_SIGNER_NAME_STYLE } from "@/lib/signing/stamp-pdf"
 import { authorizeIsoSignRequest } from "@/app/api/sign/_lib/iso-sign-auth"
+import { hasPadesRootCa } from "@/lib/signing/pades"
+import { sealPdfWithVerifyLink, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -1188,7 +1191,7 @@ export async function POST(req: NextRequest) {
 
     const { data: profileData } = await supabaseAdmin
       .from("profiles")
-      .select("factory_id")
+      .select("factory_id, auth_email")
       .eq("id", userId)
       .single()
     const factoryId = profileData?.factory_id ?? ""
@@ -1807,7 +1810,85 @@ export async function POST(req: NextRequest) {
     const copiedOriginalPages = await finalDoc.copyPages(originalPages, originalPages.getPageIndices())
     copiedOriginalPages.forEach((copiedPage) => finalDoc.addPage(copiedPage))
 
-    const signedPdfBytes = await finalDoc.save()
+    let signedPdfBytes: Buffer = Buffer.from(await finalDoc.save())
+
+    // ── Niêm phong chữ ký số PAdES (Giai đoạn 2, 2026-09-08) ──
+    // Sinh sẵn id dòng nhật ký TRƯỚC khi ký: link "xem bằng chứng xác minh" phủ trên con dấu phải
+    // trỏ đúng trang xác thực, mà annotation đó lại phải nằm trong phần nội dung được PAdES ký —
+    // không thể chờ insert log xong mới biết id.
+    const logId = randomUUID()
+    let padesSigIndex: number | null = null
+    let padesError: string | null = null
+
+    // CHỈ niêm phong ở bước PHÊ DUYỆT của FILE CHÍNH — 1 niêm phong duy nhất cho cả tài liệu:
+    //  - Route này dựng lại file từ `file_goc_url` và vẽ lại chữ ký của cả 3 bước mỗi lượt ký,
+    //    kết thúc bằng `create()` + `copyPages()` + `save()` — thao tác phẳng hoá file, xoá sạch
+    //    mọi annotation/chữ ký số của lượt trước. Nhúng ở bước soạn thảo/xem xét là vô nghĩa vì
+    //    lượt sau sẽ xoá mất, đồng thời làm người xác thực hiểu nhầm chữ ký "biến mất".
+    //  - File phụ soát xét (Phiếu yêu cầu thay đổi / Đề nghị soát xét) là tài liệu bổ trợ, không
+    //    phải bản có hiệu lực. Quan trọng hơn: chúng lưu ở CỘT URL KHÁC, trong khi trang xác thực
+    //    tra theo `doc_id` rồi tải `file_signed_pdf_url` — niêm phong file phụ sẽ tạo dòng log
+    //    trỏ nhầm sang file chính khi xác thực.
+    const shouldSealPades = action === "phe_duyet" && signFileKind === "main"
+
+    if (shouldSealPades) {
+      if (!hasPadesRootCa()) {
+        padesError =
+          "Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM / SIGN_PADES_ROOT_CA_KEY_PEM trên môi trường này"
+      } else {
+        try {
+          // Phủ link lên MỌI ô con dấu có trên file (cả 3 bước ký + các khung nhân bản) — file chỉ
+          // có đúng 1 niêm phong nên bấm vào chữ ký nào cũng dẫn tới cùng trang xác thực.
+          const linkTargets: VerifyLinkTarget[] = []
+          const pageCount = finalDoc.getPageCount()
+          for (const { signerUserId, placement } of allPlacements) {
+            if (!signerUserId || !placement) continue
+            const idx = placement.page - 1
+            if (idx >= 0 && idx < pageCount) {
+              linkTargets.push({
+                pageIndex: idx,
+                x: placement.x,
+                y: placement.y,
+                width: placement.width,
+                height: placement.height,
+              })
+            }
+            for (const extra of placement.extraPlacements ?? []) {
+              const extraIdx = (extra.page ?? 1) - 1
+              if (extraIdx >= 0 && extraIdx < pageCount) {
+                linkTargets.push({
+                  pageIndex: extraIdx,
+                  x: extra.x,
+                  y: extra.y,
+                  width: extra.width,
+                  height: extra.height,
+                })
+              }
+            }
+          }
+
+          // Tên trên chứng thư = người phê duyệt (người đang gọi route ở bước này).
+          // Email: dùng ĐÚNG email nội bộ dạng `username@auth...` (chắc chắn ASCII, hợp chuẩn
+          // IA5String của attribute `emailAddress`) — không đưa mã/tên tài liệu có dấu tiếng Việt
+          // vào chứng thư, xem cảnh báo trong `issueLeafCertificate` của pades.ts.
+          const sealSignerName = signerNames.get(userId)?.trim() || "Nguoi phe duyet"
+          signedPdfBytes = await sealPdfWithVerifyLink(
+            signedPdfBytes,
+            linkTargets,
+            `${APP_URL}/van-ban-verify/${logId}`,
+            sealSignerName,
+            (profileData?.auth_email as string) || "",
+          )
+          // File được dựng lại từ đầu mỗi lượt ⇒ luôn có đúng 1 chữ ký PAdES, index luôn là 0.
+          padesSigIndex = 0
+        } catch (err) {
+          // Best-effort tuyệt đối: mất lớp chữ ký số KHÔNG được chặn luồng phê duyệt nghiệp vụ.
+          padesSigIndex = null
+          padesError = err instanceof Error ? err.message : "Lỗi không xác định khi nhúng chữ ký số"
+        }
+      }
+    }
+
     // Vá bảo mật 2026-08-27 (Giai đoạn 0 mục 2): hash tính NGAY sau khi ký, TRƯỚC khi upload —
     // chứng minh nội dung file lúc lưu vào doc_approval_log khớp đúng file thật đã ký, không
     // phải file có thể bị thay đổi giữa lúc ký và lúc audit.
@@ -1847,7 +1928,11 @@ export async function POST(req: NextRequest) {
     }
     console.log("[generate-pdf] DB update OK - docId:", docId)
 
-    await supabaseAdmin.from("doc_approval_log").insert({
+    // `doc_approval_log` là bảng BẤT BIẾN (trigger chặn UPDATE/DELETE) — phải ghi đủ giá trị ngay
+    // lần insert duy nhất này, kể cả `pades_sig_index`. Id sinh sẵn ở trên để link xác thực phủ
+    // trên con dấu trỏ đúng dòng log này.
+    const baseLogRow = {
+      id: logId,
       factory_id: factoryId,
       doc_id: docId,
       doc_type: docType,
@@ -1856,7 +1941,16 @@ export async function POST(req: NextRequest) {
       content_hash: signedContentHash,
       ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
       user_agent: req.headers.get("user-agent") || "",
-    })
+    }
+    const { error: logErr } = await supabaseAdmin
+      .from("doc_approval_log")
+      .insert({ ...baseLogRow, pades_sig_index: padesSigIndex, pades_error: padesError })
+    if (logErr) {
+      // Migration 20260905 chưa chạy → 2 cột mới chưa tồn tại, PostgREST từ chối cả câu insert.
+      // Vẫn phải giữ dòng nhật ký + hash toàn vẹn (đã có từ Giai đoạn 0), chỉ mất phần chỉ số
+      // chữ ký số — nếu không sẽ mất trắng audit trail của lượt ký này.
+      await supabaseAdmin.from("doc_approval_log").insert(baseLogRow)
+    }
 
     const bodySignaturesEmbedded = allPlacements.filter((entry) => entry.signerUserId && entry.placement).length
     const signerNameResolved = allPlacements

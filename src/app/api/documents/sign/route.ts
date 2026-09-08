@@ -7,7 +7,7 @@ import { SIGN_AS_OPTIONS, stepSignerUserId, type ThuTuKyStep, type SignAsType } 
 // xoá khi người sau đóng dấu tiếp. Type của các helper vẽ dùng chung (`stamp-pdf.ts`,
 // `apply-template.ts`) vẫn khai theo `pdf-lib` gốc vì còn dùng chung với ISO → ép kiểu tại chỗ
 // gọi, đúng cách `src/lib/signing/requests.ts` đang làm cho hệ ký dùng chung.
-import { PDFDocument, PDFArray, PDFName, PDFNumber, PDFString } from "@cantoo/pdf-lib"
+import { PDFDocument } from "@cantoo/pdf-lib"
 import type { PDFDocument as PdfLibDocument } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import JSZip from "jszip"
@@ -15,6 +15,9 @@ import QRCode from "qrcode"
 import { randomUUID } from "crypto"
 import { computeIntegrityHash } from "@/lib/signing/hash"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "@/lib/signing/pades"
+// Link "xem bằng chứng xác minh" dùng chung với module ISO (tách ra lib 2026-09-08) — trước đây
+// là hàm private của chính file này.
+import { addVerifyLinkAnnotations, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 import { formatFactoryDateTimeVN, formatFactoryDateVN, getFactoryTodayISO } from "@/lib/date-utils"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import {
@@ -515,9 +518,6 @@ async function stampPdfStep(
   }
 }
 
-/** Rect khung chữ ký (point, gốc dưới-trái) + trang chứa nó — nơi phủ link "xem bằng chứng". */
-type VerifyLinkTarget = { pageIndex: number; x: number; y: number; width: number; height: number }
-
 /**
  * Quyết định lượt ký này có nhúng chữ ký PAdES hay không.
  *
@@ -560,39 +560,6 @@ async function resolvePadesEligibility(
     }
   }
   return { eligible: true, nextIndex: withPades }
-}
-
-/**
- * Phủ link annotation lên đúng ô con dấu — bấm vào (Acrobat/Chrome/mọi trình xem hỗ trợ link)
- * mở trang xác thực chữ ký PAdES của chính bước đó. Vẽ trong CÙNG lượt incremental-update với
- * con dấu, mirror kỹ thuật append-vào-Annots của `addSignaturePlaceholderToDoc` (pades.ts).
- */
-function addVerifyLinkAnnotations(pdfDoc: PDFDocument, targets: VerifyLinkTarget[], url: string): void {
-  const pages = pdfDoc.getPages()
-  for (const t of targets) {
-    const page = pages[t.pageIndex]
-    if (!page) continue
-    try {
-      const rect = PDFArray.withContext(pdfDoc.context)
-      ;[t.x, t.y, t.x + t.width, t.y + t.height].forEach((c) => rect.push(PDFNumber.of(c)))
-      const linkDict = pdfDoc.context.obj({
-        Type: "Annot",
-        Subtype: "Link",
-        Rect: rect,
-        Border: [0, 0, 0],
-        A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
-      })
-      const linkRef = pdfDoc.context.register(linkDict)
-      let annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray)
-      if (typeof annots === "undefined") {
-        annots = pdfDoc.context.obj([])
-        page.node.set(PDFName.of("Annots"), annots)
-      }
-      annots.push(linkRef)
-    } catch {
-      /* thêm link thất bại không được chặn luồng ký chính */
-    }
-  }
 }
 
 async function performFileStamp(
