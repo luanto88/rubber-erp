@@ -1847,10 +1847,19 @@ export default function IsoDocumentDetailPage() {
       // Cập nhật artifact tài liệu cũ bị hủy hiệu lực
       if (invalidatedIds.length > 0) {
         try {
+          // Route restamp-pdf nay yêu cầu Bearer token (vá bảo mật 2026-09-08) — thiếu
+          // header này là hỏng ngay bước đóng dấu "Hết hiệu lực" bản cũ.
+          const restampToken = (await getFreshAuthSession())?.access_token
+          if (!restampToken) {
+            throw new Error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
+          }
           const invalidationRes = await fetch("/api/sign/restamp-pdf", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ docIds: invalidatedIds, factoryId }),
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${restampToken}`,
+            },
+            body: JSON.stringify({ docIds: invalidatedIds }),
           })
           const invalidationJson = await invalidationRes.json()
           if (!invalidationJson.ok) {

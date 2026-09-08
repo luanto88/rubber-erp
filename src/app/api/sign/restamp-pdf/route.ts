@@ -8,6 +8,7 @@ import path from "path"
 import { pathToFileURL } from "url"
 import JSZip from "jszip"
 import ExcelJS from "exceljs"
+import { requireAuthUser, assertAccountActive } from "@/app/api/account/_lib/security"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -53,6 +54,33 @@ const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
+
+// Quyền phê duyệt ISO của người gọi. Cộng gộp 2 nguồn cấp quyền giống hệt
+// `fetchPermissionCodesForUser()` phía client và các route `dept-users`/`profiles-by-permission`:
+// cấp tường minh cho user (`user_permissions.granted = true`) HOẶC cấp theo vai trò
+// (`role_permissions`). Chấp nhận cả `iso.soat_xet` để tương thích dữ liệu phân quyền cũ,
+// đúng như UI đang làm với `canXemXet`.
+const ISO_APPROVE_PERMISSION_CODES = ["iso.phe_duyet", "iso.soat_xet", "iso.xem_xet"]
+
+async function hasIsoApprovePermission(userId: string, role: string): Promise<boolean> {
+  const [directRes, roleRes] = await Promise.all([
+    supabaseAdmin
+      .from("user_permissions")
+      .select("permission_code")
+      .eq("user_id", userId)
+      .eq("granted", true)
+      .in("permission_code", ISO_APPROVE_PERMISSION_CODES),
+    role
+      ? supabaseAdmin
+          .from("role_permissions")
+          .select("permission_code")
+          .eq("role", role)
+          .in("permission_code", ISO_APPROVE_PERMISSION_CODES)
+      : Promise.resolve({ data: [] as { permission_code: string }[] }),
+  ])
+
+  return (directRes.data?.length || 0) > 0 || (roleRes.data?.length || 0) > 0
+}
 
 type InvalidatedDoc = {
   id: string
@@ -503,11 +531,41 @@ function buildOfficeUpdatePayload(doc: InvalidatedDoc, publicUrl: string, ext: s
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { docIds, factoryId }: { docIds: string[]; factoryId: string } = body
+    // Vá bảo mật 2026-09-08: route này TRƯỚC ĐÂY KHÔNG XÁC THỰC GÌ CẢ — chỉ nhận
+    // `{docIds, factoryId}` rồi ghi đè `file_signed_pdf_url`/`file_goc_url` của các tài liệu
+    // đó bằng bản đóng dấu "Hết hiệu lực". Bất kỳ ai biết URL đều có thể vô hiệu hoá hình ảnh
+    // tài liệu ISO của bất kỳ nhà máy nào chỉ bằng cách đoán/lấy được cặp id.
+    const authUser = await requireAuthUser(req)
+    await assertAccountActive(authUser.id)
 
-    if (!docIds || !Array.isArray(docIds) || docIds.length === 0 || !factoryId) {
+    const body = await req.json()
+    const { docIds }: { docIds: string[] } = body
+
+    if (!docIds || !Array.isArray(docIds) || docIds.length === 0) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
+    }
+
+    // KHÔNG tin `factoryId` do client gửi lên — luôn lấy từ hồ sơ của chính người gọi.
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("factory_id, role")
+      .eq("id", authUser.id)
+      .single()
+    const factoryId = (profile?.factory_id as string | undefined) || ""
+    if (!factoryId) {
+      return NextResponse.json({ error: "Không xác định được nhà máy" }, { status: 400 })
+    }
+
+    // Đóng dấu hết hiệu lực chỉ xảy ra như một phần của việc phê duyệt bản soát xét mới,
+    // nên yêu cầu đúng quyền phê duyệt ISO (hoặc admin).
+    const allowed =
+      profile?.role === "admin" ||
+      (await hasIsoApprovePermission(authUser.id, (profile?.role as string) || ""))
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "Bạn không có quyền đóng dấu hết hiệu lực tài liệu ISO" },
+        { status: 403 },
+      )
     }
 
     const { data: docs, error: docsErr } = await supabaseAdmin

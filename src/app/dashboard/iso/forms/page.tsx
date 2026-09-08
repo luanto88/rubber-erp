@@ -14,6 +14,7 @@ import { ModalShell } from "../../_components/modal-shell"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
@@ -683,7 +684,12 @@ export default function IsoFormsPage() {
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {(() => {
-                          const downloadUrl = inst.final_pdf_url || inst.final_office_url || inst.soan_thao_signed_url || inst.draft_file_url
+                          // `<a download>` bị bỏ qua khi khác origin — dùng `?download=` của
+                          // Supabase Storage (xem lib/storage-download.ts).
+                          const downloadUrl = buildStorageDownloadUrl(
+                            inst.final_pdf_url || inst.final_office_url || inst.soan_thao_signed_url || inst.draft_file_url,
+                            inst.tieu_de || "Hồ sơ ISO",
+                          )
                           return (
                             <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                               <button

@@ -25,6 +25,7 @@ import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 
 export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -382,7 +383,12 @@ export default function IsoDocumentsPage() {
                         const isAdmin = userRole === "admin"
                         const canEditDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
                         const canDeleteDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
-                        const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+                        // `<a download>` bị bỏ qua khi khác origin (file nằm trên Supabase
+                        // Storage) — phải dùng `?download=` của Storage, xem storage-download.ts.
+                        const downloadUrl = buildStorageDownloadUrl(
+                          doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
+                          `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim(),
+                        )
                         return (
                           <div className="inline-flex items-center gap-1">
                             <Link
@@ -469,7 +475,10 @@ export default function IsoDocumentsPage() {
                           const isAdmin = userRole === "admin"
                           const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
                           const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                          const childDownloadUrl = child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
+                          const childDownloadUrl = buildStorageDownloadUrl(
+                            child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url,
+                            `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim(),
+                          )
                           return (
                             <div className="inline-flex items-center gap-1">
                               <Link

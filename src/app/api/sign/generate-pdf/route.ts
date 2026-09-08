@@ -9,6 +9,7 @@ import path from "path"
 import { computeIntegrityHash } from "@/lib/signing/hash"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import { loadSignerNameFont, computeNameSlot, ISO_SIGNER_NAME_STYLE } from "@/lib/signing/stamp-pdf"
+import { authorizeIsoSignRequest } from "@/app/api/sign/_lib/iso-sign-auth"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -665,20 +666,10 @@ async function openPdfjsDocument(pdfBytes: ArrayBuffer) {
   }
 }
 
-function getCurrentSignerKey(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): string | null {
-  if (action === "gui_xem_xet") return "soan_thao_placement"
-  if (action === "gui_lai_phe_duyet") return "xem_xet_placement"
-  if (action === "gui_phe_duyet") {
-    const capTl = String(doc.cap_tl || "")
-    const hasReviewer = !!doc.xem_xet_user_id
-    return capTl === "Cấp 2" || !hasReviewer ? "soan_thao_placement" : "xem_xet_placement"
-  }
-  if (action === "phe_duyet") return "phe_duyet_placement"
-  if (userId === (doc.soan_thao_user_id as string)) return "soan_thao_placement"
-  if (userId === (doc.xem_xet_user_id as string)) return "xem_xet_placement"
-  if (userId === (doc.phe_duyet_user_id as string)) return "phe_duyet_placement"
-  return null
-}
+// Bước ký (`soan_thao` | `xem_xet` | `phe_duyet`) nay được xác thực tập trung trong
+// `authorizeIsoSignRequest()` — hàm `getCurrentSignerKey()` cũ đã bị xoá vì nó chỉ ánh xạ
+// action -> tên cột placement mà KHÔNG kiểm tra người gọi có đúng là người được giao bước
+// đó hay không (xem lỗ hổng #2 mô tả trong `_lib/iso-sign-auth.ts`).
 
 async function fillMetadataPlaceholders(
   pdfDoc: PDFDocument,
@@ -1181,15 +1172,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
-    let payload: { userId: string; docId: string; docType: string }
+    let payload: Record<string, unknown>
     try {
       const { payload: verifiedPayload } = await jwtVerify(token, JWT_SECRET)
-      payload = verifiedPayload as typeof payload
+      payload = verifiedPayload as Record<string, unknown>
     } catch {
       return NextResponse.json({ error: "Token không hợp lệ hoặc đã hết hạn" }, { status: 401 })
     }
 
-    const { userId } = payload
+    const userId = String(payload.userId || "")
+    if (!userId) {
+      return NextResponse.json({ error: "Token không hợp lệ" }, { status: 401 })
+    }
     const signFileKind: SignFileKind = fileKind ?? "main"
 
     const { data: profileData } = await supabaseAdmin
@@ -1211,6 +1205,23 @@ export async function POST(req: NextRequest) {
     }
 
     const doc = docData as Record<string, unknown>
+
+    // Vá bảo mật 2026-09-08: đối chiếu token với ĐÚNG tài liệu đang đóng dấu (hoặc tài
+    // liệu cùng bộ cha-con) và xác thực người gọi đúng là người được giao bước ký này.
+    // Trước bản vá, route này không kiểm tra gì ngoài chữ ký JWT còn hợp lệ.
+    const signAuth = await authorizeIsoSignRequest({
+      admin: supabaseAdmin,
+      tokenPayload: payload,
+      docId,
+      docType,
+      factoryId,
+      doc,
+      action,
+    })
+    if (!signAuth.ok) {
+      return NextResponse.json({ error: signAuth.error }, { status: signAuth.status })
+    }
+
     const maTl = (doc.ma_tai_lieu as string) || "-"
     const lsStr = normalizeRevisionText(doc.lan_ban_hanh)
     const trangThai = doc.trang_thai as string
@@ -1223,7 +1234,7 @@ export async function POST(req: NextRequest) {
       ? ((doc.ngay_hieu_luc as string) || new Date().toISOString())
       : ((doc.ngay_hieu_luc as string) || "")
     const dateStr = effectiveDate ? fmtDate(effectiveDate) : ""
-    const currentSignerKey = getCurrentSignerKey(doc, userId, action)
+    const currentSignerKey = `${signAuth.step}_placement`
     // Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ có giá trị khi doc đã lưu
     // phe_duyet_sign_as (ghi bởi doTransition ngay trước khi gọi route này khi
     // action === "phe_duyet"). Áp dụng cho MỌI placement có showPrefix === true

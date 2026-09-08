@@ -1,8 +1,8 @@
-﻿"use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+"use client";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Maximize2, ZoomIn } from "lucide-react";
 import {
   type Lang,
   DEFAULT_LANG,
@@ -16,6 +16,7 @@ import {
   storeHomepageLang,
 } from "@/lib/homepage-i18n";
 import { LangSwitcher } from "@/app/_components/lang-switcher";
+import { ImageLightbox, type LightboxItem } from "@/app/_components/image-lightbox";
 
 // ─── Scroll Reveal ────────────────────────────────────────────────────────────
 function useScrollReveal() {
@@ -277,6 +278,7 @@ function OrgNode({ node, depth = 0, color = "emerald" }: {
 export default function LandingPage() {
   const containerRef = useScrollReveal();
   const [lang, setLang] = useState<Lang>(DEFAULT_LANG);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -292,6 +294,46 @@ export default function LandingPage() {
   }, []);
 
   const s = HOME_STRINGS;
+
+  const galleryItems: LightboxItem[] = useMemo(() => [
+    {
+      id: "factory",
+      src: "/images/nha_may.png",
+      alt: s.companyName[lang],
+      title: s.companyName[lang],
+      category: s.lightbox.badgeFactory[lang],
+      desc: s.hero.subtitle[lang],
+    },
+    {
+      id: "product-csr10",
+      src: "/images/banh_mu_khong_nhan.jpg",
+      alt: "CSR 10",
+      title: "CSR 10 — Standard Cambodia Rubber 10",
+      category: s.lightbox.badgeProduct[lang],
+      desc: s.productsSection.banner1Desc[lang],
+    },
+    {
+      id: "production-line",
+      src: "/images/day_chuyen_hien_dai.png",
+      alt: s.productsSection.banner2Title[lang],
+      title: s.productsSection.banner2Title[lang],
+      category: s.lightbox.badgeProductionLine[lang],
+      desc: s.productsSection.banner2Desc[lang],
+    },
+    ...CERTS_I18N.map((c) => ({
+      id: `cert-${c.name}`,
+      src: c.img,
+      alt: c.name,
+      title: c.name,
+      category: s.lightbox.badgeCert[lang],
+      desc: c.desc[lang],
+    })),
+  ], [lang, s]);
+
+  const openLightboxById = useCallback((id: string) => {
+    const idx = galleryItems.findIndex((item) => item.id === id);
+    if (idx !== -1) setLightboxIndex(idx);
+  }, [galleryItems]);
 
   return (
     <div ref={containerRef} className="min-h-screen bg-slate-50">
@@ -338,9 +380,17 @@ export default function LandingPage() {
       <section className="pt-20 px-4 md:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:min-h-[75vh]">
-            <div className="lg:col-span-2 relative h-[360px] sm:h-[420px] lg:h-auto rounded-3xl overflow-hidden group">
+            <div
+              onClick={() => openLightboxById("factory")}
+              className="lg:col-span-2 relative h-[360px] sm:h-[420px] lg:h-auto rounded-3xl overflow-hidden group cursor-zoom-in"
+              title={s.lightbox.clickToZoom[lang]}
+            >
               <Image src="/images/nha_may.png" alt="Nhà máy chế biến cao su Phước Hòa Kampong Thom" fill className="object-cover group-hover:scale-105 transition-transform duration-700" priority />
               <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+              <div className="absolute top-4 right-4 z-10 hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 text-white text-xs font-semibold backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                <Maximize2 size={13} />
+                <span>{s.lightbox.clickToZoom[lang]}</span>
+              </div>
               <div className="absolute inset-x-0 bottom-0 p-6 sm:p-8 md:p-12">
                 <div className="sr" style={{ animationDelay: "0.1s" }}>
                   <p className="text-emerald-300 text-xs sm:text-sm font-semibold tracking-widest uppercase mb-2 sm:mb-3">{s.hero.eyebrow[lang]}</p>
@@ -468,12 +518,31 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
             {CERTS_I18N.map((c, i) => (
               <div key={i} className="sr group" style={{ animationDelay: `${i * 0.12}s` }}>
-                <div className={`relative rounded-2xl overflow-hidden border border-slate-200/60 hover:shadow-xl hover:border-emerald-200 transition-all duration-300 hover:-translate-y-1 ${c.bg} h-full`}>
+                <div
+                  onClick={() => openLightboxById(`cert-${c.name}`)}
+                  className={`relative rounded-2xl overflow-hidden border border-slate-200/60 hover:shadow-xl hover:border-emerald-300 transition-all duration-300 hover:-translate-y-1 ${c.bg} h-full cursor-zoom-in group/card`}
+                  title={s.lightbox.clickToZoom[lang]}
+                >
                   <div className="flex flex-col h-full p-6">
-                    <div className="w-full h-28 mb-4 flex items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-100">
-                      <Image src={c.img} alt={c.name} width={240} height={112} className="max-h-[108px] w-auto max-w-full object-contain group-hover:scale-105 transition-transform duration-300" />
+                    <div className="relative w-full h-28 mb-4 flex items-center justify-center rounded-xl overflow-hidden bg-white border border-slate-100 group-hover/card:border-emerald-200 transition-colors">
+                      <Image
+                        src={c.img}
+                        alt={c.name}
+                        width={240}
+                        height={112}
+                        className="max-h-[108px] w-auto max-w-full object-contain group-hover/card:scale-105 transition-transform duration-300"
+                      />
+                      <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-emerald-600/90 text-white opacity-0 group-hover/card:opacity-100 transition-all duration-200 shadow-md backdrop-blur-sm">
+                        <Maximize2 size={13} />
+                      </div>
                     </div>
-                    <h3 className="text-base font-bold text-slate-800 mb-1.5 group-hover:text-emerald-700 transition-colors">{c.name}</h3>
+                    <div className="flex items-center justify-between gap-1 mb-1.5">
+                      <h3 className="text-base font-bold text-slate-800 group-hover/card:text-emerald-700 transition-colors">{c.name}</h3>
+                      <span className="text-[11px] font-semibold text-emerald-600 opacity-0 group-hover/card:opacity-100 transition-opacity duration-200 flex items-center gap-1">
+                        <ZoomIn size={12} />
+                        {s.lightbox.zoomIn[lang].split(" ")[0]}
+                      </span>
+                    </div>
                     <p className="text-sm text-slate-500 leading-relaxed flex-1">{c.desc[lang]}</p>
                   </div>
                 </div>
@@ -492,18 +561,38 @@ export default function LandingPage() {
             <p className="text-slate-500 text-lg max-w-2xl mx-auto">{s.productsSection.subtitle[lang]}</p>
           </div>
           <div className="sr grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <div className="relative rounded-3xl overflow-hidden h-80 group">
+            <div
+              onClick={() => openLightboxById("product-csr10")}
+              className="relative rounded-3xl overflow-hidden h-80 group cursor-zoom-in ring-1 ring-slate-200/60 hover:ring-2 hover:ring-emerald-400 hover:shadow-2xl transition-all duration-300"
+              title={s.lightbox.clickToZoom[lang]}
+            >
               <Image src="/images/banh_mu_khong_nhan.jpg" alt="Bành mủ CSR" fill className="object-cover group-hover:scale-105 transition-transform duration-700" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+              
+              <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 text-white text-xs font-semibold backdrop-blur-md opacity-80 group-hover:opacity-100 group-hover:bg-emerald-600 transition-all duration-200 shadow-lg">
+                <Maximize2 size={13} />
+                <span>{s.lightbox.clickToZoom[lang]}</span>
+              </div>
+
               <div className="absolute bottom-0 left-0 right-0 p-8">
                 <span className="inline-block px-3 py-1 bg-emerald-500 text-white text-xs font-bold rounded-full mb-3">{s.productsSection.banner1Badge[lang]}</span>
                 <h3 className="text-3xl font-black text-white mb-1">CSR 10</h3>
                 <p className="text-white/80 text-sm">{s.productsSection.banner1Desc[lang]}</p>
               </div>
             </div>
-            <div className="relative rounded-3xl overflow-hidden h-80 group">
+            <div
+              onClick={() => openLightboxById("production-line")}
+              className="relative rounded-3xl overflow-hidden h-80 group cursor-zoom-in ring-1 ring-slate-200/60 hover:ring-2 hover:ring-emerald-400 hover:shadow-2xl transition-all duration-300"
+              title={s.lightbox.clickToZoom[lang]}
+            >
               <Image src="/images/day_chuyen_hien_dai.png" alt="Dây chuyền sản xuất" fill className="object-cover group-hover:scale-105 transition-transform duration-700" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+
+              <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/50 text-white text-xs font-semibold backdrop-blur-md opacity-80 group-hover:opacity-100 group-hover:bg-emerald-600 transition-all duration-200 shadow-lg">
+                <Maximize2 size={13} />
+                <span>{s.lightbox.clickToZoom[lang]}</span>
+              </div>
+
               <div className="absolute bottom-0 left-0 right-0 p-8">
                 <h3 className="text-3xl font-black text-white mb-1">{s.productsSection.banner2Title[lang]}</h3>
                 <p className="text-white/80 text-sm">{s.productsSection.banner2Desc[lang]}</p>
@@ -622,6 +711,14 @@ export default function LandingPage() {
           transform-origin: top;
         }
       `}</style>
+      {/* ── Image Lightbox Modal ── */}
+      <ImageLightbox
+        items={galleryItems}
+        currentIndex={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onNavigate={(idx) => setLightboxIndex(idx)}
+        lang={lang}
+      />
     </div>
   );
 }

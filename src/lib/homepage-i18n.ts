@@ -203,6 +203,26 @@ export const HOME_STRINGS = {
       km: "v2.0 · PTCS Phuoc Hoa Kampong Thom © 2018–2026 · Powered by Next.js",
     },
   },
+  lightbox: {
+    zoomIn: { vi: "Phóng to (+)", en: "Zoom In (+)", km: "ពង្រីក (+)" },
+    zoomOut: { vi: "Thu nhỏ (-)", en: "Zoom Out (-)", km: "បង្រួម (-)" },
+    resetZoom: { vi: "Đặt lại kích thước (0)", en: "Reset Zoom (0)", km: "កំណត់ឡើងវិញ (0)" },
+    rotate: { vi: "Xoay 90° (R)", en: "Rotate 90° (R)", km: "បង្វិល ៩០° (R)" },
+    fullscreen: { vi: "Toàn màn hình (F)", en: "Fullscreen (F)", km: "ពេញអេក្រង់ (F)" },
+    exitFullscreen: { vi: "Thoát toàn màn hình", en: "Exit Fullscreen", km: "ចាកចេញពីពេញអេក្រង់" },
+    openOriginal: { vi: "Mở ảnh gốc", en: "Open original", km: "បើករូបភាពដើម" },
+    close: { vi: "Đóng (Esc)", en: "Close (Esc)", km: "បិទ (Esc)" },
+    prev: { vi: "Ảnh trước (←)", en: "Previous (←)", km: "រូបមុន (←)" },
+    next: { vi: "Ảnh sau (→)", en: "Next (→)", km: "រូបបន្ទាប់ (→)" },
+    clickToZoom: { vi: "Click để phóng to toàn màn hình", en: "Click to zoom fullscreen", km: "ចុចដើម្បីពង្រីកពេញអេក្រង់" },
+    hintZoom: { vi: "Cuộn chuột hoặc bấm đúp để zoom", en: "Scroll or double-click to zoom", km: "រំកិលកណ្ដុរ ឬចុចទ្វេដងដើម្បីពង្រីក" },
+    hintNav: { vi: "Dùng phím mũi tên ← → để chuyển ảnh", en: "Use ← → arrow keys to navigate", km: "ប្រើព្រួញ ← → ដើម្បីប្ដូររូប" },
+    hintClose: { vi: "Bấm Esc hoặc click ra ngoài để đóng", en: "Press Esc or click outside to close", km: "ចុច Esc ឬចុចខាងក្រៅដើម្បីបិទ" },
+    badgeCert: { vi: "Chứng nhận quốc tế", en: "International Certificate", km: "វិញ្ញាបនបត្រអន្តរជាតិ" },
+    badgeProduct: { vi: "Sản phẩm", en: "Product", km: "ផលិតផល" },
+    badgeProductionLine: { vi: "Dây chuyền sản xuất", en: "Production Line", km: "ខ្សែសង្វាក់ផលិតកម្ម" },
+    badgeFactory: { vi: "Toàn cảnh nhà máy", en: "Factory Overview", km: "ទិដ្ឋភាពទូទៅរោងចក្រ" },
+  },
 } as const
 
 export const STATS_I18N: { value: string; label: LStr; icon: string }[] = [

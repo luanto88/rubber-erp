@@ -6816,3 +6816,213 @@ Cộng thêm 2 lớp test thật, không chỉ tin `tsc`:
 3. Điều xe + Chất lượng: bấm ⬇ **không được** nhảy sang trang chi tiết.
 4. Văn bản: chỉ còn icon, rê chuột hiện tooltip đủ 4 nút; tải thật về máy; màn hình ≤430px không
    còn tràn ngang; test cả văn bản chỉ có `file_goc_url` và văn bản Office (DOCX).
+
+---
+
+## Kế hoạch phiên sau (2026-09-08) — Cải tiến module ISO: vá quyền → PAdES → QR công khai
+
+**CHƯA CODE GÌ.** Kế hoạch chi tiết đầy đủ: `C:\Users\Software\.claude\plans\wiggly-wiggling-moon.md`
+— **đọc file đó trước khi bắt đầu**, mục dưới đây chỉ là bản tóm tắt để không phải khảo sát lại.
+
+### Phát hiện lớn nhất: repo có 3 HỆ KÝ SONG SONG
+
+| Hệ | Lõi | Module dùng |
+|---|---|---|
+| Ký dùng chung | `lib/signing/requests.ts` + `api/signing/*` + `/dashboard/ky/[id]` + 6 bảng lõi | Điều xe, Chất lượng, Bảo trì |
+| Văn bản | `api/documents/sign/route.ts` + `apply-template` + `mau_vi_tri` + `/van-ban-verify` | Văn bản |
+| **ISO** | `api/sign/generate-pdf` (tài liệu) + `api/iso/forms/[id]/finalize` (hồ sơ) | ISO |
+
+ISO **không dùng bất kỳ bảng nào trong 6 bảng lõi** (`yeu_cau_ky`/`nguoi_ky`/… → grep 0 kết quả),
+chỉ chia sẻ 3 file cấp thấp (`stamp-pdf.ts`, `signature-image.ts`, `hash.ts`) ⇒ **không thể** bật
+tính năng bằng cách nối vào `requests.ts`.
+
+### Số liệu thật đã đo trên DB (đừng đo lại)
+
+- `iso_documents` **101** (67 hiệu lực, 28 hết hiệu lực, 6 dở dang — 4 trong đó là tài liệu test).
+- **74 con / 27 cha, 1 cha có tới 18 con** ⇒ 1 lượt ký bộ cha+con phải kéo-thả **19 file liên
+  tiếp**, mỗi lần lại bắt đầu từ toạ độ hard-code (100,100).
+- `iso_form_instances` chỉ **9** hồ sơ ⇒ nhánh này rủi ro thấp.
+- File phụ soát xét **0/37** ⇒ tính năng chưa từng chạy thật.
+- `doc_approval_log`: **0** dòng ISO có `pades_sig_index`.
+- `mau_vi_tri`: 30 dòng, **toàn của Văn bản**; bảng này **không có cột `modun`**.
+- `cau_hinh_tai_lieu`: 2 dòng trùng lặp, **0 tham chiếu trong `src/`**.
+
+### 8 quyết định đã chốt với người dùng
+
+1. Soạn thảo/Soát xét trước, Thực hiện hồ sơ sau. 2. Ưu tiên #1 là **PAdES + trang xác thực**
+(không phải mẫu vị trí ký). 3. **Vá lỗ hổng quyền TRƯỚC**. 4. PAdES: **1 niêm phong duy nhất lúc
+phê duyệt**. 5. Hết hiệu lực: **ghi đè như hiện nay**, chấp nhận mất chữ ký số. 6. Trang xác
+thực: **dùng chung 1 trang**. 7. **Có** trang công khai cho QR, URL cũ vẫn chạy. 8. **Không** làm
+`che_do_xem` cho ISO.
+
+### ⚠️ 3 lỗ hổng quyền phải vá TRƯỚC (Giai đoạn 1)
+
+1. `api/sign/generate-pdf/route.ts` — **không kiểm quyền gì cả**: `payload.docId` không so với
+   `docId` body (token ký tài liệu A dùng được cho B), `getCurrentSignerKey` trả `null` khi user
+   ngoài luồng nhưng **vẫn stamp tiếp**. Mirror `generate-office/route.ts:934-950` (đã làm đúng,
+   có xử lý đặc thù "token cha ký con cùng bộ" — **đừng copy máy móc từ Văn bản** vốn 1 file/lượt).
+2. `api/sign/restamp-pdf/route.ts:504-512` — **không có xác thực gì**, chỉ nhận `{docIds, factoryId}`.
+3. RLS `iso_form_instances` là `FOR ALL` **không `WITH CHECK`** ⇒ ai cùng nhà máy cũng UPDATE/
+   DELETE được; "Trả về"/"Xoá" chạy thẳng từ client. ⚠️ Phải **`DROP POLICY` cũ**, không chỉ thêm
+   mới (policy PERMISSIVE cộng dồn bằng OR — quên drop thì siết chỉ là trang trí **và test vẫn
+   "pass"**).
+
+### Vì sao "1 niêm phong lúc phê duyệt" — và vì sao nó rẻ
+
+Route ISO lấy nguồn **`file_goc_url`** rồi **vẽ lại toàn bộ 3 chữ ký từ đầu** mỗi lượt ký, cuối
+cùng `PDFDocument.create()+copyPages()+save()` (`:1794-1799`) — **phẳng hoá file, xoá sạch
+annotation và chữ ký số**. Mô hình "mỗi người 1 chữ ký PAdES" vì vậy **bất khả thi** nếu không
+viết lại route.
+
+Điểm rẻ: `applyPadesSignature(pdfBytes, …)` (`lib/signing/pades.ts:315`) nhận **Buffer** và tự
+load `@cantoo/pdf-lib` bên trong ⇒ **không cần** đổi route sang `@cantoo`, **không cần**
+`forIncrementalUpdate`, **không cần** bỏ `create()+copyPages()`. Chỉ thêm 1 bước sau `save()`.
+`pades.ts` hoàn toàn tổng quát (0 tham chiếu tới van_ban/documents/iso). Cột `pades_sig_index`/
+`pades_error` **đã có sẵn** trên `doc_approval_log` ⇒ **không cần migration**.
+
+### ⚠️ Bẫy phải xử lý ở trang xác thực
+
+`restamp-pdf:562` ghi đè `file_signed_pdf_url` khi hết hiệu lực ⇒ chữ ký PAdES **sẽ hỏng**. Trang
+xác thực phải phân biệt: tài liệu `het_hieu_luc` + chữ ký sai ⇒ **vàng, trung tính** ("đã đóng dấu
+lại, bình thường"); `co_hieu_luc` + chữ ký sai ⇒ **đỏ, cảnh báo thật**. Thiếu bước này thì mọi
+tài liệu hết hiệu lực sẽ báo "chữ ký không hợp lệ" và gây hoảng khi đánh giá.
+
+Ngoài ra ISO ghi **2 dòng log mỗi lượt ký** (1 từ client không có hash, 1 từ route `generate_pdf`
+có hash) — link xác thực phải trỏ **dòng của route**.
+
+### Việc rẻ làm kèm
+
+Nút "Tải" ở ISO vẫn dính đúng bug đã sửa cho Văn bản (`<a download target="_blank">` cross-origin
+không thực sự tải): `iso/documents/page.tsx:397` + `:484`, `iso/forms/page.tsx:698` → dùng
+`buildStorageDownloadUrl` (`src/lib/storage-download.ts`).
+
+### CHƯA làm — ghi để không quên
+
+- **Mẫu vị trí ký cho ISO** (giải quyết nỗi đau 19 file — giá trị vận hành lớn nhất, chỉ là không
+  được chọn ưu tiên đợt này). Phải gỡ 3 coupling: `ky/mau-vi-tri/page.tsx:538-543` query thẳng
+  `van_ban_documents`; `api/signing/templates/route.ts:82` gate bằng `documents.create` (người
+  dùng ISO sẽ bị 403); từ vựng vai trò `ky_buoc|phe_duyet|…` vs ISO `soan_thao→xem_xet→phe_duyet`.
+  Cộng thêm: `mau_vi_tri` thiếu cột `modun`, namespace phẳng (hiện 2 tập mã rời nhau nên **chưa**
+  va chạm).
+- Nhánh **Thực hiện hồ sơ ISO** (9 hồ sơ).
+- **~600-800 dòng trùng lặp** giữa `iso/documents/[id]/page.tsx` (5065 dòng) và
+  `iso/forms/[id]/page.tsx` (1891 dòng); cả hai tự viết lại `drawSignatureImage`/`drawSignerName`/
+  `drawSignPrefix`/`drawExtraPlacements` dù `lib/signing/stamp-pdf.ts` đã export sẵn.
+- Quyết định dùng hay bỏ bảng `cau_hinh_tai_lieu`.
+
+### Prompt mở đầu session sau
+
+```
+Đọc mục "Kế hoạch phiên sau (2026-09-08) — Cải tiến module ISO" trong CLAUDE.md và file kế hoạch
+đầy đủ C:\Users\Software\.claude\plans\wiggly-wiggling-moon.md. Đã khảo sát kỹ và chốt 8 quyết
+định với tôi — KHÔNG cần khảo sát lại từ đầu.
+
+Làm tuần tự, dừng lại cho tôi test sau mỗi giai đoạn:
+1. Giai đoạn 1 — vá 3 lỗ hổng quyền ISO (BẮT BUỘC trước PAdES).
+2. Giai đoạn 2 — PAdES niêm phong lúc phê duyệt + tổng quát hoá trang xác thực dùng chung.
+3. Giai đoạn 3 — trang công khai cho QR.
+Kèm việc rẻ: sửa 3 chỗ nút "Tải" ISO sang buildStorageDownloadUrl.
+
+KHÔNG tự ý làm mẫu vị trí ký cho ISO hay nhánh Thực hiện hồ sơ — đã chốt để đợt sau.
+
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
+```
+
+## Cập nhật (2026-09-08) — Giai đoạn 1 ĐÃ XONG VÀ ĐÃ XÁC NHẬN: vá 4 lỗ hổng quyền ISO + nút Tải
+
+`npx tsc --noEmit` sạch toàn repo; `npx eslint` trên 7 file **0 lỗi** (12 warning còn lại đều
+pre-existing — đã đối chiếu bằng `git stash`, y hệt tập cũ, chỉ lệch số dòng). Cộng **29/29
+assertion** gọi thẳng code thật qua `node --experimental-strip-types`.
+
+**Người dùng đã xác nhận (2026-09-08)**: migration `20260908_iso_form_instances_rls_hardening.sql`
+đã chạy, 3 câu kiểm chứng `pg_policies` đều pass (đúng 4 + 2 dòng, không còn
+`iso_form_instances_factory`); đã test tay luồng **ký tài liệu, ký hồ sơ, soát xét** — tất cả
+pass, không hồi quy. Giai đoạn 1 coi như hoàn tất.
+
+Phần **chưa được xác nhận riêng** (không chặn Giai đoạn 2, test tuỳ nghi sau): 6 kịch bản tấn
+công ở mục B của hướng dẫn test (gọi thẳng API bằng tài khoản sai vai trò / token chéo tài liệu
+/ `restamp-pdf` không Bearer / UPDATE-DELETE trực tiếp qua Console), và nút "Tải" ISO ở mục C.
+
+### ⚠️ Trạng thái triển khai — CODE CHƯA COMMIT/DEPLOY, MIGRATION ĐÃ LIVE
+
+Người dùng test trên **localhost**; code Giai đoạn 1 vẫn nằm trong working tree, **chưa
+commit/push** ⇒ **production `qlsxkpt.vercel.app` hiện vẫn còn nguyên cả 4 lỗ hổng**, đặc biệt
+`restamp-pdf` không xác thực gì. Cần deploy sớm.
+
+Ngược lại, migration RLS **đã chạy trên chính DB Supabase dùng chung với production**. Đã rà và
+xác nhận **an toàn khi đi trước code**: 4 policy mới chỉ mirror đúng các gate UI mà code cũ vốn
+đã tuân thủ (UPDATE = người tạo/xem xét/phê duyệt/admin; DELETE = draft+người tạo hoặc admin;
+logs chỉ ghi thêm — code cũ không xoá log bao giờ). Không có luồng nào của bản production hiện
+tại bị chặn bởi migration này.
+
+Khi deploy: client (`Authorization: Bearer` cho `restamp-pdf`) và server (`requireAuthUser`) nằm
+CÙNG một commit — không được tách đôi, deploy lệch nửa sẽ hỏng bước đóng dấu hết hiệu lực.
+
+### Module mới dùng chung: `src/app/api/sign/_lib/iso-sign-auth.ts`
+
+Gom toàn bộ uỷ quyền ký ISO về một chỗ cho cả `generate-pdf` lẫn `generate-office`:
+`isoStepFromAction` / `isoStepFromUser` / `resolveIsoSignStep` / `tokenCoversDoc` /
+`authorizeIsoSignRequest`. Ba hàm `getStep`/`getStepFromAction`/`resolveStep` của
+`generate-office` và `getCurrentSignerKey` của `generate-pdf` đã bị **xoá** (không để lại
+dead code).
+
+### Lỗ hổng #1 — token ký dùng chéo tài liệu (`generate-pdf`)
+
+Route **không hề đối chiếu** `payload.docId`/`payload.docType` với body. Token lấy hợp lệ bằng
+PIN của chính mình cho tài liệu A dùng được để đóng dấu lên tài liệu B bất kỳ cùng nhà máy.
+Nay `tokenCoversDoc()` chỉ chấp nhận đúng 3 quan hệ (chính tài liệu đó / con của tài liệu
+token / con anh em cùng `parent_doc_id`) — mirror đúng logic đã chạy thật ở `generate-office`,
+**không nới lỏng thêm**.
+
+### Lỗ hổng #2 — ai cũng ký được bước của người khác (CẢ HAI route)
+
+`getCurrentSignerKey`/`resolveStep` suy bước ký từ `action` mà **không đối chiếu danh tính**.
+Bất kỳ ai cùng nhà máy có PIN của chính mình đều đóng dấu được ở bước "phê duyệt" của tài liệu
+người khác. Nay bắt buộc `userId === doc.<step>_user_id`.
+
+⚠️ **`generate-office` cũng dính lỗ hổng #2** dù CLAUDE.md trước đây ghi route này "đã làm
+đúng" — nó chỉ đúng phần đối chiếu token, phần danh tính thì không. Đã vá cùng lúc, nên nếu
+regression thì **cả PDF lẫn Office hỏng cùng nhau** — test cả hai.
+
+2 quyết định cố ý:
+- **KHÔNG có ngoại lệ cho admin.** UI cũng gate `canApprove`/`canXemXet` theo đúng
+  `userId === doc.*_user_id` bất kể vai trò; cho admin ký thay ở tầng API sẽ tạo năng lực
+  không có trong UI và phá tính chống chối bỏ của PAdES sắp làm ở Giai đoạn 2.
+- **Cột `*_user_id` rỗng (dữ liệu cũ) → cho qua**, chỉ `console.warn`. Chặn sẽ làm kẹt vĩnh
+  viễn hồ sơ đang luân chuyển dở, trong khi UI vốn đã không cho ai bấm ký ở trường hợp này.
+
+### Lỗ hổng #3 — `restamp-pdf` KHÔNG XÁC THỰC GÌ CẢ
+
+Chỉ nhận `{docIds, factoryId}` rồi ghi đè `file_signed_pdf_url`/`file_goc_url` bằng bản đóng
+dấu "Hết hiệu lực". Ai biết URL đều vô hiệu hoá được tài liệu ISO của **bất kỳ nhà máy nào**.
+Nay: `requireAuthUser` + `assertAccountActive`, `factoryId` lấy từ hồ sơ người gọi (**bỏ hẳn
+giá trị client gửi lên**), và yêu cầu quyền phê duyệt ISO qua `hasIsoApprovePermission()`
+(cộng gộp `user_permissions.granted=true` ∪ `role_permissions`, chấp nhận
+`iso.phe_duyet`/`iso.soat_xet`/`iso.xem_xet` cho tương thích phân quyền cũ).
+
+⚠️ **Đã sửa kèm client** `iso/documents/[id]/page.tsx` để gửi `Authorization: Bearer` — sửa
+server mà quên client là hỏng ngay bước đóng dấu hết hiệu lực (đúng bug đã từng gặp ở
+`fetchGrantCandidates`).
+
+### Lỗ hổng #4 (RLS) — migration `20260908_iso_form_instances_rls_hardening.sql` — **CHƯA CHẠY**
+
+Policy cũ không có `FOR` (⇒ `FOR ALL`) và không có `WITH CHECK` ⇒ **bất kỳ ai cùng nhà máy
+UPDATE/DELETE được mọi hồ sơ của người khác**, kể cả đã phê duyệt; `iso_form_instance_logs`
+cũng **xoá được** bởi người dùng thường. Nay tách 4 policy (`iso_form_instances`) + 2 policy
+(`logs`, chỉ SELECT/INSERT ⇒ nhật ký bất biến).
+
+Quyền ghi mirror **đúng** gate của UI: UPDATE = người tạo / người xem xét / người phê duyệt /
+admin; DELETE = `(trang_thai='draft' AND người tạo)` hoặc admin.
+
+⚠️ Migration **BẮT BUỘC `DROP POLICY` bản cũ** — policy PERMISSIVE cộng dồn bằng OR, quên drop
+thì phần siết chỉ là trang trí **và test vẫn "pass"**. Kèm sẵn 3 câu kiểm chứng `pg_policies`
++ khối rollback ở cuối file.
+
+Khác biệt nhỏ có chủ đích: dùng `current_profile_factory_id()`/`current_profile_role()` (đã lọc
+`status='active'`) ⇒ tài khoản `pending`/`disabled` từ nay không đọc/ghi được bảng này.
+
+### Việc rẻ kèm theo — nút "Tải" ISO
+
+3 chỗ (`iso/documents/page.tsx` ×2 gồm cả hồ sơ con, `iso/forms/page.tsx`) vẫn dùng
+`<a download>` cross-origin (bị trình duyệt bỏ qua ⇒ chỉ mở tab). Đổi sang
+`buildStorageDownloadUrl()`, tên file giữ dấu tiếng Việt.

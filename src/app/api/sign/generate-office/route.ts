@@ -6,6 +6,7 @@ import JSZip from "jszip"
 import ExcelJS from "exceljs"
 import { computeIntegrityHash } from "@/lib/signing/hash"
 import { getSignatureImage } from "@/lib/signing/signature-image"
+import { authorizeIsoSignRequest } from "@/app/api/sign/_lib/iso-sign-auth"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -204,30 +205,8 @@ async function getSigImage(factoryId: string, userId: string): Promise<Buffer> {
   return sig
 }
 
-function getStep(doc: Record<string, unknown>, userId: string): SignStep | null {
-  if (userId === doc.soan_thao_user_id) return "soan_thao"
-  if (userId === doc.xem_xet_user_id) return "xem_xet"
-  if (userId === doc.phe_duyet_user_id) return "phe_duyet"
-  return null
-}
-
-function getStepFromAction(doc: Record<string, unknown>, action?: WorkflowAction): SignStep | null {
-  if (action === "gui_xem_xet") return "soan_thao"
-  if (action === "gui_lai_phe_duyet") return "xem_xet"
-  if (action === "gui_phe_duyet") {
-    const capTl = String(doc.cap_tl || "")
-    const hasReviewer = !!doc.xem_xet_user_id
-    return capTl === "Cấp 2" || !hasReviewer ? "soan_thao" : "xem_xet"
-  }
-  if (action === "phe_duyet") return "phe_duyet"
-  return null
-}
-
-function resolveStep(doc: Record<string, unknown>, userId: string, action?: WorkflowAction): SignStep | null {
-  const actionStep = getStepFromAction(doc, action)
-  if (actionStep) return actionStep
-  return getStep(doc, userId)
-}
+// `getStep`/`getStepFromAction`/`resolveStep` đã chuyển sang `_lib/iso-sign-auth.ts`
+// (dùng chung với `generate-pdf`) và được bổ sung kiểm tra danh tính người ký.
 
 function getStepTags(step: SignStep): { signatureTag: string; nameTag: string; nameValue: string } {
   if (step === "soan_thao") return { signatureTag: "{{CHU_KY_SOAN_THAO}}", nameTag: "{{TEN_SOAN_THAO}}", nameValue: "" }
@@ -923,8 +902,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Token không hợp lệ hoặc đã hết hạn. Vui lòng ký lại." }, { status: 401 })
     }
     const userId = String(payload.userId || "")
-    const tokenDocId = String(payload.docId || "")
-    if (!userId || !tokenDocId || payload.docType !== docType) {
+    if (!userId) {
       return NextResponse.json({ error: "Token không hợp lệ" }, { status: 401 })
     }
 
@@ -939,19 +917,24 @@ export async function POST(req: NextRequest) {
       .eq("factory_id", factoryId)
       .single()
     if (docErr || !doc) return NextResponse.json({ error: "Không tìm thấy tài liệu" }, { status: 404 })
-    if (tokenDocId !== docId && doc.parent_doc_id !== tokenDocId) {
-      const { data: tokenDoc } = await supabaseAdmin
-        .from("iso_documents")
-        .select("id, parent_doc_id")
-        .eq("id", tokenDocId)
-        .eq("factory_id", factoryId)
-        .single()
-      const sameChildBatch = !!tokenDoc?.parent_doc_id && tokenDoc.parent_doc_id === doc.parent_doc_id
-      if (!sameChildBatch) return NextResponse.json({ error: "Token khong hop le" }, { status: 401 })
-    }
 
-    const step = resolveStep(doc, userId, action)
-    if (!step) return NextResponse.json({ error: "Người dùng không thuộc luồng ký tài liệu này" }, { status: 403 })
+    // Vá bảo mật 2026-09-08: phần đối chiếu token <-> tài liệu (kể cả bộ cha-con) giữ nguyên
+    // hành vi cũ, nhưng nay gom về helper dùng chung và BỔ SUNG kiểm tra người gọi đúng là
+    // người được giao bước ký — trước đây `resolveStep()` suy bước từ `action` mà không hề
+    // đối chiếu danh tính, nên ai cùng nhà máy cũng ký được bước của người khác.
+    const signAuth = await authorizeIsoSignRequest({
+      admin: supabaseAdmin,
+      tokenPayload: payload as Record<string, unknown>,
+      docId,
+      docType,
+      factoryId,
+      doc: doc as Record<string, unknown>,
+      action,
+    })
+    if (!signAuth.ok) {
+      return NextResponse.json({ error: signAuth.error }, { status: signAuth.status })
+    }
+    const step = signAuth.step
 
     const isChildOffice = isChildOfficeDoc(doc)
     const sourceUrl = getFileUrl(doc, fileKind)
