@@ -7100,19 +7100,82 @@ hiện cảnh báo đỏ "file bị sửa" và gây hoảng khi đánh giá ISO.
 dict. Và **không** tamper bằng `indexOf("chữ trong trang")` — nội dung trang nằm trong stream đã
 nén FlateDecode; phải sửa byte trong vùng `ByteRange`.
 
-### CHƯA test tay — cần làm trước khi coi Giai đoạn 2 là xong
+### Kết quả test tay trên localhost (2026-09-08) — 5/7 mục PASS, 2 mục chờ deploy
 
-1. Phê duyệt 1 tài liệu ISO **PDF** thật qua UI ⇒ tải file cuối ⇒ `openssl cms -verify -binary
-   -CAfile public/rubber-erp-signing-root-ca.pem` phải thành công.
-2. Mở file bằng **Adobe Acrobat Reader thật** ⇒ có panel chữ ký, đúng tên người phê duyệt.
-3. Bấm vào con dấu trong PDF ⇒ mở đúng `/van-ban-verify/{logId}` ⇒ "Chữ ký hợp lệ".
-4. `SELECT pades_sig_index, pades_error FROM doc_approval_log WHERE doc_type='iso' ORDER BY
-   created_at DESC LIMIT 5` ⇒ dòng `generate_pdf` mới có `pades_sig_index = 0`.
-5. Ký bước **soạn thảo/xem xét** (chưa phê duyệt) ⇒ xác nhận **không** nhúng PAdES, luồng không đổi.
-6. Soát xét bản mới → phê duyệt → bản cũ bị `restamp-pdf` đóng dấu ⇒ mở trang xác thực của bản cũ
-   ⇒ phải hiện **vàng trung tính**, KHÔNG phải cảnh báo đỏ.
-7. Ký 1 **văn bản nội bộ** bình thường ⇒ không hồi quy sau khi tách `addVerifyLinkAnnotations`.
+| # | Mục | Kết quả |
+|---|---|---|
+| 1 | Phê duyệt tài liệu ISO PDF thật ⇒ `openssl cms -verify -binary -CAfile` | ✅ `CMS Verification successful` trên file thật (`KHXD-QT05-F04`, 1.031.057 bytes, đúng 1 chữ ký). `pkcs7 -print_certs` ⇒ `CN=Luân Tô` (dấu tiếng Việt đúng), chain trỏ `Rubber ERP Internal Root CA` |
+| 2 | Mở bằng **Adobe Acrobat Reader thật** | ⏳ **CHƯA** — cần người dùng mở tay |
+| 3 | Bấm con dấu trong PDF ⇒ mở trang xác thực | ⏳ **CHƯA** — chờ deploy, xem mục "404" bên dưới |
+| 4 | `pades_sig_index` của dòng `generate_pdf` | ✅ 2 dòng lúc phê duyệt = `0`, `pades_error = null`; các dòng soạn thảo/xem xét = `null` |
+| 5 | Bước soạn thảo/xem xét KHÔNG nhúng PAdES | ✅ người dùng xác nhận |
+| 6 | Kịch bản hết hiệu lực ⇒ vàng trung tính | ✅ gián tiếp: gọi API thật với tài liệu `het_hieu_luc` (NMCB-QT01-F11) ⇒ `severity: warn`; người dùng xác nhận `restamp-pdf` đóng dấu như cũ, không hồi quy |
+| 7 | Ký văn bản nội bộ | ✅ người dùng xác nhận bình thường |
+
+Ngoài ra: gọi API trên **chính chữ ký ISO vừa ký qua UI** ⇒ `valid: true, severity: ok`, đúng
+`buoc: "Phê duyệt ban hành"`, `signerName: "Luân Tô"`, `RSA-2048 + SHA-256`.
+
+### ⚠️ "Không tìm thấy chữ ký này" khi bấm link — KHÔNG phải bug
+
+Link nhúng trong PDF luôn dùng `APP_URL` (`NEXT_PUBLIC_APP_URL`, fallback
+`https://qlsxkpt.vercel.app`) ⇒ ký trên localhost thì link vẫn trỏ **production**. Production hiện
+chạy code CŨ (Giai đoạn 2 chưa push) nên route `api/documents/verify/[logId]` bản cũ vẫn hard-code
+`if (doc_type !== "van_ban") → 404`. Đây đúng hành vi đã ghi cho module Văn bản trước đây.
+
+⇒ Mục 3 **chỉ xác minh được sau khi push**. Cách khác nếu muốn test ngay trên localhost: tạm thêm
+`NEXT_PUBLIC_APP_URL=http://localhost:3000` vào `.env.local`, restart dev, **ký lại tài liệu MỚI**
+(link đã in vào file cũ không đổi được), rồi **xoá dòng đó đi** — nếu để lại, QR và thông báo
+Telegram/email sinh ra sau đó sẽ mang link localhost.
 
 ### Giai đoạn 3 (trang công khai cho QR) — CHƯA làm, đúng phạm vi đã chốt
 
 Cũng chưa đụng: mẫu vị trí ký cho ISO (nỗi đau 19 file/lượt) và nhánh Thực hiện hồ sơ ISO.
+
+### Prompt gợi ý cho phiên sau — Giai đoạn 3 (trang công khai cho QR)
+
+```
+Đọc mục "Cập nhật (2026-09-08, tiếp) — Giai đoạn 1 đã deploy; Giai đoạn 2 (PAdES ISO + trang
+xác thực) đã code xong" ở cuối CLAUDE.md, và mục "Giai đoạn 3" trong kế hoạch đầy đủ
+C:\Users\Software\.claude\plans\wiggly-wiggling-moon.md. Đã khảo sát và chốt 8 quyết định từ
+trước — KHÔNG khảo sát lại từ đầu.
+
+TRẠNG THÁI:
+- Giai đoạn 1 (vá 4 lỗ hổng quyền ISO + nút Tải): đã push (775a6a7), đã chạy migration
+  20260908_iso_form_instances_rls_hardening.sql, đã test tay pass.
+- Giai đoạn 2 (niêm phong PAdES lúc phê duyệt + trang xác thực dùng chung): đã commit
+  (3efa9b8), CHƯA PUSH. Đã test tay 5/7 mục pass — xem bảng kết quả trong CLAUDE.md.
+  KHÔNG cần test lại phần này.
+
+VIỆC ĐẦU TIÊN: hỏi tôi đã push 3efa9b8 lên production chưa.
+- Chưa push ⇒ nhắc tôi rằng 2 mục còn lại của Giai đoạn 2 chỉ xác minh được sau khi deploy:
+  (a) bấm con dấu trong PDF ⇒ mở /van-ban-verify/{logId} ⇒ "Chữ ký hợp lệ" — hiện production
+      còn code cũ nên trả 404 "Không tìm thấy chữ ký này" (KHÔNG phải bug, xem CLAUDE.md);
+  (b) mở file bằng Adobe Acrobat Reader thật ⇒ có panel chữ ký, đúng tên người phê duyệt
+      (việc này làm được ngay không cần deploy).
+- Đã push ⇒ xác nhận 2 mục trên rồi mới sang Giai đoạn 3.
+
+Sau đó làm Giai đoạn 3 — trang công khai cho QR. Nắm sẵn (đã khảo sát, ĐỪNG điều tra lại):
+- QR trong PDF ISO trỏ `${APP_URL}/dashboard/iso/documents/${docId}` (generate-pdf/route.ts).
+  Route này nằm trong /dashboard ⇒ người chưa đăng nhập bị đá về /login. Cần trang công khai
+  hiển thị đúng trạng thái hiệu lực mà KHÔNG lộ thông tin nội bộ ngoài metadata tài liệu.
+- Quyết định đã chốt (mục 7 của kế hoạch): CÓ trang công khai cho QR, và URL cũ vẫn phải chạy
+  (QR đã in vào hàng trăm tài liệu, không đổi được).
+- Mẫu gần nhất để mirror: trang công khai /storage (tra cứu ngăn lưu) và cặp
+  /van-ban-verify/[logId] + api/documents/verify/[logId] vừa làm ở Giai đoạn 2 (route công khai
+  dùng getSupabaseAdmin, đặt ở top-level ngoài /dashboard để không bị layout đá về /login).
+- Tài liệu hết hiệu lực phải hiện rõ dấu đỏ + chỉ ra bản thay thế (tra theo ma_tai_lieu trong
+  cùng factory_id, bản đang co_hieu_luc).
+- Người đã đăng nhập mở cùng URL phải vào được trang dashboard đầy đủ như trước, không bị
+  chuyển hướng nhầm.
+
+Verify bắt buộc: mở trình duyệt ẩn danh (chưa đăng nhập) dán URL QR của 1 tài liệu đã ký ⇒
+thấy trang công khai đúng trạng thái; tài liệu hết hiệu lực ⇒ có dấu đỏ + bản thay thế; đăng
+nhập rồi mở cùng URL ⇒ vẫn vào dashboard như cũ; xác nhận trang công khai không lộ dữ liệu
+nội bộ.
+
+KHÔNG tự ý làm mẫu vị trí ký cho ISO (nỗi đau 19 file/lượt ký) hay nhánh Thực hiện hồ sơ ISO —
+đã chốt để đợt sau.
+
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build (dev server của tôi thường
+đang chạy song song trên cổng 3000).
+```
